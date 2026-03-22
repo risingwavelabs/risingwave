@@ -191,6 +191,20 @@ impl NotificationManager {
             .await
     }
 
+    pub fn notify_frontend_with_version(
+        &self,
+        operation: Operation,
+        info: Info,
+        version: NotificationVersion,
+    ) {
+        self.notify(
+            SubscribeType::Frontend.into(),
+            operation,
+            info,
+            Some(version),
+        );
+    }
+
     pub async fn notify_frontend_object_info(
         &self,
         operation: Operation,

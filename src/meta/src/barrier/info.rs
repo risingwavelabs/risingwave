@@ -115,6 +115,7 @@ impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
 #[derive(Default, Debug)]
 pub struct SharedActorInfosInner {
     info: HashMap<DatabaseId, HashMap<FragmentId, SharedFragmentInfo>>,
+    streaming_worker_slot_mapping_version: u64,
 }
 
 impl SharedActorInfosInner {
@@ -126,6 +127,11 @@ impl SharedActorInfosInner {
 
     pub fn iter_over_fragments(&self) -> impl Iterator<Item = (&FragmentId, &SharedFragmentInfo)> {
         self.info.values().flatten()
+    }
+
+    fn next_streaming_worker_slot_mapping_version(&mut self) -> u64 {
+        self.streaming_worker_slot_mapping_version += 1;
+        self.streaming_worker_slot_mapping_version
     }
 }
 
@@ -140,6 +146,20 @@ pub struct SharedActorInfos {
 impl SharedActorInfos {
     pub fn read_guard(&self) -> RwLockReadGuard<'_, RawRwLock, SharedActorInfosInner> {
         self.inner.read()
+    }
+
+    pub fn snapshot(&self) -> (Vec<PbFragmentWorkerSlotMapping>, u64) {
+        let guard = self.inner.read();
+        let version = guard.streaming_worker_slot_mapping_version;
+        let mappings = guard
+            .iter_over_fragments()
+            .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
+            .collect_vec();
+        (mappings, version)
+    }
+
+    pub fn current_version(&self) -> u64 {
+        self.inner.read().streaming_worker_slot_mapping_version
     }
 
     pub fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
@@ -207,34 +227,45 @@ impl SharedActorInfos {
     }
 
     pub(super) fn remove_database(&self, database_id: DatabaseId) {
-        if let Some(database) = self.inner.write().info.remove(&database_id) {
-            let mapping = database
-                .into_values()
-                .map(|fragment| rebuild_fragment_mapping(&fragment))
-                .collect_vec();
-            if !mapping.is_empty() {
-                self.notification_manager
-                    .notify_fragment_mapping(Operation::Delete, mapping);
-            }
+        let mut guard = self.inner.write();
+        let Some(database) = guard.info.remove(&database_id) else {
+            return;
+        };
+        let mapping = database
+            .into_values()
+            .map(|fragment| rebuild_fragment_mapping(&fragment))
+            .collect_vec();
+        let version =
+            (!mapping.is_empty()).then(|| guard.next_streaming_worker_slot_mapping_version());
+
+        if let Some(version) = version {
+            // Keep the write lock until notifications are enqueued so version order matches
+            // mutation order across concurrent writers.
+            self.notification_manager
+                .notify_fragment_mapping(Operation::Delete, mapping, version);
         }
     }
 
     pub(super) fn retain_databases(&self, database_ids: impl IntoIterator<Item = DatabaseId>) {
         let database_ids: HashSet<_> = database_ids.into_iter().collect();
 
+        let mut guard = self.inner.write();
         let mut mapping = Vec::new();
-        for fragment in self
-            .inner
-            .write()
+        for fragment in guard
             .info
             .extract_if(|database_id, _| !database_ids.contains(database_id))
             .flat_map(|(_, fragments)| fragments.into_values())
         {
             mapping.push(rebuild_fragment_mapping(&fragment));
         }
-        if !mapping.is_empty() {
+        let version =
+            (!mapping.is_empty()).then(|| guard.next_streaming_worker_slot_mapping_version());
+
+        if let Some(version) = version {
+            // Keep the write lock until notifications are enqueued so version order matches
+            // mutation order across concurrent writers.
             self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+                .notify_fragment_mapping(Operation::Delete, mapping, version);
         }
     }
 
@@ -345,18 +376,33 @@ impl SharedActorInfoWriter<'_> {
         }
     }
 
-    pub(super) fn finish(self) {
-        if let Some(mapping) = self.added_fragment_mapping {
-            self.notification_manager
-                .notify_fragment_mapping(Operation::Add, mapping);
+    pub(super) fn finish(mut self) {
+        let has_mapping_update = self.added_fragment_mapping.is_some()
+            || self.updated_fragment_mapping.is_some()
+            || self.deleted_fragment_mapping.is_some();
+        let version = has_mapping_update.then(|| {
+            self.write_guard
+                .next_streaming_worker_slot_mapping_version()
+        });
+        let notification_manager = self.notification_manager;
+        let added_fragment_mapping = self.added_fragment_mapping;
+        let updated_fragment_mapping = self.updated_fragment_mapping;
+        let deleted_fragment_mapping = self.deleted_fragment_mapping;
+
+        let Some(version) = version else {
+            return;
+        };
+
+        // Keep the write lock until notifications are enqueued so version order matches
+        // mutation order across concurrent writers.
+        if let Some(mapping) = added_fragment_mapping {
+            notification_manager.notify_fragment_mapping(Operation::Add, mapping, version);
         }
-        if let Some(mapping) = self.updated_fragment_mapping {
-            self.notification_manager
-                .notify_fragment_mapping(Operation::Update, mapping);
+        if let Some(mapping) = updated_fragment_mapping {
+            notification_manager.notify_fragment_mapping(Operation::Update, mapping, version);
         }
-        if let Some(mapping) = self.deleted_fragment_mapping {
-            self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+        if let Some(mapping) = deleted_fragment_mapping {
+            notification_manager.notify_fragment_mapping(Operation::Delete, mapping, version);
         }
     }
 }

@@ -672,7 +672,7 @@ message SubscribeResponse {
   common.Status status = 1;
   Operation operation = 2;
 
-  // Catalog version
+  // Version associated with the notification payload.
   uint64 version = 3;
 
   oneof info {

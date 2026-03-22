@@ -224,6 +224,147 @@ pub trait NotificationClient: Send + Sync + 'static {
     ) -> Result<Self::Channel, ObserverError>;
 }
 
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
+    use risingwave_pb::meta::subscribe_response::{Info, Operation};
+    use risingwave_pb::meta::{
+        FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse, SubscribeType,
+    };
+    use tonic::Status;
+
+    use super::{Channel, NotificationClient, ObserverError, ObserverManager, ObserverState};
+
+    #[derive(Clone, Default)]
+    struct TestState {
+        init_mapping_versions: Arc<Mutex<Vec<u64>>>,
+        handled_mapping_versions: Arc<Mutex<Vec<u64>>>,
+    }
+
+    impl ObserverState for TestState {
+        fn subscribe_type() -> SubscribeType {
+            SubscribeType::Frontend
+        }
+
+        fn handle_notification(&mut self, resp: SubscribeResponse) {
+            self.handled_mapping_versions
+                .lock()
+                .unwrap()
+                .push(resp.version);
+        }
+
+        fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+            let Some(Info::Snapshot(snapshot)) = resp.info else {
+                panic!("expected snapshot");
+            };
+            self.init_mapping_versions.lock().unwrap().push(
+                snapshot
+                    .version
+                    .as_ref()
+                    .unwrap()
+                    .streaming_worker_slot_mapping_version,
+            );
+        }
+    }
+
+    struct TestClient;
+
+    #[async_trait::async_trait]
+    impl NotificationClient for TestClient {
+        type Channel = TestChannel;
+
+        async fn subscribe(
+            &self,
+            _subscribe_type: SubscribeType,
+        ) -> Result<Self::Channel, ObserverError> {
+            unreachable!("subscribe should not be called in this test")
+        }
+    }
+
+    struct TestChannel {
+        notifications: VecDeque<SubscribeResponse>,
+    }
+
+    #[async_trait::async_trait]
+    impl Channel for TestChannel {
+        type Item = SubscribeResponse;
+
+        async fn message(&mut self) -> std::result::Result<Option<Self::Item>, Status> {
+            Ok(self.notifications.pop_front())
+        }
+    }
+
+    fn snapshot_notification(streaming_worker_slot_mapping_version: u64) -> SubscribeResponse {
+        SubscribeResponse {
+            status: None,
+            operation: Operation::Snapshot as _,
+            version: 0,
+            info: Some(Info::Snapshot(MetaSnapshot {
+                version: Some(SnapshotVersion {
+                    catalog_version: 0,
+                    worker_node_version: 0,
+                    streaming_worker_slot_mapping_version,
+                }),
+                ..Default::default()
+            })),
+        }
+    }
+
+    fn mapping_notification(version: u64) -> SubscribeResponse {
+        SubscribeResponse {
+            status: None,
+            operation: Operation::Add as _,
+            version,
+            info: Some(Info::StreamingWorkerSlotMapping(
+                FragmentWorkerSlotMapping {
+                    fragment_id: 1.into(),
+                    mapping: None,
+                },
+            )),
+        }
+    }
+
+    #[tokio::test]
+    async fn keeps_newer_streaming_mapping_notification_during_initialization() {
+        let state = TestState::default();
+        let mut observer_manager = ObserverManager {
+            rx: TestChannel {
+                notifications: VecDeque::from([mapping_notification(2), snapshot_notification(1)]),
+            },
+            client: TestClient,
+            observer_states: state.clone(),
+        };
+
+        observer_manager.wait_init_notification().await.unwrap();
+
+        assert_eq!(state.init_mapping_versions.lock().unwrap().as_slice(), &[1]);
+        assert_eq!(
+            state.handled_mapping_versions.lock().unwrap().as_slice(),
+            &[2]
+        );
+    }
+
+    #[tokio::test]
+    async fn drops_streaming_mapping_notification_already_covered_by_snapshot() {
+        let state = TestState::default();
+        let mut observer_manager = ObserverManager {
+            rx: TestChannel {
+                notifications: VecDeque::from([mapping_notification(1), snapshot_notification(1)]),
+            },
+            client: TestClient,
+            observer_states: state.clone(),
+        };
+
+        observer_manager.wait_init_notification().await.unwrap();
+
+        assert_eq!(state.init_mapping_versions.lock().unwrap().as_slice(), &[1]);
+        assert!(state.handled_mapping_versions.lock().unwrap().is_empty());
+    }
+}
+
 pub struct RpcNotificationClient {
     meta_client: MetaClient,
 }

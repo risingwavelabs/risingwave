@@ -291,6 +291,7 @@ pub trait CatalogWriter: Send + Sync {
 pub struct CatalogWriterImpl {
     meta_client: MetaClient,
     catalog_updated_rx: Receiver<CatalogVersion>,
+    streaming_worker_slot_mapping_updated_rx: Receiver<u64>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
@@ -775,23 +776,88 @@ impl CatalogWriterImpl {
     pub fn new(
         meta_client: MetaClient,
         catalog_updated_rx: Receiver<CatalogVersion>,
+        streaming_worker_slot_mapping_updated_rx: Receiver<u64>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         Self {
             meta_client,
             catalog_updated_rx,
+            streaming_worker_slot_mapping_updated_rx,
             hummock_snapshot_manager,
         }
     }
 
     async fn wait_version(&self, version: WaitVersion) -> Result<()> {
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow_and_update() < version.catalog_version {
-            rx.changed().await.map_err(|e| anyhow!(e))?;
-        }
-        self.hummock_snapshot_manager
-            .wait(version.hummock_version_id)
-            .await;
-        Ok(())
+        wait_version_update(
+            self.catalog_updated_rx.clone(),
+            self.streaming_worker_slot_mapping_updated_rx.clone(),
+            self.hummock_snapshot_manager.clone(),
+            version,
+        )
+        .await
+    }
+}
+
+async fn wait_version_update(
+    mut catalog_updated_rx: Receiver<CatalogVersion>,
+    mut streaming_worker_slot_mapping_updated_rx: Receiver<u64>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
+    version: WaitVersion,
+) -> Result<()> {
+    while *catalog_updated_rx.borrow_and_update() < version.catalog_version {
+        catalog_updated_rx.changed().await.map_err(|e| anyhow!(e))?;
+    }
+    while *streaming_worker_slot_mapping_updated_rx.borrow_and_update()
+        < version.streaming_worker_slot_mapping_version
+    {
+        streaming_worker_slot_mapping_updated_rx
+            .changed()
+            .await
+            .map_err(|e| anyhow!(e))?;
+    }
+    hummock_snapshot_manager
+        .wait(version.hummock_version_id)
+        .await;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_pb::ddl_service::WaitVersion;
+    use tokio::sync::watch;
+
+    use super::wait_version_update;
+    use crate::scheduler::HummockSnapshotManager;
+    use crate::test_utils::MockFrontendMetaClient;
+
+    #[tokio::test]
+    async fn wait_version_update_waits_for_streaming_mapping_version() {
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
+        let (streaming_worker_slot_mapping_updated_tx, streaming_worker_slot_mapping_updated_rx) =
+            watch::channel(0);
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+
+        let wait_handle = tokio::spawn(wait_version_update(
+            catalog_updated_rx,
+            streaming_worker_slot_mapping_updated_rx,
+            hummock_snapshot_manager,
+            WaitVersion {
+                catalog_version: 1,
+                hummock_version_id: 0.into(),
+                streaming_worker_slot_mapping_version: 2,
+            },
+        ));
+
+        catalog_updated_tx.send(1).unwrap();
+        tokio::task::yield_now().await;
+        assert!(!wait_handle.is_finished());
+
+        streaming_worker_slot_mapping_updated_tx.send(2).unwrap();
+
+        wait_handle.await.unwrap().unwrap();
     }
 }

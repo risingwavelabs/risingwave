@@ -156,13 +156,11 @@ impl NotificationServiceImpl {
     async fn get_worker_slot_mapping_snapshot(
         &self,
     ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
-        let mappings = self
+        let (mappings, version) = self
             .metadata_manager
             .catalog_controller
-            .get_worker_slot_mappings();
-
-        let notification_version = self.env.notification_manager().current_version().await;
-        Ok((mappings, notification_version))
+            .get_worker_slot_mappings_snapshot();
+        Ok((mappings, version))
     }
 
     fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {

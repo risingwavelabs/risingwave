@@ -500,9 +500,14 @@ impl DdlController {
             .register(await_tree_key, await_tree_span)
             .instrument(Box::pin(fut));
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
+        let streaming_worker_slot_mapping_version = self
+            .metadata_manager
+            .catalog_controller
+            .current_streaming_worker_slot_mapping_version();
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
             hummock_version_id: self.barrier_manager.get_hummock_version_id().await,
+            streaming_worker_slot_mapping_version,
         }))
     }
 
@@ -2360,9 +2365,14 @@ impl DdlController {
                     .notify_frontend_trivial()
                     .await;
                 let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
+                let streaming_worker_slot_mapping_version = self
+                    .metadata_manager
+                    .catalog_controller
+                    .current_streaming_worker_slot_mapping_version();
                 return Ok(WaitVersion {
                     catalog_version,
                     hummock_version_id,
+                    streaming_worker_slot_mapping_version,
                 });
             }
 

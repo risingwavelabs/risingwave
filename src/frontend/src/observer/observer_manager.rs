@@ -42,7 +42,9 @@ use crate::user::user_manager::UserInfoManager;
 pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     version: CatalogVersion,
+    streaming_worker_slot_mapping_version: u64,
     catalog_updated_tx: Sender<CatalogVersion>,
+    streaming_worker_slot_mapping_updated_tx: Sender<u64>,
     catalog: Arc<RwLock<Catalog>>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -203,7 +205,12 @@ impl ObserverState for FrontendObserverNode {
             ));
 
         let snapshot_version = version.unwrap();
+        drop(catalog_guard);
+        drop(user_guard);
         self.version = snapshot_version.catalog_version;
+        self.reset_streaming_worker_slot_mapping_version(
+            snapshot_version.streaming_worker_slot_mapping_version,
+        );
         self.catalog_updated_tx
             .send(snapshot_version.catalog_version)
             .unwrap();
@@ -219,6 +226,7 @@ impl FrontendObserverNode {
         worker_node_manager: WorkerNodeManagerRef,
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
+        streaming_worker_slot_mapping_updated_tx: Sender<u64>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
@@ -227,9 +235,11 @@ impl FrontendObserverNode {
     ) -> Self {
         Self {
             version: 0,
+            streaming_worker_slot_mapping_version: 0,
             worker_node_manager,
             catalog,
             catalog_updated_tx,
+            streaming_worker_slot_mapping_updated_tx,
             user_info_manager,
             hummock_snapshot_manager,
             system_params_manager,
@@ -464,6 +474,15 @@ impl FrontendObserverNode {
     }
 
     fn handle_fragment_mapping_notification(&mut self, resp: SubscribeResponse) {
+        if resp.version != 0 && resp.version < self.streaming_worker_slot_mapping_version {
+            tracing::debug!(
+                notification_version = resp.version,
+                current_version = self.streaming_worker_slot_mapping_version,
+                "Skip stale streaming worker slot mapping notification"
+            );
+            return;
+        }
+
         let Some(info) = resp.info.as_ref() else {
             return;
         };
@@ -491,6 +510,8 @@ impl FrontendObserverNode {
                     }
                     _ => panic!("receive an unsupported notify {:?}", resp),
                 }
+
+                self.advance_streaming_worker_slot_mapping_version(resp.version);
             }
             _ => unreachable!(),
         }
@@ -524,6 +545,25 @@ impl FrontendObserverNode {
     /// Update max committed epoch in `HummockSnapshotManager`.
     fn handle_hummock_snapshot_notification(&self, deltas: HummockVersionDeltas) {
         self.hummock_snapshot_manager.update(deltas);
+    }
+
+    fn advance_streaming_worker_slot_mapping_version(&mut self, version: u64) {
+        if version <= self.streaming_worker_slot_mapping_version {
+            return;
+        }
+
+        self.reset_streaming_worker_slot_mapping_version(version);
+    }
+
+    fn reset_streaming_worker_slot_mapping_version(&mut self, version: u64) {
+        if version == self.streaming_worker_slot_mapping_version {
+            return;
+        }
+
+        self.streaming_worker_slot_mapping_version = version;
+        self.streaming_worker_slot_mapping_updated_tx
+            .send(version)
+            .unwrap();
     }
 
     fn handle_secret_notification(&mut self, resp: SubscribeResponse) {
@@ -579,4 +619,126 @@ fn convert_worker_slot_mapping(
             },
         )
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+    use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManager;
+    use risingwave_common::catalog::CatalogVersion;
+    use risingwave_common::config::RpcClientConfig;
+    use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+    use risingwave_common::session_config::SessionConfig;
+    use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+    use risingwave_common::system_param::reader::SystemParamsReader;
+    use risingwave_common_service::ObserverState;
+    use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
+    use risingwave_pb::meta::subscribe_response::{Info, Operation};
+    use risingwave_pb::meta::{
+        FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeResponse,
+    };
+    use risingwave_rpc_client::ComputeClientPool;
+    use tokio::sync::watch;
+
+    use super::FrontendObserverNode;
+    use crate::catalog::FragmentId;
+    use crate::catalog::root_catalog::Catalog;
+    use crate::scheduler::HummockSnapshotManager;
+    use crate::test_utils::MockFrontendMetaClient;
+    use crate::user::user_manager::UserInfoManager;
+
+    fn make_observer_node() -> (
+        FrontendObserverNode,
+        watch::Receiver<CatalogVersion>,
+        watch::Receiver<u64>,
+    ) {
+        let worker_node_manager = Arc::new(WorkerNodeManager::new());
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
+        let (streaming_worker_slot_mapping_updated_tx, streaming_worker_slot_mapping_updated_rx) =
+            watch::channel(0);
+        let catalog = Arc::new(RwLock::new(Catalog::default()));
+        let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+        let system_params_manager = Arc::new(LocalSystemParamsManager::new(
+            SystemParamsReader::from(risingwave_pb::meta::SystemParams::default()),
+        ));
+        let session_params = Arc::new(RwLock::new(SessionConfig::default()));
+        let compute_client_pool = Arc::new(ComputeClientPool::new(1, RpcClientConfig::default()));
+
+        (
+            FrontendObserverNode::new(
+                worker_node_manager,
+                catalog,
+                catalog_updated_tx,
+                streaming_worker_slot_mapping_updated_tx,
+                user_info_manager,
+                hummock_snapshot_manager,
+                system_params_manager,
+                session_params,
+                compute_client_pool,
+            ),
+            catalog_updated_rx,
+            streaming_worker_slot_mapping_updated_rx,
+        )
+    }
+
+    fn streaming_mapping_notification(fragment_id: FragmentId, version: u64) -> SubscribeResponse {
+        SubscribeResponse {
+            status: None,
+            operation: Operation::Add as i32,
+            info: Some(Info::StreamingWorkerSlotMapping(
+                FragmentWorkerSlotMapping {
+                    fragment_id,
+                    mapping: Some(
+                        WorkerSlotMapping::new_single(WorkerSlotId::new(1.into(), 0)).to_protobuf(),
+                    ),
+                },
+            )),
+            version,
+        }
+    }
+
+    fn snapshot_notification(version: u64) -> SubscribeResponse {
+        SubscribeResponse {
+            status: None,
+            operation: Operation::Snapshot as i32,
+            info: Some(Info::Snapshot(MetaSnapshot {
+                hummock_version: Some(Default::default()),
+                session_params: Some(GetSessionParamsResponse {
+                    params: serde_json::to_string(&SessionConfig::default()).unwrap(),
+                }),
+                version: Some(SnapshotVersion {
+                    catalog_version: 0,
+                    worker_node_version: 0,
+                    streaming_worker_slot_mapping_version: version,
+                }),
+                cluster_resource: Some(Default::default()),
+                ..Default::default()
+            })),
+            version: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn initialization_snapshot_resets_streaming_mapping_version() {
+        let (mut observer_node, _catalog_version_rx, mut version_rx) = make_observer_node();
+
+        observer_node.handle_notification(streaming_mapping_notification(1.into(), 5));
+        assert_eq!(*version_rx.borrow_and_update(), 5);
+
+        observer_node.handle_initialization_notification(snapshot_notification(1));
+        assert_eq!(observer_node.streaming_worker_slot_mapping_version, 1);
+        assert_eq!(*version_rx.borrow_and_update(), 1);
+
+        observer_node.handle_notification(streaming_mapping_notification(2.into(), 2));
+        assert_eq!(observer_node.streaming_worker_slot_mapping_version, 2);
+        observer_node
+            .worker_node_manager
+            .get_streaming_fragment_mapping(&2.into())
+            .unwrap();
+    }
 }
