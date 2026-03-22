@@ -2345,6 +2345,23 @@ impl DdlController {
     }
 
     pub async fn wait(&self, job_id: Option<JobId>) -> MetaResult<WaitVersion> {
+        if let Some(job_id) = job_id {
+            let database_id = self
+                .metadata_manager
+                .catalog_controller
+                .get_object_database_id(job_id)
+                .await?;
+            let catalog_version = self
+                .metadata_manager
+                .wait_streaming_job_finished(database_id, job_id)
+                .await?;
+            let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
+            return Ok(WaitVersion {
+                catalog_version,
+                hummock_version_id,
+            });
+        }
+
         let timeout_ms = 2 * 60 * 60 * 1000;
         let poll_interval = Duration::from_millis(100);
         for _ in 0..(timeout_ms / poll_interval.as_millis() as usize) {
@@ -2353,11 +2370,7 @@ impl DdlController {
                 .catalog_controller
                 .list_background_creating_jobs(true, None)
                 .await?;
-            let wait_done = match job_id {
-                Some(job_id) => !background_jobs.contains(&job_id),
-                None => background_jobs.is_empty(),
-            };
-            if wait_done {
+            if background_jobs.is_empty() {
                 let catalog_version = self
                     .metadata_manager
                     .catalog_controller
