@@ -352,6 +352,22 @@ impl ScaleController {
 
         for ensemble in find_fragment_no_shuffle_dags_detailed(&txn, &fragment_id_list).await? {
             let entry_fragment_ids = ensemble.entry_fragments().collect_vec();
+            let requested_fragment_ids_in_ensemble = ensemble
+                .component_fragments()
+                .filter(|fragment_id| policy.contains_key(fragment_id))
+                .collect_vec();
+            let non_entry_fragment_ids = requested_fragment_ids_in_ensemble
+                .iter()
+                .filter(|fragment_id| !entry_fragment_ids.contains(fragment_id))
+                .copied()
+                .collect_vec();
+            if !non_entry_fragment_ids.is_empty() {
+                bail_invalid_parameter!(
+                    "fragment reschedule request contains non-entry fragments {:?}; use entry fragments {:?} for no-shuffle ensemble updates",
+                    non_entry_fragment_ids,
+                    entry_fragment_ids
+                );
+            }
 
             let desired_parallelism = match entry_fragment_ids
                 .iter()
@@ -869,7 +885,7 @@ pub(crate) fn build_reschedule_commands(
             let mut all_actor_dispatchers: HashMap<_, Vec<_>> = HashMap::new();
 
             for downstream_fragment_id in downstream_fragments.keys() {
-                let target_fragment_actors =
+                let (target_fragment_distribution, target_fragment_actors) =
                     match all_rendered_fragments.get(downstream_fragment_id) {
                         None => {
                             let external_fragment = all_prev_fragments
@@ -881,20 +897,24 @@ pub(crate) fn build_reschedule_commands(
                                     ))
                                 })?;
 
-                            external_fragment
+                            (
+                                external_fragment.distribution_type,
+                                external_fragment
+                                    .actors
+                                    .iter()
+                                    .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
+                                    .collect(),
+                            )
+                        }
+                        Some(downstream_rendered) => (
+                            downstream_rendered.distribution_type,
+                            downstream_rendered
                                 .actors
                                 .iter()
                                 .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-                                .collect()
-                        }
-                        Some(downstream_rendered) => downstream_rendered
-                            .actors
-                            .iter()
-                            .map(|(actor_id, info)| (*actor_id, info.vnode_bitmap.clone()))
-                            .collect(),
+                                .collect(),
+                        ),
                     };
-
-                let target_fragment_distribution = *distribution_type;
 
                 let fragment_relation::Model {
                     source_fragment_id: _,
