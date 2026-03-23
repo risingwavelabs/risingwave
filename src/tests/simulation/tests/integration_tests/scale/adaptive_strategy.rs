@@ -13,118 +13,18 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use anyhow::Result;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
+use tokio::time::sleep;
 
 #[tokio::test]
-async fn test_streaming_parallelism_adaptive_variants() -> Result<()> {
-    let config = Configuration::for_auto_parallelism(10, true);
-    let total_cores = config.total_streaming_cores();
-    assert_eq!(total_cores, 6u32);
-
-    let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-
-    session
-        .run("set streaming_parallelism_for_table = adaptive")
-        .await?;
-    session.run("create table t_auto(v int)").await?;
-    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_auto' and distribution_type = 'HASH';").await?.assert_result_eq("6");
-
-    session
-        .run("set streaming_parallelism_for_table = 'bounded(2)'")
-        .await?;
-    session.run("create table t_bounded(v int)").await?;
-    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_bounded' and distribution_type = 'HASH';").await?.assert_result_eq("2");
-
-    session
-        .run("set streaming_parallelism_for_table = 'ratio(0.5)'")
-        .await?;
-    session.run("create table t_ratio(v int)").await?;
-    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_ratio' and distribution_type = 'HASH';").await?.assert_result_eq("3");
-
-    session
-        .run("set streaming_parallelism_for_table = 'ratio(0.00001)'")
-        .await?;
-    session.run("create table t_ratio_min(v int)").await?;
-    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_ratio_min' and distribution_type = 'HASH';").await?.assert_result_eq("1");
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_streaming_parallelism_type_override() -> Result<()> {
-    let config = Configuration::for_auto_parallelism(10, true);
-
-    let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-
-    session
-        .run("set streaming_parallelism_for_table = 'ratio(0.5)'")
-        .await?;
-    session.run("create table t_base(v int)").await?;
-    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_base' and distribution_type = 'HASH';").await?.assert_result_eq("3");
-
-    session
-        .run("set streaming_parallelism_for_materialized_view = 'bounded(2)'")
-        .await?;
-    session
-        .run("create materialized view m_override as select * from t_base")
-        .await?;
-    session.run("select distinct parallelism from rw_fragment_parallelism where name = 'm_override' and distribution_type = 'HASH';").await?.assert_result_eq("2");
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_streaming_parallelism_default_fallback() -> Result<()> {
-    let config = Configuration::for_auto_parallelism(10, true);
-
-    let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-
-    session
-        .run("set streaming_parallelism = 'ratio(0.5)'")
-        .await?;
-    session
-        .run("set streaming_parallelism_for_materialized_view = default")
-        .await?;
-    session.run("create table t_base(v int)").await?;
-    session
-        .run("create materialized view m_fallback as select * from t_base")
-        .await?;
-    session.run("select distinct parallelism from rw_fragment_parallelism where name = 'm_fallback' and distribution_type = 'HASH';").await?.assert_result_eq("3");
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_streaming_parallelism_persistence() -> Result<()> {
-    let config = Configuration::for_auto_parallelism(10, true);
-
-    let mut cluster = Cluster::start(config).await?;
-    let mut session = cluster.start_session();
-
-    session
-        .run("set streaming_parallelism_for_table = 'ratio(0.5)'")
-        .await?;
-    session.run("create table t_persist(v int)").await?;
-    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_persist' and distribution_type = 'HASH';").await?.assert_result_eq("3");
-
-    session
-        .run("set streaming_parallelism_for_table = 'bounded(2)'")
-        .await?;
-    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_persist' and distribution_type = 'HASH';").await?.assert_result_eq("3");
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_streaming_parallelism_adaptive_resource_group_scale() -> Result<()> {
+async fn test_adaptive_strategy_alter_resource_group() -> Result<()> {
     let mut config = Configuration::for_arrangement_backfill();
+
     config.compute_nodes = 3;
     config.compute_node_cores = 2;
     config.compute_resource_groups = HashMap::from([
@@ -136,16 +36,21 @@ async fn test_streaming_parallelism_adaptive_resource_group_scale() -> Result<()
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
 
-    session.run("set streaming_parallelism = adaptive").await?;
     session
-        .run("set streaming_use_arrangement_backfill = true")
+        .run("SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;")
         .await?;
+
+    session
+        .run("alter system set adaptive_parallelism_strategy to AUTO")
+        .await?;
+
     session.run("create table t(v int)").await?;
     session
         .run("create materialized view m as select * from t")
         .await?;
 
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 't' and distribution_type = 'HASH';").await?.assert_result_eq("2");
+
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 'm' and distribution_type = 'HASH';").await?.assert_result_eq("2");
 
     session
@@ -153,6 +58,14 @@ async fn test_streaming_parallelism_adaptive_resource_group_scale() -> Result<()
         .await?;
 
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 'm' and distribution_type = 'HASH';").await?.assert_result_eq("4");
+
+    session
+        .run("alter system set adaptive_parallelism_strategy to 'BOUNDED(2)'")
+        .await?;
+
+    sleep(Duration::from_secs(100)).await;
+
+    session.run("select distinct parallelism from rw_fragment_parallelism where name = 'm' and distribution_type = 'HASH';").await?.assert_result_eq("2");
 
     Ok(())
 }
