@@ -19,8 +19,8 @@ use std::cmp::max;
 use std::collections::{HashMap, HashSet, hash_map};
 use std::mem::take;
 use std::ops::Bound::{Excluded, Unbounded};
+use std::time::Duration;
 
-use barrier_control::CreatingStreamingJobBarrierControl;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -82,7 +82,7 @@ pub(crate) struct CreatingStreamingJobControl {
     node_actors: HashMap<WorkerId, HashSet<ActorId>>,
     state_table_ids: HashSet<TableId>,
 
-    barrier_control: CreatingStreamingJobBarrierControl,
+    max_committed_epoch: Option<u64>,
     status: CreatingStreamingJobStatus,
 
     upstream_lag: LabelGuardedIntGauge,
@@ -169,8 +169,6 @@ impl CreatingStreamingJobControl {
             &actors.actor_location,
         );
 
-        let barrier_control = CreatingStreamingJobBarrierControl::new(job_id, None);
-
         let mut prev_epoch_fake_physical_time = 0;
         let mut pending_non_checkpoint_barriers = vec![];
 
@@ -219,7 +217,7 @@ impl CreatingStreamingJobControl {
             partial_graph_id,
             job_id,
             snapshot_backfill_upstream_tables,
-            barrier_control,
+            max_committed_epoch: None,
             snapshot_epoch,
             status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
             upstream_lag: GLOBAL_META_METRICS
@@ -237,7 +235,6 @@ impl CreatingStreamingJobControl {
         if let Err(e) = Self::inject_barrier(
             partial_graph_id,
             graph_adder.manager(),
-            &mut job.barrier_control,
             &job.node_actors,
             &job.state_table_ids,
             false,
@@ -460,8 +457,6 @@ impl CreatingStreamingJobControl {
             %job_id,
             "recovered creating snapshot backfill job"
         );
-        let barrier_control =
-            CreatingStreamingJobBarrierControl::new(job_id, Some(committed_epoch));
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
         let state_table_ids: HashSet<_> =
@@ -554,7 +549,7 @@ impl CreatingStreamingJobControl {
             snapshot_epoch,
             node_actors,
             state_table_ids,
-            barrier_control,
+            max_committed_epoch: Some(committed_epoch),
             status,
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
@@ -593,11 +588,12 @@ impl CreatingStreamingJobControl {
                     log_store_progress_tracker.gen_backfill_progress()
                 )
             }
-            CreatingStreamingJobStatus::Finishing(..) => {
-                format!(
-                    "Finishing [epoch count: {}]",
-                    self.barrier_control.inflight_barrier_count()
-                )
+            CreatingStreamingJobStatus::Finishing(finish_epoch, ..) => {
+                let committed_epoch = self.max_committed_epoch.expect("should have committed");
+                let lag = Duration::from_millis(
+                    Epoch(*finish_epoch).physical_time() - Epoch(committed_epoch).physical_time(),
+                );
+                format!("Finishing [epoch lag: {lag:?}]",)
             }
             CreatingStreamingJobStatus::Resetting(_) => "Resetting".to_owned(),
             CreatingStreamingJobStatus::PlaceHolder => {
@@ -612,19 +608,14 @@ impl CreatingStreamingJobControl {
 
     pub(super) fn pinned_upstream_log_epoch(&self) -> (u64, HashSet<TableId>) {
         (
-            max(
-                self.barrier_control.max_committed_epoch().unwrap_or(0),
-                self.snapshot_epoch,
-            ),
+            max(self.max_committed_epoch.unwrap_or(0), self.snapshot_epoch),
             self.snapshot_backfill_upstream_tables.clone(),
         )
     }
 
-    #[expect(clippy::too_many_arguments)]
     fn inject_barrier(
         partial_graph_id: PartialGraphId,
         partial_graph_manager: &mut PartialGraphManager,
-        barrier_control: &mut CreatingStreamingJobBarrierControl,
         node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
         state_table_ids: &HashSet<TableId>,
         is_finishing: bool,
@@ -639,7 +630,6 @@ impl CreatingStreamingJobControl {
         } else {
             (None, None)
         };
-        let prev_epoch = barrier_info.prev_epoch();
         partial_graph_manager.inject_barrier(
             partial_graph_id,
             mutation,
@@ -657,7 +647,6 @@ impl CreatingStreamingJobControl {
                 state_table_ids.clone(),
             ),
         )?;
-        barrier_control.enqueue_epoch(prev_epoch);
         Ok(())
     }
 
@@ -675,7 +664,6 @@ impl CreatingStreamingJobControl {
         Self::inject_barrier(
             self.partial_graph_id,
             partial_graph_manager,
-            &mut self.barrier_control,
             &self.node_actors,
             &self.state_table_ids,
             true,
@@ -702,12 +690,11 @@ impl CreatingStreamingJobControl {
         barrier_info: &BarrierInfo,
         mutation: Option<(Mutation, Vec<Notifier>)>,
     ) -> MetaResult<()> {
-        let progress_epoch =
-            if let Some(max_committed_epoch) = self.barrier_control.max_committed_epoch() {
-                max(max_committed_epoch, self.snapshot_epoch)
-            } else {
-                self.snapshot_epoch
-            };
+        let progress_epoch = if let Some(max_committed_epoch) = self.max_committed_epoch {
+            max(max_committed_epoch, self.snapshot_epoch)
+        } else {
+            self.snapshot_epoch
+        };
         self.upstream_lag.set(
             barrier_info
                 .prev_epoch
@@ -727,7 +714,6 @@ impl CreatingStreamingJobControl {
                 Self::inject_barrier(
                     self.partial_graph_id,
                     partial_graph_manager,
-                    &mut self.barrier_control,
                     &self.node_actors,
                     &self.state_table_ids,
                     false,
@@ -751,7 +737,6 @@ impl CreatingStreamingJobControl {
                 .values()
                 .flat_map(|resp| &resp.create_mview_progress),
         );
-        self.barrier_control.collect(collected_barrier);
         self.should_merge_to_upstream()
     }
 
@@ -779,7 +764,7 @@ impl CreatingStreamingJobControl {
         upstream_committed_epoch: u64,
     ) -> Option<(
         u64,
-        Vec<BarrierCompleteResponse>,
+        HashMap<WorkerId, BarrierCompleteResponse>,
         PartialGraphBarrierInfo,
         bool,
     )> {
@@ -814,16 +799,22 @@ impl CreatingStreamingJobControl {
                 unreachable!()
             }
         };
-        self.barrier_control
-            .start_completing(epoch_end_bound, |epoch| {
-                partial_graph_manager.take_collected_barrier(self.partial_graph_id, epoch)
-            })
+        partial_graph_manager
+            .start_completing(
+                self.partial_graph_id,
+                epoch_end_bound,
+                |non_checkpoint_epoch, _, _| {
+                    if let Some(finish_at_epoch) = finished_at_epoch {
+                        assert!(non_checkpoint_epoch.prev < finish_at_epoch);
+                    }
+                },
+            )
             .map(|(epoch, resps, info)| {
                 let is_finish_epoch = if let Some(finish_at_epoch) = finished_at_epoch {
                     assert!(!info.post_collect_command.should_checkpoint());
                     if epoch == finish_at_epoch {
-                        self.barrier_control.ack_completed(epoch);
-                        assert!(self.barrier_control.is_empty());
+                        // TODO: can early remove partial graph here
+                        self.ack_completed(partial_graph_manager, epoch);
                         true
                     } else {
                         false
@@ -835,8 +826,15 @@ impl CreatingStreamingJobControl {
             })
     }
 
-    pub(super) fn ack_completed(&mut self, completed_epoch: u64) {
-        self.barrier_control.ack_completed(completed_epoch);
+    pub(super) fn ack_completed(
+        &mut self,
+        partial_graph_manager: &mut PartialGraphManager,
+        completed_epoch: u64,
+    ) {
+        partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+        if let Some(prev_max_committed_epoch) = self.max_committed_epoch.replace(completed_epoch) {
+            assert!(completed_epoch > prev_max_committed_epoch);
+        }
     }
 
     pub fn fragment_infos_with_job_id(
@@ -892,7 +890,6 @@ impl CreatingStreamingJobControl {
     }
 
     pub fn into_tracking_job(self) -> TrackingJob {
-        assert!(self.barrier_control.is_empty());
         match self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { .. }
