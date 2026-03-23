@@ -39,13 +39,20 @@ use crate::catalog::root_catalog::Catalog;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CompletedObserverRecovery {
+    pub epoch: u64,
+    pub catalog_version: CatalogVersion,
+    pub streaming_worker_slot_mapping_version: u64,
+}
+
 pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     version: CatalogVersion,
     streaming_worker_slot_mapping_version: u64,
     catalog_updated_tx: Sender<CatalogVersion>,
     streaming_worker_slot_mapping_updated_tx: Sender<u64>,
-    observer_reinitialized_tx: Sender<u64>,
+    completed_observer_recovery_tx: Sender<CompletedObserverRecovery>,
     catalog: Arc<RwLock<Catalog>>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -212,8 +219,6 @@ impl ObserverState for FrontendObserverNode {
         self.reset_streaming_worker_slot_mapping_version(
             snapshot_version.streaming_worker_slot_mapping_version,
         );
-        self.observer_reinitialized_tx
-            .send_modify(|epoch| *epoch += 1);
         self.catalog_updated_tx
             .send(snapshot_version.catalog_version)
             .unwrap();
@@ -221,6 +226,15 @@ impl ObserverState for FrontendObserverNode {
             serde_json::from_str(&session_params.unwrap().params).unwrap();
         LocalSecretManager::global().init_secrets(secrets);
         LicenseManager::get().update_cluster_resource(cluster_resource.unwrap());
+    }
+
+    fn handle_initialization_finished(&mut self) {
+        self.completed_observer_recovery_tx.send_modify(|recovery| {
+            recovery.epoch += 1;
+            recovery.catalog_version = self.version;
+            recovery.streaming_worker_slot_mapping_version =
+                self.streaming_worker_slot_mapping_version;
+        });
     }
 }
 
@@ -230,7 +244,7 @@ impl FrontendObserverNode {
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
         streaming_worker_slot_mapping_updated_tx: Sender<u64>,
-        observer_reinitialized_tx: Sender<u64>,
+        completed_observer_recovery_tx: Sender<CompletedObserverRecovery>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
@@ -244,7 +258,7 @@ impl FrontendObserverNode {
             catalog,
             catalog_updated_tx,
             streaming_worker_slot_mapping_updated_tx,
-            observer_reinitialized_tx,
+            completed_observer_recovery_tx,
             user_info_manager,
             hummock_snapshot_manager,
             system_params_manager,
@@ -646,7 +660,7 @@ mod tests {
     use risingwave_rpc_client::ComputeClientPool;
     use tokio::sync::watch;
 
-    use super::FrontendObserverNode;
+    use super::{CompletedObserverRecovery, FrontendObserverNode};
     use crate::catalog::FragmentId;
     use crate::catalog::root_catalog::Catalog;
     use crate::scheduler::HummockSnapshotManager;
@@ -657,12 +671,14 @@ mod tests {
         FrontendObserverNode,
         watch::Receiver<CatalogVersion>,
         watch::Receiver<u64>,
+        watch::Receiver<CompletedObserverRecovery>,
     ) {
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let (streaming_worker_slot_mapping_updated_tx, streaming_worker_slot_mapping_updated_rx) =
             watch::channel(0);
-        let (observer_reinitialized_tx, _observer_reinitialized_rx) = watch::channel(0u64);
+        let (completed_observer_recovery_tx, completed_observer_recovery_rx) =
+            watch::channel(CompletedObserverRecovery::default());
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
@@ -678,7 +694,7 @@ mod tests {
                 catalog,
                 catalog_updated_tx,
                 streaming_worker_slot_mapping_updated_tx,
-                observer_reinitialized_tx,
+                completed_observer_recovery_tx,
                 user_info_manager,
                 hummock_snapshot_manager,
                 system_params_manager,
@@ -687,6 +703,7 @@ mod tests {
             ),
             catalog_updated_rx,
             streaming_worker_slot_mapping_updated_rx,
+            completed_observer_recovery_rx,
         )
     }
 
@@ -729,7 +746,8 @@ mod tests {
 
     #[tokio::test]
     async fn initialization_snapshot_resets_streaming_mapping_version() {
-        let (mut observer_node, _catalog_version_rx, mut version_rx) = make_observer_node();
+        let (mut observer_node, _catalog_version_rx, mut version_rx, _reinit_rx) =
+            make_observer_node();
 
         observer_node.handle_notification(streaming_mapping_notification(1.into(), 5));
         assert_eq!(*version_rx.borrow_and_update(), 5);
@@ -744,5 +762,27 @@ mod tests {
             .worker_node_manager
             .get_streaming_fragment_mapping(&2.into())
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn initialization_notification_does_not_signal_reinitialized_before_finish() {
+        let (mut observer_node, _catalog_version_rx, _version_rx, mut reinit_rx) =
+            make_observer_node();
+
+        observer_node.handle_initialization_notification(snapshot_notification(1));
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery::default()
+        );
+
+        observer_node.handle_initialization_finished();
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery {
+                epoch: 1,
+                catalog_version: 0,
+                streaming_worker_slot_mapping_version: 1,
+            }
+        );
     }
 }

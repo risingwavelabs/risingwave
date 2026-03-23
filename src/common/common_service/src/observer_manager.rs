@@ -38,6 +38,10 @@ pub trait ObserverState: Send + 'static {
 
     /// Initialize data from the meta. It will be called at start or resubscribe
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse);
+
+    /// Called after the initialization snapshot and all buffered notifications collected before
+    /// that snapshot have been replayed.
+    fn handle_initialization_finished(&mut self) {}
 }
 
 impl<S: ObserverState> ObserverManager<RpcNotificationClient, S> {
@@ -140,6 +144,8 @@ where
         for notification in notification_vec {
             self.observer_states.handle_notification(notification);
         }
+
+        self.observer_states.handle_initialization_finished();
 
         Ok(())
     }
@@ -267,6 +273,14 @@ mod tests {
     struct TestState {
         init_mapping_versions: Arc<Mutex<Vec<u64>>>,
         handled_mapping_versions: Arc<Mutex<Vec<u64>>>,
+        events: Arc<Mutex<Vec<TestEvent>>>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum TestEvent {
+        Snapshot,
+        Notification,
+        Finished,
     }
 
     impl ObserverState for TestState {
@@ -275,6 +289,7 @@ mod tests {
         }
 
         fn handle_notification(&mut self, resp: SubscribeResponse) {
+            self.events.lock().unwrap().push(TestEvent::Notification);
             self.handled_mapping_versions
                 .lock()
                 .unwrap()
@@ -285,6 +300,7 @@ mod tests {
             let Some(Info::Snapshot(snapshot)) = resp.info else {
                 panic!("expected snapshot");
             };
+            self.events.lock().unwrap().push(TestEvent::Snapshot);
             self.init_mapping_versions.lock().unwrap().push(
                 snapshot
                     .version
@@ -292,6 +308,10 @@ mod tests {
                     .unwrap()
                     .streaming_worker_slot_mapping_version,
             );
+        }
+
+        fn handle_initialization_finished(&mut self) {
+            self.events.lock().unwrap().push(TestEvent::Finished);
         }
     }
 
@@ -370,6 +390,14 @@ mod tests {
             state.handled_mapping_versions.lock().unwrap().as_slice(),
             &[2]
         );
+        assert_eq!(
+            state.events.lock().unwrap().as_slice(),
+            &[
+                TestEvent::Snapshot,
+                TestEvent::Notification,
+                TestEvent::Finished,
+            ]
+        );
     }
 
     #[tokio::test]
@@ -387,5 +415,32 @@ mod tests {
 
         assert_eq!(state.init_mapping_versions.lock().unwrap().as_slice(), &[1]);
         assert!(state.handled_mapping_versions.lock().unwrap().is_empty());
+        assert_eq!(
+            state.events.lock().unwrap().as_slice(),
+            &[TestEvent::Snapshot, TestEvent::Finished]
+        );
+    }
+
+    #[tokio::test]
+    async fn marks_initialization_finished_after_replaying_buffered_notifications() {
+        let state = TestState::default();
+        let mut observer_manager = ObserverManager {
+            rx: TestChannel {
+                notifications: VecDeque::from([mapping_notification(3), snapshot_notification(1)]),
+            },
+            client: TestClient,
+            observer_states: state.clone(),
+        };
+
+        observer_manager.wait_init_notification().await.unwrap();
+
+        assert_eq!(
+            state.events.lock().unwrap().as_slice(),
+            &[
+                TestEvent::Snapshot,
+                TestEvent::Notification,
+                TestEvent::Finished,
+            ]
+        );
     }
 }
