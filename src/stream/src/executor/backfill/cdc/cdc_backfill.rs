@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 
 use either::Either;
 use futures::stream;
@@ -794,6 +795,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             }
         }
 
+        let suspend_stream_after_n = 0;
+        let mut counter = 0;
         // After backfill progress finished
         // we can forward messages directly to the downstream,
         // as backfill is finished.
@@ -805,6 +808,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 if let Message::Barrier(barrier) = &msg {
                     // commit state just to bump the epoch of state table
                     state_impl.commit_state(barrier.epoch).await?;
+                } else {
+                    if counter >= suspend_stream_after_n {
+                        // DEBUG: Suspend the stream upon any CDC event.
+                        tokio::time::sleep(Duration::from_secs(3600)).await;
+                    } else {
+                        counter += 1;
+                    }
                 }
                 yield msg;
             }

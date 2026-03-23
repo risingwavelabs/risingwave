@@ -61,6 +61,7 @@ pub mod utils;
 
 mod util;
 use std::future::IntoFuture;
+use std::time::Duration;
 
 pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
 pub use batch::BatchSourceSplitImpl;
@@ -122,6 +123,7 @@ pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool 
 }
 
 /// Tasks executed by `WaitCheckpointWorker`
+#[derive(Debug)]
 pub enum WaitCheckpointTask {
     CommitCdcOffset(Option<(SplitId, String)>),
     AckPubsubMessage(Subscription, Vec<ArrayRef>),
@@ -146,9 +148,12 @@ impl WaitCheckpointTask {
             WaitCheckpointTask::CommitCdcOffset(updated_offset) => {
                 if let Some((split_id, offset)) = updated_offset {
                     let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
+                    tracing::info!(?source_id, ?offset, "!!! sleep before commit offset: wait for pg heartbeat to initialize DbzChangeEventConsumer::currentRecordCommitter.");
+                    tokio::time::sleep(Duration::from_secs(120)).await;
                     // notify cdc connector to commit offset
                     match cdc::jni_source::commit_cdc_offset(source_id, offset.clone()) {
                         Ok(()) => {
+                            tracing::info!(?source_id, ?offset, "!!! after");
                             // Execute callback after successful commit
                             on_commit_success(source_id, &offset);
                         }

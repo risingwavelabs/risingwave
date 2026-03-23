@@ -1121,6 +1121,7 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
             // poll the rx and wait for the epoch commit
             match self.wait_checkpoint_rx.recv().await {
                 Some((epoch, task)) => {
+                    tracing::info!(?epoch, ?task, "!!! before");
                     tracing::debug!("start to wait epoch {}", epoch.0);
                     let ret = self
                         .state_store
