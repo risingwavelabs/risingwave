@@ -177,9 +177,12 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism: ConfigParallelism,
 
-    /// Specific parallelism for backfill. Defaults to `default`, which keeps backfill aligned
-    /// with the job's normal parallelism instead of applying a dedicated override.
-    #[parameter(default = ConfigBackfillParallelism::Default)]
+    /// Specific parallelism for backfill. In PR2, only `default` and a fixed positive integer
+    /// are supported. Adaptive backfill strategies are deferred to a later PR.
+    #[parameter(
+        default = ConfigBackfillParallelism::Default,
+        check_hook = check_streaming_parallelism_for_backfill
+    )]
     streaming_parallelism_for_backfill: ConfigBackfillParallelism,
 
     /// Specific parallelism for table. Defaults to `default`, which preserves the legacy
@@ -544,6 +547,17 @@ fn check_streaming_max_parallelism(val: &usize) -> Result<(), String> {
     }
 }
 
+fn check_streaming_parallelism_for_backfill(val: &ConfigBackfillParallelism) -> Result<(), String> {
+    match val {
+        ConfigBackfillParallelism::Default | ConfigBackfillParallelism::Fixed(_) => Ok(()),
+        ConfigBackfillParallelism::Adaptive
+        | ConfigBackfillParallelism::Bounded(_)
+        | ConfigBackfillParallelism::Ratio(_) => Err(
+            "PR2 only supports `default` or fixed backfill parallelism; adaptive backfill strategy is deferred to a later PR.".to_owned(),
+        ),
+    }
+}
+
 impl SessionConfig {
     pub fn set_force_two_phase_agg(
         &mut self,
@@ -778,5 +792,60 @@ mod test {
                 .unwrap(),
             "default"
         );
+    }
+
+    #[test]
+    fn test_streaming_parallelism_for_backfill_accepts_default_and_fixed() {
+        let mut config = SessionConfig::default();
+
+        config
+            .set(
+                "streaming_parallelism_for_backfill",
+                "default".to_owned(),
+                &mut (),
+            )
+            .unwrap();
+        assert_eq!(
+            config.get("streaming_parallelism_for_backfill").unwrap(),
+            "default"
+        );
+
+        config
+            .set(
+                "streaming_parallelism_for_backfill",
+                "2".to_owned(),
+                &mut (),
+            )
+            .unwrap();
+        assert_eq!(config.streaming_parallelism_for_backfill().to_string(), "2");
+    }
+
+    #[test]
+    fn test_streaming_parallelism_for_backfill_rejects_adaptive_modes() {
+        let mut config = SessionConfig::default();
+        let expected = "PR2 only supports `default` or fixed backfill parallelism; adaptive backfill strategy is deferred to a later PR.";
+
+        for value in ["adaptive", "bounded(2)", "ratio(0.5)"] {
+            let err = config
+                .set(
+                    "streaming_parallelism_for_backfill",
+                    value.to_owned(),
+                    &mut (),
+                )
+                .unwrap_err();
+
+            match err {
+                SessionConfigError::InvalidValue {
+                    entry,
+                    value: actual_value,
+                    source,
+                } => {
+                    assert_eq!(entry, "streaming_parallelism_for_backfill");
+                    assert_eq!(actual_value, value);
+                    assert_eq!(source.to_string(), expected);
+                }
+                other => panic!("unexpected error: {other:?}"),
+            }
+        }
     }
 }

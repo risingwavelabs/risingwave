@@ -337,17 +337,6 @@ mod tests {
     }
 
     #[test]
-    fn test_backfill_parallelism_adaptive_resolves_strategy() {
-        assert_eq!(
-            derive_backfill_parallelism(ConfigBackfillParallelism::Adaptive),
-            ResolvedParallelism {
-                parallelism: None,
-                adaptive_strategy: Some(AdaptiveParallelismStrategy::Auto),
-            }
-        );
-    }
-
-    #[test]
     fn test_backfill_parallelism_default_does_not_resolve_to_fixed() {
         assert_eq!(
             derive_backfill_parallelism(ConfigBackfillParallelism::Default),
@@ -359,16 +348,14 @@ mod tests {
     }
 
     #[test]
-    fn test_backfill_parallelism_bounded_resolves_strategy() {
+    fn test_backfill_parallelism_fixed_preserves_explicit_override() {
         assert_eq!(
-            derive_backfill_parallelism(ConfigBackfillParallelism::Bounded(
+            derive_backfill_parallelism(ConfigBackfillParallelism::Fixed(
                 NonZeroU64::new(2).unwrap()
             )),
             ResolvedParallelism {
-                parallelism: None,
-                adaptive_strategy: Some(AdaptiveParallelismStrategy::Bounded(
-                    NonZeroUsize::new(2).unwrap()
-                )),
+                parallelism: Some(Parallelism { parallelism: 2 }),
+                adaptive_strategy: None,
             }
         );
     }
