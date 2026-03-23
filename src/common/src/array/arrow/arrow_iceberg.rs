@@ -18,18 +18,25 @@ use std::ops::Div;
 use std::sync::{Arc, LazyLock};
 
 use arrow_array::ArrayRef;
+use arrow_schema::extension::ExtensionType;
 use num_traits::abs;
+use parquet_variant_compute::{VariantArray, VariantType};
+use parquet_variant_json::VariantToJson;
 
 pub use super::arrow_57::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
     is_parquet_schema_match_source_schema,
 };
 use crate::array::{
-    Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
+    Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray, JsonbArray,
 };
 use crate::types::StructType;
 
 pub struct IcebergArrowConvert;
+
+struct DefaultIcebergFromArrow;
+
+impl FromArrow for DefaultIcebergFromArrow {}
 
 // Arrow Decimal128 supports up to 38 decimal digits. We use precision=38, scale=10:
 // - Integer range: up to 10^28 - 1 (28 digits)
@@ -214,7 +221,54 @@ impl ToArrow for IcebergArrowConvert {
     }
 }
 
-impl FromArrow for IcebergArrowConvert {}
+impl FromArrow for IcebergArrowConvert {
+    fn from_extension_type(
+        &self,
+        type_name: &str,
+        physical_type: &arrow_schema::DataType,
+    ) -> Result<DataType, ArrayError> {
+        match (type_name, physical_type) {
+            (VariantType::NAME, arrow_schema::DataType::Struct(_)) => Ok(DataType::Jsonb),
+            _ => DefaultIcebergFromArrow.from_extension_type(type_name, physical_type),
+        }
+    }
+
+    fn from_extension_array(
+        &self,
+        type_name: &str,
+        array: &arrow_array::ArrayRef,
+    ) -> Result<ArrayImpl, ArrayError> {
+        match type_name {
+            VariantType::NAME => variant_array_to_jsonb(array),
+            _ => DefaultIcebergFromArrow.from_extension_array(type_name, array),
+        }
+    }
+}
+
+fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, ArrayError> {
+    let variant_array = VariantArray::try_new(array.as_ref()).map_err(ArrayError::from_arrow)?;
+    let mut values = Vec::with_capacity(variant_array.len());
+
+    for idx in 0..variant_array.len() {
+        if variant_array.is_null(idx) {
+            values.push(None);
+            continue;
+        }
+
+        let json_value = variant_array
+            .try_value(idx)
+            .and_then(|variant| variant.to_json_value())
+            .map_err(|err| {
+                ArrayError::from_arrow(format!(
+                    "failed to decode iceberg variant value at index {idx}: {err}"
+                ))
+            })?;
+
+        values.push(Some(json_value.into()));
+    }
+
+    Ok(ArrayImpl::Jsonb(JsonbArray::from_iter(values)))
+}
 
 /// Iceberg sink with `create_table_if_not_exists` option will use this struct to convert the
 /// iceberg data type to arrow data type.
@@ -322,10 +376,13 @@ impl ToArrow for IcebergCreateTableArrowConvert {
 mod test {
     use std::sync::Arc;
 
+    use parquet_variant_compute::json_to_variant;
+
     use super::arrow_array::{ArrayRef, Decimal128Array};
-    use super::arrow_schema::DataType;
+    use super::arrow_schema::DataType as ArrowDataType;
     use super::*;
     use crate::array::{Decimal, DecimalArray};
+    use crate::types::{MapType, ScalarRef};
 
     #[test]
     fn decimal() {
@@ -337,7 +394,7 @@ mod test {
             Some(Decimal::Normalized("123.4".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ]);
-        let ty = DataType::Decimal128(6, 3);
+        let ty = ArrowDataType::Decimal128(6, 3);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
         let expect_array = Arc::new(
             Decimal128Array::from(vec![
@@ -363,7 +420,7 @@ mod test {
             Some(Decimal::Normalized("123.4".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ]);
-        let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
+        let ty = ArrowDataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
         let expect_array = Arc::new(
             Decimal128Array::from(vec![
@@ -412,7 +469,7 @@ mod test {
             Some(Decimal::Normalized("0.0000000000".parse().unwrap())),
         ]);
 
-        let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
+        let ty = ArrowDataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
 
         let expect_array = Arc::new(
@@ -454,7 +511,7 @@ mod test {
         ]);
 
         // Convert to Arrow
-        let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
+        let ty = ArrowDataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
         let arrow_array = IcebergArrowConvert
             .decimal_to_arrow(&ty, &original_array)
             .unwrap();
@@ -487,5 +544,179 @@ mod test {
 
         // NULL -> NULL -> None
         assert_eq!(roundtrip_array.value_at(4), None);
+    }
+
+    #[test]
+    fn variant_extension_type_maps_to_jsonb() {
+        let json_values = Arc::new(arrow_array::StringArray::from(vec![
+            Some(r#""iceberg""#),
+            None,
+        ])) as ArrayRef;
+        let variant_array = json_to_variant(&json_values).unwrap();
+        let field = variant_array.field("variant_col");
+
+        assert_eq!(
+            IcebergArrowConvert.type_from_field(&field).unwrap(),
+            DataType::Jsonb
+        );
+    }
+
+    #[test]
+    fn variant_array_converts_to_jsonb() {
+        let json_values = Arc::new(arrow_array::StringArray::from(vec![
+            Some(r#"{"k":[1,true,null]}"#),
+            None,
+            Some(r#""rw""#),
+        ])) as ArrayRef;
+        let variant_array = json_to_variant(&json_values).unwrap();
+        let field = variant_array.field("variant_col");
+        let array = Arc::new(variant_array.into_inner()) as ArrayRef;
+
+        let converted = IcebergArrowConvert
+            .array_from_arrow_array(&field, &array)
+            .unwrap();
+        let values = converted
+            .into_jsonb()
+            .iter()
+            .map(|value| value.map(|value| value.to_owned_scalar()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            values,
+            vec![
+                Some(r#"{"k":[1,true,null]}"#.parse().unwrap()),
+                None,
+                Some(r#""rw""#.parse().unwrap()),
+            ],
+        );
+    }
+
+    #[test]
+    fn variant_type_recurses_in_nested_types() {
+        let payload_field = arrow_schema::Field::new(
+            "payload",
+            ArrowDataType::Struct(
+                vec![
+                    Arc::new(variant_arrow_field("top_variant", true)),
+                    Arc::new(arrow_schema::Field::new(
+                        "variant_list",
+                        ArrowDataType::List(Arc::new(variant_arrow_field("element", true))),
+                        true,
+                    )),
+                    Arc::new(arrow_schema::Field::new(
+                        "variant_map",
+                        ArrowDataType::Map(
+                            Arc::new(arrow_schema::Field::new(
+                                "entries",
+                                ArrowDataType::Struct(
+                                    vec![
+                                        Arc::new(arrow_schema::Field::new(
+                                            "key",
+                                            ArrowDataType::Utf8,
+                                            false,
+                                        )),
+                                        Arc::new(variant_arrow_field("value", true)),
+                                    ]
+                                    .into(),
+                                ),
+                                false,
+                            )),
+                            false,
+                        ),
+                        true,
+                    )),
+                ]
+                .into(),
+            ),
+            true,
+        );
+
+        assert_eq!(
+            IcebergArrowConvert.type_from_field(&payload_field).unwrap(),
+            DataType::Struct(StructType::new(vec![
+                ("top_variant", DataType::Jsonb),
+                ("variant_list", DataType::list(DataType::Jsonb)),
+                (
+                    "variant_map",
+                    DataType::Map(MapType::from_kv(DataType::Varchar, DataType::Jsonb)),
+                ),
+            ])),
+        );
+    }
+
+    #[test]
+    fn variant_map_key_is_rejected() {
+        let field = arrow_schema::Field::new(
+            "variant_map_key",
+            ArrowDataType::Map(
+                Arc::new(arrow_schema::Field::new(
+                    "entries",
+                    ArrowDataType::Struct(
+                        vec![
+                            Arc::new(variant_arrow_field("key", false)),
+                            Arc::new(arrow_schema::Field::new("value", ArrowDataType::Utf8, true)),
+                        ]
+                        .into(),
+                    ),
+                    false,
+                )),
+                false,
+            ),
+            true,
+        );
+
+        let err = IcebergArrowConvert.type_from_field(&field).unwrap_err();
+        assert!(err.to_string().contains("invalid map key type: jsonb"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid variant data")]
+    fn invalid_variant_value_panics_in_upstream_decoder() {
+        let field = variant_arrow_field("variant_col", true);
+        let array = Arc::new(arrow_array::StructArray::from(vec![
+            (
+                Arc::new(arrow_schema::Field::new(
+                    "metadata",
+                    ArrowDataType::Binary,
+                    false,
+                )),
+                Arc::new(arrow_array::BinaryArray::from_iter_values([
+                    &[1_u8, 0, 0][..]
+                ])) as ArrayRef,
+            ),
+            (
+                Arc::new(arrow_schema::Field::new(
+                    "value",
+                    ArrowDataType::Binary,
+                    true,
+                )),
+                Arc::new(arrow_array::BinaryArray::from_iter_values([&[255_u8][..]])) as ArrayRef,
+            ),
+        ])) as ArrayRef;
+
+        let _ = IcebergArrowConvert.array_from_arrow_array(&field, &array);
+    }
+
+    fn variant_arrow_field(name: &str, nullable: bool) -> arrow_schema::Field {
+        arrow_schema::Field::new(
+            name,
+            ArrowDataType::Struct(
+                vec![
+                    Arc::new(arrow_schema::Field::new(
+                        "metadata",
+                        ArrowDataType::Binary,
+                        false,
+                    )),
+                    Arc::new(arrow_schema::Field::new(
+                        "value",
+                        ArrowDataType::Binary,
+                        true,
+                    )),
+                ]
+                .into(),
+            ),
+            nullable,
+        )
+        .with_extension_type(VariantType)
     }
 }
