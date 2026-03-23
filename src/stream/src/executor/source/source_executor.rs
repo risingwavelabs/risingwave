@@ -1131,7 +1131,13 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                             },
                         )
                         .await;
-
+                    if self.wait_checkpoint_rx.is_closed() {
+                        // The task must not be committed since the associated epoch may not succeed.
+                        // The wait_checkpoint_rx lifetime is tied to the lifecycle of the source executor actor.
+                        // The old actor must be dropped before any subsequent recovery can succeed; see PartialGraphState::abort_and_wait_actors
+                        tracing::debug!(epoch = epoch.0, "Drop stale wait checkpoint task.");
+                        break;
+                    }
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
