@@ -809,20 +809,19 @@ async fn wait_version_update(
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     version: WaitVersion,
 ) -> Result<()> {
-    // Mark current re-initialization epoch as seen BEFORE any waiting begins.
-    // Any re-initialization that occurs after this point (including during the catalog
-    // version wait below) will be detected by the select! branch.
+    // Mark current re-initialization epoch as seen so we only react to
+    // re-initializations that happen AFTER this DDL's WaitVersion was issued.
     let _ = observer_reinitialized_rx.borrow_and_update();
 
-    while *catalog_updated_rx.borrow_and_update() < version.catalog_version {
-        catalog_updated_rx.changed().await.map_err(|e| anyhow!(e))?;
-    }
-
-    // Race the mapping version wait against observer re-initialization.
-    // If the observer re-subscribes (e.g. after meta restart), the new snapshot already
-    // contains all committed mappings, so we can safely stop waiting.
+    // Race all version waits against observer re-initialization.
+    // If the observer re-subscribes (e.g. after meta restart), the new snapshot
+    // already contains all committed catalog data and mappings, so we can safely
+    // stop waiting for any specific version.
     tokio::select! {
         result = async {
+            while *catalog_updated_rx.borrow_and_update() < version.catalog_version {
+                catalog_updated_rx.changed().await.map_err(|e| anyhow!(e))?;
+            }
             while *streaming_worker_slot_mapping_updated_rx.borrow_and_update()
                 < version.streaming_worker_slot_mapping_version
             {
@@ -835,7 +834,7 @@ async fn wait_version_update(
         } => { result?; }
         Ok(_) = observer_reinitialized_rx.changed() => {
             // Observer re-subscribed and received a fresh snapshot.
-            // All committed mappings are already loaded into the frontend.
+            // All committed state is already loaded into the frontend.
         }
     }
 
@@ -920,13 +919,14 @@ mod tests {
 
     #[tokio::test]
     async fn wait_version_update_unblocks_when_reinit_happens_during_catalog_wait() {
-        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0u64);
+        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(0u64);
         let (_streaming_tx, streaming_rx) = watch::channel(0u64);
         let (observer_reinitialized_tx, observer_reinitialized_rx) = watch::channel(0u64);
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));
 
+        // Neither catalog (target 5, current 0) nor mapping (target 100, current 0) is met.
         let wait_handle = tokio::spawn(wait_version_update(
             catalog_updated_rx,
             streaming_rx,
@@ -942,15 +942,11 @@ mod tests {
         tokio::task::yield_now().await;
         assert!(!wait_handle.is_finished());
 
-        // Re-initialization happens while still waiting for catalog version.
+        // Re-initialization (e.g. after meta restart) immediately unblocks the wait,
+        // even though neither catalog nor mapping version targets are met.
+        // The fresh snapshot already contains all committed state.
         observer_reinitialized_tx.send_modify(|v| *v += 1);
-        tokio::task::yield_now().await;
-        assert!(!wait_handle.is_finished()); // Still blocked on catalog wait.
 
-        // Catalog version finally arrives.
-        catalog_updated_tx.send(5).unwrap();
-
-        // Should unblock immediately because reinit already happened.
         wait_handle.await.unwrap().unwrap();
     }
 }
