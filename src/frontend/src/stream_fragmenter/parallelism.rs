@@ -31,10 +31,7 @@ pub(crate) struct ResolvedParallelism {
 fn resolve_global_parallelism(
     global_streaming_parallelism: ConfigParallelism,
 ) -> ConfigParallelism {
-    match global_streaming_parallelism {
-        ConfigParallelism::Default => ConfigParallelism::Bounded(NonZeroU64::new(64).unwrap()),
-        other => other,
-    }
+    global_streaming_parallelism
 }
 
 fn resolve_default_parallelism(
@@ -68,7 +65,12 @@ pub(crate) fn derive_parallelism(
         };
 
     match effective_parallelism {
-        ConfigParallelism::Default => unreachable!("effective streaming parallelism must be set"),
+        // No explicit session-level override: let meta use the system param
+        // `adaptive_parallelism_strategy` to decide.
+        ConfigParallelism::Default => ResolvedParallelism {
+            parallelism: None,
+            adaptive_strategy: None,
+        },
         ConfigParallelism::Fixed(n) => ResolvedParallelism {
             parallelism: Some(Parallelism {
                 parallelism: n.get(),
@@ -130,9 +132,7 @@ mod tests {
         assert_eq!(derive_parallelism(None, None, global).parallelism, None);
         assert_eq!(
             derive_parallelism(None, None, global).adaptive_strategy,
-            Some(AdaptiveParallelismStrategy::Bounded(
-                NonZeroUsize::new(64).unwrap()
-            ))
+            None
         );
     }
 
@@ -165,9 +165,7 @@ mod tests {
         assert_eq!(derive_parallelism(None, specific, global).parallelism, None);
         assert_eq!(
             derive_parallelism(None, specific, global).adaptive_strategy,
-            Some(AdaptiveParallelismStrategy::Bounded(
-                NonZeroUsize::new(64).unwrap()
-            ))
+            None
         );
     }
 
@@ -325,9 +323,7 @@ mod tests {
                 ConfigParallelism::Default
             )
             .adaptive_strategy,
-            Some(AdaptiveParallelismStrategy::Bounded(
-                NonZeroUsize::new(64).unwrap()
-            ))
+            None
         );
         assert_eq!(
             derive_parallelism(
