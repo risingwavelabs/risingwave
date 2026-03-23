@@ -27,6 +27,7 @@ use crate::CtlContext;
 
 const LEGACY_MANUAL_RESCHEDULE_REMOVED: &str = "legacy manual reschedule has been removed; use ALTER ... SET PARALLELISM / ALTER FRAGMENT ... instead";
 
+#[allow(clippy::unused_async)]
 pub async fn reschedule(
     _context: &CtlContext,
     _plan: Option<String>,
