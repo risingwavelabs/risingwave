@@ -153,7 +153,7 @@ impl NotificationServiceImpl {
         Ok(decrypted_secrets)
     }
 
-    async fn get_worker_slot_mapping_snapshot(
+    fn get_worker_slot_mapping_snapshot(
         &self,
     ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
         let (mappings, version) = self
@@ -257,7 +257,7 @@ impl NotificationServiceImpl {
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
 
         let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
-            self.get_worker_slot_mapping_snapshot().await?;
+            self.get_worker_slot_mapping_snapshot()?;
 
         let streaming_job_count = self.metadata_manager.count_streaming_job().await?;
         if streaming_job_count > 0 && streaming_worker_slot_mappings.is_empty() {

@@ -224,6 +224,31 @@ pub trait NotificationClient: Send + Sync + 'static {
     ) -> Result<Self::Channel, ObserverError>;
 }
 
+pub struct RpcNotificationClient {
+    meta_client: MetaClient,
+}
+
+impl RpcNotificationClient {
+    pub fn new(meta_client: MetaClient) -> Self {
+        Self { meta_client }
+    }
+}
+
+#[async_trait::async_trait]
+impl NotificationClient for RpcNotificationClient {
+    type Channel = Streaming<SubscribeResponse>;
+
+    async fn subscribe(
+        &self,
+        subscribe_type: SubscribeType,
+    ) -> Result<Self::Channel, ObserverError> {
+        self.meta_client
+            .subscribe(subscribe_type)
+            .await
+            .map_err(Into::into)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
@@ -362,30 +387,5 @@ mod tests {
 
         assert_eq!(state.init_mapping_versions.lock().unwrap().as_slice(), &[1]);
         assert!(state.handled_mapping_versions.lock().unwrap().is_empty());
-    }
-}
-
-pub struct RpcNotificationClient {
-    meta_client: MetaClient,
-}
-
-impl RpcNotificationClient {
-    pub fn new(meta_client: MetaClient) -> Self {
-        Self { meta_client }
-    }
-}
-
-#[async_trait::async_trait]
-impl NotificationClient for RpcNotificationClient {
-    type Channel = Streaming<SubscribeResponse>;
-
-    async fn subscribe(
-        &self,
-        subscribe_type: SubscribeType,
-    ) -> Result<Self::Channel, ObserverError> {
-        self.meta_client
-            .subscribe(subscribe_type)
-            .await
-            .map_err(Into::into)
     }
 }
