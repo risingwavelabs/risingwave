@@ -504,7 +504,7 @@ pub async fn format_with_option_secret_resolved(
 ) -> MetaResult<Vec<SqlOption>> {
     let mut options = Vec::new();
     for (k, v) in options_with_secret.as_plaintext() {
-        let sql_option = SqlOption::try_from((k, &format!("'{}'", v)))
+        let sql_option = SqlOption::try_from((k, &v.to_owned()))
             .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
         options.push(sql_option);
     }
