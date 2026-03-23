@@ -146,10 +146,7 @@ impl Configuration {
             meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            per_session_queries: vec![
-                "alter system set adaptive_parallelism_strategy to AUTO".into(),
-            ]
-            .into(),
+            per_session_queries: vec![].into(),
             ..Default::default()
         }
     }
@@ -159,7 +156,6 @@ impl Configuration {
     pub fn for_scale_no_shuffle() -> Self {
         let mut conf = Self::for_scale();
         conf.per_session_queries = vec![
-            "alter system set adaptive_parallelism_strategy to AUTO".into(),
             "SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into(),
             "SET STREAMING_USE_SNAPSHOT_BACKFILL = false;".into(),
         ]
@@ -169,11 +165,7 @@ impl Configuration {
 
     pub fn for_scale_shared_source() -> Self {
         let mut conf = Self::for_scale();
-        conf.per_session_queries = vec![
-            "alter system set adaptive_parallelism_strategy to AUTO".into(),
-            "SET STREAMING_USE_SHARED_SOURCE = true;".into(),
-        ]
-        .into();
+        conf.per_session_queries = vec!["SET STREAMING_USE_SHARED_SOURCE = true;".into()].into();
         conf
     }
 
@@ -217,7 +209,6 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 2,
             per_session_queries: vec![
-                "alter system set adaptive_parallelism_strategy to AUTO".into(),
                 "create view if not exists table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;".into(),
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
