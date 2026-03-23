@@ -356,11 +356,13 @@ impl FrontendEnv {
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let (streaming_worker_slot_mapping_updated_tx, streaming_worker_slot_mapping_updated_rx) =
             watch::channel(0);
+        let (observer_reinitialized_tx, observer_reinitialized_rx) = watch::channel(0u64);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(CatalogWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx.clone(),
             streaming_worker_slot_mapping_updated_rx,
+            observer_reinitialized_rx,
             hummock_snapshot_manager.clone(),
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
@@ -411,6 +413,7 @@ impl FrontendEnv {
             catalog,
             catalog_updated_tx,
             streaming_worker_slot_mapping_updated_tx,
+            observer_reinitialized_tx,
             user_info_manager,
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),

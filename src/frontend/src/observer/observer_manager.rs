@@ -45,6 +45,7 @@ pub struct FrontendObserverNode {
     streaming_worker_slot_mapping_version: u64,
     catalog_updated_tx: Sender<CatalogVersion>,
     streaming_worker_slot_mapping_updated_tx: Sender<u64>,
+    observer_reinitialized_tx: Sender<u64>,
     catalog: Arc<RwLock<Catalog>>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -211,6 +212,8 @@ impl ObserverState for FrontendObserverNode {
         self.reset_streaming_worker_slot_mapping_version(
             snapshot_version.streaming_worker_slot_mapping_version,
         );
+        self.observer_reinitialized_tx
+            .send_modify(|epoch| *epoch += 1);
         self.catalog_updated_tx
             .send(snapshot_version.catalog_version)
             .unwrap();
@@ -227,6 +230,7 @@ impl FrontendObserverNode {
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
         streaming_worker_slot_mapping_updated_tx: Sender<u64>,
+        observer_reinitialized_tx: Sender<u64>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
@@ -240,6 +244,7 @@ impl FrontendObserverNode {
             catalog,
             catalog_updated_tx,
             streaming_worker_slot_mapping_updated_tx,
+            observer_reinitialized_tx,
             user_info_manager,
             hummock_snapshot_manager,
             system_params_manager,
@@ -658,6 +663,7 @@ mod tests {
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let (streaming_worker_slot_mapping_updated_tx, streaming_worker_slot_mapping_updated_rx) =
             watch::channel(0);
+        let (observer_reinitialized_tx, _observer_reinitialized_rx) = watch::channel(0u64);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
@@ -675,6 +681,7 @@ mod tests {
                 catalog,
                 catalog_updated_tx,
                 streaming_worker_slot_mapping_updated_tx,
+                observer_reinitialized_tx,
                 user_info_manager,
                 hummock_snapshot_manager,
                 system_params_manager,

@@ -292,6 +292,7 @@ pub struct CatalogWriterImpl {
     meta_client: MetaClient,
     catalog_updated_rx: Receiver<CatalogVersion>,
     streaming_worker_slot_mapping_updated_rx: Receiver<u64>,
+    observer_reinitialized_rx: Receiver<u64>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
@@ -777,12 +778,14 @@ impl CatalogWriterImpl {
         meta_client: MetaClient,
         catalog_updated_rx: Receiver<CatalogVersion>,
         streaming_worker_slot_mapping_updated_rx: Receiver<u64>,
+        observer_reinitialized_rx: Receiver<u64>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         Self {
             meta_client,
             catalog_updated_rx,
             streaming_worker_slot_mapping_updated_rx,
+            observer_reinitialized_rx,
             hummock_snapshot_manager,
         }
     }
@@ -791,6 +794,7 @@ impl CatalogWriterImpl {
         wait_version_update(
             self.catalog_updated_rx.clone(),
             self.streaming_worker_slot_mapping_updated_rx.clone(),
+            self.observer_reinitialized_rx.clone(),
             self.hummock_snapshot_manager.clone(),
             version,
         )
@@ -801,20 +805,40 @@ impl CatalogWriterImpl {
 async fn wait_version_update(
     mut catalog_updated_rx: Receiver<CatalogVersion>,
     mut streaming_worker_slot_mapping_updated_rx: Receiver<u64>,
+    mut observer_reinitialized_rx: Receiver<u64>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     version: WaitVersion,
 ) -> Result<()> {
+    // Mark current re-initialization epoch as seen BEFORE any waiting begins.
+    // Any re-initialization that occurs after this point (including during the catalog
+    // version wait below) will be detected by the select! branch.
+    let _ = observer_reinitialized_rx.borrow_and_update();
+
     while *catalog_updated_rx.borrow_and_update() < version.catalog_version {
         catalog_updated_rx.changed().await.map_err(|e| anyhow!(e))?;
     }
-    while *streaming_worker_slot_mapping_updated_rx.borrow_and_update()
-        < version.streaming_worker_slot_mapping_version
-    {
-        streaming_worker_slot_mapping_updated_rx
-            .changed()
-            .await
-            .map_err(|e| anyhow!(e))?;
+
+    // Race the mapping version wait against observer re-initialization.
+    // If the observer re-subscribes (e.g. after meta restart), the new snapshot already
+    // contains all committed mappings, so we can safely stop waiting.
+    tokio::select! {
+        result = async {
+            while *streaming_worker_slot_mapping_updated_rx.borrow_and_update()
+                < version.streaming_worker_slot_mapping_version
+            {
+                streaming_worker_slot_mapping_updated_rx
+                    .changed()
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+            }
+            Ok::<(), anyhow::Error>(())
+        } => { result?; }
+        Ok(_) = observer_reinitialized_rx.changed() => {
+            // Observer re-subscribed and received a fresh snapshot.
+            // All committed mappings are already loaded into the frontend.
+        }
     }
+
     hummock_snapshot_manager
         .wait(version.hummock_version_id)
         .await;
@@ -837,6 +861,7 @@ mod tests {
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let (streaming_worker_slot_mapping_updated_tx, streaming_worker_slot_mapping_updated_rx) =
             watch::channel(0);
+        let (_observer_reinitialized_tx, observer_reinitialized_rx) = watch::channel(0u64);
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));
@@ -844,6 +869,7 @@ mod tests {
         let wait_handle = tokio::spawn(wait_version_update(
             catalog_updated_rx,
             streaming_worker_slot_mapping_updated_rx,
+            observer_reinitialized_rx,
             hummock_snapshot_manager,
             WaitVersion {
                 catalog_version: 1,
@@ -858,6 +884,73 @@ mod tests {
 
         streaming_worker_slot_mapping_updated_tx.send(2).unwrap();
 
+        wait_handle.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_version_update_unblocks_on_observer_reinitialization() {
+        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(10u64);
+        let (_streaming_tx, streaming_rx) = watch::channel(0u64);
+        let (observer_reinitialized_tx, observer_reinitialized_rx) = watch::channel(0u64);
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+
+        // Wait for mapping version 100, which will never arrive normally.
+        let wait_handle = tokio::spawn(wait_version_update(
+            catalog_updated_rx,
+            streaming_rx,
+            observer_reinitialized_rx,
+            hummock_snapshot_manager,
+            WaitVersion {
+                catalog_version: 5,
+                hummock_version_id: 0.into(),
+                streaming_worker_slot_mapping_version: 100,
+            },
+        ));
+
+        tokio::task::yield_now().await;
+        assert!(!wait_handle.is_finished());
+
+        // Simulate observer re-initialization (e.g. after meta restart).
+        observer_reinitialized_tx.send_modify(|v| *v += 1);
+
+        wait_handle.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_version_update_unblocks_when_reinit_happens_during_catalog_wait() {
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0u64);
+        let (_streaming_tx, streaming_rx) = watch::channel(0u64);
+        let (observer_reinitialized_tx, observer_reinitialized_rx) = watch::channel(0u64);
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+
+        let wait_handle = tokio::spawn(wait_version_update(
+            catalog_updated_rx,
+            streaming_rx,
+            observer_reinitialized_rx,
+            hummock_snapshot_manager,
+            WaitVersion {
+                catalog_version: 5,
+                hummock_version_id: 0.into(),
+                streaming_worker_slot_mapping_version: 100,
+            },
+        ));
+
+        tokio::task::yield_now().await;
+        assert!(!wait_handle.is_finished());
+
+        // Re-initialization happens while still waiting for catalog version.
+        observer_reinitialized_tx.send_modify(|v| *v += 1);
+        tokio::task::yield_now().await;
+        assert!(!wait_handle.is_finished()); // Still blocked on catalog wait.
+
+        // Catalog version finally arrives.
+        catalog_updated_tx.send(5).unwrap();
+
+        // Should unblock immediately because reinit already happened.
         wait_handle.await.unwrap().unwrap();
     }
 }
