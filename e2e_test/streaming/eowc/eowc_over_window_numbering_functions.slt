@@ -1,0 +1,172 @@
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE rank_input (
+    tm TIMESTAMPTZ,
+    foo INT,
+    bar INT,
+    WATERMARK FOR tm AS tm - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW rank_mv AS
+SELECT
+    tm,
+    foo,
+    bar,
+    row_number() OVER (PARTITION BY bar ORDER BY tm) AS rn,
+    rank() OVER (PARTITION BY bar ORDER BY tm) AS rk,
+    dense_rank() OVER (PARTITION BY bar ORDER BY tm) AS dr
+FROM rank_input
+EMIT ON WINDOW CLOSE;
+
+let state_table_id, state_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'rank_mv'
+  AND name LIKE '%eowcoverwindow%'
+  AND name NOT LIKE '%intermediatestate%'
+ORDER BY id
+LIMIT 1
+
+let intermediate_state_table_id, intermediate_state_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'rank_mv'
+  AND name LIKE '%eowcoverwindowintermediatestate%'
+ORDER BY id
+LIMIT 1
+
+statement ok
+INSERT INTO rank_input VALUES ('2024-01-01 00:00:00+00', 10, 1);
+
+statement ok
+INSERT INTO rank_input VALUES ('2024-01-01 00:00:00+00', 20, 2);
+
+query I
+SELECT count(*) FROM rank_mv;
+----
+0
+
+statement ok
+INSERT INTO rank_input VALUES ('2024-01-01 00:00:20+00', 11, 1);
+
+query TIIIII rowsort retry 11 backoff 1s
+SELECT * FROM rank_mv ORDER BY tm, bar;
+----
+2024-01-01 00:00:00+00:00 10 1 1 1 1
+2024-01-01 00:00:00+00:00 20 2 1 1 1
+
+let bar1_state0_before, bar1_state1_before, bar1_state2_before
+SELECT
+    encode(state_0::bytea, 'hex'),
+    encode(state_1::bytea, 'hex'),
+    encode(state_2::bytea, 'hex')
+FROM ${intermediate_state_table}
+WHERE rank_input_bar = 1
+
+let bar2_state0_before, bar2_state1_before, bar2_state2_before
+SELECT
+    encode(state_0::bytea, 'hex'),
+    encode(state_1::bytea, 'hex'),
+    encode(state_2::bytea, 'hex')
+FROM ${intermediate_state_table}
+WHERE rank_input_bar = 2
+
+query I retry 11 backoff 1s
+SELECT count(*) FROM ${state_table};
+----
+0
+
+query IBBB rowsort retry 11 backoff 1s
+SELECT
+    rank_input_bar,
+    state_0 IS NOT NULL,
+    state_1 IS NOT NULL,
+    state_2 IS NOT NULL
+FROM ${intermediate_state_table};
+----
+1 t t t
+2 t t t
+
+statement ok
+INSERT INTO rank_input VALUES ('2024-01-01 00:00:20+00', 21, 2);
+
+query I
+SELECT count(*) FROM rank_mv;
+----
+2
+
+statement ok
+INSERT INTO rank_input VALUES ('2024-01-01 00:00:40+00', 12, 1);
+
+query TIIIII rowsort retry 11 backoff 1s
+SELECT * FROM rank_mv ORDER BY tm, bar;
+----
+2024-01-01 00:00:00+00:00 10 1 1 1 1
+2024-01-01 00:00:00+00:00 20 2 1 1 1
+2024-01-01 00:00:20+00:00 11 1 2 2 2
+2024-01-01 00:00:20+00:00 21 2 2 2 2
+
+let bar1_state0_after, bar1_state1_after, bar1_state2_after
+SELECT
+    encode(state_0::bytea, 'hex'),
+    encode(state_1::bytea, 'hex'),
+    encode(state_2::bytea, 'hex')
+FROM ${intermediate_state_table}
+WHERE rank_input_bar = 1
+
+let bar2_state0_after, bar2_state1_after, bar2_state2_after
+SELECT
+    encode(state_0::bytea, 'hex'),
+    encode(state_1::bytea, 'hex'),
+    encode(state_2::bytea, 'hex')
+FROM ${intermediate_state_table}
+WHERE rank_input_bar = 2
+
+query III
+SELECT
+    CASE WHEN '${bar1_state0_before}' <> '${bar1_state0_after}' THEN 1 ELSE 0 END,
+    CASE WHEN '${bar1_state1_before}' <> '${bar1_state1_after}' THEN 1 ELSE 0 END,
+    CASE WHEN '${bar1_state2_before}' <> '${bar1_state2_after}' THEN 1 ELSE 0 END;
+----
+1 1 1
+
+query III
+SELECT
+    CASE WHEN '${bar2_state0_before}' <> '${bar2_state0_after}' THEN 1 ELSE 0 END,
+    CASE WHEN '${bar2_state1_before}' <> '${bar2_state1_after}' THEN 1 ELSE 0 END,
+    CASE WHEN '${bar2_state2_before}' <> '${bar2_state2_after}' THEN 1 ELSE 0 END;
+----
+1 1 1
+
+query I retry 11 backoff 1s
+SELECT count(*) FROM ${state_table};
+----
+0
+
+query IBBB rowsort retry 11 backoff 1s
+SELECT
+    rank_input_bar,
+    state_0 IS NOT NULL,
+    state_1 IS NOT NULL,
+    state_2 IS NOT NULL
+FROM ${intermediate_state_table};
+----
+1 t t t
+2 t t t
+
+statement ok
+DROP MATERIALIZED VIEW rank_mv;
+
+statement ok
+DROP TABLE rank_input;
+
+statement ok
+SET streaming_parallelism = 0;

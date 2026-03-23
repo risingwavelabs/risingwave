@@ -81,6 +81,8 @@ impl RankFuncCount for RowNumber {
 pub(super) struct Rank {
     prev_order_key: Option<MemcmpEncoded>,
     prev_rank: i64,
+    // 1-based position of the previously output row within its peer group.
+    // Used to advance the rank by the peer-group size when a new group starts.
     prev_pos_in_peer_group: i64,
 }
 
