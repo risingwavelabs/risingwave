@@ -177,8 +177,8 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism: ConfigParallelism,
 
-    /// Specific parallelism for backfill. In PR2, only `default` and a fixed positive integer
-    /// are supported. Adaptive backfill strategies are deferred to a later PR.
+    /// Specific parallelism for backfill. Only `default` and a fixed positive integer are
+    /// supported here. Adaptive backfill strategies are deferred to a later change.
     #[parameter(
         default = ConfigBackfillParallelism::Default,
         check_hook = check_streaming_parallelism_for_backfill
@@ -553,7 +553,7 @@ fn check_streaming_parallelism_for_backfill(val: &ConfigBackfillParallelism) -> 
         ConfigBackfillParallelism::Adaptive
         | ConfigBackfillParallelism::Bounded(_)
         | ConfigBackfillParallelism::Ratio(_) => Err(
-            "PR2 only supports `default` or fixed backfill parallelism; adaptive backfill strategy is deferred to a later PR.".to_owned(),
+            "Only `default` or fixed backfill parallelism is supported here; adaptive backfill strategy is deferred to a later change.".to_owned(),
         ),
     }
 }
@@ -823,7 +823,7 @@ mod test {
     #[test]
     fn test_streaming_parallelism_for_backfill_rejects_adaptive_modes() {
         let mut config = SessionConfig::default();
-        let expected = "PR2 only supports `default` or fixed backfill parallelism; adaptive backfill strategy is deferred to a later PR.";
+        let expected = "Only `default` or fixed backfill parallelism is supported here; adaptive backfill strategy is deferred to a later change.";
 
         for value in ["adaptive", "bounded(2)", "ratio(0.5)"] {
             let err = config
