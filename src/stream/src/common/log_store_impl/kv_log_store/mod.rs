@@ -71,7 +71,7 @@ impl LogStoreVnodeProgress {
         match prev_progress {
             None => {
                 assert!(
-                    prev_epoch < epoch,
+                    prev_epoch <= epoch,
                     "barrier epoch {} decrease to {}",
                     prev_epoch,
                     epoch
@@ -80,7 +80,24 @@ impl LogStoreVnodeProgress {
             Some(prev_progress) => {
                 assert_eq!(prev_epoch, epoch);
                 if let Some(progress) = progress {
-                    assert!(progress > prev_progress);
+                    assert!(
+                        progress >= prev_progress,
+                        "seq_id decreased: prev_epoch={}, epoch={}, prev_progress={}, progress={}",
+                        prev_epoch,
+                        epoch,
+                        prev_progress,
+                        progress
+                    );
+                    if progress == prev_progress {
+                        tracing::warn!(
+                            prev_epoch,
+                            epoch,
+                            prev_progress,
+                            progress,
+                            "progress did not strictly increase: this may indicate \
+                             empty chunks (cardinality=0) were not filtered out"
+                        );
+                    }
                 }
             }
         }
@@ -628,12 +645,16 @@ mod tests {
     async fn test_basic() {
         for count in (0..20).step_by(5) {
             #[expect(deprecated)]
-            test_basic_inner(
+            Box::pin(test_basic_inner(
                 count * TEST_DATA_SIZE,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_basic_inner(
+                count * TEST_DATA_SIZE,
+                &KV_LOG_STORE_V2_INFO,
+            ))
+            .await;
         }
     }
 
@@ -745,12 +766,16 @@ mod tests {
     async fn test_recovery() {
         for count in (0..20).step_by(5) {
             #[expect(deprecated)]
-            test_recovery_inner(
+            Box::pin(test_recovery_inner(
                 count * TEST_DATA_SIZE,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_recovery_inner(
+                count * TEST_DATA_SIZE,
+                &KV_LOG_STORE_V2_INFO,
+            ))
+            .await;
         }
     }
 
@@ -929,12 +954,12 @@ mod tests {
     async fn test_truncate() {
         for count in (2..10).step_by(3) {
             #[expect(deprecated)]
-            test_truncate_inner(
+            Box::pin(test_truncate_inner(
                 count,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_truncate_inner(count, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_truncate_inner(count, &KV_LOG_STORE_V2_INFO)).await;
         }
     }
 
@@ -1887,12 +1912,12 @@ mod tests {
     #[tokio::test]
     async fn test_truncate_historical() {
         #[expect(deprecated)]
-        test_truncate_historical_inner(
+        Box::pin(test_truncate_historical_inner(
             10,
             &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-        )
+        ))
         .await;
-        test_truncate_historical_inner(10, &KV_LOG_STORE_V2_INFO).await;
+        Box::pin(test_truncate_historical_inner(10, &KV_LOG_STORE_V2_INFO)).await;
     }
 
     async fn test_truncate_historical_inner(

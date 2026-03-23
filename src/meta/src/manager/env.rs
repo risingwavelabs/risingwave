@@ -128,6 +128,12 @@ pub struct MetaOpts {
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
+    /// Compression algorithm for hummock version checkpoint: "zstd", "lz4", or "none".
+    pub checkpoint_compression_algorithm: risingwave_common::config::CheckpointCompression,
+    /// Chunk size in bytes for reading large checkpoints.
+    pub checkpoint_read_chunk_size: usize,
+    /// Maximum number of concurrent chunk reads for large checkpoints.
+    pub checkpoint_read_max_in_flight_chunks: usize,
     pub hummock_time_travel_snapshot_interval: u64,
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
@@ -279,6 +285,9 @@ pub struct MetaOpts {
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
 
+    pub table_change_log_insert_batch_size: u64,
+    pub table_change_log_delete_batch_size: u64,
+
     pub license_key_path: Option<PathBuf>,
 
     pub compute_client_config: RpcClientConfig,
@@ -314,6 +323,10 @@ impl MetaOpts {
             iceberg_gc_interval_sec: 3600,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
+            checkpoint_compression_algorithm:
+                risingwave_common::config::CheckpointCompression::Zstd,
+            checkpoint_read_chunk_size: 128 * 1024 * 1024,
+            checkpoint_read_max_in_flight_chunks: 4,
             hummock_time_travel_snapshot_interval: 0,
             hummock_time_travel_sst_info_fetch_batch_size: 10_000,
             hummock_time_travel_sst_info_insert_batch_size: 10,
@@ -388,6 +401,8 @@ impl MetaOpts {
             enable_legacy_table_migration: true,
             refresh_scheduler_interval_sec: 60,
             pause_on_next_bootstrap_offline: false,
+            table_change_log_insert_batch_size: 1000,
+            table_change_log_delete_batch_size: 1000,
         }
     }
 }

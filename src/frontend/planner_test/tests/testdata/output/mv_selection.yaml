@@ -208,3 +208,70 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: mv, columns: [mv.count], distribution: Single }
+- id: agg_rollup_selection
+  sql: |
+    create table t_rollup (a int, b int, c int);
+    create materialized view mv_rollup as
+      select a, c, sum(b) as s, count(*) as cnt
+      from t_rollup
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b) as s, count(*) as cnt
+    from t_rollup
+    group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchSortAgg { group_key: [mv_rollup.a], aggs: [sum(mv_rollup.s), sum0(mv_rollup.cnt)] }
+      └─BatchExchange { order: [mv_rollup.a ASC], dist: HashShard(mv_rollup.a) }
+        └─BatchScan { table: mv_rollup, columns: [mv_rollup.a, mv_rollup.s, mv_rollup.cnt], distribution: SomeShard }
+- id: agg_rollup_distinct_not_selected
+  sql: |
+    create table t_rollup_distinct (a int, b int, c int);
+    create materialized view mv_rollup_distinct as
+      select a, c, count(distinct b) as cnt_distinct
+      from t_rollup_distinct
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, count(distinct b) as cnt_distinct
+    from t_rollup_distinct
+    group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [t_rollup_distinct.a], aggs: [count(t_rollup_distinct.b)] }
+      └─BatchExchange { order: [], dist: HashShard(t_rollup_distinct.a) }
+        └─BatchHashAgg { group_key: [t_rollup_distinct.a, t_rollup_distinct.b], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(t_rollup_distinct.a, t_rollup_distinct.b) }
+            └─BatchScan { table: t_rollup_distinct, columns: [t_rollup_distinct.a, t_rollup_distinct.b], distribution: SomeShard }
+- id: agg_rollup_duplicate_query_aggs1
+  sql: |
+    create table t_rollup_dup (a int, b int, c int);
+    create materialized view mv_rollup_dup as
+      select a, c, sum(b) as s
+      from t_rollup_dup
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b) as s1, sum(b) as s2
+    from t_rollup_dup
+    group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv_rollup_dup.a, sum(mv_rollup_dup.s), sum(mv_rollup_dup.s)] }
+      └─BatchSortAgg { group_key: [mv_rollup_dup.a], aggs: [sum(mv_rollup_dup.s)] }
+        └─BatchExchange { order: [mv_rollup_dup.a ASC], dist: HashShard(mv_rollup_dup.a) }
+          └─BatchScan { table: mv_rollup_dup, columns: [mv_rollup_dup.a, mv_rollup_dup.s], distribution: SomeShard }
+- id: agg_rollup_duplicate_query_aggs2
+  sql: |
+    create table t_rollup_dup (a int, b int, c int);
+    create materialized view mv_rollup_dup as
+      select a, c, count(b) as s1, count(b) as s2
+      from t_rollup_dup
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, count(b) as s
+    from t_rollup_dup
+    group by a;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchSortAgg { group_key: [mv_rollup_dup.a], aggs: [sum0(mv_rollup_dup.s1)] }
+      └─BatchExchange { order: [mv_rollup_dup.a ASC], dist: HashShard(mv_rollup_dup.a) }
+        └─BatchScan { table: mv_rollup_dup, columns: [mv_rollup_dup.a, mv_rollup_dup.s1], distribution: SomeShard }

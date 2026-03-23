@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
+use risingwave_common::RW_VERSION;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_pb::common::HostAddress;
 use risingwave_pb::common::worker_node::State;
+use risingwave_pb::common::{HostAddress, WorkerType as PbWorkerType};
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
     AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
     GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse, GetMetaStoreInfoRequest,
     GetMetaStoreInfoResponse, ListAllNodesRequest, ListAllNodesResponse,
-    UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -57,6 +56,17 @@ impl ClusterService for ClusterServiceImpl {
             .property
             .ok_or_else(|| MetaError::invalid_parameter("worker node property is not provided"))?;
         let resource = req.resource.unwrap_or_default();
+        if matches!(
+            worker_type,
+            PbWorkerType::Frontend | PbWorkerType::ComputeNode | PbWorkerType::Compactor
+        ) && resource.rw_version != RW_VERSION
+        {
+            return Err(MetaError::invalid_parameter(format!(
+                "worker node version {} does not match meta node version {}",
+                resource.rw_version, RW_VERSION,
+            ))
+            .into());
+        }
         let worker_id = self
             .metadata_manager
             .add_worker_node(worker_type, host, property, resource)
@@ -66,26 +76,6 @@ impl ClusterService for ClusterServiceImpl {
         Ok(Response::new(AddWorkerNodeResponse {
             node_id: Some(worker_id),
             cluster_id,
-        }))
-    }
-
-    /// Update schedulability of a compute node. Will not affect actors which are already running on
-    /// that node, if marked as unschedulable
-    async fn update_worker_node_schedulability(
-        &self,
-        req: Request<UpdateWorkerNodeSchedulabilityRequest>,
-    ) -> Result<Response<UpdateWorkerNodeSchedulabilityResponse>, Status> {
-        let req = req.into_inner();
-        let schedulability = req.get_schedulability()?;
-        let worker_ids = req.worker_ids;
-
-        self.metadata_manager
-            .cluster_controller
-            .update_schedulability(worker_ids.into_iter().map_into().collect(), schedulability)
-            .await?;
-
-        Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
-            status: None,
         }))
     }
 

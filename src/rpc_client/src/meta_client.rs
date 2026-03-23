@@ -47,6 +47,7 @@ use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_error::bail;
 use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
+use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult,
@@ -68,6 +69,7 @@ use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
+use risingwave_pb::hummock::get_table_change_logs_request::PbTableFilter;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
@@ -102,7 +104,6 @@ use risingwave_pb::meta::session_param_service_client::SessionParamServiceClient
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{FragmentDistribution, *};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
@@ -292,9 +293,6 @@ impl MetaClient {
             true,
         );
 
-        if property.is_unschedulable {
-            tracing::warn!("worker {:?} registered as unschedulable", addr.clone());
-        }
         let init_result: Result<_> = tokio_retry::RetryIf::spawn(
             retry_strategy,
             || async {
@@ -572,6 +570,23 @@ impl MetaClient {
             owner_id,
         };
         let resp = self.inner.alter_owner(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> Result<WaitVersion> {
+        let request = AlterSubscriptionRetentionRequest {
+            subscription_id,
+            retention_seconds,
+            definition,
+        };
+        let resp = self.inner.alter_subscription_retention(request).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
@@ -1057,22 +1072,6 @@ impl MetaClient {
                 );
             }
         }
-    }
-
-    pub async fn update_schedulability(
-        &self,
-        worker_ids: &[WorkerId],
-        schedulability: Schedulability,
-    ) -> Result<UpdateWorkerNodeSchedulabilityResponse> {
-        let request = UpdateWorkerNodeSchedulabilityRequest {
-            worker_ids: worker_ids.to_vec(),
-            schedulability: schedulability.into(),
-        };
-        let resp = self
-            .inner
-            .update_worker_node_schedulability(request)
-            .await?;
-        Ok(resp)
     }
 
     pub async fn list_worker_nodes(
@@ -1748,6 +1747,33 @@ impl MetaClient {
         Ok(resp.configs)
     }
 
+    pub async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        let req = GetTableChangeLogsRequest {
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids: table_ids.map(|iter| PbTableFilter {
+                table_ids: iter.into_iter().collect::<Vec<_>>(),
+            }),
+            exclude_empty,
+            limit,
+        };
+        let resp = self.inner.get_table_change_logs(req).await?;
+        Ok(resp
+            .table_change_logs
+            .into_iter()
+            .map(|(id, change_log)| (TableId::new(id), TableChangeLog::from_protobuf(&change_log)))
+            .collect())
+    }
+
     pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
         let _resp = self
             .inner
@@ -1934,6 +1960,14 @@ impl MetaClient {
         Ok(resp.states)
     }
 
+    pub async fn list_iceberg_compaction_status(
+        &self,
+    ) -> Result<Vec<list_iceberg_compaction_status_response::IcebergCompactionStatus>> {
+        let request = ListIcebergCompactionStatusRequest {};
+        let resp = self.inner.list_iceberg_compaction_status(request).await?;
+        Ok(resp.statuses)
+    }
+
     pub async fn list_sink_log_store_tables(
         &self,
     ) -> Result<Vec<list_sink_log_store_tables_response::SinkLogStoreTable>> {
@@ -1956,7 +1990,7 @@ impl MetaClient {
             if_not_exists,
         };
 
-        let resp = self.inner.create_iceberg_table(request).await?;
+        let resp = Box::pin(self.inner.create_iceberg_table(request)).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
@@ -2047,7 +2081,8 @@ impl HummockMetaClient for MetaClient {
         table_id: JobId,
         level: u32,
         sst_ids: Vec<HummockSstableId>,
-    ) -> Result<()> {
+        exclusive: bool,
+    ) -> Result<bool> {
         // TODO: support key_range parameter
         let req = TriggerManualCompactionRequest {
             compaction_group_id,
@@ -2056,11 +2091,12 @@ impl HummockMetaClient for MetaClient {
             // without check internal_table_id
             level,
             sst_ids,
+            exclusive: Some(exclusive),
             ..Default::default()
         };
 
-        self.inner.trigger_manual_compaction(req).await?;
-        Ok(())
+        let resp = self.inner.trigger_manual_compaction(req).await?;
+        Ok(resp.should_retry.unwrap_or(false))
     }
 
     async fn trigger_full_gc(
@@ -2147,6 +2183,26 @@ impl HummockMetaClient for MetaClient {
             .await?;
 
         Ok((request_sender, Box::pin(stream)))
+    }
+
+    async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        self.get_table_change_logs(
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids,
+            exclude_empty,
+            limit,
+        )
+        .await
     }
 }
 
@@ -2573,7 +2629,6 @@ macro_rules! for_all_meta_rpc {
              { cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
-            ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, get_cluster_recovery_status, GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse }
             ,{ cluster_client, get_meta_store_info, GetMetaStoreInfoRequest, GetMetaStoreInfoResponse }
@@ -2594,6 +2649,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, list_refresh_table_states, ListRefreshTableStatesRequest, ListRefreshTableStatesResponse }
+            ,{ stream_client, list_iceberg_compaction_status, ListIcebergCompactionStatusRequest, ListIcebergCompactionStatusResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, alter_source_properties_safe, AlterSourcePropertiesSafeRequest, AlterSourcePropertiesSafeResponse }
             ,{ stream_client, reset_source_splits, ResetSourceSplitsRequest, ResetSourceSplitsResponse }
@@ -2607,6 +2663,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_name, AlterNameRequest, AlterNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
+            ,{ ddl_client, alter_subscription_retention, AlterSubscriptionRetentionRequest, AlterSubscriptionRetentionResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, alter_backfill_parallelism, AlterBackfillParallelismRequest, AlterBackfillParallelismResponse }
@@ -2685,6 +2742,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ hummock_client, merge_compaction_group, MergeCompactionGroupRequest, MergeCompactionGroupResponse }
+            ,{ hummock_client, get_table_change_logs, GetTableChangeLogsRequest, GetTableChangeLogsResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

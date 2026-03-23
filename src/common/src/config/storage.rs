@@ -209,6 +209,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
     pub time_travel_version_cache_capacity: u64,
 
+    #[serde(default = "default::storage::table_change_log_cache_capacity")]
+    pub table_change_log_cache_capacity: u64,
+
     // iceberg compaction
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
@@ -218,7 +221,12 @@ pub struct StorageConfig {
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_max_file_count_per_partition")]
     pub iceberg_compaction_max_file_count_per_partition: u32,
+    /// DEPRECATED: This config will be deprecated in the future version.
+    /// Use sink config `compaction.write_parquet_max_row_group_rows` instead.
     #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
+    #[deprecated(
+        note = "This config is deprecated. Use sink config `compaction.write_parquet_max_row_group_rows` instead."
+    )]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 
     /// The ratio of iceberg compaction max parallelism to the number of CPU cores
@@ -1056,6 +1064,10 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             10
+        }
+
+        pub fn table_change_log_cache_capacity() -> u64 {
+            60
         }
 
         pub fn sst_skip_bloom_filter_in_serde() -> bool {

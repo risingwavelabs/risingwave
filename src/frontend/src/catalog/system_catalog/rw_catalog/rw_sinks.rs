@@ -34,6 +34,7 @@ struct RwSink {
     sink_type: String,
     connection_id: Option<ConnectionId>,
     definition: String,
+    target_table_name: Option<String>,
     acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
@@ -82,6 +83,9 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     })
                     .unwrap_or_else(jsonbb::Value::null)
                     .into();
+                let target_table_name = sink
+                    .target_table
+                    .and_then(|table_id| catalog_reader.get_table_name_by_id(table_id).ok());
                 RwSink {
                     id: sink.id,
                     name: sink.name.clone(),
@@ -104,6 +108,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     connector_props,
                     format_encode_options,
                     background_ddl: sink.create_type == CreateType::Background,
+                    target_table_name,
                 }
             })
         })

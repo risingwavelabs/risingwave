@@ -1299,6 +1299,10 @@ pub enum Statement {
         /// RETURNING
         returning: Vec<SelectItem>,
     },
+    /// DELETE META SNAPSHOT(S)
+    DeleteMetaSnapshots {
+        snapshot_ids: Vec<u64>,
+    },
     /// DISCARD
     Discard(DiscardType),
     /// CREATE VIEW
@@ -1684,6 +1688,8 @@ pub enum Statement {
     /// WAIT for ALL running stream jobs to finish.
     /// It will block the current session the condition is met.
     Wait,
+    /// Trigger meta backup.
+    Backup,
     /// Trigger stream job recover
     Recover,
     /// `USE <db_name>`
@@ -1920,6 +1926,14 @@ impl Statement {
                 if !returning.is_empty() {
                     write!(f, " RETURNING {}", display_comma_separated(returning))?;
                 }
+                Ok(())
+            }
+            Statement::DeleteMetaSnapshots { snapshot_ids } => {
+                write!(
+                    f,
+                    "DELETE META SNAPSHOTS {}",
+                    display_comma_separated(snapshot_ids)
+                )?;
                 Ok(())
             }
             Statement::CreateDatabase {
@@ -2442,6 +2456,10 @@ impl Statement {
             }
             Statement::Wait => {
                 write!(f, "WAIT")
+            }
+            Statement::Backup => {
+                write!(f, "BACKUP")?;
+                Ok(())
             }
             Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
@@ -3257,7 +3275,11 @@ impl TryFrom<(&String, &String)> for SqlOption {
         let name_parts: Vec<&str> = name.split('.').collect();
         let object_name = ObjectName(name_parts.into_iter().map(Ident::from_real_value).collect());
 
-        let query = format!("{} = {}", object_name, value);
+        // Wrap the value in single quotes so it is always parsed as a string literal.
+        // This prevents values containing special characters (e.g., "jdbc:postgresql://...")
+        // from being incorrectly tokenized. Escape any embedded single quotes.
+        let escaped_value = value.replace('\'', "''");
+        let query = format!("{} = '{}'", object_name, escaped_value);
         let mut tokenizer = Tokenizer::new(query.as_str());
         let tokens = tokenizer.tokenize_with_location()?;
         let mut parser = Parser(&tokens);
@@ -3795,13 +3817,15 @@ impl fmt::Display for SetVariableValue {
 pub enum SetVariableValueSingle {
     Ident(Ident),
     Literal(Value),
+    Raw(String),
 }
 
 impl SetVariableValueSingle {
     pub fn to_string_unquoted(&self) -> String {
         match self {
             Self::Literal(Value::SingleQuotedString(s))
-            | Self::Literal(Value::DoubleQuotedString(s)) => s.clone(),
+            | Self::Literal(Value::DoubleQuotedString(s))
+            | Self::Raw(s) => s.clone(),
             _ => self.to_string(),
         }
     }
@@ -3813,6 +3837,7 @@ impl fmt::Display for SetVariableValueSingle {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            Raw(raw) => write!(f, "{}", raw),
         }
     }
 }

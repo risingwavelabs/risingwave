@@ -345,6 +345,7 @@ impl Parser<'_> {
                 Keyword::COMMENT => Ok(self.parse_comment()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
                 Keyword::WAIT => Ok(Statement::Wait),
+                Keyword::BACKUP => Ok(Statement::Backup),
                 Keyword::RECOVER => Ok(Statement::Recover),
                 Keyword::USE => Ok(self.parse_use()?),
                 Keyword::VACUUM => Ok(self.parse_vacuum()?),
@@ -3755,8 +3756,16 @@ impl Parser<'_> {
                 AlterSubscriptionOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_keyword(Keyword::RETENTION) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SUBSCRIPTION SET RETENTION");
+                }
+                let retention = self.ensure_parse_value()?;
+                AlterSubscriptionOperation::SetRetention { retention }
             } else {
-                return self.expected("SCHEMA after SET");
+                return self.expected("SCHEMA or RETENTION after SET");
             }
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_subscription = self.parse_object_name()?;
@@ -4155,6 +4164,16 @@ impl Parser<'_> {
                     |parser: &mut Self| {
                         let checkpoint = *parser;
                         let ident = parser.parse_identifier()?;
+                        if parser.consume_token(&Token::LParen) {
+                            let args = parser.parse_comma_separated(Parser::ensure_parse_value)?;
+                            parser.expect_token(&Token::RParen)?;
+                            let raw = format!(
+                                "{}({})",
+                                ident,
+                                args.iter().map(ToString::to_string).join(", ")
+                            );
+                            return Ok(SetVariableValueSingle::Raw(raw));
+                        }
                         if ident.value == "default" {
                             *parser = checkpoint;
                             return parser.expected("parameter list value").map_err(|e| e.cut());
@@ -4526,6 +4545,15 @@ impl Parser<'_> {
     }
 
     pub fn parse_delete(&mut self) -> ModalResult<Statement> {
+        if self.parse_keyword(Keyword::META) {
+            let Some(_) = self.parse_one_of_keywords(&[Keyword::SNAPSHOT, Keyword::SNAPSHOTS])
+            else {
+                return self.expected("SNAPSHOT or SNAPSHOTS");
+            };
+            let snapshot_ids = self.parse_comma_separated(Parser::parse_literal_u64)?;
+            return Ok(Statement::DeleteMetaSnapshots { snapshot_ids });
+        }
+
         self.expect_keyword(Keyword::FROM)?;
         let table_name = self.parse_object_name()?;
         let selection = if self.parse_keyword(Keyword::WHERE) {

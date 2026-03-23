@@ -17,9 +17,13 @@
 use std::sync::Arc;
 
 use datafusion::functions::{core, datetime, math, string, unicode};
+use datafusion::functions_nested::{
+    array_has, cardinality, concat, extract, flatten, length, make_array, min_max, position,
+    remove, replace, reverse, sort, string as nested_string,
+};
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
-    BinaryExpr, Case, Cast, Operator, ScalarUDF, Signature, TypeSignature, Volatility,
+    self, BinaryExpr, Case, Cast, Operator, ScalarUDF, Signature, TypeSignature, Volatility,
 };
 use datafusion::prelude::Expr as DFExpr;
 use itertools::Itertools;
@@ -63,9 +67,11 @@ pub fn convert_function_call(
         convert_binary_func,
         convert_case_func,
         convert_cast_func,
+        convert_trivial_datafusion_func,
         convert_field_func,
         convert_row_func,
-        convert_trivial_datafusion_func,
+        convert_in_list_func,
+        convert_list_ops_func,
         fallback_rw_expr_builder
     );
 
@@ -316,22 +322,101 @@ fn convert_row_func(func_call: &FunctionCall, input_columns: &impl ColumnTrait) 
     }))
 }
 
-fn convert_trivial_datafusion_func(
+fn convert_in_list_func(
     func_call: &FunctionCall,
     input_columns: &impl ColumnTrait,
 ) -> Option<DFExpr> {
-    if !func_call
-        .inputs()
+    if func_call.func_type() != ExprType::In {
+        return None;
+    }
+    if func_call.inputs().len() < 2 {
+        return None;
+    }
+
+    let left = convert_expr(&func_call.inputs()[0], input_columns).ok()?;
+    let list = func_call.inputs()[1..]
         .iter()
-        .all(|input| input.return_type().is_datafusion_native())
-    {
+        .map(|input| convert_expr(input, input_columns).ok())
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(logical_expr::in_list(left, list, false))
+}
+
+/// Array functions that only depend on list structure (length, cardinality), not
+/// element type. These can be mapped to DataFusion even when the list element type is not
+/// datafusion-native (e.g. list of jsonb), as long as the list can be represented in Arrow.
+fn convert_list_ops_func(
+    func_call: &FunctionCall,
+    input_columns: &impl ColumnTrait,
+) -> Option<DFExpr> {
+    let udf_impl: Arc<ScalarUDF> = match func_call.func_type() {
+        ExprType::ArrayLength => length::array_length_udf(),
+        ExprType::Cardinality => cardinality::cardinality_udf(),
+        _ => return None,
+    };
+
+    let inputs = func_call.inputs();
+    if inputs.is_empty() {
+        return None;
+    }
+    if !matches!(inputs[0].return_type(), RwDataType::List(_)) {
         return None;
     }
     if !func_call.return_type().is_datafusion_native() {
         return None;
     }
 
-    let udf_impl: Arc<ScalarUDF> = match func_call.func_type() {
+    let args = func_call
+        .inputs()
+        .iter()
+        .map(|input| convert_expr(input, input_columns).ok())
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(DFExpr::ScalarFunction(ScalarFunction {
+        func: udf_impl,
+        args,
+    }))
+}
+
+fn pow_type_mismatch(base: &RwDataType, exp: &RwDataType) -> bool {
+    matches!(
+        base,
+        RwDataType::Float32 | RwDataType::Float64 | RwDataType::Decimal
+    ) || matches!(
+        exp,
+        RwDataType::Float32 | RwDataType::Float64 | RwDataType::Decimal
+    )
+}
+
+fn array_to_string_type_mismatch(ty: &RwDataType) -> bool {
+    match ty {
+        RwDataType::List(list) => matches!(
+            list.elem(),
+            &RwDataType::Float32 | &RwDataType::Float64 | &RwDataType::Decimal
+        ),
+        _ => false,
+    }
+}
+
+fn convert_trivial_datafusion_func(
+    func_call: &FunctionCall,
+    input_columns: &impl ColumnTrait,
+) -> Option<DFExpr> {
+    let func_type = func_call.func_type();
+    let inputs = func_call.inputs();
+    let return_type = func_call.return_type();
+
+    if !inputs
+        .iter()
+        .all(|input| input.return_type().is_datafusion_native())
+    {
+        return None;
+    }
+    if !return_type.is_datafusion_native() {
+        return None;
+    }
+
+    let udf_impl: Arc<ScalarUDF> = match func_type {
         // Math functions
         //
         // Note: `round` is intentionally NOT mapped because RisingWave uses banker's rounding
@@ -342,12 +427,14 @@ fn convert_trivial_datafusion_func(
         // - sqrt: negative input -> RW: error, DF: NaN
         // - ln/log10: input <= 0 -> RW: error, DF: NaN/-inf
         // - exp: extreme values -> RW: error, DF: inf/0
-        // - pow: 0^negative or negative^frac -> RW: error, DF: inf/NaN
         ExprType::Abs => math::abs(),
         ExprType::Ceil => math::ceil(),
         ExprType::Floor => math::floor(),
         ExprType::Trunc => math::trunc(),
-        ExprType::Pow => math::power(),
+        // - pow: DataFusion doesn't support power which exp is not integer. And pow(decimal, integer) is easy to overflow because it will keep the precision, e.x. pow(2::decimal(38, 10), 4) will calculate (2e10 ^ 4) / (1e10 ^ 4) and 2e10 ^ 4 = 1.6e41 has exceed the max precision of decimal(38, 10).
+        ExprType::Pow if !pow_type_mismatch(&inputs[0].return_type(), &inputs[1].return_type()) => {
+            math::power()
+        }
         ExprType::Exp => math::exp(),
         ExprType::Sin => math::sin(),
         ExprType::Cos => math::cos(),
@@ -411,15 +498,64 @@ fn convert_trivial_datafusion_func(
         ExprType::Substr => unicode::substr(),
         ExprType::Left => unicode::left(),
         ExprType::Right => unicode::right(),
+        // Array functions
+        //
+        // Note: The following functions are NOT mapped due to incompatibilities:
+        // - Row — struct construction; handled by convert_row_func.
+        // - FormatType — RW catalog/type name helper; no DF equivalent.
+        // - TrimArray — RW trim_array(array, n) returns first length-n elements; DF has array_resize with different signature/semantics.
+        // - ArrayTransform — lambda-based; DF has no direct equivalent in scalar UDF form.
+        // - ArraySum — DF nested_expressions has no array_sum.
+        // - ArrayDims — RW array_dims returns text, DF array_dims returns int32.
+        // - ArrayDistinct — DF will make extra sort for distinct, which is different from RW.
+        ExprType::Array => make_array::make_array_udf(),
+        ExprType::ArrayAccess => extract::array_element_udf(),
+        ExprType::ArrayRangeAccess => extract::array_slice_udf(),
+        ExprType::ArrayCat => concat::array_concat_udf(),
+        ExprType::ArrayAppend => concat::array_append_udf(),
+        ExprType::ArrayPrepend => concat::array_prepend_udf(),
+        ExprType::ArrayRemove => remove::array_remove_udf(),
+        ExprType::ArrayPositions => position::array_positions_udf(),
+        ExprType::StringToArray => nested_string::string_to_array_udf(),
+        ExprType::ArrayPosition => position::array_position_udf(),
+        ExprType::ArrayReplace => replace::array_replace_all_udf(),
+        ExprType::ArrayMin => min_max::array_min_udf(),
+        ExprType::ArrayMax => min_max::array_max_udf(),
+        ExprType::ArraySort => sort::array_sort_udf(),
+        ExprType::ArrayContains => array_has::array_has_all_udf(),
+        ExprType::ArrayContained => array_has::array_has_all_udf(),
+        ExprType::ArrayFlatten => flatten::flatten_udf(),
+        ExprType::ArrayReverse => reverse::array_reverse_udf(),
+        // ArrayToString: do not map when array element is float/decimal — RW uses ToText, DF uses
+        // Arrow formatting; display can differ (precision, exponent).
+        ExprType::ArrayToString if !array_to_string_type_mismatch(&inputs[0].return_type()) => {
+            nested_string::array_to_string_udf()
+        }
         // Misc functions
         ExprType::Coalesce => core::coalesce(),
         _ => return None,
     };
-    let args = func_call
+    let mut args = func_call
         .inputs()
         .iter()
         .map(|input| convert_expr(input, input_columns).ok())
         .collect::<Option<Vec<_>>>()?;
+
+    // ArrayContained(a, b) = a <@ b means "a contained in b" = array_has_all(b, a); swap args.
+    if func_call.func_type() == ExprType::ArrayContained && args.len() == 2 {
+        args.swap(0, 1);
+    }
+    // ArraySort(array) = array_sort(array, ASC, NULLS LAST); datafusion default is ASC, NULLS FIRST.
+    if func_call.func_type() == ExprType::ArraySort && args.len() == 1 {
+        args.push(DFExpr::Literal(
+            datafusion_common::ScalarValue::Utf8(Some("ASC".to_owned())),
+            None,
+        ));
+        args.push(DFExpr::Literal(
+            datafusion_common::ScalarValue::Utf8(Some("NULLS LAST".to_owned())),
+            None,
+        ));
+    }
 
     Some(DFExpr::ScalarFunction(ScalarFunction {
         func: udf_impl,
@@ -459,6 +595,7 @@ fn fallback_rw_expr_builder(
         signature: Signature {
             type_signature: TypeSignature::Any(input_columns.len()),
             volatility,
+            parameter_names: None,
         },
     };
     Some(DFExpr::ScalarFunction(ScalarFunction {
