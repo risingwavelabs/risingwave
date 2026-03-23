@@ -637,7 +637,6 @@ mod tests {
     use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
     use risingwave_common::session_config::SessionConfig;
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
-    use risingwave_common::system_param::reader::SystemParamsReader;
     use risingwave_common_service::ObserverState;
     use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
     use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -669,9 +668,7 @@ mod tests {
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));
-        let system_params_manager = Arc::new(LocalSystemParamsManager::new(
-            SystemParamsReader::from(risingwave_pb::meta::SystemParams::default()),
-        ));
+        let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let session_params = Arc::new(RwLock::new(SessionConfig::default()));
         let compute_client_pool = Arc::new(ComputeClientPool::new(1, RpcClientConfig::default()));
 

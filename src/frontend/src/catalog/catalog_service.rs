@@ -847,6 +847,7 @@ async fn wait_version_update(
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::time::Duration;
 
     use risingwave_pb::ddl_service::WaitVersion;
     use tokio::sync::watch;
@@ -865,7 +866,7 @@ mod tests {
             MockFrontendMetaClient {},
         )));
 
-        let wait_handle = tokio::spawn(wait_version_update(
+        let wait_future = wait_version_update(
             catalog_updated_rx,
             streaming_worker_slot_mapping_updated_rx,
             observer_reinitialized_rx,
@@ -875,15 +876,19 @@ mod tests {
                 hummock_version_id: 0.into(),
                 streaming_worker_slot_mapping_version: 2,
             },
-        ));
+        );
+        tokio::pin!(wait_future);
 
         catalog_updated_tx.send(1).unwrap();
-        tokio::task::yield_now().await;
-        assert!(!wait_handle.is_finished());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), wait_future.as_mut())
+                .await
+                .is_err()
+        );
 
         streaming_worker_slot_mapping_updated_tx.send(2).unwrap();
 
-        wait_handle.await.unwrap().unwrap();
+        wait_future.await.unwrap();
     }
 
     #[tokio::test]
@@ -896,7 +901,7 @@ mod tests {
         )));
 
         // Wait for mapping version 100, which will never arrive normally.
-        let wait_handle = tokio::spawn(wait_version_update(
+        let wait_future = wait_version_update(
             catalog_updated_rx,
             streaming_rx,
             observer_reinitialized_rx,
@@ -906,15 +911,19 @@ mod tests {
                 hummock_version_id: 0.into(),
                 streaming_worker_slot_mapping_version: 100,
             },
-        ));
+        );
+        tokio::pin!(wait_future);
 
-        tokio::task::yield_now().await;
-        assert!(!wait_handle.is_finished());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), wait_future.as_mut())
+                .await
+                .is_err()
+        );
 
         // Simulate observer re-initialization (e.g. after meta restart).
-        observer_reinitialized_tx.send_modify(|v| *v += 1);
+        observer_reinitialized_tx.send_replace(1);
 
-        wait_handle.await.unwrap().unwrap();
+        wait_future.await.unwrap();
     }
 
     #[tokio::test]
@@ -927,7 +936,7 @@ mod tests {
         )));
 
         // Neither catalog (target 5, current 0) nor mapping (target 100, current 0) is met.
-        let wait_handle = tokio::spawn(wait_version_update(
+        let wait_future = wait_version_update(
             catalog_updated_rx,
             streaming_rx,
             observer_reinitialized_rx,
@@ -937,16 +946,20 @@ mod tests {
                 hummock_version_id: 0.into(),
                 streaming_worker_slot_mapping_version: 100,
             },
-        ));
+        );
+        tokio::pin!(wait_future);
 
-        tokio::task::yield_now().await;
-        assert!(!wait_handle.is_finished());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), wait_future.as_mut())
+                .await
+                .is_err()
+        );
 
         // Re-initialization (e.g. after meta restart) immediately unblocks the wait,
         // even though neither catalog nor mapping version targets are met.
         // The fresh snapshot already contains all committed state.
-        observer_reinitialized_tx.send_modify(|v| *v += 1);
+        observer_reinitialized_tx.send_replace(1);
 
-        wait_handle.await.unwrap().unwrap();
+        wait_future.await.unwrap();
     }
 }
