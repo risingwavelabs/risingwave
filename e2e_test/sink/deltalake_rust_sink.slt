@@ -16,6 +16,7 @@ statement ok
 create sink s6 as select * from mv6
 with (
     connector = 'deltalake',
+    is_exactly_once = 'true',
     type = 'append-only',
     force_append_only = 'true',
     location = 's3a://deltalake/deltalake-test',
