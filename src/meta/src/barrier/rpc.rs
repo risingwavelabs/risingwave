@@ -66,6 +66,7 @@ use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
+    DatabaseCheckpointControlMetrics,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -994,6 +995,7 @@ impl PartialGraphRecoverer<'_> {
                 &nodes_actors,
                 InflightFragmentInfo::existing_table_ids(database_jobs.values().flatten()),
                 new_actors,
+                DatabaseCheckpointControlMetrics::new(database_id),
             )?;
             debug!(
                 %database_id,

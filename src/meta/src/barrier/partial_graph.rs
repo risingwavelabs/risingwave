@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::mem::take;
 use std::sync::Arc;
+use std::time::Instant;
 
+use educe::Educe;
 use itertools::Itertools;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::common::WorkerNode;
@@ -29,8 +31,11 @@ use risingwave_pb::stream_service::streaming_control_stream_response::{
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+use crate::barrier::BarrierKind;
+use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::info::BarrierInfo;
+use crate::barrier::notifier::Notifier;
 use crate::barrier::rpc::{ControlStreamManager, WorkerNodeEvent};
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::manager::MetaSrvEnv;
@@ -38,30 +43,86 @@ use crate::model::StreamJobActorsToCreate;
 use crate::{MetaError, MetaResult};
 
 #[derive(Debug)]
+pub(super) struct PartialGraphBarrierInfo {
+    enqueue_time: Instant,
+    pub(super) post_collect_command: PostCollectCommand,
+    pub(super) barrier_info: BarrierInfo,
+    pub(super) notifiers: Vec<Notifier>,
+    pub(super) table_ids_to_commit: HashSet<TableId>,
+}
+
+impl PartialGraphBarrierInfo {
+    pub(super) fn new(
+        post_collect_command: PostCollectCommand,
+        barrier_info: BarrierInfo,
+        notifiers: Vec<Notifier>,
+        table_ids_to_commit: HashSet<TableId>,
+    ) -> Self {
+        Self {
+            enqueue_time: Instant::now(),
+            post_collect_command,
+            barrier_info,
+            notifiers,
+            table_ids_to_commit,
+        }
+    }
+
+    pub(super) fn elapsed_secs(&self) -> f64 {
+        self.enqueue_time.elapsed().as_secs_f64()
+    }
+}
+
+#[derive(Debug)]
 struct PartialGraphInflightBarrier {
     epoch: EpochPair,
     node_to_collect: NodeToCollect,
     resps: HashMap<WorkerId, BarrierCompleteResponse>,
+    info: PartialGraphBarrierInfo,
 }
 
 #[derive(Debug)]
+struct PartialGraphCollectedBarrier {
+    epoch: EpochPair,
+    resps: HashMap<WorkerId, BarrierCompleteResponse>,
+    info: PartialGraphBarrierInfo,
+}
+
+pub(super) trait PartialGraphStat: Send + Sync + 'static {
+    fn observe_barrier_latency(&self, epoch: EpochPair, barrier_latency_secs: f64);
+    fn observe_barrier_num(&self, inflight_barrier_num: usize, collected_barrier_num: usize);
+}
+
+#[derive(Educe)]
+#[educe(Debug)]
 struct PartialGraphRunningState {
     /// `prev_epoch` -> barrier
     inflight_barriers: BTreeMap<u64, PartialGraphInflightBarrier>,
+    /// newer epoch at the back. `push_back` and `pop_front`
+    collected_barriers: VecDeque<PartialGraphCollectedBarrier>,
+    #[educe(Debug(ignore))]
+    stat: Box<dyn PartialGraphStat>,
 }
 
 impl PartialGraphRunningState {
-    fn new() -> Self {
+    fn new(stat: Box<dyn PartialGraphStat>) -> Self {
         Self {
             inflight_barriers: Default::default(),
+            collected_barriers: Default::default(),
+            stat,
         }
     }
 
-    fn enqueue(&mut self, epoch: EpochPair, node_to_collect: NodeToCollect) {
+    fn enqueue(&mut self, node_to_collect: NodeToCollect, mut info: PartialGraphBarrierInfo) {
+        let epoch = info.barrier_info.epoch();
         if let Some((last_prev_epoch, last_barrier)) = self.inflight_barriers.last_key_value() {
             assert_eq!(last_barrier.epoch.curr, epoch.prev);
             assert!(*last_prev_epoch < epoch.prev);
         }
+        assert_ne!(info.barrier_info.kind, BarrierKind::Initial);
+        if info.post_collect_command.should_checkpoint() {
+            assert!(info.barrier_info.kind.is_checkpoint());
+        }
+        info.notifiers.iter_mut().for_each(|n| n.notify_started());
         self.inflight_barriers
             .try_insert(
                 epoch.prev,
@@ -69,9 +130,12 @@ impl PartialGraphRunningState {
                     epoch,
                     node_to_collect,
                     resps: Default::default(),
+                    info,
                 },
             )
             .expect("non-duplicated");
+        self.stat
+            .observe_barrier_num(self.inflight_barriers.len(), self.collected_barriers.len());
     }
 
     fn collect(&mut self, resp: BarrierCompleteResponse) {
@@ -92,12 +156,26 @@ impl PartialGraphRunningState {
             .expect("non-duplicate");
     }
 
-    fn barrier_collected(&mut self) -> Option<CollectedBarrier> {
+    fn barrier_collected<'a>(
+        &mut self,
+        temp_ref: &'a CollectedBarrierTempRef,
+    ) -> Option<CollectedBarrier<'a>> {
         if let Some(entry) = self.inflight_barriers.first_entry()
             && entry.get().node_to_collect.is_empty()
         {
-            let PartialGraphInflightBarrier { epoch, resps, .. } = entry.remove();
-            Some(CollectedBarrier { epoch, resps })
+            let PartialGraphInflightBarrier {
+                epoch, resps, info, ..
+            } = entry.remove();
+            self.stat
+                .observe_barrier_latency(epoch, info.elapsed_secs());
+            if let Some(prev_barrier) = self.collected_barriers.back() {
+                assert_eq!(prev_barrier.epoch.curr, epoch.prev);
+            }
+            self.collected_barriers
+                .push_back(PartialGraphCollectedBarrier { epoch, resps, info });
+            self.stat
+                .observe_barrier_num(self.inflight_barriers.len(), self.collected_barriers.len());
+            Some(temp_ref.collected_barrier(epoch))
         } else {
             None
         }
@@ -120,39 +198,46 @@ impl ResetPartialGraphCollector {
     }
 }
 
-#[derive(Debug)]
+#[derive(Educe)]
+#[educe(Debug)]
 enum PartialGraphStatus {
     Running(PartialGraphRunningState),
     Resetting(ResetPartialGraphCollector),
     Initializing {
         epoch: EpochPair,
         node_to_collect: NodeToCollect,
+        #[educe(Debug(ignore))]
+        stat: Option<Box<dyn PartialGraphStat>>,
     },
 }
 
 impl PartialGraphStatus {
-    fn collect(
+    fn collect<'a>(
         &mut self,
         worker_id: WorkerId,
         resp: BarrierCompleteResponse,
-    ) -> Option<PartialGraphEvent> {
+        temp_ref: &'a CollectedBarrierTempRef,
+    ) -> Option<PartialGraphEvent<'a>> {
         assert_eq!(worker_id, resp.worker_id);
         match self {
             PartialGraphStatus::Running(state) => {
                 state.collect(resp);
                 state
-                    .barrier_collected()
+                    .barrier_collected(temp_ref)
                     .map(PartialGraphEvent::BarrierCollected)
             }
             PartialGraphStatus::Resetting(_) => None,
             PartialGraphStatus::Initializing {
                 epoch,
                 node_to_collect,
+                stat,
             } => {
                 assert_eq!(epoch.prev, resp.epoch);
                 assert!(node_to_collect.remove(&worker_id));
                 if node_to_collect.is_empty() {
-                    *self = PartialGraphStatus::Running(PartialGraphRunningState::new());
+                    *self = PartialGraphStatus::Running(PartialGraphRunningState::new(
+                        stat.take().expect("should be taken for once"),
+                    ));
                     Some(PartialGraphEvent::Initialized)
                 } else {
                     None
@@ -162,14 +247,70 @@ impl PartialGraphStatus {
     }
 }
 
-#[derive(Debug)]
-pub(super) struct CollectedBarrier {
-    pub epoch: EpochPair,
-    pub resps: HashMap<WorkerId, BarrierCompleteResponse>,
+/// Holding the reference to a static empty map as a temporary workaround for borrow checker limitation on `CollectedBarrier`.
+/// Mod local method can create a `CollectedBarrierTempRef` locally, and the created `CollectedBarrier` will temporarily reference
+/// to the `CollectedBarrierTempRef`. The method must fill in the correct reference before returning in a mod-pub method.
+///
+/// This struct *must* be private to ensure that the invalid lifetime won't be leaked outside.
+struct CollectedBarrierTempRef {
+    resps: &'static HashMap<WorkerId, BarrierCompleteResponse>,
 }
 
-pub(super) enum PartialGraphEvent {
-    BarrierCollected(CollectedBarrier),
+impl CollectedBarrierTempRef {
+    fn new() -> Self {
+        static EMPTY: std::sync::LazyLock<HashMap<WorkerId, BarrierCompleteResponse>> =
+            std::sync::LazyLock::new(HashMap::new);
+        CollectedBarrierTempRef { resps: &EMPTY }
+    }
+
+    fn collected_barrier(&self, epoch: EpochPair) -> CollectedBarrier<'_> {
+        CollectedBarrier {
+            epoch,
+            resps: self.resps,
+        }
+    }
+
+    fn correct_lifetime<'a>(
+        &self,
+        event: PartialGraphManagerEvent<'_>,
+        manager: &'a PartialGraphManager,
+    ) -> PartialGraphManagerEvent<'a> {
+        match event {
+            PartialGraphManagerEvent::PartialGraph(partial_graph_id, event) => {
+                let event = match event {
+                    PartialGraphEvent::BarrierCollected(collected) => {
+                        let graph = manager.graphs.get(&partial_graph_id).expect("should exist");
+                        let PartialGraphStatus::Running(state) = graph else {
+                            unreachable!("should be running when barrier collected")
+                        };
+                        let actual = state.collected_barriers.back().expect("should exist");
+                        assert_eq!(actual.epoch, collected.epoch);
+                        PartialGraphEvent::BarrierCollected(CollectedBarrier {
+                            epoch: collected.epoch,
+                            resps: &actual.resps,
+                        })
+                    }
+                    PartialGraphEvent::Reset(resps) => PartialGraphEvent::Reset(resps),
+                    PartialGraphEvent::Initialized => PartialGraphEvent::Initialized,
+                    PartialGraphEvent::Error(worker_id) => PartialGraphEvent::Error(worker_id),
+                };
+                PartialGraphManagerEvent::PartialGraph(partial_graph_id, event)
+            }
+            PartialGraphManagerEvent::Worker(worker_id, event) => {
+                PartialGraphManagerEvent::Worker(worker_id, event)
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct CollectedBarrier<'a> {
+    pub epoch: EpochPair,
+    pub resps: &'a HashMap<WorkerId, BarrierCompleteResponse>,
+}
+
+pub(super) enum PartialGraphEvent<'a> {
+    BarrierCollected(CollectedBarrier<'a>),
     Reset(HashMap<WorkerId, ResetPartialGraphResponse>),
     Initialized,
     Error(WorkerId),
@@ -247,6 +388,28 @@ impl PartialGraphManager {
     pub(super) fn clear_worker(&mut self) {
         self.control_stream_manager.clear();
     }
+
+    pub(crate) fn notify_all_err(&mut self, err: &MetaError) {
+        for graph in self.graphs.values_mut() {
+            if let PartialGraphStatus::Running(graph) = graph {
+                for info in graph
+                    .inflight_barriers
+                    .values_mut()
+                    .map(|barrier| &mut barrier.info)
+                    .chain(
+                        graph
+                            .collected_barriers
+                            .iter_mut()
+                            .map(|barrier| &mut barrier.info),
+                    )
+                {
+                    for notifier in info.notifiers.drain(..) {
+                        notifier.notify_collection_failed(err.clone());
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[must_use]
@@ -284,11 +447,12 @@ impl PartialGraphManager {
     pub(super) fn add_partial_graph(
         &mut self,
         partial_graph_id: PartialGraphId,
+        stat: impl PartialGraphStat,
     ) -> PartialGraphAdder<'_> {
         self.graphs
             .try_insert(
                 partial_graph_id,
-                PartialGraphStatus::Running(PartialGraphRunningState::new()),
+                PartialGraphStatus::Running(PartialGraphRunningState::new(Box::new(stat))),
             )
             .expect("non-duplicated");
         self.control_stream_manager
@@ -356,11 +520,11 @@ impl PartialGraphManager {
         &mut self,
         partial_graph_id: PartialGraphId,
         mutation: Option<Mutation>,
-        barrier_info: &BarrierInfo,
         node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
         table_ids_to_sync: impl Iterator<Item = TableId>,
         nodes_to_sync_table: impl Iterator<Item = WorkerId>,
         new_actors: Option<StreamJobActorsToCreate>,
+        info: PartialGraphBarrierInfo,
     ) -> MetaResult<()> {
         let graph = self
             .graphs
@@ -369,7 +533,7 @@ impl PartialGraphManager {
         let node_to_collect = self.control_stream_manager.inject_barrier(
             partial_graph_id,
             mutation,
-            barrier_info,
+            &info.barrier_info,
             node_actors,
             table_ids_to_sync,
             nodes_to_sync_table,
@@ -378,8 +542,39 @@ impl PartialGraphManager {
         let PartialGraphStatus::Running(state) = graph else {
             panic!("should not inject barrier on non-running status: {graph:?}")
         };
-        state.enqueue(barrier_info.epoch(), node_to_collect);
+        state.enqueue(node_to_collect, info);
         Ok(())
+    }
+
+    pub(super) fn take_collected_barrier(
+        &mut self,
+        partial_graph_id: PartialGraphId,
+        epoch: u64,
+    ) -> (Vec<BarrierCompleteResponse>, PartialGraphBarrierInfo) {
+        let PartialGraphStatus::Running(graph) = self
+            .graphs
+            .get_mut(&partial_graph_id)
+            .expect("should exist")
+        else {
+            unreachable!("should be running")
+        };
+        let barrier = graph.collected_barriers.pop_front().expect("should exist");
+        assert_eq!(barrier.epoch.prev, epoch);
+        (barrier.resps.into_values().collect(), barrier.info)
+    }
+
+    pub(super) fn has_pending_checkpoint_barrier(&self, partial_graph_id: PartialGraphId) -> bool {
+        let PartialGraphStatus::Running(graph) =
+            self.graphs.get(&partial_graph_id).expect("should exist")
+        else {
+            unreachable!("should be running")
+        };
+        graph
+            .inflight_barriers
+            .values()
+            .map(|barrier| &barrier.info)
+            .chain(graph.collected_barriers.iter().map(|barrier| &barrier.info))
+            .any(|info| info.barrier_info.kind.is_checkpoint())
     }
 
     pub(super) fn start_recover(&mut self) -> PartialGraphRecoverer<'_> {
@@ -407,6 +602,7 @@ impl PartialGraphRecoverer<'_> {
         node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
         table_ids_to_sync: impl Iterator<Item = TableId>,
         new_actors: StreamJobActorsToCreate,
+        stat: impl PartialGraphStat,
     ) -> MetaResult<()> {
         assert!(
             self.added_partial_graphs.insert(partial_graph_id),
@@ -432,6 +628,7 @@ impl PartialGraphRecoverer<'_> {
                 PartialGraphStatus::Initializing {
                     epoch: barrier_info.epoch(),
                     node_to_collect,
+                    stat: Some(Box::new(stat)),
                 },
             )
             .expect("non-duplicated");
@@ -465,20 +662,30 @@ impl Drop for PartialGraphRecoverer<'_> {
 }
 
 #[must_use]
-pub(super) enum PartialGraphManagerEvent {
-    PartialGraph(PartialGraphId, PartialGraphEvent),
+pub(super) enum PartialGraphManagerEvent<'a> {
+    PartialGraph(PartialGraphId, PartialGraphEvent<'a>),
     Worker(WorkerId, WorkerEvent),
 }
 
 impl PartialGraphManager {
-    pub(super) async fn next_event(
+    pub(super) async fn next_event<'a>(
+        &'a mut self,
+        context: &Arc<impl GlobalBarrierWorkerContext>,
+    ) -> PartialGraphManagerEvent<'a> {
+        let temp_ref = CollectedBarrierTempRef::new();
+        let event = self.next_event_inner(context, &temp_ref).await;
+        temp_ref.correct_lifetime(event, self)
+    }
+
+    async fn next_event_inner<'a>(
         &mut self,
         context: &Arc<impl GlobalBarrierWorkerContext>,
-    ) -> PartialGraphManagerEvent {
+        temp_ref: &'a CollectedBarrierTempRef,
+    ) -> PartialGraphManagerEvent<'a> {
         for (&partial_graph_id, graph) in &mut self.graphs {
             match graph {
                 PartialGraphStatus::Running(state) => {
-                    if let Some(collected) = state.barrier_collected() {
+                    if let Some(collected) = state.barrier_collected(temp_ref) {
                         return PartialGraphManagerEvent::PartialGraph(
                             partial_graph_id,
                             PartialGraphEvent::BarrierCollected(collected),
@@ -496,10 +703,14 @@ impl PartialGraphManager {
                     }
                 }
                 PartialGraphStatus::Initializing {
-                    node_to_collect, ..
+                    node_to_collect,
+                    stat,
+                    ..
                 } => {
                     if node_to_collect.is_empty() {
-                        *graph = PartialGraphStatus::Running(PartialGraphRunningState::new());
+                        *graph = PartialGraphStatus::Running(PartialGraphRunningState::new(
+                            stat.take().expect("should be taken once"),
+                        ));
                         return PartialGraphManagerEvent::PartialGraph(
                             partial_graph_id,
                             PartialGraphEvent::Initialized,
@@ -522,7 +733,7 @@ impl PartialGraphManager {
                                 .graphs
                                 .get_mut(&partial_graph_id)
                                 .expect("should exist")
-                                .collect(worker_id, resp)
+                                .collect(worker_id, resp, temp_ref)
                             {
                                 return PartialGraphManagerEvent::PartialGraph(
                                     partial_graph_id,

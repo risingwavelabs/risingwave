@@ -579,27 +579,6 @@ impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
     }
 }
 
-impl ToSql for JsonbVal {
-    accepts!(JSON, JSONB);
-
-    to_sql_checked!();
-
-    fn to_sql(
-        &self,
-        ty: &Type,
-        out: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
-    where
-        Self: Sized,
-    {
-        if matches!(*ty, Type::JSONB) {
-            out.put_u8(1);
-        }
-        write!(out, "{}", self.0).unwrap();
-        Ok(IsNull::No)
-    }
-}
-
 impl<'a> FromSql<'a> for JsonbVal {
     accepts!(JSON, JSONB);
 

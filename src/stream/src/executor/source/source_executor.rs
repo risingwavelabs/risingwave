@@ -27,7 +27,9 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
-use risingwave_connector::source::cdc::split::extract_postgres_lsn_from_offset_str;
+use risingwave_connector::source::cdc::split::{
+    extract_postgres_lsn_from_offset_str, extract_sql_server_commit_lsn_from_offset_str,
+};
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -55,6 +57,10 @@ use crate::task::LocalBarrierManager;
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
 pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+
+fn lsn_u128_to_i64(lsn: u128) -> i64 {
+    lsn.min(i64::MAX as u128) as i64
+}
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -538,6 +544,20 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .mysql_cdc_state_binlog_position
                                 .with_guarded_label_values(&[&source_id])
                                 .set(position as i64);
+                        }
+                    }
+                    SplitImpl::SqlServerCdc(sqlserver_split) => {
+                        if let Some(lsn) = sqlserver_split.sql_server_change_lsn() {
+                            self.metrics
+                                .sqlserver_cdc_state_change_lsn
+                                .with_guarded_label_values(&[&source_id])
+                                .set(lsn_u128_to_i64(lsn));
+                        }
+                        if let Some(lsn) = sqlserver_split.sql_server_commit_lsn() {
+                            self.metrics
+                                .sqlserver_cdc_state_commit_lsn
+                                .with_guarded_label_values(&[&source_id])
+                                .set(lsn_u128_to_i64(lsn));
                         }
                     }
                     _ => {}
@@ -1258,7 +1278,13 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                             },
                         )
                         .await;
-
+                    if self.wait_checkpoint_rx.is_closed() {
+                        // The task must not be committed since the associated epoch may not succeed.
+                        // The wait_checkpoint_rx lifetime is tied to the lifecycle of the source executor actor.
+                        // The old actor must be dropped before any subsequent recovery can succeed; see PartialGraphState::abort_and_wait_actors
+                        tracing::debug!(epoch = epoch.0, "Drop stale wait checkpoint task.");
+                        break;
+                    }
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
@@ -1272,6 +1298,14 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                                         .pg_cdc_jni_commit_offset_lsn
                                         .with_guarded_label_values(&[&source_id.to_string()])
                                         .set(lsn_value as i64);
+                                }
+                                if let Some(lsn_value) =
+                                    extract_sql_server_commit_lsn_from_offset_str(offset)
+                                {
+                                    self.metrics
+                                        .sqlserver_cdc_jni_commit_offset_lsn
+                                        .with_guarded_label_values(&[&source_id.to_string()])
+                                        .set(lsn_u128_to_i64(lsn_value));
                                 }
                             })
                             .await;

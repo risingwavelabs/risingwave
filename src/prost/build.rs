@@ -334,6 +334,9 @@ for_all_wrapped_id_fields! (
             job_id: JobId,
             fragment_id: FragmentId,
         }
+        WaitRequest {
+            job_id: JobId,
+        }
         WaitVersion {
             hummock_version_id: HummockVersionId,
         }
@@ -388,10 +391,12 @@ for_all_wrapped_id_fields! (
             start_id: HummockRawObjectId,
             end_id: HummockRawObjectId,
         }
+        GetTableChangeLogsRequest.TableFilter {
+            table_ids: TableId,
+        }
         GetVersionByEpochRequest {
             table_id: TableId,
         }
-
         GroupConstruct {
             new_sst_start_id: HummockSstableId,
             parent_group_id: CompactionGroupId,
