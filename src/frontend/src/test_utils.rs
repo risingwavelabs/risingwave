@@ -803,7 +803,7 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
-    async fn wait(&self) -> Result<()> {
+    async fn wait(&self, _job_id: Option<JobId>) -> Result<()> {
         Ok(())
     }
 }

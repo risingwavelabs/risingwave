@@ -26,16 +26,23 @@ pub(crate) fn derive_parallelism(
         // fallback to global streaming_parallelism
         Some(ConfigParallelism::Default) | None => match global_streaming_parallelism {
             // for streaming_parallelism, `Default` is `Adaptive`
-            ConfigParallelism::Default | ConfigParallelism::Adaptive => None,
+            ConfigParallelism::Default
+            | ConfigParallelism::Adaptive
+            | ConfigParallelism::Bounded(_)
+            | ConfigParallelism::Ratio(_) => None,
             ConfigParallelism::Fixed(n) => Some(Parallelism {
                 parallelism: n.get(),
             }),
         },
 
-        // specific type parallelism is set to `Adaptive` or `Fixed(0)`
-        Some(ConfigParallelism::Adaptive) => None,
+        // specific type parallelism is set to an adaptive mode
+        Some(
+            ConfigParallelism::Adaptive
+            | ConfigParallelism::Bounded(_)
+            | ConfigParallelism::Ratio(_),
+        ) => None,
 
-        // specific type parallelism is set to `Fixed(n)
+        // specific type parallelism is set to `Fixed(n)`
         Some(ConfigParallelism::Fixed(n)) => Some(Parallelism {
             parallelism: n.get(),
         }),
