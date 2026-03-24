@@ -343,7 +343,7 @@ async fn test_over_window_aggregate() {
     .await;
 }
 
-/// Test EOWC row_number recovery continuity.
+/// Test EOWC `row_number` recovery continuity.
 /// After recovery, ranks should continue from where they left off, not restart from 1.
 #[tokio::test]
 async fn test_over_window_row_number_recovery() {
@@ -419,7 +419,7 @@ async fn test_over_window_row_number_recovery() {
     .await;
 }
 
-/// Test EOWC with multiple numbering functions (row_number + rank) in one executor.
+/// Test EOWC with multiple numbering functions (`row_number` + `rank`) in one executor.
 /// Each function should have its own separate snapshot.
 #[tokio::test]
 async fn test_over_window_multiple_numbering_functions() {
@@ -669,8 +669,8 @@ async fn test_over_window_mixed_numbering_and_aggregate() {
     .await;
 }
 
-/// Test EOWC without intermediate_state_table behaves exactly as before (legacy compatibility).
-/// Eviction hint should be CannotEvict when intermediate_state_table is absent.
+/// Test EOWC without `intermediate_state_table` behaves exactly as before (legacy compatibility).
+/// Eviction hint should be `CannotEvict` when `intermediate_state_table` is absent.
 #[tokio::test]
 async fn test_over_window_legacy_without_intermediate_state_table() {
     let store = MemoryStateStore::new();
