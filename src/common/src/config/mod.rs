@@ -210,7 +210,12 @@ pub mod default {
         }
 
         pub fn stream_exchange_concurrent_barriers() -> usize {
-            1
+            // Must be > 1 to avoid deadlock. With concurrent_barriers=1, a single
+            // slow consumer (e.g., CDC backfill doing snapshot reads) can exhaust the
+            // barrier permit, blocking the upstream dispatcher's broadcast_concurrent.
+            // Since broadcast uses try_join_all, one blocked output blocks ALL outputs,
+            // causing cascading backpressure across the entire streaming graph.
+            2
         }
 
         pub fn stream_exchange_concurrent_dispatchers() -> usize {

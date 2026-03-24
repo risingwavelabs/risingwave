@@ -189,7 +189,7 @@ stream_topn_cache_min_capacity = 10
 stream_chunk_size = 256
 stream_exchange_initial_permits = 2048
 stream_exchange_batched_permits = 256
-stream_exchange_concurrent_barriers = 1
+stream_exchange_concurrent_barriers = 2
 stream_exchange_concurrent_dispatchers = 0
 stream_dml_channel_initial_permits = 32768
 stream_hash_agg_max_dirty_groups_heap_size = 67108864
@@ -359,6 +359,8 @@ skip_recent_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false
+req_concurrency_limit = 1024
+http_concurrent_limit = 1024
 opendal_upload_concurrency = 256
 opendal_writer_abort_on_err = false
 upload_part_size = 16777216
