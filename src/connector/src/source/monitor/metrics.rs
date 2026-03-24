@@ -37,6 +37,10 @@ pub struct EnumeratorMetrics {
     pub mysql_cdc_binlog_file_seq_min: LabelGuardedIntGaugeVec,
     /// MySQL CDC binlog file sequence number (max)
     pub mysql_cdc_binlog_file_seq_max: LabelGuardedIntGaugeVec,
+    /// SQL Server CDC upstream minimum LSN
+    pub sqlserver_cdc_upstream_min_lsn: LabelGuardedIntGaugeVec,
+    /// SQL Server CDC upstream maximum LSN
+    pub sqlserver_cdc_upstream_max_lsn: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
@@ -84,12 +88,30 @@ impl EnumeratorMetrics {
         )
         .unwrap();
 
+        let sqlserver_cdc_upstream_min_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "sqlserver_cdc_upstream_min_lsn",
+            "SQL Server CDC upstream minimum LSN",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_upstream_max_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "sqlserver_cdc_upstream_max_lsn",
+            "SQL Server CDC upstream maximum LSN",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
         EnumeratorMetrics {
             high_watermark,
             pg_cdc_confirmed_flush_lsn,
             pg_cdc_upstream_max_lsn,
             mysql_cdc_binlog_file_seq_min,
             mysql_cdc_binlog_file_seq_max,
+            sqlserver_cdc_upstream_min_lsn,
+            sqlserver_cdc_upstream_max_lsn,
         }
     }
 
