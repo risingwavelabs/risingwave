@@ -121,6 +121,7 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
             (inner, r)
         }
         .boxed();
+    
         Self::Dispatching {
             future: fut,
             read_future,
