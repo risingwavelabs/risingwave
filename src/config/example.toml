@@ -408,6 +408,8 @@ skip_recent_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false
+req_concurrency_limit = 0
+http_concurrent_limit = 0
 opendal_upload_concurrency = 256
 opendal_writer_abort_on_err = false
 upload_part_size = 16777216
