@@ -156,7 +156,7 @@ def _(outer_panels: Panels):
                             "Abnormal Delta Log Number",
                         ),
                         panels.target(
-                            alert_threshold(f"sum({metric('state_store_event_handler_pending_event')}) by {NODE_LABEL}", 10000000),
+                            alert_threshold(f"sum({metric('state_store_event_handler_pending_event')}) by ({NODE_LABEL})", 10000000),
                             "Abnormal Pending Event Number @ {{%s}}" % (NODE_LABEL),
                         ),
                         panels.target(
