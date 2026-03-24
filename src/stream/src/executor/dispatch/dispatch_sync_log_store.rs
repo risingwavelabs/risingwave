@@ -31,7 +31,7 @@ use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStream
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, LogStoreVnodeProgress};
 use crate::executor::prelude::*;
-use crate::executor::sync_log_store_impl::{
+use crate::executor::sync_kv_log_store::{
     ReadFuture, SyncKvLogStoreContext, SyncedLogStoreBuffer, WriteFuture, WriteFutureEvent,
     aligned_message_stream, apply_pause_resume_mutation, init_local_log_store_state,
     process_chunk_flushed, process_upstream_chunk, write_barrier,
@@ -121,7 +121,7 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
             (inner, r)
         }
         .boxed();
-    
+
         Self::Dispatching {
             future: fut,
             read_future,
