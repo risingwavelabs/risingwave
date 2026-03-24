@@ -6,6 +6,7 @@ from . import section
 def _(panels: Panels):
     mv_filter = 'executor_identity=~".*MaterializeExecutor.*"'
     sink_filter = 'executor_identity=~".*SinkExecutor.*"'
+    compute_component_filter = f'{COMPONENT_LABEL}="compute"'
     return [
         panels.row("Overview"),
         panels.timeseries_rowsps(
@@ -116,8 +117,8 @@ def _(panels: Panels):
                     "Abnormal Block Cache Memory",
                 ),
                 panels.target(
-                    f"{metric('state_store_uploading_memory_usage_ratio')} >= bool 0.7",
-                    "Abnormal Uploading Memory Usage",
+                    f"{metric('state_store_uploading_memory_usage_ratio', filter=compute_component_filter)} >= bool 0.8",
+                    "Abnormal Uploading Memory Usage @ {{%s}}" % (NODE_LABEL),
                 ),
                 panels.target(
                     f"{metric('storage_write_stop_compaction_groups')} > bool 0",
