@@ -15,6 +15,7 @@
 use std::marker::PhantomData;
 use std::ops::Bound;
 
+use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayRef, Op};
@@ -87,14 +88,13 @@ fn decode_snapshot(
     pk_deser: &OrderedRowSerde,
 ) -> StreamExecutorResult<WindowStateSnapshot> {
     use prost::Message;
-    let pb = PbWindowStateSnapshot::decode(bytes)
-        .map_err(|e| anyhow::anyhow!("failed to decode snapshot: {e}"))?;
+    let pb = PbWindowStateSnapshot::decode(bytes).context("failed to decode snapshot")?;
     let last_output_key = pb
         .last_output_key
         .map(|key| {
             let pk = pk_deser
                 .deserialize(&key.pk)
-                .map_err(|e| anyhow::anyhow!("failed to deserialize pk: {e}"))?;
+                .context("failed to deserialize pk")?;
             Ok::<_, anyhow::Error>(StateKey {
                 order_key: key.order_key.into(),
                 pk: pk.into(),
@@ -103,7 +103,7 @@ fn decode_snapshot(
         .transpose()?;
     let function_state = pb
         .function_state
-        .ok_or_else(|| anyhow::anyhow!("snapshot missing function_state"))?;
+        .context("snapshot missing function_state")?;
     Ok(WindowStateSnapshot {
         last_output_key,
         function_state,
