@@ -1069,8 +1069,9 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(GetTablesResponse { tables }))
     }
 
-    async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
-        let version = self.ddl_controller.wait().await?;
+    async fn wait(&self, request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
+        let req = request.into_inner();
+        let version = self.ddl_controller.wait(req.job_id).await?;
         Ok(Response::new(WaitResponse {
             version: Some(version),
         }))

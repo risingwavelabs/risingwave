@@ -334,6 +334,9 @@ for_all_wrapped_id_fields! (
             job_id: JobId,
             fragment_id: FragmentId,
         }
+        WaitRequest {
+            job_id: JobId,
+        }
         WaitVersion {
             hummock_version_id: HummockVersionId,
         }
