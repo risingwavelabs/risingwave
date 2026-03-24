@@ -22,7 +22,7 @@ use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
-use risingwave_common::id::{JobId, ObjectId, TableId};
+use risingwave_common::id::{ObjectId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
@@ -1071,7 +1071,7 @@ impl DdlService for DdlServiceImpl {
 
     async fn wait(&self, request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
         let req = request.into_inner();
-        let version = self.ddl_controller.wait(req.job_id.map(JobId::new)).await?;
+        let version = self.ddl_controller.wait(req.job_id).await?;
         Ok(Response::new(WaitResponse {
             version: Some(version),
         }))

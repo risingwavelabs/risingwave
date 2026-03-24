@@ -1147,9 +1147,7 @@ impl MetaClient {
     }
 
     pub async fn wait(&self, job_id: Option<JobId>) -> Result<WaitVersion> {
-        let request = WaitRequest {
-            job_id: job_id.map(|job_id| job_id.as_raw_id()),
-        };
+        let request = WaitRequest { job_id };
         let resp = self.inner.wait(request).await?;
         Ok(resp
             .version
