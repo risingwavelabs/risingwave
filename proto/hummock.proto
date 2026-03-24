@@ -15,6 +15,13 @@ enum BloomFilterType {
   BLOCKED = 2;
 }
 
+enum SstableFilterType {
+  SSTABLE_FILTER_UNSPECIFIED = 0;
+  SSTABLE_FILTER_NONE = 1;
+  SSTABLE_FILTER_XOR8 = 2;
+  SSTABLE_FILTER_XOR16 = 3;
+}
+
 // Key range for a single vnode within an SST.
 // Keys are always represented as closed intervals: [min_key, max_key].
 message VnodeUserKeyRange {
@@ -51,6 +58,7 @@ message SstableInfo {
   // Optional per-vnode statistics for query pruning when the SST spans only a small set of vnodes.
   // Only emitted when SST contains multiple vnodes to avoid redundancy with key_range.
   VnodeStatistics vnode_statistics = 15;
+  SstableFilterType filter_type = 16;
 }
 
 enum LevelType {
