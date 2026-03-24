@@ -26,7 +26,6 @@ use crate::source::google_pubsub::split::PubsubSplit;
 
 pub struct PubsubSplitEnumerator {
     subscription: String,
-    split_count: u32,
 }
 
 #[async_trait]
@@ -38,10 +37,12 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
     ) -> ConnectorResult<PubsubSplitEnumerator> {
-        let split_count = properties.parallelism.unwrap_or(1);
-        if split_count < 1 {
-            bail!("parallelism must be >= 1");
-        };
+        if properties.parallelism.is_some() {
+            tracing::warn!(
+                "pubsub.parallelism is deprecated and will be ignored. \
+                 Split count now adapts automatically to the number of actors."
+            );
+        }
 
         if properties.credentials.is_none() && properties.emulator_host.is_none() {
             bail!("credentials must be set if not using the pubsub emulator")
@@ -79,21 +80,16 @@ impl SplitEnumerator for PubsubSplitEnumerator {
 
         Ok(Self {
             subscription: properties.subscription,
-            split_count,
         })
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<PubsubSplit>> {
-        tracing::debug!("enumerating pubsub splits");
-        let splits: Vec<PubsubSplit> = (0..self.split_count)
-            .map(|i| PubsubSplit {
-                index: i,
-                subscription: self.subscription.clone(),
-                __deprecated_start_offset: None,
-                __deprecated_stop_offset: None,
-            })
-            .collect();
-
-        Ok(splits)
+        tracing::debug!("enumerating pubsub splits (adaptive mode, returning 1 template split)");
+        Ok(vec![PubsubSplit {
+            index: 0,
+            subscription: self.subscription.clone(),
+            __deprecated_start_offset: None,
+            __deprecated_stop_offset: None,
+        }])
     }
 }
