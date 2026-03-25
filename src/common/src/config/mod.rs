@@ -757,4 +757,24 @@ pub mod tests {
         "#]]
         .assert_eq(&config.to_string());
     }
+
+    #[test]
+    fn test_storage_max_prefetch_block_number_must_be_positive() {
+        let config = toml::from_str::<RwConfig>(
+            r#"
+            [storage]
+            max_prefetch_block_number = 0
+            "#,
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 3, column 41
+              |
+            3 |             max_prefetch_block_number = 0
+              |                                         ^
+            storage.max_prefetch_block_number must be greater than 0
+        "#]]
+        .assert_eq(&config.to_string());
+    }
 }
