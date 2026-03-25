@@ -210,6 +210,8 @@ pub struct TableCatalog {
     pub vector_index_info: Option<PbVectorIndexInfo>,
 
     pub cdc_table_type: Option<ExternalCdcTableType>,
+
+    pub disable_bloom_filter: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -627,6 +629,7 @@ impl TableCatalog {
                 .cdc_table_type
                 .clone()
                 .map(|t| PbCdcTableType::from(t) as i32),
+            disable_bloom_filter: self.disable_bloom_filter,
         }
     }
 
@@ -862,6 +865,7 @@ impl From<PbTable> for TableCatalog {
                 .cdc_table_type
                 .and_then(|t| PbCdcTableType::try_from(t).ok())
                 .map(ExternalCdcTableType::from),
+            disable_bloom_filter: tb.disable_bloom_filter,
         }
     }
 }
@@ -960,6 +964,7 @@ mod tests {
             refreshable: false,
             vector_index_info: None,
             cdc_table_type: None,
+            disable_bloom_filter: false,
         }
         .into();
 
@@ -1031,6 +1036,7 @@ mod tests {
                 refreshable: false,
                 vector_index_info: None,
                 cdc_table_type: None,
+                disable_bloom_filter: false,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost()));

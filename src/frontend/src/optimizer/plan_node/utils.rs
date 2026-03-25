@@ -227,6 +227,7 @@ impl TableCatalogBuilder {
             refreshable: false, // Internal tables are not refreshable
             vector_index_info: None,
             cdc_table_type: None,
+            disable_bloom_filter: false,
         }
     }
 

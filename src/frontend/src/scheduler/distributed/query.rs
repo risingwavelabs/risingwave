@@ -593,6 +593,7 @@ pub(crate) mod tests {
             clean_watermark_indices: vec![],
             vector_index_info: None,
             cdc_table_type: None,
+            disable_bloom_filter: false,
         };
         let batch_plan_node = LogicalScan::create(table_catalog.into(), ctx, None)
             .to_batch()
