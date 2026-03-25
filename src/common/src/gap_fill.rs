@@ -14,7 +14,7 @@
 
 use num_integer::Integer;
 
-use crate::types::{Datum, DatumRef, Decimal, ScalarImpl, ScalarRefImpl};
+use crate::types::{Datum, DatumRef, Decimal, Scalar as _, ScalarImpl, ScalarRefImpl};
 
 /// Strategy for filling gaps in time series data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,7 +69,7 @@ pub fn calculate_interpolation_step(d1: DatumRef<'_>, d2: DatumRef<'_>, steps: u
             Some(ScalarImpl::Float64((v2 - v1) / steps as f64))
         }
         (ScalarRefImpl::Decimal(v1), ScalarRefImpl::Decimal(v2)) => Some(ScalarImpl::Decimal(
-            (v2.xxd() - v1.xxd()) / Decimal::from(steps),
+            (v2 - v1).as_scalar_ref() / Decimal::from(steps).as_scalar_ref(),
         )),
         _ => None,
     }
@@ -88,7 +88,7 @@ pub fn apply_interpolation_step(current: &mut Datum, step: &ScalarImpl) {
             (ScalarImpl::Int64(v1), &ScalarImpl::Int64(v2)) => *v1 += v2,
             (ScalarImpl::Float32(v1), &ScalarImpl::Float32(v2)) => *v1 += v2,
             (ScalarImpl::Float64(v1), &ScalarImpl::Float64(v2)) => *v1 += v2,
-            (ScalarImpl::Decimal(v1), &ScalarImpl::Decimal(v2)) => *v1 = *v1 + v2,
+            (ScalarImpl::Decimal(v1), ScalarImpl::Decimal(v2)) => *v1 = v1.as_scalar_ref() + v2.as_scalar_ref(),
             _ => (),
         }
     }
