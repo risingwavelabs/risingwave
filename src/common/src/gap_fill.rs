@@ -88,7 +88,9 @@ pub fn apply_interpolation_step(current: &mut Datum, step: &ScalarImpl) {
             (ScalarImpl::Int64(v1), &ScalarImpl::Int64(v2)) => *v1 += v2,
             (ScalarImpl::Float32(v1), &ScalarImpl::Float32(v2)) => *v1 += v2,
             (ScalarImpl::Float64(v1), &ScalarImpl::Float64(v2)) => *v1 += v2,
-            (ScalarImpl::Decimal(v1), ScalarImpl::Decimal(v2)) => *v1 = v1.as_scalar_ref() + v2.as_scalar_ref(),
+            (ScalarImpl::Decimal(v1), ScalarImpl::Decimal(v2)) => {
+                *v1 = v1.as_scalar_ref() + v2.as_scalar_ref()
+            }
             _ => (),
         }
     }

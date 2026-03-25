@@ -28,8 +28,8 @@ use super::to_text::ToText;
 use super::{CheckedNeg, DataType};
 use crate::array::ArrayResult;
 use crate::types::Decimal::Normalized;
-use crate::types::{IsNegative, Scalar as _};
 use crate::types::ordered_float::OrderedFloat;
+use crate::types::{IsNegative, Scalar as _};
 
 #[derive(Debug, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
@@ -87,7 +87,7 @@ impl ToText for DeciRef<'_> {
 
 impl Decimal {
     /// Used by `PrimitiveArray` to serialize the array to protobuf.
-    pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
+    pub fn to_protobuf(&self, output: &mut impl Write) -> ArrayResult<usize> {
         let buf = self.dxx().unordered_serialize();
         output.write_all(&buf)?;
         Ok(buf.len())
@@ -401,15 +401,27 @@ impl Div for DeciRef<'_> {
                 _ => unreachable!(),
             },
             // div by +/-inf
-            (Decimal::Normalized(_), Decimal::PositiveInf) => Decimal::Normalized(RustDecimal::from(0)),
+            (Decimal::Normalized(_), Decimal::PositiveInf) => {
+                Decimal::Normalized(RustDecimal::from(0))
+            }
             (_, Decimal::PositiveInf) => Decimal::NaN,
-            (Decimal::Normalized(_), Decimal::NegativeInf) => Decimal::Normalized(RustDecimal::from(0)),
+            (Decimal::Normalized(_), Decimal::NegativeInf) => {
+                Decimal::Normalized(RustDecimal::from(0))
+            }
             (_, Decimal::NegativeInf) => Decimal::NaN,
             // div inf
-            (Decimal::PositiveInf, Decimal::Normalized(d)) if d.is_sign_positive() => Decimal::PositiveInf,
-            (Decimal::PositiveInf, Decimal::Normalized(d)) if d.is_sign_negative() => Decimal::NegativeInf,
-            (Decimal::NegativeInf, Decimal::Normalized(d)) if d.is_sign_positive() => Decimal::NegativeInf,
-            (Decimal::NegativeInf, Decimal::Normalized(d)) if d.is_sign_negative() => Decimal::PositiveInf,
+            (Decimal::PositiveInf, Decimal::Normalized(d)) if d.is_sign_positive() => {
+                Decimal::PositiveInf
+            }
+            (Decimal::PositiveInf, Decimal::Normalized(d)) if d.is_sign_negative() => {
+                Decimal::NegativeInf
+            }
+            (Decimal::NegativeInf, Decimal::Normalized(d)) if d.is_sign_positive() => {
+                Decimal::NegativeInf
+            }
+            (Decimal::NegativeInf, Decimal::Normalized(d)) if d.is_sign_negative() => {
+                Decimal::PositiveInf
+            }
             // normal case
             (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) => Decimal::Normalized(lhs / rhs),
             _ => unreachable!(),
@@ -928,11 +940,36 @@ mod tests {
         ];
         for (d_lhs, f_lhs) in decimals.iter().zip_eq_fast(floats.iter()) {
             for (d_rhs, f_rhs) in decimals.iter().zip_eq_fast(floats.iter()) {
-                assert!(check((d_lhs.as_scalar_ref() + d_rhs.as_scalar_ref()).try_into().unwrap(), f_lhs + f_rhs));
-                assert!(check((d_lhs.as_scalar_ref() - d_rhs.as_scalar_ref()).try_into().unwrap(), f_lhs - f_rhs));
-                assert!(check((d_lhs.as_scalar_ref() * d_rhs.as_scalar_ref()).try_into().unwrap(), f_lhs * f_rhs));
-                assert!(check((d_lhs.as_scalar_ref() / d_rhs.as_scalar_ref()).try_into().unwrap(), f_lhs / f_rhs));
-                assert!(check((d_lhs.as_scalar_ref() % d_rhs.as_scalar_ref()).try_into().unwrap(), f_lhs % f_rhs));
+                assert!(check(
+                    (d_lhs.as_scalar_ref() + d_rhs.as_scalar_ref())
+                        .try_into()
+                        .unwrap(),
+                    f_lhs + f_rhs
+                ));
+                assert!(check(
+                    (d_lhs.as_scalar_ref() - d_rhs.as_scalar_ref())
+                        .try_into()
+                        .unwrap(),
+                    f_lhs - f_rhs
+                ));
+                assert!(check(
+                    (d_lhs.as_scalar_ref() * d_rhs.as_scalar_ref())
+                        .try_into()
+                        .unwrap(),
+                    f_lhs * f_rhs
+                ));
+                assert!(check(
+                    (d_lhs.as_scalar_ref() / d_rhs.as_scalar_ref())
+                        .try_into()
+                        .unwrap(),
+                    f_lhs / f_rhs
+                ));
+                assert!(check(
+                    (d_lhs.as_scalar_ref() % d_rhs.as_scalar_ref())
+                        .try_into()
+                        .unwrap(),
+                    f_lhs % f_rhs
+                ));
             }
         }
     }
