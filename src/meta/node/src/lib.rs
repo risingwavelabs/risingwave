@@ -461,6 +461,7 @@ pub fn start(
                     .meta
                     .periodic_scheduling_compaction_group_split_interval_sec,
                 enable_compaction_group_normalize: config.meta.enable_compaction_group_normalize,
+                max_normalize_splits_per_round: config.meta.max_normalize_splits_per_round,
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,

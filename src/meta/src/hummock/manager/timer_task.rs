@@ -486,6 +486,40 @@ impl HummockManager {
 }
 
 impl HummockManager {
+    async fn maybe_normalize_compaction_groups(&self, schedule_type: &'static str) {
+        if !self.env.opts.enable_compaction_group_normalize {
+            return;
+        }
+
+        match self
+            .normalize_overlapping_compaction_groups_with_limit(
+                self.env
+                    .opts
+                    .max_normalize_splits_per_round
+                    .try_into()
+                    .unwrap_or(usize::MAX),
+            )
+            .await
+        {
+            Ok(split_count) => {
+                if split_count > 0 {
+                    tracing::info!(
+                        "normalize compaction groups finished with {} split(s) before {} scheduling",
+                        split_count,
+                        schedule_type
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    "failed to normalize compaction groups before {} scheduling",
+                    schedule_type
+                );
+            }
+        }
+    }
+
     async fn check_dead_task(&self) {
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
@@ -573,25 +607,7 @@ impl HummockManager {
     /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
     async fn on_handle_schedule_group_split(&self) {
         let table_write_throughput = self.table_write_throughput_statistic_manager.read().clone();
-
-        if self.env.opts.enable_compaction_group_normalize {
-            match self.normalize_overlapping_compaction_groups().await {
-                Ok(split_count) => {
-                    if split_count > 0 {
-                        tracing::info!(
-                            "normalize compaction groups finished with {} split(s)",
-                            split_count
-                        );
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e.as_report(),
-                        "failed to normalize compaction groups"
-                    );
-                }
-            }
-        }
+        self.maybe_normalize_compaction_groups("split").await;
 
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
@@ -606,6 +622,16 @@ impl HummockManager {
             self.try_split_compaction_group(&table_write_throughput, group)
                 .await;
         }
+    }
+
+    #[cfg(test)]
+    pub async fn schedule_group_split_for_test(&self) {
+        self.on_handle_schedule_group_split().await;
+    }
+
+    #[cfg(test)]
+    pub async fn schedule_group_merge_for_test(&self) {
+        self.on_handle_schedule_group_merge().await;
     }
 
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
@@ -624,6 +650,8 @@ impl HummockManager {
     /// 2. The compaction group is a small group.
     /// 3. All tables in compaction group is in a low throughput state.
     async fn on_handle_schedule_group_merge(&self) {
+        self.maybe_normalize_compaction_groups("merge").await;
+
         let created_tables = match self.metadata_manager.get_created_table_ids().await {
             Ok(created_tables) => HashSet::from_iter(created_tables),
             Err(err) => {

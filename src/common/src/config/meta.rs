@@ -350,10 +350,13 @@ pub struct MetaConfig {
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
-    /// When enabled, automatically splits compaction groups whose table-id ranges
-    /// overlap into non-overlapping groups before the regular split/merge scheduling.
+    /// Whether to normalize overlapping compaction groups before the regular split/merge scheduling.
     #[serde(default = "default::meta::enable_compaction_group_normalize")]
     pub enable_compaction_group_normalize: bool,
+
+    /// The maximum number of normalize splits in one scheduler round.
+    #[serde(default = "default::meta::max_normalize_splits_per_round")]
+    pub max_normalize_splits_per_round: u64,
 
     /// The interval of the periodic scheduling compaction group merge job.
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
@@ -751,6 +754,10 @@ pub mod default {
 
         pub fn enable_compaction_group_normalize() -> bool {
             false
+        }
+
+        pub fn max_normalize_splits_per_round() -> u64 {
+            4
         }
 
         pub fn compaction_group_merge_dimension_threshold() -> f64 {
