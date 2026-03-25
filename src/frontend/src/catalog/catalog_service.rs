@@ -292,7 +292,6 @@ pub trait CatalogWriter: Send + Sync {
 pub struct CatalogWriterImpl {
     meta_client: MetaClient,
     catalog_updated_rx: Receiver<CatalogVersion>,
-    streaming_worker_slot_mapping_updated_rx: Receiver<u64>,
     completed_observer_recovery_rx: Receiver<CompletedObserverRecovery>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
@@ -778,14 +777,12 @@ impl CatalogWriterImpl {
     pub fn new(
         meta_client: MetaClient,
         catalog_updated_rx: Receiver<CatalogVersion>,
-        streaming_worker_slot_mapping_updated_rx: Receiver<u64>,
         completed_observer_recovery_rx: Receiver<CompletedObserverRecovery>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         Self {
             meta_client,
             catalog_updated_rx,
-            streaming_worker_slot_mapping_updated_rx,
             completed_observer_recovery_rx,
             hummock_snapshot_manager,
         }
@@ -794,7 +791,6 @@ impl CatalogWriterImpl {
     async fn wait_version(&self, version: WaitVersion) -> Result<()> {
         wait_version_update(
             self.catalog_updated_rx.clone(),
-            self.streaming_worker_slot_mapping_updated_rx.clone(),
             self.completed_observer_recovery_rx.clone(),
             self.hummock_snapshot_manager.clone(),
             version,
@@ -812,7 +808,6 @@ fn completed_recovery_covers_wait_version(
 
 async fn wait_version_update(
     mut catalog_updated_rx: Receiver<CatalogVersion>,
-    mut streaming_worker_slot_mapping_updated_rx: Receiver<u64>,
     mut completed_observer_recovery_rx: Receiver<CompletedObserverRecovery>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     version: WaitVersion,
@@ -837,14 +832,6 @@ async fn wait_version_update(
         result = async {
             while *catalog_updated_rx.borrow_and_update() < version.catalog_version {
                 catalog_updated_rx.changed().await.map_err(|e| anyhow!(e))?;
-            }
-            while *streaming_worker_slot_mapping_updated_rx.borrow_and_update()
-                < version.streaming_worker_slot_mapping_version
-            {
-                streaming_worker_slot_mapping_updated_rx
-                    .changed()
-                    .await
-                    .map_err(|e| anyhow!(e))?;
             }
             Ok::<(), anyhow::Error>(())
         } => { result?; }
@@ -886,23 +873,16 @@ mod tests {
     use crate::scheduler::HummockSnapshotManager;
     use crate::test_utils::MockFrontendMetaClient;
 
-    fn completed_recovery(
-        epoch: u64,
-        catalog_version: u64,
-        streaming_worker_slot_mapping_version: u64,
-    ) -> CompletedObserverRecovery {
+    fn completed_recovery(epoch: u64, catalog_version: u64) -> CompletedObserverRecovery {
         CompletedObserverRecovery {
             epoch,
             catalog_version,
-            streaming_worker_slot_mapping_version,
         }
     }
 
     #[tokio::test]
-    async fn wait_version_update_waits_for_streaming_mapping_version() {
+    async fn wait_version_update_waits_for_catalog_version() {
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
-        let (streaming_worker_slot_mapping_updated_tx, streaming_worker_slot_mapping_updated_rx) =
-            watch::channel(0);
         let (_completed_observer_recovery_tx, completed_observer_recovery_rx) =
             watch::channel(CompletedObserverRecovery::default());
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
@@ -911,13 +891,11 @@ mod tests {
 
         let wait_future = wait_version_update(
             catalog_updated_rx,
-            streaming_worker_slot_mapping_updated_rx,
             completed_observer_recovery_rx,
             hummock_snapshot_manager,
             WaitVersion {
-                catalog_version: 1,
+                catalog_version: 2,
                 hummock_version_id: 0.into(),
-                streaming_worker_slot_mapping_version: 2,
             },
         );
         tokio::pin!(wait_future);
@@ -929,44 +907,7 @@ mod tests {
                 .is_err()
         );
 
-        streaming_worker_slot_mapping_updated_tx.send(2).unwrap();
-
-        wait_future.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn wait_version_update_unblocks_on_completed_observer_reinitialization() {
-        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(10u64);
-        let (_streaming_tx, streaming_rx) = watch::channel(0u64);
-        let (completed_observer_recovery_tx, completed_observer_recovery_rx) =
-            watch::channel(CompletedObserverRecovery::default());
-        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
-            MockFrontendMetaClient {},
-        )));
-
-        // Wait for mapping version 100, which will never arrive normally.
-        let wait_future = wait_version_update(
-            catalog_updated_rx,
-            streaming_rx,
-            completed_observer_recovery_rx,
-            hummock_snapshot_manager,
-            WaitVersion {
-                catalog_version: 5,
-                hummock_version_id: 0.into(),
-                streaming_worker_slot_mapping_version: 100,
-            },
-        );
-        tokio::pin!(wait_future);
-
-        assert!(
-            tokio::time::timeout(Duration::from_millis(10), wait_future.as_mut())
-                .await
-                .is_err()
-        );
-
-        // Simulate an observer recovery that already replayed the buffered notifications
-        // collected before the snapshot.
-        completed_observer_recovery_tx.send_replace(completed_recovery(1, 5, 100));
+        catalog_updated_tx.send(2).unwrap();
 
         wait_future.await.unwrap();
     }
@@ -974,22 +915,19 @@ mod tests {
     #[tokio::test]
     async fn wait_version_update_unblocks_if_completed_recovery_already_covers_target() {
         let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(10u64);
-        let (_streaming_tx, streaming_rx) = watch::channel(0u64);
         let (_completed_observer_recovery_tx, completed_observer_recovery_rx) =
-            watch::channel(completed_recovery(1, 5, 100));
+            watch::channel(completed_recovery(1, 5));
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));
 
         wait_version_update(
             catalog_updated_rx,
-            streaming_rx,
             completed_observer_recovery_rx,
             hummock_snapshot_manager,
             WaitVersion {
                 catalog_version: 5,
                 hummock_version_id: 0.into(),
-                streaming_worker_slot_mapping_version: 100,
             },
         )
         .await
@@ -998,24 +936,20 @@ mod tests {
 
     #[tokio::test]
     async fn wait_version_update_ignores_completed_recovery_that_does_not_cover_target() {
-        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(5u64);
-        let (streaming_worker_slot_mapping_updated_tx, streaming_worker_slot_mapping_updated_rx) =
-            watch::channel(0u64);
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0u64);
         let (_completed_observer_recovery_tx, completed_observer_recovery_rx) =
-            watch::channel(completed_recovery(1, 4, 100));
+            watch::channel(completed_recovery(1, 4));
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));
 
         let wait_future = wait_version_update(
             catalog_updated_rx,
-            streaming_worker_slot_mapping_updated_rx,
             completed_observer_recovery_rx,
             hummock_snapshot_manager,
             WaitVersion {
                 catalog_version: 5,
                 hummock_version_id: 0.into(),
-                streaming_worker_slot_mapping_version: 2,
             },
         );
         tokio::pin!(wait_future);
@@ -1026,7 +960,7 @@ mod tests {
                 .is_err()
         );
 
-        streaming_worker_slot_mapping_updated_tx.send(2).unwrap();
+        catalog_updated_tx.send(5).unwrap();
 
         wait_future.await.unwrap();
     }
@@ -1034,23 +968,19 @@ mod tests {
     #[tokio::test]
     async fn wait_version_update_unblocks_when_completed_reinit_happens_during_catalog_wait() {
         let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(0u64);
-        let (_streaming_tx, streaming_rx) = watch::channel(0u64);
         let (completed_observer_recovery_tx, completed_observer_recovery_rx) =
             watch::channel(CompletedObserverRecovery::default());
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
             MockFrontendMetaClient {},
         )));
 
-        // Neither catalog (target 5, current 0) nor mapping (target 100, current 0) is met.
         let wait_future = wait_version_update(
             catalog_updated_rx,
-            streaming_rx,
             completed_observer_recovery_rx,
             hummock_snapshot_manager,
             WaitVersion {
                 catalog_version: 5,
                 hummock_version_id: 0.into(),
-                streaming_worker_slot_mapping_version: 100,
             },
         );
         tokio::pin!(wait_future);
@@ -1063,38 +993,8 @@ mod tests {
 
         // Once observer recovery finishes, the fresh snapshot and replayed buffered
         // notifications already contain all committed state.
-        completed_observer_recovery_tx.send_replace(completed_recovery(1, 5, 100));
+        completed_observer_recovery_tx.send_replace(completed_recovery(1, 5));
 
         wait_future.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn wait_version_update_unblocks_on_completed_recovery_with_zero_mapping_version() {
-        // After meta restart with no streaming jobs, recovery can have
-        // mapping_version=0 and that's genuine.  The wait must still unblock.
-        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(10u64);
-        let (_streaming_tx, streaming_rx) = watch::channel(0u64);
-        let (_completed_observer_recovery_tx, completed_observer_recovery_rx) =
-            watch::channel(completed_recovery(1, 5, 0));
-        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
-            MockFrontendMetaClient {},
-        )));
-
-        // mapping_version=2 from old meta will never arrive normally, but the
-        // recovery (epoch=1, catalog=5) covers catalog_version=5 and should
-        // unblock the wait.
-        wait_version_update(
-            catalog_updated_rx,
-            streaming_rx,
-            completed_observer_recovery_rx,
-            hummock_snapshot_manager,
-            WaitVersion {
-                catalog_version: 5,
-                hummock_version_id: 0.into(),
-                streaming_worker_slot_mapping_version: 2,
-            },
-        )
-        .await
-        .unwrap();
     }
 }

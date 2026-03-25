@@ -354,15 +354,12 @@ impl FrontendEnv {
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
-        let (streaming_worker_slot_mapping_updated_tx, streaming_worker_slot_mapping_updated_rx) =
-            watch::channel(0);
         let (completed_observer_recovery_tx, completed_observer_recovery_rx) =
             watch::channel(CompletedObserverRecovery::default());
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(CatalogWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx.clone(),
-            streaming_worker_slot_mapping_updated_rx,
             completed_observer_recovery_rx,
             hummock_snapshot_manager.clone(),
         ));
@@ -413,7 +410,6 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
-            streaming_worker_slot_mapping_updated_tx,
             completed_observer_recovery_tx,
             user_info_manager,
             hummock_snapshot_manager.clone(),

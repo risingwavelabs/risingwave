@@ -153,14 +153,11 @@ impl NotificationServiceImpl {
         Ok(decrypted_secrets)
     }
 
-    fn get_worker_slot_mapping_snapshot(
-        &self,
-    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion, bool)> {
-        let (mappings, version, recovery_complete) = self
+    fn get_worker_slot_mapping_snapshot(&self) -> MetaResult<Vec<FragmentWorkerSlotMapping>> {
+        Ok(self
             .metadata_manager
             .catalog_controller
-            .get_worker_slot_mappings_snapshot();
-        Ok((mappings, version, recovery_complete))
+            .get_worker_slot_mappings_snapshot())
     }
 
     fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
@@ -256,17 +253,7 @@ impl NotificationServiceImpl {
         // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
 
-        let (
-            streaming_worker_slot_mappings,
-            streaming_worker_slot_mapping_version,
-            streaming_worker_slot_mapping_ready,
-        ) = self.get_worker_slot_mapping_snapshot()?;
-
-        if !streaming_worker_slot_mapping_ready {
-            tracing::warn!(
-                "frontend subscribe returns streaming_worker_slot_mappings while barrier manager is still recovering"
-            );
-        }
+        let streaming_worker_slot_mappings = self.get_worker_slot_mapping_snapshot()?;
 
         let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
 
@@ -310,8 +297,6 @@ impl NotificationServiceImpl {
             version: Some(SnapshotVersion {
                 catalog_version,
                 worker_node_version,
-                streaming_worker_slot_mapping_version,
-                streaming_worker_slot_mapping_ready,
             }),
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,

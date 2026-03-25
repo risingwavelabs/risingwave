@@ -1165,14 +1165,8 @@ impl CatalogController {
         Ok(actor_infos)
     }
 
-    pub fn get_worker_slot_mappings_snapshot(
-        &self,
-    ) -> (Vec<PbFragmentWorkerSlotMapping>, NotificationVersion, bool) {
+    pub fn get_worker_slot_mappings_snapshot(&self) -> Vec<PbFragmentWorkerSlotMapping> {
         self.env.shared_actor_infos().snapshot()
-    }
-
-    pub fn current_streaming_worker_slot_mapping_version(&self) -> NotificationVersion {
-        self.env.shared_actor_infos().current_version()
     }
 
     pub async fn list_fragment_descs_with_node(

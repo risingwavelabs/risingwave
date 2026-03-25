@@ -127,18 +127,7 @@ where
             Info::HummockStats(_) => true,
             Info::Recovery(_) => true,
             Info::ClusterResource(_) => true,
-            Info::StreamingWorkerSlotMapping(_) => {
-                // Version 0 is used for intermediate notifications in a multi-fragment
-                // batch (only the final notification carries the real version).
-                // Always retain these so no fragment mappings are lost during init.
-                notification.version == 0
-                    || notification.version
-                        > info
-                            .version
-                            .as_ref()
-                            .unwrap()
-                            .streaming_worker_slot_mapping_version
-            }
+            Info::StreamingWorkerSlotMapping(_) => true,
             Info::ServingWorkerSlotMappings(_) => true,
         });
 
@@ -275,7 +264,7 @@ mod tests {
 
     #[derive(Clone, Default)]
     struct TestState {
-        init_mapping_versions: Arc<Mutex<Vec<u64>>>,
+        initialized: Arc<Mutex<u64>>,
         handled_mapping_versions: Arc<Mutex<Vec<u64>>>,
         events: Arc<Mutex<Vec<TestEvent>>>,
     }
@@ -305,13 +294,8 @@ mod tests {
                 panic!("expected snapshot");
             };
             self.events.lock().unwrap().push(TestEvent::Snapshot);
-            self.init_mapping_versions.lock().unwrap().push(
-                snapshot
-                    .version
-                    .as_ref()
-                    .unwrap()
-                    .streaming_worker_slot_mapping_version,
-            );
+            assert!(snapshot.version.is_some());
+            *self.initialized.lock().unwrap() += 1;
         }
 
         fn handle_initialization_finished(&mut self) {
@@ -346,7 +330,7 @@ mod tests {
         }
     }
 
-    fn snapshot_notification(streaming_worker_slot_mapping_version: u64) -> SubscribeResponse {
+    fn snapshot_notification() -> SubscribeResponse {
         SubscribeResponse {
             status: None,
             operation: Operation::Snapshot as _,
@@ -355,8 +339,6 @@ mod tests {
                 version: Some(SnapshotVersion {
                     catalog_version: 0,
                     worker_node_version: 0,
-                    streaming_worker_slot_mapping_version,
-                    streaming_worker_slot_mapping_ready: true,
                 }),
                 ..Default::default()
             })),
@@ -382,7 +364,7 @@ mod tests {
         let state = TestState::default();
         let mut observer_manager = ObserverManager {
             rx: TestChannel {
-                notifications: VecDeque::from([mapping_notification(2), snapshot_notification(1)]),
+                notifications: VecDeque::from([mapping_notification(2), snapshot_notification()]),
             },
             client: TestClient,
             observer_states: state.clone(),
@@ -390,7 +372,7 @@ mod tests {
 
         observer_manager.wait_init_notification().await.unwrap();
 
-        assert_eq!(state.init_mapping_versions.lock().unwrap().as_slice(), &[1]);
+        assert_eq!(*state.initialized.lock().unwrap(), 1);
         assert_eq!(
             state.handled_mapping_versions.lock().unwrap().as_slice(),
             &[2]
@@ -406,11 +388,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drops_streaming_mapping_notification_already_covered_by_snapshot() {
+    async fn keeps_streaming_mapping_notification_during_initialization() {
         let state = TestState::default();
         let mut observer_manager = ObserverManager {
             rx: TestChannel {
-                notifications: VecDeque::from([mapping_notification(1), snapshot_notification(1)]),
+                notifications: VecDeque::from([mapping_notification(1), snapshot_notification()]),
             },
             client: TestClient,
             observer_states: state.clone(),
@@ -418,11 +400,18 @@ mod tests {
 
         observer_manager.wait_init_notification().await.unwrap();
 
-        assert_eq!(state.init_mapping_versions.lock().unwrap().as_slice(), &[1]);
-        assert!(state.handled_mapping_versions.lock().unwrap().is_empty());
+        assert_eq!(*state.initialized.lock().unwrap(), 1);
+        assert_eq!(
+            state.handled_mapping_versions.lock().unwrap().as_slice(),
+            &[1]
+        );
         assert_eq!(
             state.events.lock().unwrap().as_slice(),
-            &[TestEvent::Snapshot, TestEvent::Finished]
+            &[
+                TestEvent::Snapshot,
+                TestEvent::Notification,
+                TestEvent::Finished,
+            ]
         );
     }
 
@@ -431,7 +420,7 @@ mod tests {
         let state = TestState::default();
         let mut observer_manager = ObserverManager {
             rx: TestChannel {
-                notifications: VecDeque::from([mapping_notification(3), snapshot_notification(1)]),
+                notifications: VecDeque::from([mapping_notification(3), snapshot_notification()]),
             },
             client: TestClient,
             observer_states: state.clone(),
@@ -460,7 +449,7 @@ mod tests {
                 notifications: VecDeque::from([
                     mapping_notification(0), // intermediate (version 0)
                     mapping_notification(5), // final of the batch
-                    snapshot_notification(3),
+                    snapshot_notification(),
                 ]),
             },
             client: TestClient,
