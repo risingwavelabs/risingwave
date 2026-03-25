@@ -326,6 +326,9 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     metrics,
                     log_store_identity,
                     pk_info,
+                )
+                .with_historical_read_semaphore(
+                    params.env.kv_log_store_historical_read_semaphore(),
                 );
 
                 SinkExecutor::new(

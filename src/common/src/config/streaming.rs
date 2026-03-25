@@ -252,6 +252,13 @@ pub struct StreamingDeveloperConfig {
     /// The interval in seconds for the refresh scheduler to check and trigger scheduled refreshes.
     #[serde(default = "default::developer::refresh_scheduler_interval_sec")]
     pub refresh_scheduler_interval_sec: u64,
+
+    /// The maximum number of kv log store readers that can concurrently read historical data
+    /// (i.e., from the state store) during initialization. A reader is considered "initializing"
+    /// until it has read at least one row from the historical stream or the stream returns empty.
+    /// Set to 0 to disable the limit (unlimited concurrency).
+    #[serde(default = "default::developer::max_concurrent_kv_log_store_historical_read")]
+    pub max_concurrent_kv_log_store_historical_read: usize,
 }
 
 pub mod default {

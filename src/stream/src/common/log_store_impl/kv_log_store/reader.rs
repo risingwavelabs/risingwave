@@ -41,7 +41,7 @@ use risingwave_storage::store::{
     PrefetchOptions, ReadOptions, StateStoreKeyedRowRef, StateStoreRead,
 };
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
 
@@ -126,7 +126,12 @@ impl RewindDelay {
 
 enum KvLogStoreReaderFutureState<S: StateStoreRead> {
     /// consuming historical log data
-    ReadStateStoreStream(Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>),
+    ReadStateStoreStream(
+        Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>,
+        /// Held permit limiting concurrent historical reads. Automatically released
+        /// when this variant is replaced (i.e. stream fully consumed or reset).
+        Option<OwnedSemaphorePermit>,
+    ),
     ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>),
     Reset,
     Empty,
@@ -192,9 +197,14 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
     identity: String,
 
     rewind_delay: RewindDelay,
+
+    /// Shared semaphore to limit concurrent historical reads across the compute node.
+    /// `None` means unlimited.
+    historical_read_semaphore: Option<Arc<Semaphore>>,
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreReadState<S>,
         rx: LogStoreBufferReceiver,
@@ -203,6 +213,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
         identity: String,
+        historical_read_semaphore: Option<Arc<Semaphore>>,
     ) -> Self {
         let rewind_delay = RewindDelay::new(&metrics);
         Self {
@@ -218,6 +229,7 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             is_paused,
             identity,
             rewind_delay,
+            historical_read_semaphore,
         }
     }
 }
@@ -414,8 +426,33 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             {
                 KvLogStoreReaderFutureState::Empty
             } else {
+                // Acquire a permit before starting to read historical data.
+                // This limits the number of concurrent historical reads across
+                // the compute node, preventing excessive state store I/O during
+                // recovery or restart.
+                //
+                // Deadlock safety: The writer side of this log store runs as a
+                // separate future in a `select` with this consumer. Even if this
+                // consumer is blocked waiting for a permit, the writer can still
+                // make progress processing barriers. The log store buffer is also
+                // unbounded on the writer side, so the writer won't be blocked by
+                // the reader not consuming. Therefore, blocking here does not
+                // prevent barrier flow.
+                let permit = if let Some(semaphore) = &self.historical_read_semaphore {
+                    Some(
+                        semaphore
+                            .clone()
+                            .acquire_owned()
+                            .instrument_await("Wait for Historical Read Permit")
+                            .await
+                            .map_err(|_| anyhow!("historical read semaphore closed"))?,
+                    )
+                } else {
+                    None
+                };
                 KvLogStoreReaderFutureState::ReadStateStoreStream(
                     self.read_persisted_log_store(range_start).await?,
+                    permit,
                 )
             };
         self.rx.rewind(start_offset);
@@ -462,7 +499,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 .map_err(|_| anyhow!("unable to subscribe resume"))?;
         }
         match &mut self.future_state {
-            KvLogStoreReaderFutureState::ReadStateStoreStream(state_store_stream) => {
+            KvLogStoreReaderFutureState::ReadStateStoreStream(state_store_stream, _permit) => {
                 match state_store_stream
                     .try_next()
                     .instrument_await("Try Next for Historical Stream")
@@ -496,6 +533,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         return Ok((epoch, item));
                     }
                     None => {
+                        // Historical stream fully consumed. Permit is dropped with the variant.
                         self.future_state = KvLogStoreReaderFutureState::Empty;
                     }
                 }

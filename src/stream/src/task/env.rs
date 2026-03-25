@@ -23,6 +23,7 @@ use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::{ComputeClientPoolRef, MetaClient};
 use risingwave_storage::StateStoreImpl;
+use tokio::sync::Semaphore;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
@@ -60,6 +61,10 @@ pub struct StreamEnvironment {
 
     /// Compute client pool for streaming gRPC exchange.
     client_pool: ComputeClientPoolRef,
+
+    /// Semaphore to limit the number of kv log store readers concurrently reading historical data.
+    /// `None` means unlimited.
+    kv_log_store_historical_read_semaphore: Option<Arc<Semaphore>>,
 }
 
 impl StreamEnvironment {
@@ -75,6 +80,16 @@ impl StreamEnvironment {
         meta_client: MetaClient,
         client_pool: ComputeClientPoolRef,
     ) -> Self {
+        let kv_log_store_historical_read_semaphore = {
+            let max = global_config
+                .developer
+                .max_concurrent_kv_log_store_historical_read;
+            if max > 0 {
+                Some(Arc::new(Semaphore::new(max)))
+            } else {
+                None
+            }
+        };
         StreamEnvironment {
             server_addr,
             global_config,
@@ -86,6 +101,7 @@ impl StreamEnvironment {
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: Some(meta_client),
             client_pool,
+            kv_log_store_historical_read_semaphore,
         }
     }
 
@@ -108,6 +124,7 @@ impl StreamEnvironment {
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: None,
             client_pool: Arc::new(ComputeClientPool::for_test()),
+            kv_log_store_historical_read_semaphore: None,
         }
     }
 
@@ -149,5 +166,9 @@ impl StreamEnvironment {
 
     pub fn client_pool(&self) -> ComputeClientPoolRef {
         self.client_pool.clone()
+    }
+
+    pub fn kv_log_store_historical_read_semaphore(&self) -> Option<Arc<Semaphore>> {
+        self.kv_log_store_historical_read_semaphore.clone()
     }
 }

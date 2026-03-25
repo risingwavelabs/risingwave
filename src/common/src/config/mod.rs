@@ -394,6 +394,10 @@ pub mod default {
         pub fn refresh_scheduler_interval_sec() -> u64 {
             60
         }
+
+        pub fn max_concurrent_kv_log_store_historical_read() -> usize {
+            0
+        }
     }
 }
 

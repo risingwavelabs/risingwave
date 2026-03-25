@@ -513,6 +513,10 @@ pub struct KvLogStoreFactory<S: StateStore> {
     identity: String,
 
     pk_info: &'static KvLogStorePkInfo,
+
+    /// Semaphore to limit the number of concurrent historical reads.
+    /// `None` means unlimited.
+    historical_read_semaphore: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
@@ -536,7 +540,16 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             metrics,
             identity: identity.into(),
             pk_info,
+            historical_read_semaphore: None,
         }
+    }
+
+    pub fn with_historical_read_semaphore(
+        mut self,
+        semaphore: Option<Arc<tokio::sync::Semaphore>>,
+    ) -> Self {
+        self.historical_read_semaphore = semaphore;
+        self
     }
 }
 
@@ -585,6 +598,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
+            self.historical_read_semaphore,
         );
 
         let writer = KvLogStoreWriter::new(
