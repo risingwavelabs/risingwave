@@ -392,7 +392,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                             },
                             WriteFutureEvent::ChunkFlushed(info) => {
                                 write_future_state =
-                                    SyncedKvLogStoreExecutor::<S>::process_chunk_flushed(
+                                    SyncedKvLogStoreExecutor::<S>::process_flushed_chunk(
                                         stream,
                                         write_state,
                                         info,
