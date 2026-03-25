@@ -570,6 +570,10 @@ message Table {
   // tables and tests. Not to be confused with the global catalog version for
   // notification service.
   TableVersion version = 100;
+
+  // Disable bloom filter contribution for this table when building SST bloom
+  // filters. This is an internal storage optimization flag.
+  bool disable_bloom_filter = 101;
 }
 
 enum HandleConflictBehavior {
