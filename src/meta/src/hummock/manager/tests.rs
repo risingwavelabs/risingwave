@@ -226,6 +226,22 @@ fn has_overlapping_compaction_groups(version: &HummockVersion) -> bool {
     ranges.windows(2).any(|window| window[0].1 >= window[1].0)
 }
 
+fn all_group_member_table_ids(version: &HummockVersion) -> Vec<u32> {
+    version
+        .levels
+        .keys()
+        .flat_map(|group_id| {
+            version
+                .state_table_info
+                .compaction_group_member_table_ids(*group_id)
+                .iter()
+                .map(|table_id| table_id.as_raw_id())
+                .collect_vec()
+        })
+        .sorted()
+        .collect_vec()
+}
+
 #[tokio::test]
 async fn test_hummock_compaction_task() {
     let (_, hummock_manager, _, worker_id) = setup_compute_env(80).await;
@@ -2828,7 +2844,24 @@ async fn test_normalize_overlapping_compaction_groups_cascading() {
         .collect_vec();
     assert_eq!(members_64, vec![64]);
     assert_eq!(members_65, vec![65]);
-
+    assert_eq!(
+        all_group_member_table_ids(&current_version),
+        vec![64, 65, 80, 81, 83]
+    );
+    assert_eq!(
+        current_version
+            .levels
+            .keys()
+            .filter(|group_id| {
+                !current_version
+                    .state_table_info
+                    .compaction_group_member_table_ids(**group_id)
+                    .is_empty()
+            })
+            .count(),
+        4,
+        "normalize should create exactly two new non-empty groups"
+    );
     assert_compaction_groups_non_overlapping(&current_version);
 }
 

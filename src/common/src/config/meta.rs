@@ -343,7 +343,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
     pub compact_task_table_size_partition_threshold_high: u64,
 
-    /// The interval of the periodic scheduling compaction group split job.
+    /// The interval of the regular periodic compaction group split job.
+    /// This does not disable normalize-triggered splits when
+    /// `enable_compaction_group_normalize` is enabled.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
         alias = "periodic_split_compact_group_interval_sec"
