@@ -694,6 +694,7 @@ mod tests {
                 version: Some(SnapshotVersion {
                     catalog_version: 0,
                     worker_node_version: 0,
+                    streaming_worker_slot_mapping_version: 0,
                 }),
                 cluster_resource: Some(Default::default()),
                 ..Default::default()

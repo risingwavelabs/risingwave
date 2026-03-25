@@ -153,11 +153,15 @@ impl NotificationServiceImpl {
         Ok(decrypted_secrets)
     }
 
-    fn get_worker_slot_mapping_snapshot(&self) -> MetaResult<Vec<FragmentWorkerSlotMapping>> {
-        Ok(self
+    async fn get_worker_slot_mapping_snapshot(
+        &self,
+    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
+        let mappings = self
             .metadata_manager
             .catalog_controller
-            .get_worker_slot_mappings_snapshot())
+            .get_worker_slot_mappings_snapshot();
+        let notification_version = self.env.notification_manager().current_version().await;
+        Ok((mappings, notification_version))
     }
 
     fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
@@ -253,7 +257,8 @@ impl NotificationServiceImpl {
         // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
 
-        let streaming_worker_slot_mappings = self.get_worker_slot_mapping_snapshot()?;
+        let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
+            self.get_worker_slot_mapping_snapshot().await?;
 
         let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
 
@@ -297,6 +302,7 @@ impl NotificationServiceImpl {
             version: Some(SnapshotVersion {
                 catalog_version,
                 worker_node_version,
+                streaming_worker_slot_mapping_version,
             }),
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,
