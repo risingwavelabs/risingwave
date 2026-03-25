@@ -31,7 +31,7 @@ use crate::types::Decimal::Normalized;
 use crate::types::IsNegative;
 use crate::types::ordered_float::OrderedFloat;
 
-#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+#[derive(Debug, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
@@ -61,7 +61,7 @@ impl From<DeciRef<'_>> for Decimal {
 
 impl DeciRef<'_> {
     pub fn xxd(self) -> Decimal {
-        *self.0
+        self.0.clone()
     }
 }
 impl Decimal {
@@ -516,7 +516,7 @@ impl DeciRef<'_> {
                 let new_d = d.round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero);
                 Decimal::Normalized(new_d)
             }
-            d => *d,
+            d => d.clone(),
         }
     }
 
@@ -564,7 +564,7 @@ impl DeciRef<'_> {
                 }
                 Decimal::Normalized(d)
             }
-            d => *d,
+            d => d.clone(),
         }
     }
 
@@ -572,7 +572,7 @@ impl DeciRef<'_> {
     pub fn floor(self) -> Decimal {
         match self.0 {
             Decimal::Normalized(d) => Decimal::Normalized(d.floor()),
-            d => *d,
+            d => d.clone(),
         }
     }
 
@@ -586,7 +586,7 @@ impl DeciRef<'_> {
                 }
                 Decimal::Normalized(d)
             }
-            d => *d,
+            d => d.clone(),
         }
     }
 
@@ -594,7 +594,7 @@ impl DeciRef<'_> {
     pub fn round_ties_even(self) -> Decimal {
         match self.0 {
             Decimal::Normalized(d) => Decimal::Normalized(d.round()),
-            d => *d,
+            d => d.clone(),
         }
     }
 }
@@ -653,7 +653,7 @@ impl DeciRef<'_> {
     pub fn normalize(self) -> Decimal {
         match self.0 {
             Decimal::Normalized(d) => Decimal::Normalized(d.normalize()),
-            d => *d,
+            d => d.clone(),
         }
     }
 

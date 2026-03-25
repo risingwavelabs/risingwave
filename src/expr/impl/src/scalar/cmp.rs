@@ -601,7 +601,7 @@ mod tests {
         .await;
     }
 
-    trait TestFrom: Copy {
+    trait TestFrom: Clone {
         const NAME: &'static str;
         fn test_from(i: usize) -> Self;
     }
@@ -676,8 +676,8 @@ mod tests {
             };
             let l = l.map(TestFrom::test_from);
             let r = r.map(TestFrom::test_from);
-            lhs.push(l);
-            rhs.push(r);
+            lhs.push(l.clone());
+            rhs.push(r.clone());
             target.push(f(l, r));
         }
         (lhs, rhs, target)
@@ -737,8 +737,8 @@ mod tests {
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
-                lhs[i].map(|int| int.to_scalar_value()),
-                rhs[i].map(|int| int.to_scalar_value()),
+                lhs[i].clone().map(|int| int.to_scalar_value()),
+                rhs[i].clone().map(|int| int.to_scalar_value()),
             ]);
             let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
