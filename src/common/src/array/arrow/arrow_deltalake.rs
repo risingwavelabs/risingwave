@@ -42,6 +42,7 @@ impl DeltaLakeConvert {
     fn decimal_to_i128(decimal: Decimal, precision: u8, max_scale: i8) -> Option<i128> {
         match decimal {
             crate::array::Decimal::Normalized(e) => {
+                let e = Decimal::qz(&e);
                 let value = e.mantissa();
                 let scale = e.scale() as i8;
                 let diff_scale = abs(max_scale - scale);
@@ -112,8 +113,8 @@ mod test {
             Some(Decimal::NaN),
             Some(Decimal::PositiveInf),
             Some(Decimal::NegativeInf),
-            Some(Decimal::Normalized("1".parse().unwrap())),
-            Some(Decimal::Normalized("123.456".parse().unwrap())),
+            Some(Decimal::normalized("1".parse().unwrap())),
+            Some(Decimal::normalized("123.456".parse().unwrap())),
         ])));
         let array = Arc::new(ArrayImpl::List(ListArray::from_iter(vec![value])));
         let chunk = crate::array::DataChunk::new(vec![array], Bitmap::ones(1));

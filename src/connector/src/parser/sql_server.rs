@@ -125,7 +125,7 @@ impl_chrono_tiberius_wrapper!(TimestampTiberiusWrapper, Timestamp, NaiveDateTime
 impl<'a> tiberius::IntoSql<'a> for DecimalTiberiusWrapper {
     fn into_sql(self) -> tiberius::ColumnData<'a> {
         match self.0 {
-            Decimal::Normalized(d) => d.into_sql(),
+            Decimal::Normalized(d) => Decimal::qz(&d).into_sql(),
             Decimal::NaN => tiberius::ColumnData::Numeric(None),
             Decimal::PositiveInf => tiberius::ColumnData::Numeric(None),
             Decimal::NegativeInf => tiberius::ColumnData::Numeric(None),
@@ -138,7 +138,7 @@ impl<'a> tiberius::FromSql<'a> for DecimalTiberiusWrapper {
     fn from_sql(value: &'a tiberius::ColumnData<'static>) -> tiberius::Result<Option<Self>> {
         tiberius::Result::Ok(
             RustDecimal::from_sql(value)?
-                .map(Decimal::Normalized)
+                .map(Decimal::normalizeq)
                 .map(DecimalTiberiusWrapper::from),
         )
     }

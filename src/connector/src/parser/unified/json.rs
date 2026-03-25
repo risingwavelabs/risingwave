@@ -502,7 +502,7 @@ impl JsonParseOptions {
                     .as_bytes();
                 let unscaled = BigInt::from_signed_bytes_be(value);
                 let decimal = scaled_bigint_to_rust_decimal(unscaled, scale as _)?;
-                ScalarImpl::Decimal(Decimal::Normalized(decimal))
+                ScalarImpl::Decimal(Decimal::normalizeq(decimal))
             }
             // ---- Date -----
             (

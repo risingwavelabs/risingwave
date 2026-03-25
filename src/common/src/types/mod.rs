@@ -1389,7 +1389,7 @@ mod tests {
         assert_item_size_eq!(TimestampArray, 12);
 
         // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
-        assert_item_size_eq!(DecimalArray, 20);
+        assert_item_size_eq!(DecimalArray, 16);
 
         const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
         const_assert_eq!(std::mem::size_of::<ScalarRefImpl<'_>>(), 24);

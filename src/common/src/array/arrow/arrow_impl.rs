@@ -1954,8 +1954,8 @@ mod tests {
     fn uint64() {
         let array: DecimalArray = DecimalArray::from_iter([
             None,
-            Some(Decimal::Normalized("7".parse().unwrap())),
-            Some(Decimal::Normalized("18446744073709551615".parse().unwrap())),
+            Some(Decimal::normalized("7".parse().unwrap())),
+            Some(Decimal::normalized("18446744073709551615".parse().unwrap())),
         ]);
         let arr = arrow_array::UInt64Array::from(vec![None, Some(7), Some(18446744073709551615)]);
         let converted: DecimalArray = (&arr).try_into().unwrap();
@@ -2028,8 +2028,8 @@ mod tests {
             Some(Decimal::NaN),
             Some(Decimal::PositiveInf),
             Some(Decimal::NegativeInf),
-            Some(Decimal::Normalized("123.4".parse().unwrap())),
-            Some(Decimal::Normalized("123.456".parse().unwrap())),
+            Some(Decimal::normalized("123.4".parse().unwrap())),
+            Some(Decimal::normalized("123.456".parse().unwrap())),
         ]);
         let arrow = arrow_array::LargeBinaryArray::from(&array);
         assert_eq!(DecimalArray::try_from(&arrow).unwrap(), array);

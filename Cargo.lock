@@ -11589,6 +11589,7 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "auto_impl",
+ "bigdecimal 0.4.10",
  "bitfield-struct",
  "bitflags 2.10.0",
  "byteorder",

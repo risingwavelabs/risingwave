@@ -585,6 +585,7 @@ fn bind_params(
                 ScalarRefImpl::Bool(v) => query.bind(v),
                 ScalarRefImpl::Decimal(v) => match v.xxd() {
                     Decimal::Normalized(d) => {
+                        let d = Decimal::qz(&d);
                         query.bind(decimal_to_sql(&d));
                     }
                     Decimal::NaN | Decimal::PositiveInf | Decimal::NegativeInf => {

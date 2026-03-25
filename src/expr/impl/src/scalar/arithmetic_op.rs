@@ -21,7 +21,6 @@ use risingwave_common::types::{
     Scalar as _, Time, Timestamp,
 };
 use risingwave_expr::{ExprError, Result, function};
-use rust_decimal::MathematicalOps;
 
 #[function("add(*int, *int) -> auto")]
 #[function("add(decimal, decimal) -> auto")]
@@ -389,7 +388,7 @@ pub fn sqrt_decimal(expr: DeciRef<'_>) -> Result<Decimal> {
     match expr.xxd() {
         Decimal::NaN | Decimal::PositiveInf => Ok(expr.xxd()),
         Decimal::Normalized(value) => match value.sqrt() {
-            Some(res) => Ok(Decimal::from(res)),
+            Some(res) => Ok(Decimal::normalized(res)),
             None => Err(ExprError::InvalidParam {
                 name: "sqrt input",
                 reason: "input cannot be negative value".into(),

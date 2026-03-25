@@ -169,6 +169,7 @@ impl ToArrow for IcebergArrowConvert {
             .map(|e| {
                 e.and_then(|e| match e.xxd() {
                     crate::array::Decimal::Normalized(e) => {
+                        let e = crate::array::Decimal::qz(&e);
                         let value = e.mantissa();
                         let scale = e.scale() as i8;
                         let diff_scale = abs(max_scale - scale);
@@ -334,8 +335,8 @@ mod test {
             Some(Decimal::NaN),
             Some(Decimal::PositiveInf),
             Some(Decimal::NegativeInf),
-            Some(Decimal::Normalized("123.4".parse().unwrap())),
-            Some(Decimal::Normalized("123.456".parse().unwrap())),
+            Some(Decimal::normalized("123.4".parse().unwrap())),
+            Some(Decimal::normalized("123.456".parse().unwrap())),
         ]);
         let ty = DataType::Decimal128(6, 3);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
@@ -360,8 +361,8 @@ mod test {
             Some(Decimal::NaN),
             Some(Decimal::PositiveInf),
             Some(Decimal::NegativeInf),
-            Some(Decimal::Normalized("123.4".parse().unwrap())),
-            Some(Decimal::Normalized("123.456".parse().unwrap())),
+            Some(Decimal::normalized("123.4".parse().unwrap())),
+            Some(Decimal::normalized("123.456".parse().unwrap())),
         ]);
         let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
@@ -385,31 +386,31 @@ mod test {
         // Test edge cases between RisingWave decimal precision (28 digits) and Arrow Decimal128(38,10)
         let array = DecimalArray::from_iter([
             // Large 27-digit integer (previously would overflow with precision=28, scale=10)
-            Some(Decimal::Normalized(
+            Some(Decimal::normalized(
                 "999999999999999999999999999".parse().unwrap(),
             )),
             // RisingWave MAX_PRECISION: 28-digit integer
-            Some(Decimal::Normalized(
+            Some(Decimal::normalized(
                 "9999999999999999999999999999".parse().unwrap(),
             )),
             // Large integer with fractional part
-            Some(Decimal::Normalized(
+            Some(Decimal::normalized(
                 "999999999999999999.9999999999".parse().unwrap(),
             )),
             // Small value with maximum fractional digits
-            Some(Decimal::Normalized(
+            Some(Decimal::normalized(
                 "0.9999999999999999999999999999".parse().unwrap(),
             )),
             // Negative large integer
-            Some(Decimal::Normalized(
+            Some(Decimal::normalized(
                 "-999999999999999999999999999".parse().unwrap(),
             )),
             // Edge case: exactly 10^18 (18 digits) - boundary for old precision=28,scale=10
-            Some(Decimal::Normalized("1000000000000000000".parse().unwrap())),
+            Some(Decimal::normalized("1000000000000000000".parse().unwrap())),
             // Very small decimal
-            Some(Decimal::Normalized("0.0000000001".parse().unwrap())),
+            Some(Decimal::normalized("0.0000000001".parse().unwrap())),
             // Zero with fractional representation
-            Some(Decimal::Normalized("0.0000000000".parse().unwrap())),
+            Some(Decimal::normalized("0.0000000000".parse().unwrap())),
         ]);
 
         let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
@@ -449,7 +450,7 @@ mod test {
             Some(Decimal::PositiveInf),
             Some(Decimal::NegativeInf),
             Some(Decimal::NaN),
-            Some(Decimal::Normalized("123.45".parse().unwrap())),
+            Some(Decimal::normalized("123.45".parse().unwrap())),
             None,
         ]);
 

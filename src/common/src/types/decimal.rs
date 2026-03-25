@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::io::{Cursor, Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+use bigdecimal::BigDecimal;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedRem, CheckedSub, One, Zero};
@@ -36,7 +37,7 @@ pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
     #[display("{0}")]
-    Normalized(RustDecimal),
+    Normalized(Box<BigDecimal>),
     #[display("Infinity")]
     PositiveInf,
     #[display("NaN")]
@@ -67,6 +68,31 @@ impl DeciRef<'_> {
 impl Decimal {
     pub fn dxx(&self) -> DeciRef<'_> {
         DeciRef(self)
+    }
+}
+#[easy_ext::ext]
+impl RustDecimal {
+    fn zq(&self) -> BigDecimal {
+        BigDecimal::from_str(&self.to_string()).unwrap()
+    }
+}
+#[easy_ext::ext]
+impl BigDecimal {
+    fn qz(&self) -> RustDecimal {
+        RustDecimal::from_str(&self.to_string()).unwrap()
+    }
+}
+impl Decimal {
+    pub fn normalized(d: BigDecimal) -> Self {
+        Self::Normalized(Box::new(d))
+    }
+
+    pub fn normalizeq(d: RustDecimal) -> Self {
+        Self::Normalized(Box::new(d.zq()))
+    }
+
+    pub fn qz(d: &BigDecimal) -> RustDecimal {
+        d.qz()
     }
 }
 
@@ -102,7 +128,7 @@ impl Decimal {
 
     pub fn from_scientific(value: &str) -> Option<Self> {
         let decimal = RustDecimal::from_scientific(value).ok()?;
-        Some(Normalized(decimal))
+        Some(Decimal::normalizeq(decimal))
     }
 
     pub fn from_str_radix(s: &str, radix: u32) -> rust_decimal::Result<Self> {
@@ -110,7 +136,7 @@ impl Decimal {
             "nan" => Ok(Decimal::NaN),
             "inf" | "+inf" | "infinity" | "+infinity" => Ok(Decimal::PositiveInf),
             "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
-            s => RustDecimal::from_str_radix(s, radix).map(Decimal::Normalized),
+            s => RustDecimal::from_str_radix(s, radix).map(Decimal::normalizeq),
         }
     }
 }
@@ -130,7 +156,7 @@ impl ToSql for DeciRef<'_> {
     {
         match self.0 {
             Decimal::Normalized(d) => {
-                return d.to_sql(ty, out);
+                return d.qz().to_sql(ty, out);
             }
             Decimal::NaN => {
                 out.reserve(8);
@@ -171,7 +197,7 @@ impl<'a> FromSql<'a> for Decimal {
             0xC000 => Ok(Self::NaN),
             0xD000 => Ok(Self::PositiveInf),
             0xF000 => Ok(Self::NegativeInf),
-            _ => RustDecimal::from_sql(ty, raw).map(Self::Normalized),
+            _ => RustDecimal::from_sql(ty, raw).map(Self::normalizeq),
         }
     }
 
@@ -185,7 +211,7 @@ macro_rules! impl_convert_int {
         impl core::convert::From<$T> for Decimal {
             #[inline]
             fn from(t: $T) -> Self {
-                Self::Normalized(t.into())
+                Self::normalizeq(t.into())
             }
         }
 
@@ -195,7 +221,7 @@ macro_rules! impl_convert_int {
             #[inline]
             fn try_from(d: Decimal) -> Result<Self, Self::Error> {
                 match d.dxx().round_dp_ties_away(0) {
-                    Decimal::Normalized(d) => d.try_into(),
+                    Decimal::Normalized(d) => d.qz().try_into(),
                     _ => Err(Error::ConversionTo(std::any::type_name::<$T>().into())),
                 }
             }
@@ -206,7 +232,7 @@ macro_rules! impl_convert_int {
             #[inline]
             fn try_from(d: DeciRef<'_>) -> Result<Self, Self::Error> {
                 match d.round_dp_ties_away(0) {
-                    Decimal::Normalized(d) => d.try_into(),
+                    Decimal::Normalized(d) => d.qz().try_into(),
                     _ => Err(Error::ConversionTo(std::any::type_name::<$T>().into())),
                 }
             }
@@ -224,7 +250,7 @@ macro_rules! impl_convert_float {
                     num if num.is_nan() => Ok(Decimal::NaN),
                     num if num.is_infinite() && num.is_sign_positive() => Ok(Decimal::PositiveInf),
                     num if num.is_infinite() && num.is_sign_negative() => Ok(Decimal::NegativeInf),
-                    num => num.try_into().map(Decimal::Normalized),
+                    num => num.try_into().map(Decimal::normalizeq),
                 }
             }
         }
@@ -241,7 +267,7 @@ macro_rules! impl_convert_float {
 
             fn try_from(d: Decimal) -> Result<Self, Self::Error> {
                 match d {
-                    Decimal::Normalized(d) => d.try_into(),
+                    Decimal::Normalized(d) => d.qz().try_into(),
                     Decimal::NaN => Ok(<$T>::NAN),
                     Decimal::PositiveInf => Ok(<$T>::INFINITY),
                     Decimal::NegativeInf => Ok(<$T>::NEG_INFINITY),
@@ -271,7 +297,7 @@ macro_rules! checked_proxy {
             fn $func(&self, other: &Self) -> Option<Self> {
                 match (self, other) {
                     (Self::Normalized(lhs), Self::Normalized(rhs)) => {
-                        lhs.$func(rhs).map(Decimal::Normalized)
+                        lhs.qz().$func(rhs.qz()).map(Decimal::normalizeq)
                     }
                     (lhs, rhs) => Some(lhs.as_scalar_ref() $op rhs.as_scalar_ref()),
                 }
@@ -312,7 +338,9 @@ impl Add for DeciRef<'_> {
 
     fn add(self, other: Self) -> Self::Output {
         match (self.0, other.0) {
-            (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) => Decimal::Normalized(lhs + rhs),
+            (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) => {
+                Decimal::normalized(lhs.as_ref() + rhs.as_ref())
+            }
             (Decimal::NaN, _) => Decimal::NaN,
             (_, Decimal::NaN) => Decimal::NaN,
             (Decimal::PositiveInf, Decimal::NegativeInf) => Decimal::NaN,
@@ -330,7 +358,7 @@ impl Neg for Decimal {
 
     fn neg(self) -> Self {
         match self {
-            Self::Normalized(d) => Self::Normalized(-d),
+            Self::Normalized(d) => Self::normalized(-d.as_ref()),
             Self::NaN => Self::NaN,
             Self::PositiveInf => Self::NegativeInf,
             Self::NegativeInf => Self::PositiveInf,
@@ -343,7 +371,7 @@ impl CheckedNeg for DeciRef<'_> {
 
     fn checked_neg(self) -> Option<Self::Output> {
         match self.xxd() {
-            Decimal::Normalized(d) => Some(Decimal::Normalized(-d)),
+            Decimal::Normalized(d) => Some(Decimal::normalized(-d.as_ref())),
             Decimal::NaN => Some(Decimal::NaN),
             Decimal::PositiveInf => Some(Decimal::NegativeInf),
             Decimal::NegativeInf => Some(Decimal::PositiveInf),
@@ -357,21 +385,21 @@ impl Rem for DeciRef<'_> {
     fn rem(self, other: Self) -> Self::Output {
         match (self.0, other.0) {
             (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) if !rhs.is_zero() => {
-                Decimal::Normalized(lhs % rhs)
+                Decimal::normalized(lhs.as_ref() % rhs.as_ref())
             }
             (Decimal::Normalized(_), Decimal::Normalized(_)) => Decimal::NaN,
             (Decimal::Normalized(lhs), Decimal::PositiveInf)
-                if lhs.is_sign_positive() || lhs.is_zero() =>
+                if lhs.qz().is_sign_positive() || lhs.is_zero() =>
             {
-                Decimal::Normalized(*lhs)
+                Decimal::Normalized(lhs.clone())
             }
-            (Decimal::Normalized(d), Decimal::PositiveInf) => Decimal::Normalized(*d),
+            (Decimal::Normalized(d), Decimal::PositiveInf) => Decimal::Normalized(d.clone()),
             (Decimal::Normalized(lhs), Decimal::NegativeInf)
-                if lhs.is_sign_negative() || lhs.is_zero() =>
+                if lhs.qz().is_sign_negative() || lhs.is_zero() =>
             {
-                Decimal::Normalized(*lhs)
+                Decimal::Normalized(lhs.clone())
             }
-            (Decimal::Normalized(d), Decimal::NegativeInf) => Decimal::Normalized(*d),
+            (Decimal::Normalized(d), Decimal::NegativeInf) => Decimal::Normalized(d.clone()),
             _ => Decimal::NaN,
         }
     }
@@ -388,9 +416,9 @@ impl Div for DeciRef<'_> {
             // div by zero
             (lhs, Decimal::Normalized(rhs)) if rhs.is_zero() => match lhs {
                 Decimal::Normalized(lhs) => {
-                    if lhs.is_sign_positive() && !lhs.is_zero() {
+                    if lhs.qz().is_sign_positive() && !lhs.is_zero() {
                         Decimal::PositiveInf
-                    } else if lhs.is_sign_negative() && !lhs.is_zero() {
+                    } else if lhs.qz().is_sign_negative() && !lhs.is_zero() {
                         Decimal::NegativeInf
                     } else {
                         Decimal::NaN
@@ -402,28 +430,30 @@ impl Div for DeciRef<'_> {
             },
             // div by +/-inf
             (Decimal::Normalized(_), Decimal::PositiveInf) => {
-                Decimal::Normalized(RustDecimal::from(0))
+                Decimal::normalized(BigDecimal::from(0))
             }
             (_, Decimal::PositiveInf) => Decimal::NaN,
             (Decimal::Normalized(_), Decimal::NegativeInf) => {
-                Decimal::Normalized(RustDecimal::from(0))
+                Decimal::normalized(BigDecimal::from(0))
             }
             (_, Decimal::NegativeInf) => Decimal::NaN,
             // div inf
-            (Decimal::PositiveInf, Decimal::Normalized(d)) if d.is_sign_positive() => {
+            (Decimal::PositiveInf, Decimal::Normalized(d)) if d.qz().is_sign_positive() => {
                 Decimal::PositiveInf
             }
-            (Decimal::PositiveInf, Decimal::Normalized(d)) if d.is_sign_negative() => {
+            (Decimal::PositiveInf, Decimal::Normalized(d)) if d.qz().is_sign_negative() => {
                 Decimal::NegativeInf
             }
-            (Decimal::NegativeInf, Decimal::Normalized(d)) if d.is_sign_positive() => {
+            (Decimal::NegativeInf, Decimal::Normalized(d)) if d.qz().is_sign_positive() => {
                 Decimal::NegativeInf
             }
-            (Decimal::NegativeInf, Decimal::Normalized(d)) if d.is_sign_negative() => {
+            (Decimal::NegativeInf, Decimal::Normalized(d)) if d.qz().is_sign_negative() => {
                 Decimal::PositiveInf
             }
             // normal case
-            (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) => Decimal::Normalized(lhs / rhs),
+            (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) => {
+                Decimal::normalized(lhs.as_ref() / rhs.as_ref())
+            }
             _ => unreachable!(),
         }
     }
@@ -434,50 +464,52 @@ impl Mul for DeciRef<'_> {
 
     fn mul(self, other: Self) -> Self::Output {
         match (self.0, other.0) {
-            (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) => Decimal::Normalized(lhs * rhs),
+            (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) => {
+                Decimal::normalized(lhs.as_ref() * rhs.as_ref())
+            }
             (Decimal::NaN, _) => Decimal::NaN,
             (_, Decimal::NaN) => Decimal::NaN,
             (Decimal::PositiveInf, Decimal::Normalized(rhs))
-                if !rhs.is_zero() && rhs.is_sign_negative() =>
+                if !rhs.is_zero() && rhs.qz().is_sign_negative() =>
             {
                 Decimal::NegativeInf
             }
             (Decimal::PositiveInf, Decimal::Normalized(rhs))
-                if !rhs.is_zero() && rhs.is_sign_positive() =>
+                if !rhs.is_zero() && rhs.qz().is_sign_positive() =>
             {
                 Decimal::PositiveInf
             }
             (Decimal::PositiveInf, Decimal::PositiveInf) => Decimal::PositiveInf,
             (Decimal::PositiveInf, Decimal::NegativeInf) => Decimal::NegativeInf,
             (Decimal::Normalized(lhs), Decimal::PositiveInf)
-                if !lhs.is_zero() && lhs.is_sign_negative() =>
+                if !lhs.is_zero() && lhs.qz().is_sign_negative() =>
             {
                 Decimal::NegativeInf
             }
             (Decimal::Normalized(lhs), Decimal::PositiveInf)
-                if !lhs.is_zero() && lhs.is_sign_positive() =>
+                if !lhs.is_zero() && lhs.qz().is_sign_positive() =>
             {
                 Decimal::PositiveInf
             }
             (Decimal::NegativeInf, Decimal::PositiveInf) => Decimal::NegativeInf,
             (Decimal::NegativeInf, Decimal::Normalized(rhs))
-                if !rhs.is_zero() && rhs.is_sign_negative() =>
+                if !rhs.is_zero() && rhs.qz().is_sign_negative() =>
             {
                 Decimal::PositiveInf
             }
             (Decimal::NegativeInf, Decimal::Normalized(rhs))
-                if !rhs.is_zero() && rhs.is_sign_positive() =>
+                if !rhs.is_zero() && rhs.qz().is_sign_positive() =>
             {
                 Decimal::NegativeInf
             }
             (Decimal::NegativeInf, Decimal::NegativeInf) => Decimal::PositiveInf,
             (Decimal::Normalized(lhs), Decimal::NegativeInf)
-                if !lhs.is_zero() && lhs.is_sign_negative() =>
+                if !lhs.is_zero() && lhs.qz().is_sign_negative() =>
             {
                 Decimal::PositiveInf
             }
             (Decimal::Normalized(lhs), Decimal::NegativeInf)
-                if !lhs.is_zero() && lhs.is_sign_positive() =>
+                if !lhs.is_zero() && lhs.qz().is_sign_positive() =>
             {
                 Decimal::NegativeInf
             }
@@ -492,7 +524,9 @@ impl Sub for DeciRef<'_> {
 
     fn sub(self, other: Self) -> Self::Output {
         match (self.0, other.0) {
-            (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) => Decimal::Normalized(lhs - rhs),
+            (Decimal::Normalized(lhs), Decimal::Normalized(rhs)) => {
+                Decimal::normalized(lhs.as_ref() - rhs.as_ref())
+            }
             (Decimal::NaN, _) => Decimal::NaN,
             (_, Decimal::NaN) => Decimal::NaN,
             (Decimal::PositiveInf, Decimal::PositiveInf) => Decimal::NaN,
@@ -515,14 +549,14 @@ impl DeciRef<'_> {
         let Decimal::Normalized(d) = self.0 else {
             return None;
         };
-        Some(d.scale() as _)
+        Some(d.qz().scale() as _)
     }
 
     pub fn rescale(self, scale: u32) -> Decimal {
         if let Normalized(a) = self.0 {
-            let mut a = *a;
+            let mut a = a.qz();
             a.rescale(scale);
-            Normalized(a)
+            Decimal::normalizeq(a)
         } else {
             self.xxd()
         }
@@ -532,8 +566,10 @@ impl DeciRef<'_> {
     pub fn round_dp_ties_away(self, dp: u32) -> Decimal {
         match self.0 {
             Decimal::Normalized(d) => {
-                let new_d = d.round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero);
-                Decimal::Normalized(new_d)
+                let new_d = d
+                    .qz()
+                    .round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero);
+                Decimal::normalizeq(new_d)
             }
             d => d.clone(),
         }
@@ -542,23 +578,24 @@ impl DeciRef<'_> {
     /// Round to the left of the decimal point, for example `31.5` -> `30`.
     #[must_use]
     pub fn round_left_ties_away(self, left: u32) -> Option<Decimal> {
-        let &Decimal::Normalized(mut d) = self.0 else {
+        let Decimal::Normalized(d) = self.0 else {
             return Some(self.xxd());
         };
 
         // First, move the decimal point to the left so that we can reuse `round`. This is more
         // efficient than division.
-        let old_scale = d.scale();
+        let old_scale = d.qz().scale();
         let new_scale = old_scale.saturating_add(left);
         const MANTISSA_UP: i128 = 5 * 10i128.pow(Decimal::MAX_PRECISION as _);
         let d = match new_scale.cmp(&Decimal::MAX_PRECISION.add(1).into()) {
             // trivial within 28 digits
             std::cmp::Ordering::Less => {
+                let mut d = d.qz();
                 d.set_scale(new_scale).unwrap();
                 d.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
             }
             // Special case: scale cannot be 29, but it may or may not be >= 0.5e+29
-            std::cmp::Ordering::Equal => (d.mantissa() / MANTISSA_UP).signum().into(),
+            std::cmp::Ordering::Equal => (d.qz().mantissa() / MANTISSA_UP).signum().into(),
             // always 0 for >= 30 digits
             std::cmp::Ordering::Greater => 0.into(),
         };
@@ -569,7 +606,7 @@ impl DeciRef<'_> {
             true => d.is_zero().then(|| 0.into()),
             false => d
                 .checked_mul(RustDecimal::from_i128_with_scale(10i128.pow(left), 0))
-                .map(Decimal::Normalized),
+                .map(Decimal::normalizeq),
         }
     }
 
@@ -577,11 +614,11 @@ impl DeciRef<'_> {
     pub fn ceil(self) -> Decimal {
         match self.0 {
             Decimal::Normalized(d) => {
-                let mut d = d.ceil();
+                let mut d = d.qz().ceil();
                 if d.is_zero() {
                     d.set_sign_positive(true);
                 }
-                Decimal::Normalized(d)
+                Decimal::normalizeq(d)
             }
             d => d.clone(),
         }
@@ -590,7 +627,7 @@ impl DeciRef<'_> {
     #[must_use]
     pub fn floor(self) -> Decimal {
         match self.0 {
-            Decimal::Normalized(d) => Decimal::Normalized(d.floor()),
+            Decimal::Normalized(d) => Decimal::normalizeq(d.qz().floor()),
             d => d.clone(),
         }
     }
@@ -599,11 +636,11 @@ impl DeciRef<'_> {
     pub fn trunc(self) -> Decimal {
         match self.0 {
             Decimal::Normalized(d) => {
-                let mut d = d.trunc();
+                let mut d = d.qz().trunc();
                 if d.is_zero() {
                     d.set_sign_positive(true);
                 }
-                Decimal::Normalized(d)
+                Decimal::normalizeq(d)
             }
             d => d.clone(),
         }
@@ -612,7 +649,7 @@ impl DeciRef<'_> {
     #[must_use]
     pub fn round_ties_even(self) -> Decimal {
         match self.0 {
-            Decimal::Normalized(d) => Decimal::Normalized(d.round()),
+            Decimal::Normalized(d) => Decimal::normalizeq(d.qz().round()),
             d => d.clone(),
         }
     }
@@ -620,7 +657,7 @@ impl DeciRef<'_> {
 
 impl Decimal {
     pub fn from_i128_with_scale(num: i128, scale: u32) -> Self {
-        Decimal::Normalized(RustDecimal::from_i128_with_scale(num, scale))
+        Decimal::normalizeq(RustDecimal::from_i128_with_scale(num, scale))
     }
 
     /// Truncate the given `num` and `scale` to fit into `Decimal`, return `None` if it cannot be
@@ -640,14 +677,14 @@ impl Decimal {
             num /= 10i128.pow(diff_scale);
             scale = Self::MAX_PRECISION as u32;
         }
-        Some(Decimal::Normalized(
+        Some(Decimal::normalizeq(
             RustDecimal::try_from_i128_with_scale(num, scale).ok()?,
         ))
     }
 
     pub fn unordered_deserialize(bytes: [u8; 16]) -> Self {
         match bytes[0] {
-            0u8 => Self::Normalized(RustDecimal::deserialize(bytes)),
+            0u8 => Self::normalizeq(RustDecimal::deserialize(bytes)),
             1u8 => Self::NaN,
             2u8 => Self::PositiveInf,
             3u8 => Self::NegativeInf,
@@ -661,7 +698,7 @@ impl DeciRef<'_> {
         // according to https://docs.rs/rust_decimal/1.18.0/src/rust_decimal/decimal.rs.html#665-684
         // the lower 15 bits is not used, so we can use first byte to distinguish nan and inf
         match self.0 {
-            Decimal::Normalized(d) => d.serialize(),
+            Decimal::Normalized(d) => d.qz().serialize(),
             Decimal::NaN => [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             Decimal::PositiveInf => [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             Decimal::NegativeInf => [3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -671,7 +708,7 @@ impl DeciRef<'_> {
     #[must_use]
     pub fn normalize(self) -> Decimal {
         match self.0 {
-            Decimal::Normalized(d) => Decimal::Normalized(d.normalize()),
+            Decimal::Normalized(d) => Decimal::normalizeq(d.qz().normalize()),
             d => d.clone(),
         }
     }
@@ -679,10 +716,10 @@ impl DeciRef<'_> {
     pub fn abs(self) -> Decimal {
         match self.0 {
             Decimal::Normalized(d) => {
-                if d.is_sign_negative() {
-                    Decimal::Normalized(-d)
+                if d.qz().is_sign_negative() {
+                    Decimal::normalized(-d.as_ref())
                 } else {
-                    Decimal::Normalized(*d)
+                    Decimal::Normalized(d.clone())
                 }
             }
             Decimal::NaN => Decimal::NaN,
@@ -704,7 +741,7 @@ impl DeciRef<'_> {
 
     pub fn checked_exp(self) -> Option<Decimal> {
         match self.0 {
-            Decimal::Normalized(d) => d.checked_exp().map(Decimal::Normalized),
+            Decimal::Normalized(d) => d.qz().checked_exp().map(Decimal::normalizeq),
             Decimal::NaN => Some(Decimal::NaN),
             Decimal::PositiveInf => Some(Decimal::PositiveInf),
             Decimal::NegativeInf => Some(Decimal::zero()),
@@ -713,7 +750,7 @@ impl DeciRef<'_> {
 
     pub fn checked_ln(self) -> Option<Decimal> {
         match self.0 {
-            Decimal::Normalized(d) => d.checked_ln().map(Decimal::Normalized),
+            Decimal::Normalized(d) => d.qz().checked_ln().map(Decimal::normalizeq),
             Decimal::NaN => Some(Decimal::NaN),
             Decimal::PositiveInf => Some(Decimal::PositiveInf),
             Decimal::NegativeInf => None,
@@ -722,7 +759,7 @@ impl DeciRef<'_> {
 
     pub fn checked_log10(self) -> Option<Decimal> {
         match self.0 {
-            Decimal::Normalized(d) => d.checked_log10().map(Decimal::Normalized),
+            Decimal::Normalized(d) => d.qz().checked_log10().map(Decimal::normalizeq),
             Decimal::NaN => Some(Decimal::NaN),
             Decimal::PositiveInf => Some(Decimal::PositiveInf),
             Decimal::NegativeInf => None,
@@ -773,17 +810,20 @@ impl DeciRef<'_> {
             | (Decimal::NegativeInf, Decimal::NegativeInf) => Ok(0.into()),
 
             // D. Handle `inf ^ p`
-            (Decimal::PositiveInf, Normalized(rhs)) => match rhs.cmp(&0.into()) {
+            (Decimal::PositiveInf, Normalized(rhs)) => match rhs.as_ref().cmp(&0.into()) {
                 Ordering::Greater => Ok(Decimal::PositiveInf),
                 Ordering::Equal => Ok(1.into()),
                 Ordering::Less => Ok(0.into()),
             },
 
             // E. Handle `-inf ^ p`. Finite `p` can be fractional, odd, or even.
-            (Decimal::NegativeInf, Normalized(rhs)) => match !rhs.fract().is_zero() {
+            (Decimal::NegativeInf, Normalized(rhs)) => match !rhs.qz().fract().is_zero() {
                 // Err in PostgreSQL. No err in ISO 9899 which treats fractional as non-odd below.
                 true => Err(PowError::NegativeFract),
-                false => match (rhs.cmp(&0.into()), rhs.rem(&2.into()).abs().is_one()) {
+                false => match (
+                    rhs.as_ref().cmp(&0.into()),
+                    rhs.as_ref().rem(&2.into()).abs().is_one(),
+                ) {
                     (Ordering::Greater, true) => Ok(Decimal::NegativeInf),
                     (Ordering::Greater, false) => Ok(Decimal::PositiveInf),
                     (Ordering::Equal, true) => unreachable!(),
@@ -795,14 +835,14 @@ impl DeciRef<'_> {
 
             // F. Finite numbers
             (Normalized(lhs), Normalized(rhs)) => {
-                if lhs.is_zero() && rhs < &0.into() {
+                if lhs.is_zero() && rhs.as_ref() < &BigDecimal::zero() {
                     return Err(PowError::ZeroNegative);
                 }
-                if lhs < &0.into() && !rhs.fract().is_zero() {
+                if lhs.as_ref() < &BigDecimal::zero() && !rhs.qz().fract().is_zero() {
                     return Err(PowError::NegativeFract);
                 }
-                match lhs.checked_powd(*rhs) {
-                    Some(d) => Ok(Decimal::Normalized(d)),
+                match lhs.qz().checked_powd(rhs.qz()) {
+                    Some(d) => Ok(Decimal::normalizeq(d)),
                     None => Err(PowError::Overflow),
                 }
             }
@@ -819,7 +859,7 @@ pub enum PowError {
 impl From<DeciRef<'_>> for memcomparable::Decimal {
     fn from(d: DeciRef<'_>) -> Self {
         match d.0 {
-            Decimal::Normalized(d) => Self::Normalized(*d),
+            Decimal::Normalized(d) => Self::Normalized(d.qz()),
             Decimal::PositiveInf => Self::Inf,
             Decimal::NegativeInf => Self::NegInf,
             Decimal::NaN => Self::NaN,
@@ -830,7 +870,7 @@ impl From<DeciRef<'_>> for memcomparable::Decimal {
 impl From<memcomparable::Decimal> for Decimal {
     fn from(d: memcomparable::Decimal) -> Self {
         match d {
-            memcomparable::Decimal::Normalized(d) => Self::Normalized(d),
+            memcomparable::Decimal::Normalized(d) => Self::normalizeq(d),
             memcomparable::Decimal::Inf => Self::PositiveInf,
             memcomparable::Decimal::NegInf => Self::NegativeInf,
             memcomparable::Decimal::NaN => Self::NaN,
@@ -840,7 +880,7 @@ impl From<memcomparable::Decimal> for Decimal {
 
 impl Default for Decimal {
     fn default() -> Self {
-        Self::Normalized(RustDecimal::default())
+        Self::normalizeq(RustDecimal::default())
     }
 }
 
@@ -854,7 +894,7 @@ impl FromStr for Decimal {
             "-inf" | "-infinity" => Ok(Decimal::NegativeInf),
             s => RustDecimal::from_str(s)
                 .or_else(|_| RustDecimal::from_scientific(s))
-                .map(Decimal::Normalized),
+                .map(Decimal::normalizeq),
         }
     }
 }
@@ -862,7 +902,7 @@ impl FromStr for Decimal {
 impl IsNegative for DeciRef<'_> {
     fn is_negative(&self) -> bool {
         match self.0 {
-            Decimal::Normalized(d) => *d < RustDecimal::ZERO,
+            Decimal::Normalized(d) => d.as_ref() < &BigDecimal::zero(),
             Decimal::NaN => false,
             Decimal::PositiveInf => false,
             Decimal::NegativeInf => true,
@@ -872,7 +912,7 @@ impl IsNegative for DeciRef<'_> {
 
 impl Zero for Decimal {
     fn zero() -> Self {
-        Self::Normalized(RustDecimal::zero())
+        Self::normalized(BigDecimal::zero())
     }
 
     fn is_zero(&self) -> bool {
@@ -886,13 +926,13 @@ impl Zero for Decimal {
 
 impl One for Decimal {
     fn one() -> Self {
-        Self::Normalized(RustDecimal::one())
+        Self::normalized(BigDecimal::one())
     }
 }
 
 impl From<RustDecimal> for Decimal {
     fn from(d: RustDecimal) -> Self {
-        Self::Normalized(d)
+        Self::normalizeq(d)
     }
 }
 
@@ -1121,7 +1161,7 @@ mod tests {
         let decimal = Decimal::NegativeInf;
         assert_eq!(decimal.estimated_size(), 20);
 
-        let decimal = Decimal::Normalized(RustDecimal::try_from(1.0).unwrap());
+        let decimal = Decimal::normalized(BigDecimal::try_from(1.0).unwrap());
         assert_eq!(decimal.estimated_size(), 20);
     }
 }

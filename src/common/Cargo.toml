@@ -27,6 +27,7 @@ arrow-57-schema = { package = "arrow-schema", version = "57" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
+bigdecimal = "0.4.10"
 bitfield-struct = "0.12"
 bitflags = "2"
 byteorder = "1"
