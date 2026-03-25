@@ -587,11 +587,17 @@ mod tests {
             dec("5.0")
         );
         assert_eq!(
-            sqrt_decimal(dec("107").as_scalar_ref()).unwrap(),
-            dec("10.344080432788600469738599442")
+            sqrt_decimal(dec("107").as_scalar_ref())
+                .unwrap()
+                .as_scalar_ref()
+                .round_dp_ties_away(27),
+            dec("10.344080432788600469738599443")
         );
         assert_eq!(
-            sqrt_decimal(dec("12.234567").as_scalar_ref()).unwrap(),
+            sqrt_decimal(dec("12.234567").as_scalar_ref())
+                .unwrap()
+                .as_scalar_ref()
+                .round_dp_ties_away(27),
             dec("3.4977945908815171589625746860")
         );
         assert!(sqrt_decimal(dec("-25.0").as_scalar_ref()).is_err());

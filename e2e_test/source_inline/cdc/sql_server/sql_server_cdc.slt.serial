@@ -548,7 +548,7 @@ query TTTTTTT
 SELECT id, c_xml, c_money from shared_sqlserver_all_data_types order by id;
 ----
 1 <Person><Name>John Doe</Name><Age>30</Age></Person>  100.51
-2 <Person><Name>Jane Doe</Name><Age>28</Age></Person>  100.50
+2 <Person><Name>Jane Doe</Name><Age>28</Age></Person>  100.5
 3 <Name>Jane Doe</Name> 100
 11 <Person><Name>John Doe</Name><Age>30</Age></Person> 200.5000
 12 <Person><Name>Jane Doe</Name><Age>28</Age></Person> 200.5000

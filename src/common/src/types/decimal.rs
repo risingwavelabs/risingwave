@@ -32,16 +32,38 @@ use crate::types::Decimal::Normalized;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::{IsNegative, Scalar as _};
 
-#[derive(Debug, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+#[derive(Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
-    #[display("-Infinity")]
     NegativeInf,
-    #[display("{0}")]
     Normalized(Box<BigDecimal>),
-    #[display("Infinity")]
     PositiveInf,
-    #[display("NaN")]
     NaN,
+}
+
+impl std::fmt::Display for Decimal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Decimal::NegativeInf => write!(f, "-Infinity"),
+            Decimal::Normalized(d) => d.write_plain_string(f),
+            Decimal::PositiveInf => write!(f, "Infinity"),
+            Decimal::NaN => write!(f, "NaN"),
+        }
+    }
+}
+
+impl std::fmt::Debug for Decimal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Decimal::NegativeInf => write!(f, "-Infinity"),
+            Decimal::Normalized(d) => {
+                write!(f, "Normalized(")?;
+                d.write_plain_string(f)?;
+                write!(f, ")")
+            }
+            Decimal::PositiveInf => write!(f, "Infinity"),
+            Decimal::NaN => write!(f, "NaN"),
+        }
+    }
 }
 
 #[derive(Copy, parse_display::Display, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -79,7 +101,7 @@ impl RustDecimal {
 #[easy_ext::ext]
 impl BigDecimal {
     fn qz(&self) -> RustDecimal {
-        RustDecimal::from_str(&self.to_string()).unwrap()
+        RustDecimal::from_str(&self.to_plain_string()).unwrap()
     }
 }
 impl Decimal {
@@ -1159,9 +1181,9 @@ mod tests {
     #[test]
     fn test_decimal_estimate_size() {
         let decimal = Decimal::NegativeInf;
-        assert_eq!(decimal.estimated_size(), 20);
+        assert_eq!(decimal.estimated_size(), 16);
 
         let decimal = Decimal::normalized(BigDecimal::try_from(1.0).unwrap());
-        assert_eq!(decimal.estimated_size(), 20);
+        assert_eq!(decimal.estimated_size(), 16);
     }
 }

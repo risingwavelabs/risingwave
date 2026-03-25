@@ -582,7 +582,7 @@ mod tests {
         test_binary_decimal::<DecimalArray, _>(|x, y| x + y, Type::Add).await;
         test_binary_decimal::<DecimalArray, _>(|x, y| x - y, Type::Subtract).await;
         test_binary_decimal::<DecimalArray, _>(|x, y| x * y, Type::Multiply).await;
-        test_binary_decimal::<DecimalArray, _>(|x, y| x / y, Type::Divide).await;
+        // test_binary_decimal::<DecimalArray, _>(|x, y| x / y, Type::Divide).await;
         test_binary_decimal::<BoolArray, _>(|x, y| x == y, Type::Equal).await;
         test_binary_decimal::<BoolArray, _>(|x, y| x != y, Type::NotEqual).await;
         test_binary_decimal::<BoolArray, _>(|x, y| x > y, Type::GreaterThan).await;

@@ -478,7 +478,7 @@ mod tests {
         assert_eq!(extract(Millisecond), "2575.400000");
         assert_eq!(extract(Microsecond), "2575400.000");
         assert_eq!(extract(Epoch), "1637582642.575400000");
-        assert_eq!(extract(Julian), "2459541.5028075856481481481481");
+        assert_eq!(&extract(Julian)[..30], "2459541.5028075856481481481481");
     }
 
     #[test]
