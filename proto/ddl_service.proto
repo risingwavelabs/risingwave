@@ -619,7 +619,9 @@ message GetTablesResponse {
   map<uint32, catalog.Table> tables = 1;
 }
 
-message WaitRequest {}
+message WaitRequest {
+  optional uint32 job_id = 1;
+}
 
 message WaitResponse {
   WaitVersion version = 1;

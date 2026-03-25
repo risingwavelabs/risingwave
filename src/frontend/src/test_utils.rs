@@ -36,6 +36,7 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -802,7 +803,7 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
-    async fn wait(&self) -> Result<()> {
+    async fn wait(&self, _job_id: Option<JobId>) -> Result<()> {
         Ok(())
     }
 }
@@ -1284,6 +1285,21 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn backup_meta(&self, _remarks: Option<String>) -> RpcResult<u64> {
+        unimplemented!()
+    }
+
+    async fn get_backup_job_status(
+        &self,
+        _job_id: u64,
+    ) -> RpcResult<(risingwave_pb::backup_service::BackupJobStatus, String)> {
+        unimplemented!()
+    }
+
+    async fn delete_meta_snapshot(&self, _snapshot_ids: &[u64]) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn apply_throttle(
         &self,
         _throttle_target: PbThrottleTarget,
@@ -1415,6 +1431,17 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_unmigrated_tables(&self) -> RpcResult<HashMap<crate::catalog::TableId, String>> {
         unimplemented!()
+    }
+
+    async fn get_hummock_table_change_log(
+        &self,
+        _start_epoch_inclusive: Option<u64>,
+        _end_epoch_inclusive: Option<u64>,
+        _table_ids: Option<HashSet<TableId>>,
+        _exclude_empty: bool,
+        _limit: Option<u32>,
+    ) -> RpcResult<TableChangeLogs> {
+        Ok(HashMap::default())
     }
 }
 

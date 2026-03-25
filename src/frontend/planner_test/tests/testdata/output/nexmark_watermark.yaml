@@ -300,9 +300,9 @@
 
     Table 3 { columns: [ $expr2, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ $expr5, $expr6, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ $expr5, $expr6, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [2] }
 
-    Table 5 { columns: [ $expr5, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr5, _row_id, _degree, $expr1, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
     Table 6 { columns: [ vnode, offset, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
@@ -393,7 +393,7 @@
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start], pk_columns: [auction, window_start], pk_conflict: NoCheck, watermark_columns: [window_start(hidden), window_start#1(hidden)] }
     └─StreamProject { exprs: [$expr2, count, window_start, window_start], output_watermarks: [[window_start, window_start]] }
       └─StreamFilter { predicate: (count >= max(count)) }
-        └─StreamHashJoin [window] { type: Inner, predicate: window_start = window_start, output_watermarks: [[window_start, window_start]], output: all }
+        └─StreamHashJoin [window] { type: Inner, predicate: window_start = window_start, conditions_to_clean_state_in_join_key: [(window_start = window_start)], output_watermarks: [[window_start, window_start]], output: all }
           ├─StreamExchange { dist: HashShard(window_start) }
           │ └─StreamShare { id: 9 }
           │   └─StreamHashAgg [append_only] { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [[window_start]] }
@@ -423,7 +423,8 @@
     StreamMaterialize { columns: [auction, num, window_start(hidden), window_start#1(hidden)], stream_key: [auction, window_start], pk_columns: [auction, window_start], pk_conflict: NoCheck, watermark_columns: [window_start(hidden), window_start#1(hidden)] }
     └── StreamProject { exprs: [$expr2, count, window_start, window_start], output_watermarks: [[window_start, window_start]] }
         └── StreamFilter { predicate: (count >= max(count)) }
-            └── StreamHashJoin [window] { type: Inner, predicate: window_start = window_start, output_watermarks: [[window_start, window_start]], output: all } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
+            └── StreamHashJoin [window] { type: Inner, predicate: window_start = window_start, conditions_to_clean_state_in_join_key: [(window_start = window_start)], output_watermarks: [[window_start, window_start]], output: all }
+                ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
                 ├── StreamExchange Hash([1]) from 1
                 └── StreamProject { exprs: [window_start, max(count)], output_watermarks: [[window_start]] }
                     └── StreamHashAgg { group_key: [window_start], aggs: [max(count), count], output_watermarks: [[window_start]] } { tables: [ HashAggState: 8, HashAggCall0: 7 ] }
@@ -450,13 +451,13 @@
     StreamNoOp
     └── StreamExchange NoShuffle from 2
 
-    Table 0 { columns: [ $expr2, window_start, count, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ $expr2, window_start, count, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1, clean watermark indices: [1] }
 
-    Table 1 { columns: [ window_start, $expr2, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ window_start, $expr2, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
-    Table 2 { columns: [ window_start, max(count), _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ window_start, max(count), _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
-    Table 3 { columns: [ window_start, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ window_start, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
     Table 4 { columns: [ $expr2, window_start, count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0, 1 ], read pk prefix len hint: 2 }
 
@@ -475,7 +476,7 @@
     └─StreamEowcSort { sort_column: window_start }
       └─StreamProject { exprs: [$expr2, count, window_start, window_start], output_watermarks: [[window_start, window_start]] }
         └─StreamFilter { predicate: (count >= max(count)) }
-          └─StreamHashJoin [window, append_only] { type: Inner, predicate: window_start = window_start, output_watermarks: [[window_start, window_start]], output: all }
+          └─StreamHashJoin [window, append_only] { type: Inner, predicate: window_start = window_start, conditions_to_clean_state_in_join_key: [(window_start = window_start)], output_watermarks: [[window_start, window_start]], output: all }
             ├─StreamExchange { dist: HashShard(window_start) }
             │ └─StreamShare { id: 9 }
             │   └─StreamHashAgg [append_only, eowc] { group_key: [$expr2, window_start], aggs: [count], output_watermarks: [[window_start]] }
@@ -601,9 +602,9 @@
 
     Table 3 { columns: [ $expr2, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ $expr5, $expr6, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ $expr5, $expr6, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [2] }
 
-    Table 5 { columns: [ $expr5, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ $expr5, _row_id, _degree, $expr1, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
     Table 6 { columns: [ vnode, offset, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
@@ -707,13 +708,13 @@
     StreamProject { exprs: [(TumbleStart($expr1, '00:00:10':Interval) + '00:00:10':Interval) as $expr5, $expr4, _row_id], output_watermarks: [[$expr5]] }
     └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ $expr2, $expr3, $expr4, $expr1, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ $expr2, $expr3, $expr4, $expr1, _row_id, _rw_timestamp ], primary key: [ $2 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 2 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
-    Table 1 { columns: [ $expr4, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ $expr4, _row_id, _degree, $expr1, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
-    Table 2 { columns: [ $expr5, max($expr4), $expr6, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ $expr5, max($expr4), $expr6, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 1 ], read pk prefix len hint: 1, clean watermark indices: [0] }
 
-    Table 3 { columns: [ max($expr4), $expr5, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ max($expr4), $expr5, _degree, $expr5_0, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
     Table 4 { columns: [ vnode, offset, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
@@ -804,7 +805,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [id, name, starttime, $expr5(hidden), $expr7(hidden), $expr6(hidden), $expr8(hidden)], stream_key: [id, name, starttime, $expr5], pk_columns: [id, name, starttime, $expr5], pk_conflict: NoCheck, watermark_columns: [starttime, $expr5(hidden), $expr6(hidden), $expr8(hidden)] }
     └─StreamExchange { dist: HashShard($expr3, $expr4, $expr2, $expr5) }
-      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr2 = $expr6 AND $expr5 = $expr8 AND $expr3 = $expr7, output_watermarks: [[$expr2, $expr5, $expr6, $expr8]], output: all }
+      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr2 = $expr6 AND $expr5 = $expr8 AND $expr3 = $expr7, conditions_to_clean_state_in_join_key: [($expr2 = $expr6)], output_watermarks: [[$expr2, $expr5, $expr6, $expr8]], output: all }
         ├─StreamExchange { dist: HashShard($expr3, $expr2, $expr5) }
         │ └─StreamProject { exprs: [$expr3, $expr4, $expr2, $expr5], output_watermarks: [[$expr2, $expr5]] }
         │   └─StreamAppendOnlyDedup { dedup_cols: [$expr3, $expr4, $expr2, $expr5] }
@@ -838,7 +839,8 @@
     └── StreamExchange Hash([0, 1, 2, 3]) from 1
 
     Fragment 1
-    StreamHashJoin [window, append_only] { type: Inner, predicate: $expr2 = $expr6 AND $expr5 = $expr8 AND $expr3 = $expr7, output_watermarks: [[$expr2, $expr5, $expr6, $expr8]], output: all } { tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ] }
+    StreamHashJoin [window, append_only] { type: Inner, predicate: $expr2 = $expr6 AND $expr5 = $expr8 AND $expr3 = $expr7, conditions_to_clean_state_in_join_key: [($expr2 = $expr6)], output_watermarks: [[$expr2, $expr5, $expr6, $expr8]], output: all }
+    ├── tables: [ HashJoinLeft: 0, HashJoinDegreeLeft: 1, HashJoinRight: 2, HashJoinDegreeRight: 3 ]
     ├── StreamExchange Hash([0, 2, 3]) from 2
     └── StreamProject { exprs: [$expr7, $expr6, $expr8], output_watermarks: [[$expr6, $expr8]] }
         └── StreamAppendOnlyDedup { dedup_cols: [$expr7, $expr6, $expr8] } { tables: [ AppendOnlyDedup: 7 ] }
@@ -869,13 +871,13 @@
         └── StreamFilter { predicate: (event_type = 1:Int32) }
             └── StreamExchange NoShuffle from 4
 
-    Table 0 { columns: [ $expr3, $expr4, $expr2, $expr5, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 3 }
+    Table 0 { columns: [ $expr3, $expr4, $expr2, $expr5, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 3, clean watermark indices: [2] }
 
-    Table 1 { columns: [ $expr2, $expr5, $expr3, $expr4, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 2, 0, 1 ], read pk prefix len hint: 3 }
+    Table 1 { columns: [ $expr2, $expr5, $expr3, $expr4, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 4 ], distribution key: [ 2, 0, 1 ], read pk prefix len hint: 3, clean watermark indices: [0] }
 
-    Table 2 { columns: [ $expr7, $expr6, $expr8, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 2 { columns: [ $expr7, $expr6, $expr8, _rw_timestamp ], primary key: [ $1 ASC, $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3, clean watermark indices: [1] }
 
-    Table 3 { columns: [ $expr6, $expr8, $expr7, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 2, 0, 1 ], read pk prefix len hint: 3 }
+    Table 3 { columns: [ $expr6, $expr8, $expr7, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 2, 0, 1 ], read pk prefix len hint: 3, clean watermark indices: [0] }
 
     Table 4 { columns: [ $expr3, $expr4, $expr2, $expr5, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 1, 2, 3 ], read pk prefix len hint: 4 }
 
@@ -890,7 +892,7 @@
   eowc_stream_plan: |-
     StreamMaterialize { columns: [id, name, starttime, $expr5(hidden), $expr7(hidden), $expr6(hidden), $expr8(hidden)], stream_key: [id, name, starttime, $expr5], pk_columns: [id, name, starttime, $expr5], pk_conflict: NoCheck, watermark_columns: [starttime] }
     └─StreamEowcSort { sort_column: $expr2 }
-      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr2 = $expr6 AND $expr5 = $expr8 AND $expr3 = $expr7, output_watermarks: [[$expr2, $expr5, $expr6, $expr8]], output: all }
+      └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr2 = $expr6 AND $expr5 = $expr8 AND $expr3 = $expr7, conditions_to_clean_state_in_join_key: [($expr2 = $expr6)], output_watermarks: [[$expr2, $expr5, $expr6, $expr8]], output: all }
         ├─StreamExchange { dist: HashShard($expr3, $expr2, $expr5) }
         │ └─StreamProject { exprs: [$expr3, $expr4, $expr2, $expr5], output_watermarks: [[$expr2, $expr5]] }
         │   └─StreamAppendOnlyDedup { dedup_cols: [$expr3, $expr4, $expr2, $expr5] }
@@ -1035,9 +1037,9 @@
 
     Table 2 { columns: [ $expr2, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ $expr10, $expr11, $expr12, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ $expr10, $expr11, $expr12, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
-    Table 4 { columns: [ $expr10, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ $expr10, _row_id, _degree, $expr1, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
     Table 5 { columns: [ vnode, offset, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
@@ -2560,9 +2562,9 @@
 
     Table 6 { columns: [ $expr2, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ $expr4, $expr5, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ $expr4, $expr5, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [2] }
 
-    Table 8 { columns: [ $expr4, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 8 { columns: [ $expr4, _row_id, _degree, $expr1, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, clean watermark indices: [3] }
 
     Table 9 { columns: [ vnode, offset, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 

@@ -198,20 +198,6 @@ impl PinnedSnapshot {
     pub fn version(&self) -> &FrontendHummockVersion {
         &self.value
     }
-
-    pub fn list_change_log_epochs(
-        &self,
-        table_id: TableId,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Vec<u64> {
-        if let Some(table_change_log) = self.value.table_change_log.get(&table_id) {
-            let table_change_log = table_change_log.clone();
-            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
-        } else {
-            vec![]
-        }
-    }
 }
 
 /// Returns an invalid snapshot, used for initial values.
@@ -219,7 +205,6 @@ fn invalid_snapshot() -> FrontendHummockVersion {
     FrontendHummockVersion {
         id: INVALID_VERSION_ID,
         state_table_info: HummockVersionStateTableInfo::from_protobuf(&HashMap::new()),
-        table_change_log: Default::default(),
     }
 }
 
@@ -236,13 +221,7 @@ pub struct HummockSnapshotManager {
     /// of `committed_epoch`.
     latest_snapshot: watch::Sender<PinnedSnapshotRef>,
 
-    table_change_log_notification_sender: watch::Sender<TableChangeLogNotificationMsg>,
-}
-
-#[derive(Default)]
-struct TableChangeLogNotificationMsg {
-    updated_change_log_table_ids: HashSet<TableId>,
-    deleted_table_ids: HashSet<TableId>,
+    version_update_notification_sender: watch::Sender<()>,
 }
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
@@ -255,12 +234,11 @@ impl HummockSnapshotManager {
 
         let (latest_snapshot, _) = watch::channel(latest_snapshot);
 
-        let (table_change_log_notification_sender, _) =
-            watch::channel(TableChangeLogNotificationMsg::default());
+        let (version_update_notification_sender, _) = watch::channel(());
 
         Self {
             latest_snapshot,
-            table_change_log_notification_sender,
+            version_update_notification_sender,
         }
     }
 
@@ -270,23 +248,7 @@ impl HummockSnapshotManager {
     }
 
     pub fn init(&self, version: FrontendHummockVersion) {
-        let updated_change_log_table_ids: HashSet<_> = version
-            .table_change_log
-            .iter()
-            .filter_map(|(table_id, change_log)| {
-                if change_log.get_non_empty_epochs(0, usize::MAX).is_empty() {
-                    None
-                } else {
-                    Some(*table_id)
-                }
-            })
-            .collect();
-        self.table_change_log_notification_sender
-            .send(TableChangeLogNotificationMsg {
-                updated_change_log_table_ids,
-                deleted_table_ids: Default::default(),
-            })
-            .ok();
+        self.version_update_notification_sender.send(()).ok();
 
         self.update_inner(|_| Some(version));
     }
@@ -295,35 +257,6 @@ impl HummockSnapshotManager {
     ///
     /// Should only be called by the observer manager.
     pub fn update(&self, deltas: HummockVersionDeltas) {
-        let updated_change_log_table_ids: HashSet<_> = deltas
-            .version_deltas
-            .iter()
-            .flat_map(|version_deltas| &version_deltas.change_log_delta)
-            .filter_map(|(table_id, change_log)| match change_log.new_log.as_ref() {
-                Some(new_log) => {
-                    let new_value_empty = new_log.new_value.is_empty();
-                    let old_value_empty = new_log.old_value.is_empty();
-                    if !new_value_empty || !old_value_empty {
-                        Some(*table_id)
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            })
-            .collect();
-        let deleted_table_ids: HashSet<_> = deltas
-            .version_deltas
-            .iter()
-            .flat_map(|version_deltas| version_deltas.removed_table_ids.iter().copied())
-            .collect();
-        self.table_change_log_notification_sender
-            .send(TableChangeLogNotificationMsg {
-                updated_change_log_table_ids,
-                deleted_table_ids,
-            })
-            .ok();
-
         self.update_inner(|old_snapshot| {
             if deltas.version_deltas.is_empty() {
                 return None;
@@ -333,7 +266,8 @@ impl HummockSnapshotManager {
                 snapshot.apply_delta(FrontendHummockVersionDelta::from_protobuf(delta));
             }
             Some(snapshot)
-        })
+        });
+        self.version_update_notification_sender.send(()).ok();
     }
 
     pub fn add_table_for_test(&self, table_id: TableId) {
@@ -387,28 +321,30 @@ impl HummockSnapshotManager {
     pub async fn wait_table_change_log_notification(
         &self,
         table_id: TableId,
+        seek_timestamp: u64,
     ) -> Result<(), RwError> {
-        let mut rx = self.table_change_log_notification_sender.subscribe();
+        let mut rx = self.version_update_notification_sender.subscribe();
         loop {
             rx.changed()
                 .await
                 .map_err(|_| ErrorCode::InternalError("cursor notify channel is closed.".into()))?;
-            let table_change_log_notification_msg = rx.borrow_and_update();
-            if table_change_log_notification_msg
-                .deleted_table_ids
-                .contains(&table_id)
+            let _ = rx.borrow_and_update();
+            if let Some(info) = self
+                .acquire()
+                .version()
+                .state_table_info
+                .info()
+                .get(&table_id)
             {
+                if info.committed_epoch >= seek_timestamp {
+                    break;
+                }
+            } else {
                 return Err(ErrorCode::InternalError(format!(
                     "Cursor dependent table deleted: table_id is {:?}",
                     table_id
                 ))
                 .into());
-            }
-            if table_change_log_notification_msg
-                .updated_change_log_table_ids
-                .contains(&table_id)
-            {
-                break;
             }
         }
         Ok(())

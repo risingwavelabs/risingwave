@@ -5,6 +5,7 @@ include ./join.slt.part
 include ./join-3way.slt.part
 include ./asof_join.slt.part
 include ./interval_join.slt.part
+include ./hash_join_watermark.slt.part
 include ./full_outer_join_global_agg.slt.part
 
 statement ok
@@ -14,6 +15,7 @@ include ./join.slt.part
 include ./join-3way.slt.part
 include ./asof_join.slt.part
 include ./interval_join.slt.part
+include ./hash_join_watermark.slt.part
 include ./full_outer_join_global_agg.slt.part
 
 statement ok

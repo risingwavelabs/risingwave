@@ -1189,7 +1189,7 @@ pub use logical_filter::LogicalFilter;
 pub use logical_gap_fill::LogicalGapFill;
 pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
-pub use logical_iceberg_intermediate_scan::LogicalIcebergIntermediateScan;
+pub use logical_iceberg_intermediate_scan::{HummockRewriteInfo, LogicalIcebergIntermediateScan};
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;

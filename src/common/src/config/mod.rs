@@ -125,6 +125,10 @@ pub struct RwConfig {
 pub struct RpcClientConfig {
     #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
+    /// Maximum concurrency when setting up an RPC client pool.
+    /// Set to 0 to keep the previous unlimited behavior.
+    #[serde(default = "default::developer::rpc_client_pool_setup_concurrency")]
+    pub pool_setup_concurrency: usize,
 }
 
 pub use risingwave_common_metrics::MetricLevel;
@@ -392,6 +396,10 @@ pub mod default {
             5
         }
 
+        pub fn rpc_client_pool_setup_concurrency() -> usize {
+            0
+        }
+
         pub fn iceberg_list_interval_sec() -> u64 {
             10
         }
@@ -422,6 +430,14 @@ pub mod default {
 
         pub fn sync_log_store_buffer_size() -> usize {
             2048
+        }
+
+        pub fn table_change_log_insert_batch_size() -> u64 {
+            1000
+        }
+
+        pub fn table_change_log_delete_batch_size() -> u64 {
+            1000
         }
 
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
@@ -677,6 +693,7 @@ pub mod tests {
 
             [streaming.developer.stream_compute_client_config]
             connect_timeout_secs = 42
+            pool_setup_concurrency = 10
             ",
         )
         .unwrap();
@@ -689,6 +706,14 @@ pub mod tests {
                 .compute_client_config
                 .connect_timeout_secs,
             42
+        );
+        assert_eq!(
+            config
+                .streaming
+                .developer
+                .compute_client_config
+                .pool_setup_concurrency,
+            10
         );
     }
 
