@@ -337,9 +337,7 @@ mod tests {
         }
     }
 
-    fn snapshot_notification(
-        streaming_worker_slot_mapping_version: u64,
-    ) -> SubscribeResponse {
+    fn snapshot_notification(streaming_worker_slot_mapping_version: u64) -> SubscribeResponse {
         SubscribeResponse {
             status: None,
             operation: Operation::Snapshot as _,
@@ -374,10 +372,7 @@ mod tests {
         let state = TestState::default();
         let mut observer_manager = ObserverManager {
             rx: TestChannel {
-                notifications: VecDeque::from([
-                    mapping_notification(2),
-                    snapshot_notification(1),
-                ]),
+                notifications: VecDeque::from([mapping_notification(2), snapshot_notification(1)]),
             },
             client: TestClient,
             observer_states: state.clone(),
@@ -405,10 +400,7 @@ mod tests {
         let state = TestState::default();
         let mut observer_manager = ObserverManager {
             rx: TestChannel {
-                notifications: VecDeque::from([
-                    mapping_notification(1),
-                    snapshot_notification(1),
-                ]),
+                notifications: VecDeque::from([mapping_notification(1), snapshot_notification(1)]),
             },
             client: TestClient,
             observer_states: state.clone(),
@@ -429,10 +421,7 @@ mod tests {
         let state = TestState::default();
         let mut observer_manager = ObserverManager {
             rx: TestChannel {
-                notifications: VecDeque::from([
-                    mapping_notification(3),
-                    snapshot_notification(1),
-                ]),
+                notifications: VecDeque::from([mapping_notification(3), snapshot_notification(1)]),
             },
             client: TestClient,
             observer_states: state.clone(),
