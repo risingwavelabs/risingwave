@@ -32,9 +32,8 @@ use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
 use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, LogStoreVnodeProgress};
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::{
-    ReadFuture, SyncKvLogStoreContext, SyncedLogStoreBuffer, WriteFuture, WriteFutureEvent,
-    aligned_message_stream, apply_pause_resume_mutation, init_local_log_store_state,
-    process_chunk_flushed, process_upstream_chunk, write_barrier,
+    ReadFuture, SyncKvLogStoreContext, SyncedKvLogStoreExecutor, SyncedLogStoreBuffer, WriteFuture,
+    WriteFutureEvent,
 };
 use crate::executor::{StreamConsumer, SyncedKvLogStoreMetrics};
 use crate::task::NewOutputRequest;
@@ -214,13 +213,17 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
             );
 
             let (read_state, initial_write_state) =
-                init_local_log_store_state(&log_store_config, first_write_epoch).await?;
+                SyncedKvLogStoreExecutor::<S>::init_local_log_store_state(
+                    &log_store_config,
+                    first_write_epoch,
+                )
+                .await?;
 
             let initial_write_epoch = first_write_epoch;
             let mut pause_stream = first_barrier.is_pause_on_startup();
 
             if log_store_config.aligned {
-                let aligned_stream = aligned_message_stream::<S>(
+                let aligned_stream = SyncedKvLogStoreExecutor::<S>::aligned_message_stream(
                     actor_id,
                     input,
                     read_state,
@@ -319,13 +322,14 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                         match either {
                             WriteFutureEvent::UpstreamMessageReceived(msg) => match msg {
                                 Message::Chunk(chunk) => {
-                                    let (new_seq_id, next_write_future) = process_upstream_chunk(
-                                        seq_id,
-                                        stream,
-                                        write_state,
-                                        chunk,
-                                        &mut buffer,
-                                    );
+                                    let (new_seq_id, next_write_future) =
+                                        SyncedKvLogStoreExecutor::<S>::process_upstream_chunk(
+                                            seq_id,
+                                            stream,
+                                            write_state,
+                                            chunk,
+                                            &mut buffer,
+                                        );
                                     seq_id = new_seq_id;
                                     write_future_state = next_write_future;
                                 }
@@ -343,16 +347,20 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                         clean_state = false;
                                         log_store_config.metrics.unclean_state.inc();
                                     } else {
-                                        apply_pause_resume_mutation(&barrier, &mut pause_stream);
-                                        let write_state_post_write_barrier = write_barrier(
-                                            actor_id,
-                                            &mut write_state,
-                                            barrier.clone(),
-                                            &log_store_config.metrics,
-                                            progress.take(),
-                                            &mut buffer,
-                                        )
-                                        .await?;
+                                        SyncedKvLogStoreExecutor::<S>::apply_pause_resume_mutation(
+                                            &barrier,
+                                            &mut pause_stream,
+                                        );
+                                        let write_state_post_write_barrier =
+                                            SyncedKvLogStoreExecutor::<S>::write_barrier(
+                                                actor_id,
+                                                &mut write_state,
+                                                barrier.clone(),
+                                                &log_store_config.metrics,
+                                                progress.take(),
+                                                &mut buffer,
+                                            )
+                                            .await?;
                                         seq_id = FIRST_SEQ_ID;
                                         let update_vnode_bitmap =
                                             barrier.as_update_vnode_bitmap(actor_id);
@@ -383,13 +391,14 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                 }
                             },
                             WriteFutureEvent::ChunkFlushed(info) => {
-                                write_future_state = process_chunk_flushed(
-                                    stream,
-                                    write_state,
-                                    info,
-                                    &mut buffer,
-                                    &log_store_config.metrics,
-                                );
+                                write_future_state =
+                                    SyncedKvLogStoreExecutor::<S>::process_chunk_flushed(
+                                        stream,
+                                        write_state,
+                                        info,
+                                        &mut buffer,
+                                        &log_store_config.metrics,
+                                    );
                             }
                         }
                     }
