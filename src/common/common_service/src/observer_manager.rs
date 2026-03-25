@@ -128,12 +128,16 @@ where
             Info::Recovery(_) => true,
             Info::ClusterResource(_) => true,
             Info::StreamingWorkerSlotMapping(_) => {
-                notification.version
-                    > info
-                        .version
-                        .as_ref()
-                        .unwrap()
-                        .streaming_worker_slot_mapping_version
+                // Version 0 is used for intermediate notifications in a multi-fragment
+                // batch (only the final notification carries the real version).
+                // Always retain these so no fragment mappings are lost during init.
+                notification.version == 0
+                    || notification.version
+                        > info
+                            .version
+                            .as_ref()
+                            .unwrap()
+                            .streaming_worker_slot_mapping_version
             }
             Info::ServingWorkerSlotMappings(_) => true,
         });
@@ -352,6 +356,7 @@ mod tests {
                     catalog_version: 0,
                     worker_node_version: 0,
                     streaming_worker_slot_mapping_version,
+                    streaming_worker_slot_mapping_ready: true,
                 }),
                 ..Default::default()
             })),
@@ -438,6 +443,43 @@ mod tests {
             state.events.lock().unwrap().as_slice(),
             &[
                 TestEvent::Snapshot,
+                TestEvent::Notification,
+                TestEvent::Finished,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn retains_version_zero_intermediate_streaming_mapping_during_initialization() {
+        // Version-0 notifications are intermediate batch entries whose real batch
+        // version is carried only on the final notification.  They must NOT be
+        // dropped during init buffering even when the snapshot version is > 0.
+        let state = TestState::default();
+        let mut observer_manager = ObserverManager {
+            rx: TestChannel {
+                notifications: VecDeque::from([
+                    mapping_notification(0), // intermediate (version 0)
+                    mapping_notification(5), // final of the batch
+                    snapshot_notification(3),
+                ]),
+            },
+            client: TestClient,
+            observer_states: state.clone(),
+        };
+
+        observer_manager.wait_init_notification().await.unwrap();
+
+        // Both notifications should be replayed: version-0 is retained because it
+        // could belong to a batch newer than the snapshot, and version-5 > 3.
+        assert_eq!(
+            state.handled_mapping_versions.lock().unwrap().as_slice(),
+            &[0, 5]
+        );
+        assert_eq!(
+            state.events.lock().unwrap().as_slice(),
+            &[
+                TestEvent::Snapshot,
+                TestEvent::Notification,
                 TestEvent::Notification,
                 TestEvent::Finished,
             ]

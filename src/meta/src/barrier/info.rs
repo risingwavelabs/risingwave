@@ -32,7 +32,7 @@ use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
-use risingwave_pb::meta::subscribe_response::Operation;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::source::PbCdcTableSnapshotSplits;
 use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -53,7 +53,7 @@ use crate::barrier::{
 };
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
-use crate::manager::NotificationManagerRef;
+use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationManagerRef};
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, StreamJobFragments};
 use crate::stream::UpstreamSinkInfo;
 use crate::{MetaError, MetaResult};
@@ -116,6 +116,11 @@ impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
 pub struct SharedActorInfosInner {
     info: HashMap<DatabaseId, HashMap<FragmentId, SharedFragmentInfo>>,
     streaming_worker_slot_mapping_version: u64,
+    /// `true` after the barrier manager has finished recovering all databases
+    /// (or when no recovery is needed).  `false` during recovery, when
+    /// `info` may contain only a subset of the databases that have streaming
+    /// jobs.
+    recovery_complete: bool,
 }
 
 impl SharedActorInfosInner {
@@ -148,18 +153,40 @@ impl SharedActorInfos {
         self.inner.read()
     }
 
-    pub fn snapshot(&self) -> (Vec<PbFragmentWorkerSlotMapping>, u64) {
+    pub fn snapshot(&self) -> (Vec<PbFragmentWorkerSlotMapping>, u64, bool) {
         let guard = self.inner.read();
         let version = guard.streaming_worker_slot_mapping_version;
+        let recovery_complete = guard.recovery_complete;
         let mappings = guard
             .iter_over_fragments()
             .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
             .collect_vec();
-        (mappings, version)
+        (mappings, version, recovery_complete)
     }
 
     pub fn current_version(&self) -> u64 {
         self.inner.read().streaming_worker_slot_mapping_version
+    }
+
+    pub fn set_recovery_complete(&self, complete: bool) {
+        let mut guard = self.inner.write();
+        guard.recovery_complete = complete;
+        if complete {
+            // Bump the mapping version and send a notification so that any frontend
+            // in `recovery_deferred` state (subscribed while recovery was in progress)
+            // can observe that recovery has completed and unblock its wait.
+            let version = guard.next_streaming_worker_slot_mapping_version();
+            // Keep the write lock until the notification is enqueued so version order
+            // matches mutation order.
+            self.notification_manager.notify_frontend_with_version(
+                Operation::Update,
+                Info::StreamingWorkerSlotMapping(PbFragmentWorkerSlotMapping {
+                    fragment_id: 0.into(),
+                    mapping: None,
+                }),
+                version,
+            );
+        }
     }
 
     pub fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
@@ -331,6 +358,34 @@ impl SharedActorInfos {
     }
 }
 
+fn fragment_mapping_batch_versions(
+    has_added: bool,
+    has_updated: bool,
+    has_deleted: bool,
+    version: u64,
+) -> [Option<u64>; 3] {
+    let batch_presence = [has_added, has_updated, has_deleted];
+    let last_non_empty_batch = batch_presence.iter().rposition(|present| *present);
+
+    [
+        has_added.then_some(if last_non_empty_batch == Some(0) {
+            version
+        } else {
+            IGNORED_NOTIFICATION_VERSION
+        }),
+        has_updated.then_some(if last_non_empty_batch == Some(1) {
+            version
+        } else {
+            IGNORED_NOTIFICATION_VERSION
+        }),
+        has_deleted.then_some(if last_non_empty_batch == Some(2) {
+            version
+        } else {
+            IGNORED_NOTIFICATION_VERSION
+        }),
+    ]
+}
+
 pub(super) struct SharedActorInfoWriter<'a> {
     database_id: DatabaseId,
     write_guard: parking_lot::RwLockWriteGuard<'a, SharedActorInfosInner>,
@@ -392,17 +447,35 @@ impl SharedActorInfoWriter<'_> {
         let Some(version) = version else {
             return;
         };
+        let [added_version, updated_version, deleted_version] = fragment_mapping_batch_versions(
+            added_fragment_mapping.is_some(),
+            updated_fragment_mapping.is_some(),
+            deleted_fragment_mapping.is_some(),
+            version,
+        );
 
         // Keep the write lock until notifications are enqueued so version order matches
         // mutation order across concurrent writers.
         if let Some(mapping) = added_fragment_mapping {
-            notification_manager.notify_fragment_mapping(Operation::Add, mapping, version);
+            notification_manager.notify_fragment_mapping(
+                Operation::Add,
+                mapping,
+                added_version.expect("added mapping should have a version"),
+            );
         }
         if let Some(mapping) = updated_fragment_mapping {
-            notification_manager.notify_fragment_mapping(Operation::Update, mapping, version);
+            notification_manager.notify_fragment_mapping(
+                Operation::Update,
+                mapping,
+                updated_version.expect("updated mapping should have a version"),
+            );
         }
         if let Some(mapping) = deleted_fragment_mapping {
-            notification_manager.notify_fragment_mapping(Operation::Delete, mapping, version);
+            notification_manager.notify_fragment_mapping(
+                Operation::Delete,
+                mapping,
+                deleted_version.expect("deleted mapping should have a version"),
+            );
         }
     }
 }
@@ -1451,5 +1524,39 @@ impl InflightDatabaseInfo {
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fragment_mapping_batch_versions;
+    use crate::manager::IGNORED_NOTIFICATION_VERSION;
+
+    #[test]
+    fn test_fragment_mapping_batch_versions_only_last_non_empty_batch_advances_version() {
+        assert_eq!(
+            fragment_mapping_batch_versions(true, true, true, 9),
+            [
+                Some(IGNORED_NOTIFICATION_VERSION),
+                Some(IGNORED_NOTIFICATION_VERSION),
+                Some(9),
+            ]
+        );
+        assert_eq!(
+            fragment_mapping_batch_versions(true, true, false, 9),
+            [Some(IGNORED_NOTIFICATION_VERSION), Some(9), None]
+        );
+        assert_eq!(
+            fragment_mapping_batch_versions(true, false, false, 9),
+            [Some(9), None, None]
+        );
+        assert_eq!(
+            fragment_mapping_batch_versions(false, true, false, 9),
+            [None, Some(9), None]
+        );
+        assert_eq!(
+            fragment_mapping_batch_versions(false, false, true, 9),
+            [None, None, Some(9)]
+        );
     }
 }

@@ -155,12 +155,12 @@ impl NotificationServiceImpl {
 
     fn get_worker_slot_mapping_snapshot(
         &self,
-    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
-        let (mappings, version) = self
+    ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion, bool)> {
+        let (mappings, version, recovery_complete) = self
             .metadata_manager
             .catalog_controller
             .get_worker_slot_mappings_snapshot();
-        Ok((mappings, version))
+        Ok((mappings, version, recovery_complete))
     }
 
     fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
@@ -256,14 +256,15 @@ impl NotificationServiceImpl {
         // Use the plain text secret value for frontend. The secret value will be masked in frontend handle.
         let decrypted_secrets = self.decrypt_secrets(secrets)?;
 
-        let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
-            self.get_worker_slot_mapping_snapshot()?;
+        let (
+            streaming_worker_slot_mappings,
+            streaming_worker_slot_mapping_version,
+            streaming_worker_slot_mapping_ready,
+        ) = self.get_worker_slot_mapping_snapshot()?;
 
-        let streaming_job_count = self.metadata_manager.count_streaming_job().await?;
-        if streaming_job_count > 0 && streaming_worker_slot_mappings.is_empty() {
+        if !streaming_worker_slot_mapping_ready {
             tracing::warn!(
-                streaming_job_count,
-                "frontend subscribe returns empty streaming_worker_slot_mappings while streaming jobs exist; meta may still be recovering"
+                "frontend subscribe returns streaming_worker_slot_mappings while barrier manager is still recovering"
             );
         }
 
@@ -310,6 +311,7 @@ impl NotificationServiceImpl {
                 catalog_version,
                 worker_node_version,
                 streaming_worker_slot_mapping_version,
+                streaming_worker_slot_mapping_ready,
             }),
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,

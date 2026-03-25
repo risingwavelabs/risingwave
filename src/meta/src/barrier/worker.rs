@@ -1001,8 +1001,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             RecoveryReason::Adhoc => "adhoc recovery".to_owned(),
         };
         self.context.abort_and_mark_blocked(None, recovery_reason);
+        self.env.shared_actor_infos().set_recovery_complete(false);
 
         self.recovery_inner(is_paused, reason_str).await;
+        self.env.shared_actor_infos().set_recovery_complete(true);
         self.context.mark_ready(MarkReadyOptions::Global {
             blocked_databases: self.checkpoint_control.recovering_databases().collect(),
         });

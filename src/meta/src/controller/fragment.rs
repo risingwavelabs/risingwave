@@ -78,7 +78,8 @@ use crate::controller::utils::{
 };
 use crate::error::MetaError;
 use crate::manager::{
-    ActiveStreamingWorkerNodes, LocalNotification, NotificationManager, NotificationVersion,
+    ActiveStreamingWorkerNodes, IGNORED_NOTIFICATION_VERSION, LocalNotification,
+    NotificationManager, NotificationVersion,
 };
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -189,11 +190,17 @@ impl NotificationManager {
             return;
         }
         // notify all fragment mappings to frontend.
-        for fragment_mapping in fragment_mappings {
+        let final_notification_index = fragment_mappings.len() - 1;
+        for (index, fragment_mapping) in fragment_mappings.into_iter().enumerate() {
+            let notification_version = if index == final_notification_index {
+                version
+            } else {
+                IGNORED_NOTIFICATION_VERSION
+            };
             self.notify_frontend_with_version(
                 operation,
                 NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
-                version,
+                notification_version,
             );
         }
 
@@ -1160,7 +1167,7 @@ impl CatalogController {
 
     pub fn get_worker_slot_mappings_snapshot(
         &self,
-    ) -> (Vec<PbFragmentWorkerSlotMapping>, NotificationVersion) {
+    ) -> (Vec<PbFragmentWorkerSlotMapping>, NotificationVersion, bool) {
         self.env.shared_actor_infos().snapshot()
     }
 
@@ -2059,21 +2066,31 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
-    use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCount};
+    use risingwave_common::hash::{
+        ActorMapping, VirtualNode, VnodeCount, WorkerSlotId, WorkerSlotMapping,
+    };
     use risingwave_common::id::JobId;
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::*;
+    use risingwave_pb::common::HostAddress;
+    use risingwave_pb::meta::subscribe_response::{
+        Info as NotificationInfo, Operation as NotificationOperation,
+    };
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+    use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, SubscribeType};
     use risingwave_pb::plan_common::PbExprContext;
     use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{MergeNode, PbStreamNode, PbUnionNode};
+    use tokio::sync::mpsc;
 
     use super::ActorInfo;
     use crate::MetaResult;
+    use crate::controller::SqlMetaStore;
     use crate::controller::catalog::CatalogController;
+    use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationManager, WorkerKey};
     use crate::model::{Fragment, StreamActor};
 
     type ActorUpstreams = BTreeMap<crate::model::FragmentId, HashSet<crate::model::ActorId>>;
@@ -2374,5 +2391,65 @@ mod tests {
         );
 
         assert_eq!(policy, "upstream_fragment([1, 2, 3])");
+    }
+
+    #[tokio::test]
+    async fn test_notify_fragment_mapping_only_advances_version_on_last_notification() {
+        let notification_manager = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let worker_key = WorkerKey(HostAddress {
+            host: "frontend".to_owned(),
+            port: 4566,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        notification_manager.insert_sender(SubscribeType::Frontend, worker_key, tx);
+
+        notification_manager.notify_fragment_mapping(
+            NotificationOperation::Add,
+            vec![
+                PbFragmentWorkerSlotMapping {
+                    fragment_id: 1.into(),
+                    mapping: Some(
+                        WorkerSlotMapping::new_single(WorkerSlotId::new(1.into(), 0)).to_protobuf(),
+                    ),
+                },
+                PbFragmentWorkerSlotMapping {
+                    fragment_id: 2.into(),
+                    mapping: Some(
+                        WorkerSlotMapping::new_single(WorkerSlotId::new(2.into(), 0)).to_protobuf(),
+                    ),
+                },
+                PbFragmentWorkerSlotMapping {
+                    fragment_id: 3.into(),
+                    mapping: Some(
+                        WorkerSlotMapping::new_single(WorkerSlotId::new(3.into(), 0)).to_protobuf(),
+                    ),
+                },
+            ],
+            42,
+        );
+
+        let received = [rx.recv().await, rx.recv().await, rx.recv().await]
+            .into_iter()
+            .map(|notification| notification.expect("should receive notification"))
+            .map(|notification| notification.expect("notification should succeed"))
+            .map(|response| {
+                let fragment_id = match response.info {
+                    Some(NotificationInfo::StreamingWorkerSlotMapping(mapping)) => {
+                        mapping.fragment_id
+                    }
+                    other => panic!("unexpected notification info: {other:?}"),
+                };
+                (fragment_id, response.version)
+            })
+            .collect_vec();
+
+        assert_eq!(
+            received,
+            vec![
+                (1.into(), IGNORED_NOTIFICATION_VERSION),
+                (2.into(), IGNORED_NOTIFICATION_VERSION),
+                (3.into(), 42),
+            ]
+        );
     }
 }

@@ -50,6 +50,14 @@ pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     version: CatalogVersion,
     streaming_worker_slot_mapping_version: u64,
+    streaming_worker_slot_mapping_ready: bool,
+    /// Set to `true` when a `StreamingWorkerSlotMapping` notification with
+    /// `mapping: None` is replayed during init buffering (before
+    /// `handle_initialization_finished` runs).  This is the recovery-complete
+    /// signal from meta; we track it so we can detect the race where the signal
+    /// arrives before the deferred-recovery flag is set.
+    recovery_complete_seen: bool,
+    recovery_deferred: bool,
     catalog_updated_tx: Sender<CatalogVersion>,
     streaming_worker_slot_mapping_updated_tx: Sender<u64>,
     completed_observer_recovery_tx: Sender<CompletedObserverRecovery>,
@@ -131,6 +139,7 @@ impl ObserverState for FrontendObserverNode {
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        self.recovery_deferred = false;
         let mut catalog_guard = self.catalog.write();
         let mut user_guard = self.user_info_manager.write();
         catalog_guard.clear();
@@ -216,6 +225,9 @@ impl ObserverState for FrontendObserverNode {
         drop(catalog_guard);
         drop(user_guard);
         self.version = snapshot_version.catalog_version;
+        self.streaming_worker_slot_mapping_ready =
+            snapshot_version.streaming_worker_slot_mapping_ready;
+        self.recovery_complete_seen = false;
         self.reset_streaming_worker_slot_mapping_version(
             snapshot_version.streaming_worker_slot_mapping_version,
         );
@@ -229,12 +241,18 @@ impl ObserverState for FrontendObserverNode {
     }
 
     fn handle_initialization_finished(&mut self) {
-        self.completed_observer_recovery_tx.send_modify(|recovery| {
-            recovery.epoch += 1;
-            recovery.catalog_version = self.version;
-            recovery.streaming_worker_slot_mapping_version =
-                self.streaming_worker_slot_mapping_version;
-        });
+        if self.streaming_worker_slot_mapping_ready {
+            self.signal_completed_recovery();
+        } else if self.recovery_complete_seen {
+            // The recovery-complete notification (mapping=None) was already buffered
+            // and replayed before this callback.  Signal immediately.
+            self.signal_completed_recovery();
+        } else {
+            // Barrier manager is still recovering — streaming jobs exist but their
+            // fragment mappings are not yet available.  Defer the recovery signal
+            // until the recovery-complete notification arrives.
+            self.recovery_deferred = true;
+        }
     }
 }
 
@@ -254,6 +272,9 @@ impl FrontendObserverNode {
         Self {
             version: 0,
             streaming_worker_slot_mapping_version: 0,
+            streaming_worker_slot_mapping_ready: false,
+            recovery_complete_seen: false,
+            recovery_deferred: false,
             worker_node_manager,
             catalog,
             catalog_updated_tx,
@@ -507,27 +528,39 @@ impl FrontendObserverNode {
         };
         match info {
             Info::StreamingWorkerSlotMapping(streaming_worker_slot_mapping) => {
-                let fragment_id = streaming_worker_slot_mapping.fragment_id;
-                let mapping = || {
-                    WorkerSlotMapping::from_protobuf(
-                        streaming_worker_slot_mapping.mapping.as_ref().unwrap(),
-                    )
-                };
+                // A notification with `mapping: None` is a version-only bump — the
+                // recovery-complete signal from meta.  Skip data processing but still
+                // advance the version so deferred recovery can fire.
+                if let Some(pb_mapping) = streaming_worker_slot_mapping.mapping.as_ref() {
+                    let fragment_id = streaming_worker_slot_mapping.fragment_id;
+                    let mapping = WorkerSlotMapping::from_protobuf(pb_mapping);
 
-                match resp.operation() {
-                    Operation::Add => {
-                        self.worker_node_manager
-                            .insert_streaming_fragment_mapping(fragment_id, mapping());
+                    match resp.operation() {
+                        Operation::Add => {
+                            self.worker_node_manager
+                                .insert_streaming_fragment_mapping(fragment_id, mapping);
+                        }
+                        Operation::Delete => {
+                            self.worker_node_manager
+                                .remove_streaming_fragment_mapping(&fragment_id);
+                        }
+                        Operation::Update => {
+                            self.worker_node_manager
+                                .update_streaming_fragment_mapping(fragment_id, mapping);
+                        }
+                        _ => panic!("receive an unsupported notify {:?}", resp),
                     }
-                    Operation::Delete => {
-                        self.worker_node_manager
-                            .remove_streaming_fragment_mapping(&fragment_id);
+                } else {
+                    // mapping=None is the recovery-complete signal from meta.
+                    self.recovery_complete_seen = true;
+                    if self.recovery_deferred {
+                        // The deferred recovery can now fire — we know recovery
+                        // is truly complete, not just a partial mapping update.
+                        // Advance version first so the signal carries the right value.
+                        self.advance_streaming_worker_slot_mapping_version(resp.version);
+                        self.signal_completed_recovery();
+                        return;
                     }
-                    Operation::Update => {
-                        self.worker_node_manager
-                            .update_streaming_fragment_mapping(fragment_id, mapping());
-                    }
-                    _ => panic!("receive an unsupported notify {:?}", resp),
                 }
 
                 self.advance_streaming_worker_slot_mapping_version(resp.version);
@@ -583,6 +616,16 @@ impl FrontendObserverNode {
         self.streaming_worker_slot_mapping_updated_tx
             .send(version)
             .unwrap();
+    }
+
+    fn signal_completed_recovery(&mut self) {
+        self.recovery_deferred = false;
+        self.completed_observer_recovery_tx.send_modify(|recovery| {
+            recovery.epoch += 1;
+            recovery.catalog_version = self.version;
+            recovery.streaming_worker_slot_mapping_version =
+                self.streaming_worker_slot_mapping_version;
+        });
     }
 
     fn handle_secret_notification(&mut self, resp: SubscribeResponse) {
@@ -723,7 +766,7 @@ mod tests {
         }
     }
 
-    fn snapshot_notification(version: u64) -> SubscribeResponse {
+    fn snapshot_notification(version: u64, ready: bool) -> SubscribeResponse {
         SubscribeResponse {
             status: None,
             operation: Operation::Snapshot as i32,
@@ -736,6 +779,7 @@ mod tests {
                     catalog_version: 0,
                     worker_node_version: 0,
                     streaming_worker_slot_mapping_version: version,
+                    streaming_worker_slot_mapping_ready: ready,
                 }),
                 cluster_resource: Some(Default::default()),
                 ..Default::default()
@@ -752,7 +796,7 @@ mod tests {
         observer_node.handle_notification(streaming_mapping_notification(1.into(), 5));
         assert_eq!(*version_rx.borrow_and_update(), 5);
 
-        observer_node.handle_initialization_notification(snapshot_notification(1));
+        observer_node.handle_initialization_notification(snapshot_notification(1, true));
         assert_eq!(observer_node.streaming_worker_slot_mapping_version, 1);
         assert_eq!(*version_rx.borrow_and_update(), 1);
 
@@ -769,7 +813,7 @@ mod tests {
         let (mut observer_node, _catalog_version_rx, _version_rx, mut reinit_rx) =
             make_observer_node();
 
-        observer_node.handle_initialization_notification(snapshot_notification(1));
+        observer_node.handle_initialization_notification(snapshot_notification(1, true));
         assert_eq!(
             *reinit_rx.borrow_and_update(),
             CompletedObserverRecovery::default()
@@ -782,6 +826,188 @@ mod tests {
                 epoch: 1,
                 catalog_version: 0,
                 streaming_worker_slot_mapping_version: 1,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn initialization_finished_defers_recovery_when_mapping_not_ready() {
+        let (mut observer_node, _catalog_version_rx, _version_rx, mut reinit_rx) =
+            make_observer_node();
+
+        // ready=false simulates barrier manager still recovering
+        // (streaming jobs exist but mappings are empty).
+        observer_node.handle_initialization_notification(snapshot_notification(0, false));
+        observer_node.handle_initialization_finished();
+
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery::default()
+        );
+
+        // Normal mapping updates during recovery do NOT unblock the deferred signal.
+        observer_node.handle_notification(streaming_mapping_notification(1.into(), 1));
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery::default()
+        );
+
+        // Only the recovery-complete notification (mapping=None) fires the signal.
+        observer_node.handle_notification(recovery_complete_notification(2));
+
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery {
+                epoch: 1,
+                catalog_version: 0,
+                streaming_worker_slot_mapping_version: 2,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn initialization_finished_signals_immediately_when_no_streaming_jobs() {
+        let (mut observer_node, _catalog_version_rx, _version_rx, mut reinit_rx) =
+            make_observer_node();
+
+        // ready=true with version=0: no streaming jobs exist, mapping state is
+        // genuinely empty and complete.
+        observer_node.handle_initialization_notification(snapshot_notification(0, true));
+        observer_node.handle_initialization_finished();
+
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery {
+                epoch: 1,
+                catalog_version: 0,
+                streaming_worker_slot_mapping_version: 0,
+            }
+        );
+    }
+
+    fn recovery_complete_notification(version: u64) -> SubscribeResponse {
+        // Recovery-complete signal: mapping=None, version bump only.
+        SubscribeResponse {
+            status: None,
+            operation: Operation::Update as i32,
+            info: Some(Info::StreamingWorkerSlotMapping(
+                FragmentWorkerSlotMapping {
+                    fragment_id: 0.into(),
+                    mapping: None,
+                },
+            )),
+            version,
+        }
+    }
+
+    #[tokio::test]
+    async fn deferred_recovery_fires_on_recovery_complete_notification() {
+        let (mut observer_node, _catalog_version_rx, _version_rx, mut reinit_rx) =
+            make_observer_node();
+
+        // Subscribe during recovery: ready=false, version=0
+        observer_node.handle_initialization_notification(snapshot_notification(0, false));
+        observer_node.handle_initialization_finished();
+
+        // Recovery is deferred — no signal yet.
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery::default()
+        );
+
+        // Meta sends recovery-complete notification (mapping=None, version bump).
+        observer_node.handle_notification(recovery_complete_notification(1));
+
+        // The deferred recovery should now fire.
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery {
+                epoch: 1,
+                catalog_version: 0,
+                streaming_worker_slot_mapping_version: 1,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn mapping_none_notification_does_not_panic() {
+        let (mut observer_node, _catalog_version_rx, mut version_rx, _reinit_rx) =
+            make_observer_node();
+
+        // ready=true so no deferred recovery
+        observer_node.handle_initialization_notification(snapshot_notification(0, true));
+        observer_node.handle_initialization_finished();
+
+        // A mapping=None notification should not panic, just advance version.
+        observer_node.handle_notification(recovery_complete_notification(3));
+        assert_eq!(*version_rx.borrow_and_update(), 3);
+    }
+
+    #[tokio::test]
+    async fn recovery_complete_buffered_before_initialization_finished() {
+        // Simulates the race: recovery-complete notification is buffered during
+        // init and replayed (via handle_notification) BEFORE handle_initialization_finished.
+        let (mut observer_node, _catalog_version_rx, _version_rx, mut reinit_rx) =
+            make_observer_node();
+
+        // Snapshot with ready=false, version=0 (recovery in progress).
+        observer_node.handle_initialization_notification(snapshot_notification(0, false));
+
+        // The recovery-complete notification was buffered and gets replayed now,
+        // before handle_initialization_finished is called.
+        observer_node.handle_notification(recovery_complete_notification(1));
+
+        // No recovery signal yet (recovery_deferred is still false at this point).
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery::default()
+        );
+
+        // Now handle_initialization_finished runs — it should detect that the
+        // recovery-complete signal was already replayed and signal immediately.
+        observer_node.handle_initialization_finished();
+
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery {
+                epoch: 1,
+                catalog_version: 0,
+                streaming_worker_slot_mapping_version: 1,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn normal_mapping_update_during_recovery_does_not_signal() {
+        // A normal mapping=Some update replayed before handle_initialization_finished
+        // should NOT trigger recovery signal — only mapping=None does.
+        let (mut observer_node, _catalog_version_rx, _version_rx, mut reinit_rx) =
+            make_observer_node();
+
+        // Snapshot with ready=false, version=0 (recovery in progress).
+        observer_node.handle_initialization_notification(snapshot_notification(0, false));
+
+        // A normal mapping update is replayed during init buffering.
+        observer_node.handle_notification(streaming_mapping_notification(1.into(), 1));
+
+        // handle_initialization_finished should NOT signal — the version advanced
+        // but this was a regular mapping update, not the recovery-complete signal.
+        observer_node.handle_initialization_finished();
+
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery::default()
+        );
+        assert!(observer_node.recovery_deferred);
+
+        // Only the actual recovery-complete notification should unblock.
+        observer_node.handle_notification(recovery_complete_notification(2));
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery {
+                epoch: 1,
+                catalog_version: 0,
+                streaming_worker_slot_mapping_version: 2,
             }
         );
     }
