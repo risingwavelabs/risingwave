@@ -2717,6 +2717,8 @@ impl CatalogController {
             properties: Set(risingwave_meta_model::Property(
                 options_with_secret.as_plaintext().clone(),
             )),
+            secret_ref: Set((!options_with_secret.as_secret().is_empty())
+                .then(|| SecretRef::from(options_with_secret.as_secret().clone()))),
             definition: Set(rewrite_sql.clone()),
             ..Default::default()
         };
