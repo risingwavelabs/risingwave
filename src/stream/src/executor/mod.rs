@@ -169,7 +169,6 @@ pub use receiver::ReceiverExecutor;
 use risingwave_common::id::SourceId;
 pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
-pub(crate) use sync_kv_log_store::SyncKvLogStoreContext;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
 pub use sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 pub use temporal_join::TemporalJoinExecutor;

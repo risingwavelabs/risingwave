@@ -15,10 +15,12 @@
 use std::collections::VecDeque;
 use std::future::pending;
 use std::mem::replace;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Either, select};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan;
 use risingwave_storage::StateStore;
@@ -28,8 +30,11 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{DispatchExecutor, DispatchExecutorInner, dispatch_message_batch};
 use crate::common::log_store_impl::kv_log_store::reader::LogStoreReadStateStreamRangeStart;
+use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::state::LogStoreReadState;
-use crate::common::log_store_impl::kv_log_store::{FIRST_SEQ_ID, LogStoreVnodeProgress};
+use crate::common::log_store_impl::kv_log_store::{
+    FIRST_SEQ_ID, KV_LOG_STORE_V2_INFO, LogStoreVnodeProgress,
+};
 use crate::executor::prelude::*;
 use crate::executor::sync_kv_log_store::{
     ReadFuture, SyncKvLogStoreContext, SyncedKvLogStoreExecutor, SyncedLogStoreBuffer, WriteFuture,
@@ -50,7 +55,71 @@ pub struct SyncLogStoreDispatchExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new(
+        input: Executor,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        dispatchers: Vec<stream_plan::Dispatcher>,
+        actor_context: &ActorContextRef,
+        sync: &stream_plan::SyncLogStoreNode,
+        vnode_bitmap: Option<Bitmap>,
+        state_store: S,
+    ) -> StreamResult<Self> {
+        let chunk_size = actor_context.config.developer.chunk_size;
+        let fragment_id = actor_context.fragment_id;
+        let log_store_metrics = SyncedKvLogStoreMetrics::new(
+            &actor_context.streaming_metrics,
+            actor_context.id,
+            fragment_id,
+            "sync_log_store_dispatch",
+            "sync_log_store_dispatch",
+        );
+
+        let table = sync
+            .log_store_table
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing log_store_table in SyncLogStoreNode"))?;
+
+        #[allow(deprecated)]
+        let pause_duration_ms = sync.pause_duration_ms.map_or(
+            actor_context
+                .config
+                .developer
+                .sync_log_store_pause_duration_ms,
+            |v| v as usize,
+        );
+
+        #[allow(deprecated)]
+        let max_buffer_size = sync.buffer_size.map_or(
+            actor_context.config.developer.sync_log_store_buffer_size,
+            |v| v as usize,
+        );
+
+        let serde =
+            LogStoreRowSerde::new(table, vnode_bitmap.map(Into::into), &KV_LOG_STORE_V2_INFO);
+        let log_store_context = SyncKvLogStoreContext {
+            table_id: table.id,
+            fragment_id,
+            serde,
+            state_store,
+            max_buffer_size,
+            pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
+            aligned: sync.aligned,
+            chunk_size,
+            metrics: log_store_metrics,
+        };
+
+        Self::new_with_log_store_context(
+            input,
+            new_output_request_rx,
+            dispatchers,
+            actor_context,
+            log_store_context,
+        )
+        .await
+    }
+
+    async fn new_with_log_store_context(
         input: Executor,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         dispatchers: Vec<stream_plan::Dispatcher>,
@@ -541,7 +610,7 @@ mod tests {
             .boxed(),
         );
 
-        let executor = SyncLogStoreDispatchExecutor::new(
+        let executor = SyncLogStoreDispatchExecutor::new_with_log_store_context(
             input,
             new_output_request_rx,
             vec![dispatcher],
@@ -635,7 +704,7 @@ mod tests {
             .boxed(),
         );
 
-        let executor = SyncLogStoreDispatchExecutor::new(
+        let executor = SyncLogStoreDispatchExecutor::new_with_log_store_context(
             input,
             new_output_request_rx,
             vec![dispatcher],
@@ -799,7 +868,7 @@ mod tests {
             .boxed(),
         );
 
-        let executor = SyncLogStoreDispatchExecutor::new(
+        let executor = SyncLogStoreDispatchExecutor::new_with_log_store_context(
             input,
             new_output_request_rx,
             vec![dispatcher],
