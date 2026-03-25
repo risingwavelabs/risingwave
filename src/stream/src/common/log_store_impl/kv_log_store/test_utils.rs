@@ -165,14 +165,16 @@ pub(crate) fn gen_test_log_store_table(pk_info: &'static KvLogStorePkInfo) -> Pb
     let order_types = pk_info.pk_orderings.to_vec();
     let pk_index = (0..pk_info.pk_len()).collect();
     let read_prefix_len_hint = 0;
-    gen_pbtable_with_dist_key(
+    let mut table = gen_pbtable_with_dist_key(
         TEST_TABLE_ID,
         schema,
         order_types,
         pk_index,
         read_prefix_len_hint,
         vec![pk_info.predefined_column_len()],
-    )
+    );
+    table.disable_bloom_filter = true;
+    table
 }
 
 pub(crate) fn calculate_vnode_bitmap<'a>(
