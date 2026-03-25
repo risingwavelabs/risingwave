@@ -15,7 +15,7 @@
 use risingwave_common::array::StructValue;
 use risingwave_common::row::Row;
 use risingwave_common::types::{
-    DataType, ListRef, MapRef, MapType, MapValue, ScalarImpl, ScalarRef, ScalarRefImpl,
+    DataType, ListRef, MapRef, MapType, ScalarImpl, ScalarRefImpl,
     ToOwnedDatum,
 };
 use risingwave_expr::{ExprError, function};
@@ -258,15 +258,32 @@ fn map_cat(
     m2: Option<MapRef<'_>>,
     writer: &mut impl risingwave_common::array::MapWrite,
 ) -> Option<()> {
-    // MapValue::concat and to_owned_scalar both allocate.
-    // The output-side copy into `writer` is zero-alloc from the builder's
-    // perspective — no second MapValue is allocated for the output column.
-    let result = match (m1, m2) {
+    match (m1, m2) {
         (None, None) => return None,
-        (Some(m), None) | (None, Some(m)) => m.to_owned_scalar(),
-        (Some(m1), Some(m2)) => MapValue::concat(m1, m2),
-    };
-    writer.write_iter(result.into_inner().iter());
+        (Some(m), None) | (None, Some(m)) => {
+            writer.write_iter(m.into_inner().iter());
+        }
+        (Some(m1), Some(m2)) => {
+            // Same logic as MapValue::concat, but writes directly into the
+            // builder via the writer — no intermediate MapValue allocation.
+            debug_assert_eq!(m1.inner().elem_type(), m2.inner().elem_type());
+
+            // Vec is used because ScalarRefImpl doesn't implement Hash or Ord,
+            // so neither HashSet nor BTreeSet is available here.
+            let m2_keys: Vec<ScalarRefImpl<'_>> = m2.iter().map(|(k, _)| k).collect();
+
+            // Write m1 entries whose key is NOT overridden by m2
+            for s in m1.iter_struct() {
+                let key = s.field_at(0).expect("map key is not null");
+                if !m2_keys.contains(&key) {
+                    writer.write(Some(ScalarRefImpl::Struct(s)));
+                }
+            }
+
+            // Write all m2 entries (m2 takes precedence on duplicate keys)
+            writer.write_iter(m2.into_inner().iter());
+        }
+    }
     Some(())
 }
 
