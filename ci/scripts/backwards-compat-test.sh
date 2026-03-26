@@ -37,6 +37,8 @@ source e2e_test/backwards-compat-tests/scripts/utils.sh
 
 ################################### Main
 
+CURRENT_GIT_SHA="${GIT_SHA:-}"
+
 configure_rw() {
 VERSION="$1"
 ENABLE_BUILD="$2"
@@ -166,6 +168,11 @@ setup_old_cluster() {
 setup_new_cluster() {
   echo "--- Setup Risingwave @ $RW_COMMIT"
   git checkout "$RW_COMMIT"
+  if [[ -n "${CURRENT_GIT_SHA}" ]]; then
+    export GIT_SHA="$CURRENT_GIT_SHA"
+  else
+    unset GIT_SHA
+  fi
   download_and_prepare_rw "$profile" common
   # Reuse the Java connector artifact produced by the `build-other` step
   # instead of rebuilding it from source during `risedev d`.
