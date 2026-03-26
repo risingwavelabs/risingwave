@@ -143,15 +143,25 @@ async fn ensure_no_foreign_key(config: &PostgresConfig) -> Result<()> {
     )
     .await?;
 
+    ensure_no_foreign_key_with_client(&client, &config.schema, &config.table).await
+}
+
+async fn ensure_no_foreign_key_with_client(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+) -> Result<()> {
     let has_foreign_key = client
-        .query_one(CHECK_FOREIGN_KEY_SQL, &[&config.schema, &config.table])
+        .query_one(CHECK_FOREIGN_KEY_SQL, &[&schema, &table])
         .await
         .context("failed to check foreign key constraints")?
         .get::<_, bool>(0);
 
     if has_foreign_key {
         return Err(SinkError::Config(anyhow!(
-            "Postgres sink does not support target tables with foreign key constraints"
+            "Postgres sink does not support target table \"{}\".\"{}\" with foreign key constraints. Please remove foreign key constraints from the target table or choose a different sink table.",
+            schema,
+            table,
         )));
     }
 
@@ -357,8 +367,6 @@ impl PostgresSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        ensure_no_foreign_key(&config).await?;
-
         let tcp_keepalive = tcp_keepalive_from_config(&config);
 
         let client = create_pg_client(
@@ -372,6 +380,8 @@ impl PostgresSinkWriter {
             tcp_keepalive,
         )
         .await?;
+
+        ensure_no_foreign_key_with_client(&client, &config.schema, &config.table).await?;
 
         let pk_indices_lookup = pk_indices.iter().copied().collect::<HashSet<_>>();
 
