@@ -1112,6 +1112,7 @@ mod tests {
             cdc_table_snapshot_splits: None,
             locality_fragment_state_table_mapping: Default::default(),
             is_serverless: false,
+            refresh_interval_sec: None,
             streaming_job_model: streaming_job::Model {
                 job_id: JobId::new(100),
                 job_status: risingwave_meta_model::JobStatus::Creating,
@@ -1125,6 +1126,7 @@ mod tests {
                 max_parallelism: 256,
                 specific_resource_group: None,
                 is_serverless_backfill: false,
+                refresh_interval_sec: None,
             },
         };
 

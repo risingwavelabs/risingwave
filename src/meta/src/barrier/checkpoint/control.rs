@@ -38,6 +38,7 @@ use risingwave_pb::stream_service::streaming_control_stream_response::ResetParti
 use tracing::{debug, warn};
 
 use crate::barrier::cdc_progress::CdcProgress;
+use crate::barrier::checkpoint::batch_refresh_job::BatchRefreshJobCheckpointControl;
 use crate::barrier::checkpoint::creating_job::CreatingStreamingJobControl;
 use crate::barrier::checkpoint::recovery::{
     DatabaseRecoveringState, DatabaseStatusAction, EnterInitializing, EnterRunning,
@@ -55,8 +56,106 @@ use crate::barrier::utils::{BarrierItemCollector, collect_creating_job_commit_ep
 use crate::barrier::{
     BackfillProgress, Command, CreateStreamingJobType, FragmentBackfillProgress, Reschedule,
 };
+use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::{build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs};
 use crate::manager::MetaSrvEnv;
+
+// ── Enum unifying independent checkpoint job types ─────────────────────────────
+
+/// A streaming job that checkpoints independently from the database's main graph,
+/// using its own partial graph.
+pub(crate) enum IndependentCheckpointJobControl {
+    CreatingStreamingJob(CreatingStreamingJobControl),
+    BatchRefresh(BatchRefreshJobCheckpointControl),
+}
+
+impl IndependentCheckpointJobControl {
+    pub(crate) fn gen_backfill_progress(&self) -> BackfillProgress {
+        match self {
+            Self::CreatingStreamingJob(j) => j.gen_backfill_progress(),
+            Self::BatchRefresh(j) => j.gen_backfill_progress(),
+        }
+    }
+
+    pub(crate) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
+        match self {
+            Self::CreatingStreamingJob(j) => j.gen_fragment_backfill_progress(),
+            Self::BatchRefresh(j) => j.gen_fragment_backfill_progress(),
+        }
+    }
+
+    pub(crate) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
+        match self {
+            Self::CreatingStreamingJob(j) => j.is_valid_after_worker_err(worker_id),
+            Self::BatchRefresh(j) => j.is_valid_after_worker_err(worker_id),
+        }
+    }
+
+    pub(crate) fn pinned_upstream_log_epoch(&self) -> (u64, HashSet<TableId>) {
+        match self {
+            Self::CreatingStreamingJob(j) => j.pinned_upstream_log_epoch(),
+            Self::BatchRefresh(j) => j.pinned_upstream_log_epoch(),
+        }
+    }
+
+    pub(crate) fn collect_no_shuffle_fragment_relations(
+        &self,
+        relations: &mut Vec<(FragmentId, FragmentId)>,
+    ) {
+        match self {
+            Self::CreatingStreamingJob(j) => j.collect_no_shuffle_fragment_relations(relations),
+            Self::BatchRefresh(j) => j.collect_no_shuffle_fragment_relations(relations),
+        }
+    }
+
+    pub(crate) fn collect_reschedule_blocked_fragment_ids(
+        &self,
+        ids: &mut HashSet<FragmentId>,
+    ) {
+        match self {
+            Self::CreatingStreamingJob(j) => j.collect_reschedule_blocked_fragment_ids(ids),
+            Self::BatchRefresh(j) => j.collect_reschedule_blocked_fragment_ids(ids),
+        }
+    }
+
+    pub fn fragment_infos_with_job_id(
+        &self,
+    ) -> impl Iterator<Item = (&InflightFragmentInfo, JobId)> + '_ {
+        match self {
+            Self::CreatingStreamingJob(j) => itertools::Either::Left(j.fragment_infos_with_job_id()),
+            Self::BatchRefresh(j) => itertools::Either::Right(j.fragment_infos_with_job_id()),
+        }
+    }
+
+    pub(crate) fn ack_completed(
+        &mut self,
+        partial_graph_manager: &mut PartialGraphManager,
+        epoch: u64,
+    ) {
+        match self {
+            Self::CreatingStreamingJob(j) => j.ack_completed(partial_graph_manager, epoch),
+            Self::BatchRefresh(j) => j.ack_completed(partial_graph_manager, epoch),
+        }
+    }
+
+    pub(crate) fn on_partial_graph_reset(self) {
+        match self {
+            Self::CreatingStreamingJob(j) => j.on_partial_graph_reset(),
+            Self::BatchRefresh(mut j) => j.on_partial_graph_reset(),
+        }
+    }
+
+    pub(crate) fn drop(
+        &mut self,
+        notifiers: &mut Vec<Notifier>,
+        partial_graph_manager: &mut PartialGraphManager,
+    ) -> bool {
+        match self {
+            Self::CreatingStreamingJob(j) => j.drop(notifiers, partial_graph_manager),
+            Self::BatchRefresh(j) => j.drop(notifiers, partial_graph_manager),
+        }
+    }
+}
 use crate::model::ActorId;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
@@ -385,11 +484,11 @@ impl CheckpointControl {
                     .database_info
                     .gen_backfill_progress(),
             );
-            // Progress of snapshot backfill
-            for (job_id, creating_job) in
-                &database_checkpoint_control.creating_streaming_job_controls
+            // Progress of snapshot backfill / batch refresh jobs
+            for (job_id, job) in
+                &database_checkpoint_control.independent_checkpoint_job_controls
             {
-                progress.extend([(*job_id, creating_job.gen_backfill_progress())]);
+                progress.extend([(*job_id, job.gen_backfill_progress())]);
             }
         }
         progress
@@ -406,11 +505,11 @@ impl CheckpointControl {
                     .database_info
                     .gen_fragment_backfill_progress(),
             );
-            for creating_job in database_checkpoint_control
-                .creating_streaming_job_controls
+            for job in database_checkpoint_control
+                .independent_checkpoint_job_controls
                 .values()
             {
-                progress.extend(creating_job.gen_fragment_backfill_progress());
+                progress.extend(job.gen_fragment_backfill_progress());
             }
         }
         progress
@@ -470,23 +569,26 @@ impl CheckpointControl {
         match self.databases.get_mut(&database_id).expect("should exist") {
             DatabaseCheckpointControlStatus::Running(database) => {
                 if let Some(creating_job_id) = creating_job {
-                    let Some(job) = database
-                        .creating_streaming_job_controls
+                    match database
+                        .independent_checkpoint_job_controls
                         .remove(&creating_job_id)
-                    else {
-                        if cfg!(debug_assertions) {
-                            panic!(
-                                "receive reset partial graph resp on non-existing creating job {creating_job_id} in database {database_id}"
-                            )
+                    {
+                        Some(independent_job) => {
+                            independent_job.on_partial_graph_reset();
                         }
-                        warn!(
-                            %database_id,
-                            %creating_job_id,
-                            "ignore reset partial graph resp on non-existing creating job on running database"
-                        );
-                        return;
-                    };
-                    job.on_partial_graph_reset();
+                        None => {
+                            if cfg!(debug_assertions) {
+                                panic!(
+                                    "receive reset partial graph resp on non-existing creating job {creating_job_id} in database {database_id}"
+                                )
+                            }
+                            warn!(
+                                %database_id,
+                                %creating_job_id,
+                                "ignore reset partial graph resp on non-existing creating job on running database"
+                            );
+                        }
+                    }
                 } else {
                     unreachable!("should not receive reset database resp when database running")
                 }
@@ -570,7 +672,7 @@ impl DatabaseCheckpointControlStatus {
 
     fn may_have_snapshot_backfilling_jobs(&self) -> bool {
         self.running_state()
-            .map(|database| !database.creating_streaming_job_controls.is_empty())
+            .map(|database| !database.independent_checkpoint_job_controls.is_empty())
             .unwrap_or(true) // there can be snapshot backfilling jobs when the database is recovering.
     }
 
@@ -637,7 +739,7 @@ pub(in crate::barrier) struct DatabaseCheckpointControl {
     committed_epoch: Option<u64>,
 
     pub(super) database_info: InflightDatabaseInfo,
-    pub creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl>,
+    pub independent_checkpoint_job_controls: HashMap<JobId, IndependentCheckpointJobControl>,
 }
 
 impl DatabaseCheckpointControl {
@@ -650,7 +752,7 @@ impl DatabaseCheckpointControl {
             completing_barrier: None,
             committed_epoch: None,
             database_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
-            creating_streaming_job_controls: Default::default(),
+            independent_checkpoint_job_controls: Default::default(),
         }
     }
 
@@ -659,7 +761,7 @@ impl DatabaseCheckpointControl {
         state: BarrierWorkerState,
         committed_epoch: u64,
         database_info: InflightDatabaseInfo,
-        creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl>,
+        independent_checkpoint_job_controls: HashMap<JobId, IndependentCheckpointJobControl>,
     ) -> Self {
         Self {
             database_id,
@@ -669,14 +771,14 @@ impl DatabaseCheckpointControl {
             completing_barrier: None,
             committed_epoch: Some(committed_epoch),
             database_info,
-            creating_streaming_job_controls,
+            independent_checkpoint_job_controls,
         }
     }
 
     pub(crate) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
         !self.database_info.contains_worker(worker_id as _)
             && self
-                .creating_streaming_job_controls
+                .independent_checkpoint_job_controls
                 .values()
                 .all(|job| job.is_valid_after_worker_err(worker_id))
     }
@@ -708,13 +810,20 @@ impl DatabaseCheckpointControl {
         let (database_id, creating_job_id) = from_partial_graph_id(partial_graph_id);
         assert_eq!(self.database_id, database_id);
         if let Some(creating_job_id) = creating_job_id {
-            let should_merge_to_upstream = self
-                .creating_streaming_job_controls
+            match self
+                .independent_checkpoint_job_controls
                 .get_mut(&creating_job_id)
                 .expect("should exist")
-                .collect(collected_barrier);
-            if should_merge_to_upstream {
-                periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
+            {
+                IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) => {
+                    let should_merge_to_upstream = creating_job.collect(collected_barrier);
+                    if should_merge_to_upstream {
+                        periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
+                    }
+                }
+                IndependentCheckpointJobControl::BatchRefresh(batch_refresh_job) => {
+                    batch_refresh_job.collect(collected_barrier);
+                }
             }
         }
         Ok(())
@@ -726,9 +835,9 @@ impl DatabaseCheckpointControl {
     fn collect_backfill_pinned_upstream_log_epoch(
         &self,
     ) -> HashMap<JobId, (u64, HashSet<TableId>)> {
-        self.creating_streaming_job_controls
+        self.independent_checkpoint_job_controls
             .iter()
-            .map(|(job_id, creating_job)| (*job_id, creating_job.pinned_upstream_log_epoch()))
+            .map(|(job_id, job)| (*job_id, job.pinned_upstream_log_epoch()))
             .collect()
     }
 
@@ -748,8 +857,8 @@ impl DatabaseCheckpointControl {
             });
         }
 
-        for creating_job in self.creating_streaming_job_controls.values() {
-            creating_job.collect_no_shuffle_fragment_relations(&mut no_shuffle_relations);
+        for job in self.independent_checkpoint_job_controls.values() {
+            job.collect_no_shuffle_fragment_relations(&mut no_shuffle_relations);
         }
         no_shuffle_relations
     }
@@ -758,8 +867,8 @@ impl DatabaseCheckpointControl {
         &self,
     ) -> MetaResult<HashSet<JobId>> {
         let mut initial_blocked_fragment_ids = HashSet::new();
-        for creating_job in self.creating_streaming_job_controls.values() {
-            creating_job.collect_reschedule_blocked_fragment_ids(&mut initial_blocked_fragment_ids);
+        for job in self.independent_checkpoint_job_controls.values() {
+            job.collect_reschedule_blocked_fragment_ids(&mut initial_blocked_fragment_ids);
         }
 
         let mut blocked_fragment_ids = initial_blocked_fragment_ids.clone();
@@ -825,25 +934,63 @@ impl DatabaseCheckpointControl {
         if let Some(committed_epoch) = self.committed_epoch {
             // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
             let mut finished_jobs = Vec::new();
+            let mut snapshot_done_jobs = Vec::new();
+            let mut snapshot_finished_tracking_jobs = Vec::new();
             let min_upstream_inflight_barrier = partial_graph_manager
                 .first_inflight_barrier(self.partial_graph_id)
                 .map(|epoch| epoch.prev);
-            for (job_id, job) in &mut self.creating_streaming_job_controls {
-                if let Some((epoch, resps, info, is_finish_epoch)) = job.start_completing(
-                    partial_graph_manager,
-                    min_upstream_inflight_barrier,
-                    committed_epoch,
-                ) {
-                    let resps = resps.into_values().collect_vec();
-                    if is_finish_epoch {
-                        assert!(info.notifiers.is_empty());
-                        finished_jobs.push((*job_id, epoch, resps));
-                        continue;
-                    };
-                    creating_jobs_task.push((*job_id, epoch, resps, info));
+            for (job_id, job) in &mut self.independent_checkpoint_job_controls {
+                match job {
+                    IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) => {
+                        if let Some((epoch, resps, info, is_finish_epoch)) =
+                            creating_job.start_completing(
+                                partial_graph_manager,
+                                min_upstream_inflight_barrier,
+                                committed_epoch,
+                            )
+                        {
+                            let resps = resps.into_values().collect_vec();
+                            if is_finish_epoch {
+                                assert!(info.notifiers.is_empty());
+                                finished_jobs.push((*job_id, epoch, resps));
+                                continue;
+                            };
+                            creating_jobs_task.push((*job_id, epoch, resps, info));
+                        }
+                    }
+                    IndependentCheckpointJobControl::BatchRefresh(batch_refresh_job) => {
+                        if let Some((epoch, resps, info, is_stop)) =
+                            batch_refresh_job.start_completing(
+                                partial_graph_manager,
+                                min_upstream_inflight_barrier,
+                                committed_epoch,
+                            )
+                        {
+                            let resps = resps.into_values().collect_vec();
+                            if is_stop {
+                                snapshot_done_jobs.push(*job_id);
+                                if let Some(tracking_job) =
+                                    batch_refresh_job.take_tracking_job()
+                                {
+                                    snapshot_finished_tracking_jobs.push(tracking_job);
+                                }
+                                continue;
+                            };
+                            creating_jobs_task.push((*job_id, epoch, resps, info));
+                        }
+                    }
                 }
             }
-
+            // Batch refresh jobs that completed their snapshot: transition to idle
+            if !snapshot_done_jobs.is_empty() {
+                for job_id in snapshot_done_jobs {
+                    if let Some(IndependentCheckpointJobControl::BatchRefresh(job)) =
+                        self.independent_checkpoint_job_controls.get_mut(&job_id)
+                    {
+                        job.transition_to_idle(partial_graph_manager);
+                    }
+                }
+            }
             if !finished_jobs.is_empty() {
                 partial_graph_manager.remove_partial_graphs(
                     finished_jobs
@@ -856,13 +1003,18 @@ impl DatabaseCheckpointControl {
                 debug!(epoch, %job_id, "finish creating job");
                 // It's safe to remove the creating job, because on CompleteJobType::Finished,
                 // all previous barriers have been collected and completed.
-                let creating_streaming_job = self
-                    .creating_streaming_job_controls
-                    .remove(&job_id)
-                    .expect("should exist");
+                let Some(IndependentCheckpointJobControl::CreatingStreamingJob(creating_streaming_job)) =
+                    self.independent_checkpoint_job_controls.remove(&job_id)
+                else {
+                    panic!("finished job {job_id} should be a creating streaming job");
+                };
                 let tracking_job = creating_streaming_job.into_tracking_job();
                 self.finishing_jobs_collector
                     .collect(epoch, job_id, (resps, tracking_job));
+            }
+            if !snapshot_finished_tracking_jobs.is_empty() {
+                let task = task.get_or_insert_default();
+                task.finished_jobs.extend(snapshot_finished_tracking_jobs);
             }
         }
         let mut observed_non_checkpoint = false;
@@ -958,7 +1110,7 @@ impl DatabaseCheckpointControl {
                 assert_eq!(command_prev_epoch, None);
             };
             for (job_id, epoch) in creating_job_epochs {
-                if let Some(job) = self.creating_streaming_job_controls.get_mut(&job_id) {
+                if let Some(job) = self.independent_checkpoint_job_controls.get_mut(&job_id) {
                     job.ack_completed(partial_graph_manager, epoch);
                 }
                 // If the job is not found, it was dropped and already removed
@@ -1044,7 +1196,7 @@ impl DatabaseCheckpointControl {
             if streaming_job_ids.len() > 1 {
                 for job_to_cancel in streaming_job_ids {
                     if self
-                        .creating_streaming_job_controls
+                        .independent_checkpoint_job_controls
                         .contains_key(job_to_cancel)
                     {
                         warn!(
@@ -1060,19 +1212,24 @@ impl DatabaseCheckpointControl {
                     }
                 }
             } else if let Some(job_to_drop) = streaming_job_ids.iter().next()
-                && let Some(creating_job) =
-                    self.creating_streaming_job_controls.get_mut(job_to_drop)
-                && creating_job.drop(&mut notifiers, partial_graph_manager)
+                && let Some(job) =
+                    self.independent_checkpoint_job_controls.get_mut(job_to_drop)
             {
-                return Ok(());
+                let dropped = job.drop(&mut notifiers, partial_graph_manager);
+                if dropped {
+                    return Ok(());
+                }
             }
         }
 
         if let Some(Command::Throttle { jobs, .. }) = &command
             && jobs.len() > 1
-            && let Some(creating_job_id) = jobs
-                .iter()
-                .find(|job| self.creating_streaming_job_controls.contains_key(*job))
+            && let Some(creating_job_id) = jobs.iter().find(|job| {
+                matches!(
+                    self.independent_checkpoint_job_controls.get(*job),
+                    Some(IndependentCheckpointJobControl::CreatingStreamingJob(_))
+                )
+            })
         {
             warn!(
                 job_id = %creating_job_id,
@@ -1090,7 +1247,7 @@ impl DatabaseCheckpointControl {
             reschedule_plan: Some(reschedule_plan),
             ..
         }) = &command
-            && !self.creating_streaming_job_controls.is_empty()
+            && !self.independent_checkpoint_job_controls.is_empty()
         {
             let blocked_job_ids =
                 self.collect_reschedule_blocked_jobs_for_creating_jobs_inflight()?;
@@ -1121,7 +1278,7 @@ impl DatabaseCheckpointControl {
             && self.database_info.is_empty()
         {
             assert!(
-                self.creating_streaming_job_controls.is_empty(),
+                self.independent_checkpoint_job_controls.is_empty(),
                 "should not have snapshot backfill job when there is no normal job in database"
             );
             // skip the command when there is nothing to do with the barrier
@@ -1133,7 +1290,8 @@ impl DatabaseCheckpointControl {
         };
 
         if let Some(Command::CreateStreamingJob {
-            job_type: CreateStreamingJobType::SnapshotBackfill(_),
+            job_type:
+                CreateStreamingJobType::SnapshotBackfill(_) | CreateStreamingJobType::BatchRefresh(_),
             ..
         }) = &command
             && self.state.is_paused()

@@ -65,8 +65,9 @@ use crate::barrier::BackfillOrderState;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
-    BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
-    DatabaseCheckpointControlMetrics,
+    BarrierWorkerState, BatchRefreshJobCheckpointControl, BatchRefreshJobInfo,
+    CreatingStreamingJobControl, DatabaseCheckpointControl, DatabaseCheckpointControlMetrics,
+    IndependentCheckpointJobControl,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -591,7 +592,7 @@ impl DatabaseInitialBarrierCollector {
         database_partial_graphs(
             self.database_id,
             self.database
-                .creating_streaming_job_controls
+                .independent_checkpoint_job_controls
                 .keys()
                 .copied(),
         )
@@ -1003,24 +1004,14 @@ impl PartialGraphRecoverer<'_> {
             );
         };
 
-        let mut creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl> =
+        let mut independent_checkpoint_job_controls: HashMap<JobId, IndependentCheckpointJobControl> =
             HashMap::new();
         for (job_id, (info, upstream_table_ids, committed_epoch, snapshot_epoch)) in
             ongoing_snapshot_backfill_jobs
         {
-            let node_actors = edges.collect_actors_to_create(info.values().map(|fragment_infos| {
-                (
-                    fragment_infos.fragment_id,
-                    &fragment_infos.nodes,
-                    fragment_infos.actors.iter().map(move |(actor_id, actor)| {
-                        (
-                            stream_actors.get(actor_id).expect("should exist"),
-                            actor.worker_id,
-                        )
-                    }),
-                    vec![], // no subscribers for backfilling jobs,
-                )
-            }));
+            let refresh_interval_sec = job_extra_info
+                .get(&job_id)
+                .and_then(|extra| extra.refresh_interval_sec);
 
             let database_job_source_splits =
                 collect_source_splits(database_jobs.values().flatten(), source_splits);
@@ -1049,23 +1040,100 @@ impl PartialGraphRecoverer<'_> {
                 false,
             );
 
-            let job = CreatingStreamingJobControl::recover(
-                database_id,
-                job_id,
-                upstream_table_ids,
-                &database_job_log_epochs,
-                snapshot_epoch,
-                committed_epoch,
-                &barrier_info,
-                info,
-                job_backfill_orders,
-                fragment_relations,
-                hummock_version_stats,
-                node_actors,
-                mutation.clone(),
-                self,
-            )?;
-            creating_streaming_job_controls.insert(job_id, job);
+            if refresh_interval_sec.is_some() {
+                let control_stream_manager = self.control_stream_manager();
+                let mut builder = FragmentEdgeBuilder::new(info.values().map(|fragment_infos| {
+                    (
+                        fragment_infos.fragment_id,
+                        EdgeBuilderFragmentInfo::from_inflight(
+                            fragment_infos,
+                            to_partial_graph_id(database_id, Some(job_id)),
+                            control_stream_manager,
+                        ),
+                    )
+                }));
+                builder.add_relations(
+                    &info
+                        .keys()
+                        .filter_map(|fragment_id| {
+                            fragment_relations
+                                .get(fragment_id)
+                                .map(|relations| (*fragment_id, relations.clone()))
+                        })
+                        .collect(),
+                );
+                let mut batch_refresh_edges = builder.build();
+                let node_actors = batch_refresh_edges.collect_actors_to_create(info.values().map(
+                    |fragment_infos| {
+                        (
+                            fragment_infos.fragment_id,
+                            &fragment_infos.nodes,
+                            fragment_infos.actors.iter().map(move |(actor_id, actor)| {
+                                (
+                                    stream_actors.get(actor_id).expect("should exist"),
+                                    actor.worker_id,
+                                )
+                            }),
+                            vec![], // no subscribers for backfilling jobs,
+                        )
+                    },
+                ));
+
+                // Batch refresh jobs use their own self-contained control.
+                let batch_refresh_info = BatchRefreshJobInfo {
+                    upstream_table_ids: upstream_table_ids.clone(),
+                };
+                let job = BatchRefreshJobCheckpointControl::recover(
+                    database_id,
+                    job_id,
+                    upstream_table_ids,
+                    snapshot_epoch,
+                    committed_epoch,
+                    info,
+                    job_backfill_orders,
+                    fragment_relations,
+                    hummock_version_stats,
+                    node_actors,
+                    mutation.clone(),
+                    batch_refresh_info,
+                    self,
+                )?;
+                independent_checkpoint_job_controls
+                    .insert(job_id, IndependentCheckpointJobControl::BatchRefresh(job));
+            } else {
+                let node_actors =
+                    edges.collect_actors_to_create(info.values().map(|fragment_infos| {
+                        (
+                            fragment_infos.fragment_id,
+                            &fragment_infos.nodes,
+                            fragment_infos.actors.iter().map(move |(actor_id, actor)| {
+                                (
+                                    stream_actors.get(actor_id).expect("should exist"),
+                                    actor.worker_id,
+                                )
+                            }),
+                            vec![], // no subscribers for backfilling jobs,
+                        )
+                    }));
+                let job = CreatingStreamingJobControl::recover(
+                    database_id,
+                    job_id,
+                    upstream_table_ids,
+                    &database_job_log_epochs,
+                    snapshot_epoch,
+                    committed_epoch,
+                    &barrier_info,
+                    info,
+                    job_backfill_orders,
+                    fragment_relations,
+                    hummock_version_stats,
+                    node_actors,
+                    mutation.clone(),
+                    self,
+                )?;
+                independent_checkpoint_job_controls
+                    .insert(job_id, IndependentCheckpointJobControl::CreatingStreamingJob(job));
+            }
         }
 
         self.control_stream_manager()
@@ -1080,7 +1148,7 @@ impl PartialGraphRecoverer<'_> {
                             .map(move |fragment| (fragment, info.job_id))
                     })
                     .chain(
-                        creating_streaming_job_controls
+                        independent_checkpoint_job_controls
                             .values()
                             .flat_map(|job| job.fragment_infos_with_job_id()),
                     ),
@@ -1102,7 +1170,7 @@ impl PartialGraphRecoverer<'_> {
             database_state,
             committed_epoch,
             database_info,
-            creating_streaming_job_controls,
+            independent_checkpoint_job_controls,
         ))
     }
 }

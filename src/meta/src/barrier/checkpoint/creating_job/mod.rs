@@ -18,6 +18,8 @@ mod status;
 use std::cmp::max;
 use std::collections::{HashMap, HashSet, hash_map};
 use std::mem::take;
+
+use super::control::IndependentCheckpointJobControl;
 use std::ops::Bound::{Excluded, Unbounded};
 use std::time::Duration;
 
@@ -117,7 +119,7 @@ fn collect_fragment_upstream_fragment_ids(
 
 impl CreatingStreamingJobControl {
     pub(super) fn new<'a>(
-        entry: hash_map::VacantEntry<'a, JobId, Self>,
+        entry: hash_map::VacantEntry<'a, JobId, IndependentCheckpointJobControl>,
         create_info: CreateSnapshotBackfillJobCommandInfo,
         notifiers: Vec<Notifier>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
@@ -213,19 +215,23 @@ impl CreatingStreamingJobControl {
 
         let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
 
-        let job = entry.insert(Self {
-            partial_graph_id,
-            job_id,
-            snapshot_backfill_upstream_tables,
-            max_committed_epoch: None,
-            snapshot_epoch,
-            status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
-            upstream_lag: GLOBAL_META_METRICS
-                .snapshot_backfill_lag
-                .with_guarded_label_values(&[&format!("{}", job_id)]),
-            node_actors,
-            state_table_ids,
-        });
+        let IndependentCheckpointJobControl::CreatingStreamingJob(job) =
+            entry.insert(IndependentCheckpointJobControl::CreatingStreamingJob(Self {
+                partial_graph_id,
+                job_id,
+                snapshot_backfill_upstream_tables,
+                max_committed_epoch: None,
+                snapshot_epoch,
+                status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
+                upstream_lag: GLOBAL_META_METRICS
+                    .snapshot_backfill_lag
+                    .with_guarded_label_values(&[&format!("{}", job_id)]),
+                node_actors,
+                state_table_ids,
+            }))
+        else {
+            unreachable!()
+        };
 
         let mut graph_adder = partial_graph_manager.add_partial_graph(
             partial_graph_id,

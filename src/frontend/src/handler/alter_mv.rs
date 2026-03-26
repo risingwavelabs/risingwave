@@ -143,7 +143,7 @@ async fn handle_alter_mv_bound(
 
     // TODO(alter-mv): use `ColumnIdGenerator` to generate IDs for MV columns, in order to
     // support schema changes.
-    let (mut table, graph, _dependencies, _resource_group) = {
+    let (mut table, graph, _dependencies, _resource_group, _refresh_interval_sec) = {
         create_mv::gen_create_mv_graph(
             handler_args,
             name,

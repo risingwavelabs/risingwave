@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub(crate) mod batch_refresh_job;
 mod control;
 mod creating_job;
 mod recovery;
 mod state;
 
+pub(crate) use batch_refresh_job::{BatchRefreshJobCheckpointControl, BatchRefreshJobInfo};
 pub(super) use control::{
     CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl,
-    DatabaseCheckpointControlMetrics,
+    DatabaseCheckpointControlMetrics, IndependentCheckpointJobControl,
 };
 pub(super) use creating_job::CreatingStreamingJobControl;
 pub(super) use state::BarrierWorkerState;
