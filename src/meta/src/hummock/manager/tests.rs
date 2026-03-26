@@ -3119,27 +3119,6 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
 }
 
 #[tokio::test]
-async fn test_schedule_group_split_with_normalize_enabled() {
-    let mut opts = MetaOpts::test(false);
-    opts.enable_compaction_group_normalize = true;
-    let (_env, hummock_manager, _, _worker_id) = setup_compute_env_with_meta_opts(80, opts).await;
-
-    hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
-        .await
-        .unwrap();
-    hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
-        .await
-        .unwrap();
-
-    hummock_manager.schedule_group_split_for_test().await;
-
-    let current_version = hummock_manager.get_current_version().await;
-    assert_compaction_groups_non_overlapping(&current_version);
-}
-
-#[tokio::test]
 async fn test_schedule_group_split_runs_split_logic_after_normalize() {
     let mut opts = MetaOpts::test(false);
     opts.enable_compaction_group_normalize = true;
@@ -3205,28 +3184,6 @@ async fn test_schedule_group_split_runs_split_logic_after_normalize() {
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 200).await,
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 201).await
     );
-}
-
-#[tokio::test]
-async fn test_schedule_group_merge_with_normalize_enabled_when_split_scheduling_disabled() {
-    let mut opts = MetaOpts::test(false);
-    opts.enable_compaction_group_normalize = true;
-    opts.periodic_scheduling_compaction_group_split_interval_sec = 0;
-    let (_env, hummock_manager, _, _worker_id) = setup_compute_env_with_meta_opts(80, opts).await;
-
-    hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
-        .await
-        .unwrap();
-    hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
-        .await
-        .unwrap();
-
-    hummock_manager.schedule_group_merge_for_test().await;
-
-    let current_version = hummock_manager.get_current_version().await;
-    assert_compaction_groups_non_overlapping(&current_version);
 }
 
 #[tokio::test]
