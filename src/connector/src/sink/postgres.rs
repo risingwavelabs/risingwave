@@ -73,7 +73,7 @@ pub struct PostgresConfig {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct TcpKeepaliveConfig {
     #[serde(rename = "tcp.keepalive.idle")]
     #[serde_as(as = "DisplayFromStr")]
