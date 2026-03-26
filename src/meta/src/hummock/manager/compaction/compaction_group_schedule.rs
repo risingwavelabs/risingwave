@@ -55,25 +55,6 @@ struct NormalizePlan {
 }
 
 impl NormalizePlan {
-    fn new(
-        parent_group_id: CompactionGroupId,
-        parent_table_ids: Vec<StateTableId>,
-        boundary_table_id: StateTableId,
-    ) -> Self {
-        assert!(!parent_table_ids.is_empty());
-
-        let boundary_index =
-            parent_table_ids.partition_point(|&table_id| table_id < boundary_table_id);
-        assert!(boundary_index > 0 && boundary_index < parent_table_ids.len());
-        assert_eq!(parent_table_ids[boundary_index], boundary_table_id);
-
-        Self {
-            parent_group_id,
-            parent_table_ids,
-            boundary_table_id,
-        }
-    }
-
     fn split_key(&self) -> Bytes {
         group_split::build_split_full_key(self.boundary_table_id, VirtualNode::ZERO)
             .encode()
@@ -92,6 +73,35 @@ impl NormalizePlan {
         assert!(!table_ids_left.is_empty() && !table_ids_right.is_empty());
         (table_ids_left, table_ids_right)
     }
+}
+
+fn gen_normalize_plan(
+    left: &CompactionGroupStatistic,
+    right: &CompactionGroupStatistic,
+) -> Option<NormalizePlan> {
+    let left_table_ids = left.table_statistic.keys().copied().collect_vec();
+
+    if left_table_ids.len() <= 1 {
+        return None;
+    }
+
+    let left_max = *left_table_ids.last().unwrap();
+    let right_min = *right.table_statistic.keys().next().unwrap();
+    if left_max < right_min {
+        return None;
+    }
+
+    let boundary_index = left_table_ids.partition_point(|&table_id| table_id < right_min);
+    if boundary_index == 0 || boundary_index >= left_table_ids.len() {
+        return None;
+    }
+    let boundary_table_id = left_table_ids[boundary_index];
+
+    Some(NormalizePlan {
+        parent_group_id: left.group_id,
+        parent_table_ids: left_table_ids,
+        boundary_table_id,
+    })
 }
 
 fn build_normalize_plan_from_group_statistics(
@@ -114,31 +124,9 @@ fn build_normalize_plan_from_group_statistics(
                 .unwrap_or(false)
         })
         .find_map(|segment| {
-            segment.windows(2).find_map(|pair| {
-                let left = &pair[0];
-                let right = &pair[1];
-                let left_table_ids = left.table_statistic.keys().copied().collect_vec();
-
-                if left_table_ids.len() <= 1 {
-                    return None;
-                }
-
-                let left_max = *left_table_ids.last().unwrap();
-                let right_min = *right.table_statistic.keys().next().unwrap();
-                if left_max < right_min {
-                    return None;
-                }
-
-                let boundary_index =
-                    left_table_ids.partition_point(|&table_id| table_id < right_min);
-                let boundary_table_id = left_table_ids[boundary_index];
-
-                Some(NormalizePlan::new(
-                    left.group_id,
-                    left_table_ids,
-                    boundary_table_id,
-                ))
-            })
+            segment
+                .windows(2)
+                .find_map(|pair| gen_normalize_plan(pair[0], pair[1]))
         })
 }
 
@@ -502,6 +490,99 @@ impl HummockManager {
             .inc();
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use risingwave_hummock_sdk::CompactionGroupId;
+    use risingwave_pb::hummock::CompactionConfig;
+
+    use super::{
+        CompactionGroupStatistic, NormalizePlan, build_normalize_plan_from_group_statistics,
+        gen_normalize_plan,
+    };
+    use crate::hummock::model::CompactionGroup;
+
+    fn group(
+        group_id: CompactionGroupId,
+        table_ids: &[u32],
+        disable_auto_group_scheduling: bool,
+    ) -> CompactionGroupStatistic {
+        let config = CompactionConfig {
+            disable_auto_group_scheduling: Some(disable_auto_group_scheduling),
+            ..Default::default()
+        };
+        CompactionGroupStatistic {
+            group_id,
+            group_size: 0,
+            table_statistic: table_ids
+                .iter()
+                .copied()
+                .map(|table_id| (table_id.into(), 0_u64))
+                .collect::<BTreeMap<_, _>>(),
+            compaction_group_config: CompactionGroup::new(group_id, config),
+        }
+    }
+
+    #[test]
+    fn test_gen_normalize_plan_returns_none_for_single_table_group() {
+        let left = group(1.into(), &[10], false);
+        let right = group(2.into(), &[5, 20], false);
+
+        assert_eq!(None, gen_normalize_plan(&left, &right));
+    }
+
+    #[test]
+    fn test_gen_normalize_plan_returns_none_for_non_overlapping_groups() {
+        let left = group(1.into(), &[1, 2, 3], false);
+        let right = group(2.into(), &[4, 5, 6], false);
+
+        assert_eq!(None, gen_normalize_plan(&left, &right));
+    }
+
+    #[test]
+    fn test_gen_normalize_plan_returns_none_when_boundary_cannot_split_parent() {
+        let left = group(1.into(), &[5, 6, 7], false);
+        let right = group(2.into(), &[4, 8], false);
+
+        assert_eq!(None, gen_normalize_plan(&left, &right));
+    }
+
+    #[test]
+    fn test_gen_normalize_plan_generates_expected_boundary() {
+        let left = group(1.into(), &[1, 4, 7], false);
+        let right = group(2.into(), &[2, 5, 8], false);
+
+        assert_eq!(
+            Some(NormalizePlan {
+                parent_group_id: 1.into(),
+                parent_table_ids: vec![1.into(), 4.into(), 7.into()],
+                boundary_table_id: 4.into(),
+            }),
+            gen_normalize_plan(&left, &right)
+        );
+    }
+
+    #[test]
+    fn test_build_normalize_plan_skips_disabled_boundary_and_continues_later_segment() {
+        let groups = vec![
+            group(1.into(), &[1, 4, 7], false),
+            group(2.into(), &[2, 5, 8], true),
+            group(3.into(), &[10, 13, 16], false),
+            group(4.into(), &[11, 14, 17], false),
+        ];
+
+        assert_eq!(
+            Some(NormalizePlan {
+                parent_group_id: 3.into(),
+                parent_table_ids: vec![10.into(), 13.into(), 16.into()],
+                boundary_table_id: 13.into(),
+            }),
+            build_normalize_plan_from_group_statistics(&groups)
+        );
     }
 }
 
