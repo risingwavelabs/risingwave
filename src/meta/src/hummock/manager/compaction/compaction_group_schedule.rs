@@ -54,6 +54,27 @@ struct NormalizePlan {
     boundary_table_id: StateTableId,
 }
 
+impl NormalizePlan {
+    fn split_key(&self) -> Bytes {
+        group_split::build_split_full_key(self.boundary_table_id, VirtualNode::ZERO)
+            .encode()
+            .into()
+    }
+
+    fn split_table_ids(&self) -> Option<(Vec<StateTableId>, Vec<StateTableId>)> {
+        let split_full_key =
+            group_split::build_split_full_key(self.boundary_table_id, VirtualNode::ZERO);
+        let (table_ids_left, table_ids_right) =
+            group_split::split_table_ids_with_table_id_and_vnode(
+                &self.parent_table_ids,
+                split_full_key.user_key.table_id,
+                split_full_key.user_key.get_vnode_id(),
+            );
+        (!table_ids_left.is_empty() && !table_ids_right.is_empty())
+            .then_some((table_ids_left, table_ids_right))
+    }
+}
+
 fn build_normalize_plan_from_group_statistics(
     groups: &[CompactionGroupStatistic],
 ) -> Option<NormalizePlan> {
@@ -76,14 +97,13 @@ fn build_normalize_plan_from_group_statistics(
                 let left = &pair[0];
                 let right = &pair[1];
                 let left_table_ids = left.table_statistic.keys().copied().collect_vec();
-                let right_table_ids = right.table_statistic.keys().copied().collect_vec();
 
                 if left_table_ids.len() <= 1 {
                     return None;
                 }
 
                 let left_max = *left_table_ids.last().unwrap();
-                let right_min = right_table_ids[0];
+                let right_min = *right.table_statistic.keys().next().unwrap();
                 if left_max < right_min {
                     return None;
                 }
@@ -135,8 +155,6 @@ fn collect_normalize_group_statistics(
             compaction_group_config: group_config,
         });
     }
-
-    groups.sort_by_key(|group| *group.table_statistic.keys().next().unwrap());
     Ok(groups)
 }
 
@@ -840,15 +858,7 @@ impl HummockManager {
             return Ok(None);
         };
 
-        let split_full_key =
-            group_split::build_split_full_key(plan.boundary_table_id, VirtualNode::ZERO);
-        let (table_ids_left, table_ids_right) =
-            group_split::split_table_ids_with_table_id_and_vnode(
-                &plan.parent_table_ids,
-                split_full_key.user_key.table_id,
-                split_full_key.user_key.get_vnode_id(),
-            );
-        if table_ids_left.is_empty() || table_ids_right.is_empty() {
+        if plan.split_table_ids().is_none() {
             tracing::debug!(
                 "normalize split skipped because one side is empty. parent_group_id={} boundary={}",
                 plan.parent_group_id,
@@ -878,17 +888,9 @@ impl HummockManager {
                 return Ok(false);
             }
 
-            let split_full_key =
-                group_split::build_split_full_key(plan.boundary_table_id, VirtualNode::ZERO);
-            let (table_ids_left, table_ids_right) =
-                group_split::split_table_ids_with_table_id_and_vnode(
-                    &plan.parent_table_ids,
-                    split_full_key.user_key.table_id,
-                    split_full_key.user_key.get_vnode_id(),
-                );
-            if table_ids_left.is_empty() || table_ids_right.is_empty() {
+            let Some((_table_ids_left, table_ids_right)) = plan.split_table_ids() else {
                 return Ok(false);
-            }
+            };
 
             let config = compaction_group_manager
                 .try_get_compaction_group_config(plan.parent_group_id)
@@ -911,7 +913,7 @@ impl HummockManager {
                 &self.metrics,
             );
             let mut new_version_delta = version.new_delta();
-            let split_key: Bytes = split_full_key.encode().into();
+            let split_key = plan.split_key();
             let split_sst_count = new_version_delta
                 .latest_version()
                 .count_new_ssts_in_group_split(plan.parent_group_id, split_key.clone());
