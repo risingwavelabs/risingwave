@@ -25,7 +25,7 @@ use risingwave_storage::table::TableIter;
 use risingwave_storage::table::batch_table::BatchTable;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
-use crate::cache::cache_may_stale;
+use crate::cache::keyed_cache_may_stale;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::lookup::LookupExecutor;
@@ -333,7 +333,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 .update_vnode_bitmap(vnode_bitmap.clone());
 
             // Manipulate the cache if necessary.
-            if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+            if keyed_cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
                 self.lookup_cache.clear();
             }
         }

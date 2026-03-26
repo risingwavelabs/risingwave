@@ -348,4 +348,16 @@ impl Source {
             1,
         )
     }
+
+    pub fn clone_with_column_catalog(&self, column_catalog: Vec<ColumnCatalog>) -> Self {
+        let row_id_index = column_catalog.iter().position(|c| c.is_row_id_column());
+        Self {
+            catalog: self.catalog.clone(),
+            column_catalog,
+            row_id_index,
+            kind: self.kind.clone(),
+            ctx: self.ctx.clone(),
+            as_of: self.as_of.clone(),
+        }
+    }
 }

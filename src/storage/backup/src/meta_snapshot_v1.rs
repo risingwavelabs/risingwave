@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_hummock_sdk::HummockRawObjectId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Secret, Sink, Source, Subscription, Table, View,
@@ -98,6 +99,18 @@ impl Metadata for ClusterMetadata {
     fn hummock_version(self) -> HummockVersion {
         self.hummock_version
     }
+
+    fn storage_url(&self) -> BackupResult<String> {
+        unreachable!("");
+    }
+
+    fn storage_directory(&self) -> BackupResult<String> {
+        unreachable!("");
+    }
+
+    fn table_change_log_object_ids(&self) -> HashSet<HummockRawObjectId> {
+        HashSet::default()
+    }
 }
 
 /// For backward compatibility, never remove fields and only append new field.
@@ -162,7 +175,7 @@ impl ClusterMetadata {
             .zip_eq_fast(default_cf_values.into_iter())
             .collect();
         let hummock_version =
-            HummockVersion::from_persisted_protobuf(&Self::decode_prost_message(&mut buf)?);
+            HummockVersion::from_persisted_protobuf_owned(Self::decode_prost_message(&mut buf)?);
         let version_stats = Self::decode_prost_message(&mut buf)?;
         let compaction_groups: Vec<CompactionGroup> = Self::decode_prost_message_list(&mut buf)?;
         let table_fragments: Vec<TableFragments> = Self::decode_prost_message_list(&mut buf)?;
@@ -282,7 +295,7 @@ mod tests {
         let mut raw = ClusterMetadata::default();
         raw.default_cf.insert(vec![0, 1, 2], vec![3, 4, 5]);
         raw.hummock_version.id = HummockVersionId::new(1);
-        raw.version_stats.hummock_version_id = 10;
+        raw.version_stats.hummock_version_id = 10.into();
         raw.version_stats.table_stats.insert(
             200.into(),
             TableStats {
@@ -291,7 +304,7 @@ mod tests {
             },
         );
         raw.compaction_groups.push(CompactionGroup {
-            id: 3000,
+            id: 3000.into(),
             ..Default::default()
         });
         raw.encode_to(&mut buf).unwrap();

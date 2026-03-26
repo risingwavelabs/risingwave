@@ -34,6 +34,7 @@ use tokio_postgres::{Client as PgClient, NoTls};
 #[cfg(not(madsim))]
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::error::ConnectorResult;
+use crate::sink::postgres::TcpKeepaliveConfig;
 
 /// SQL query to discover primary key columns directly from PostgreSQL system tables.
 /// This bypasses querying `information_schema.table_constraints` to avoid permission issues.
@@ -331,6 +332,14 @@ impl fmt::Display for SslMode {
     }
 }
 
+impl std::str::FromStr for SslMode {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_value(serde_json::Value::String(s.to_owned()))
+    }
+}
+
 pub async fn create_pg_client(
     user: &str,
     password: &str,
@@ -339,6 +348,7 @@ pub async fn create_pg_client(
     database: &str,
     ssl_mode: &SslMode,
     ssl_root_cert: &Option<String>,
+    tcp_keepalive: Option<TcpKeepaliveConfig>,
 ) -> anyhow::Result<PgClient> {
     let mut pg_config = tokio_postgres::Config::new();
     pg_config
@@ -347,6 +357,27 @@ pub async fn create_pg_client(
         .host(host)
         .port(port.parse::<u16>().unwrap())
         .dbname(database);
+
+    // Configure TCP keepalive if provided
+    if let Some(keepalive) = tcp_keepalive {
+        pg_config.keepalives(true);
+        pg_config.keepalives_idle(std::time::Duration::from_secs(
+            keepalive.tcp_keepalive_idle as u64,
+        ));
+        #[cfg(not(target_os = "windows"))]
+        {
+            pg_config.keepalives_interval(std::time::Duration::from_secs(
+                keepalive.tcp_keepalive_interval as u64,
+            ));
+            pg_config.keepalives_retries(keepalive.tcp_keepalive_count);
+        }
+        tracing::info!(
+            "TCP keepalive enabled: idle={}s, interval={}s, retries={}",
+            keepalive.tcp_keepalive_idle,
+            keepalive.tcp_keepalive_interval,
+            keepalive.tcp_keepalive_count
+        );
+    }
 
     let (_verify_ca, verify_hostname) = match ssl_mode {
         SslMode::VerifyCa => (true, false),

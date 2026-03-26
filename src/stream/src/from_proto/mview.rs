@@ -45,8 +45,16 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         let versioned = table.version.is_some();
         let refreshable = table.refreshable;
 
-        let conflict_behavior =
+        let mut conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
+        if params
+            .config
+            .developer
+            .materialize_force_overwrite_on_no_check
+            && conflict_behavior == ConflictBehavior::NoCheck
+        {
+            conflict_behavior = ConflictBehavior::Overwrite;
+        }
         let version_column_indices: Vec<u32> = table.version_column_indices.clone();
 
         let exec = if refreshable {
@@ -74,6 +82,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                 version_column_indices.clone(),
                 params.executor_stats.clone(),
                 Some(refresh_args),
+                node.cleaned_by_ttl_watermark,
                 params.local_barrier_manager.clone(),
             )
             .await
@@ -94,6 +103,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     version_column_indices.clone(),
                     params.executor_stats.clone(),
                     None, // No refresh args for regular tables
+                    node.cleaned_by_ttl_watermark,
                     params.local_barrier_manager.clone(),
                 )
                 .await
@@ -112,6 +122,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     version_column_indices.clone(),
                     params.executor_stats.clone(),
                     None, // No refresh args for regular tables
+                    node.cleaned_by_ttl_watermark,
                     params.local_barrier_manager.clone(),
                 )
                 .await
@@ -162,7 +173,8 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             conflict_behavior,
             version_column_indices,
             params.executor_stats.clone(),
-            None, // ArrangeExecutor doesn't support refresh functionality
+            None,  // ArrangeExecutor doesn't support refresh functionality
+            false, // ArrangeExecutor doesn't support TTL watermark
             params.local_barrier_manager.clone(),
         )
         .await;

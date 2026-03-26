@@ -34,6 +34,25 @@ pub(super) fn resolve_streaming_job_id_for_alter(
     alter_stmt_type: StatementType,
     alter_target: &str,
 ) -> Result<JobId> {
+    resolve_streaming_job_id_for_alter_impl(session, obj_name, alter_stmt_type, alter_target, false)
+}
+
+pub(super) fn resolve_streaming_job_id_for_alter_parallelism(
+    session: &SessionImpl,
+    obj_name: ObjectName,
+    alter_stmt_type: StatementType,
+    alter_target: &str,
+) -> Result<JobId> {
+    resolve_streaming_job_id_for_alter_impl(session, obj_name, alter_stmt_type, alter_target, true)
+}
+
+fn resolve_streaming_job_id_for_alter_impl(
+    session: &SessionImpl,
+    obj_name: ObjectName,
+    alter_stmt_type: StatementType,
+    alter_target: &str,
+    include_creating_table: bool,
+) -> Result<JobId> {
     let db_name = &session.database();
     let (schema_name, real_table_name) = Binder::resolve_schema_qualified_name(db_name, &obj_name)?;
     let search_path = session.config().search_path();
@@ -45,8 +64,11 @@ pub(super) fn resolve_streaming_job_id_for_alter(
         StatementType::ALTER_TABLE
         | StatementType::ALTER_MATERIALIZED_VIEW
         | StatementType::ALTER_INDEX => {
-            let (table, schema_name) =
-                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+            let (table, schema_name) = if include_creating_table {
+                reader.get_table_by_name(db_name, schema_path, &real_table_name, true)?
+            } else {
+                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?
+            };
 
             match (table.table_type(), alter_stmt_type) {
                 (TableType::Internal, _) => {

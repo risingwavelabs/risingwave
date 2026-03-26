@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::config::ServerConfig;
+use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::rpc::await_tree::dump_cluster_await_tree;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
@@ -25,6 +27,21 @@ use tonic::{Request, Response, Status};
 pub struct MonitorServiceImpl {
     pub metadata_manager: MetadataManager,
     pub await_tree_reg: await_tree::Registry,
+    pub profile_service: ProfileServiceImpl,
+}
+
+impl MonitorServiceImpl {
+    pub fn new(
+        metadata_manager: MetadataManager,
+        await_tree_reg: await_tree::Registry,
+        server_config: ServerConfig,
+    ) -> Self {
+        Self {
+            metadata_manager,
+            await_tree_reg,
+            profile_service: ProfileServiceImpl::new(server_config),
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -48,30 +65,30 @@ impl MonitorService for MonitorServiceImpl {
 
     async fn profiling(
         &self,
-        _request: Request<monitor_service::ProfilingRequest>,
+        request: Request<monitor_service::ProfilingRequest>,
     ) -> Result<Response<monitor_service::ProfilingResponse>, Status> {
-        Err(Status::unimplemented("not implemented in meta node"))
+        self.profile_service.profiling(request).await
     }
 
     async fn heap_profiling(
         &self,
-        _request: Request<monitor_service::HeapProfilingRequest>,
+        request: Request<monitor_service::HeapProfilingRequest>,
     ) -> Result<Response<monitor_service::HeapProfilingResponse>, Status> {
-        Err(Status::unimplemented("not implemented in meta node"))
+        self.profile_service.heap_profiling(request).await
     }
 
     async fn list_heap_profiling(
         &self,
-        _request: Request<monitor_service::ListHeapProfilingRequest>,
+        request: Request<monitor_service::ListHeapProfilingRequest>,
     ) -> Result<Response<monitor_service::ListHeapProfilingResponse>, Status> {
-        Err(Status::unimplemented("not implemented in meta node"))
+        self.profile_service.list_heap_profiling(request).await
     }
 
     async fn analyze_heap(
         &self,
-        _request: Request<monitor_service::AnalyzeHeapRequest>,
+        request: Request<monitor_service::AnalyzeHeapRequest>,
     ) -> Result<Response<monitor_service::AnalyzeHeapResponse>, Status> {
-        Err(Status::unimplemented("not implemented in meta node"))
+        self.profile_service.analyze_heap(request).await
     }
 
     async fn get_streaming_stats(

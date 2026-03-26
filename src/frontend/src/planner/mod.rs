@@ -22,7 +22,6 @@ mod changelog;
 mod delete;
 mod insert;
 mod query;
-mod recursive_union;
 mod relation;
 mod select;
 mod set_expr;

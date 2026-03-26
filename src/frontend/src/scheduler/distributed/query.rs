@@ -648,8 +648,13 @@ pub(crate) mod tests {
         );
         let eq_join_predicate =
             EqJoinPredicate::new(Condition::true_cond(), vec![eq_key_1, eq_key_2], 2, 2);
-        let hash_join_node: PlanRef =
-            BatchHashJoin::new(logical_join_node, eq_join_predicate, None).into();
+        let logical_join_node = generic::Join::with_full_output_eq_predicate(
+            logical_join_node.left,
+            logical_join_node.right,
+            logical_join_node.join_type,
+            eq_join_predicate,
+        );
+        let hash_join_node: PlanRef = BatchHashJoin::new(logical_join_node, None).into();
         let batch_exchange_node: PlanRef = BatchExchange::new(
             hash_join_node.clone(),
             Order::default(),
@@ -667,7 +672,6 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             property: Some(Property {
                 parallelism: 8,
-                is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
                 ..Default::default()
@@ -685,7 +689,6 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             property: Some(Property {
                 parallelism: 8,
-                is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
                 ..Default::default()
@@ -703,7 +706,6 @@ pub(crate) mod tests {
             state: risingwave_pb::common::worker_node::State::Running as i32,
             property: Some(Property {
                 parallelism: 8,
-                is_unschedulable: false,
                 is_serving: true,
                 is_streaming: true,
                 ..Default::default()

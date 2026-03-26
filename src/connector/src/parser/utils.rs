@@ -134,7 +134,9 @@ pub fn extract_cdc_meta_column<'a>(
     match column_type {
         ColumnType::Timestamp(_) => Ok(cdc_meta.extract_timestamp()),
         ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
-        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name()),
+        // `table_name` in additional columns should be the object name only, not the routing key
+        // (which can be `schema.table` or `db.table` depending on the connector).
+        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name_only()),
         _ => Err(AccessError::UnsupportedAdditionalColumn {
             name: column_name.to_owned(),
         }),

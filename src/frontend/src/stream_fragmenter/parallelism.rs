@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::session_config::parallelism::ConfigParallelism;
+use risingwave_common::session_config::parallelism::{
+    ConfigAdaptiveParallelismStrategy, ConfigParallelism,
+};
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 
 pub(crate) fn derive_parallelism(
@@ -23,19 +26,41 @@ pub(crate) fn derive_parallelism(
         // fallback to global streaming_parallelism
         Some(ConfigParallelism::Default) | None => match global_streaming_parallelism {
             // for streaming_parallelism, `Default` is `Adaptive`
-            ConfigParallelism::Default | ConfigParallelism::Adaptive => None,
+            ConfigParallelism::Default
+            | ConfigParallelism::Adaptive
+            | ConfigParallelism::Bounded(_)
+            | ConfigParallelism::Ratio(_) => None,
             ConfigParallelism::Fixed(n) => Some(Parallelism {
                 parallelism: n.get(),
             }),
         },
 
-        // specific type parallelism is set to `Adaptive` or `Fixed(0)`
-        Some(ConfigParallelism::Adaptive) => None,
+        // specific type parallelism is set to an adaptive mode
+        Some(
+            ConfigParallelism::Adaptive
+            | ConfigParallelism::Bounded(_)
+            | ConfigParallelism::Ratio(_),
+        ) => None,
 
-        // specific type parallelism is set to `Fixed(n)
+        // specific type parallelism is set to `Fixed(n)`
         Some(ConfigParallelism::Fixed(n)) => Some(Parallelism {
             parallelism: n.get(),
         }),
+    }
+}
+
+pub(crate) fn derive_parallelism_strategy(
+    specific_strategy: Option<ConfigAdaptiveParallelismStrategy>,
+    global_strategy: ConfigAdaptiveParallelismStrategy,
+) -> Option<AdaptiveParallelismStrategy> {
+    let to_strategy =
+        |cfg: ConfigAdaptiveParallelismStrategy| -> Option<AdaptiveParallelismStrategy> {
+            cfg.into()
+        };
+
+    match specific_strategy.unwrap_or(ConfigAdaptiveParallelismStrategy::Default) {
+        ConfigAdaptiveParallelismStrategy::Default => to_strategy(global_strategy),
+        other => to_strategy(other),
     }
 }
 
@@ -119,5 +144,31 @@ mod tests {
                 Some(6)
             );
         }
+    }
+
+    #[test]
+    fn test_parallelism_strategy_fallback() {
+        assert_eq!(
+            derive_parallelism_strategy(None, ConfigAdaptiveParallelismStrategy::Auto),
+            Some(AdaptiveParallelismStrategy::Auto)
+        );
+        assert_eq!(
+            derive_parallelism_strategy(
+                Some(ConfigAdaptiveParallelismStrategy::Default),
+                ConfigAdaptiveParallelismStrategy::Full
+            ),
+            Some(AdaptiveParallelismStrategy::Full)
+        );
+    }
+
+    #[test]
+    fn test_parallelism_strategy_override() {
+        assert_eq!(
+            derive_parallelism_strategy(
+                Some(ConfigAdaptiveParallelismStrategy::Ratio(0.5)),
+                ConfigAdaptiveParallelismStrategy::Full
+            ),
+            Some(AdaptiveParallelismStrategy::Ratio(0.5))
+        );
     }
 }

@@ -41,7 +41,9 @@ use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
     SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
+use risingwave_connector::{
+    AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, source,
+};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
@@ -59,7 +61,7 @@ use risingwave_sqlparser::ast::{
     FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
-use risingwave_sqlparser::parser::{IncludeOption, Parser};
+use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
@@ -95,13 +97,16 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
-    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
-    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, CompactionType, ENABLE_COMPACTION,
-    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
-    IcebergSink, IcebergWriteMode, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
-    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
+    COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_DELETE_FILES_COUNT_THRESHOLD,
+    COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, COMPACTION_SMALL_FILES_THRESHOLD_MB,
+    COMPACTION_TARGET_FILE_SIZE_MB, COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE,
+    COMPACTION_WRITE_PARQUET_COMPRESSION, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
+    CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
+    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
+    ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
+    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+    parse_partition_by_exprs,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -827,6 +832,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     source: Arc<SourceCatalog>,
     external_table_name: String,
     column_defs: Vec<ColumnDef>,
+    source_watermarks: Vec<SourceWatermark>,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
     cdc_with_options: WithOptionsSecResolved,
@@ -858,6 +864,13 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let (mut columns, pk_column_ids, _row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+
+    let watermark_descs = bind_source_watermark(
+        context.session_ctx(),
+        table_name.real_value(),
+        source_watermarks,
+        &columns,
+    )?;
 
     // NOTES: In auto schema change, default value is not provided in column definition.
     bind_sql_column_constraints(
@@ -936,7 +949,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             columns,
             pk_column_ids,
             row_id_index: None,
-            watermark_descs: vec![],
+            watermark_descs,
             source_catalog: Some((*source).clone()),
             version: col_id_gen.into_version(),
         },
@@ -957,10 +970,17 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     Ok((materialize.into(), table))
 }
 
+/// Derive connector properties and normalize `external_table_name` for CDC tables.
+///
+/// Returns (`connector_properties`, `normalized_external_table_name`) where:
+/// - For SQL Server: Normalizes 'db.schema.table' (3 parts) to 'schema.table' (2 parts),
+///   because users can optionally include database name for verification, but it needs to be
+///   stripped to match the format returned by Debezium's `extract_table_name()`.
+/// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
 fn derive_with_options_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
-) -> Result<WithOptionsSecResolved> {
+) -> Result<(WithOptionsSecResolved, String)> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
     let source_database_name: &str = source_with_properties
@@ -990,6 +1010,8 @@ fn derive_with_options_for_cdc_table(
                 }
                 with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+                // Return original external_table_name unchanged for MySQL
+                return Ok((with_options, external_table_name));
             }
             POSTGRES_CDC_CONNECTOR => {
                 let (schema_name, table_name) = external_table_name
@@ -999,52 +1021,72 @@ fn derive_with_options_for_cdc_table(
                 // insert 'schema.name' into connect properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+                // Return original external_table_name unchanged for Postgres
+                return Ok((with_options, external_table_name));
             }
             SQL_SERVER_CDC_CONNECTOR => {
-                // SQL Server external table name can be in different formats:
-                // 1. 'databaseName.schemaName.tableName' (full format)
-                // 2. 'schemaName.tableName' (schema and table only)
-                // 3. 'tableName' (table only, will use default schema 'dbo')
-                // We will auto-fill missing parts from source configuration
+                // SQL Server external table name must be in one of two formats:
+                // 1. 'schemaName.tableName' (2 parts) - database is already specified in source
+                // 2. 'databaseName.schemaName.tableName' (3 parts) - for explicit verification
+                //
+                // We do NOT allow single table name (e.g., 't') because:
+                // - Unlike database name (already in source), schema name is NOT pre-specified
+                // - User must explicitly provide schema (even if it's 'dbo')
                 let parts: Vec<&str> = external_table_name.split('.').collect();
-                let (_, schema_name, table_name) = match parts.len() {
+                let (schema_name, table_name) = match parts.len() {
                     3 => {
-                        // Full format: database.schema.table
+                        // Format: database.schema.table
+                        // Verify that the database name matches the one in source definition
                         let db_name = parts[0];
                         let schema_name = parts[1];
                         let table_name = parts[2];
 
-                        // Verify database name matches source configuration
                         if db_name != source_database_name {
                             return Err(anyhow!(
-                                "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
+                                "The database name '{}' in FROM clause does not match the database name '{}' specified in source definition. \
+                                 You can either use 'schema.table' format (recommended) or ensure the database name matches.",
                                 db_name,
                                 source_database_name
                             ).into());
                         }
-                        (db_name, schema_name, table_name)
+                        (schema_name, table_name)
                     }
                     2 => {
-                        // Schema and table only: schema.table
+                        // Format: schema.table (recommended)
+                        // Database name is taken from source definition
                         let schema_name = parts[0];
                         let table_name = parts[1];
-                        (source_database_name, schema_name, table_name)
+                        (schema_name, table_name)
                     }
                     1 => {
-                        // Table only: table (use default schema 'dbo')
-                        let table_name = parts[0];
-                        (source_database_name, "dbo", table_name)
+                        // Format: table only
+                        // Reject with clear error message
+                        return Err(anyhow!(
+                            "Invalid table name format '{}'. For SQL Server CDC, you must specify the schema name. \
+                             Use 'schema.table' format (e.g., 'dbo.{}') or 'database.schema.table' format (e.g., '{}.dbo.{}').",
+                            external_table_name,
+                            external_table_name,
+                            source_database_name,
+                            external_table_name
+                        ).into());
                     }
                     _ => {
+                        // Invalid format (4+ parts or empty)
                         return Err(anyhow!(
-                            "The upstream table name must be in one of these formats: 'database.schema.table', 'schema.table', or 'table'"
+                            "Invalid table name format '{}'. Expected 'schema.table' or 'database.schema.table'.",
+                            external_table_name
                         ).into());
                     }
                 };
 
-                // insert 'schema.name' into connect properties
+                // Insert schema and table names into connector properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+
+                // Normalize external_table_name to 'schema.table' format
+                // This ensures consistency with extract_table_name() in message.rs
+                let normalized_external_table_name = format!("{}.{}", schema_name, table_name);
+                return Ok((with_options, normalized_external_table_name));
             }
             _ => {
                 return Err(RwError::from(anyhow!(
@@ -1054,7 +1096,7 @@ fn derive_with_options_for_cdc_table(
             }
         };
     }
-    Ok(with_options)
+    unreachable!("All valid CDC connectors should have returned by now")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1177,10 +1219,11 @@ pub(super) async fn handle_create_table_plan(
                 )?;
                 source.clone()
             };
-            let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
-                &source.with_properties,
-                cdc_table.external_table_name.clone(),
-            )?;
+            let (cdc_with_options, normalized_external_table_name) =
+                derive_with_options_for_cdc_table(
+                    &source.with_properties,
+                    cdc_table.external_table_name.clone(),
+                )?;
 
             let (columns, pk_names) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
@@ -1216,8 +1259,9 @@ pub(super) async fn handle_create_table_plan(
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                cdc_table.external_table_name.clone(),
+                normalized_external_table_name,
                 column_defs,
+                source_watermarks,
                 columns,
                 pk_names,
                 cdc_with_options,
@@ -1348,10 +1392,14 @@ fn sanity_check_for_table_on_cdc_source(
         .into());
     }
 
-    if !source_watermarks.is_empty() {
+    if !source_watermarks.is_empty()
+        && source_watermarks
+            .iter()
+            .any(|watermark| !watermark.with_ttl)
+    {
         return Err(ErrorCode::NotSupported(
-            "watermark defined on the table created from a CDC source".into(),
-            "Remove the Watermark definitions".into(),
+            "non-TTL watermark defined on the table created from a CDC source".into(),
+            "Use `WATERMARK ... WITH TTL` instead.".into(),
         )
         .into());
     }
@@ -1499,7 +1547,7 @@ pub async fn handle_create_table(
         Engine::Iceberg => {
             let hummock_table_name = hummock_table.name.clone();
             session.create_staging_table(hummock_table.clone());
-            let res = create_iceberg_engine_table(
+            let res = Box::pin(create_iceberg_engine_table(
                 session.clone(),
                 handler_args,
                 source.map(|s| s.to_prost()),
@@ -1508,7 +1556,7 @@ pub async fn handle_create_table(
                 table_name,
                 job_type,
                 if_not_exists,
-            )
+            ))
             .await;
             session.drop_staging_table(&hummock_table_name);
             res?
@@ -1689,24 +1737,12 @@ pub async fn create_iceberg_engine_table(
         .map(|c| c.to_string())
         .collect::<Vec<String>>();
 
-    // For the table without primary key. We will use `_row_id` as primary key
-    let sink_from = if pks.len() == 1 && pks[0].eq(ROW_ID_COLUMN_NAME) {
+    // For the table without primary key. We will use `_row_id` as primary key.
+    if pks.len() == 1 && pks[0].eq(ROW_ID_COLUMN_NAME) {
         pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
-        let [stmt]: [_; 1] = Parser::parse_sql(&format!(
-            "select {} as {}, * from {}",
-            ROW_ID_COLUMN_NAME, RISINGWAVE_ICEBERG_ROW_ID, table_name
-        ))
-        .context("unable to parse query")?
-        .try_into()
-        .unwrap();
+    }
 
-        let Statement::Query(query) = &stmt else {
-            panic!("unexpected statement: {:?}", stmt);
-        };
-        CreateSink::AsQuery(query.clone())
-    } else {
-        CreateSink::From(table_name.clone())
-    };
+    let sink_from = CreateSink::From(table_name.clone());
 
     let mut sink_name = table_name.clone();
     *sink_name.0.last_mut().unwrap() = Ident::from(
@@ -1726,6 +1762,7 @@ pub async fn create_iceberg_engine_table(
     let mut sink_handler_args = handler_args.clone();
 
     let mut sink_with = with_common.clone();
+    sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
 
     if table.append_only {
         sink_with.insert("type".to_owned(), "append-only".to_owned());
@@ -1782,6 +1819,33 @@ pub async fn create_iceberg_engine_table(
     sink_with.insert(
         COMMIT_CHECKPOINT_INTERVAL.to_owned(),
         commit_checkpoint_interval.to_string(),
+    );
+
+    let commit_checkpoint_size_threshold_mb = handler_args
+        .with_options
+        .get(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+        .map(|v| v.to_owned())
+        .unwrap_or_else(|| ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_string());
+    let commit_checkpoint_size_threshold_mb = commit_checkpoint_size_threshold_mb
+        .parse::<u64>()
+        .map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "{} must be greater than 0: {}",
+                COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, commit_checkpoint_size_threshold_mb
+            ))
+        })?;
+    if commit_checkpoint_size_threshold_mb == 0 {
+        bail!("{COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB} must be greater than 0");
+    }
+
+    // remove commit_checkpoint_size_threshold_mb from source options, otherwise it will be considered as an unknown field.
+    source.as_mut().map(|x| {
+        x.with_properties
+            .remove(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+    });
+    sink_with.insert(
+        COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_owned(),
+        commit_checkpoint_size_threshold_mb.to_string(),
     );
     sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
 
@@ -1920,6 +1984,24 @@ pub async fn create_iceberg_engine_table(
                     .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
             });
         }
+    }
+
+    if let Some(format_version) = handler_args.with_options.get(FORMAT_VERSION) {
+        let format_version = format_version.parse::<u8>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "format_version must be 1, 2 or 3: {}",
+                format_version
+            ))
+        })?;
+        if format_version != 1 && format_version != 2 && format_version != 3 {
+            bail!("format_version must be 1, 2 or 3");
+        }
+        sink_with.insert(FORMAT_VERSION.to_owned(), format_version.to_string());
+
+        // remove format_version from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(FORMAT_VERSION));
     }
 
     if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
@@ -2121,6 +2203,50 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove(COMPACTION_TYPE));
+    }
+
+    if let Some(write_parquet_compression) = handler_args
+        .with_options
+        .get(COMPACTION_WRITE_PARQUET_COMPRESSION)
+    {
+        sink_with.insert(
+            COMPACTION_WRITE_PARQUET_COMPRESSION.to_owned(),
+            write_parquet_compression.to_owned(),
+        );
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_WRITE_PARQUET_COMPRESSION)
+        });
+    }
+
+    if let Some(write_parquet_max_row_group_rows) = handler_args
+        .with_options
+        .get(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS)
+    {
+        let write_parquet_max_row_group_rows = write_parquet_max_row_group_rows
+            .parse::<usize>()
+            .map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "{} must be a positive integer: {}",
+                    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, write_parquet_max_row_group_rows
+                ))
+            })?;
+        if write_parquet_max_row_group_rows == 0 {
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS
+            ));
+        }
+        sink_with.insert(
+            COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS.to_owned(),
+            write_parquet_max_row_group_rows.to_string(),
+        );
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS)
+        });
     }
 
     let partition_by = handler_args
@@ -2433,14 +2559,23 @@ pub async fn generate_stream_graph_for_replace_table(
             ((plan, None, table), TableJobType::General)
         }
         (None, Some(cdc_table)) => {
+            sanity_check_for_table_on_cdc_source(
+                append_only,
+                &columns,
+                &wildcard_idx,
+                &constraints,
+                &source_watermarks,
+            )?;
+
             let session = &handler_args.session;
             let (source, resolved_table_name) =
                 get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;
 
-            let cdc_with_options = derive_with_options_for_cdc_table(
-                &source.with_properties,
-                cdc_table.external_table_name.clone(),
-            )?;
+            let (cdc_with_options, normalized_external_table_name) =
+                derive_with_options_for_cdc_table(
+                    &source.with_properties,
+                    cdc_table.external_table_name.clone(),
+                )?;
 
             let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
 
@@ -2449,8 +2584,9 @@ pub async fn generate_stream_graph_for_replace_table(
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                cdc_table.external_table_name.clone(),
+                normalized_external_table_name,
                 columns,
+                source_watermarks,
                 column_catalogs,
                 pk_names,
                 cdc_with_options,
@@ -2570,27 +2706,36 @@ fn bind_webhook_info(
         (None, None)
     };
 
-    let secure_compare_context = SecureCompareContext {
-        column_name: columns_defs[0].name.real_value(),
-        secret_name,
-    };
-    let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
-    let expr = binder.bind_expr(&signature_expr)?;
+    let signature_expr = if let Some(signature_expr) = signature_expr {
+        let secure_compare_context = SecureCompareContext {
+            column_name: columns_defs[0].name.real_value(),
+            secret_name,
+        };
+        let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
+        let expr = binder.bind_expr(&signature_expr)?;
 
-    // validate expr, ensuring it is SECURE_COMPARE()
-    if expr.as_function_call().is_none()
-        || expr.as_function_call().unwrap().func_type()
-            != crate::optimizer::plan_node::generic::ExprType::SecureCompare
-    {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "The signature verification function must be SECURE_COMPARE()".to_owned(),
-        )
-        .into());
-    }
+        // validate expr, ensuring it is SECURE_COMPARE()
+        if expr.as_function_call().is_none()
+            || expr.as_function_call().unwrap().func_type()
+                != crate::optimizer::plan_node::generic::ExprType::SecureCompare
+        {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "The signature verification function must be SECURE_COMPARE()".to_owned(),
+            )
+            .into());
+        }
+
+        Some(expr.to_expr_proto())
+    } else {
+        session.notice_to_user(
+            "VALIDATE clause is strongly recommended for safety or production usages",
+        );
+        None
+    };
 
     let pb_webhook_info = PbWebhookSourceInfo {
         secret_ref: pb_secret_ref,
-        signature_expr: Some(expr.to_expr_proto()),
+        signature_expr,
         wait_for_persistence,
         is_batched,
     };

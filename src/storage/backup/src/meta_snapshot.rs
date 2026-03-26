@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
+use risingwave_hummock_sdk::HummockRawObjectId;
 use risingwave_hummock_sdk::version::HummockVersion;
 
 use crate::error::BackupResult;
@@ -30,6 +32,12 @@ pub trait Metadata: Display + Send + Sync {
     fn hummock_version_ref(&self) -> &HummockVersion;
 
     fn hummock_version(self) -> HummockVersion;
+
+    fn storage_url(&self) -> BackupResult<String>;
+
+    fn storage_directory(&self) -> BackupResult<String>;
+
+    fn table_change_log_object_ids(&self) -> HashSet<HummockRawObjectId>;
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]

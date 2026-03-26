@@ -24,8 +24,8 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::StackTraceResponseExt;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_hummock_sdk::level::Level;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
 use risingwave_license::LicenseManager;
 use risingwave_meta_model::{JobStatus, StreamingParallelism};
 use risingwave_pb::catalog::table::PbTableType;
@@ -43,6 +43,7 @@ use crate::controller::system_param::SystemParamsControllerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::manager::event_log::EventLogManagerRef;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::rpc::await_tree::dump_cluster_await_tree;
 
 pub type DiagnoseCommandRef = Arc<DiagnoseCommand>;
@@ -51,6 +52,7 @@ pub struct DiagnoseCommand {
     metadata_manager: MetadataManager,
     await_tree_reg: await_tree::Registry,
     hummock_manger: HummockManagerRef,
+    iceberg_compaction_manager: IcebergCompactionManagerRef,
     event_log_manager: EventLogManagerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
     prometheus_selector: String,
@@ -63,6 +65,7 @@ impl DiagnoseCommand {
         metadata_manager: MetadataManager,
         await_tree_reg: await_tree::Registry,
         hummock_manger: HummockManagerRef,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
         event_log_manager: EventLogManagerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
@@ -73,6 +76,7 @@ impl DiagnoseCommand {
             metadata_manager,
             await_tree_reg,
             hummock_manger,
+            iceberg_compaction_manager,
             event_log_manager,
             prometheus_client,
             prometheus_selector,
@@ -99,6 +103,8 @@ impl DiagnoseCommand {
         self.write_streaming_prometheus(&mut report).await;
         let _ = writeln!(report);
         self.write_storage(&mut report).await;
+        let _ = writeln!(report);
+        self.write_iceberg_compaction_schedule(&mut report).await;
         let _ = writeln!(report);
         self.write_event_logs(&mut report);
         let _ = writeln!(report);
@@ -244,6 +250,7 @@ impl DiagnoseCommand {
             let mut row = Row::new();
             row.add_cell("id".into());
             row.add_cell("host".into());
+            row.add_cell("hostname".into());
             row.add_cell("type".into());
             row.add_cell("state".into());
             row.add_cell("parallelism".into());
@@ -267,6 +274,10 @@ impl DiagnoseCommand {
                     .host
                     .as_ref()
                     .map(|h| format!("{}:{}", h.host, h.port)),
+            );
+            try_add_cell(
+                &mut row,
+                worker_node.resource.as_ref().map(|r| r.hostname.clone()),
             );
             try_add_cell(
                 &mut row,
@@ -513,7 +524,7 @@ impl DiagnoseCommand {
 
         #[derive(PartialEq, Eq)]
         struct SstableSort {
-            compaction_group_id: u64,
+            compaction_group_id: CompactionGroupId,
             sst_id: HummockSstableId,
             delete_ratio: u64,
         }
@@ -607,6 +618,65 @@ impl DiagnoseCommand {
 
         let _ = writeln!(s);
         self.write_storage_prometheus(s).await;
+    }
+
+    async fn write_iceberg_compaction_schedule(&self, s: &mut String) {
+        use comfy_table::{Row, Table};
+
+        let sink_names = match self.metadata_manager.catalog_controller.list_sinks().await {
+            Ok(sinks) => sinks
+                .into_iter()
+                .map(|sink| (sink.id.as_raw_id(), sink.name))
+                .collect::<BTreeMap<u32, String>>(),
+            Err(err) => {
+                tracing::warn!(error=?err.as_report(), "failed to list sinks");
+                return;
+            }
+        };
+
+        let statuses = self
+            .iceberg_compaction_manager
+            .list_compaction_statuses()
+            .await;
+
+        let _ = writeln!(s, "ICEBERG COMPACTION SCHEDULE");
+
+        let mut table = Table::new();
+        table.set_header({
+            let mut row = Row::new();
+            row.add_cell("sink_id".into());
+            row.add_cell("sink_name".into());
+            row.add_cell("task_type".into());
+            row.add_cell("schedule_state".into());
+            row.add_cell("trigger_interval_sec".into());
+            row.add_cell("trigger_snapshot_count".into());
+            row.add_cell("pending_snapshot_count".into());
+            row.add_cell("next_compaction_after_sec".into());
+            row.add_cell("is_triggerable".into());
+            row
+        });
+
+        for status in statuses {
+            let mut row = Row::new();
+            row.add_cell(status.sink_id.as_raw_id().into());
+            try_add_cell(
+                &mut row,
+                sink_names.get(&status.sink_id.as_raw_id()).cloned(),
+            );
+            row.add_cell(status.task_type.into());
+            row.add_cell(status.schedule_state.into());
+            row.add_cell(status.trigger_interval_sec.into());
+            row.add_cell((status.trigger_snapshot_count as u64).into());
+            try_add_cell(
+                &mut row,
+                status.pending_snapshot_count.map(|count| count as u64),
+            );
+            try_add_cell(&mut row, status.next_compaction_after_sec);
+            row.add_cell(status.is_triggerable.into());
+            table.add_row(row);
+        }
+
+        let _ = writeln!(s, "{table}");
     }
 
     async fn write_streaming_prometheus(&self, s: &mut String) {

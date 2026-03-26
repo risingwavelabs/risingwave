@@ -66,6 +66,7 @@ pub struct StreamingMetrics {
     pub actor_count: LabelGuardedIntGaugeVec,
     pub actor_in_record_cnt: RelabeledGuardedIntCounterVec,
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec,
+    pub fragment_channel_buffered_bytes: LabelGuardedIntGaugeVec,
     pub actor_current_epoch: RelabeledGuardedIntGaugeVec,
 
     // Source
@@ -177,6 +178,9 @@ pub struct StreamingMetrics {
     pub kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec,
     pub kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec,
     pub kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec,
+    pub kv_log_store_buffer_memory_bytes: LabelGuardedIntGaugeVec,
+
+    pub crossdb_last_consumed_min_epoch: LabelGuardedIntGaugeVec,
 
     pub sync_kv_log_store_read_count: LabelGuardedIntCounterVec,
     pub sync_kv_log_store_read_size: LabelGuardedIntCounterVec,
@@ -189,6 +193,7 @@ pub struct StreamingMetrics {
     pub sync_kv_log_store_buffer_unconsumed_row_count: LabelGuardedIntGaugeVec,
     pub sync_kv_log_store_buffer_unconsumed_epoch_count: LabelGuardedIntGaugeVec,
     pub sync_kv_log_store_buffer_unconsumed_min_epoch: LabelGuardedIntGaugeVec,
+    pub sync_kv_log_store_buffer_memory_bytes: LabelGuardedIntGaugeVec,
 
     // Memory management
     pub lru_runtime_loop_count: IntCounter,
@@ -218,6 +223,11 @@ pub struct StreamingMetrics {
     pub mysql_cdc_state_binlog_file_seq: LabelGuardedIntGaugeVec,
     pub mysql_cdc_state_binlog_position: LabelGuardedIntGaugeVec,
 
+    // SQL Server CDC LSN monitoring
+    pub sqlserver_cdc_state_change_lsn: LabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_state_commit_lsn: LabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
+
     // Gap Fill
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
 
@@ -237,7 +247,7 @@ pub fn global_streaming_metrics(metric_level: MetricLevel) -> StreamingMetrics {
 }
 
 impl StreamingMetrics {
-    fn new(registry: &Registry, level: MetricLevel) -> Self {
+    pub fn new(registry: &Registry, level: MetricLevel) -> Self {
         let executor_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",
@@ -340,6 +350,30 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let sqlserver_cdc_state_change_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_state_change_lsn",
+            "Current change_lsn value stored in SQL Server CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_state_commit_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_state_commit_lsn",
+            "Current commit_lsn value stored in SQL Server CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_jni_commit_offset_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_jni_commit_offset_lsn",
+            "LSN value when JNI commit offset is called for SQL Server CDC",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
         let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_sink_chunk_buffer_size",
             "Total size of chunks buffered in a barrier",
@@ -368,6 +402,14 @@ impl StreamingMetrics {
             .unwrap()
             // mask the first label `actor_id` if the level is less verbose than `Debug`
             .relabel_debug_1(level);
+
+        let fragment_channel_buffered_bytes = register_guarded_int_gauge_vec_with_registry!(
+            "stream_fragment_channel_buffered_bytes",
+            "Estimated buffered bytes for actor channels by fragment",
+            &["fragment_id"],
+            registry
+        )
+        .unwrap();
 
         let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
@@ -986,6 +1028,14 @@ impl StreamingMetrics {
                 registry
             )
             .unwrap();
+        let sync_kv_log_store_buffer_memory_bytes =
+            register_guarded_int_gauge_vec_with_registry!(
+                "sync_kv_log_store_buffer_memory_bytes",
+                "Estimated heap bytes used by synced kv log store buffer (unconsumed + consumed but not truncated)",
+                &["actor_id", "target", "fragment_id", "relation"],
+                registry
+            )
+            .unwrap();
 
         let kv_log_store_storage_write_count = register_guarded_int_counter_vec_with_registry!(
             "kv_log_store_storage_write_count",
@@ -1083,6 +1133,23 @@ impl StreamingMetrics {
             register_guarded_int_gauge_vec_with_registry!(
                 "kv_log_store_buffer_unconsumed_min_epoch",
                 "Number of Unconsumed Epoch in buffer",
+                &["actor_id", "connector", "sink_id", "sink_name"],
+                registry
+            )
+            .unwrap();
+
+        let crossdb_last_consumed_min_epoch = register_guarded_int_gauge_vec_with_registry!(
+            "crossdb_last_consumed_min_epoch",
+            "Last consumed min epoch for cross-database changelog stream scan",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let kv_log_store_buffer_memory_bytes =
+            register_guarded_int_gauge_vec_with_registry!(
+                "kv_log_store_buffer_memory_bytes",
+                "Estimated heap bytes used by kv log store buffer (unconsumed + consumed but not truncated)",
                 &["actor_id", "connector", "sink_id", "sink_name"],
                 registry
             )
@@ -1253,6 +1320,7 @@ impl StreamingMetrics {
             actor_count,
             actor_in_record_cnt,
             actor_out_record_cnt,
+            fragment_channel_buffered_bytes,
             actor_current_epoch,
             source_output_row_count,
             source_split_change_count,
@@ -1325,6 +1393,8 @@ impl StreamingMetrics {
             kv_log_store_buffer_unconsumed_row_count,
             kv_log_store_buffer_unconsumed_epoch_count,
             kv_log_store_buffer_unconsumed_min_epoch,
+            kv_log_store_buffer_memory_bytes,
+            crossdb_last_consumed_min_epoch,
             sync_kv_log_store_read_count,
             sync_kv_log_store_read_size,
             sync_kv_log_store_write_pause_duration_ns,
@@ -1336,6 +1406,7 @@ impl StreamingMetrics {
             sync_kv_log_store_buffer_unconsumed_row_count,
             sync_kv_log_store_buffer_unconsumed_epoch_count,
             sync_kv_log_store_buffer_unconsumed_min_epoch,
+            sync_kv_log_store_buffer_memory_bytes,
             lru_runtime_loop_count,
             lru_latest_sequence,
             lru_watermark_sequence,
@@ -1356,6 +1427,9 @@ impl StreamingMetrics {
             pg_cdc_jni_commit_offset_lsn,
             mysql_cdc_state_binlog_file_seq,
             mysql_cdc_state_binlog_position,
+            sqlserver_cdc_state_change_lsn,
+            sqlserver_cdc_state_commit_lsn,
+            sqlserver_cdc_jni_commit_offset_lsn,
             gap_fill_generated_rows_count,
             state_table_iter_count,
             state_table_get_count,

@@ -19,11 +19,48 @@ def _(outer_panels: Panels):
     block_refill_unfiltered_filter = 'type="block",op="unfiltered"'
     cache_hit_filter = 'op="hit"'
     cache_miss_filter = 'op="miss"'
+    meta_miss_filter = "type='meta_miss'"
+    meta_total_filter = "type='meta_total'"
+    data_miss_filter = "type='data_miss'"
+    data_total_filter = "type='data_total'"
     return [
         outer_panels.row_collapsed(
             "Hummock Tiered Cache",
             [
-                # hybrid
+                panels.subheader("Cache"),
+                panels.timeseries_ops(
+                    "Per Table Cache Ops (filter by threshold data_miss > 50, meta_miss > 10)",
+                    "Shows cache miss operations per table that exceed threshold rates. High data miss rates (>50 ops/sec) or meta miss rates (>10 ops/sec) may indicate insufficient cache capacity or poor cache effectiveness for specific tables.",
+                    [
+                        panels.target(
+                            f"sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id, type) > 50",
+                            "{{table_id}} @ {{type}} - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id, type) > 10",
+                            "{{table_id}} @ {{type}} - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        )
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Per Table Cache Miss Ratio (filter by threshold data_miss_ratio > 0.5, meta_miss_ratio > 0.1)",
+                    "Shows cache miss ratios per table that exceed threshold ratios. High data miss ratios (>50%) or meta miss ratios (>10%) may indicate that the cache is not effectively serving requests for those tables.",
+                    [
+                        panels.target(
+                            f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) > 0.1",
+                            "meta cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) > 0.5",
+                            "block cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+
                 panels.timeseries_ops(
                     "Hybrid Cache Ops",
                     "",
@@ -58,7 +95,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                # memory
+                panels.subheader("Memory Cache"),
                 panels.timeseries_ops(
                     "Memory Cache Ops",
                     "",
@@ -89,7 +126,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                # storage
+                panels.subheader("Disk Cache"),
                 panels.timeseries_ops(
                     "Disk Cache Ops",
                     "",
@@ -160,7 +197,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                # disk
                 panels.timeseries_ops(
                     "Disk Ops",
                     "",
@@ -195,7 +231,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                # refill
+                panels.subheader("Refill"),
                 panels.timeseries_ops(
                     "Refill Ops",
                     "",
@@ -211,7 +247,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "Data Refill Throughput",
+                    "Refill Throughput",
                     "",
                     [
                         panels.target(
@@ -266,7 +302,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_ops(
-                    "Inheritance - Unit inheritance Ops",
+                    "Inheritance - Unit Inheritance Ops",
                     "",
                     [
                         panels.target(
@@ -276,7 +312,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Inheritance - Unit inheritance Ratio",
+                    "Inheritance - Unit Inheritance Ratio",
                     "",
                     [
                         panels.target(
@@ -322,6 +358,20 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum(rate({metric('recent_filter_ops')}[$__rate_interval])) by (op, {NODE_LABEL})",
                             "recent filter {{op}} @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Block Cache Efficiency",
+                    "Histogram of the estimated hit ratio of a block while in the block cache.",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"clamp_max(histogram_quantile({quantile}, sum(rate({metric('block_efficiency_histogram_bucket')}[$__rate_interval])) by (le,{COMPONENT_LABEL},{NODE_LABEL})), 1)",
+                                f"block cache efficiency - p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [10, 25, 50, 75, 90, 100],
                         ),
                     ],
                 ),

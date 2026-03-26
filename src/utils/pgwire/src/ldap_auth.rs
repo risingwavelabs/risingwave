@@ -19,6 +19,8 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use ldap3::{LdapConnAsync, Scope, SearchEntry, dn_escape, ldap_escape};
 use risingwave_common::config::{AuthMethod, HbaEntry};
+use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use thiserror_ext::AsReport;
 use tracing::warn;
 
@@ -88,39 +90,37 @@ impl LdapTlsConfig {
 
     /// Initialize rustls ClientConfig based on TLS configuration
     fn init_client_config(&self) -> PsqlResult<rustls::ClientConfig> {
-        let tls_client_config = rustls::ClientConfig::builder().with_safe_defaults();
+        let tls_client_config = rustls::ClientConfig::builder();
 
         let mut root_cert_store = rustls::RootCertStore::empty();
         if let Some(tls_config) = &self.ca_cert {
             let ca_cert_bytes = fs::read(tls_config).map_err(|e| {
                 PsqlError::StartupError(anyhow!(e).context("Failed to read CA certificate").into())
             })?;
-            let ca_certs = rustls_pemfile::certs(&mut ca_cert_bytes.as_slice()).map_err(|e| {
-                PsqlError::StartupError(anyhow!(e).context("Failed to parse CA certificate").into())
-            })?;
-            for cert in ca_certs {
-                root_cert_store
-                    .add(&rustls::Certificate(cert))
-                    .map_err(|err| {
-                        PsqlError::StartupError(
-                            anyhow!(err).context("Failed to add CA certificate").into(),
-                        )
-                    })?;
+            for cert in CertificateDer::pem_slice_iter(&ca_cert_bytes) {
+                let cert = cert.map_err(|e| {
+                    PsqlError::StartupError(
+                        anyhow!(e).context("Failed to parse CA certificate").into(),
+                    )
+                })?;
+                root_cert_store.add(cert).map_err(|err| {
+                    PsqlError::StartupError(
+                        anyhow!(err).context("Failed to add CA certificate").into(),
+                    )
+                })?;
             }
         } else {
             // If ca certs is not present, load system native certs.
             for cert in
                 rustls_native_certs::load_native_certs().expect("could not load platform certs")
             {
-                root_cert_store
-                    .add(&rustls::Certificate(cert.0))
-                    .map_err(|err| {
-                        PsqlError::StartupError(
-                            anyhow!(err)
-                                .context("Failed to add native CA certificate")
-                                .into(),
-                        )
-                    })?;
+                root_cert_store.add(cert).map_err(|err| {
+                    PsqlError::StartupError(
+                        anyhow!(err)
+                            .context("Failed to add native CA certificate")
+                            .into(),
+                    )
+                })?;
             }
         }
         let tls_client_config = tls_client_config.with_root_certificates(root_cert_store);
@@ -141,8 +141,9 @@ impl LdapTlsConfig {
             let client_key_bytes = fs::read(key).map_err(|e| {
                 PsqlError::StartupError(anyhow!(e).context("Failed to read client key").into())
             })?;
-            let client_certs =
-                rustls_pemfile::certs(&mut client_cert_bytes.as_slice()).map_err(|e| {
+            let client_certs = CertificateDer::pem_slice_iter(&client_cert_bytes)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| {
                     PsqlError::StartupError(
                         anyhow!(e)
                             .context("Failed to parse client certificate")
@@ -150,26 +151,13 @@ impl LdapTlsConfig {
                     )
                 })?;
 
-            let mut reader = std::io::Cursor::new(&client_key_bytes);
-            let mut private_keys =
-                rustls_pemfile::pkcs8_private_keys(&mut reader).map_err(|e| {
+            let client_private_key =
+                PrivateKeyDer::from_pem_slice(&client_key_bytes).map_err(|e| {
                     PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
                 })?;
-            if private_keys.is_empty() {
-                // Try RSA private keys as a fallback
-                reader.set_position(0);
-                private_keys = rustls_pemfile::rsa_private_keys(&mut reader).map_err(|e| {
-                    PsqlError::StartupError(anyhow!(e).context("Failed to parse client key").into())
-                })?;
-            }
-            let client_private_key = private_keys.pop().ok_or_else(|| {
-                PsqlError::StartupError("No private key found in client key file".into())
-            })?;
-            let client_certs_rustls: Vec<rustls::Certificate> =
-                client_certs.into_iter().map(rustls::Certificate).collect();
 
             tls_client_config
-                .with_client_auth_cert(client_certs_rustls, rustls::PrivateKey(client_private_key))
+                .with_client_auth_cert(client_certs, client_private_key)
                 .map_err(|err| {
                     PsqlError::StartupError(
                         anyhow!(err)

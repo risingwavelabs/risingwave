@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use either::Either;
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
@@ -267,7 +266,12 @@ impl Binder {
             }
         };
 
-        self.bind_table_to_context(columns, table_name.to_owned(), alias)?;
+        self.bind_table_to_context(
+            columns,
+            table_name.to_owned(),
+            schema_name.map(|s| s.to_owned()),
+            alias,
+        )?;
         Ok(ret)
     }
 
@@ -449,11 +453,10 @@ impl Binder {
                 share_id
             }
         };
-        let input = Either::Left(query);
         Ok((
             Relation::Share(Box::new(BoundShare {
                 share_id,
-                input: BoundShareInput::Query(input),
+                input: BoundShareInput::Query(query),
             })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))
@@ -496,6 +499,7 @@ impl Binder {
                 .iter()
                 .map(|c| (c.is_hidden, (&c.column_desc).into())),
             table_name.to_owned(),
+            Some(schema_name.to_owned()),
             None,
         )?;
 

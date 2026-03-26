@@ -39,9 +39,7 @@ pub use schema::{Field, FieldDisplay, FieldLike, Schema, test_utils as schema_te
 use crate::array::DataChunk;
 pub use crate::constants::hummock;
 use crate::error::BoxedError;
-pub use crate::id::{
-    ConnectionId, DatabaseId, FunctionId, IndexId, ObjectId, SchemaId, SecretId, TableId,
-};
+pub use crate::id::*;
 
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
@@ -62,16 +60,16 @@ pub const INFORMATION_SCHEMA_SCHEMA_NAME: &str = "information_schema";
 pub const RW_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPER_USER: &str = "root";
-pub const DEFAULT_SUPER_USER_ID: u32 = 1;
+pub const DEFAULT_SUPER_USER_ID: UserId = UserId::new(1);
 // This is for compatibility with customized utils for PostgreSQL.
 pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 // This is the default superuser for admin, which is used only for cloud control plane.
 pub const DEFAULT_SUPER_USER_FOR_ADMIN: &str = "rwadmin";
-pub const DEFAULT_SUPER_USER_FOR_ADMIN_ID: u32 = 3;
+pub const DEFAULT_SUPER_USER_FOR_ADMIN_ID: UserId = UserId::new(3);
 
-pub const NON_RESERVED_USER_ID: i32 = 11;
+pub const NON_RESERVED_USER_ID: UserId = UserId::new(11);
 
 pub const MAX_SYS_CATALOG_NUM: i32 = 5000;
 pub const SYS_CATALOG_START_ID: i32 = i32::MAX - MAX_SYS_CATALOG_NUM;
@@ -129,6 +127,10 @@ pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 pub const RW_TIMESTAMP_COLUMN_NAME: &str = "_rw_timestamp";
 pub const RW_TIMESTAMP_COLUMN_ID: ColumnId = ColumnId::new(-1);
 
+/// The column name for the projected row ID in `ProjectSet`.
+/// This is a hidden column used to track row indices when expanding set-returning functions.
+pub const PROJECTED_ROW_ID_COLUMN_NAME: &str = "_rw_projected_row_id";
+
 pub const ICEBERG_SEQUENCE_NUM_COLUMN_NAME: &str = "_iceberg_sequence_number";
 pub const ICEBERG_FILE_PATH_COLUMN_NAME: &str = "_iceberg_file_path";
 pub const ICEBERG_FILE_POS_COLUMN_NAME: &str = "_iceberg_file_pos";
@@ -175,42 +177,6 @@ impl TableOption {
     pub fn new(retention_seconds: Option<u32>) -> Self {
         // now we only support ttl for TableOption
         TableOption { retention_seconds }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
-#[display("{user_id}")]
-pub struct UserId {
-    pub user_id: u32,
-}
-
-impl UserId {
-    pub const fn new(user_id: u32) -> Self {
-        UserId { user_id }
-    }
-
-    pub const fn placeholder() -> Self {
-        UserId {
-            user_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-}
-
-impl From<u32> for UserId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl From<&u32> for UserId {
-    fn from(id: &u32) -> Self {
-        Self::new(*id)
-    }
-}
-
-impl From<UserId> for u32 {
-    fn from(id: UserId) -> Self {
-        id.user_id
     }
 }
 

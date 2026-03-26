@@ -12,22 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod iceberg_query_storage_mode;
 mod non_zero64;
 mod opt;
 pub mod parallelism;
 mod query_mode;
 mod search_path;
 pub mod sink_decouple;
+mod statement_timeout;
 mod transaction_isolation_level;
 mod visibility_mode;
 
 use chrono_tz::Tz;
+pub use iceberg_query_storage_mode::IcebergQueryStorageMode;
 use itertools::Itertools;
 pub use opt::OptionConfig;
 pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
+pub use statement_timeout::StatementTimeout;
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
@@ -35,7 +39,7 @@ use crate::config::mutate::TomlTableMutateExt;
 use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
-use crate::session_config::parallelism::ConfigParallelism;
+use crate::session_config::parallelism::{ConfigAdaptiveParallelismStrategy, ConfigParallelism};
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -64,6 +68,13 @@ const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 const DISABLE_DML_RATE_LIMIT: i32 = -1;
 const DISABLE_SINK_RATE_LIMIT: i32 = -1;
+
+/// Default parallelism bound for tables
+const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
+
+/// Default parallelism bound for sources
+const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 =
+    std::num::NonZeroU64::new(4).unwrap();
 
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
@@ -99,6 +110,11 @@ pub struct SessionConfig {
     /// or distributed mode automatically.
     #[parameter(default = QueryMode::default())]
     query_mode: QueryMode,
+
+    /// For Iceberg engine tables, which storage to use for batch SELECT: Iceberg (columnar) or
+    /// Hummock (row). Only affects batch SELECT on tables with ENGINE = ICEBERG.
+    #[parameter(default = IcebergQueryStorageMode::default())]
+    iceberg_query_storage_mode: IcebergQueryStorageMode,
 
     /// Sets the number of digits displayed for floating-point values.
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>
@@ -174,21 +190,45 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_backfill: ConfigParallelism,
 
+    /// The adaptive parallelism strategy for streaming jobs. Defaults to `default`, which follows the system setting.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
+
+    /// Specific adaptive parallelism strategy for table. Defaults to `BOUNDED(4)`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND))]
+    streaming_parallelism_strategy_for_table: ConfigAdaptiveParallelismStrategy,
+
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_table: ConfigParallelism,
+
+    /// Specific adaptive parallelism strategy for sink. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_sink: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_sink: ConfigParallelism,
 
+    /// Specific adaptive parallelism strategy for index. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_index: ConfigAdaptiveParallelismStrategy,
+
     /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_index: ConfigParallelism,
 
+    /// Specific adaptive parallelism strategy for source. Defaults to `BOUNDED(4)`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_SOURCE_PARALLELISM_BOUND))]
+    streaming_parallelism_strategy_for_source: ConfigAdaptiveParallelismStrategy,
+
     /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_source: ConfigParallelism,
+
+    /// Specific adaptive parallelism strategy for materialized view. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_materialized_view: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
@@ -215,16 +255,22 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_use_arrangement_backfill: bool,
 
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     streaming_use_snapshot_backfill: bool,
+
+    /// Enable serverless backfill for streaming queries. Defaults to false.
+    #[parameter(default = false)]
+    enable_serverless_backfill: bool,
 
     /// Allow `jsonb` in stream key
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
 
-    /// Enable materialized expressions for impure functions (typically UDF).
-    #[parameter(default = true)]
-    streaming_enable_materialized_expressions: bool,
+    /// Unsafe: allow impure expressions on non-append-only streams without materialization.
+    ///
+    /// This may lead to inconsistent results or panics due to re-evaluation on updates/retracts.
+    #[parameter(default = false)]
+    streaming_unsafe_allow_unmaterialized_impure_expr: bool,
 
     /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
     #[parameter(default = false)]
@@ -303,8 +349,8 @@ pub struct SessionConfig {
     /// `log_min_error_statement` is set to ERROR or lower, the statement that timed out will also be
     /// logged. If this value is specified without units, it is taken as milliseconds. A value of
     /// zero (the default) disables the timeout.
-    #[parameter(default = 0u32)]
-    statement_timeout: u32,
+    #[parameter(default = StatementTimeout::default())]
+    statement_timeout: StatementTimeout,
 
     /// Terminate any session that has been idle (that is, waiting for a client query) within an open transaction for longer than the specified amount of time in milliseconds.
     #[parameter(default = 60000u32)]
@@ -435,6 +481,10 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     enable_index_selection: bool,
 
+    /// Enable mv selection for queries
+    #[parameter(default = false)]
+    enable_mv_selection: bool,
+
     /// Enable locality backfill for streaming queries. Defaults to false.
     #[parameter(default = false)]
     enable_locality_backfill: bool,
@@ -454,6 +504,12 @@ pub struct SessionConfig {
     /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
     #[parameter(default = false)]
     enable_datafusion_engine: bool,
+
+    /// Prefer hash join over sort merge join in DataFusion engine
+    /// When enabled, the DataFusion engine will prioritize hash joins for query execution plans,
+    /// potentially improving performance for certain workloads, but may cause OOM for large datasets.
+    #[parameter(default = true)]
+    datafusion_prefer_hash_join: bool,
 
     /// Emit chunks in upsert format for `UPDATE` and `DELETE` DMLs.
     /// May lead to undefined behavior if the table is created with `ON CONFLICT DO NOTHING`.

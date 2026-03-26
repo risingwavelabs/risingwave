@@ -122,6 +122,7 @@ impl Strong {
             ExprType::And | ExprType::Or | ExprType::Coalesce => self.all_null(func_call),
             // TODO: Function like case when is important but current its structure is complicated, so we need to implement it later if necessary.
             // Assume that any other expressions cannot be simplified.
+            #[expect(deprecated)]
             ExprType::In
             | ExprType::Some
             | ExprType::All
@@ -227,6 +228,8 @@ impl Strong {
             | ExprType::Scale
             | ExprType::MinScale
             | ExprType::TrimScale
+            | ExprType::Gamma
+            | ExprType::Lgamma
             | ExprType::Encode
             | ExprType::Decode
             | ExprType::Sha1
@@ -234,6 +237,8 @@ impl Strong {
             | ExprType::Sha256
             | ExprType::Sha384
             | ExprType::Sha512
+            | ExprType::Crc32
+            | ExprType::Crc32c
             | ExprType::GetBit
             | ExprType::GetByte
             | ExprType::SetBit

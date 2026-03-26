@@ -26,7 +26,7 @@ use crate::error::Result;
 #[primary_key(objoid, classoid, objsubid)]
 struct RwDescription {
     // table_id, view_id, function_id, etc.
-    objoid: i32,
+    objoid: TableId,
     // rw_tables, rw_views, rw_functions, etc.
     classoid: i32,
     // If `objoid` is `table_id`, then non-null `objsubid` is column number.
@@ -40,7 +40,7 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDescription>> {
                      catalog_id,
                      index: Option<i32>,
                      description: Option<Box<str>>| RwDescription {
-        objoid: table_id.as_i32_id(),
+        objoid: table_id,
         classoid: catalog_id,
         objsubid: index,
         description: description.map(|s| s.into()),

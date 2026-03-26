@@ -1,4 +1,5 @@
 import os
+from typing import Union
 
 from grafanalib.core import *
 
@@ -486,18 +487,32 @@ class Panels:
         targets,
         columns,
         excludeByName=dict.fromkeys(["Time", "Value"], True),
+        renameByName=None,
+        unitByName=None,
     ):
         gridPos = self.layout.next_one_third_width_graph()
         column_indices = {column: index for index, column in enumerate(columns)}
+        organize_options = {
+            "indexByName": column_indices,
+            "excludeByName": excludeByName,
+        }
+        if renameByName:
+            organize_options["renameByName"] = renameByName
         transformations = [
             {
                 "id": "organize",
-                "options": {
-                    "indexByName": column_indices,
-                    "excludeByName": excludeByName,
-                },
+                "options": organize_options,
             }
         ]
+        overrides = []
+        if unitByName:
+            for name, unit_value in unitByName.items():
+                overrides.append(
+                    {
+                        "matcher": {"id": "byName", "options": name},
+                        "properties": [{"id": "unit", "value": unit_value}],
+                    }
+                )
         return Table(
             title=title,
             dataSource=self.datasource,
@@ -507,11 +522,15 @@ class Panels:
             showHeader=True,
             filterable=True,
             transformations=transformations,
+            overrides=overrides,
         )
 
     def subheader(self, title="", content="", height=1):
         gridPos = self.layout.next_row()
+        # Keep layout state consistent with the actual panel height, otherwise the next panel may overlap
+        # when callers use a custom `height`.
         gridPos.h = height
+        self.layout.h = height
         return Text(
             title=title,
             gridPos=gridPos,
@@ -567,3 +586,13 @@ def quantile(f, percentiles):
 def epoch_to_unix_millis(epoch_expr):
     # UNIX_RISINGWAVE_DATE_SEC
     return f"(1617235200000+({epoch_expr} != 0)/65536)"
+
+
+def alert_when(expr: str) -> str:
+    """Return 1 when expr > 0, and drop the series when expr <= 0."""
+    return f"(({expr}) > bool 0) > 0"
+
+
+def alert_threshold(expr: str, threshold: Union[int, float], comparator: str = ">=") -> str:
+    """Return 1 when expr compares true against threshold, and drop the series otherwise."""
+    return f"(({expr}) {comparator} bool {threshold}) > 0"

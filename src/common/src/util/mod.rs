@@ -15,6 +15,7 @@
 pub use self::prost::*;
 
 pub mod addr;
+pub mod batch_spill_config;
 pub mod chunk_coalesce;
 pub mod column_index_mapping;
 pub mod compress;
@@ -29,7 +30,6 @@ pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
 pub mod query_log;
-pub mod quote_ident;
 pub use rw_resource_util as resource_util;
 pub mod functional;
 pub mod recursive;

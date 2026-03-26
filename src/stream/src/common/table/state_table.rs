@@ -19,10 +19,12 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use either::Either;
 use foyer::Hint;
-use futures::future::try_join_all;
+use futures::future::{ready, try_join_all};
+use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
@@ -55,7 +57,7 @@ use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
 use risingwave_storage::row_serde::row_serde_util::{
-    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
+    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode, serialize_row,
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::*;
@@ -63,9 +65,9 @@ use risingwave_storage::table::{KeyedRow, TableDistribution};
 use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
-use crate::cache::cache_may_stale;
-use crate::executor::StreamExecutorResult;
+use crate::cache::keyed_cache_may_stale;
 use crate::executor::monitor::streaming_stats::StateTableMetrics;
+use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This macro is used to mark a point where we want to randomly discard the operation and early
 /// return, only in insane mode.
@@ -342,13 +344,16 @@ struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
     all_rows: Option<HashMap<VirtualNode, BTreeMap<Bytes, OwnedRow>>>,
 
     table_id: TableId,
-    table_option: TableOption,
     row_serde: Arc<SD>,
     // should be only used for debugging in panic message of handle_mem_table_error
     pk_serde: OrderedRowSerde,
 
     // Per-vnode min/max key statistics for pruning
     vnode_stats: Option<HashMap<VirtualNode, VnodeStatistics>>,
+    /// When false, vnode stats pruning is in dry-run mode:
+    /// we maintain stats and verify pruning correctness but don't actually apply pruning.
+    /// Reads still go to cache/storage even when pruning would indicate no results.
+    enable_state_table_vnode_stats_pruning: bool,
     // Optional metrics for state table operations
     pub metrics: Option<StateTableMetrics>,
 }
@@ -372,7 +377,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             // Get min key via forward iteration
             let memcomparable_range_with_vnode = prefixed_range_with_vnode::<Bytes>(.., vnode);
             let read_options = ReadOptions {
-                retention_seconds: self.table_option.retention_seconds,
                 cache_policy: CachePolicy::Fill(Hint::Low),
                 ..Default::default()
             };
@@ -422,7 +426,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             let start_time = Instant::now();
             *rows = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                 let state_store = &self.state_store;
-                let retention_seconds = self.table_option.retention_seconds;
                 let row_serde = &self.row_serde;
                 async move {
                     let mut rows = BTreeMap::new();
@@ -437,7 +440,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                                     prefix_hint: None,
                                     prefetch_options: Default::default(),
                                     cache_policy: Default::default(),
-                                    retention_seconds,
                                 },
                             )
                             .await?,
@@ -523,6 +525,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                     warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written non pk prefix watermark");
                     self.all_rows = None;
                 }
+                WatermarkSerdeType::Value => {
+                    warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written value watermark");
+                    self.all_rows = None;
+                }
             }
         }
         self.state_store
@@ -570,7 +576,10 @@ pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, PreloadAllRow
     op_consistency_level: Option<StateTableOpConsistencyLevel>,
     output_column_ids: Option<Vec<ColumnId>>,
     preload_all_rows: PreloadAllRow,
-    enable_vnode_key_pruning: Option<bool>,
+    enable_vnode_key_stats: Option<bool>,
+    /// When false, vnode stats pruning is in dry-run mode:
+    /// we maintain stats and verify pruning correctness but don't actually apply pruning.
+    enable_state_table_vnode_stats_pruning: bool,
     metrics: Option<StateTableMetrics>,
 
     _serde: PhantomData<SD>,
@@ -587,7 +596,8 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             op_consistency_level: None,
             output_column_ids: None,
             preload_all_rows: (),
-            enable_vnode_key_pruning: None,
+            enable_vnode_key_stats: None,
+            enable_state_table_vnode_stats_pruning: false,
             metrics: None,
             _serde: Default::default(),
         }
@@ -604,7 +614,8 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             op_consistency_level: self.op_consistency_level,
             output_column_ids: self.output_column_ids,
             preload_all_rows,
-            enable_vnode_key_pruning: self.enable_vnode_key_pruning,
+            enable_vnode_key_stats: self.enable_vnode_key_stats,
+            enable_state_table_vnode_stats_pruning: self.enable_state_table_vnode_stats_pruning,
             metrics: self.metrics,
             _serde: Default::default(),
         }
@@ -648,8 +659,10 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAll
         self
     }
 
-    pub fn enable_vnode_key_pruning(mut self, enable: bool) -> Self {
-        self.enable_vnode_key_pruning = Some(enable);
+    pub fn enable_vnode_key_stats(mut self, enable: bool, config: &StreamingConfig) -> Self {
+        self.enable_vnode_key_stats = Some(enable);
+        self.enable_state_table_vnode_stats_pruning =
+            enable && config.developer.enable_state_table_vnode_stats_pruning;
         self
     }
 
@@ -672,13 +685,13 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             preload_all_rows = false;
         }
 
-        let should_enable_vnode_key_pruning = if preload_all_rows
-            && let Some(enable_vnode_key_pruning) = self.enable_vnode_key_pruning
-            && enable_vnode_key_pruning
+        let should_enable_vnode_key_stats = if preload_all_rows
+            && let Some(enable_vnode_key_stats) = self.enable_vnode_key_stats
+            && enable_vnode_key_stats
         {
             false
         } else {
-            self.enable_vnode_key_pruning.unwrap_or(false)
+            self.enable_vnode_key_stats.unwrap_or(false)
         };
 
         StateTableInner::from_table_catalog_inner(
@@ -689,7 +702,8 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
                 .unwrap_or(StateTableOpConsistencyLevel::ConsistentOldValue),
             self.output_column_ids.unwrap_or_default(),
             preload_all_rows,
-            should_enable_vnode_key_pruning,
+            should_enable_vnode_key_stats,
+            self.enable_state_table_vnode_stats_pruning,
             self.metrics,
         )
         .await
@@ -742,7 +756,8 @@ where
         op_consistency_level: StateTableOpConsistencyLevel,
         output_column_ids: Vec<ColumnId>,
         preload_all_rows: bool,
-        enable_vnode_key_pruning: bool,
+        enable_vnode_key_stats: bool,
+        enable_state_table_vnode_stats_pruning: bool,
         metrics: Option<StateTableMetrics>,
     ) -> Self {
         let table_id = table_catalog.id;
@@ -847,6 +862,7 @@ where
         let new_local_options = if IS_REPLICATED {
             NewLocalOptions::new_replicated(
                 table_id,
+                table_catalog.fragment_id,
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),
@@ -854,6 +870,7 @@ where
         } else {
             NewLocalOptions::new(
                 table_id,
+                table_catalog.fragment_id,
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),
@@ -900,13 +917,11 @@ where
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
-
         let clean_watermark_indices = table_catalog.get_clean_watermark_column_indices();
         if clean_watermark_indices.len() > 1 {
             unimplemented!("multiple clean watermark columns are not supported yet")
         }
         let clean_watermark_index = clean_watermark_indices.first().map(|&i| i as usize);
-
         let watermark_serde = clean_watermark_index.map(|idx| {
             let pk_idx = pk_indices.iter().position(|&i| i == idx);
             let (watermark_serde, watermark_serde_type) = match pk_idx {
@@ -920,24 +935,19 @@ where
                         vec![data_types[idx].clone()],
                         vec![OrderType::ascending()],
                     ),
-                    // TODO(ttl): may introduce a new type for watermark not in pk.
-                    WatermarkSerdeType::NonPkPrefix,
+                    WatermarkSerdeType::Value,
                 ),
             };
             (watermark_serde, watermark_serde_type)
         });
 
         // Restore persisted table watermark.
-        //
-        // Note: currently the underlying local state store only exposes persisted watermarks for
-        // `PkPrefix` type (i.e., the first PK column), so we only restore in that case.
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some((deser, WatermarkSerdeType::PkPrefix)) =
-            watermark_serde.as_ref()
+        let committed_watermark = if let Some((deser, _)) = watermark_serde.as_ref()
             && let Some(max_watermark) = max_watermark_of_vnodes
         {
             let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
@@ -960,13 +970,13 @@ where
             table_id,
             row_store: StateTableRowStore {
                 all_rows: preload_all_rows.then(HashMap::new),
-                table_option,
                 state_store: local_state_store,
                 row_serde,
                 pk_serde: pk_serde.clone(),
                 table_id,
                 // Need to maintain vnode min/max key stats when vnode key pruning is enabled
-                vnode_stats: enable_vnode_key_pruning.then(HashMap::new),
+                vnode_stats: enable_vnode_key_stats.then(HashMap::new),
+                enable_state_table_vnode_stats_pruning,
                 metrics,
             },
             store,
@@ -1141,7 +1151,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         }
 
         // Try to prune using vnode statistics
-        if let Some(stats) = &self.vnode_stats
+        let should_prune = if let Some(stats) = &self.vnode_stats
             && let (vnode, key) = key_bytes.split_vnode_bytes()
             && let Some(vnode_stat) = stats.get(&vnode)
             && vnode_stat.can_prune(&key)
@@ -1149,23 +1159,39 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             if let Some(m) = &self.metrics {
                 m.get_vnode_pruned_count.inc();
             }
+            true
+        } else {
+            false
+        };
+
+        if should_prune && self.enable_state_table_vnode_stats_pruning {
             return Ok(None);
         }
 
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
 
-        self.state_store
+        let result = self
+            .state_store
             .on_key_value(key_bytes, read_options, move |_, value| {
                 let row = self.row_serde.deserialize(value)?;
                 Ok(OwnedRow::new(row))
             })
             .await
-            .map_err(Into::into)
+            .map_err(Into::<StreamExecutorError>::into)?;
+
+        // In dry-run mode, verify that pruning would have been correct
+        if should_prune && result.is_some() {
+            tracing::warn!(
+                table_id = %self.table_id,
+                "vnode stats pruning dry run fails for get. This will not affect correctness."
+            );
+        }
+
+        Ok(result)
     }
 
     async fn exists(
@@ -1182,7 +1208,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         }
 
         // Try to prune using vnode statistics
-        if let Some(stats) = &self.vnode_stats
+        let should_prune = if let Some(stats) = &self.vnode_stats
             && let (vnode, key) = key_bytes.split_vnode_bytes()
             && let Some(vnode_stat) = stats.get(&vnode)
             && vnode_stat.can_prune(&key)
@@ -1190,12 +1216,17 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             if let Some(m) = &self.metrics {
                 m.get_vnode_pruned_count.inc();
             }
+            true
+        } else {
+            false
+        };
+
+        if should_prune && self.enable_state_table_vnode_stats_pruning {
             return Ok(false);
         }
 
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
@@ -1203,7 +1234,17 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             .state_store
             .on_key_value(key_bytes, read_options, move |_, _| Ok(()))
             .await?;
-        Ok(result.is_some())
+        let exists = result.is_some();
+
+        // In dry-run mode, verify that pruning would have been correct
+        if should_prune && exists {
+            tracing::warn!(
+                table_id = %self.table_id,
+                "vnode stats pruning dry run fails for exists. This will not affect correctness."
+            );
+        }
+
+        Ok(exists)
     }
 }
 
@@ -1235,6 +1276,10 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
+    /// Returns `Some((new_vnodes, old_vnodes, state_table), keyed_cache_may_stale)` if the vnode bitmap is updated.
+    ///
+    /// Note the `keyed_cache_may_stale` only applies to keyed cache. If the executor's cache is not keyed, but will
+    /// be consumed with all vnodes it owns, the executor may need to ALWAYS clear the cache regardless of this flag.
     pub async fn post_yield_barrier(
         mut self,
         new_vnodes: Option<Arc<Bitmap>>,
@@ -1250,9 +1295,9 @@ where
     > {
         self.inner.on_post_commit = false;
         Ok(if let Some(new_vnodes) = new_vnodes {
-            let (old_vnodes, cache_may_stale) =
+            let (old_vnodes, keyed_cache_may_stale) =
                 self.update_vnode_bitmap(new_vnodes.clone()).await?;
-            Some(((new_vnodes, old_vnodes, self.inner), cache_may_stale))
+            Some(((new_vnodes, old_vnodes, self.inner), keyed_cache_may_stale))
         } else {
             None
         })
@@ -1287,15 +1332,15 @@ where
         }
         assert_eq!(self.inner.vnodes().len(), new_vnodes.len());
 
-        let cache_may_stale = cache_may_stale(self.inner.vnodes(), &new_vnodes);
+        let keyed_cache_may_stale = keyed_cache_may_stale(self.inner.vnodes(), &new_vnodes);
 
-        if cache_may_stale {
+        if keyed_cache_may_stale {
             self.inner.pending_watermark = None;
         }
 
         Ok((
             self.inner.distribution.update_vnode_bitmap(new_vnodes),
-            cache_may_stale,
+            keyed_cache_may_stale,
         ))
     }
 }
@@ -1352,8 +1397,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
         let (vnode, key_without_vnode) = key.split_vnode_bytes();
 
-        // Clear vnode statistics on delete (conservative approach, skip if all_rows is present)
-        // The deleted key might be the min or max, so we invalidate the stats
         if self.all_rows.is_none()
             && let Some(stats) = &mut self.vnode_stats
             && let Some(vnode_stat) = stats.get_mut(&vnode)
@@ -1597,14 +1640,12 @@ where
             .watermark_serde
             .as_ref()
             .expect("watermark serde should be initialized to commit watermark");
-
         let watermark_suffix =
-            serialize_pk(row::once(Some(watermark.clone())), watermark_serializer);
+            serialize_row(row::once(Some(watermark.clone())), watermark_serializer);
         let vnode_watermark = VnodeWatermark::new(
             self.vnodes().clone(),
             Bytes::copy_from_slice(watermark_suffix.as_ref()),
         );
-
         trace!(table_id = %self.table_id, ?vnode_watermark, "table watermark");
 
         let order_type = watermark_serializer.get_order_types().get(0).unwrap();
@@ -1633,6 +1674,8 @@ impl<'a, S: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a> KeyedRowS
 
 pub trait PkRowStream<'a, K>: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a {}
 impl<'a, K, S: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a> PkRowStream<'a, K> for S {}
+
+pub type BoxedRowStream<'a> = BoxStream<'a, StreamExecutorResult<OwnedRow>>;
 
 pub trait FromVnodeBytes {
     fn from_vnode_bytes(vnode: VirtualNode, bytes: &Bytes) -> Self;
@@ -1714,51 +1757,80 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             m.iter_count.inc();
         }
         // Check if we can prune the entire range using vnode statistics
-        let (pruned_start, pruned_end) = if let Some(stats) = &self.vnode_stats
+        let (pruned_start, pruned_end, should_prune_entirely) = if let Some(stats) =
+            &self.vnode_stats
             && let Some(vnode_stat) = stats.get(&vnode)
         {
             match vnode_stat.pruned_key_range(&start, &end) {
-                Some((new_start, new_end)) => (new_start, new_end),
+                Some((new_start, new_end)) => {
+                    if self.enable_state_table_vnode_stats_pruning {
+                        (new_start, new_end, false)
+                    } else {
+                        // In dry-run mode, we don't apply pruning but verify correctness
+                        (start, end, false)
+                    }
+                }
                 None => {
                     if let Some(m) = &self.metrics {
                         m.iter_vnode_pruned_count.inc();
                     }
-                    return Ok(futures::future::Either::Left(futures::stream::empty()));
+                    // Mark that we should prune entirely, but handle dry-run below
+                    (start.clone(), end.clone(), true)
                 }
             }
         } else {
-            (start, end)
+            (start, end, false)
+        };
+
+        if should_prune_entirely && self.enable_state_table_vnode_stats_pruning {
+            return Ok(futures::future::Either::Left(futures::stream::empty()));
+        }
+
+        let table_id = self.table_id;
+        let inspect_fn = move |result: &StreamExecutorResult<(K, OwnedRow)>| {
+            // Only log when in dry-run mode and we would have pruned but got results
+            if should_prune_entirely && result.is_ok() {
+                tracing::warn!(
+                    table_id = %table_id,
+                    "vnode stats pruning dry run fails for iter. This will not affect correctness."
+                );
+            }
         };
 
         if let Some(rows) = &self.all_rows {
             return Ok(futures::future::Either::Right(
-                futures::future::Either::Left(futures::stream::iter(
-                    rows.get(&vnode)
-                        .expect("covered vnode")
-                        .range((pruned_start, pruned_end))
-                        .map(move |(key, value)| {
-                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
-                        }),
-                )),
+                futures::future::Either::Left(
+                    futures::stream::iter(
+                        rows.get(&vnode)
+                            .expect("covered vnode")
+                            .range((pruned_start, pruned_end))
+                            .map(move |(key, value)| {
+                                Ok((K::from_vnode_bytes(vnode, key), value.clone()))
+                            }),
+                    )
+                    .inspect(inspect_fn),
+                ),
             ));
         }
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             prefetch_options,
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
 
         Ok(futures::future::Either::Right(
-            futures::future::Either::Right(deserialize_keyed_row_stream(
-                self.state_store
-                    .iter(
-                        prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
-                        read_options,
-                    )
-                    .await?,
-                &*self.row_serde,
-            )),
+            futures::future::Either::Right(
+                deserialize_keyed_row_stream(
+                    self.state_store
+                        .iter(
+                            prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
+                            read_options,
+                        )
+                        .await?,
+                    &*self.row_serde,
+                )
+                .inspect(inspect_fn),
+            ),
         ))
     }
 
@@ -1773,52 +1845,81 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             m.iter_count.inc();
         }
         // Check if we can prune the entire range using vnode statistics
-        let (pruned_start, pruned_end) = if let Some(stats) = &self.vnode_stats
+        let (pruned_start, pruned_end, should_prune_entirely) = if let Some(stats) =
+            &self.vnode_stats
             && let Some(vnode_stat) = stats.get(&vnode)
         {
             match vnode_stat.pruned_key_range(&start, &end) {
-                Some((new_start, new_end)) => (new_start, new_end),
+                Some((new_start, new_end)) => {
+                    if self.enable_state_table_vnode_stats_pruning {
+                        (new_start, new_end, false)
+                    } else {
+                        // In dry-run mode, we don't apply pruning but verify correctness
+                        (start, end, false)
+                    }
+                }
                 None => {
                     if let Some(m) = &self.metrics {
                         m.iter_vnode_pruned_count.inc();
                     }
-                    return Ok(futures::future::Either::Left(futures::stream::empty()));
+                    // Mark that we should prune entirely, but handle dry-run below
+                    (start, end, true)
                 }
             }
         } else {
-            (start, end)
+            (start, end, false)
+        };
+
+        if should_prune_entirely && self.enable_state_table_vnode_stats_pruning {
+            return Ok(futures::future::Either::Left(futures::stream::empty()));
+        }
+
+        let table_id = self.table_id;
+        let inspect_fn = move |result: &StreamExecutorResult<(K, OwnedRow)>| {
+            // Only log when in dry-run mode and we would have pruned but got results
+            if should_prune_entirely && result.is_ok() {
+                tracing::warn!(
+                    table_id = %table_id,
+                    "vnode stats pruning dry run fails for rev_iter. This will not affect correctness."
+                );
+            }
         };
 
         if let Some(rows) = &self.all_rows {
             return Ok(futures::future::Either::Right(
-                futures::future::Either::Left(futures::stream::iter(
-                    rows.get(&vnode)
-                        .expect("covered vnode")
-                        .range((pruned_start, pruned_end))
-                        .rev()
-                        .map(move |(key, value)| {
-                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
-                        }),
-                )),
+                futures::future::Either::Left(
+                    futures::stream::iter(
+                        rows.get(&vnode)
+                            .expect("covered vnode")
+                            .range((pruned_start, pruned_end))
+                            .rev()
+                            .map(move |(key, value)| {
+                                Ok((K::from_vnode_bytes(vnode, key), value.clone()))
+                            }),
+                    )
+                    .inspect(inspect_fn),
+                ),
             ));
         }
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             prefetch_options,
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
 
         Ok(futures::future::Either::Right(
-            futures::future::Either::Right(deserialize_keyed_row_stream(
-                self.state_store
-                    .rev_iter(
-                        prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
-                        read_options,
-                    )
-                    .await?,
-                &*self.row_serde,
-            )),
+            futures::future::Either::Right(
+                deserialize_keyed_row_stream(
+                    self.state_store
+                        .rev_iter(
+                            prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
+                            read_options,
+                        )
+                        .await?,
+                    &*self.row_serde,
+                )
+                .inspect(inspect_fn),
+            ),
         ))
     }
 }
@@ -1840,6 +1941,124 @@ where
         let stream = self.iter_with_prefix_inner::</* REVERSE */ false, ()>(pk_prefix, sub_range, prefetch_options)
             .await?;
         Ok(stream.map_ok(|(_, row)| row))
+    }
+
+    /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same
+    /// `vnode`, and filters out rows based on watermarks. It calls `iter_with_prefix` and further filters rows
+    /// based on the table watermark retrieved from the state store.
+    ///
+    /// The caller must ensure that `clean_watermark_index` is set before calling this method, otherwise it will return all rows without filtering.
+    pub async fn iter_with_prefix_respecting_watermark(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<BoxedRowStream<'_>> {
+        let vnode = self.compute_prefix_vnode(&pk_prefix);
+        let Some(clean_watermark_index) = self.clean_watermark_index else {
+            return self
+                .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+                .await
+                .map(|s| s.boxed());
+        };
+        let Some((watermark_serde, watermark_type)) = &self.watermark_serde else {
+            return Err(StreamExecutorError::from(anyhow!(
+                "Missing watermark serde"
+            )));
+        };
+        // Fast path. TableWatermarksIndex::rewrite_range_with_table_watermark has already filtered the rows.
+        if matches!(watermark_type, WatermarkSerdeType::PkPrefix) {
+            return self
+                .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+                .await
+                .map(|s| s.boxed());
+        }
+
+        let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
+        let Some(watermark_bytes) = watermark_bytes else {
+            return self
+                .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+                .await
+                .map(|s| s.boxed());
+        };
+        let watermark_row = watermark_serde.deserialize(&watermark_bytes)?;
+        if watermark_row.len() != 1 {
+            return Err(StreamExecutorError::from(format!(
+                "Watermark row should have exactly 1 column, got {}",
+                watermark_row.len()
+            )));
+        }
+        let watermark_value = watermark_row[0].clone();
+        // StateTableInner::update_watermark should ensure that the watermark is not NULL
+        if watermark_value.is_none() {
+            return Err(StreamExecutorError::from(anyhow!(
+                "Watermark cannot be NULL"
+            )));
+        }
+        let order_type = watermark_serde.get_order_types().get(0).ok_or_else(|| {
+            StreamExecutorError::from(anyhow!(
+                "Watermark serde should have at least one order type"
+            ))
+        })?;
+
+        let direction = if order_type.is_ascending() {
+            WatermarkDirection::Ascending
+        } else {
+            WatermarkDirection::Descending
+        };
+        let clean_watermark_index_in_pk = self
+            .pk_indices
+            .iter()
+            .position(|&i| i == clean_watermark_index);
+        let clean_watermark_index_in_value = match &self.value_indices {
+            Some(value_indices) => value_indices
+                .iter()
+                .position(|idx| *idx == clean_watermark_index)
+                .ok_or_else(|| {
+                    StreamExecutorError::from(anyhow!(
+                        "clean watermark column index {} is not included in table value indices {:?}",
+                        clean_watermark_index,
+                        value_indices
+                    ))
+                })?,
+            None => clean_watermark_index,
+        };
+
+        let stream = self
+            .iter_with_prefix_inner::</* REVERSE */ false, Bytes>(pk_prefix, sub_range, prefetch_options)
+            .await?
+            .try_filter_map(move |(pk, row)| {
+                let should_filter =  match watermark_type {
+                    WatermarkSerdeType::PkPrefix => unreachable!(),
+                    WatermarkSerdeType::NonPkPrefix => {
+                        let table_key = TableKey(pk);
+                        let (vnode, key) = table_key.split_vnode();
+                        let pk_cols = self.pk_serde
+                        .deserialize(key)
+                        .unwrap_or_else(|e| {
+                            panic!("Failed to deserialize table {} vnode {:?} key {:?} error: {:?}", self.table_id(), vnode, key, e.as_report());
+                        });
+                        direction.datum_filter_by_watermark(
+                            pk_cols.datum_at(clean_watermark_index_in_pk.unwrap()),
+                            &watermark_value,
+                            *order_type,
+                        )
+                    },
+                    WatermarkSerdeType::Value => {
+                        direction.datum_filter_by_watermark(
+                            row.datum_at(clean_watermark_index_in_value),
+                            &watermark_value,
+                            *order_type,
+                        )
+                    }
+                };
+                if should_filter {
+                    ready(Ok(None))
+                } else {
+                    ready(Ok(Some(row)))
+                }
+            });
+        Ok(stream.boxed())
     }
 
     /// Get the row from a state table with only 1 row.

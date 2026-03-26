@@ -40,7 +40,7 @@ pub use connector_client::{SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 use error::Result;
 pub use frontend_client::{FrontendClientPool, FrontendClientPoolRef};
 use futures::future::try_join_all;
-use futures::stream::{BoxStream, Peekable};
+use futures::stream::{BoxStream, Peekable, TryStreamExt};
 use futures::{Stream, StreamExt};
 pub use hummock_meta_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
@@ -48,6 +48,7 @@ pub use hummock_meta_client::{
 };
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use moka::future::Cache;
+pub use monitor_client::{MonitorClient, MonitorClientPool, MonitorClientPoolRef};
 use rand::prelude::IndexedRandom;
 use risingwave_common::config::RpcClientConfig;
 use risingwave_common::util::addr::HostAddr;
@@ -70,6 +71,7 @@ mod connector_client;
 mod frontend_client;
 mod hummock_meta_client;
 mod meta_client;
+mod monitor_client;
 mod sink_coordinate_client;
 mod stream_client;
 
@@ -82,11 +84,20 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
         size: usize,
         opts: &RpcClientConfig,
     ) -> Result<Arc<Vec<Self>>> {
-        try_join_all(
-            std::iter::repeat_n(host_addr, size).map(|host_addr| Self::new_client(host_addr, opts)),
-        )
-        .await
-        .map(Arc::new)
+        let make_clients = || {
+            std::iter::repeat_n(host_addr.clone(), size)
+                .map(|host_addr| Self::new_client(host_addr, opts))
+        };
+        let concurrency = opts.pool_setup_concurrency;
+        if concurrency == 0 || concurrency >= size {
+            try_join_all(make_clients()).await.map(Arc::new)
+        } else {
+            futures::stream::iter(make_clients())
+                .buffer_unordered(concurrency)
+                .try_collect::<Vec<_>>()
+                .await
+                .map(Arc::new)
+        }
     }
 }
 

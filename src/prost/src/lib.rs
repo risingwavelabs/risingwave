@@ -14,6 +14,7 @@
 
 #![allow(unfulfilled_lint_expectations)]
 #![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::doc_lazy_continuation)]
 // for derived code of `Message`
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
@@ -24,6 +25,7 @@
 #![expect(clippy::module_inception)]
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
+#![feature(step_trait)]
 
 pub mod id;
 
@@ -36,6 +38,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::ddl_service::streaming_job_resource_type;
 use crate::id::{FragmentId, SourceId, WorkerId};
 use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
@@ -321,13 +324,6 @@ impl meta::table_fragments::ActorStatus {
     }
 }
 
-impl common::WorkerNode {
-    pub fn is_streaming_schedulable(&self) -> bool {
-        let property = self.property.as_ref();
-        property.is_some_and(|p| p.is_streaming) && !property.is_some_and(|p| p.is_unschedulable)
-    }
-}
-
 impl common::ActorLocation {
     pub fn from_worker(worker_node_id: WorkerId) -> Option<Self> {
         Some(Self { worker_node_id })
@@ -506,14 +502,19 @@ impl catalog::StreamSourceInfo {
 }
 
 impl stream_plan::PbStreamScanType {
-    pub fn is_reschedulable(&self) -> bool {
+    pub fn is_reschedulable(&self, is_online: bool) -> bool {
         match self {
+            PbStreamScanType::Unspecified => {
+                unreachable!()
+            }
             // todo: should this be true?
             PbStreamScanType::UpstreamOnly => false,
             PbStreamScanType::ArrangementBackfill => true,
             PbStreamScanType::CrossDbSnapshotBackfill => true,
-            PbStreamScanType::SnapshotBackfill => true,
-            _ => false,
+            PbStreamScanType::SnapshotBackfill => !is_online,
+            PbStreamScanType::Chain | PbStreamScanType::Rearrange | PbStreamScanType::Backfill => {
+                false
+            }
         }
     }
 }
@@ -772,6 +773,18 @@ impl expr::UserDefinedFunctionMetadata {
         } else {
             // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
             self.identifier.as_deref()
+        }
+    }
+}
+
+impl streaming_job_resource_type::ResourceType {
+    pub fn resource_group(&self) -> Option<String> {
+        match self {
+            streaming_job_resource_type::ResourceType::Regular(_) => None,
+            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+            | streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group) => {
+                Some(group.clone())
+            }
         }
     }
 }

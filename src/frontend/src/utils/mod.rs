@@ -38,6 +38,12 @@ pub(crate) mod group_by;
 pub mod overwrite_options;
 pub use group_by::*;
 pub use overwrite_options::*;
+mod iceberg_predicate;
+pub use iceberg_predicate::*;
+#[cfg(feature = "datafusion")]
+mod drop_guard;
+#[cfg(feature = "datafusion")]
+pub use drop_guard::DropGuard;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 

@@ -15,22 +15,24 @@
 pub mod cdc_progress;
 pub mod progress;
 
+use std::sync::Arc;
+
 pub use progress::CreateMviewProgressReporter;
-use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_pb::id::FragmentId;
+use risingwave_pb::id::{FragmentId, PartialGraphId};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::error::{IntoUnexpectedExit, StreamError};
-use crate::executor::exchange::permit::{self, channel_from_config};
+use crate::executor::exchange::permit;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner};
 use crate::task::barrier_manager::progress::BackfillState;
 use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, StreamEnvironment};
 
-/// Events sent from actors via [`LocalBarrierManager`] to [`super::barrier_worker::managed_state::DatabaseManagedBarrierState`].
+/// Events sent from actors via [`LocalBarrierManager`] to [`super::barrier_worker::managed_state::PartialGraphState`].
 ///
 /// See [`crate::task`] for architecture overview.
 pub(super) enum LocalBarrierEvent {
@@ -69,6 +71,7 @@ pub(super) enum LocalBarrierEvent {
     RegisterLocalUpstreamOutput {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
+        upstream_partial_graph_id: PartialGraphId,
         tx: permit::Sender,
     },
     ReportCdcTableBackfillProgress {
@@ -76,23 +79,26 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         state: CdcTableBackfillState,
     },
+    ReportCdcSourceOffsetUpdated {
+        epoch: EpochPair,
+        actor_id: ActorId,
+        source_id: SourceId,
+    },
 }
 
-/// Can send [`LocalBarrierEvent`] to [`super::barrier_worker::managed_state::DatabaseManagedBarrierState::poll_next_event`]
+/// Can send [`LocalBarrierEvent`] to [`super::barrier_worker::managed_state::PartialGraphState::poll_next_event`]
 ///
 /// See [`crate::task`] for architecture overview.
 #[derive(Clone)]
 pub struct LocalBarrierManager {
     barrier_event_sender: UnboundedSender<LocalBarrierEvent>,
     actor_failure_sender: UnboundedSender<(ActorId, StreamError)>,
-    pub(crate) database_id: DatabaseId,
     pub(crate) term_id: String,
     pub(crate) env: StreamEnvironment,
 }
 
 impl LocalBarrierManager {
     pub(super) fn new(
-        database_id: DatabaseId,
         term_id: String,
         env: StreamEnvironment,
     ) -> (
@@ -106,7 +112,6 @@ impl LocalBarrierManager {
             Self {
                 barrier_event_sender: event_tx,
                 actor_failure_sender: err_tx,
-                database_id,
                 term_id,
                 env,
             },
@@ -116,15 +121,10 @@ impl LocalBarrierManager {
     }
 
     pub fn for_test() -> Self {
-        Self::new(
-            114514.into(),
-            "114514".to_owned(),
-            StreamEnvironment::for_test(),
-        )
-        .0
+        Self::new("114514".to_owned(), StreamEnvironment::for_test()).0
     }
 
-    /// Event is handled by [`super::barrier_worker::managed_state::DatabaseManagedBarrierState::poll_next_event`]
+    /// Event is handled by [`super::barrier_worker::managed_state::PartialGraphState::poll_next_event`]
     fn send_event(&self, event: LocalBarrierEvent) {
         // ignore error, because the current barrier manager maybe a stale one
         let _ = self.barrier_event_sender.send(event);
@@ -160,11 +160,25 @@ impl LocalBarrierManager {
         &self,
         actor_id: ActorId,
         upstream_actor_id: ActorId,
+        upstream_fragment_id: FragmentId,
+        upstream_partial_graph_id: PartialGraphId,
+        metrics: Arc<StreamingMetrics>,
     ) -> permit::Receiver {
-        let (tx, rx) = channel_from_config(self.env.global_config());
+        let upstream_fragment_id_str = upstream_fragment_id.to_string();
+        let fragment_channel_buffered_bytes = metrics
+            .fragment_channel_buffered_bytes
+            .with_guarded_label_values(&[&upstream_fragment_id_str]);
+        let (tx, rx) = permit::channel_from_config_with_metrics(
+            self.env.global_config(),
+            permit::ChannelMetrics {
+                sender_actor_channel_buffered_bytes: fragment_channel_buffered_bytes.clone(),
+                receiver_actor_channel_buffered_bytes: fragment_channel_buffered_bytes,
+            },
+        );
         self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
             actor_id,
             upstream_actor_id,
+            upstream_partial_graph_id,
             tx,
         });
         rx
@@ -212,6 +226,19 @@ impl LocalBarrierManager {
             actor_id,
             table_id,
             staging_table_id,
+        });
+    }
+
+    pub fn report_cdc_source_offset_updated(
+        &self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        source_id: SourceId,
+    ) {
+        self.send_event(LocalBarrierEvent::ReportCdcSourceOffsetUpdated {
+            epoch,
+            actor_id,
+            source_id,
         });
     }
 }

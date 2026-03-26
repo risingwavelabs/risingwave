@@ -18,12 +18,12 @@ use std::sync::Arc;
 
 use educe::Educe;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, IndexId, Schema};
+use risingwave_common::catalog::{ColumnDesc, CreateType, Field, IndexId, Schema};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{
-    PbIndex, PbIndexColumnProperties, PbVectorIndexInfo, vector_index_info,
+    PbCreateType, PbIndex, PbIndexColumnProperties, PbVectorIndexInfo, vector_index_info,
 };
 
 use crate::catalog::table_catalog::TableType;
@@ -109,6 +109,9 @@ pub struct IndexCatalog {
 
     pub primary_table: Arc<TableCatalog>,
 
+    /// Indicate whether to create index in background or foreground.
+    pub create_type: CreateType,
+
     pub created_at_epoch: Option<Epoch>,
 
     pub initialized_at_epoch: Option<Epoch>,
@@ -130,6 +133,10 @@ impl IndexCatalog {
             .map(|expr| ExprImpl::from_expr_proto(expr).unwrap())
             .map(|expr| item_rewriter::CompositeCastEliminator.rewrite_expr(expr))
             .collect();
+
+        let create_type = index_prost
+            .get_create_type()
+            .unwrap_or(PbCreateType::Foreground);
 
         let index_type = match index_table.table_type {
             TableType::Index => {
@@ -216,6 +223,7 @@ impl IndexCatalog {
             initialized_at_epoch: index_prost.initialized_at_epoch.map(Epoch::from),
             created_at_cluster_version: index_prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: index_prost.initialized_at_cluster_version.clone(),
+            create_type: CreateType::from_proto(create_type),
         }
     }
 }

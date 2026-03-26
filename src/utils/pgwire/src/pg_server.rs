@@ -55,7 +55,6 @@ pub trait SessionManager: Send + Sync + 'static {
     fn create_dummy_session(
         &self,
         database_id: DatabaseId,
-        user_id: u32,
     ) -> Result<Arc<Self::Session>, Self::Error>;
 
     fn connect(
@@ -140,6 +139,8 @@ pub trait Session: Send + Sync {
     fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
 
     fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()>;
+
+    fn user(&self) -> String;
 }
 
 /// Each session could run different SQLs multiple times.
@@ -408,7 +409,6 @@ mod tests {
         fn create_dummy_session(
             &self,
             _database_id: DatabaseId,
-            _user_name: u32,
         ) -> Result<Arc<Self::Session>, Self::Error> {
             unimplemented!()
         }
@@ -549,6 +549,10 @@ mod tests {
 
         fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
             Ok(())
+        }
+
+        fn user(&self) -> String {
+            "mock".to_owned()
         }
     }
 

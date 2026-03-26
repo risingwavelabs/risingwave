@@ -1,4 +1,11 @@
 statement ok
+create table optional_validate (
+  data JSONB
+) WITH (
+  connector = 'webhook'
+);
+
+statement ok
 create table rudderstack (
   data JSONB
 ) WITH (

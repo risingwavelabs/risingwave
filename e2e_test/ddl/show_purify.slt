@@ -52,15 +52,15 @@ public.ctas	CREATE TABLE ctas (v1 NUMERIC, v2 TIMESTAMP, v3 TIMESTAMP WITH TIME 
 statement ok
 drop table ctas;
 
-# Test quote & case-sensitivity when purifying definition.
+# Test quote, case-sensitivity, and keyword identifiers when purifying definition.
 
 statement ok
-create table accounts ("accountId" string, data jsonb, primary key ("accountId"));
+create table accounts ("accountId" string, data jsonb, "select" int, primary key ("accountId"));
 
 query TT
 show create table accounts;
 ----
-public.accounts	CREATE TABLE accounts ("accountId" CHARACTER VARYING, data JSONB, PRIMARY KEY ("accountId"))
+public.accounts	CREATE TABLE accounts ("accountId" CHARACTER VARYING, data JSONB, "select" INT, PRIMARY KEY ("accountId"))
 
 statement ok
 drop table accounts;

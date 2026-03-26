@@ -246,6 +246,7 @@ impl PostgresExternalTableReader {
             &config.database,
             &config.ssl_mode,
             &config.ssl_root_cert,
+            None, // No TCP keepalive for CDC source
         )
         .await?;
         let field_names = rw_schema
@@ -799,6 +800,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "varchar" => Some(PgType::VARCHAR_ARRAY),
             "text" => Some(PgType::TEXT_ARRAY),
             "bytea" => Some(PgType::BYTEA_ARRAY),
+            "geometry" => Some(PgType::BYTEA_ARRAY), // PostGIS geometry array
             "date" => Some(PgType::DATE_ARRAY),
             "time" => Some(PgType::TIME_ARRAY),
             "timetz" => Some(PgType::TIMETZ_ARRAY),
@@ -831,6 +833,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
             "citext" | "text" => Some(PgType::TEXT),
             "bytea" => Some(PgType::BYTEA),
+            "geometry" => Some(PgType::BYTEA), // PostGIS geometry type
             "date" => Some(PgType::DATE),
             "time" => Some(PgType::TIME),
             "timetz" => Some(PgType::TIMETZ),

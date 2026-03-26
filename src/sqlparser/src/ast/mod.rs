@@ -54,6 +54,7 @@ pub use crate::ast::ddl::{
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
+pub use crate::quote_ident::QuoteIdent;
 use crate::tokenizer::Tokenizer;
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
@@ -172,14 +173,9 @@ impl Ident {
     }
 
     /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident` or
-    /// `QuoteIdent` wrapper in `common` crate.
+    /// [`QuoteIdent`] wrapper.
     pub fn from_real_value(value: &str) -> Self {
-        let needs_quotes = value
-            .chars()
-            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'))
-            // Also need quotes if the identifier starts with a digit, as it would be
-            // tokenized as a number instead of an identifier (e.g., "2000000")
-            || value.chars().next().is_some_and(|c| c.is_ascii_digit());
+        let needs_quotes = QuoteIdent::needs_quotes(value);
 
         if needs_quotes {
             Self::with_quote_unchecked('"', value.replace('"', "\"\""))
@@ -1250,6 +1246,15 @@ pub enum CopyTarget {
     Stdout,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum WaitTarget {
+    All,
+    Table(ObjectName),
+    MaterializedView(ObjectName),
+    Sink(ObjectName),
+    Index(ObjectName),
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1302,6 +1307,10 @@ pub enum Statement {
         selection: Option<Expr>,
         /// RETURNING
         returning: Vec<SelectItem>,
+    },
+    /// DELETE META SNAPSHOT(S)
+    DeleteMetaSnapshots {
+        snapshot_ids: Vec<u64>,
     },
     /// DISCARD
     Discard(DiscardType),
@@ -1488,7 +1497,6 @@ pub enum Statement {
     AlterSecret {
         /// Secret name
         name: ObjectName,
-        with_options: Vec<SqlOption>,
         operation: AlterSecretOperation,
     },
     /// ALTER FRAGMENT
@@ -1686,9 +1694,11 @@ pub enum Statement {
     ///
     /// Note: RisingWave specific statement.
     Flush,
-    /// WAIT for ALL running stream jobs to finish.
-    /// It will block the current session the condition is met.
-    Wait,
+    /// WAIT for background stream jobs to finish.
+    /// It will block the current session until the condition is met.
+    Wait(WaitTarget),
+    /// Trigger meta backup.
+    Backup,
     /// Trigger stream job recover
     Recover,
     /// `USE <db_name>`
@@ -1927,6 +1937,14 @@ impl Statement {
                 }
                 Ok(())
             }
+            Statement::DeleteMetaSnapshots { snapshot_ids } => {
+                write!(
+                    f,
+                    "DELETE META SNAPSHOTS {}",
+                    display_comma_separated(snapshot_ids)
+                )?;
+                Ok(())
+            }
             Statement::CreateDatabase {
                 db_name,
                 if_not_exists,
@@ -2110,13 +2128,15 @@ impl Statement {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
-                if let Some(info) = webhook_info {
+                if let Some(info) = webhook_info
+                    && let Some(signature_expr) = &info.signature_expr
+                {
                     if let Some(secret) = &info.secret_ref {
                         write!(f, " VALIDATE SECRET {}", secret.secret_name)?;
                     } else {
                         write!(f, " VALIDATE")?;
                     }
-                    write!(f, " AS {}", info.signature_expr)?;
+                    write!(f, " AS {}", signature_expr)?;
                 }
                 match engine {
                     Engine::Hummock => {}
@@ -2224,16 +2244,9 @@ impl Statement {
             Statement::AlterConnection { name, operation } => {
                 write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
-            Statement::AlterSecret {
-                name,
-                with_options,
-                operation,
-            } => {
+            Statement::AlterSecret { name, operation } => {
                 write!(f, "ALTER SECRET {}", name)?;
-                if !with_options.is_empty() {
-                    write!(f, " WITH ({})", display_comma_separated(with_options))?;
-                }
-                write!(f, " {}", operation)
+                write!(f, "{}", operation)
             }
             Statement::Discard(t) => write!(f, "DISCARD {}", t),
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
@@ -2450,8 +2463,18 @@ impl Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
-            Statement::Wait => {
-                write!(f, "WAIT")
+            Statement::Wait(target) => match target {
+                WaitTarget::All => write!(f, "WAIT"),
+                WaitTarget::Table(name) => write!(f, "WAIT TABLE {name}"),
+                WaitTarget::MaterializedView(name) => {
+                    write!(f, "WAIT MATERIALIZED VIEW {name}")
+                }
+                WaitTarget::Sink(name) => write!(f, "WAIT SINK {name}"),
+                WaitTarget::Index(name) => write!(f, "WAIT INDEX {name}"),
+            },
+            Statement::Backup => {
+                write!(f, "BACKUP")?;
+                Ok(())
             }
             Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
@@ -3267,7 +3290,11 @@ impl TryFrom<(&String, &String)> for SqlOption {
         let name_parts: Vec<&str> = name.split('.').collect();
         let object_name = ObjectName(name_parts.into_iter().map(Ident::from_real_value).collect());
 
-        let query = format!("{} = {}", object_name, value);
+        // Wrap the value in single quotes so it is always parsed as a string literal.
+        // This prevents values containing special characters (e.g., "jdbc:postgresql://...")
+        // from being incorrectly tokenized. Escape any embedded single quotes.
+        let escaped_value = value.replace('\'', "''");
+        let query = format!("{} = '{}'", object_name, escaped_value);
         let mut tokenizer = Tokenizer::new(query.as_str());
         let tokens = tokenizer.tokenize_with_location()?;
         let mut parser = Parser(&tokens);
@@ -3805,13 +3832,15 @@ impl fmt::Display for SetVariableValue {
 pub enum SetVariableValueSingle {
     Ident(Ident),
     Literal(Value),
+    Raw(String),
 }
 
 impl SetVariableValueSingle {
     pub fn to_string_unquoted(&self) -> String {
         match self {
             Self::Literal(Value::SingleQuotedString(s))
-            | Self::Literal(Value::DoubleQuotedString(s)) => s.clone(),
+            | Self::Literal(Value::DoubleQuotedString(s))
+            | Self::Raw(s) => s.clone(),
             _ => self.to_string(),
         }
     }
@@ -3823,6 +3852,7 @@ impl fmt::Display for SetVariableValueSingle {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            Raw(raw) => write!(f, "{}", raw),
         }
     }
 }

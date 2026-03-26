@@ -66,16 +66,18 @@ function drop_mvs() {
 }
 
 function backup() {
-  local job_id
-  job_id=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta backup-meta 2>&1 | grep "backup job succeeded" | awk -F ',' '{print $(NF-1)}'| awk '{print $(NF)}')
-  [ -n "${job_id}" ]
-  echo "${job_id}"
+  local snapshot_id
+  o=$(execute_sql_t "BACKUP;")
+  snapshot_id=$(echo "${o}" | awk '{$1=$1}; NF {print $1}' | tail -n 1)
+  # snapshot_id=$(awk '{$1=$1}; NF {print $1}' < <(execute_sql_t "BACKUP;") | tail -n 1)
+  [ -n "${snapshot_id}" ]
+  echo "${snapshot_id}"
 }
 
 function delete_snapshot() {
   local snapshot_id
   snapshot_id=$1
-  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta delete-meta-snapshots --snapshot-ids "${snapshot_id}"
+  execute_sql "DELETE META SNAPSHOT ${snapshot_id};" 1>/dev/null
 }
 
 function restore() {
@@ -197,9 +199,13 @@ function execute_sql_and_expect() {
   [ -n "${result}" ]
 }
 
-function get_total_sst_count() {
+function get_all_sst_paths() {
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
-  find "hummock-minio/hummock001" -name "*.data" |wc -l
+  find "hummock-minio/hummock001" -name "*.data" | sort
+}
+
+function get_total_sst_count() {
+  get_all_sst_paths | wc -l
 }
 
 function get_table_committed_epoch_in_meta_snapshot() {

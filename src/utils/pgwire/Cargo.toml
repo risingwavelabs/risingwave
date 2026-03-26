@@ -15,7 +15,7 @@ bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
 jsonwebtoken = { workspace = true }
-ldap3 = { version = "0.11.3", default-features = false, features = ["tls-rustls"] }
+ldap3 = { version = "0.12.1", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
 openssl = "0.10.72"
 panic-message = "0.3"
 parking_lot = { workspace = true }
@@ -24,9 +24,9 @@ postgres-types = { version = "0.2.6" }
 reqwest = "0.12.2"
 risingwave_common = { workspace = true }
 risingwave_sqlparser = { workspace = true }
-rustls = "0.21"
-rustls-native-certs = "0.6.3"
-rustls-pemfile = "1.0"
+rustls = "0.23"
+rustls-native-certs = "0.8"
+rustls-pki-types = { version = "1", features = ["std"] }
 serde = { workspace = true }
 serde_json = "1"
 socket2 = "0.6"

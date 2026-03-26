@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::id::WorkerId;
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::common::WorkerType;
@@ -24,7 +25,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwWorkerNode {
     #[primary_key]
-    id: i32,
+    id: WorkerId,
     host: Option<String>,
     port: Option<String>,
     r#type: String,
@@ -32,7 +33,6 @@ struct RwWorkerNode {
     parallelism: Option<i32>,
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
-    is_unschedulable: Option<bool>,
     internal_rpc_host_addr: Option<String>,
     rw_version: Option<String>,
     system_total_memory_bytes: Option<i64>,
@@ -56,7 +56,7 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
             let is_compute = worker.get_type().unwrap() == WorkerType::ComputeNode;
             let is_compactor = worker.get_type().unwrap() == WorkerType::Compactor;
             RwWorkerNode {
-                id: worker.id.as_i32_id(),
+                id: worker.id,
                 host: host.map(|h| h.host.clone()),
                 port: host.map(|h| h.port.to_string()),
                 r#type: worker.get_type().unwrap().as_str_name().into(),
@@ -69,11 +69,6 @@ async fn read_rw_worker_nodes_info(reader: &SysCatalogReaderImpl) -> Result<Vec<
                 },
                 is_serving: if is_compute {
                     property.map(|p| p.is_serving)
-                } else {
-                    None
-                },
-                is_unschedulable: if is_compute {
-                    property.map(|p| p.is_unschedulable)
                 } else {
                     None
                 },

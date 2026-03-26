@@ -85,18 +85,6 @@ select count(*) from rw_catalog.rw_ddl_progress;
 ----
 1
 
-onlyif snapshot-backfill
-statement ok
-alter materialized view m1 set backfill_rate_limit=10000;
-
-onlyif snapshot-backfill
-statement ok
-recover;
-
-onlyif snapshot-backfill
-statement ok
-wait;
-
 statement ok
 drop materialized view m1;
 
@@ -137,18 +125,6 @@ statement ok
 create materialized view if not exists m1 as select * from t;
 
 sleep 1s
-
-onlyif snapshot-backfill
-statement ok
-alter materialized view m1 set backfill_rate_limit=10000;
-
-onlyif snapshot-backfill
-statement ok
-recover;
-
-onlyif snapshot-backfill
-statement ok
-wait;
 
 statement ok
 drop materialized view m1;

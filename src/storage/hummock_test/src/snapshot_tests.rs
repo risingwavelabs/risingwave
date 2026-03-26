@@ -76,40 +76,6 @@ macro_rules! assert_count_range_scan {
     }};
 }
 
-#[allow(unused_macros)]
-macro_rules! assert_count_backward_range_scan {
-    ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
-        use std::ops::RangeBounds;
-        let range = $range;
-        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (
-            range.start_bound().map(|x: &Bytes| x.to_vec()),
-            range.end_bound().map(|x: &Bytes| x.to_vec()),
-        );
-        let it = $storage
-            .backward_iter(
-                bounds,
-                ReadOptions {
-                    ignore_range_tombstone: false,
-                    epoch: $epoch,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                },
-            )
-            .await
-            .unwrap();
-        futures::pin_mut!(it);
-        let mut count = 0;
-        loop {
-            match it.try_next().await.unwrap() {
-                Some(_) => count += 1,
-                None => break,
-            }
-        }
-        assert_eq!(count, $expect_count);
-    }};
-}
-
 async fn test_snapshot_inner(
     hummock_storage: HummockStorage,
     mock_hummock_meta_client: Arc<MockHummockMetaClient>,

@@ -16,7 +16,10 @@
     <name>risingwave-sink-iceberg</name>
 
     <properties>
-        <iceberg.version>1.9.2</iceberg.version>
+        <iceberg.version>1.10.1</iceberg.version>
+        <!-- Keep in sync with the versions bundled in org.apache.iceberg:iceberg-gcp-bundle -->
+        <google.cloud.storage.version>2.55.0</google.cloud.storage.version>
+        <google.cloud.kms.version>2.75.0</google.cloud.kms.version>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <maven.javadoc.skip>true</maven.javadoc.skip>
@@ -95,6 +98,16 @@
             <version>${iceberg.version}</version>
         </dependency>
         <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-storage</artifactId>
+            <version>${google.cloud.storage.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-kms</artifactId>
+            <version>${google.cloud.kms.version}</version>
+        </dependency>
+        <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
         </dependency>
@@ -105,6 +118,10 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>glue</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>kms</artifactId>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
@@ -136,7 +153,7 @@
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-snowflake</artifactId>
-            <version>1.9.2</version>
+            <version>${iceberg.version}</version>
         </dependency>
     </dependencies>
 </project>

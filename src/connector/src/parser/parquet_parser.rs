@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use prometheus::core::GenericCounter;
-use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
+use risingwave_common::array::arrow::arrow_array_iceberg::{ArrayRef, RecordBatch};
 use risingwave_common::array::arrow::{IcebergArrowConvert, is_parquet_schema_match_source_schema};
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, StreamChunk};
 use risingwave_common::metrics::LabelGuardedMetric;
@@ -32,6 +32,7 @@ pub struct ParquetParser {
     rw_columns: Vec<SourceColumnDesc>,
     file_name: String,
     offset: usize,
+    case_insensitive: bool,
 }
 
 impl ParquetParser {
@@ -39,11 +40,13 @@ impl ParquetParser {
         rw_columns: Vec<SourceColumnDesc>,
         file_name: String,
         offset: usize,
+        case_insensitive: bool,
     ) -> ConnectorResult<Self> {
         Ok(Self {
             rw_columns,
             file_name,
             offset,
+            case_insensitive,
         })
     }
 
@@ -118,7 +121,8 @@ impl ParquetParser {
                     let rw_data_type: &risingwave_common::types::DataType =
                         &source_column.data_type;
                     let rw_column_name = &source_column.name;
-                    if let Some(parquet_column) = record_batch.column_by_name(rw_column_name)
+                    if let Some(parquet_column) =
+                        self.find_parquet_column(&record_batch, rw_column_name)
                         && is_parquet_schema_match_source_schema(
                             parquet_column.data_type(),
                             rw_data_type,
@@ -208,5 +212,29 @@ impl ParquetParser {
 
         let data_chunk = DataChunk::new(chunk_columns.clone(), record_batch.num_rows());
         Ok(data_chunk.into())
+    }
+
+    fn find_parquet_column<'a>(
+        &self,
+        record_batch: &'a RecordBatch,
+        column_name: &str,
+    ) -> Option<&'a ArrayRef> {
+        if let Some(column) = record_batch.column_by_name(column_name) {
+            return Some(column);
+        }
+        if !self.case_insensitive {
+            return None;
+        }
+        let schema = record_batch.schema();
+        let mut matched_index: Option<usize> = None;
+        for (index, field) in schema.fields().iter().enumerate() {
+            if field.name().eq_ignore_ascii_case(column_name) {
+                if matched_index.is_some() {
+                    return None;
+                }
+                matched_index = Some(index);
+            }
+        }
+        matched_index.map(|index| record_batch.column(index))
     }
 }

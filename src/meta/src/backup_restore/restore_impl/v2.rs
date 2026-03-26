@@ -163,6 +163,7 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.pending_sink_state.clone(), db).await?;
         insert_models(metadata.refresh_jobs.clone(), db).await?;
         insert_models(metadata.cdc_table_snapshot_splits.clone(), db).await?;
+        insert_models(metadata.hummock_table_change_logs.clone(), db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
         Ok(())
@@ -175,7 +176,6 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         new_backup_url: &str,
         new_backup_dir: &str,
     ) -> BackupResult<()> {
-        use sea_orm::ActiveModelTrait;
         let kvs = [
             ("state_store", new_storage_url),
             ("data_directory", new_storage_dir),
@@ -194,7 +194,10 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
             };
             let mut kv: risingwave_meta_model::system_parameter::ActiveModel = model.into();
             kv.value = sea_orm::ActiveValue::Set(v.to_owned());
-            kv.update(&self.meta_store.conn).await.map_err(map_db_err)?;
+            risingwave_meta_model::system_parameter::Entity::update(kv)
+                .exec(&self.meta_store.conn)
+                .await
+                .map_err(map_db_err)?;
         }
         Ok(())
     }

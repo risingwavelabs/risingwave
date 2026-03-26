@@ -34,8 +34,9 @@ python3 -m pip install --break-system-packages psycopg2-binary
 
 host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
 
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn,risingwave_storage::hummock::compactor=error,risingwave_hummock_sdk::compaction_group::hummock_version_ext=error,risingwave_storage::hummock::event_handler::hummock_event_handler=error"
+
 echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, streaming"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-3cn-3fe-opendal-fs-backend
 risedev slt "${host_args[@]}" -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-opendal-fs-backend-${profile}" --label "parallel"
 
@@ -45,7 +46,6 @@ sleep 1
 rm -rf /tmp/rw_ci
 
 echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, batch"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-3cn-3fe-opendal-fs-backend
 risedev slt "${host_args[@]}" -d dev  './e2e_test/ddl/**/*.slt' --junit "parallel-opendal-fs-backend-ddl-${profile}" --label "parallel"
 risedev slt "${host_args[@]}" -d dev  './e2e_test/visibility_mode/*.slt' -j 16 --junit "parallel-opendal-fs-backend-batch-${profile}" --label "parallel"

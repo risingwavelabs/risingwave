@@ -42,6 +42,12 @@ pub trait SinkWriter: Send + 'static {
     /// writer should commit the current epoch.
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<Self::CommitMetadata>;
 
+    /// Return true when the writer wants to commit on the next checkpoint barrier earlier than
+    /// the configured checkpoint interval.
+    fn should_commit_on_checkpoint(&self) -> bool {
+        false
+    }
+
     /// Clean up
     async fn abort(&mut self) -> Result<()> {
         Ok(())
@@ -186,7 +192,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                         sink_writer.barrier(true).await?;
                         metrics
                             .sink_commit_duration
-                            .observe(start_time.elapsed().as_millis() as f64);
+                            .observe(start_time.elapsed().as_secs_f64());
                         log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                     } else {
                         assert!(new_vnode_bitmap.is_none());

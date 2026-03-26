@@ -329,17 +329,27 @@ fn gen_batch_query_plan(
 
     #[cfg(feature = "datafusion")]
     {
-        use crate::optimizer::DatafusionExecuteCheckerExt;
+        if session.config().enable_datafusion_engine() {
+            use thiserror_ext::AsReport;
 
-        if session.config().enable_datafusion_engine()
-            && optimized_logical.plan.able_to_run_by_datafusion()
-        {
-            let plan = optimized_logical.gen_datafusion_logical_plan()?;
-            return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
-                plan,
-                schema,
-                stmt_type,
-            }));
+            use crate::datafusion::{GenDataFusionPlanError, try_gen_datafusion_plan};
+
+            match try_gen_datafusion_plan(&optimized_logical) {
+                Ok(plan) => {
+                    return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
+                        plan,
+                        schema,
+                        stmt_type,
+                    }));
+                }
+                Err(GenDataFusionPlanError::MissingIcebergScan) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to generate DataFusion plan, fallback to RisingWave plan: {}",
+                        err.as_report()
+                    );
+                }
+            }
         }
     }
 

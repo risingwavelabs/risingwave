@@ -36,7 +36,7 @@ tar	CREATE TABLE tar (v INT)
 query TT
 SELECT name, definition from rw_sinks;
 ----
-s1 CREATE SINK s1 INTO tar AS SELECT * FROM src AS source WITH (type = 'append-only')
+s1 CREATE SINK s1 INTO tar AS SELECT * FROM src AS "source" WITH (type = 'append-only')
 
 statement ok
 drop sink s1;

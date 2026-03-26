@@ -25,7 +25,7 @@ use risingwave_common::id::WorkerId;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{
-    CompactionType, IcebergConfig, should_enable_iceberg_cow,
+    CompactionType, IcebergConfig, commit_branch, should_enable_iceberg_cow,
 };
 use risingwave_connector::sink::{SinkError, SinkParam};
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
@@ -74,12 +74,24 @@ enum CompactionTrackState {
 struct CompactionTrack {
     task_type: TaskType,
     trigger_interval_sec: u64,
-    /// Minimum snapshot count threshold to trigger compaction
+    /// Minimum snapshot count threshold to trigger compaction (early trigger).
+    /// Compaction triggers when `pending_snapshot_count` >= this threshold, even before interval expires.
     trigger_snapshot_count: usize,
     state: CompactionTrackState,
 }
 
 impl CompactionTrack {
+    /// Determines if compaction should be triggered.
+    ///
+    /// Trigger conditions (OR logic):
+    /// 1. `snapshot_ready` - Snapshot count >= threshold (early trigger)
+    /// 2. `time_ready && has_snapshots` - Interval expired and there's at least 1 snapshot
+    ///
+    /// This ensures:
+    /// - `trigger_snapshot_count` is an early trigger threshold
+    /// - `compaction_interval_sec` is the maximum wait time (as long as there are new snapshots)
+    /// - Force compaction works by setting `next_compaction_time` to now
+    /// - No empty compaction runs (requires at least 1 snapshot for time-based trigger)
     fn should_trigger(&self, now: Instant, snapshot_count: usize) -> bool {
         // Only Idle state can trigger
         let next_compaction_time = match &self.state {
@@ -89,11 +101,14 @@ impl CompactionTrack {
             CompactionTrackState::Processing => return false,
         };
 
-        // Check both time and snapshot count conditions
+        // Check conditions
         let time_ready = now >= next_compaction_time;
         let snapshot_ready = snapshot_count >= self.trigger_snapshot_count;
+        let has_snapshots = snapshot_count > 0;
 
-        time_ready && snapshot_ready
+        // OR logic: snapshot threshold triggers early,
+        // time trigger requires at least 1 snapshot to avoid empty compaction
+        snapshot_ready || (time_ready && has_snapshots)
     }
 
     /// Create snapshot and transition to Processing state
@@ -247,6 +262,18 @@ struct IcebergCompactionManagerInner {
     pub sink_schedules: HashMap<SinkId, CompactionTrack>,
 }
 
+#[derive(Debug, Clone)]
+pub struct IcebergCompactionScheduleStatus {
+    pub sink_id: SinkId,
+    pub task_type: String,
+    pub trigger_interval_sec: u64,
+    pub trigger_snapshot_count: usize,
+    pub schedule_state: String,
+    pub next_compaction_after_sec: Option<u64>,
+    pub pending_snapshot_count: Option<usize>,
+    pub is_triggerable: bool,
+}
+
 pub struct IcebergCompactionManager {
     pub env: MetaSrvEnv,
     inner: Arc<RwLock<IcebergCompactionManagerInner>>,
@@ -373,7 +400,7 @@ impl IcebergCompactionManager {
         // Update track
         let mut guard = self.inner.write();
         if let Some(track) = guard.sink_schedules.get_mut(&sink_id) {
-            // Force compaction: set to trigger immediately if in Idle state
+            // Force compaction: trigger immediately by setting next_compaction_time to now
             if force_compaction {
                 if let CompactionTrackState::Idle {
                     next_compaction_time,
@@ -447,7 +474,7 @@ impl IcebergCompactionManager {
         let snapshot_count_futures = sink_ids
             .iter()
             .map(|sink_id| async move {
-                let count = self.get_snapshot_count(*sink_id).await?;
+                let count = self.get_pending_snapshot_count(*sink_id).await?;
                 Some((*sink_id, count))
             })
             .collect::<Vec<_>>();
@@ -505,6 +532,54 @@ impl IcebergCompactionManager {
     pub fn clear_iceberg_commits_by_sink_id(&self, sink_id: SinkId) {
         let mut guard = self.inner.write();
         guard.sink_schedules.remove(&sink_id);
+    }
+
+    pub async fn list_compaction_statuses(&self) -> Vec<IcebergCompactionScheduleStatus> {
+        let now = Instant::now();
+        let schedules = {
+            let guard = self.inner.read();
+            guard
+                .sink_schedules
+                .iter()
+                .map(|(&sink_id, track)| (sink_id, track.clone()))
+                .collect_vec()
+        };
+
+        let mut statuses =
+            futures::future::join_all(schedules.into_iter().map(|(sink_id, track)| async move {
+                let pending_snapshot_count = self.get_pending_snapshot_count(sink_id).await;
+                let next_compaction_after_sec = match &track.state {
+                    CompactionTrackState::Idle {
+                        next_compaction_time,
+                    } => Some(
+                        next_compaction_time
+                            .saturating_duration_since(now)
+                            .as_secs(),
+                    ),
+                    CompactionTrackState::Processing => None,
+                };
+                let is_triggerable = pending_snapshot_count
+                    .map(|snapshot_count| track.should_trigger(now, snapshot_count))
+                    .unwrap_or(false);
+
+                IcebergCompactionScheduleStatus {
+                    sink_id,
+                    task_type: track.task_type.as_str_name().to_ascii_lowercase(),
+                    trigger_interval_sec: track.trigger_interval_sec,
+                    trigger_snapshot_count: track.trigger_snapshot_count,
+                    schedule_state: match track.state {
+                        CompactionTrackState::Idle { .. } => "idle".to_owned(),
+                        CompactionTrackState::Processing => "processing".to_owned(),
+                    },
+                    next_compaction_after_sec,
+                    pending_snapshot_count,
+                    is_triggerable,
+                }
+            }))
+            .await;
+
+        statuses.sort_by_key(|status| status.sink_id);
+        statuses
     }
 
     pub async fn get_sink_param(&self, sink_id: SinkId) -> MetaResult<SinkParam> {
@@ -748,36 +823,71 @@ impl IcebergCompactionManager {
         Ok(())
     }
 
-    /// Get the snapshot count for a sink's Iceberg table
-    /// Returns None if the table cannot be loaded
-    async fn get_snapshot_count(&self, sink_id: SinkId) -> Option<usize> {
+    /// Get the number of snapshots pending compaction for a sink's Iceberg table.
+    /// Returns None if the table cannot be loaded.
+    ///
+    /// Counts snapshots since last compaction:
+    /// - For COW mode: Counts snapshots on `ingestion` branch with timestamp > current snapshot on main
+    /// - For MORE mode: Counts snapshots since last `Replace` on main branch
+    async fn get_pending_snapshot_count(&self, sink_id: SinkId) -> Option<usize> {
         let iceberg_config = self.load_iceberg_config(sink_id).await.ok()?;
+        let is_cow_mode =
+            should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
         let catalog = iceberg_config.create_catalog().await.ok()?;
         let table_name = iceberg_config.full_table_name().ok()?;
         let table = catalog.load_table(&table_name).await.ok()?;
-
         let metadata = table.metadata();
-        let mut snapshots = metadata.snapshots().collect_vec();
 
-        if snapshots.is_empty() {
-            return Some(0);
+        if is_cow_mode {
+            // COW mode: count snapshots on ingestion branch since last compaction.
+            // Compaction writes Overwrite to main branch, so the current snapshot on main
+            // is the last compaction point.
+
+            // Get last compaction timestamp from main branch's current snapshot
+            let last_compaction_timestamp = metadata
+                .current_snapshot()
+                .map(|s| s.timestamp_ms())
+                .unwrap_or(0); // 0 means no compaction has happened yet
+
+            // Count snapshots on ingestion branch with timestamp > last compaction
+            let branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
+            let current_snapshot = metadata.snapshot_for_ref(&branch)?;
+
+            let mut count = 0;
+            let mut snapshot_id = Some(current_snapshot.snapshot_id());
+
+            while let Some(id) = snapshot_id {
+                let snapshot = metadata.snapshot_by_id(id)?;
+                if snapshot.timestamp_ms() > last_compaction_timestamp {
+                    count += 1;
+                    snapshot_id = snapshot.parent_snapshot_id();
+                } else {
+                    // Reached snapshots before or at last compaction, stop counting
+                    break;
+                }
+            }
+
+            Some(count)
+        } else {
+            // MORE mode: simple rposition on all snapshots (main branch only)
+            let mut snapshots = metadata.snapshots().collect_vec();
+            if snapshots.is_empty() {
+                return Some(0);
+            }
+
+            snapshots.sort_by_key(|s| s.timestamp_ms());
+
+            let last_replace_index = snapshots
+                .iter()
+                .rposition(|s| matches!(s.summary().operation, Operation::Replace));
+
+            let count = match last_replace_index {
+                Some(index) => snapshots.len() - index - 1,
+                None => snapshots.len(),
+            };
+
+            Some(count)
         }
-
-        // Sort snapshots by timestamp
-        snapshots.sort_by_key(|s| s.timestamp_ms());
-
-        // Find the last Replace operation snapshot
-        let last_replace_index = snapshots
-            .iter()
-            .rposition(|snapshot| matches!(snapshot.summary().operation, Operation::Replace));
-
-        // Calculate count from last Replace to the latest snapshot
-        let snapshot_count = match last_replace_index {
-            Some(index) => snapshots.len() - index - 1,
-            None => snapshots.len(), // No Replace found, count all snapshots
-        };
-
-        Some(snapshot_count)
     }
 
     pub async fn check_and_expire_snapshots(&self, sink_id: SinkId) -> MetaResult<()> {
@@ -790,7 +900,7 @@ impl IcebergCompactionManager {
         }
 
         let catalog = iceberg_config.create_catalog().await?;
-        let table = catalog
+        let mut table = catalog
             .load_table(&iceberg_config.full_table_name()?)
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
@@ -838,12 +948,21 @@ impl IcebergCompactionManager {
             expired_snapshots = expired_snapshots.retain_last(retain_last);
         }
 
+        let before_metadata = table.metadata_ref();
         let tx = expired_snapshots
             .apply(txn)
             .map_err(|e| SinkError::Iceberg(e.into()))?;
-        tx.commit(catalog.as_ref())
+        table = tx
+            .commit(catalog.as_ref())
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
+
+        if iceberg_config.snapshot_expiration_clear_expired_files {
+            table
+                .cleanup_expired_files(&before_metadata)
+                .await
+                .map_err(|e| SinkError::Iceberg(e.into()))?;
+        }
 
         tracing::info!(
             catalog_name = iceberg_config.catalog_name(),

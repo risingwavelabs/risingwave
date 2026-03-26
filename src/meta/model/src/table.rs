@@ -289,6 +289,13 @@ impl Related<super::source::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+impl Model {
+    pub fn job_id(&self) -> JobId {
+        self.belongs_to_job_id
+            .unwrap_or_else(|| self.table_id.as_job_id())
+    }
+}
+
 impl From<PbTable> for ActiveModel {
     fn from(pb_table: PbTable) -> Self {
         let table_type = pb_table.table_type();

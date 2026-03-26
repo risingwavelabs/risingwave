@@ -65,6 +65,7 @@ use risingwave_common::util::resource_util::memory::system_memory_available_byte
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 pub use stream_fragmenter::build_graph;
 mod utils;
+pub use utils::data_type::DataTypeToAst;
 pub use utils::{WithOptions, WithOptionsSecResolved, explain_stream_graph};
 pub(crate) mod error;
 mod meta_client;

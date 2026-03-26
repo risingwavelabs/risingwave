@@ -16,15 +16,14 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
-use std::sync::atomic::AtomicU32;
 
 use anyhow::{Context, anyhow};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    CDC_SOURCE_COLUMN_NUM, ColumnCatalog, Field, FragmentTypeFlag, FragmentTypeMask, TableId,
-    generate_internal_table_name_with_type,
+    CDC_SOURCE_COLUMN_NUM, ColumnCatalog, ColumnId, Field, FragmentTypeFlag, FragmentTypeMask,
+    TableId, generate_internal_table_name_with_type,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::id::JobId;
@@ -33,10 +32,11 @@ use risingwave_common::util::stream_graph_visitor::{
     self, visit_stream_node_cont, visit_stream_node_cont_mut,
 };
 use risingwave_connector::sink::catalog::SinkType;
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::id::StreamNodeLocalOperatorId;
+use risingwave_pb::expr::{ExprNode as PbExprNode, expr_node};
+use risingwave_pb::id::{RelationId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
@@ -49,13 +49,11 @@ use risingwave_pb::stream_plan::{
     StreamScanType,
 };
 
-use crate::barrier::{SharedFragmentInfo, SnapshotBackfillInfo};
+use crate::barrier::SnapshotBackfillInfo;
 use crate::controller::id::IdGeneratorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
-use crate::model::{ActorId, Fragment, FragmentId, StreamActor};
-use crate::stream::stream_graph::id::{
-    GlobalActorIdGen, GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen,
-};
+use crate::model::{Fragment, FragmentDownstreamRelation, FragmentId};
+use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
 use crate::{MetaError, MetaResult};
 
@@ -369,32 +367,14 @@ impl StreamFragmentEdge {
     }
 }
 
-fn clone_fragment(
-    fragment: &Fragment,
-    id_generator_manager: &IdGeneratorManager,
-    actor_id_counter: &AtomicU32,
-) -> Fragment {
+fn clone_fragment(fragment: &Fragment, id_generator_manager: &IdGeneratorManager) -> Fragment {
     let fragment_id = GlobalFragmentIdGen::new(id_generator_manager, 1)
         .to_global_id(0)
         .as_global_id();
-    let actor_id_gen = GlobalActorIdGen::new(actor_id_counter, fragment.actors.len() as _);
     Fragment {
         fragment_id,
         fragment_type_mask: fragment.fragment_type_mask,
         distribution_type: fragment.distribution_type,
-        actors: fragment
-            .actors
-            .iter()
-            .enumerate()
-            .map(|(i, actor)| StreamActor {
-                actor_id: actor_id_gen.to_global_id(i as _).as_global_id(),
-                fragment_id,
-                vnode_bitmap: actor.vnode_bitmap.clone(),
-                mview_definition: actor.mview_definition.clone(),
-                expr_context: actor.expr_context.clone(),
-                config_override: actor.config_override.clone(),
-            })
-            .collect(),
         state_table_ids: fragment.state_table_ids.clone(),
         maybe_vnode_count: fragment.maybe_vnode_count,
         nodes: fragment.nodes.clone(),
@@ -416,8 +396,28 @@ pub fn check_sink_fragments_support_refresh_schema(
     let PbNodeBody::Sink(_) = sink_node.node_body.as_ref().unwrap() else {
         return Err(anyhow!("expect PbNodeBody::Sink but got: {:?}", sink_node.node_body).into());
     };
-    let [stream_scan_node] = sink_node.input.as_slice() else {
+    let [stream_input_node] = sink_node.input.as_slice() else {
         panic!("Sink has more than 1 input: {:?}", sink_node.input);
+    };
+    let stream_scan_node = match stream_input_node.node_body.as_ref().unwrap() {
+        PbNodeBody::StreamScan(_) => stream_input_node,
+        PbNodeBody::Project(_) => {
+            let [stream_scan_node] = stream_input_node.input.as_slice() else {
+                return Err(anyhow!(
+                    "Project node must have exactly 1 input for auto schema change, but got {:?}",
+                    stream_input_node.input.len()
+                )
+                .into());
+            };
+            stream_scan_node
+        }
+        _ => {
+            return Err(anyhow!(
+                "expect PbNodeBody::StreamScan or PbNodeBody::Project but got: {:?}",
+                stream_input_node.node_body
+            )
+            .into());
+        }
     };
     let PbNodeBody::StreamScan(scan) = stream_scan_node.node_body.as_ref().unwrap() else {
         return Err(anyhow!(
@@ -450,50 +450,75 @@ pub fn check_sink_fragments_support_refresh_schema(
     Ok(())
 }
 
-pub fn rewrite_refresh_schema_sink_fragment(
-    original_sink_fragment: &Fragment,
+/// Output mapping info after rewriting a `StreamScan` node.
+struct ScanRewriteResult {
+    old_output_index_to_new_output_index: HashMap<u32, u32>,
+    new_output_index_by_column_id: HashMap<ColumnId, u32>,
+    output_fields: Vec<risingwave_pb::plan_common::Field>,
+}
+
+/// Append new columns to a sink/log-store column list with updated names/ids.
+fn extend_sink_columns(
+    sink_columns: &mut Vec<PbColumnCatalog>,
+    new_columns: &[ColumnCatalog],
+    get_column_name: impl Fn(&String) -> String,
+) {
+    let next_column_id = sink_columns
+        .iter()
+        .map(|col| col.column_desc.as_ref().unwrap().column_id + 1)
+        .max()
+        .unwrap_or(1);
+    sink_columns.extend(new_columns.iter().enumerate().map(|(i, col)| {
+        let mut col = col.to_protobuf();
+        let column_desc = col.column_desc.as_mut().unwrap();
+        column_desc.column_id = next_column_id + (i as i32);
+        column_desc.name = get_column_name(&column_desc.name);
+        col
+    }));
+}
+
+/// Build sink column list after removing and appending columns.
+fn build_new_sink_columns(
     sink: &PbSink,
+    removed_column_ids: &HashSet<ColumnId>,
+    newly_added_columns: &[ColumnCatalog],
+) -> Vec<PbColumnCatalog> {
+    let mut columns: Vec<PbColumnCatalog> = sink
+        .columns
+        .iter()
+        .filter(|col| {
+            let column_id = ColumnId::new(col.column_desc.as_ref().unwrap().column_id as _);
+            !removed_column_ids.contains(&column_id)
+        })
+        .cloned()
+        .collect();
+    extend_sink_columns(&mut columns, newly_added_columns, |name| name.clone());
+    columns
+}
+
+/// Rewrite log store table columns for schema change.
+fn rewrite_log_store_table(
+    log_store_table: &mut PbTable,
+    removed_log_store_column_names: &HashSet<String>,
+    newly_added_columns: &[ColumnCatalog],
+    upstream_table_name: &str,
+) {
+    log_store_table.columns.retain(|col| {
+        !removed_log_store_column_names.contains(&col.column_desc.as_ref().unwrap().name)
+    });
+    extend_sink_columns(&mut log_store_table.columns, newly_added_columns, |name| {
+        format!("{}_{}", upstream_table_name, name)
+    });
+}
+
+/// Rewrite `StreamScan` + Merge to match the new upstream schema.
+fn rewrite_stream_scan_and_merge(
+    stream_scan_node: &mut StreamNode,
+    removed_column_ids: &HashSet<ColumnId>,
     newly_added_columns: &[ColumnCatalog],
     upstream_table: &PbTable,
     upstream_table_fragment_id: FragmentId,
-    id_generator_manager: &IdGeneratorManager,
-    actor_id_counter: &AtomicU32,
-) -> MetaResult<(Fragment, Vec<PbColumnCatalog>, Option<PbTable>)> {
-    let mut new_sink_columns = sink.columns.clone();
-    fn extend_sink_columns(
-        sink_columns: &mut Vec<PbColumnCatalog>,
-        new_columns: &[ColumnCatalog],
-        get_column_name: impl Fn(&String) -> String,
-    ) {
-        let next_column_id = sink_columns
-            .iter()
-            .map(|col| col.column_desc.as_ref().unwrap().column_id + 1)
-            .max()
-            .unwrap_or(1);
-        sink_columns.extend(new_columns.iter().enumerate().map(|(i, col)| {
-            let mut col = col.to_protobuf();
-            let column_desc = col.column_desc.as_mut().unwrap();
-            column_desc.column_id = next_column_id + (i as i32);
-            column_desc.name = get_column_name(&column_desc.name);
-            col
-        }));
-    }
-    extend_sink_columns(&mut new_sink_columns, newly_added_columns, |name| {
-        name.clone()
-    });
-
-    let mut new_sink_fragment = clone_fragment(
-        original_sink_fragment,
-        id_generator_manager,
-        actor_id_counter,
-    );
-    let sink_node = &mut new_sink_fragment.nodes;
-    let PbNodeBody::Sink(sink_node_body) = sink_node.node_body.as_mut().unwrap() else {
-        return Err(anyhow!("expect PbNodeBody::Sink but got: {:?}", sink_node.node_body).into());
-    };
-    let [stream_scan_node] = sink_node.input.as_mut_slice() else {
-        panic!("Sink has more than 1 input: {:?}", sink_node.input);
-    };
+) -> MetaResult<ScanRewriteResult> {
     let PbNodeBody::StreamScan(scan) = stream_scan_node.node_body.as_mut().unwrap() else {
         return Err(anyhow!(
             "expect PbNodeBody::StreamScan but got: {:?}",
@@ -514,6 +539,236 @@ pub fn rewrite_refresh_schema_sink_fragment(
         )
         .into());
     };
+
+    let stream_scan_type = PbStreamScanType::try_from(scan.stream_scan_type).unwrap();
+    if stream_scan_type != PbStreamScanType::ArrangementBackfill {
+        return Err(anyhow!(
+            "unsupported stream_scan_type for auto refresh schema: {:?}",
+            stream_scan_type
+        )
+        .into());
+    }
+
+    let upstream_columns_by_id: HashMap<i32, PbColumnDesc> = upstream_table
+        .columns
+        .iter()
+        .map(|col| {
+            let desc = col.column_desc.as_ref().unwrap().clone();
+            (desc.column_id, desc)
+        })
+        .collect();
+
+    let old_upstream_column_ids = scan.upstream_column_ids.clone();
+    let old_output_indices = scan.output_indices.clone();
+    let mut old_upstream_index_to_new_upstream_index = HashMap::new();
+    let mut new_upstream_column_ids = Vec::new();
+    for (old_idx, &column_id) in old_upstream_column_ids.iter().enumerate() {
+        if !removed_column_ids.contains(&ColumnId::new(column_id as _)) {
+            let new_idx = new_upstream_column_ids.len() as u32;
+            old_upstream_index_to_new_upstream_index.insert(old_idx as u32, new_idx);
+            new_upstream_column_ids.push(column_id);
+        }
+    }
+    let mut new_output_indices = Vec::new();
+    for old_output_index in &old_output_indices {
+        if let Some(new_index) = old_upstream_index_to_new_upstream_index.get(old_output_index) {
+            new_output_indices.push(*new_index);
+        }
+    }
+    for col in newly_added_columns {
+        let new_index = new_upstream_column_ids.len() as u32;
+        new_upstream_column_ids.push(col.column_id().get_id());
+        new_output_indices.push(new_index);
+    }
+
+    let new_output_column_ids: Vec<i32> = new_output_indices
+        .iter()
+        .map(|&idx| new_upstream_column_ids[idx as usize])
+        .collect();
+    let mut new_output_index_by_column_id = HashMap::new();
+    for (pos, &column_id) in new_output_column_ids.iter().enumerate() {
+        new_output_index_by_column_id.insert(ColumnId::new(column_id as _), pos as u32);
+    }
+    let mut old_output_index_to_new_output_index = HashMap::new();
+    for (old_pos, old_output_index) in old_output_indices.iter().enumerate() {
+        let column_id = old_upstream_column_ids[*old_output_index as usize];
+        if let Some(new_pos) = new_output_index_by_column_id.get(&ColumnId::new(column_id as _)) {
+            old_output_index_to_new_output_index.insert(old_pos as u32, *new_pos);
+        }
+    }
+
+    scan.arrangement_table = Some(upstream_table.clone());
+    scan.upstream_column_ids = new_upstream_column_ids;
+    scan.output_indices = new_output_indices;
+    let table_desc = scan.table_desc.as_mut().unwrap();
+    table_desc.columns = scan
+        .upstream_column_ids
+        .iter()
+        .map(|column_id| {
+            upstream_columns_by_id
+                .get(column_id)
+                .unwrap_or_else(|| panic!("upstream column id not found: {}", column_id))
+                .clone()
+        })
+        .collect();
+
+    stream_scan_node.fields = new_output_column_ids
+        .iter()
+        .map(|column_id| {
+            let col_desc = upstream_columns_by_id
+                .get(column_id)
+                .unwrap_or_else(|| panic!("upstream column id not found: {}", column_id));
+            Field::new(
+                format!("{}.{}", upstream_table.name, col_desc.name),
+                col_desc.column_type.as_ref().unwrap().into(),
+            )
+            .to_prost()
+        })
+        .collect();
+    // following logic in <StreamTableScan as Explain>::distill
+    stream_scan_node.identity = {
+        let columns = stream_scan_node
+            .fields
+            .iter()
+            .map(|col| &col.name)
+            .join(", ");
+        format!("StreamTableScan {{ table: t, columns: [{columns}] }}")
+    };
+
+    // update merge node
+    merge_node.fields = scan
+        .upstream_column_ids
+        .iter()
+        .map(|&column_id| {
+            let col_desc = upstream_columns_by_id
+                .get(&column_id)
+                .unwrap_or_else(|| panic!("upstream column id not found: {}", column_id));
+            Field::new(
+                col_desc.name.clone(),
+                col_desc.column_type.as_ref().unwrap().into(),
+            )
+            .to_prost()
+        })
+        .collect();
+    merge.upstream_fragment_id = upstream_table_fragment_id;
+
+    Ok(ScanRewriteResult {
+        old_output_index_to_new_output_index,
+        new_output_index_by_column_id,
+        output_fields: stream_scan_node.fields.clone(),
+    })
+}
+
+/// Rewrite Project node input refs and extend with newly added columns.
+fn rewrite_project_node(
+    project_node: &mut StreamNode,
+    scan_rewrite: &ScanRewriteResult,
+    newly_added_columns: &[ColumnCatalog],
+    removed_column_ids: &HashSet<ColumnId>,
+    upstream_table_name: &str,
+) -> MetaResult<()> {
+    let PbNodeBody::Project(project_node_body) = project_node.node_body.as_mut().unwrap() else {
+        return Err(anyhow!(
+            "expect PbNodeBody::Project but got: {:?}",
+            project_node.node_body
+        )
+        .into());
+    };
+    let has_non_input_ref = project_node_body
+        .select_list
+        .iter()
+        .any(|expr| !matches!(expr.rex_node, Some(expr_node::RexNode::InputRef(_))));
+    if has_non_input_ref && !removed_column_ids.is_empty() {
+        return Err(anyhow!(
+            "auto schema change with drop column only supports Project with InputRef"
+        )
+        .into());
+    }
+
+    let mut new_select_list = Vec::with_capacity(project_node_body.select_list.len());
+    let mut new_project_fields = Vec::with_capacity(project_node.fields.len());
+    for (index, expr) in project_node_body.select_list.iter().enumerate() {
+        let mut new_expr = expr.clone();
+        if let Some(expr_node::RexNode::InputRef(old_index)) = new_expr.rex_node {
+            let Some(&new_index) = scan_rewrite
+                .old_output_index_to_new_output_index
+                .get(&old_index)
+            else {
+                continue;
+            };
+            new_expr.rex_node = Some(expr_node::RexNode::InputRef(new_index));
+        } else if !removed_column_ids.is_empty() {
+            return Err(anyhow!(
+                "auto schema change with drop column only supports Project with InputRef"
+            )
+            .into());
+        }
+        new_select_list.push(new_expr);
+        new_project_fields.push(project_node.fields[index].clone());
+    }
+
+    for col in newly_added_columns {
+        let Some(&new_index) = scan_rewrite
+            .new_output_index_by_column_id
+            .get(&col.column_id())
+        else {
+            return Err(anyhow!("new column id not found in scan output").into());
+        };
+        new_select_list.push(PbExprNode {
+            function_type: expr_node::Type::Unspecified as i32,
+            return_type: Some(col.data_type().to_protobuf()),
+            rex_node: Some(expr_node::RexNode::InputRef(new_index)),
+        });
+        new_project_fields.push(
+            Field::new(
+                format!("{}.{}", upstream_table_name, col.column_desc.name),
+                col.data_type().clone(),
+            )
+            .to_prost(),
+        );
+    }
+
+    project_node_body.select_list = new_select_list;
+    project_node.fields = new_project_fields;
+    Ok(())
+}
+
+pub fn rewrite_refresh_schema_sink_fragment(
+    original_sink_fragment: &Fragment,
+    sink: &PbSink,
+    newly_added_columns: &[ColumnCatalog],
+    removed_columns: &[ColumnCatalog],
+    upstream_table: &PbTable,
+    upstream_table_fragment_id: FragmentId,
+    id_generator_manager: &IdGeneratorManager,
+) -> MetaResult<(Fragment, Vec<PbColumnCatalog>, Option<PbTable>)> {
+    let removed_column_ids: HashSet<_> =
+        removed_columns.iter().map(|col| col.column_id()).collect();
+    let removed_log_store_column_names: HashSet<_> = removed_columns
+        .iter()
+        .map(|col| format!("{}_{}", upstream_table.name, col.column_desc.name))
+        .collect();
+    let new_sink_columns = build_new_sink_columns(sink, &removed_column_ids, newly_added_columns);
+
+    let mut new_sink_fragment = clone_fragment(original_sink_fragment, id_generator_manager);
+    let sink_node = &mut new_sink_fragment.nodes;
+    let PbNodeBody::Sink(sink_node_body) = sink_node.node_body.as_mut().unwrap() else {
+        return Err(anyhow!("expect PbNodeBody::Sink but got: {:?}", sink_node.node_body).into());
+    };
+    let [stream_input_node] = sink_node.input.as_mut_slice() else {
+        panic!("Sink has more than 1 input: {:?}", sink_node.input);
+    };
+    let stream_input_body = stream_input_node.node_body.as_ref().unwrap();
+    let stream_input_is_project = matches!(stream_input_body, PbNodeBody::Project(_));
+    let stream_input_is_scan = matches!(stream_input_body, PbNodeBody::StreamScan(_));
+    if !stream_input_is_project && !stream_input_is_scan {
+        return Err(anyhow!(
+            "expect PbNodeBody::StreamScan or PbNodeBody::Project but got: {:?}",
+            stream_input_body
+        )
+        .into());
+    }
+
     // update sink_node
     // following logic in <StreamSink as Explain>::distill
     sink_node.identity = {
@@ -539,92 +794,54 @@ pub fn rewrite_refresh_schema_sink_fragment(
         };
         format!("StreamSink {{ type: {sink_type_str}, columns: [{column_names}]{downstream_pk} }}")
     };
-    sink_node
-        .fields
-        .extend(newly_added_columns.iter().map(|col| {
-            Field::new(
-                format!("{}.{}", upstream_table.name, col.column_desc.name),
-                col.data_type().clone(),
-            )
-            .to_prost()
-        }));
-
     let new_log_store_table = if let Some(log_store_table) = &mut sink_node_body.table {
-        extend_sink_columns(&mut log_store_table.columns, newly_added_columns, |name| {
-            format!("{}_{}", upstream_table.name, name)
-        });
+        rewrite_log_store_table(
+            log_store_table,
+            &removed_log_store_column_names,
+            newly_added_columns,
+            &upstream_table.name,
+        );
         Some(log_store_table.clone())
     } else {
         None
     };
     sink_node_body.sink_desc.as_mut().unwrap().column_catalogs = new_sink_columns.clone();
 
-    // update stream scan node
-    stream_scan_node
-        .fields
-        .extend(newly_added_columns.iter().map(|col| {
-            Field::new(
-                format!("{}.{}", upstream_table.name, col.column_desc.name),
-                col.data_type().clone(),
+    let stream_scan_node = if stream_input_is_project {
+        let [stream_scan_node] = stream_input_node.input.as_mut_slice() else {
+            return Err(anyhow!(
+                "Project node must have exactly 1 input for auto schema change, but got {:?}",
+                stream_input_node.input.len()
             )
-            .to_prost()
-        }));
-    // following logic in <StreamTableScan as Explain>::distill
-    stream_scan_node.identity = {
-        let columns = stream_scan_node
-            .fields
-            .iter()
-            .map(|col| &col.name)
-            .join(", ");
-        format!("StreamTableScan {{ table: t, columns: [{columns}] }}")
+            .into());
+        };
+        stream_scan_node
+    } else {
+        stream_input_node
     };
+    let scan_rewrite = rewrite_stream_scan_and_merge(
+        stream_scan_node,
+        &removed_column_ids,
+        newly_added_columns,
+        upstream_table,
+        upstream_table_fragment_id,
+    )?;
 
-    let stream_scan_type = PbStreamScanType::try_from(scan.stream_scan_type).unwrap();
-    if stream_scan_type != PbStreamScanType::ArrangementBackfill {
-        return Err(anyhow!(
-            "unsupported stream_scan_type for auto refresh schema: {:?}",
-            stream_scan_type
-        )
-        .into());
+    if stream_input_is_project {
+        let [project_node] = sink_node.input.as_mut_slice() else {
+            panic!("Sink has more than 1 input: {:?}", sink_node.input);
+        };
+        rewrite_project_node(
+            project_node,
+            &scan_rewrite,
+            newly_added_columns,
+            &removed_column_ids,
+            &upstream_table.name,
+        )?;
+        sink_node.fields = project_node.fields.clone();
+    } else {
+        sink_node.fields = scan_rewrite.output_fields;
     }
-    scan.arrangement_table = Some(upstream_table.clone());
-    scan.output_indices.extend(
-        (0..newly_added_columns.len()).map(|i| (i + scan.upstream_column_ids.len()) as u32),
-    );
-    scan.upstream_column_ids.extend(
-        newly_added_columns
-            .iter()
-            .map(|col| col.column_id().get_id()),
-    );
-    let table_desc = scan.table_desc.as_mut().unwrap();
-    table_desc
-        .value_indices
-        .extend((0..newly_added_columns.len()).map(|i| (i + table_desc.columns.len()) as u32));
-    table_desc.columns.extend(
-        newly_added_columns
-            .iter()
-            .map(|col| col.column_desc.to_protobuf()),
-    );
-
-    // update merge node
-    merge_node.fields = scan
-        .upstream_column_ids
-        .iter()
-        .map(|&column_id| {
-            let col = upstream_table
-                .columns
-                .iter()
-                .find(|c| c.column_desc.as_ref().unwrap().column_id == column_id)
-                .unwrap();
-            let col_desc = col.column_desc.as_ref().unwrap();
-            Field::new(
-                col_desc.name.clone(),
-                col_desc.column_type.as_ref().unwrap().into(),
-            )
-            .to_prost()
-        })
-        .collect();
-    merge.upstream_fragment_id = upstream_table_fragment_id;
     Ok((new_sink_fragment, new_sink_columns, new_log_store_table))
 }
 
@@ -632,7 +849,37 @@ pub fn rewrite_refresh_schema_sink_fragment(
 /// `G[10] -> [1, 2, 11]`
 /// means for the backfill node in `fragment 10`
 /// should be backfilled before the backfill nodes in `fragment 1, 2 and 11`.
-pub type FragmentBackfillOrder = HashMap<FragmentId, Vec<FragmentId>>;
+#[derive(Clone, Debug, Default)]
+pub struct FragmentBackfillOrder<const EXTENDED: bool> {
+    inner: HashMap<FragmentId, Vec<FragmentId>>,
+}
+
+impl<const EXTENDED: bool> Deref for FragmentBackfillOrder<EXTENDED> {
+    type Target = HashMap<FragmentId, Vec<FragmentId>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl UserDefinedFragmentBackfillOrder {
+    pub fn new(inner: HashMap<FragmentId, Vec<FragmentId>>) -> Self {
+        Self { inner }
+    }
+
+    pub fn merge(orders: impl Iterator<Item = Self>) -> Self {
+        Self {
+            inner: orders.flat_map(|order| order.inner).collect(),
+        }
+    }
+
+    pub fn to_meta_model(&self) -> BackfillOrders {
+        self.inner.clone().into()
+    }
+}
+
+pub type UserDefinedFragmentBackfillOrder = FragmentBackfillOrder<false>;
+pub type ExtendedFragmentBackfillOrder = FragmentBackfillOrder<true>;
 
 /// In-memory representation of a **Fragment** Graph, built from the [`StreamFragmentGraphProto`]
 /// from the frontend.
@@ -1039,22 +1286,20 @@ impl StreamFragmentGraph {
     }
 
     /// Collect the mapping from table / `source_id` -> `fragment_id`
-    pub fn collect_backfill_mapping(&self) -> HashMap<u32, Vec<FragmentId>> {
+    pub fn collect_backfill_mapping(
+        fragments: impl Iterator<Item = (FragmentId, FragmentTypeMask, &PbStreamNode)>,
+    ) -> HashMap<RelationId, Vec<FragmentId>> {
         let mut mapping = HashMap::new();
-        for (fragment_id, fragment) in &self.fragments {
-            let fragment_id = fragment_id.as_global_id();
-            let fragment_mask = fragment.fragment_type_mask;
-            let candidates = [FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan];
-            let has_some_scan = candidates
-                .into_iter()
-                .any(|flag| (fragment_mask & flag as u32) > 0);
+        for (fragment_id, fragment_type_mask, node) in fragments {
+            let has_some_scan = fragment_type_mask
+                .contains_any([FragmentTypeFlag::StreamScan, FragmentTypeFlag::SourceScan]);
             if has_some_scan {
-                visit_stream_node_cont(fragment.node.as_ref().unwrap(), |node| {
+                visit_stream_node_cont(node, |node| {
                     match node.node_body.as_ref() {
                         Some(NodeBody::StreamScan(stream_scan)) => {
                             let table_id = stream_scan.table_id;
                             let fragments: &mut Vec<_> =
-                                mapping.entry(table_id.as_raw_id()).or_default();
+                                mapping.entry(table_id.as_relation_id()).or_default();
                             fragments.push(fragment_id);
                             // each fragment should have only 1 scan node.
                             false
@@ -1062,7 +1307,7 @@ impl StreamFragmentGraph {
                         Some(NodeBody::SourceBackfill(source_backfill)) => {
                             let source_id = source_backfill.upstream_source_id;
                             let fragments: &mut Vec<_> =
-                                mapping.entry(source_id.as_raw_id()).or_default();
+                                mapping.entry(source_id.as_relation_id()).or_default();
                             fragments.push(fragment_id);
                             // each fragment should have only 1 scan node.
                             false
@@ -1078,8 +1323,15 @@ impl StreamFragmentGraph {
     /// Initially the mapping that comes from frontend is between `table_ids`.
     /// We should remap it to fragment level, since we track progress by actor, and we can get
     /// a fragment <-> actor mapping
-    pub fn create_fragment_backfill_ordering(&self) -> FragmentBackfillOrder {
-        let mapping = self.collect_backfill_mapping();
+    pub fn create_fragment_backfill_ordering(&self) -> UserDefinedFragmentBackfillOrder {
+        let mapping =
+            Self::collect_backfill_mapping(self.fragments.iter().map(|(fragment_id, fragment)| {
+                (
+                    fragment_id.as_global_id(),
+                    fragment.fragment_type_mask.into(),
+                    fragment.node.as_ref().expect("should exist node"),
+                )
+            }));
         let mut fragment_ordering: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
 
         // 1. Add backfill dependencies
@@ -1089,13 +1341,28 @@ impl StreamFragmentGraph {
                 let downstream_fragment_ids = downstream_rel_ids
                     .data
                     .iter()
-                    .flat_map(|downstream_rel_id| mapping.get(downstream_rel_id).unwrap().iter())
+                    .flat_map(|&downstream_rel_id| mapping.get(&downstream_rel_id).unwrap().iter())
                     .copied()
                     .collect();
                 fragment_ordering.insert(*fragment_id, downstream_fragment_ids);
             }
         }
 
+        UserDefinedFragmentBackfillOrder {
+            inner: fragment_ordering,
+        }
+    }
+
+    pub fn extend_fragment_backfill_ordering_with_locality_backfill<
+        'a,
+        FI: Iterator<Item = (FragmentId, FragmentTypeMask, &'a PbStreamNode)> + 'a,
+    >(
+        fragment_ordering: UserDefinedFragmentBackfillOrder,
+        fragment_downstreams: &FragmentDownstreamRelation,
+        get_fragments: impl Fn() -> FI,
+    ) -> ExtendedFragmentBackfillOrder {
+        let mut fragment_ordering = fragment_ordering.inner;
+        let mapping = Self::collect_backfill_mapping(get_fragments());
         // If no backfill order is specified, we still need to ensure that all backfill fragments
         // run before LocalityProvider fragments.
         if fragment_ordering.is_empty() {
@@ -1107,7 +1374,10 @@ impl StreamFragmentGraph {
         }
 
         // 2. Add dependencies: all backfill fragments should run before LocalityProvider fragments
-        let locality_provider_dependencies = self.find_locality_provider_dependencies();
+        let locality_provider_dependencies = Self::find_locality_provider_dependencies(
+            get_fragments().map(|(fragment_id, _, node)| (fragment_id, node)),
+            fragment_downstreams,
+        );
 
         let backfill_fragments: HashSet<FragmentId> = mapping.values().flatten().copied().collect();
 
@@ -1151,7 +1421,9 @@ impl StreamFragmentGraph {
             downstream.retain(|id| seen.insert(*id));
         }
 
-        fragment_ordering
+        ExtendedFragmentBackfillOrder {
+            inner: fragment_ordering,
+        }
     }
 
     pub fn find_locality_provider_fragment_state_table_mapping(
@@ -1199,14 +1471,16 @@ impl StreamFragmentGraph {
     /// before `LocalityProviders` in fragments 1, 2, and 11.
     ///
     /// This method assumes each fragment contains at most one `LocalityProvider` node.
-    pub fn find_locality_provider_dependencies(&self) -> HashMap<FragmentId, Vec<FragmentId>> {
+    pub fn find_locality_provider_dependencies<'a>(
+        fragments_nodes: impl Iterator<Item = (FragmentId, &'a PbStreamNode)>,
+        fragment_downstreams: &FragmentDownstreamRelation,
+    ) -> HashMap<FragmentId, Vec<FragmentId>> {
         let mut locality_provider_fragments = HashSet::new();
         let mut dependencies: HashMap<FragmentId, Vec<FragmentId>> = HashMap::new();
 
         // First, identify all fragments that contain LocalityProvider nodes
-        for (fragment_id, fragment) in &self.fragments {
-            let fragment_id = fragment_id.as_global_id();
-            let has_locality_provider = self.fragment_has_locality_provider(fragment);
+        for (fragment_id, node) in fragments_nodes {
+            let has_locality_provider = Self::fragment_has_locality_provider(node);
 
             if has_locality_provider {
                 locality_provider_fragments.insert(fragment_id);
@@ -1218,15 +1492,14 @@ impl StreamFragmentGraph {
         // For each LocalityProvider fragment, find all downstream LocalityProvider fragments
         // The upstream fragment should be processed before the downstream fragments
         for &provider_fragment_id in &locality_provider_fragments {
-            let provider_fragment_global_id = GlobalFragmentId::new(provider_fragment_id);
-
             // Find all fragments downstream from this LocalityProvider fragment
             let mut visited = HashSet::new();
             let mut downstream_locality_providers = Vec::new();
 
-            self.collect_downstream_locality_providers(
-                provider_fragment_global_id,
+            Self::collect_downstream_locality_providers(
+                provider_fragment_id,
                 &locality_provider_fragments,
+                fragment_downstreams,
                 &mut visited,
                 &mut downstream_locality_providers,
             );
@@ -1241,10 +1514,10 @@ impl StreamFragmentGraph {
         dependencies
     }
 
-    fn fragment_has_locality_provider(&self, fragment: &BuildingFragment) -> bool {
+    fn fragment_has_locality_provider(node: &PbStreamNode) -> bool {
         let mut has_locality_provider = false;
 
-        if let Some(node) = fragment.node.as_ref() {
+        {
             visit_stream_node_cont(node, |stream_node| {
                 if let Some(NodeBody::LocalityProvider(_)) = stream_node.node_body.as_ref() {
                     has_locality_provider = true;
@@ -1260,10 +1533,10 @@ impl StreamFragmentGraph {
 
     /// Recursively collect downstream `LocalityProvider` fragments
     fn collect_downstream_locality_providers(
-        &self,
-        current_fragment_id: GlobalFragmentId,
+        current_fragment_id: FragmentId,
         locality_provider_fragments: &HashSet<FragmentId>,
-        visited: &mut HashSet<GlobalFragmentId>,
+        fragment_downstreams: &FragmentDownstreamRelation,
+        visited: &mut HashSet<FragmentId>,
         downstream_providers: &mut Vec<FragmentId>,
     ) {
         if visited.contains(&current_fragment_id) {
@@ -1272,18 +1545,25 @@ impl StreamFragmentGraph {
         visited.insert(current_fragment_id);
 
         // Check all downstream fragments
-        for &downstream_id in self.get_downstreams(current_fragment_id).keys() {
-            let downstream_fragment_id = downstream_id.as_global_id();
-
+        for downstream_fragment_id in fragment_downstreams
+            .get(&current_fragment_id)
+            .into_iter()
+            .flat_map(|downstreams| {
+                downstreams
+                    .iter()
+                    .map(|downstream| downstream.downstream_fragment_id)
+            })
+        {
             // If the downstream fragment is a LocalityProvider, add it to results
             if locality_provider_fragments.contains(&downstream_fragment_id) {
                 downstream_providers.push(downstream_fragment_id);
             }
 
             // Recursively check further downstream
-            self.collect_downstream_locality_providers(
-                downstream_id,
+            Self::collect_downstream_locality_providers(
+                downstream_fragment_id,
                 locality_provider_fragments,
+                fragment_downstreams,
                 visited,
                 downstream_providers,
             );
@@ -1350,7 +1630,7 @@ pub(super) enum EitherFragment {
     Building(BuildingFragment),
 
     /// An existing fragment that is external but connected to the fragments being built.
-    Existing(SharedFragmentInfo),
+    Existing,
 }
 
 /// A wrapper of [`StreamFragmentGraph`] that contains the additional information of pre-existing
@@ -1367,10 +1647,7 @@ pub struct CompleteStreamFragmentGraph {
     building_graph: StreamFragmentGraph,
 
     /// The required information of existing fragments.
-    existing_fragments: HashMap<GlobalFragmentId, SharedFragmentInfo>,
-
-    /// The location of the actors in the existing fragments.
-    existing_actor_location: HashMap<ActorId, WorkerId>,
+    existing_fragments: HashMap<GlobalFragmentId, Fragment>,
 
     /// Extra edges between existing fragments and the building fragments.
     extra_downstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
@@ -1382,14 +1659,12 @@ pub struct CompleteStreamFragmentGraph {
 pub struct FragmentGraphUpstreamContext {
     /// Root fragment is the root of upstream stream graph, which can be a
     /// mview fragment or source fragment for cdc source job
-    pub upstream_root_fragments: HashMap<JobId, (SharedFragmentInfo, PbStreamNode)>,
-    pub upstream_actor_location: HashMap<ActorId, WorkerId>,
+    pub upstream_root_fragments: HashMap<JobId, Fragment>,
 }
 
 pub struct FragmentGraphDownstreamContext {
     pub original_root_fragment_id: FragmentId,
-    pub downstream_fragments: Vec<(DispatcherType, SharedFragmentInfo, PbStreamNode)>,
-    pub downstream_actor_location: HashMap<ActorId, WorkerId>,
+    pub downstream_fragments: Vec<(DispatcherType, Fragment)>,
 }
 
 impl CompleteStreamFragmentGraph {
@@ -1400,7 +1675,6 @@ impl CompleteStreamFragmentGraph {
         Self {
             building_graph: graph,
             existing_fragments: Default::default(),
-            existing_actor_location: Default::default(),
             extra_downstreams: Default::default(),
             extra_upstreams: Default::default(),
         }
@@ -1453,18 +1727,15 @@ impl CompleteStreamFragmentGraph {
         let mut extra_upstreams = HashMap::new();
         let mut existing_fragments = HashMap::new();
 
-        let mut existing_actor_location = HashMap::new();
-
         if let Some(FragmentGraphUpstreamContext {
             upstream_root_fragments,
-            upstream_actor_location,
         }) = upstream_ctx
         {
             for (&id, fragment) in &mut graph.fragments {
                 let uses_shuffled_backfill = fragment.has_shuffled_backfill();
 
                 for (&upstream_job_id, required_columns) in &fragment.upstream_job_columns {
-                    let (upstream_fragment, nodes) = upstream_root_fragments
+                    let upstream_fragment = upstream_root_fragments
                         .get(&upstream_job_id)
                         .context("upstream fragment not found")?;
                     let upstream_root_fragment_id =
@@ -1517,8 +1788,12 @@ impl CompleteStreamFragmentGraph {
                             {
                                 // Resolve the required output columns from the upstream materialized view.
                                 let (dist_key_indices, output_mapping) = {
-                                    let mview_node =
-                                        nodes.get_node_body().unwrap().as_materialize().unwrap();
+                                    let mview_node = upstream_fragment
+                                        .nodes
+                                        .get_node_body()
+                                        .unwrap()
+                                        .as_materialize()
+                                        .unwrap();
                                     let all_columns = mview_node.column_descs();
                                     let dist_key_indices = mview_node.dist_key_indices();
                                     let output_mapping = gen_output_mapping(
@@ -1551,8 +1826,12 @@ impl CompleteStreamFragmentGraph {
                                 .contains(FragmentTypeFlag::Source)
                             {
                                 let output_mapping = {
-                                    let source_node =
-                                        nodes.get_node_body().unwrap().as_source().unwrap();
+                                    let source_node = upstream_fragment
+                                        .nodes
+                                        .get_node_body()
+                                        .unwrap()
+                                        .as_source()
+                                        .unwrap();
 
                                     let all_columns = source_node.column_descs().unwrap();
                                     gen_output_mapping(required_columns, &all_columns).context(
@@ -1605,16 +1884,13 @@ impl CompleteStreamFragmentGraph {
             existing_fragments.extend(
                 upstream_root_fragments
                     .into_values()
-                    .map(|(f, _)| (GlobalFragmentId::new(f.fragment_id), f)),
+                    .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
             );
-
-            existing_actor_location.extend(upstream_actor_location);
         }
 
         if let Some(FragmentGraphDownstreamContext {
             original_root_fragment_id,
             downstream_fragments,
-            downstream_actor_location,
         }) = downstream_ctx
         {
             let original_table_fragment_id = GlobalFragmentId::new(original_root_fragment_id);
@@ -1622,14 +1898,14 @@ impl CompleteStreamFragmentGraph {
 
             // Build the extra edges between the `Materialize` and the downstream `StreamScan` of the
             // existing materialized views.
-            for (dispatcher_type, fragment, nodes) in &downstream_fragments {
+            for (dispatcher_type, fragment) in &downstream_fragments {
                 let id = GlobalFragmentId::new(fragment.fragment_id);
 
                 // Similar to `extract_upstream_columns_except_cross_db_backfill`.
                 let output_columns = {
                     let mut res = None;
 
-                    stream_graph_visitor::visit_stream_node_body(nodes, |node_body| {
+                    stream_graph_visitor::visit_stream_node_body(&fragment.nodes, |node_body| {
                         let columns = match node_body {
                             NodeBody::StreamScan(stream_scan) => stream_scan.upstream_columns(),
                             NodeBody::SourceBackfill(source_backfill) => {
@@ -1709,16 +1985,13 @@ impl CompleteStreamFragmentGraph {
             existing_fragments.extend(
                 downstream_fragments
                     .into_iter()
-                    .map(|(_, f, _)| (GlobalFragmentId::new(f.fragment_id), f)),
+                    .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f)),
             );
-
-            existing_actor_location.extend(downstream_actor_location);
         }
 
         Ok(Self {
             building_graph: graph,
             existing_fragments,
-            existing_actor_location,
             extra_downstreams,
             extra_upstreams,
         })
@@ -1810,12 +2083,7 @@ impl CompleteStreamFragmentGraph {
     pub(super) fn existing_distribution(&self) -> HashMap<GlobalFragmentId, Distribution> {
         self.existing_fragments
             .iter()
-            .map(|(&id, f)| {
-                (
-                    id,
-                    Distribution::from_fragment(f, &self.existing_actor_location),
-                )
-            })
+            .map(|(&id, f)| (id, Distribution::from_fragment(f)))
             .collect()
     }
 
@@ -1867,7 +2135,6 @@ impl CompleteStreamFragmentGraph {
     pub(super) fn seal_fragment(
         &self,
         id: GlobalFragmentId,
-        actors: Vec<StreamActor>,
         distribution: Distribution,
         stream_node: StreamNode,
     ) -> Fragment {
@@ -1907,7 +2174,6 @@ impl CompleteStreamFragmentGraph {
             fragment_id: inner.fragment_id,
             fragment_type_mask: inner.fragment_type_mask.into(),
             distribution_type,
-            actors,
             state_table_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
             nodes: stream_node,
@@ -1917,8 +2183,8 @@ impl CompleteStreamFragmentGraph {
     /// Get a fragment from the complete graph, which can be either a building fragment or an
     /// existing fragment.
     pub(super) fn get_fragment(&self, fragment_id: GlobalFragmentId) -> EitherFragment {
-        if let Some(fragment) = self.existing_fragments.get(&fragment_id) {
-            EitherFragment::Existing(fragment.clone())
+        if self.existing_fragments.contains_key(&fragment_id) {
+            EitherFragment::Existing
         } else {
             EitherFragment::Building(
                 self.building_graph
@@ -1976,5 +2242,370 @@ impl CompleteStreamFragmentGraph {
     /// Get the expected vnode count of the building graph. See documentation of the field for more details.
     pub(super) fn max_parallelism(&self) -> usize {
         self.building_graph.max_parallelism()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::DataType;
+    use risingwave_pb::catalog::SinkType as PbSinkType;
+    use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+    use risingwave_pb::plan_common::StorageTableDesc;
+    use risingwave_pb::stream_plan::{
+        BatchPlanNode, MergeNode, ProjectNode, SinkDesc, SinkLogStoreType, SinkNode, StreamNode,
+        StreamScanNode, StreamScanType,
+    };
+
+    use super::*;
+
+    fn make_column(name: &str, id: i32, data_type: DataType) -> ColumnCatalog {
+        ColumnCatalog::visible(ColumnDesc::named(name, ColumnId::new(id), data_type))
+    }
+
+    fn make_field(table_name: &str, column: &ColumnCatalog) -> risingwave_pb::plan_common::Field {
+        Field::new(
+            format!("{}.{}", table_name, column.column_desc.name),
+            column.data_type().clone(),
+        )
+        .to_prost()
+    }
+
+    fn make_input_ref(index: u32, data_type: &DataType) -> PbExprNode {
+        PbExprNode {
+            function_type: expr_node::Type::Unspecified as i32,
+            return_type: Some(data_type.to_protobuf()),
+            rex_node: Some(expr_node::RexNode::InputRef(index)),
+        }
+    }
+
+    fn make_stream_scan_node(
+        table_name: &str,
+        table_id: u32,
+        columns: &[ColumnCatalog],
+    ) -> StreamNode {
+        let merge_node = StreamNode {
+            node_body: Some(NodeBody::Merge(Box::new(MergeNode {
+                upstream_fragment_id: 0.into(),
+                ..Default::default()
+            }))),
+            fields: columns
+                .iter()
+                .map(|col| make_field(table_name, col))
+                .collect(),
+            ..Default::default()
+        };
+        let batch_plan_node = StreamNode {
+            node_body: Some(NodeBody::BatchPlan(Box::new(BatchPlanNode {
+                ..Default::default()
+            }))),
+            ..Default::default()
+        };
+        let stream_scan_node = StreamScanNode {
+            table_id: table_id.into(),
+            upstream_column_ids: columns.iter().map(|c| c.column_id().get_id()).collect(),
+            output_indices: (0..columns.len()).map(|i| i as u32).collect(),
+            stream_scan_type: StreamScanType::ArrangementBackfill as i32,
+            table_desc: Some(StorageTableDesc {
+                table_id: table_id.into(),
+                columns: columns
+                    .iter()
+                    .map(|col| col.column_desc.to_protobuf())
+                    .collect(),
+                value_indices: (0..columns.len()).map(|i| i as u32).collect(),
+                versioned: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        StreamNode {
+            node_body: Some(NodeBody::StreamScan(Box::new(stream_scan_node))),
+            fields: columns
+                .iter()
+                .map(|col| make_field(table_name, col))
+                .collect(),
+            input: vec![merge_node, batch_plan_node],
+            ..Default::default()
+        }
+    }
+
+    fn make_project_node(
+        table_name: &str,
+        columns: &[ColumnCatalog],
+        input: StreamNode,
+    ) -> StreamNode {
+        let select_list = columns
+            .iter()
+            .enumerate()
+            .map(|(i, col)| make_input_ref(i as u32, col.data_type()))
+            .collect();
+        StreamNode {
+            node_body: Some(NodeBody::Project(Box::new(ProjectNode {
+                select_list,
+                ..Default::default()
+            }))),
+            fields: columns
+                .iter()
+                .map(|col| make_field(table_name, col))
+                .collect(),
+            input: vec![input],
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_refresh_schema_sink_fragment_with_project() {
+        let env = MetaSrvEnv::for_test().await;
+        let id_gen_manager = env.id_gen_manager().as_ref();
+
+        let table_name = "t";
+        let columns = vec![
+            make_column("a", 1, DataType::Int64),
+            make_column("b", 2, DataType::Int64),
+        ];
+        let new_column = make_column("c", 3, DataType::Varchar);
+
+        let mut upstream_columns = columns.clone();
+        upstream_columns.push(new_column.clone());
+        let upstream_table = PbTable {
+            name: table_name.to_owned(),
+            columns: upstream_columns
+                .iter()
+                .map(|col| col.to_protobuf())
+                .collect(),
+            ..Default::default()
+        };
+
+        let sink = PbSink {
+            columns: columns.iter().map(|col| col.to_protobuf()).collect(),
+            sink_type: PbSinkType::AppendOnly as i32,
+            ..Default::default()
+        };
+
+        let sink_desc = SinkDesc {
+            sink_type: PbSinkType::AppendOnly as i32,
+            column_catalogs: sink.columns.clone(),
+            ..Default::default()
+        };
+
+        let stream_scan_node = make_stream_scan_node(table_name, 1, &columns);
+        let project_node = make_project_node(table_name, &columns, stream_scan_node);
+
+        let log_store_table = PbTable {
+            columns: columns
+                .iter()
+                .cloned()
+                .map(|mut col| {
+                    col.column_desc.name = format!("{}_{}", table_name, col.column_desc.name);
+                    col.to_protobuf()
+                })
+                .collect(),
+            value_indices: (0..columns.len()).map(|i| i as i32).collect(),
+            ..Default::default()
+        };
+
+        let original_fragment = Fragment {
+            fragment_id: 1.into(),
+            fragment_type_mask: FragmentTypeMask::default(),
+            distribution_type: PbFragmentDistributionType::Single,
+            state_table_ids: vec![],
+            maybe_vnode_count: None,
+            nodes: StreamNode {
+                node_body: Some(NodeBody::Sink(Box::new(SinkNode {
+                    sink_desc: Some(sink_desc),
+                    table: Some(log_store_table),
+                    ..Default::default()
+                }))),
+                fields: columns
+                    .iter()
+                    .map(|col| make_field(table_name, col))
+                    .collect(),
+                input: vec![project_node],
+                ..Default::default()
+            },
+        };
+
+        let (new_fragment, _, _) = rewrite_refresh_schema_sink_fragment(
+            &original_fragment,
+            &sink,
+            std::slice::from_ref(&new_column),
+            &[],
+            &upstream_table,
+            7.into(),
+            id_gen_manager,
+        )
+        .unwrap();
+
+        let sink_node = &new_fragment.nodes;
+        let [project_node] = sink_node.input.as_slice() else {
+            panic!("Sink has more than 1 input: {:?}", sink_node.input);
+        };
+        let PbNodeBody::Project(project_body) = project_node.node_body.as_ref().unwrap() else {
+            panic!(
+                "expect PbNodeBody::Project but got: {:?}",
+                project_node.node_body
+            );
+        };
+        assert_eq!(project_body.select_list.len(), columns.len() + 1);
+        let last_expr = project_body.select_list.last().unwrap();
+        assert!(
+            matches!(last_expr.rex_node, Some(expr_node::RexNode::InputRef(idx)) if idx == columns.len() as u32)
+        );
+        assert_eq!(project_node.fields.len(), columns.len() + 1);
+
+        let [stream_scan_node] = project_node.input.as_slice() else {
+            panic!("Project has more than 1 input: {:?}", project_node.input);
+        };
+        let PbNodeBody::StreamScan(scan) = stream_scan_node.node_body.as_ref().unwrap() else {
+            panic!(
+                "expect PbNodeBody::StreamScan but got: {:?}",
+                stream_scan_node.node_body
+            );
+        };
+        assert_eq!(
+            scan.upstream_column_ids.last().copied(),
+            Some(new_column.column_id().get_id())
+        );
+        assert_eq!(
+            scan.output_indices.last().copied(),
+            Some(columns.len() as u32)
+        );
+        assert_eq!(
+            stream_scan_node.fields.last().unwrap().name,
+            format!("{}.{}", table_name, new_column.column_desc.name)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_refresh_schema_sink_fragment_drop_column_with_project() {
+        let env = MetaSrvEnv::for_test().await;
+        let id_gen_manager = env.id_gen_manager().as_ref();
+
+        let table_name = "t";
+        let columns = vec![
+            make_column("a", 1, DataType::Int64),
+            make_column("b", 2, DataType::Int64),
+            make_column("tmp", 3, DataType::Varchar),
+        ];
+        let removed_column = columns.last().unwrap().clone();
+        let upstream_columns = columns[..2].to_vec();
+
+        let upstream_table = PbTable {
+            name: table_name.to_owned(),
+            columns: upstream_columns
+                .iter()
+                .map(|col| col.to_protobuf())
+                .collect(),
+            ..Default::default()
+        };
+
+        let sink = PbSink {
+            columns: columns.iter().map(|col| col.to_protobuf()).collect(),
+            sink_type: PbSinkType::AppendOnly as i32,
+            ..Default::default()
+        };
+
+        let sink_desc = SinkDesc {
+            sink_type: PbSinkType::AppendOnly as i32,
+            column_catalogs: sink.columns.clone(),
+            ..Default::default()
+        };
+
+        let stream_scan_node = make_stream_scan_node(table_name, 1, &columns);
+        let project_node = make_project_node(table_name, &columns, stream_scan_node);
+
+        let log_store_table = PbTable {
+            columns: columns
+                .iter()
+                .cloned()
+                .map(|mut col| {
+                    col.column_desc.name = format!("{}_{}", table_name, col.column_desc.name);
+                    col.to_protobuf()
+                })
+                .collect(),
+            value_indices: (0..columns.len()).map(|i| i as i32).collect(),
+            ..Default::default()
+        };
+
+        let original_fragment = Fragment {
+            fragment_id: 1.into(),
+            fragment_type_mask: FragmentTypeMask::default(),
+            distribution_type: PbFragmentDistributionType::Single,
+            state_table_ids: vec![],
+            maybe_vnode_count: None,
+            nodes: StreamNode {
+                node_body: Some(NodeBody::Sink(Box::new(SinkNode {
+                    sink_desc: Some(sink_desc),
+                    table: Some(log_store_table),
+                    log_store_type: SinkLogStoreType::KvLogStore as i32,
+                    ..Default::default()
+                }))),
+                fields: columns
+                    .iter()
+                    .map(|col| make_field(table_name, col))
+                    .collect(),
+                input: vec![project_node],
+                ..Default::default()
+            },
+        };
+
+        let (new_fragment, new_schema, new_log_store_table) = rewrite_refresh_schema_sink_fragment(
+            &original_fragment,
+            &sink,
+            &[],
+            std::slice::from_ref(&removed_column),
+            &upstream_table,
+            7.into(),
+            id_gen_manager,
+        )
+        .unwrap();
+
+        assert_eq!(new_schema.len(), 2);
+        assert!(
+            new_schema.iter().all(|col| {
+                col.column_desc.as_ref().map(|desc| desc.name.as_str()) != Some("tmp")
+            })
+        );
+
+        let sink_node = &new_fragment.nodes;
+        let [project_node] = sink_node.input.as_slice() else {
+            panic!("Sink has more than 1 input: {:?}", sink_node.input);
+        };
+        let PbNodeBody::Project(project_body) = project_node.node_body.as_ref().unwrap() else {
+            panic!(
+                "expect PbNodeBody::Project but got: {:?}",
+                project_node.node_body
+            );
+        };
+        assert_eq!(project_body.select_list.len(), 2);
+        assert!(project_node.fields.iter().all(|f| !f.name.contains("tmp")));
+
+        let [stream_scan_node] = project_node.input.as_slice() else {
+            panic!("Project has more than 1 input: {:?}", project_node.input);
+        };
+        let PbNodeBody::StreamScan(scan) = stream_scan_node.node_body.as_ref().unwrap() else {
+            panic!(
+                "expect PbNodeBody::StreamScan but got: {:?}",
+                stream_scan_node.node_body
+            );
+        };
+        assert!(
+            !scan
+                .upstream_column_ids
+                .iter()
+                .any(|&id| id == removed_column.column_id().get_id())
+        );
+        assert!(
+            stream_scan_node
+                .fields
+                .iter()
+                .all(|f| !f.name.contains("tmp"))
+        );
+
+        let new_log_store_table = new_log_store_table.expect("log store table should be updated");
+        assert_eq!(
+            new_log_store_table.value_indices,
+            (0..columns.len()).map(|i| i as i32).collect::<Vec<_>>()
+        );
     }
 }

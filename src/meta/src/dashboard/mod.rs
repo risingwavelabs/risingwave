@@ -23,7 +23,8 @@ use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_common_heap_profiling::ProfileServiceImpl;
+use risingwave_rpc_client::MonitorClientPool;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -42,8 +43,9 @@ pub struct DashboardService {
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
     pub hummock_manager: HummockManagerRef,
-    pub compute_clients: ComputeClientPool,
+    pub monitor_clients: MonitorClientPool,
     pub diagnose_command: DiagnoseCommandRef,
+    pub profile_service: ProfileServiceImpl,
     pub trace_state: otlp_embedded::StateRef,
 }
 
@@ -66,19 +68,20 @@ pub(super) mod handlers {
     };
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::hummock::TableStats;
-    use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
     use risingwave_pb::meta::{
         ActorIds, FragmentIdToActorIdMap, FragmentToRelationMap, PbTableFragments, RelationIdInfos,
     };
     use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
     use risingwave_pb::monitor_service::{
-        ChannelDeltaStats, GetStreamingPrometheusStatsResponse, GetStreamingStatsResponse,
-        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+        AnalyzeHeapRequest, ChannelDeltaStats, GetStreamingPrometheusStatsResponse,
+        GetStreamingStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
+        ListHeapProfilingRequest, ListHeapProfilingResponse, StackTraceResponse,
     };
     use risingwave_pb::user::PbUserInfo;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use thiserror_ext::AsReport;
+    use tonic::Request;
 
     use super::*;
     use crate::controller::fragment::StreamingJobInfo;
@@ -322,9 +325,9 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
         let mut fragment_to_relation_map = HashMap::new();
-        for (relation_id, tf) in table_fragments {
+        for (relation_id, (tf, _, _)) in table_fragments {
             for fragment_id in tf.fragments.keys() {
-                fragment_to_relation_map.insert(*fragment_id, relation_id.as_raw_id());
+                fragment_to_relation_map.insert(*fragment_id, relation_id);
             }
         }
         let map = FragmentToRelationMap {
@@ -344,10 +347,14 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
         let mut map = HashMap::new();
-        for (id, tf) in table_fragments {
+        for (id, (tf, fragment_actors, _actor_status)) in table_fragments {
             let mut fragment_id_to_actor_ids = HashMap::new();
-            for (fragment_id, fragment) in &tf.fragments {
-                let actor_ids = fragment.actors.iter().map(|a| a.actor_id).collect_vec();
+            for fragment_id in tf.fragments.keys() {
+                let actor_ids = fragment_actors
+                    .get(fragment_id)
+                    .into_iter()
+                    .flat_map(|actors| actors.iter().map(|a| a.actor_id))
+                    .collect_vec();
                 fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
             }
             map.insert(
@@ -367,8 +374,9 @@ pub(super) mod handlers {
         Path(job_id): Path<u32>,
     ) -> Result<Json<PbTableFragments>> {
         let job_id = JobId::new(job_id);
-        let table_fragments = srv
+        let (table_fragments, fragment_actors, actor_status) = srv
             .metadata_manager
+            .catalog_controller
             .get_job_fragments_by_id(job_id)
             .await
             .map_err(err)?;
@@ -386,9 +394,12 @@ pub(super) mod handlers {
             )
             .await
             .map_err(err)?;
-        Ok(Json(
-            table_fragments.to_protobuf(&upstream_fragments, &dispatchers),
-        ))
+        Ok(Json(table_fragments.to_protobuf(
+            &fragment_actors,
+            &upstream_fragments,
+            &dispatchers,
+            actor_status,
+        )))
     }
 
     pub async fn list_users(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbUserInfo>>> {
@@ -426,9 +437,16 @@ pub(super) mod handlers {
         Ok(Json(schemas))
     }
 
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DashboardObjectDependency {
+        pub object_id: u32,
+        pub referenced_object_id: u32,
+    }
+
     pub async fn list_object_dependencies(
         Extension(srv): Extension<Service>,
-    ) -> Result<Json<Vec<PbObjectDependencies>>> {
+    ) -> Result<Json<Vec<DashboardObjectDependency>>> {
         let object_dependencies = srv
             .metadata_manager
             .catalog_controller
@@ -436,7 +454,15 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
 
-        Ok(Json(object_dependencies))
+        let result = object_dependencies
+            .into_iter()
+            .map(|dependency| DashboardObjectDependency {
+                object_id: dependency.object_id.as_raw_id(),
+                referenced_object_id: dependency.referenced_object_id.as_raw_id(),
+            })
+            .collect();
+
+        Ok(Json(result))
     }
 
     #[derive(Debug, Deserialize)]
@@ -509,6 +535,16 @@ pub(super) mod handlers {
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<HeapProfilingResponse>> {
+        if worker_id == crate::manager::META_NODE_ID {
+            let result = srv
+                .profile_service
+                .heap_profiling(Request::new(HeapProfilingRequest { dir: "".to_owned() }))
+                .await
+                .map_err(err)?
+                .into_inner();
+            return Ok(result.into());
+        }
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -517,7 +553,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
 
         let result = client.heap_profile("".to_owned()).await.map_err(err)?;
 
@@ -528,6 +564,16 @@ pub(super) mod handlers {
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<ListHeapProfilingResponse>> {
+        if worker_id == crate::manager::META_NODE_ID {
+            let result = srv
+                .profile_service
+                .list_heap_profiling(Request::new(ListHeapProfilingRequest {}))
+                .await
+                .map_err(err)?
+                .into_inner();
+            return Ok(result.into());
+        }
+
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -536,7 +582,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
 
         let result = client.list_heap_profile().await.map_err(err)?;
         Ok(result.into())
@@ -549,21 +595,31 @@ pub(super) mod handlers {
         let file_path =
             String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
-        let worker_node = srv
-            .metadata_manager
-            .get_worker_by_id(worker_id)
-            .await
-            .map_err(err)?
-            .context("worker node not found")
-            .map_err(err)?;
+        let collapsed_bin = if worker_id == crate::manager::META_NODE_ID {
+            srv.profile_service
+                .analyze_heap(Request::new(AnalyzeHeapRequest {
+                    path: file_path.clone(),
+                }))
+                .await
+                .map_err(err)?
+                .into_inner()
+                .result
+        } else {
+            let worker_node = srv
+                .metadata_manager
+                .get_worker_by_id(worker_id)
+                .await
+                .map_err(err)?
+                .context("worker node not found")
+                .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
-
-        let collapsed_bin = client
-            .analyze_heap(file_path.clone())
-            .await
-            .map_err(err)?
-            .result;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
+            client
+                .analyze_heap(file_path.clone())
+                .await
+                .map_err(err)?
+                .result
+        };
         let collapsed_str = String::from_utf8_lossy(&collapsed_bin).to_string();
 
         let response = Response::builder()
@@ -613,7 +669,7 @@ pub(super) mod handlers {
         let mut futures = Vec::new();
 
         for worker_node in worker_nodes {
-            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
             let client = Arc::new(client);
             let fut = async move {
                 let result = client.get_streaming_stats().await.map_err(err)?;
@@ -696,7 +752,7 @@ pub(super) mod handlers {
         let mut futures = Vec::new();
 
         for worker_node in worker_nodes {
-            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
             let client = Arc::new(client);
             let fut = async move {
                 let result = client.get_streaming_stats().await.map_err(err)?;
@@ -892,9 +948,9 @@ impl DashboardService {
 
         let api_router = Router::new()
             .route("/version", get(get_version))
-            .route("/clusters/:ty", get(list_clusters))
+            .route("/clusters/{ty}", get(list_clusters))
             .route("/streaming_jobs", get(list_streaming_jobs))
-            .route("/fragments/job_id/:job_id", get(list_fragments_by_job_id))
+            .route("/fragments/job_id/{job_id}", get(list_fragments_by_job_id))
             .route("/relation_id_infos", get(get_relation_id_infos))
             .route(
                 "/fragment_to_relation_map",
@@ -921,15 +977,15 @@ impl DashboardService {
                 get(get_streaming_stats_from_prometheus),
             )
             // /monitor/await_tree/{worker_id}/?format={text or json}
-            .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
+            .route("/monitor/await_tree/{worker_id}", get(dump_await_tree))
             // /monitor/await_tree/?format={text or json}
             .route("/monitor/await_tree/", get(dump_await_tree_all))
-            .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
+            .route("/monitor/dump_heap_profile/{worker_id}", get(heap_profile))
             .route(
-                "/monitor/list_heap_profile/:worker_id",
+                "/monitor/list_heap_profile/{worker_id}",
                 get(list_heap_profile),
             )
-            .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
+            .route("/monitor/analyze/{worker_id}/{*path}", get(analyze_heap))
             // /monitor/diagnose/?format={text or json}
             .route("/monitor/diagnose/", get(diagnose))
             .layer(

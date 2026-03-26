@@ -28,7 +28,6 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, FullKeyTracker, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, LocalSstableInfo};
-use risingwave_pb::hummock::compact_task;
 use thiserror_ext::AsReport;
 use tracing::{error, warn};
 
@@ -42,7 +41,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchOldValues, SharedBufferKeyEntry,
     VersionedSharedBufferValue,
 };
-use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
     CachePolicy, GetObjectId, HummockError, HummockResult, ObjectIdManagerRef,
     SstableBuilderOptions,
@@ -327,7 +325,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
 pub async fn merge_imms_in_memory(
     table_id: TableId,
     imms: Vec<ImmutableMemtable>,
-    memory_tracker: Option<MemoryTracker>,
 ) -> ImmutableMemtable {
     let mut epochs = vec![];
     let mut merged_size = 0;
@@ -457,7 +454,6 @@ pub async fn merge_imms_in_memory(
             old_values,
             merged_size,
             max_imm_id,
-            memory_tracker,
         )),
         table_id,
     }
@@ -568,7 +564,6 @@ impl SharedBufferCompactRunner {
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 retain_multiple_version: true,
                 stats_target_table_ids: None,
-                task_type: compact_task::TaskType::SharedBuffer,
                 table_vnode_partition,
                 use_block_based_filter,
                 table_schemas: Default::default(),

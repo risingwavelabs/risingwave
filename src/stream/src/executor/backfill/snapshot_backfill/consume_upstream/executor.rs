@@ -19,6 +19,7 @@ use futures::future::{Either, select};
 use futures::{FutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common_rate_limit::{
     MonitoredRateLimiter, RateLimit, RateLimiter, RateLimiterTrait,
 };
@@ -46,6 +47,7 @@ pub struct UpstreamTableExecutor<T: UpstreamTable, S: StateStore> {
     actor_ctx: ActorContextRef,
     barrier_rx: UnboundedReceiver<Barrier>,
     progress: CreateMviewProgressReporter,
+    crossdb_last_consumed_min_epoch: LabelGuardedIntGauge,
 }
 
 impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
@@ -64,6 +66,17 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
         progress: CreateMviewProgressReporter,
     ) -> Self {
         let rate_limiter = RateLimiter::new(rate_limit).monitored(upstream_table_id);
+        let table_id_label = upstream_table_id.to_string();
+        let actor_id_label = actor_ctx.id.to_string();
+        let fragment_id_label = actor_ctx.fragment_id.to_string();
+        let crossdb_last_consumed_min_epoch = actor_ctx
+            .streaming_metrics
+            .crossdb_last_consumed_min_epoch
+            .with_guarded_label_values(&[
+                table_id_label.as_str(),
+                actor_id_label.as_str(),
+                fragment_id_label.as_str(),
+            ]);
         Self {
             upstream_table,
             progress_state_table,
@@ -74,7 +87,21 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
             actor_ctx,
             barrier_rx,
             progress,
+            crossdb_last_consumed_min_epoch,
         }
+    }
+
+    fn extract_last_consumed_min_epoch(progress_state: &BackfillState<S>) -> u64 {
+        let mut min_epoch = u64::MAX;
+        for (_, progress) in progress_state.latest_progress() {
+            let Some(progress) = progress else {
+                // If any vnode has no progress yet, report `0` explicitly to indicate the
+                // progress is not fully ready, instead of hiding this state.
+                return 0;
+            };
+            min_epoch = min_epoch.min(progress.epoch);
+        }
+        if min_epoch == u64::MAX { 0 } else { min_epoch }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -93,12 +120,18 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
         let mut finish_reported = false;
         let mut prev_reported_row_count = 0;
         let mut upstream_table = self.upstream_table;
+        let snapshot_rebuild_interval = self
+            .actor_ctx
+            .config
+            .developer
+            .snapshot_iter_rebuild_interval();
         let mut stream = ConsumeUpstreamStream::new(
             progress_state.latest_progress(),
             &upstream_table,
             self.snapshot_epoch,
             self.chunk_size,
             self.rate_limiter.rate_limit(),
+            snapshot_rebuild_interval,
         );
 
         'on_new_stream: loop {
@@ -141,6 +174,11 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                         }
                     })
                     .await?;
+
+                let last_consumed_min_epoch =
+                    Self::extract_last_consumed_min_epoch(&progress_state);
+                self.crossdb_last_consumed_min_epoch
+                    .set(last_consumed_min_epoch as i64);
 
                 if !finish_reported {
                     let mut row_count = 0;
@@ -190,6 +228,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                         self.snapshot_epoch,
                         self.chunk_size,
                         self.rate_limiter.rate_limit(),
+                        snapshot_rebuild_interval,
                     );
                     continue 'on_new_stream;
                 }

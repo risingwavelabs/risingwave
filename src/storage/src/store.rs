@@ -26,7 +26,8 @@ use risingwave_common::array::{Op, VectorRef};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_common::id::FragmentId;
+use risingwave_common::util::epoch::{Epoch, EpochPair, MAX_EPOCH};
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
@@ -37,12 +38,15 @@ use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
 };
-use risingwave_pb::hummock::PbVnodeWatermark;
+use risingwave_pb::hummock::{PbVnodeWatermark, PbWatermarkSerdeType};
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
 use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 pub(crate) use crate::vector::{OnNearestItem, Vector};
+
+mod auto_rebuild;
+pub use auto_rebuild::{AutoRebuildStateStoreReadIter, timeout_auto_rebuild};
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
@@ -322,6 +326,7 @@ impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
 #[derive(Clone, Copy)]
 pub struct NewReadSnapshotOptions {
     pub table_id: TableId,
+    pub table_option: TableOption,
 }
 
 #[derive(Clone)]
@@ -507,8 +512,6 @@ pub struct ReadOptions {
     pub prefix_hint: Option<Bytes>,
     pub prefetch_options: PrefetchOptions,
     pub cache_policy: CachePolicy,
-
-    pub retention_seconds: Option<u32>,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -517,7 +520,6 @@ impl From<TracedReadOptions> for ReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
-            retention_seconds: value.retention_seconds,
         }
     }
 }
@@ -527,6 +529,7 @@ impl ReadOptions {
         self,
         table_id: TableId,
         epoch: Option<HummockReadEpoch>,
+        table_option: TableOption,
     ) -> TracedReadOptions {
         let value = self;
         let (read_version_from_backup, read_committed) = match epoch {
@@ -540,7 +543,7 @@ impl ReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
-            retention_seconds: value.retention_seconds,
+            retention_seconds: table_option.retention_seconds,
             table_id: table_id.into(),
             read_version_from_backup,
             read_committed,
@@ -548,12 +551,14 @@ impl ReadOptions {
     }
 }
 
-pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
-    let base_epoch = Epoch(base_epoch);
+pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<u32>) -> u64 {
     match retention_seconds {
         Some(retention_seconds_u32) => {
-            base_epoch
-                .subtract_ms(*retention_seconds_u32 as u64 * 1000)
+            if base_epoch == MAX_EPOCH {
+                panic!("generate min epoch for MAX_EPOCH");
+            }
+            Epoch(base_epoch)
+                .subtract_ms(retention_seconds_u32 as u64 * 1000)
                 .0
         }
         None => 0,
@@ -630,6 +635,7 @@ impl OpConsistencyLevel {
 #[derive(Clone)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
+    pub fragment_id: FragmentId,
     /// Whether the operation is consistent. The term `consistent` requires the following:
     ///
     /// 1. A key cannot be inserted or deleted for more than once, i.e. inserting to an existing
@@ -654,6 +660,7 @@ impl From<TracedNewLocalOptions> for NewLocalOptions {
     fn from(value: TracedNewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
+            fragment_id: value.fragment_id.into(),
             op_consistency_level: match value.op_consistency_level {
                 TracedOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
                 TracedOpConsistencyLevel::ConsistentOldValue => {
@@ -676,6 +683,7 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
     fn from(value: NewLocalOptions) -> Self {
         Self {
             table_id: value.table_id.into(),
+            fragment_id: value.fragment_id.into(),
             op_consistency_level: match value.op_consistency_level {
                 OpConsistencyLevel::Inconsistent => TracedOpConsistencyLevel::Inconsistent,
                 OpConsistencyLevel::ConsistentOldValue { .. } => {
@@ -693,6 +701,7 @@ impl From<NewLocalOptions> for TracedNewLocalOptions {
 impl NewLocalOptions {
     pub fn new(
         table_id: TableId,
+        fragment_id: FragmentId,
         op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
         vnodes: Arc<Bitmap>,
@@ -700,6 +709,7 @@ impl NewLocalOptions {
     ) -> Self {
         NewLocalOptions {
             table_id,
+            fragment_id,
             op_consistency_level,
             table_option,
             is_replicated: false,
@@ -710,12 +720,14 @@ impl NewLocalOptions {
 
     pub fn new_replicated(
         table_id: TableId,
+        fragment_id: FragmentId,
         op_consistency_level: OpConsistencyLevel,
         table_option: TableOption,
         vnodes: Arc<Bitmap>,
     ) -> Self {
         NewLocalOptions {
             table_id,
+            fragment_id,
             op_consistency_level,
             table_option,
             is_replicated: true,
@@ -727,6 +739,7 @@ impl NewLocalOptions {
     pub fn for_test(table_id: TableId) -> Self {
         Self {
             table_id,
+            fragment_id: FragmentId::default(),
             op_consistency_level: OpConsistencyLevel::Inconsistent,
             table_option: TableOption {
                 retention_seconds: None,
@@ -785,10 +798,7 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                                 Message::encode_to_vec(&pb_watermark)
                             })
                             .collect(),
-                        match watermark_type {
-                            WatermarkSerdeType::NonPkPrefix => true,
-                            WatermarkSerdeType::PkPrefix => false,
-                        },
+                        PbWatermarkSerdeType::from(watermark_type) as i32,
                     )
                 },
             ),
@@ -803,7 +813,7 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
     fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
         SealCurrentEpochOptions {
             table_watermarks: value.table_watermarks.map(
-                |(is_ascending, watermarks, is_non_pk_prefix)| {
+                |(is_ascending, watermarks, watermark_serde_type)| {
                     (
                         if is_ascending {
                             WatermarkDirection::Ascending
@@ -818,10 +828,11 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                                     .expect("should not failed")
                             })
                             .collect(),
-                        if is_non_pk_prefix {
-                            WatermarkSerdeType::NonPkPrefix
-                        } else {
-                            WatermarkSerdeType::PkPrefix
+                        match PbWatermarkSerdeType::try_from(watermark_serde_type).unwrap() {
+                            PbWatermarkSerdeType::TypeUnspecified => unreachable!(),
+                            PbWatermarkSerdeType::PkPrefix => WatermarkSerdeType::PkPrefix,
+                            PbWatermarkSerdeType::NonPkPrefix => WatermarkSerdeType::NonPkPrefix,
+                            PbWatermarkSerdeType::Value => WatermarkSerdeType::Value,
                         },
                     )
                 },

@@ -578,6 +578,32 @@ IcebergConfig:
     comments: Enable vended credentials for iceberg REST catalog.
     required: false
     default: Default::default
+  - name: catalog.security
+    field_type: String
+    comments: |-
+      Security type for REST catalog authentication.
+      Supported values: `none`, `oauth2`, `google`.
+      When set to `google`, uses Iceberg's `GoogleAuthManager` (requires Iceberg 1.10+)
+      for authentication using Google Application Default Credentials (ADC).
+    required: false
+  - name: gcp.auth.scopes
+    field_type: String
+    comments: |-
+      OAuth-based scopes for Google authentication.
+      Comma-separated list of OAuth-based scopes to request.
+      Only applicable when `catalog.security` is set to `google`.
+      Default: <https://www.googleapis.com/auth/cloud-platform>
+    required: false
+  - name: catalog.io_impl
+    field_type: String
+    comments: |-
+      Custom `FileIO` implementation class for the Iceberg catalog.
+      Allows specifying a custom `FileIO` implementation instead of the default.
+      Examples:
+      - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
+      - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
+      - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
+    required: false
   - name: database.name
     field_type: String
     required: false
@@ -601,6 +627,14 @@ IcebergConfig:
     comments: Commit every n(>0) checkpoints, default is 60.
     required: false
     default: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+    allow_alter_on_fly: true
+  - name: commit_checkpoint_size_threshold_mb
+    field_type: u64
+    comments: |-
+      Commit on the next checkpoint barrier after buffered write size exceeds this threshold.
+      Default is 128 MB.
+    required: false
+    default: Some (ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
     allow_alter_on_fly: true
   - name: create_table_if_not_exists
     field_type: bool
@@ -638,6 +672,11 @@ IcebergConfig:
     comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     required: false
     default: 'IcebergWriteMode :: MergeOnRead'
+  - name: format_version
+    field_type: FormatVersion
+    comments: Iceberg format version for table creation.
+    required: false
+    default: 'FormatVersion :: V2'
   - name: snapshot_expiration_max_age_millis
     field_type: i64
     comments: |-
@@ -695,6 +734,23 @@ IcebergConfig:
     comments: |-
       Compaction type: `full`, `small-files`, or `files-with-delete`
       If not set, will default to `full`
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.write_parquet_compression
+    field_type: String
+    comments: |-
+      Parquet compression codec
+      Supported values: uncompressed, snappy, gzip, lzo, brotli, lz4, zstd
+      Default is snappy
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.write_parquet_max_row_group_rows
+    field_type: usize
+    comments: |-
+      Maximum number of rows in a Parquet row group
+      Default is 122880 (from developer config)
     required: false
     default: Default::default
     allow_alter_on_fly: true
@@ -1365,6 +1421,9 @@ RedShiftConfig:
   - name: schema
     field_type: String
     required: false
+  - name: intermediate.schema.name
+    field_type: String
+    required: false
   - name: table.name
     field_type: String
     required: true
@@ -1375,10 +1434,14 @@ RedShiftConfig:
     field_type: bool
     required: false
     default: Default::default
-  - name: schedule_seconds
+  - name: writer_target_interval_seconds
     field_type: u64
     required: false
     default: '3600'
+  - name: write_intermediate_interval_seconds
+    field_type: u64
+    required: false
+    default: '1800'
   - name: batch_insert_rows
     field_type: u32
     required: false
@@ -1508,10 +1571,14 @@ SnowflakeV2Config:
   - name: schema
     field_type: String
     required: false
-  - name: snowflake_schedule_seconds
+  - name: writer_target_interval_seconds
     field_type: u64
     required: false
     default: '3600'
+  - name: write_intermediate_interval_seconds
+    field_type: u64
+    required: false
+    default: '1800'
   - name: warehouse
     field_type: String
     required: false

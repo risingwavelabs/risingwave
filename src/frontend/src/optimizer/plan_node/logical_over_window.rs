@@ -660,8 +660,7 @@ impl ToStream for LogicalOverWindow {
             empty_partition_by_not_implemented!();
         }
 
-        let input = try_enforce_locality_requirement(self.input(), &partition_key_indices);
-        let stream_input = input.to_stream(ctx)?;
+        let stream_input = self.input().to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
             // Emit-On-Window-Close case
@@ -678,9 +677,13 @@ impl ToStream for LogicalOverWindow {
                 .watermark_columns()
                 .contains(order_by[0].column_index)
             {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "The column ordered by must be a watermark column".to_owned(),
-                )
+                let order_by_col = self.input().schema().fields()[order_by[0].column_index]
+                    .name
+                    .clone();
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "The ORDER BY column `{}` must be a watermark column",
+                    order_by_col
+                ))
                 .into());
             }
             let order_key_index = order_by[0].column_index;
@@ -715,11 +718,39 @@ impl ToStream for LogicalOverWindow {
         }
     }
 
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+
+        let partition_key_indices = self.partition_key_indices();
+        if columns.len() > partition_key_indices.len()
+            || columns != &partition_key_indices[..columns.len()]
+        {
+            return None;
+        }
+
+        // Similar to agg/topn, keep the current over-window node so the locality can be provided
+        // by its own state table after `to_stream`, instead of trying to enforce it on input
+        // during logical rewrite.
+        Some(self.clone_with_input(self.input()).into())
+    }
+
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.core.input.logical_rewrite_for_stream(ctx)?;
+        let partition_key_indices = self.window_functions()[0]
+            .partition_by
+            .iter()
+            .map(|e| e.index())
+            .collect_vec();
+        let logical_input = if partition_key_indices.is_empty() {
+            self.input()
+        } else {
+            try_enforce_locality_requirement(self.input(), &partition_key_indices)
+        };
+        let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (new_self, output_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((new_self.into(), output_col_change))
     }

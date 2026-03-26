@@ -7,7 +7,7 @@
     └─BatchScan { table: t, columns: [t.country], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [country, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: t, columns: [t.country, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamTableScan { table: t, columns: [t.country, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   create_source:
     format: plain
     encode: protobuf
@@ -367,7 +367,7 @@
     insert into s values (1,2,(1,2,(1,2,null)));
   logical_plan: |-
     LogicalInsert { table: s, mapping: [0:0, 1:1, 2:2] }
-    └─LogicalValues { rows: [[1:Int32, 2:Int32, Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, null:Int32))]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Struct(StructType { fields: [("v1", Int32), ("v2", Int32), ("v3", Struct(StructType { fields: [("v1", Int32), ("v2", Int32), ("v3", Int32)] }))] })] } }
+    └─LogicalValues { rows: [[1:Int32, 2:Int32, Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, null:Int32))]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Struct(v1:Int32, v2:Int32, v3:Struct(v1:Int32, v2:Int32, v3:Int32))] } }
   create_table_with_connector:
     format: plain
     encode: protobuf

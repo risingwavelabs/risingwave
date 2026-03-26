@@ -205,6 +205,8 @@ impl Binder {
                 ("scale", raw_call(ExprType::Scale)),
                 ("min_scale", raw_call(ExprType::MinScale)),
                 ("trim_scale", raw_call(ExprType::TrimScale)),
+                ("gamma", raw_call(ExprType::Gamma)),
+                ("lgamma", raw_call(ExprType::Lgamma)),
                 // date and time
                 (
                     "to_timestamp",
@@ -300,6 +302,8 @@ impl Binder {
                 ("encrypt", raw_call(ExprType::Encrypt)),
                 ("decrypt", raw_call(ExprType::Decrypt)),
                 ("hmac", raw_call(ExprType::Hmac)),
+                ("crc32", raw_call(ExprType::Crc32)),
+                ("crc32c", raw_call(ExprType::Crc32c)),
                 ("secure_compare", raw_call(ExprType::SecureCompare)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
@@ -864,7 +868,7 @@ impl Binder {
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING`, `ON` and `FROM`. Found in clause: {:?}. \
-                Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information",
+                Please refer to https://docs.risingwave.com/processing/sql/temporal-filters for more information",
                 self.context.clause
             ))
                 .into());

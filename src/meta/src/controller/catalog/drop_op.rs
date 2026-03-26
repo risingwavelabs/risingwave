@@ -216,7 +216,7 @@ impl CatalogController {
             .all(&txn)
             .await?
             .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap(), None).into())
             .collect();
 
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
@@ -281,7 +281,7 @@ impl CatalogController {
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Secret)
             .map(|obj| obj.oid.as_secret_id())
-            .collect_vec();
+            .collect();
 
         if !removed_streaming_job_ids.is_empty() {
             let removed_internal_table_objs: Vec<PartialObject> = Object::find()
@@ -322,13 +322,8 @@ impl CatalogController {
             }
         }
 
-        let (removed_source_fragments, removed_sink_fragments, removed_actors, removed_fragments) =
-            get_fragments_for_jobs(
-                &txn,
-                self.env.shared_actor_infos(),
-                removed_streaming_job_ids.clone(),
-            )
-            .await?;
+        let (removed_source_fragments, removed_sink_fragments, removed_fragments) =
+            get_fragments_for_jobs(&txn, removed_streaming_job_ids.clone()).await?;
 
         let sink_target_fragments = fetch_target_fragments(&txn, removed_sink_fragments).await?;
         let mut removed_sink_fragment_by_targets = HashMap::new();
@@ -369,7 +364,7 @@ impl CatalogController {
             .all(&txn)
             .await?
             .into_iter()
-            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
+            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
         // delete all in to_drop_objects.
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(removed_objects.keys().cloned()))
@@ -435,7 +430,6 @@ impl CatalogController {
                 removed_source_ids: removed_source_ids.into_iter().collect(),
                 removed_secret_ids,
                 removed_source_fragments,
-                removed_actors,
                 removed_fragments,
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
@@ -469,6 +463,7 @@ impl CatalogController {
         }
 
         subscription.delete(&txn).await?;
+        txn.commit().await?;
         Ok(())
     }
 }

@@ -7,11 +7,11 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Adhoc queries (Batch & Frontend)",
+            "Ad hoc Queries (Batch & Frontend)",
             [
                 panels.subheader("Batch"),
                 panels.timeseries_row(
-                    "Exchange Recv Row Number",
+                    "Exchange Recv Row Count",
                     "",
                     [
                         panels.target(
@@ -21,7 +21,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Batch Mpp Task Number",
+                    "Batch MPP Task Count",
                     "",
                     [
                         panels.target(
@@ -45,7 +45,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Batch Heartbeat Worker Number",
+                    "Batch Heartbeat Worker Count",
                     "",
                     [
                         panels.target(
@@ -75,7 +75,7 @@ def _(outer_panels: Panels):
                 ),
                 panels.timeseries_bytes_per_sec(
                     "Batch Spill Throughput",
-                    "Disk throughputs of spilling-out in the bacth query engine",
+                    "Disk throughputs of spilling-out in the batch query engine",
                     [
                         panels.target(
                             f"sum(rate({metric('batch_spill_read_bytes')}[$__rate_interval]))by({COMPONENT_LABEL}, {NODE_LABEL})",
@@ -107,6 +107,38 @@ def _(outer_panels: Panels):
                             "",
                         ),
                     ],
+                ),
+                panels.timeseries_query_per_sec(
+                    "Query Per Second (DataFusion)",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('datafusion_completed_query_counter')}[$__rate_interval])",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "The Number of Completed Queries (DataFusion)",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('datafusion_completed_query_counter')}",
+                            "",
+                        ),
+                    ],
+                    ["last"],
+                ),
+                panels.timeseries_count(
+                    "The Number of Failed Queries (DataFusion)",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('datafusion_failed_query_counter')}",
+                            "",
+                        ),
+                    ],
+                    ["last"],
                 ),
                 panels.timeseries_query_per_sec(
                     "Query Per Second (Distributed Query Mode)",
@@ -151,8 +183,9 @@ def _(outer_panels: Panels):
                     ],
                     ["last"],
                 ),
+                panels.subheader("Subscriptions"),
                 panels.timeseries_count(
-                    "Subscription Cursor Nums",
+                    "Subscription Cursor Count",
                     "The number of valid and invalid subscription cursor",
                     [
                         panels.target(
@@ -176,7 +209,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency_ms(
-                    "Subscription Cursor Query Duration(ms)",
+                    "Subscription Cursor Query Duration (ms)",
                     "The amount of time a query exists inside the cursor",
                     [
                         *quantile(
@@ -189,7 +222,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency_ms(
-                    "Subscription Cursor Declare Duration(ms)",
+                    "Subscription Cursor Declare Duration (ms)",
                     "Subscription cursor duration of declare",
                     [
                         *quantile(
@@ -202,7 +235,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency_ms(
-                    "Subscription Cursor Fetch Duration(ms)",
+                    "Subscription Cursor Fetch Duration (ms)",
                     "Subscription cursor duration of fetch",
                     [
                         *quantile(
@@ -215,7 +248,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency_ms(
-                    "Subscription Cursor Last Fetch Duration(ms)",
+                    "Subscription Cursor Last Fetch Duration (ms)",
                     "Since the last fetch, the time up to now",
                     [
                         *quantile(
@@ -248,6 +281,20 @@ def _(outer_panels: Panels):
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f"histogram_quantile({quantile}, sum(rate({metric('frontend_latency_local_execution_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Query Latency (DataFusion)",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('datafusion_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
                                 f"p{legend}"
                                 + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                             ),

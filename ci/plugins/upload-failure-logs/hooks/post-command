@@ -4,6 +4,22 @@ set -euo pipefail
 
 if [ $BUILDKITE_COMMAND_EXIT_STATUS -ne 0 ]; then
   mv .risingwave/log risedev-logs
+  # Trim log files that exceed 200MB, keeping the tail and renaming them.
+  MAX_LOG_SIZE=$((200 * 1024 * 1024))
+  find risedev-logs -type f -name '*.log' -print0 | while IFS= read -r -d '' logfile; do
+    log_size=$(wc -c < "$logfile")
+    if [ "$log_size" -gt "$MAX_LOG_SIZE" ]; then
+      if [[ "$logfile" == *.log ]]; then
+        truncated_name="${logfile%.log}-truncate.log"
+      else
+        truncated_name="${logfile}-truncate.log"
+      fi
+      tmp_file="${truncated_name}.tmp"
+      tail -c "$MAX_LOG_SIZE" "$logfile" > "$tmp_file"
+      rm "$logfile"
+      mv "$tmp_file" "$truncated_name"
+    fi
+  done
   zip -q -r risedev-logs.zip risedev-logs/
   buildkite-agent artifact upload "risedev-logs/*"
   buildkite-agent artifact upload risedev-logs.zip

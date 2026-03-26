@@ -15,6 +15,11 @@
 #![feature(type_alias_impl_trait)]
 #![feature(try_blocks)]
 
+use std::alloc::System;
+
+#[global_allocator]
+static GLOBAL: System = System;
+
 mod hummock_iterator;
 use std::ffi::c_void;
 use std::ops::Deref;

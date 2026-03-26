@@ -12,6 +12,9 @@ drop table if exists rw_types_table_append_only cascade;
 system ok
 PGDATABASE=sink_test createdb
 
+statement ok
+set sink_decouple = false;
+
 ################### test table pk can mismatch
 
 system ok
@@ -495,7 +498,7 @@ statement ok
 flush;
 
 # NOTE(kwannoel): postgres_query doesn't support struct etc... yet.
-system ok
+system ok retry 4 backoff 1s
 PGDATABASE=sink_test psql --tuples-only -c "select * from pg_types_table order by id;"
 ----
   1 | Varcharvalue1  | Textvalue1  |            123 |             456 |           789 |          12.34 |       56.78 |         90.12 | t              | 2023-05-22  | 12:34:56    | 2023-05-22 12:34:56 | 1 day           | {"key": "value"}  | 448be8d9-297f-4514-85c6-a360e82ae331 |            123 | a             | {1,2,3}                      | {1,2,3}                   | {a,b,c}           | {1,2,3}
@@ -574,7 +577,7 @@ CREATE SINK rw_types_to_pg_types FROM rw_types_subset_table WITH (
     primary_key='id',
 );
 
-query I
+query I retry 4 backoff 1s
 select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '${PGPASSWORD:postgres}', 'sink_test', 'select id, varchar_column, text_column, smallint_column from pg_types_table order by id;');
 ----
   1 Varcharvalue1 NULL NULL

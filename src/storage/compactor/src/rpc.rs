@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::config::ServerConfig;
+use risingwave_common_heap_profiling::ProfileServiceImpl;
 use risingwave_pb::compactor::compactor_service_server::CompactorService;
 use risingwave_pb::compactor::{
     DispatchCompactionTaskRequest, DispatchCompactionTaskResponse, EchoRequest, EchoResponse,
@@ -68,13 +70,21 @@ impl CompactorService for CompactorServiceImpl {
     }
 }
 
+/// Compactor implementation of monitor RPCs, including profiling and compaction await-tree.
 pub struct MonitorServiceImpl {
     await_tree_reg: Option<CompactionAwaitTreeRegRef>,
+    profile_service: ProfileServiceImpl,
 }
 
 impl MonitorServiceImpl {
-    pub fn new(await_tree_reg: Option<CompactionAwaitTreeRegRef>) -> Self {
-        Self { await_tree_reg }
+    pub fn new(
+        await_tree_reg: Option<CompactionAwaitTreeRegRef>,
+        server_config: ServerConfig,
+    ) -> Self {
+        Self {
+            await_tree_reg,
+            profile_service: ProfileServiceImpl::new(server_config),
+        }
     }
 }
 
@@ -100,38 +110,30 @@ impl MonitorService for MonitorServiceImpl {
 
     async fn profiling(
         &self,
-        _request: Request<ProfilingRequest>,
+        request: Request<ProfilingRequest>,
     ) -> Result<Response<ProfilingResponse>, Status> {
-        Err(Status::unimplemented(
-            "CPU profiling unimplemented in compactor",
-        ))
+        self.profile_service.profiling(request).await
     }
 
     async fn heap_profiling(
         &self,
-        _request: Request<HeapProfilingRequest>,
+        request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
-        Err(Status::unimplemented(
-            "Heap profiling unimplemented in compactor",
-        ))
+        self.profile_service.heap_profiling(request).await
     }
 
     async fn list_heap_profiling(
         &self,
-        _request: Request<ListHeapProfilingRequest>,
+        request: Request<ListHeapProfilingRequest>,
     ) -> Result<Response<ListHeapProfilingResponse>, Status> {
-        Err(Status::unimplemented(
-            "Heap profiling unimplemented in compactor",
-        ))
+        self.profile_service.list_heap_profiling(request).await
     }
 
     async fn analyze_heap(
         &self,
-        _request: Request<AnalyzeHeapRequest>,
+        request: Request<AnalyzeHeapRequest>,
     ) -> Result<Response<AnalyzeHeapResponse>, Status> {
-        Err(Status::unimplemented(
-            "Heap profiling unimplemented in compactor",
-        ))
+        self.profile_service.analyze_heap(request).await
     }
 
     async fn get_streaming_stats(

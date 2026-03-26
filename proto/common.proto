@@ -24,6 +24,7 @@ message HostAddress {
 message ActorInfo {
   uint32 actor_id = 1;
   HostAddress host = 2;
+  uint64 partial_graph_id = 3;
 }
 
 enum WorkerType {
@@ -53,7 +54,8 @@ message WorkerNode {
   message Property {
     bool is_streaming = 1;
     bool is_serving = 2;
-    bool is_unschedulable = 3;
+    reserved 3;
+    reserved "is_unschedulable";
     // This is used for frontend node to register its rpc address
     string internal_rpc_host_addr = 4;
 
@@ -193,4 +195,12 @@ enum DistanceType {
   DISTANCE_TYPE_L2_SQR = 2;
   DISTANCE_TYPE_COSINE = 3;
   DISTANCE_TYPE_INNER_PRODUCT = 4;
+}
+
+enum ThrottleType {
+  THROTTLE_TYPE_UNSPECIFIED = 0;
+  THROTTLE_TYPE_DML = 1;
+  THROTTLE_TYPE_BACKFILL = 2;
+  THROTTLE_TYPE_SOURCE = 3;
+  THROTTLE_TYPE_SINK = 4;
 }

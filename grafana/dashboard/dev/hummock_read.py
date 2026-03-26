@@ -5,86 +5,16 @@ from . import section
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
-    meta_miss_filter = "type='meta_miss'"
-    meta_total_filter = "type='meta_total'"
-    data_miss_filter = "type='data_miss'"
-    data_total_filter = "type='data_total'"
-    file_cache_get_filter = "op='get'"
-
+    vnode_get_filter = "operation='get'"
+    vnode_get_pruned_filter = "operation='get', result='pruned'"
+    vnode_get_checked_filter = "operation='get', result='checked'"
     return [
         outer_panels.row_collapsed(
             "Hummock (Read)",
             [
+                panels.subheader("Read"),
                 panels.timeseries_ops(
-                    "Cache Ops",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({table_metric('state_store_sst_store_block_request_counts')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id, type)",
-                            "{{table_id}} @ {{type}} - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"sum(rate({metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}, type)",
-                            "total_meta_miss_count - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Cache Size",
-                    "Hummock has three parts of memory usage: 1. Meta Cache 2. Block Cache"
-                    "This metric shows the real memory usage of each of these three caches.",
-                    [
-                        panels.target(
-                            f"avg({metric('state_store_meta_cache_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "meta cache - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"avg({metric('state_store_block_cache_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "data cache - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"avg({metric('state_store_prefetch_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "prefetch cache - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Cache Miss Ratio",
-                    "",
-                    [
-                        panels.target(
-                            f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) >= 0",
-                            "meta cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"(sum(rate({table_metric('state_store_sst_store_block_request_counts', data_miss_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) / (sum(rate({table_metric('state_store_sst_store_block_request_counts', data_total_filter)}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)) >= 0",
-                            "block cache miss ratio - {{table_id}} @ {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Block Cache Efficiency",
-                    "Histogram of the estimated hit ratio of a block while in the block cache.",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"clamp_max(histogram_quantile({quantile}, sum(rate({metric('block_efficiency_histogram_bucket')}[$__rate_interval])) by (le,{COMPONENT_LABEL},{NODE_LABEL})), 1)",
-                                f"block cache efficienfy - p{legend}"
-                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
-                            [10, 25, 50, 75, 90, 100],
-                        ),
-                    ],
-                ),
-                panels.timeseries_ops(
-                    "Iter keys flow",
+                    "Iterator Key Flow",
                     "",
                     [
                         panels.target(
@@ -115,7 +45,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Read Duration - Get",
+                    "Get Duration",
                     "Histogram of the latency of Get operations that have been issued to the state store.",
                     [
                         *quantile(
@@ -135,7 +65,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Read Duration - Iter",
+                    "Iter Duration",
                     "Histogram of the time spent on iterator initialization."
                     "Histogram of the time spent on iterator scanning.",
                     [
@@ -165,6 +95,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Bloom Filters"),
                 panels.timeseries_ops(
                     "Bloom Filter Ops",
                     "",
@@ -194,12 +125,32 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Bloom Filter False-Positive Rate",
+                    "Bloom Filter False Positive Rate",
                     "False-Positive / Total",
                     [
                         panels.target(
                             f"(((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (table_id,type))) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (table_id,type))) >= 0",
                             "read req bloom filter false positive rate - {{table_id}} - {{type}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Vnode Pruning Ops",
+                    "Total number of SST pruning operations by vnode key range hints",
+                    [
+                        panels.target(
+                            f"sum(rate({table_metric('state_store_vnode_pruning_counts', vnode_get_filter)}[$__rate_interval])) by (table_id, result)",
+                            "{{result}} - {{table_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Vnode Pruning Rate",
+                    "Pruned / Checked - The ratio of SSTs skipped by vnode key range filtering",
+                    [
+                        panels.target(
+                            f"(sum(rate({table_metric('state_store_vnode_pruning_counts', vnode_get_pruned_filter)}[$__rate_interval])) by (table_id)) / (sum(rate({table_metric('state_store_vnode_pruning_counts', vnode_get_checked_filter)}[$__rate_interval])) by (table_id)) >= 0",
+                            "pruning rate - {{table_id}}",
                         ),
                     ],
                 ),
@@ -234,8 +185,9 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Sizes & Throughput"),
                 panels.timeseries_bytes(
-                    "Read Item Size - Get",
+                    "Get Item Size",
                     "",
                     [
                         *quantile(
@@ -248,7 +200,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Read Item Size - Iter",
+                    "Iter Item Size",
                     "",
                     [
                         *quantile(
@@ -261,7 +213,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Materialized View Read Size",
+                    "MV Read Size",
                     "",
                     [
                         *quantile(
@@ -274,7 +226,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Read Item Count - Iter",
+                    "Iter Item Count",
                     "",
                     [
                         *quantile(
@@ -295,7 +247,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "Read Throughput - Get",
+                    "Get Throughput",
                     "The size of a single key-value pair when reading by operation Get."
                     "Operation Get gets a single key-value pair with respect to a caller-specified key. If the key does not "
                     "exist in the storage, the size of key is counted into this metric and the size of value is 0.",
@@ -307,13 +259,24 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "Read Throughput - Iter",
+                    "Iter Throughput",
                     "The size of all the key-value paris when reading by operation Iter."
                     "Operation Iter scans a range of key-value pairs.",
                     [
                         panels.target(
                             f"sum(rate({metric('state_store_iter_size_sum')}[$__rate_interval])) by({COMPONENT_LABEL}, {NODE_LABEL})",
                             "{{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
+                panels.subheader("Metadata"),
+                panels.timeseries_count(
+                    "Slow Fetch Meta Unhits",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('state_store_iter_slow_fetch_meta_cache_unhits')}",
+                            "",
                         ),
                     ],
                 ),

@@ -7,23 +7,6 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-# Cleanup function
-cleanup_ldap() {
-    echo "--- Cleaning up LDAP environment"
-
-    # Stop RisingWave if running
-    risedev ci-kill || true
-
-    # Unset environment variables
-    unset LDAPTLS_CACERT || true
-    unset LDAPTLS_REQCERT || true
-    unset LDAPTLS_CERT || true
-    unset LDAPTLS_KEY || true
-}
-
-# Register cleanup function to run on exit
-trap cleanup_ldap EXIT
-
 while getopts 'p:' opt; do
     case ${opt} in
         p )

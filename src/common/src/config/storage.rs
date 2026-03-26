@@ -15,10 +15,12 @@
 use foyer::{
     Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig, Throttle,
 };
+use serde::de::Error as _;
 
 use super::*;
 
 /// The section `[storage]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StorageConfig {
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
@@ -80,7 +82,10 @@ pub struct StorageConfig {
     pub max_cached_recent_versions_number: usize,
 
     /// max prefetch block number
-    #[serde(default = "default::storage::max_prefetch_block_number")]
+    #[serde(
+        default = "default::storage::max_prefetch_block_number",
+        deserialize_with = "deserialize_max_prefetch_block_number"
+    )]
     pub max_prefetch_block_number: usize,
 
     #[serde(default = "default::storage::disable_remote_compactor")]
@@ -208,6 +213,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
     pub time_travel_version_cache_capacity: u64,
 
+    #[serde(default = "default::storage::table_change_log_cache_capacity")]
+    pub table_change_log_cache_capacity: u64,
+
     // iceberg compaction
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
@@ -217,7 +225,12 @@ pub struct StorageConfig {
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_max_file_count_per_partition")]
     pub iceberg_compaction_max_file_count_per_partition: u32,
+    /// DEPRECATED: This config will be deprecated in the future version.
+    /// Use sink config `compaction.write_parquet_max_row_group_rows` instead.
     #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
+    #[deprecated(
+        note = "This config is deprecated. Use sink config `compaction.write_parquet_max_row_group_rows` instead."
+    )]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 
     /// The ratio of iceberg compaction max parallelism to the number of CPU cores
@@ -252,6 +265,7 @@ pub struct StorageConfig {
 }
 
 /// the section `[storage.cache]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheConfig {
     /// Configure the capacity of the block cache in MB explicitly.
@@ -330,8 +344,15 @@ impl Default for CacheEvictionConfig {
     }
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CacheRefillConfig {
+    /// Inflight meta cache refill tasks limit.
+    ///
+    /// 0 for unlimited.
+    #[serde(default = "default::cache_refill::meta_refill_concurrency")]
+    pub meta_refill_concurrency: usize,
+
     /// `SSTable` levels to refill.
     #[serde(default = "default::cache_refill::data_refill_levels")]
     pub data_refill_levels: Vec<u32>,
@@ -380,6 +401,7 @@ pub struct CacheRefillConfig {
 /// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
 ///
 /// It's put at [`StorageConfig::data_file_cache`] and  [`StorageConfig::meta_file_cache`].
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
@@ -454,6 +476,7 @@ pub struct FileCacheConfig {
 }
 
 /// The subsections `[storage.object_store]`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreConfig {
     // alias is for backward compatibility
@@ -485,6 +508,19 @@ pub struct ObjectStoreConfig {
     pub upload_part_size: usize,
 }
 
+fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.max_prefetch_block_number must be greater than 0",
+        ));
+    }
+    Ok(value)
+}
+
 impl ObjectStoreConfig {
     pub fn set_atomic_write_dir(&mut self) {
         self.set_atomic_write_dir = true;
@@ -492,6 +528,7 @@ impl ObjectStoreConfig {
 }
 
 /// The subsections `[storage.object_store.s3]`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct S3ObjectStoreConfig {
     // alias is for backward compatibility
@@ -525,6 +562,7 @@ pub struct S3ObjectStoreConfig {
 }
 
 /// The subsections `[storage.object_store.s3.developer]`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct S3ObjectStoreDeveloperConfig {
     /// Whether to retry s3 sdk error from which no error metadata is provided.
@@ -546,6 +584,7 @@ pub struct S3ObjectStoreDeveloperConfig {
     pub use_opendal: bool,
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
 pub struct ObjectStoreRetryConfig {
     // A retry strategy driven by exponential back-off.
@@ -1044,6 +1083,10 @@ pub mod default {
             10
         }
 
+        pub fn table_change_log_cache_capacity() -> u64 {
+            60
+        }
+
         pub fn sst_skip_bloom_filter_in_serde() -> bool {
             false
         }
@@ -1179,6 +1222,10 @@ pub mod default {
     }
 
     pub mod cache_refill {
+        pub fn meta_refill_concurrency() -> usize {
+            0
+        }
+
         pub fn data_refill_levels() -> Vec<u32> {
             vec![]
         }

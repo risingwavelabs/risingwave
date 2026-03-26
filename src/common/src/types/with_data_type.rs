@@ -16,6 +16,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_pb::id::TypedId;
 
 use super::{
     DataType, Date, Decimal, F32, F64, Fields, Int256, Interval, JsonbRef, JsonbVal, Serial,
@@ -139,5 +140,17 @@ where
 {
     fn default_data_type() -> DataType {
         DataType::Struct(StructType::new(T::fields()))
+    }
+}
+
+impl<const N: usize> WithDataType for TypedId<N, u32> {
+    fn default_data_type() -> DataType {
+        DataType::Int32
+    }
+}
+
+impl<const N: usize> WithDataType for TypedId<N, u64> {
+    fn default_data_type() -> DataType {
+        DataType::Int64
     }
 }

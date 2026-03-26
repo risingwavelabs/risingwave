@@ -80,7 +80,6 @@ use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
-use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
@@ -126,6 +125,7 @@ pub async fn rpc_serve(
     meta_store_backend: MetaStoreBackend,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
+    server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
@@ -159,17 +159,18 @@ pub async fn rpc_serve(
         }
     };
 
-    rpc_serve_with_store(
+    Box::pin(rpc_serve_with_store(
         meta_store_impl,
         election_client,
         address_info,
         max_cluster_heartbeat_interval,
         lease_interval_secs,
+        server_config,
         opts,
         init_system_params,
         init_session_config,
         shutdown,
-    )
+    ))
     .await
 }
 
@@ -183,6 +184,7 @@ pub async fn rpc_serve_with_store(
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
+    server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
@@ -250,6 +252,7 @@ pub async fn rpc_serve_with_store(
         opts,
         init_system_params,
         init_session_config,
+        server_config,
         election_client,
         shutdown,
     )
@@ -312,6 +315,7 @@ pub async fn start_service_as_election_leader(
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
+    server_config: risingwave_common::config::ServerConfig,
     election_client: ElectionClientRef,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
@@ -396,41 +400,12 @@ pub async fn start_service_as_election_leader(
         prometheus_http_query::Client::from_str(x).unwrap()
     });
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
-    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
-        metadata_manager.clone(),
-        env.await_tree_reg().clone(),
-        hummock_manager.clone(),
-        env.event_log_manager_ref(),
-        prometheus_client.clone(),
-        prometheus_selector.clone(),
-        opts.redact_sql_option_keywords.clone(),
-        env.system_params_manager_impl_ref(),
-    ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
         max_length: opts.cached_traces_num,
         max_memory_usage: opts.cached_traces_memory_limit_bytes,
     });
     let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
-
-    #[cfg(not(madsim))]
-    let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
-        let dashboard_service = crate::dashboard::DashboardService {
-            await_tree_reg: env.await_tree_reg().clone(),
-            dashboard_addr: *dashboard_addr,
-            prometheus_client,
-            prometheus_selector,
-            metadata_manager: metadata_manager.clone(),
-            hummock_manager: hummock_manager.clone(),
-            compute_clients: ComputeClientPool::new(1, env.opts.compute_client_config.clone()), /* typically no need for plural clients */
-            diagnose_command,
-            trace_state,
-        };
-        let task = tokio::spawn(dashboard_service.serve());
-        Some(task)
-    } else {
-        None
-    };
 
     let (barrier_scheduler, scheduled_barriers) =
         BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
@@ -482,6 +457,7 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         metadata_manager.clone(),
         iceberg_compaction_stat_tx,
+        env.await_tree_reg().clone(),
     );
     tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
@@ -595,6 +571,7 @@ pub async fn start_service_as_election_leader(
         stream_manager.clone(),
         metadata_manager.clone(),
         refresh_manager.clone(),
+        iceberg_compaction_mgr.clone(),
     );
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
@@ -618,9 +595,46 @@ pub async fn start_service_as_election_leader(
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
     let hosted_iceberg_catalog_srv = HostedIcebergCatalogServiceImpl::new(env.clone());
-    let monitor_srv = MonitorServiceImpl {
-        metadata_manager: metadata_manager.clone(),
-        await_tree_reg: env.await_tree_reg().clone(),
+    let monitor_srv = MonitorServiceImpl::new(
+        metadata_manager.clone(),
+        env.await_tree_reg().clone(),
+        server_config.clone(),
+    );
+    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
+        metadata_manager.clone(),
+        env.await_tree_reg().clone(),
+        hummock_manager.clone(),
+        iceberg_compaction_mgr.clone(),
+        env.event_log_manager_ref(),
+        prometheus_client.clone(),
+        prometheus_selector.clone(),
+        opts.redact_sql_option_keywords.clone(),
+        env.system_params_manager_impl_ref(),
+    ));
+
+    #[cfg(not(madsim))]
+    let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
+        use risingwave_common::config::RpcClientConfig;
+        use risingwave_rpc_client::MonitorClientPool;
+
+        let dashboard_service = crate::dashboard::DashboardService {
+            await_tree_reg: env.await_tree_reg().clone(),
+            dashboard_addr: *dashboard_addr,
+            prometheus_client,
+            prometheus_selector,
+            metadata_manager: metadata_manager.clone(),
+            hummock_manager: hummock_manager.clone(),
+            monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
+            diagnose_command,
+            profile_service: risingwave_common_heap_profiling::ProfileServiceImpl::new(
+                server_config.clone(),
+            ),
+            trace_state,
+        };
+        let task = tokio::spawn(dashboard_service.serve());
+        Some(task)
+    } else {
+        None
     };
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
@@ -632,6 +646,18 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         backup_manager.clone(),
         &env.opts,
+        {
+            let barrier_manager = barrier_manager.clone();
+            Box::new(move || {
+                let barrier_manager = barrier_manager.clone();
+                Box::pin(async move {
+                    barrier_manager.may_snapshot_backfilling_job().await.unwrap_or_else(|e| {
+                        tracing::warn!(err = %e.as_report(), "failed to check having snapshot backfilling jobs. pause vacuum time travel");
+                        true
+                    })
+                })
+            })
+        }
     ));
     sub_tasks.push(start_worker_info_monitor(
         metadata_manager.clone(),
@@ -642,6 +668,7 @@ pub async fn start_service_as_election_leader(
     sub_tasks.push(start_info_monitor(
         metadata_manager.clone(),
         hummock_manager.clone(),
+        barrier_manager.clone(),
         env.system_params_manager_impl_ref(),
         meta_metrics.clone(),
     ));

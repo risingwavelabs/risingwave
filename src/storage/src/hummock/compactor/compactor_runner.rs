@@ -56,7 +56,7 @@ use crate::hummock::compactor::{
 use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
-    ValueMeta,
+    ValueMeta, ValueSkipWatermarkIterator, ValueSkipWatermarkState,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -89,6 +89,7 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
+        options.max_vnode_key_range_bytes = task.effective_max_vnode_key_range_bytes();
         let use_block_based_filter = task.should_use_block_based_filter();
 
         let key_range = KeyRange {
@@ -106,7 +107,6 @@ impl CompactorRunner {
                 gc_delete_keys: task.gc_delete_keys,
                 retain_multiple_version: false,
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
-                task_type: task.task_type,
                 use_block_based_filter,
                 table_vnode_partition: task.table_vnode_partition.clone(),
                 table_schemas: task
@@ -235,6 +235,8 @@ impl CompactorRunner {
             }
         }
 
+        // // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // // in https://github.com/risingwavelabs/risingwave/issues/13148
         // The `Pk/NonPkPrefixSkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
         let combine_iter = {
@@ -248,10 +250,18 @@ impl CompactorRunner {
                 ),
             );
 
-            NonPkPrefixSkipWatermarkIterator::new(
+            let pk_skip_watermark_iter = NonPkPrefixSkipWatermarkIterator::new(
                 skip_watermark_iter,
                 NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
                     self.compact_task.non_pk_prefix_table_watermarks.clone(),
+                    compaction_catalog_agent_ref.clone(),
+                ),
+            );
+
+            ValueSkipWatermarkIterator::new(
+                pk_skip_watermark_iter,
+                ValueSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.value_table_watermarks.clone(),
                     compaction_catalog_agent_ref,
                 ),
             )

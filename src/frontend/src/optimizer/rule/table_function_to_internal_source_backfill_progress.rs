@@ -64,6 +64,7 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
                 Field::new("job_id", DataType::Int32),
                 Field::new("fragment_id", DataType::Int32),
                 Field::new("backfill_state_table_id", DataType::Int32),
+                Field::new("partition_id", DataType::Varchar),
                 Field::new("backfill_progress", DataType::Jsonb),
             ];
             let plan = LogicalValues::new(vec![], Schema::new(fields), ctx);
@@ -94,6 +95,11 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
         let fragment_id_expr = Self::build_u32_expr(backfill_info.fragment_id.as_raw_id());
         let table_id_expr = Self::build_u32_expr(backfill_info.table_id.as_raw_id());
 
+        let partition_id = ExprImpl::InputRef(Box::new(InputRef {
+            index: backfill_info.partition_id_column_index,
+            data_type: DataType::Varchar,
+        }));
+
         let backfill_progress = ExprImpl::InputRef(Box::new(InputRef {
             index: backfill_info.backfill_progress_column_index,
             data_type: DataType::Jsonb,
@@ -105,6 +111,7 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
                 job_id_expr,
                 fragment_id_expr,
                 table_id_expr,
+                partition_id,
                 backfill_progress,
             ],
         ))
@@ -136,6 +143,7 @@ struct SourceBackfillInfo {
     job_id: JobId,
     fragment_id: FragmentId,
     table_id: TableId,
+    partition_id_column_index: usize,
     backfill_progress_column_index: usize,
 }
 
@@ -154,6 +162,16 @@ impl SourceBackfillInfo {
                 StreamSourceScan::BACKFILL_PROGRESS_COLUMN_NAME
             );
         };
+        let Some(partition_id_column_index) = table
+            .columns
+            .iter()
+            .position(|c| c.name() == StreamSourceScan::PARTITION_ID_COLUMN_NAME)
+        else {
+            bail!(
+                "`{}` column not found in source backfill state table schema",
+                StreamSourceScan::PARTITION_ID_COLUMN_NAME
+            );
+        };
         let fragment_id = table.fragment_id;
         let table_id = table.id;
 
@@ -161,6 +179,7 @@ impl SourceBackfillInfo {
             job_id,
             fragment_id,
             table_id,
+            partition_id_column_index,
             backfill_progress_column_index,
         })
     }

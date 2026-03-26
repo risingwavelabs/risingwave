@@ -28,13 +28,14 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_pb::hummock::PbHummockVersionCheckpoint;
+use risingwave_pb::hummock::{PbHummockVersionCheckpoint, PbHummockVersionCheckpointEnvelope};
 use thiserror_ext::AsReport;
 
 use crate::backup_restore::restore_impl::v2::{LoaderV2, WriterModelV2ToMetaStoreV2};
 use crate::backup_restore::restore_impl::{Loader, Writer};
 use crate::backup_restore::utils::{get_backup_store, get_meta_store};
 use crate::controller::SqlMetaStore;
+use crate::hummock::compress_payload;
 
 /// Command-line arguments for restore.
 #[derive(clap::Args, Debug, Clone)]
@@ -116,8 +117,24 @@ async fn restore_hummock_version(
         // Ignore stale objects. Full GC will clear them.
         stale_objects: Default::default(),
     };
+    use anyhow::Context;
     use prost::Message;
-    let buf = checkpoint.encode_to_vec();
+    use risingwave_common::config::CheckpointCompression;
+
+    // Use zstd compression by default. The next checkpoint written by the cluster
+    // will use the configured compression algorithm from the config file.
+    let compression = CheckpointCompression::Zstd;
+    let raw_bytes = checkpoint.encode_to_vec();
+    let compressed = compress_payload(compression, &raw_bytes)
+        .context("zstd compression failed")
+        .map_err(BackupError::Other)?;
+    let checksum = crate::hummock::xxhash64_checksum(&compressed);
+    let envelope = PbHummockVersionCheckpointEnvelope {
+        compression_algorithm: compression as i32,
+        payload: compressed,
+        checksum: Some(checksum),
+    };
+    let buf = envelope.encode_to_vec();
     object_store
         .upload(&checkpoint_path, buf.into())
         .await
@@ -201,6 +218,25 @@ async fn dispatch<L: Loader<S>, W: Writer<S>, S: Metadata>(
 
     // Restore meta store.
     let target_snapshot = loader.load(target_id).await?;
+    if !opts.overwrite_hummock_storage_endpoint {
+        let storage_url = target_snapshot.metadata.storage_url()?;
+        if storage_url != opts.hummock_storage_url {
+            return Err(BackupError::Other(anyhow::anyhow!(
+                "storage_url mismatch: {} {}",
+                storage_url,
+                opts.hummock_storage_url
+            )));
+        }
+        let storage_directory = target_snapshot.metadata.storage_directory()?;
+        if storage_directory != opts.hummock_storage_directory {
+            return Err(BackupError::Other(anyhow::anyhow!(
+                "storage_directory mismatch: {} {}",
+                storage_directory,
+                opts.hummock_storage_directory
+            )));
+        }
+    }
+
     if opts.dry_run {
         tracing::info!("Complete dry run.");
         return Ok(());

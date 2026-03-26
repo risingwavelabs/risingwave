@@ -16,19 +16,20 @@ use risingwave_common::catalog::FragmentTypeMask;
 
 use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;
+use crate::controller::utils::load_streaming_jobs_by_ids;
 
 pub(crate) async fn update_internal_tables(
     txn: &DatabaseTransaction,
     object_id: ObjectId,
     column: object::Column,
-    new_value: Value,
+    new_value: impl Into<Value>,
     objects_to_notify: &mut Vec<PbObjectInfo>,
 ) -> MetaResult<()> {
     let internal_tables = get_internal_tables_by_id(object_id.as_job_id(), txn).await?;
 
     if !internal_tables.is_empty() {
         Object::update_many()
-            .col_expr(column, SimpleExpr::Value(new_value))
+            .col_expr(column, SimpleExpr::Value(new_value.into()))
             .filter(object::Column::Oid.is_in(internal_tables.clone()))
             .exec(txn)
             .await?;
@@ -38,9 +39,14 @@ pub(crate) async fn update_internal_tables(
             .filter(table::Column::TableId.is_in(internal_tables))
             .all(txn)
             .await?;
+        let streaming_jobs =
+            load_streaming_jobs_by_ids(txn, table_objs.iter().map(|(table, _)| table.job_id()))
+                .await?;
         for (table, table_obj) in table_objs {
+            let job_id = table.job_id();
+            let streaming_job = streaming_jobs.get(&job_id).cloned();
             objects_to_notify.push(PbObjectInfo::Table(
-                ObjectModel(table, table_obj.unwrap()).into(),
+                ObjectModel(table, table_obj.unwrap(), streaming_job).into(),
             ));
         }
     }
@@ -107,129 +113,16 @@ impl CatalogController {
         }
 
         for (table_id, cdc_table_id) in cdc_table_ids {
-            table::ActiveModel {
+            Table::update(table::ActiveModel {
                 table_id: Set(table_id as _),
                 cdc_table_id: Set(Some(cdc_table_id)),
                 ..Default::default()
-            }
-            .update(&txn)
+            })
+            .exec(&txn)
             .await?;
         }
         txn.commit().await?;
         Ok(())
-    }
-
-    pub(crate) async fn list_object_dependencies(
-        &self,
-        include_creating: bool,
-    ) -> MetaResult<Vec<PbObjectDependencies>> {
-        let inner = self.inner.read().await;
-
-        let dependencies: Vec<(ObjectId, ObjectId)> = {
-            let filter = if include_creating {
-                Expr::value(true)
-            } else {
-                streaming_job::Column::JobStatus.eq(JobStatus::Created)
-            };
-            ObjectDependency::find()
-                .select_only()
-                .columns([
-                    object_dependency::Column::Oid,
-                    object_dependency::Column::UsedBy,
-                ])
-                .join(
-                    JoinType::InnerJoin,
-                    object_dependency::Relation::Object1.def(),
-                )
-                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-                .filter(filter)
-                .into_tuple()
-                .all(&inner.db)
-                .await?
-        };
-        let mut obj_dependencies = dependencies
-            .into_iter()
-            .map(|(oid, used_by)| PbObjectDependencies {
-                object_id: used_by,
-                referenced_object_id: oid,
-            })
-            .collect_vec();
-
-        let view_dependencies: Vec<(ObjectId, ObjectId)> = ObjectDependency::find()
-            .select_only()
-            .columns([
-                object_dependency::Column::Oid,
-                object_dependency::Column::UsedBy,
-            ])
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .join(JoinType::InnerJoin, object::Relation::View.def())
-            .into_tuple()
-            .all(&inner.db)
-            .await?;
-
-        obj_dependencies.extend(view_dependencies.into_iter().map(|(view_id, table_id)| {
-            PbObjectDependencies {
-                object_id: table_id,
-                referenced_object_id: view_id,
-            }
-        }));
-
-        let sink_dependencies: Vec<(SinkId, TableId)> = {
-            let filter = if include_creating {
-                sink::Column::TargetTable.is_not_null()
-            } else {
-                streaming_job::Column::JobStatus
-                    .eq(JobStatus::Created)
-                    .and(sink::Column::TargetTable.is_not_null())
-            };
-            Sink::find()
-                .select_only()
-                .columns([sink::Column::SinkId, sink::Column::TargetTable])
-                .join(JoinType::InnerJoin, sink::Relation::Object.def())
-                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-                .filter(filter)
-                .into_tuple()
-                .all(&inner.db)
-                .await?
-        };
-        obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
-            PbObjectDependencies {
-                object_id: table_id.into(),
-                referenced_object_id: sink_id.into(),
-            }
-        }));
-
-        let subscription_dependencies: Vec<(SubscriptionId, TableId)> = {
-            let filter = if include_creating {
-                subscription::Column::DependentTableId.is_not_null()
-            } else {
-                subscription::Column::SubscriptionState
-                    .eq(Into::<i32>::into(SubscriptionState::Created))
-                    .and(subscription::Column::DependentTableId.is_not_null())
-            };
-            Subscription::find()
-                .select_only()
-                .columns([
-                    subscription::Column::SubscriptionId,
-                    subscription::Column::DependentTableId,
-                ])
-                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
-                .filter(filter)
-                .into_tuple()
-                .all(&inner.db)
-                .await?
-        };
-        obj_dependencies.extend(subscription_dependencies.into_iter().map(
-            |(subscription_id, table_id)| PbObjectDependencies {
-                object_id: subscription_id.into(),
-                referenced_object_id: table_id.into(),
-            },
-        ));
-
-        Ok(obj_dependencies)
     }
 
     pub(crate) async fn log_cleaned_dirty_jobs(

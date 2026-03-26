@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
+use std::iter;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
@@ -50,7 +51,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{
     AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
-    StreamingConfig, UdfConfig, load_config,
+    RpcClientConfig, StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
@@ -76,9 +77,11 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
+    MonitorClientPool, MonitorClientPoolRef,
 };
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -119,7 +122,7 @@ use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
-use crate::rpc::FrontendServiceImpl;
+use crate::rpc::{FrontendServiceImpl, MonitorServiceImpl};
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, GLOBAL_DISTRIBUTED_QUERY_METRICS, HummockSnapshotManager,
@@ -155,6 +158,7 @@ pub(crate) struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
     frontend_client_pool: FrontendClientPoolRef,
+    monitor_client_pool: MonitorClientPoolRef,
 
     /// Each session is identified by (`process_id`,
     /// `secret_key`). When Cancel Request received, find corresponding session and cancel all
@@ -187,6 +191,13 @@ pub(crate) struct FrontendEnv {
 
     /// Memory context used for batch executors in frontend.
     mem_context: MemoryContext,
+
+    #[cfg(feature = "datafusion")]
+    /// Shared budget context for **DataFusion** spillable operators.
+    /// Created by [`crate::datafusion::execute::memory_ctx::create_df_spillable_budget_ctx`];
+    /// caps total spillable usage so unspillable operators always have headroom.
+    /// Not used by the RisingWave batch engine.
+    df_spillable_budget_ctx: MemoryContext,
 
     /// address of the serverless backfill controller.
     serverless_backfill_controller_addr: String,
@@ -223,6 +234,7 @@ impl FrontendEnv {
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let frontend_client_pool = Arc::new(FrontendClientPool::for_test());
+        let monitor_client_pool = Arc::new(MonitorClientPool::for_test());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool,
@@ -265,6 +277,7 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             frontend_client_pool,
+            monitor_client_pool,
             sessions_map,
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
@@ -278,6 +291,8 @@ impl FrontendEnv {
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
+            #[cfg(feature = "datafusion")]
+            df_spillable_budget_ctx: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
             prometheus_client: None,
             prometheus_selector: String::new(),
@@ -357,6 +372,7 @@ impl FrontendEnv {
             1,
             config.batch.developer.frontend_client_config.clone(),
         ));
+        let monitor_client_pool = Arc::new(MonitorClientPool::new(1, RpcClientConfig::default()));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool.clone(),
@@ -415,6 +431,7 @@ impl FrontendEnv {
 
         let health_srv = HealthServiceImpl::new();
         let frontend_srv = FrontendServiceImpl::new(sessions_map.clone());
+        let monitor_srv = MonitorServiceImpl::new(config.server.clone());
         let frontend_rpc_addr = opts.frontend_rpc_listener_addr.parse().unwrap();
 
         let telemetry_manager = TelemetryManager::new(
@@ -436,6 +453,7 @@ impl FrontendEnv {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
                 .add_service(FrontendServiceServer::new(frontend_srv))
+                .add_service(MonitorServiceServer::new(monitor_srv))
                 .serve(frontend_rpc_addr)
                 .await
                 .unwrap();
@@ -498,6 +516,9 @@ impl FrontendEnv {
             frontend_metrics.batch_total_mem.clone(),
             batch_memory_limit as u64,
         );
+        #[cfg(feature = "datafusion")]
+        let df_spillable_budget_ctx =
+            crate::datafusion::create_df_spillable_budget_ctx(&mem_context);
 
         // Initialize Prometheus client if endpoint is provided
         let prometheus_client = if let Some(ref endpoint) = opts.prometheus_endpoint {
@@ -542,6 +563,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool: compute_client_pool,
                 frontend_client_pool,
+                monitor_client_pool,
                 frontend_metrics,
                 cursor_metrics,
                 spill_metrics,
@@ -556,6 +578,8 @@ impl FrontendEnv {
                 creating_streaming_job_tracker,
                 compute_runtime,
                 mem_context,
+                #[cfg(feature = "datafusion")]
+                df_spillable_budget_ctx,
                 prometheus_client,
                 prometheus_selector,
             },
@@ -644,6 +668,10 @@ impl FrontendEnv {
         self.frontend_client_pool.clone()
     }
 
+    pub fn monitor_client_pool(&self) -> MonitorClientPoolRef {
+        self.monitor_client_pool.clone()
+    }
+
     pub fn batch_config(&self) -> &BatchConfig {
         &self.batch_config
     }
@@ -694,6 +722,11 @@ impl FrontendEnv {
 
     pub fn mem_context(&self) -> MemoryContext {
         self.mem_context.clone()
+    }
+
+    #[cfg(feature = "datafusion")]
+    pub fn df_spillable_budget_ctx(&self) -> MemoryContext {
+        self.df_spillable_budget_ctx.clone()
     }
 }
 
@@ -1299,17 +1332,43 @@ impl SessionImpl {
         Ok(secret.clone())
     }
 
-    pub fn list_change_log_epochs(
+    pub async fn list_change_log_epochs(
         &self,
         table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        Ok(self
+        let Some(max_epoch) = self
             .env
             .hummock_snapshot_manager()
             .acquire()
-            .list_change_log_epochs(table_id, min_epoch, max_count))
+            .version()
+            .state_table_info
+            .info()
+            .get(&table_id)
+            .map(|s| s.committed_epoch)
+        else {
+            return Ok(vec![]);
+        };
+        let ret = self
+            .env
+            .meta_client_ref()
+            .get_hummock_table_change_log(
+                Some(min_epoch),
+                Some(max_epoch),
+                Some(iter::once(table_id).collect()),
+                true,
+                Some(max_count),
+            )
+            .await?;
+        let Some(e) = ret.get(&table_id) else {
+            return Ok(vec![]);
+        };
+        Ok(e.iter()
+            .flat_map(|l| l.epochs())
+            .filter(|e| *e >= min_epoch && *e <= max_epoch)
+            .take(max_count as usize)
+            .collect())
     }
 
     pub fn clear_cancel_query_flag(&self) {
@@ -1363,7 +1422,7 @@ impl SessionImpl {
             );
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql.clone(), formats).await?;
+        let rsp = Box::pin(handle(self, stmt, sql.clone(), formats)).await?;
         Ok(rsp)
     }
 
@@ -1384,10 +1443,10 @@ impl SessionImpl {
     }
 
     pub fn statement_timeout(&self) -> Duration {
-        if self.config().statement_timeout() == 0 {
+        if self.config().statement_timeout().millis() == 0 {
             Duration::from_secs(self.env.batch_config.statement_timeout_in_sec as u64)
         } else {
-            Duration::from_secs(self.config().statement_timeout() as u64)
+            Duration::from_millis(self.config().statement_timeout().millis() as u64)
         }
     }
 
@@ -1496,22 +1555,19 @@ impl SessionManager for SessionManagerImpl {
     type Error = RwError;
     type Session = SessionImpl;
 
-    fn create_dummy_session(
-        &self,
-        database_id: DatabaseId,
-        user_id: u32,
-    ) -> Result<Arc<Self::Session>> {
+    fn create_dummy_session(&self, database_id: DatabaseId) -> Result<Arc<Self::Session>> {
         let dummy_addr = Address::Tcp(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             5691, // port of meta
         ));
-        let user_reader = self.env.user_info_reader();
-        let reader = user_reader.read_guard();
-        if let Some(user_name) = reader.get_user_name_by_id(user_id) {
-            self.connect_inner(database_id, user_name.as_str(), Arc::new(dummy_addr))
-        } else {
-            bail_catalog_error!("Role id {} does not exist", user_id)
-        }
+
+        // Always use the built-in super user for dummy sessions.
+        // This avoids permission checks tied to a specific user_id.
+        self.connect_inner(
+            database_id,
+            risingwave_common::catalog::DEFAULT_SUPER_USER,
+            Arc::new(dummy_addr),
+        )
     }
 
     fn connect(
@@ -1630,7 +1686,6 @@ impl SessionManagerImpl {
                 client_addr,
             );
 
-            // TODO: adding `FATAL` message support for no matching HBA entry.
             let Some(hba_entry_opt) = hba_entry_opt else {
                 bail_permission_denied!(
                     "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
@@ -1739,7 +1794,7 @@ impl Session for SessionImpl {
         let sql: Arc<str> = Arc::from(sql_str);
         // The handle can be slow. Release potential large String early.
         drop(string);
-        let rsp = handle(self, stmt, sql, vec![format]).await?;
+        let rsp = Box::pin(handle(self, stmt, sql, vec![format])).await?;
         Ok(rsp)
     }
 
@@ -1774,7 +1829,7 @@ impl Session for SessionImpl {
     }
 
     async fn execute(self: Arc<Self>, portal: Portal) -> Result<PgResponse<PgResponseStream>> {
-        let rsp = handle_execute(self, portal).await?;
+        let rsp = Box::pin(handle_execute(self, portal)).await?;
         Ok(rsp)
     }
 
@@ -1874,6 +1929,10 @@ impl Session for SessionImpl {
             }
         }
         Ok(())
+    }
+
+    fn user(&self) -> String {
+        self.user_name()
     }
 }
 

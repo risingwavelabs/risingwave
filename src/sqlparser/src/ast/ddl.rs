@@ -96,6 +96,11 @@ pub enum AlterTableOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -140,6 +145,11 @@ pub enum AlterIndexOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -163,6 +173,11 @@ pub enum AlterViewOperation {
     },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
     },
@@ -213,6 +228,11 @@ pub enum AlterSinkOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -228,6 +248,9 @@ pub enum AlterSinkOperation {
     SetSinkRateLimit {
         rate_limit: i32,
     },
+    SetBackfillRateLimit {
+        rate_limit: i32,
+    },
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -241,6 +264,7 @@ pub enum AlterSubscriptionOperation {
     RenameSubscription { subscription_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
+    SetRetention { retention: Value },
     SwapRenameSubscription { target_subscription: ObjectName },
 }
 
@@ -273,6 +297,11 @@ pub enum AlterSourceOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -281,6 +310,8 @@ pub enum AlterSourceOperation {
     ResetConfig {
         keys: Vec<ObjectName>,
     },
+    /// `RESET` - Reset CDC source offset to latest
+    ResetSource,
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -289,6 +320,7 @@ pub enum AlterSourceOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterFunctionOperation {
     SetSchema { new_schema_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -300,7 +332,13 @@ pub enum AlterConnectionOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterSecretOperation {
-    ChangeCredential { new_credential: Value },
+    ChangeCredential {
+        with_options: Vec<SqlOption>,
+        new_credential: Value,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -407,6 +445,17 @@ impl fmt::Display for AlterTableOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterTableOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
             AlterTableOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -459,6 +508,17 @@ impl fmt::Display for AlterIndexOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterIndexOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
             AlterIndexOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -488,6 +548,17 @@ impl fmt::Display for AlterViewOperation {
                 write!(
                     f,
                     "SET PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+            AlterViewOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -549,6 +620,17 @@ impl fmt::Display for AlterSinkOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSinkOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
             AlterSinkOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -560,6 +642,9 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
+            }
+            AlterSinkOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
             }
             AlterSinkOperation::AlterConnectorProps {
                 alter_props: changed_props,
@@ -588,6 +673,9 @@ impl fmt::Display for AlterSubscriptionOperation {
             }
             AlterSubscriptionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSubscriptionOperation::SetRetention { retention } => {
+                write!(f, "SET RETENTION TO {}", retention)
             }
             AlterSubscriptionOperation::SwapRenameSubscription {
                 target_subscription,
@@ -636,11 +724,25 @@ impl fmt::Display for AlterSourceOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSourceOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
             AlterSourceOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
             AlterSourceOperation::ResetConfig { keys } => {
                 write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
+            }
+            AlterSourceOperation::ResetSource => {
+                write!(f, "RESET")
             }
             AlterSourceOperation::AlterConnectorProps { alter_props } => {
                 write!(
@@ -658,6 +760,9 @@ impl fmt::Display for AlterFunctionOperation {
         match self {
             AlterFunctionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {new_schema_name}")
+            }
+            AlterFunctionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }
@@ -686,8 +791,19 @@ impl fmt::Display for AlterConnectionOperation {
 impl fmt::Display for AlterSecretOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AlterSecretOperation::ChangeCredential { new_credential } => {
-                write!(f, "AS {new_credential}")
+            AlterSecretOperation::ChangeCredential {
+                new_credential,
+                with_options,
+            } => {
+                write!(
+                    f,
+                    "WITH ({}) AS {}",
+                    display_comma_separated(with_options),
+                    new_credential
+                )
+            }
+            AlterSecretOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }
@@ -1048,7 +1164,7 @@ impl fmt::Display for ReferentialAction {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebhookSourceInfo {
     pub secret_ref: Option<SecretRefValue>,
-    pub signature_expr: Expr,
+    pub signature_expr: Option<Expr>,
     pub wait_for_persistence: bool,
     pub is_batched: bool,
 }

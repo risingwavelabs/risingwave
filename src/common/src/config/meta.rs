@@ -26,6 +26,45 @@ pub enum MetaBackend {
     Mysql,
 }
 
+/// Compression algorithm for hummock version checkpoint serialization.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[repr(i32)]
+pub enum CheckpointCompression {
+    /// No compression.
+    ///
+    /// NOTE: The numeric values are aligned with protobuf `CheckpointCompressionAlgorithm`.
+    None = 0,
+    /// Zstd compression (default, good balance between ratio and speed).
+    #[default]
+    Zstd = 1,
+    /// Lz4 compression (faster but lower ratio).
+    Lz4 = 2,
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::CheckpointCompressionAlgorithm;
+
+    use super::CheckpointCompression;
+
+    #[test]
+    fn checkpoint_compression_numeric_values_align_with_pb() {
+        assert_eq!(
+            CheckpointCompression::None as i32,
+            CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified as i32
+        );
+        assert_eq!(
+            CheckpointCompression::Zstd as i32,
+            CheckpointCompressionAlgorithm::CheckpointCompressionZstd as i32
+        );
+        assert_eq!(
+            CheckpointCompression::Lz4 as i32,
+            CheckpointCompressionAlgorithm::CheckpointCompressionLz4 as i32
+        );
+    }
+}
+
 #[derive(Copy, Clone, Debug, Default)]
 pub enum DefaultParallelism {
     #[default]
@@ -88,6 +127,7 @@ impl<'de> Deserialize<'de> for DefaultParallelism {
 }
 
 /// The section `[meta]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaConfig {
     /// Objects within `min_sst_retention_time_sec` won't be deleted by hummock full GC, even they
@@ -111,7 +151,8 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::max_inflight_time_travel_query")]
     pub max_inflight_time_travel_query: u64,
 
-    /// Schedule compaction for all compaction groups with this interval.
+    /// Schedule `Dynamic` compaction for all compaction groups with this interval.
+    /// Groups in cooldown (recently found to have no compaction work) are skipped.
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
 
@@ -132,6 +173,23 @@ pub struct MetaConfig {
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
+
+    /// Compression algorithm for hummock version checkpoint.
+    #[serde(default)]
+    pub checkpoint_compression_algorithm: CheckpointCompression,
+
+    /// Chunk size in bytes for reading large checkpoints.
+    /// Large checkpoints are read in parallel chunks to avoid single-request timeout issues.
+    /// Default: 128MB
+    #[serde(default = "default::meta::checkpoint_read_chunk_size")]
+    pub checkpoint_read_chunk_size: usize,
+
+    /// Maximum number of concurrent chunk reads when reading large checkpoints.
+    /// Higher values may improve read throughput but increase memory usage.
+    /// Memory usage = `checkpoint_read_chunk_size` * `checkpoint_read_max_in_flight_chunks`
+    /// Default: 4
+    #[serde(default = "default::meta::checkpoint_read_max_in_flight_chunks")]
+    pub checkpoint_read_max_in_flight_chunks: usize,
 
     /// If enabled, `SSTable` object file and version delta will be retained.
     ///
@@ -298,8 +356,9 @@ pub struct MetaConfig {
     pub event_log_channel_max_size: u32,
 
     #[serde(default)]
-    #[config_doc(omitted)]
+    #[config_doc(nested)]
     pub developer: MetaDeveloperConfig,
+
     /// Whether compactor should rewrite row to remove dropped column.
     #[serde(default = "default::meta::enable_dropped_column_reclaim")]
     pub enable_dropped_column_reclaim: bool,
@@ -377,6 +436,7 @@ pub struct MetaConfig {
 }
 
 /// Note: only applies to meta store backends other than `SQLite`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
     /// Maximum number of connections for the meta store connection pool.
@@ -400,6 +460,7 @@ pub struct MetaStoreConfig {
 ///
 /// It is put at [`MetaConfig::developer`].
 #[serde_prefix_all("meta_", mode = "alias")]
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaDeveloperConfig {
     /// The number of traces to be cached in-memory by the tracing collector
@@ -444,6 +505,9 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::time_travel_vacuum_interval_sec")]
     pub time_travel_vacuum_interval_sec: u64,
 
+    #[serde(default = "default::developer::time_travel_vacuum_max_version_count")]
+    pub time_travel_vacuum_max_version_count: Option<u32>,
+
     /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
     #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
@@ -475,8 +539,15 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default)]
     pub frontend_client_config: RpcClientConfig,
+
+    #[serde(default = "default::developer::table_change_log_insert_batch_size")]
+    pub table_change_log_insert_batch_size: u64,
+
+    #[serde(default = "default::developer::table_change_log_delete_batch_size")]
+    pub table_change_log_delete_batch_size: u64,
 }
 
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct CompactionConfig {
     #[serde(default = "default::compaction_config::max_bytes_for_level_base")]
@@ -533,10 +604,10 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
-    #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
-    pub vnode_aligned_level_size_threshold: Option<u64>,
     #[serde(default = "default::compaction_config::max_kv_count_for_xor16")]
     pub max_kv_count_for_xor16: Option<u64>,
+    #[serde(default = "default::compaction_config::max_vnode_key_range_bytes")]
+    pub max_vnode_key_range_bytes: Option<u64>,
 }
 
 pub mod default {
@@ -566,7 +637,7 @@ pub mod default {
         }
 
         pub fn periodic_compaction_interval_sec() -> u64 {
-            60
+            300
         }
 
         pub fn vacuum_interval_sec() -> u64 {
@@ -583,6 +654,14 @@ pub mod default {
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
+        }
+
+        pub fn checkpoint_read_chunk_size() -> usize {
+            128 * 1024 * 1024 // 128MB
+        }
+
+        pub fn checkpoint_read_max_in_flight_chunks() -> usize {
+            4
         }
 
         pub fn enable_hummock_data_archive() -> bool {
@@ -813,8 +892,8 @@ pub mod default {
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 5000;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
         const DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION: bool = true;
-        const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
         pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
+        const DEFAULT_MAX_VNODE_KEY_RANGE_BYTES: Option<u64> = None;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -922,12 +1001,12 @@ pub mod default {
             DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION
         }
 
-        pub fn vnode_aligned_level_size_threshold() -> Option<u64> {
-            DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD
-        }
-
         pub fn max_kv_count_for_xor16() -> Option<u64> {
             Some(DEFAULT_MAX_KV_COUNT_FOR_XOR16)
+        }
+
+        pub fn max_vnode_key_range_bytes() -> Option<u64> {
+            DEFAULT_MAX_VNODE_KEY_RANGE_BYTES
         }
     }
 }

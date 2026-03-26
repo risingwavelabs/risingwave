@@ -1,0 +1,138 @@
+# Test that backfill order control maintains order after recovery
+# This test verifies:
+# 1. Backfill order is maintained with t1 -> t2
+# 2. Progress is correctly tracked for each table
+# 3. After recovery, the order is still maintained
+# 4. t2 remains paused until t1 completes
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO TRUE;
+
+# Cleanup
+statement ok
+drop materialized view if exists mv1;
+
+statement ok
+drop materialized view if exists mv1_validate;
+
+statement ok
+drop table if exists t1 cascade;
+
+statement ok
+drop table if exists t2 cascade;
+
+# Create tables
+statement ok
+create table t1 (v1 int);
+
+statement ok
+create table t2 (v1 int);
+
+# Insert 10000 records into each table
+statement ok
+insert into t1 select i from generate_series(1, 10000) as t(i);
+
+statement ok
+insert into t2 select i from generate_series(1, 10000) as t(i);
+
+statement ok
+flush;
+
+# Set background ddl and backfill rate limit
+statement ok
+set background_ddl=true;
+
+statement ok
+set backfill_rate_limit=1;
+
+# Create materialized view with backfill order control: t1 -> t2
+statement ok
+create materialized view mv1
+with (backfill_order = FIXED(t1 -> t2))
+as select v1 from t1
+union
+select v1 from t2;
+
+# Wait for t1 backfill to start (progress > 0), t2 should still be paused
+query I retry 20 backoff 1s
+select
+  job_name,
+  upstream_table_name,
+  case
+  when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
+    then 'table backfill started'
+  else
+    'paused'
+  end
+from rw_catalog.rw_fragment_backfill_progress
+ORDER BY job_name, upstream_table_name;
+----
+public.mv1	public.t1	table backfill started
+public.mv1	public.t2	paused
+
+# Trigger recovery
+statement ok
+recover;
+
+# After recovery, verify t1 still has progress and t2 is still paused
+sleep 2s
+
+query I retry 10 backoff 1s
+select
+  job_name,
+  upstream_table_name,
+  case
+  when regexp_match(progress, '([0-9]+?\.?[0-9]+)%')[1]::numeric > 0.0
+    then 'table backfill started'
+  else
+    'paused'
+  end
+from rw_catalog.rw_fragment_backfill_progress
+ORDER BY job_name, upstream_table_name;
+----
+public.mv1	public.t1	table backfill started
+public.mv1	public.t2	paused
+
+# Alter backfill rate limit to unbounded
+statement ok
+alter materialized view mv1 set backfill_rate_limit = default;
+
+# Wait for the mv to finish backfilling
+query I retry 20 backoff 2s
+select * from rw_catalog.rw_fragment_backfill_progress;
+----
+
+# Validate the results by creating a non-background MV with the same query
+statement ok
+set background_ddl=false;
+
+statement ok
+set backfill_rate_limit=default;
+
+statement ok
+create materialized view mv1_validate
+as select v1 from t1
+union
+select v1 from t2;
+
+# Verify both MVs have the same results
+query I
+select * from mv1 except select * from mv1_validate;
+----
+
+query I
+select * from mv1_validate except select * from mv1;
+----
+
+# Cleanup
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv1_validate;
+
+statement ok
+drop table t1 cascade;
+
+statement ok
+drop table t2 cascade;

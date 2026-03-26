@@ -31,6 +31,7 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use tracing::warn;
 
 use crate::barrier::checkpoint::creating_job::CreatingJobInfo;
+use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -50,7 +51,7 @@ impl CreateMviewLogStoreProgressTracker {
         }
     }
 
-    pub(super) fn gen_ddl_progress(&self) -> String {
+    pub(super) fn gen_backfill_progress(&self) -> String {
         let sum = self.ongoing_actors.values().sum::<u64>() as f64;
         let count = if self.ongoing_actors.is_empty() {
             1
@@ -129,6 +130,7 @@ pub(super) enum CreatingStreamingJobStatus {
     /// will be finished when all previously injected barriers have been collected
     /// Store the `prev_epoch` that will finish at.
     Finishing(u64, TrackingJob),
+    Resetting(Vec<Notifier>),
     PlaceHolder,
 }
 
@@ -198,7 +200,8 @@ impl CreatingStreamingJobStatus {
             } => {
                 log_store_progress_tracker.update(create_mview_progress);
             }
-            CreatingStreamingJobStatus::Finishing(..) => {}
+            CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(..) => {}
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -229,6 +232,9 @@ impl CreatingStreamingJobStatus {
             CreatingStreamingJobStatus::Finishing { .. } => {
                 unreachable!("should not start consuming upstream for a job again")
             }
+            CreatingStreamingJobStatus::Resetting(..) => {
+                unreachable!("unlikely to start consume upstream when resetting")
+            }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -238,6 +244,7 @@ impl CreatingStreamingJobStatus {
     pub(super) fn on_new_upstream_epoch(
         &mut self,
         barrier_info: &BarrierInfo,
+        mutation: Option<Mutation>, // mutation to be set for the first barrier to inject
     ) -> Vec<(BarrierInfo, Option<Mutation>)> {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -247,7 +254,7 @@ impl CreatingStreamingJobStatus {
                 create_mview_tracker,
                 ..
             } => {
-                let mutation = {
+                let mutation = mutation.or_else(|| {
                     let pending_backfill_nodes = create_mview_tracker
                         .take_pending_backfill_nodes()
                         .collect_vec();
@@ -260,7 +267,7 @@ impl CreatingStreamingJobStatus {
                             },
                         ))
                     }
-                };
+                });
                 pending_upstream_barriers.push(barrier_info.clone());
                 vec![(
                     CreatingStreamingJobStatus::new_fake_barrier(
@@ -286,7 +293,8 @@ impl CreatingStreamingJobStatus {
                 .chain([barrier_info.clone()])
                 .map(|barrier_info| (barrier_info, None))
                 .collect(),
-            CreatingStreamingJobStatus::Finishing { .. } => {
+            CreatingStreamingJobStatus::Finishing { .. }
+            | CreatingStreamingJobStatus::Resetting(..) => {
                 vec![]
             }
             CreatingStreamingJobStatus::PlaceHolder => {
@@ -307,17 +315,20 @@ impl CreatingStreamingJobStatus {
                 *prev_epoch_fake_physical_time += 1;
                 let curr_epoch =
                     TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
-                pending_non_checkpoint_barriers.push(prev_epoch.value().0);
                 let kind = match kind {
                     PbBarrierKind::Unspecified => {
                         unreachable!()
                     }
                     PbBarrierKind::Initial => {
-                        pending_non_checkpoint_barriers.clear();
+                        assert!(pending_non_checkpoint_barriers.is_empty());
                         BarrierKind::Initial
                     }
-                    PbBarrierKind::Barrier => BarrierKind::Barrier,
+                    PbBarrierKind::Barrier => {
+                        pending_non_checkpoint_barriers.push(prev_epoch.value().0);
+                        BarrierKind::Barrier
+                    }
                     PbBarrierKind::Checkpoint => {
+                        pending_non_checkpoint_barriers.push(prev_epoch.value().0);
                         BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers))
                     }
                 };
@@ -336,7 +347,20 @@ impl CreatingStreamingJobStatus {
             | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
                 Some(&info.fragment_infos)
             }
-            CreatingStreamingJobStatus::Finishing(..) => None,
+            CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(..) => None,
+            CreatingStreamingJobStatus::PlaceHolder => {
+                unreachable!()
+            }
+        }
+    }
+
+    pub(super) fn creating_job_info(&self) -> Option<&CreatingJobInfo> {
+        match self {
+            CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => Some(info),
+            CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(_) => None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
