@@ -106,6 +106,9 @@ development = ["expect-test", "pretty_assertions"]
 libraries = [{ path = "./lints" }]
 
 [workspace.dependencies]
+
+adbc_core = { version = "0.22" }
+adbc_snowflake = { version = "0.22", default-features = false }
 apache-avro = { git = "https://github.com/risingwavelabs/avro-rs", rev = "1f2723802d4fb77b97fa084f7bb81e3b60b9e03f" }
 arc-swap = "1"
 arrow-udf-runtime = "0.8.0"
@@ -169,14 +172,14 @@ iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "9
 ] }
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "96a69c09dbc410358ed44a9e789c4ffa0b2d2871" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "96a69c09dbc410358ed44a9e789c4ffa0b2d2871" }
-
-adbc_core = { version = "0.22" }
-adbc_snowflake = { version = "0.22", default-features = false }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+lance = { version = "0.39", default-features = false }
+lance-table = { version = "0.39", default-features = false }
+lancedb = { version = "0.22", default-features = false }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
 madsim = "0.2.34"

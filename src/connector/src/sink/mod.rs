@@ -28,6 +28,7 @@ pub mod encoder;
 pub mod file_sink;
 pub mod formatter;
 feature_gated_sink_mod!(google_pubsub, GooglePubSub, "google_pubsub");
+feature_gated_sink_mod!(lancedb, LanceDb, "lancedb");
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
@@ -102,6 +103,7 @@ use self::catalog::{SinkFormatDesc, SinkType};
 use self::clickhouse::CLICKHOUSE_SINK;
 use self::deltalake::DELTALAKE_SINK;
 use self::iceberg::ICEBERG_SINK;
+use self::lancedb::LANCEDB_SINK;
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
 use crate::WithPropertiesExt;
 use crate::connector_common::IcebergSinkCompactionUpdate;
@@ -148,6 +150,7 @@ macro_rules! for_all_sinks {
                 { Snowflake, $crate::sink::file_sink::opendal_sink::FileSink<$crate::sink::file_sink::s3::SnowflakeSink>, $crate::sink::file_sink::s3::SnowflakeConfig },
                 { RedShift, $crate::sink::snowflake_redshift::redshift::RedshiftSink, $crate::sink::snowflake_redshift::redshift::RedShiftConfig },
                 { DeltaLake, $crate::sink::deltalake::DeltaLakeSink, $crate::sink::deltalake::DeltaLakeConfig },
+                { LanceDb, $crate::sink::lancedb::LanceDbSink, $crate::sink::lancedb::LanceDbConfig },
                 { BigQuery, $crate::sink::big_query::BigQuerySink, $crate::sink::big_query::BigQueryConfig },
                 { DynamoDb, $crate::sink::dynamodb::DynamoDbSink, $crate::sink::dynamodb::DynamoDbConfig },
                 { Mongodb, $crate::sink::mongodb::MongodbSink, $crate::sink::mongodb::MongodbConfig },
@@ -691,7 +694,12 @@ impl SinkWriterParam {
 fn is_sink_support_commit_checkpoint_interval(sink_name: &str) -> bool {
     matches!(
         sink_name,
-        ICEBERG_SINK | CLICKHOUSE_SINK | STARROCKS_SINK | DELTALAKE_SINK | SNOWFLAKE_SINK_V2
+        ICEBERG_SINK
+            | CLICKHOUSE_SINK
+            | STARROCKS_SINK
+            | DELTALAKE_SINK
+            | SNOWFLAKE_SINK_V2
+            | LANCEDB_SINK
     )
 }
 pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
@@ -1021,6 +1029,12 @@ pub enum SinkError {
     Doris(String),
     #[error("DeltaLake error: {0}")]
     DeltaLake(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("LanceDB error: {0}")]
+    LanceDb(
         #[source]
         #[backtrace]
         anyhow::Error,
