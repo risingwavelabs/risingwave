@@ -958,10 +958,11 @@ impl DatabaseCheckpointControl {
                 assert_eq!(command_prev_epoch, None);
             };
             for (job_id, epoch) in creating_job_epochs {
-                self.creating_streaming_job_controls
-                    .get_mut(&job_id)
-                    .expect("should exist")
-                    .ack_completed(partial_graph_manager, epoch);
+                if let Some(job) = self.creating_streaming_job_controls.get_mut(&job_id) {
+                    job.ack_completed(partial_graph_manager, epoch);
+                }
+                // If the job is not found, it was dropped and already removed
+                // by `on_partial_graph_reset` while the completing task was running.
             }
         }
     }

@@ -831,6 +831,11 @@ impl CreatingStreamingJobControl {
         partial_graph_manager: &mut PartialGraphManager,
         completed_epoch: u64,
     ) {
+        if matches!(self.status, CreatingStreamingJobStatus::Resetting(..)) {
+            // The job was dropped while the completing task was running in the background.
+            // The partial graph has already been reset, so skip the ack.
+            return;
+        }
         partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
         if let Some(prev_max_committed_epoch) = self.max_committed_epoch.replace(completed_epoch) {
             assert!(completed_epoch > prev_max_committed_epoch);
