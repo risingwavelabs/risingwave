@@ -422,17 +422,11 @@ async fn incremental_scan_stream(
                 .inc_by(pos_delete_count);
         }
 
-        // Update snapshot lag after processing.
-        let snapshot_timestamp_ms = current_snapshot.timestamp_ms();
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
-        let lag_seconds = ((now_ms - snapshot_timestamp_ms) / 1000).max(0);
+        // This scan has fully ingested the latest snapshot we observed, so lag returns to 0.
         metrics
             .iceberg_source_snapshot_lag_seconds
             .with_guarded_label_values(&label_values)
-            .set(lag_seconds);
+            .set(0);
 
         last_snapshot = Some(current_snapshot.snapshot_id());
         *last_snapshot_lock.lock() = last_snapshot;

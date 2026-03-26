@@ -483,7 +483,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                 risingwave_connector::source::ConnectorProperties::Iceberg(props) => {
                     props.table.table_name().to_owned()
                 }
-                _ => String::new(),
+                _ => unreachable!("IcebergFetchExecutor must be built with Iceberg properties"),
             }
         };
         let source_id_str = core.source_id.to_string();
@@ -518,35 +518,29 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             self.streaming_config.clone(),
         )
         .await?;
-        if !iceberg_table_name.is_empty() {
-            iceberg_metrics
-                .iceberg_source_checkpoint_file_count
-                .with_guarded_label_values(&metrics_labels)
-                .set(splits_on_fetch as i64);
-        }
+        iceberg_metrics
+            .iceberg_source_inflight_file_count
+            .with_guarded_label_values(&metrics_labels)
+            .set(splits_on_fetch as i64);
 
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
-                    if !iceberg_table_name.is_empty() {
-                        iceberg_metrics
-                            .iceberg_source_scan_errors_total
-                            .with_guarded_label_values(&[
-                                metrics_labels[0],
-                                metrics_labels[1],
-                                metrics_labels[2],
-                                "fetch_error",
-                            ])
-                            .inc();
-                    }
+                    iceberg_metrics
+                        .iceberg_source_scan_errors_total
+                        .with_guarded_label_values(&[
+                            metrics_labels[0],
+                            metrics_labels[1],
+                            metrics_labels[2],
+                            "fetch_error",
+                        ])
+                        .inc();
                     splits_on_fetch = 0;
-                    if !iceberg_table_name.is_empty() {
-                        iceberg_metrics
-                            .iceberg_source_checkpoint_file_count
-                            .with_guarded_label_values(&metrics_labels)
-                            .set(0);
-                    }
+                    iceberg_metrics
+                        .iceberg_source_inflight_file_count
+                        .with_guarded_label_values(&metrics_labels)
+                        .set(0);
                 }
                 Ok(msg) => {
                     match msg {
@@ -615,12 +609,10 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                             self.streaming_config.clone(),
                                         )
                                         .await?;
-                                        if !iceberg_table_name.is_empty() {
-                                            iceberg_metrics
-                                                .iceberg_source_checkpoint_file_count
-                                                .with_guarded_label_values(&metrics_labels)
-                                                .set(splits_on_fetch as i64);
-                                        }
+                                        iceberg_metrics
+                                            .iceberg_source_inflight_file_count
+                                            .with_guarded_label_values(&metrics_labels)
+                                            .set(splits_on_fetch as i64);
                                     }
                                 }
                                 // Receiving file assignments from upstream list executor,
@@ -651,12 +643,10 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                             if true {
                                 splits_on_fetch = splits_on_fetch.saturating_sub(1);
                                 state_store_handler.delete(&data_file_path).await?;
-                                if !iceberg_table_name.is_empty() {
-                                    iceberg_metrics
-                                        .iceberg_source_checkpoint_file_count
-                                        .with_guarded_label_values(&metrics_labels)
-                                        .set(splits_on_fetch as i64);
-                                }
+                                iceberg_metrics
+                                    .iceberg_source_inflight_file_count
+                                    .with_guarded_label_values(&metrics_labels)
+                                    .set(splits_on_fetch as i64);
                             }
 
                             for chunk in &chunks {

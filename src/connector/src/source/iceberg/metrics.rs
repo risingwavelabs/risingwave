@@ -61,8 +61,8 @@ pub struct IcebergScanMetrics {
     pub iceberg_source_delete_files_per_data_file: LabelGuardedHistogramVec,
 
     // -- Operational Health --
-    /// Number of files tracked in checkpoint state table.
-    pub iceberg_source_checkpoint_file_count: LabelGuardedIntGaugeVec,
+    /// Number of files currently being fetched by the active reader.
+    pub iceberg_source_inflight_file_count: LabelGuardedIntGaugeVec,
 
     /// Categorized scan error counter.
     pub iceberg_source_scan_errors_total: LabelGuardedIntCounterVec,
@@ -159,7 +159,7 @@ impl IcebergScanMetrics {
                 histogram_opts!(
                     "iceberg_source_delete_files_per_data_file",
                     "Number of delete files attached per data file scan task",
-                    // 0, 1, 2, 4, 8, 16, 32, 64, 128
+                    // 1, 2, 4, 8, 16, 32, 64, 128
                     exponential_buckets(1.0, 2.0, 8).unwrap()
                 ),
                 &["source_id", "source_name", "table_name"],
@@ -167,9 +167,9 @@ impl IcebergScanMetrics {
             )
             .unwrap();
 
-        let iceberg_source_checkpoint_file_count = register_guarded_int_gauge_vec_with_registry!(
-            "iceberg_source_checkpoint_file_count",
-            "Number of files tracked in checkpoint state table",
+        let iceberg_source_inflight_file_count = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_source_inflight_file_count",
+            "Number of files currently being fetched by the active reader",
             &["source_id", "source_name", "table_name"],
             registry
         )
@@ -194,7 +194,7 @@ impl IcebergScanMetrics {
             iceberg_source_files_read_total,
             iceberg_source_delete_rows_applied_total,
             iceberg_source_delete_files_per_data_file,
-            iceberg_source_checkpoint_file_count,
+            iceberg_source_inflight_file_count,
             iceberg_source_scan_errors_total,
         }
     }

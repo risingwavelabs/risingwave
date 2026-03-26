@@ -212,11 +212,11 @@ def _(outer_panels: Panels):
                 ),
                 panels.subheader("Source Operational Health"),
                 panels.timeseries_count(
-                    "Iceberg Source Checkpoint File Count",
-                    "Number of files tracked in checkpoint state table",
+                    "Iceberg Source In-Flight File Count",
+                    "Number of files currently being fetched by the active reader",
                     [
                         panels.target(
-                            f"{metric('iceberg_source_checkpoint_file_count')}",
+                            f"{metric('iceberg_source_inflight_file_count')}",
                             "{{source_name}} ({{source_id}}) @ {{table_name}}",
                         ),
                     ],
