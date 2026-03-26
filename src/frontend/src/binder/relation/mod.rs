@@ -344,11 +344,14 @@ impl Binder {
         alias: Option<&TableAlias>,
     ) -> Result<()> {
         const EMPTY: [Ident; 0] = [];
-        let (table_name, column_aliases, table_alias) = match alias {
-            None => (table_name, &EMPTY[..], None),
-            Some(TableAlias { name, columns }) => {
-                (name.real_value(), columns.as_slice(), Some(table_name))
-            }
+        let (resolved_schema_name, table_name, column_aliases, table_alias) = match alias {
+            None => (schema_name.clone(), table_name, &EMPTY[..], None),
+            Some(TableAlias { name, columns }) => (
+                None,
+                name.real_value(),
+                columns.as_slice(),
+                Some(table_name),
+            ),
         };
 
         let num_col_aliases = column_aliases.len();
@@ -394,7 +397,7 @@ impl Binder {
         match self
             .context
             .range_of
-            .entry((schema_name, table_name.clone()))
+            .entry((resolved_schema_name, table_name.clone()))
         {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
                 "Duplicated table name while binding table to context: {}",
