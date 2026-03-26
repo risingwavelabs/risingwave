@@ -37,8 +37,6 @@ source e2e_test/backwards-compat-tests/scripts/utils.sh
 
 ################################### Main
 
-CURRENT_GIT_SHA="${GIT_SHA:-}"
-
 configure_rw() {
 VERSION="$1"
 ENABLE_BUILD="$2"
@@ -95,8 +93,6 @@ fi
 setup_old_cluster() {
   echo "--- Build risedev for $OLD_VERSION, it may not be backwards compatible"
   git config --global --add safe.directory /risingwave
-  # The old checked-out version must use its own git metadata instead of the current PR commit.
-  unset GIT_SHA
   git checkout "v${OLD_VERSION}"
   cargo build -p risedev
   echo "--- Get RisingWave binary for $OLD_VERSION"
@@ -125,11 +121,6 @@ setup_old_cluster() {
 setup_new_cluster() {
   echo "--- Setup Risingwave @ $RW_COMMIT"
   git checkout "$RW_COMMIT"
-  if [[ -n "${CURRENT_GIT_SHA}" ]]; then
-    export GIT_SHA="$CURRENT_GIT_SHA"
-  else
-    unset GIT_SHA
-  fi
   download_and_prepare_rw "$profile" common
   # Make sure we always start w/o old config
   rm -r .risingwave/config
