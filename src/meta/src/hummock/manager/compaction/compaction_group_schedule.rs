@@ -78,6 +78,8 @@ impl NormalizePlan {
 fn build_normalize_plan_from_group_statistics(
     groups: &[CompactionGroupStatistic],
 ) -> Option<NormalizePlan> {
+    // `calculate_compaction_group_statistic()` iterates all version levels, so newly created or
+    // transiently empty groups can appear here without any member tables.
     let mut groups = groups
         .iter()
         .filter(|group| !group.table_statistic.is_empty())
