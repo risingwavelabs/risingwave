@@ -888,9 +888,9 @@ impl HummockManager {
                 return Ok(false);
             }
 
-            let Some((_table_ids_left, table_ids_right)) = plan.split_table_ids() else {
-                return Ok(false);
-            };
+            let (_table_ids_left, table_ids_right) = plan
+                .split_table_ids()
+                .expect("normalize plan should stay splittable after validation");
 
             let config = compaction_group_manager
                 .try_get_compaction_group_config(plan.parent_group_id)
