@@ -261,16 +261,20 @@ fn variant_array_to_jsonb(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, Ar
             continue;
         }
 
-        let json_value = variant_array
+        match variant_array
             .try_value(idx)
             .and_then(|variant| variant.to_json_value())
-            .map_err(|err| {
-                ArrayError::from_arrow(format!(
-                    "failed to decode iceberg variant value at index {idx}: {err}"
-                ))
-            })?;
-
-        values.push(Some(json_value.into()));
+        {
+            Ok(json_value) => values.push(Some(json_value.into())),
+            Err(err) => {
+                tracing::warn!(
+                    "failed to decode iceberg variant value at index {}: {}. It will be replaced with null.",
+                    idx,
+                    err
+                );
+                values.push(None);
+            }
+        }
     }
 
     Ok(ArrayImpl::Jsonb(JsonbArray::from_iter(values)))
@@ -388,7 +392,12 @@ impl ToArrow for IcebergCreateTableArrowConvert {
 mod test {
     use std::sync::Arc;
 
-    use parquet_variant_compute::json_to_variant;
+    use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+    use parquet_variant::{
+        ShortString, Variant, VariantDecimal4, VariantDecimal8, VariantDecimal16,
+    };
+    use parquet_variant_compute::{VariantArrayBuilder, json_to_variant};
+    use uuid::Uuid;
 
     use super::arrow_array::{ArrayRef, Decimal128Array};
     use super::arrow_schema::DataType as ArrowDataType;
@@ -599,6 +608,123 @@ mod test {
                 Some(r#"{"k":[1,true,null]}"#.parse().unwrap()),
                 None,
                 Some(r#""rw""#.parse().unwrap()),
+            ],
+        );
+    }
+
+    #[test]
+    fn all_variant_internal_types_convert_to_jsonb() {
+        let long_string = "x".repeat(64);
+        let binary_bytes = [0x0a_u8, 0x0b, 0x0c, 0x0d];
+        let object_and_list_json = Arc::new(arrow_array::StringArray::from(vec![
+            Some(r#"{"a":1,"b":[true,null]}"#),
+            Some(r#"[1,{"x":2},"tail"]"#),
+        ])) as ArrayRef;
+        let object_and_list = json_to_variant(&object_and_list_json).unwrap();
+
+        let timestamp_micros = DateTime::parse_from_rfc3339("2024-11-07T12:33:54.123456+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let timestamp_ntz_micros =
+            NaiveDateTime::parse_from_str("2024-11-07 12:33:54.123456", "%Y-%m-%d %H:%M:%S%.f")
+                .unwrap();
+        let timestamp_nanos = DateTime::parse_from_rfc3339("2024-11-07T12:33:54.123456789+00:00")
+            .unwrap()
+            .with_timezone(&Utc);
+        let timestamp_ntz_nanos =
+            NaiveDateTime::parse_from_str("2024-11-07 12:33:54.123456789", "%Y-%m-%d %H:%M:%S%.f")
+                .unwrap();
+        let time = NaiveTime::from_hms_micro_opt(12, 33, 54, 123_456).unwrap();
+        let uuid = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap();
+
+        let mut builder = VariantArrayBuilder::new(24);
+        builder.append_variant(Variant::Null);
+        builder.append_variant(Variant::BooleanTrue);
+        builder.append_variant(Variant::BooleanFalse);
+        builder.append_variant(Variant::Int8(34));
+        builder.append_variant(Variant::Int16(1234));
+        builder.append_variant(Variant::Int32(100_000));
+        builder.append_variant(Variant::Int64(5_000_000_000));
+        builder.append_variant(Variant::Float(3.5));
+        builder.append_variant(Variant::Double(14.25));
+        builder.append_variant(Variant::Decimal4(
+            VariantDecimal4::try_new(12_345, 0).unwrap(),
+        ));
+        builder.append_variant(Variant::Decimal8(
+            VariantDecimal8::try_new(1_234_567_890_123, 0).unwrap(),
+        ));
+        builder.append_variant(Variant::Decimal16(
+            VariantDecimal16::try_new(1_234_567_890_123_456_789, 0).unwrap(),
+        ));
+        builder.append_variant(Variant::Date(NaiveDate::from_ymd_opt(2024, 11, 7).unwrap()));
+        builder.append_variant(Variant::TimestampMicros(timestamp_micros));
+        builder.append_variant(Variant::TimestampNtzMicros(timestamp_ntz_micros));
+        builder.append_variant(Variant::TimestampNanos(timestamp_nanos));
+        builder.append_variant(Variant::TimestampNtzNanos(timestamp_ntz_nanos));
+        builder.append_variant(Variant::Time(time));
+        builder.append_variant(Variant::Binary(&binary_bytes));
+        builder.append_variant(Variant::ShortString(
+            ShortString::try_new("iceberg").unwrap(),
+        ));
+        builder.append_variant(Variant::from(long_string.as_str()));
+        builder.append_variant(Variant::Uuid(uuid));
+        builder.append_variant(object_and_list.value(0));
+        builder.append_variant(object_and_list.value(1));
+
+        let variant_array = builder.build();
+        let field = variant_array.field("variant_col");
+        let array = Arc::new(variant_array.into_inner()) as ArrayRef;
+
+        let converted = IcebergArrowConvert
+            .array_from_arrow_array(&field, &array)
+            .unwrap();
+        let values = converted
+            .into_jsonb()
+            .iter()
+            .map(|value| value.map(|value| value.to_owned_scalar()))
+            .collect::<Vec<_>>();
+
+        let timestamp_micros_json =
+            serde_json::to_string("2024-11-07T12:33:54.123456+00:00").unwrap();
+        let timestamp_ntz_micros_json =
+            serde_json::to_string("2024-11-07T12:33:54.123456").unwrap();
+        let timestamp_nanos_json =
+            serde_json::to_string("2024-11-07T12:33:54.123456789+00:00").unwrap();
+        let timestamp_ntz_nanos_json =
+            serde_json::to_string("2024-11-07T12:33:54.123456789").unwrap();
+        let time_json = serde_json::to_string("12:33:54.123456").unwrap();
+        let binary_json = serde_json::to_string("CgsMDQ==").unwrap();
+        let short_string_json = serde_json::to_string("iceberg").unwrap();
+        let long_string_json = serde_json::to_string(&long_string).unwrap();
+        let uuid_json = serde_json::to_string("123e4567-e89b-12d3-a456-426614174000").unwrap();
+
+        assert_eq!(
+            values,
+            vec![
+                Some("null".parse().unwrap()),
+                Some("true".parse().unwrap()),
+                Some("false".parse().unwrap()),
+                Some("34".parse().unwrap()),
+                Some("1234".parse().unwrap()),
+                Some("100000".parse().unwrap()),
+                Some("5000000000".parse().unwrap()),
+                Some("3.5".parse().unwrap()),
+                Some("14.25".parse().unwrap()),
+                Some("12345".parse().unwrap()),
+                Some("1234567890123".parse().unwrap()),
+                Some("1234567890123456789".parse().unwrap()),
+                Some(r#""2024-11-07""#.parse().unwrap()),
+                Some(timestamp_micros_json.parse().unwrap()),
+                Some(timestamp_ntz_micros_json.parse().unwrap()),
+                Some(timestamp_nanos_json.parse().unwrap()),
+                Some(timestamp_ntz_nanos_json.parse().unwrap()),
+                Some(time_json.parse().unwrap()),
+                Some(binary_json.parse().unwrap()),
+                Some(short_string_json.parse().unwrap()),
+                Some(long_string_json.parse().unwrap()),
+                Some(uuid_json.parse().unwrap()),
+                Some(r#"{"a":1,"b":[true,null]}"#.parse().unwrap()),
+                Some(r#"[1,{"x":2},"tail"]"#.parse().unwrap()),
             ],
         );
     }
