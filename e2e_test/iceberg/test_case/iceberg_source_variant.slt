@@ -1,0 +1,104 @@
+statement ok
+DROP SOURCE IF EXISTS iceberg_variant_source;
+
+statement ok
+CREATE SOURCE iceberg_variant_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'test_variant_source',
+);
+
+query TTTTTTTTTT
+select
+    pg_typeof(v_null),
+    pg_typeof(v_true),
+    pg_typeof(v_false),
+    pg_typeof(v_int8),
+    pg_typeof(v_int16),
+    pg_typeof(v_int32),
+    pg_typeof(v_int64),
+    pg_typeof(v_float),
+    pg_typeof(v_double),
+    pg_typeof(v_decimal4)
+from iceberg_variant_source
+where id = 1;
+----
+jsonb jsonb jsonb jsonb jsonb jsonb jsonb jsonb jsonb jsonb
+
+query TTTTTTTTTTTTT
+select
+    pg_typeof(v_decimal8),
+    pg_typeof(v_decimal16),
+    pg_typeof(v_date),
+    pg_typeof(v_timestamp),
+    pg_typeof(v_timestamp_ntz),
+    pg_typeof(v_binary),
+    pg_typeof(v_short_string),
+    pg_typeof(v_long_string),
+    pg_typeof(v_object),
+    pg_typeof(v_array),
+    pg_typeof((nested).top_variant),
+    pg_typeof((nested).variant_list),
+    pg_typeof((nested).variant_map)
+from iceberg_variant_source
+where id = 1;
+----
+jsonb jsonb jsonb jsonb jsonb jsonb jsonb jsonb jsonb jsonb jsonb jsonb[] map(character varying,jsonb)
+
+query TTTTTTTTTTTT
+select
+    v_null = 'null'::jsonb,
+    v_true = 'true'::jsonb,
+    v_false = 'false'::jsonb,
+    v_int8 = to_jsonb(cast(34 as smallint)),
+    v_int16 = to_jsonb(cast(1234 as integer)),
+    v_int32 = to_jsonb(cast(100000 as integer)),
+    v_int64 = to_jsonb(cast(5000000000 as bigint)),
+    v_float = to_jsonb(cast(3.5 as real)),
+    v_double = to_jsonb(cast(14.25 as double precision)),
+    v_decimal4 = '12345.5'::jsonb,
+    v_decimal8 = '123456789.5'::jsonb,
+    v_decimal16 = '1234567890123456789'::jsonb
+from iceberg_variant_source
+where id = 1;
+----
+t t t t t t t t t t t t
+
+query TTTTTT
+select
+    v_date = to_jsonb(cast('2024-11-07' as varchar)),
+    v_timestamp = to_jsonb(cast('2024-11-07T12:33:54.123456+00:00' as varchar)),
+    v_timestamp_ntz = to_jsonb(cast('2024-11-07T12:33:54.123456' as varchar)),
+    v_binary = to_jsonb(cast('CgsMDQ==' as varchar)),
+    v_short_string = to_jsonb(cast('iceberg' as varchar)),
+    v_long_string = to_jsonb(cast(repeat('x', 64) as varchar))
+from iceberg_variant_source
+where id = 1;
+----
+t t t t t t
+
+query TTTTTTTTT
+select
+    v_object = '{"a":1,"b":true}'::jsonb,
+    v_array = '[1,true,null]'::jsonb,
+    (nested).top_variant = to_jsonb(cast('2024-11-08' as varchar)),
+    (nested).variant_list[1] = to_jsonb(cast(7 as smallint)),
+    (nested).variant_list[2] = '{"x":2}'::jsonb,
+    (nested).variant_list[3] = to_jsonb(cast('q80=' as varchar)),
+    (nested).variant_map['k1'] = to_jsonb(cast(42 as integer)),
+    (nested).variant_map['k2'] = to_jsonb(cast(repeat('y', 64) as varchar)),
+    (nested).variant_map['k3'] = 'null'::jsonb
+from iceberg_variant_source
+where id = 1;
+----
+t t t t t t t t t
+
+statement ok
+DROP SOURCE iceberg_variant_source;

@@ -134,6 +134,7 @@ criterion = { workspace = true }
 expect-test = "1"
 lru = { workspace = true }
 more-asserts = "0.3"
+parquet-variant = "57"
 pretty_assertions = "1"
 rand = { workspace = true }
 rusty-fork = "0.3"
