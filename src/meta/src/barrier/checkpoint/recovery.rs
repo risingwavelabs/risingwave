@@ -28,7 +28,7 @@ use tracing::{info, warn};
 
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::CheckpointControl;
-use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
+use crate::barrier::checkpoint::control::{DatabaseCheckpointControlStatus, IndependentCheckpointJobControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
 use crate::barrier::context::recovery::RenderedDatabaseRuntimeInfo;
 use crate::barrier::partial_graph::PartialGraphManager;
@@ -263,15 +263,24 @@ impl DatabaseStatusAction<'_, EnterReset> {
             DatabaseCheckpointControlStatus::Running(database) => {
                 let mut resetting_partial_graphs = HashSet::new();
                 let new_reset_partial_graphs: HashSet<_> = database
-                    .creating_streaming_job_controls
+                    .independent_checkpoint_job_controls
                     .drain()
                     .filter_map(|(job_id, job)| {
                         let partial_graph_id = to_partial_graph_id(self.database_id, Some(job_id));
-                        if job.reset() {
-                            resetting_partial_graphs.insert(partial_graph_id);
-                            None
-                        } else {
-                            Some(partial_graph_id)
+                        match job {
+                            IndependentCheckpointJobControl::CreatingStreamingJob(j) => {
+                                if j.reset() {
+                                    resetting_partial_graphs.insert(partial_graph_id);
+                                    None
+                                } else {
+                                    Some(partial_graph_id)
+                                }
+                            }
+                            IndependentCheckpointJobControl::BatchRefresh(_) => {
+                                // Batch refresh jobs are dropped; their partial graphs
+                                // are rebuilt during re-initialization.
+                                Some(partial_graph_id)
+                            }
                         }
                     })
                     .chain([to_partial_graph_id(self.database_id, None)])

@@ -338,16 +338,6 @@ impl SharedActorInfoWriter<'_> {
         }
     }
 
-    pub(super) fn remove_fragment_id(&mut self, fragment_id: FragmentId) {
-        if let Some(database) = self.write_guard.info.get_mut(&self.database_id)
-            && let Some(fragment) = database.remove(&fragment_id)
-        {
-            self.deleted_fragment_mapping
-                .get_or_insert_default()
-                .push(rebuild_fragment_mapping(&fragment));
-        }
-    }
-
     pub(super) fn remove(&mut self, info: &InflightFragmentInfo) {
         if let Some(database) = self.write_guard.info.get_mut(&self.database_id)
             && let Some(fragment) = database.remove(&info.fragment_id)
