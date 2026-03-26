@@ -61,7 +61,7 @@ impl NormalizePlan {
             .into()
     }
 
-    fn split_table_ids(&self) -> Option<(Vec<StateTableId>, Vec<StateTableId>)> {
+    fn split_table_ids(&self) -> (Vec<StateTableId>, Vec<StateTableId>) {
         let split_full_key =
             group_split::build_split_full_key(self.boundary_table_id, VirtualNode::ZERO);
         let (table_ids_left, table_ids_right) =
@@ -70,8 +70,8 @@ impl NormalizePlan {
                 split_full_key.user_key.table_id,
                 split_full_key.user_key.get_vnode_id(),
             );
-        (!table_ids_left.is_empty() && !table_ids_right.is_empty())
-            .then_some((table_ids_left, table_ids_right))
+        assert!(!table_ids_left.is_empty() && !table_ids_right.is_empty());
+        (table_ids_left, table_ids_right)
     }
 }
 
@@ -852,22 +852,9 @@ impl HummockManager {
 }
 
 impl HummockManager {
-    async fn build_normalize_plan(&self) -> Result<Option<NormalizePlan>> {
+    async fn build_normalize_plan(&self) -> Option<NormalizePlan> {
         let groups = self.calculate_compaction_group_statistic().await;
-        let Some(plan) = build_normalize_plan_from_group_statistics(&groups) else {
-            return Ok(None);
-        };
-
-        if plan.split_table_ids().is_none() {
-            tracing::debug!(
-                "normalize split skipped because one side is empty. parent_group_id={} boundary={}",
-                plan.parent_group_id,
-                plan.boundary_table_id
-            );
-            return Ok(None);
-        }
-
-        Ok(Some(plan))
+        build_normalize_plan_from_group_statistics(&groups)
     }
 
     async fn apply_normalize_plan(&self, plan: &NormalizePlan) -> Result<bool> {
@@ -888,9 +875,7 @@ impl HummockManager {
                 return Ok(false);
             }
 
-            let (_table_ids_left, table_ids_right) = plan
-                .split_table_ids()
-                .expect("normalize plan should stay splittable after validation");
+            let (_table_ids_left, table_ids_right) = plan.split_table_ids();
 
             let config = compaction_group_manager
                 .try_get_compaction_group_config(plan.parent_group_id)
@@ -1047,7 +1032,7 @@ impl HummockManager {
     ) -> Result<usize> {
         let mut split_count = 0usize;
         while split_count < max_splits {
-            let Some(plan) = self.build_normalize_plan().await? else {
+            let Some(plan) = self.build_normalize_plan().await else {
                 break;
             };
 
