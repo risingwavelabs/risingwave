@@ -33,28 +33,42 @@ static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::de
 struct PgVectorAdapter(Vec<f32>);
 
 impl<'a> FromSql<'a> for PgVectorAdapter {
+    fn accepts(ty: &Type) -> bool {
+        ty.name() == "vector"
+    }
+
     fn from_sql(
         _ty: &Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        // Text format.
+        // PostgreSQL usually sends values in binary format through tokio-postgres.
+        // Keep this text fallback for compatibility with format negotiation fallback paths.
         if raw.starts_with(b"[") {
-            let s = std::str::from_utf8(raw)?;
-            let s = s
-                .strip_prefix('[')
-                .ok_or("vector must start with [")?
-                .strip_suffix(']')
-                .ok_or("vector must end with ]")?;
-            let elems = if s.trim().is_empty() {
-                vec![]
-            } else {
-                s.split(',')
-                    .map(|v| v.trim().parse::<f32>())
-                    .collect::<Result<Vec<_>, _>>()?
-            };
-            return Ok(Self(elems));
+            return Self::parse_text(raw);
         }
+        Self::parse_binary(raw)
+    }
+}
 
+impl PgVectorAdapter {
+    fn parse_text(raw: &[u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let s = std::str::from_utf8(raw)?;
+        let s = s
+            .strip_prefix('[')
+            .ok_or("vector must start with [")?
+            .strip_suffix(']')
+            .ok_or("vector must end with ]")?;
+        let elems = if s.trim().is_empty() {
+            vec![]
+        } else {
+            s.split(',')
+                .map(|v| v.trim().parse::<f32>())
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        Ok(Self(elems))
+    }
+
+    fn parse_binary(raw: &[u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         // Binary format from pgvector extension:
         // int16 dimension, int16 unused, repeated float4 values.
         if raw.len() < 4 {
@@ -68,13 +82,9 @@ impl<'a> FromSql<'a> for PgVectorAdapter {
         }
         let mut elems = Vec::with_capacity(dim);
         for _ in 0..dim {
-            elems.push(f32::from_bits(buf.get_u32()));
+            elems.push(buf.get_f32());
         }
         Ok(Self(elems))
-    }
-
-    fn accepts(ty: &Type) -> bool {
-        ty.name() == "vector"
     }
 }
 
@@ -217,9 +227,31 @@ pub fn postgres_cell_to_scalar_impl(
 mod tests {
     use tokio_postgres::NoTls;
 
+    use crate::parser::postgres::PgVectorAdapter;
     use crate::parser::scalar_adapter::EnumString;
     const DB: &str = "postgres";
     const USER: &str = "kexiang";
+
+    #[test]
+    fn test_pg_vector_adapter_parse_text() {
+        let v = PgVectorAdapter::parse_text(b"[1.5,-2.25,3]").unwrap();
+        assert_eq!(v.0, vec![1.5, -2.25, 3.0]);
+    }
+
+    #[test]
+    fn test_pg_vector_adapter_parse_binary() {
+        let mut raw = vec![];
+        // dim = 3
+        raw.extend_from_slice(&(3u16.to_be_bytes()));
+        // unused
+        raw.extend_from_slice(&(0u16.to_be_bytes()));
+        raw.extend_from_slice(&1.5f32.to_be_bytes());
+        raw.extend_from_slice(&(-2.25f32).to_be_bytes());
+        raw.extend_from_slice(&3.0f32.to_be_bytes());
+
+        let v = PgVectorAdapter::parse_binary(&raw).unwrap();
+        assert_eq!(v.0, vec![1.5, -2.25, 3.0]);
+    }
 
     #[ignore]
     #[tokio::test]
