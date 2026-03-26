@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -610,8 +611,7 @@ impl HummockManager {
         self.maybe_normalize_compaction_groups("split").await;
 
         let mut group_infos = self.calculate_compaction_group_statistic().await;
-        group_infos.sort_by_key(|group| group.group_size);
-        group_infos.reverse();
+        group_infos.sort_by_key(|group| Reverse(group.group_size));
 
         for group in group_infos {
             if group.table_statistic.len() == 1 {
@@ -663,14 +663,7 @@ impl HummockManager {
             self.table_write_throughput_statistic_manager.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         // sort by first table id for deterministic merge order
-        group_infos.sort_by_key(|group| {
-            let table_ids = group
-                .table_statistic
-                .keys()
-                .cloned()
-                .collect::<BTreeSet<_>>();
-            table_ids.iter().next().cloned()
-        });
+        group_infos.sort_by_key(|group| group.table_statistic.keys().next().copied());
 
         let group_count = group_infos.len();
         if group_count < 2 {
