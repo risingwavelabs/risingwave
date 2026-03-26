@@ -681,9 +681,24 @@ impl JsonParseOptions {
             .into(),
             // ---- Vector -----
             (DataType::Vector(size), ValueType::String) => {
-                VectorVal::from_text(value.as_str().unwrap(), *size)
-                    .map_err(|_| create_error())?
-                    .into()
+                let text = value.as_str().unwrap();
+                match VectorVal::from_text(text, *size) {
+                    Ok(v) => v.into(),
+                    Err(err) => {
+                        static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                            LazyLock::new(LogSuppressor::default);
+                        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                            tracing::warn!(
+                                error = %err,
+                                expected_dim = *size,
+                                text_len = text.len(),
+                                suppressed_count,
+                                "failed to parse vector text, padding with `NULL`"
+                            );
+                        }
+                        Err(create_error())?
+                    }
+                }
             }
             (DataType::Vector(size), ValueType::Array) => {
                 let array = value.as_array().unwrap();
@@ -696,7 +711,16 @@ impl JsonParseOptions {
                         ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128 => {
                             v.try_as_i64().map_err(|_| create_error())? as f32
                         }
-                        ValueType::F64 => v.try_as_f32().map_err(|_| create_error())?,
+                        ValueType::F64 => {
+                            let f64_value = v.try_as_f64().map_err(|_| create_error())?;
+                            if !f64_value.is_finite()
+                                || f64_value < f32::MIN as f64
+                                || f64_value > f32::MAX as f64
+                            {
+                                Err(create_error())?
+                            }
+                            f64_value as f32
+                        }
                         _ => Err(create_error())?,
                     };
                     let finite = Finite32::try_from(value).map_err(|_| create_error())?;
