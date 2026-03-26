@@ -1044,30 +1044,19 @@ impl HummockManager {
         max_splits: usize,
     ) -> Result<usize> {
         let mut split_count = 0usize;
-        let mut stale_plan_retries = 0usize;
-        const MAX_STALE_PLAN_RETRIES: usize = 8;
         while split_count < max_splits {
             let Some(plan) = self.build_normalize_plan().await? else {
                 break;
             };
 
             if !self.apply_normalize_plan(&plan).await? {
-                stale_plan_retries += 1;
                 tracing::debug!(
                     parent_group_id = %plan.parent_group_id,
                     boundary_table_id = %plan.boundary_table_id,
                     "normalize plan became stale before apply"
                 );
-                if stale_plan_retries >= MAX_STALE_PLAN_RETRIES {
-                    tracing::warn!(
-                        retry_count = stale_plan_retries,
-                        "normalize stopped after too many stale plan retries"
-                    );
-                    break;
-                }
-                continue;
+                break;
             }
-            stale_plan_retries = 0;
             split_count += 1;
         }
 
