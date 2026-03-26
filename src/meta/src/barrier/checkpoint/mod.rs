@@ -17,6 +17,9 @@ mod creating_job;
 mod recovery;
 mod state;
 
-pub(super) use control::{CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl};
+pub(super) use control::{
+    CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl,
+    DatabaseCheckpointControlMetrics,
+};
 pub(super) use creating_job::CreatingStreamingJobControl;
 pub(super) use state::BarrierWorkerState;
