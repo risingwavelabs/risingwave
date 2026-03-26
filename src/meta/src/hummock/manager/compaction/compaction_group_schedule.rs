@@ -88,10 +88,9 @@ fn build_normalize_plan_from_group_statistics(
                     return None;
                 }
 
-                let boundary_table_id = left_table_ids
-                    .iter()
-                    .find(|&&table_id| table_id >= right_min)
-                    .copied()?;
+                let boundary_index =
+                    left_table_ids.partition_point(|&table_id| table_id < right_min);
+                let boundary_table_id = left_table_ids.get(boundary_index).copied()?;
 
                 Some(NormalizePlan {
                     parent_group_id: left.group_id,
