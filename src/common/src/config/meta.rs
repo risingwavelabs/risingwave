@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common_proc_macro::serde_prefix_all;
+use serde::de::Error as _;
 
 use super::*;
 
@@ -356,8 +357,11 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::enable_compaction_group_normalize")]
     pub enable_compaction_group_normalize: bool,
 
-    /// The maximum number of normalize splits in one scheduler round.
-    #[serde(default = "default::meta::max_normalize_splits_per_round")]
+    /// The maximum number of normalize splits in one scheduler round. Must be greater than 0.
+    #[serde(
+        default = "default::meta::max_normalize_splits_per_round",
+        deserialize_with = "deserialize_max_normalize_splits_per_round"
+    )]
     pub max_normalize_splits_per_round: u64,
 
     /// The interval of the periodic scheduling compaction group merge job.
@@ -408,6 +412,19 @@ pub struct MetaStoreConfig {
     /// Acquire timeout in seconds for a meta store connection.
     #[serde(default = "default::meta_store_config::acquire_timeout_sec")]
     pub acquire_timeout_sec: u64,
+}
+
+fn deserialize_max_normalize_splits_per_round<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "meta.max_normalize_splits_per_round must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 /// The subsections `[meta.developer]`.

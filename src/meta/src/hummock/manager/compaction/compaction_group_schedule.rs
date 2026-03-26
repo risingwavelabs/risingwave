@@ -1044,10 +1044,6 @@ impl HummockManager {
         &self,
         max_splits: usize,
     ) -> Result<usize> {
-        if max_splits == 0 {
-            return Ok(0);
-        }
-
         let mut split_count = 0usize;
         let mut stale_plan_retries = 0usize;
         const MAX_STALE_PLAN_RETRIES: usize = 8;

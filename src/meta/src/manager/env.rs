@@ -197,7 +197,7 @@ pub struct MetaOpts {
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
     /// Whether to enable overlap normalization before the regular split and merge schedulers.
     pub enable_compaction_group_normalize: bool,
-    /// Maximum normalize splits in one scheduler round.
+    /// Maximum normalize splits in one scheduler round. Must be greater than 0.
     pub max_normalize_splits_per_round: u64,
 
     /// Whether config object storage bucket lifecycle to purge stale data.

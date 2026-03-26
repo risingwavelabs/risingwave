@@ -3187,29 +3187,6 @@ async fn test_schedule_group_split_runs_split_logic_after_normalize() {
 }
 
 #[tokio::test]
-async fn test_schedule_group_merge_with_normalize_limit_zero() {
-    let mut opts = MetaOpts::test(false);
-    opts.enable_compaction_group_normalize = true;
-    opts.max_normalize_splits_per_round = 0;
-    let (_env, hummock_manager, _, _worker_id) = setup_compute_env_with_meta_opts(80, opts).await;
-
-    hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
-        .await
-        .unwrap();
-    hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
-        .await
-        .unwrap();
-
-    hummock_manager.schedule_group_merge_for_test().await;
-
-    let current_version = hummock_manager.get_current_version().await;
-    let ranges = compaction_group_ranges(&current_version);
-    assert_eq!(ranges, vec![(64, 80), (65, 81)]);
-}
-
-#[tokio::test]
 async fn test_schedule_group_merge_with_normalize_disabled() {
     let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
 
@@ -3223,29 +3200,6 @@ async fn test_schedule_group_merge_with_normalize_disabled() {
         .unwrap();
 
     hummock_manager.schedule_group_merge_for_test().await;
-
-    let current_version = hummock_manager.get_current_version().await;
-    let ranges = compaction_group_ranges(&current_version);
-    assert_eq!(ranges, vec![(64, 80), (65, 81)]);
-}
-
-#[tokio::test]
-async fn test_schedule_group_split_with_normalize_limit_zero() {
-    let mut opts = MetaOpts::test(false);
-    opts.enable_compaction_group_normalize = true;
-    opts.max_normalize_splits_per_round = 0;
-    let (_env, hummock_manager, _, _worker_id) = setup_compute_env_with_meta_opts(80, opts).await;
-
-    hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
-        .await
-        .unwrap();
-    hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
-        .await
-        .unwrap();
-
-    hummock_manager.schedule_group_split_for_test().await;
 
     let current_version = hummock_manager.get_current_version().await;
     let ranges = compaction_group_ranges(&current_version);
