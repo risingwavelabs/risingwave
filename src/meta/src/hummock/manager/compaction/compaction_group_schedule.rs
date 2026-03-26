@@ -55,6 +55,25 @@ struct NormalizePlan {
 }
 
 impl NormalizePlan {
+    fn new(
+        parent_group_id: CompactionGroupId,
+        parent_table_ids: Vec<StateTableId>,
+        boundary_table_id: StateTableId,
+    ) -> Self {
+        assert!(!parent_table_ids.is_empty());
+
+        let boundary_index =
+            parent_table_ids.partition_point(|&table_id| table_id < boundary_table_id);
+        assert!(boundary_index > 0 && boundary_index < parent_table_ids.len());
+        assert_eq!(parent_table_ids[boundary_index], boundary_table_id);
+
+        Self {
+            parent_group_id,
+            parent_table_ids,
+            boundary_table_id,
+        }
+    }
+
     fn split_key(&self) -> Bytes {
         group_split::build_split_full_key(self.boundary_table_id, VirtualNode::ZERO)
             .encode()
@@ -112,13 +131,13 @@ fn build_normalize_plan_from_group_statistics(
 
                 let boundary_index =
                     left_table_ids.partition_point(|&table_id| table_id < right_min);
-                let boundary_table_id = left_table_ids.get(boundary_index).copied()?;
+                let boundary_table_id = left_table_ids[boundary_index];
 
-                Some(NormalizePlan {
-                    parent_group_id: left.group_id,
-                    parent_table_ids: left_table_ids,
+                Some(NormalizePlan::new(
+                    left.group_id,
+                    left_table_ids,
                     boundary_table_id,
-                })
+                ))
             })
         })
 }
