@@ -289,13 +289,6 @@ impl HummockManager {
 }
 
 impl HummockManager {
-    fn remaining_compaction_task_id_refill_capacity(
-        max_select_count: usize,
-        picked_task_count: usize,
-    ) -> u32 {
-        u32::try_from(max_select_count.saturating_sub(picked_task_count)).unwrap_or(u32::MAX)
-    }
-
     /// Gets one compaction task id with best-effort batching while ensuring concurrent callers
     /// share the same refill instead of wasting an allocated range.
     async fn next_compaction_task_id_with_prefetch(&self, refill_capacity: u32) -> Result<u64> {
@@ -365,8 +358,8 @@ impl HummockManager {
         ));
         // Reuse prefetched task ids from previous loops.
         // Each group consumes at most one task_id (trivial tasks share the same id with normal
-        // task). When prefetched ids are exhausted, refill in chunks to avoid per-group SQL
-        // transactions while keeping over-prefetch bounded by current remaining budget.
+        // task). When prefetched ids are exhausted, refill in fixed-size chunks to avoid
+        // per-group SQL transactions while keeping the in-memory cache small.
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;
@@ -393,12 +386,10 @@ impl HummockManager {
             };
 
             // Use prefetched task id if available; when exhausted, refill in chunks first.
-            let task_id_refill_capacity = Self::remaining_compaction_task_id_refill_capacity(
-                max_select_count,
-                pick_tasks.len(),
-            );
             let task_id = self
-                .next_compaction_task_id_with_prefetch(task_id_refill_capacity)
+                .next_compaction_task_id_with_prefetch(
+                    self.env.opts.compaction_task_id_refill_capacity,
+                )
                 .await?;
 
             if !compaction_statuses.contains_key(&compaction_group_id) {
@@ -1815,26 +1806,11 @@ impl GroupStateValidator {
 
 #[cfg(test)]
 mod prefetched_task_id_tests {
-    use crate::hummock::HummockManager;
+    use crate::manager::MetaOpts;
 
     #[test]
-    fn test_remaining_compaction_task_id_refill_capacity() {
-        assert_eq!(
-            HummockManager::remaining_compaction_task_id_refill_capacity(8, 0),
-            8
-        );
-        assert_eq!(
-            HummockManager::remaining_compaction_task_id_refill_capacity(8, 3),
-            5
-        );
-        assert_eq!(
-            HummockManager::remaining_compaction_task_id_refill_capacity(8, 8),
-            0
-        );
-        assert_eq!(
-            HummockManager::remaining_compaction_task_id_refill_capacity(8, 9),
-            0
-        );
+    fn test_compaction_task_id_refill_capacity_default() {
+        assert_eq!(MetaOpts::test(false).compaction_task_id_refill_capacity, 64);
     }
 }
 

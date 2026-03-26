@@ -214,6 +214,7 @@ pub struct MetaOpts {
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_task_max_progress_interval_secs: u64,
+    pub compaction_task_id_refill_capacity: u32,
     pub compaction_config: Option<CompactionConfig>,
 
     /// hybrid compaction group config
@@ -364,6 +365,7 @@ impl MetaOpts {
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_task_max_progress_interval_secs: 1,
+            compaction_task_id_refill_capacity: 64,
             compaction_config: None,
             hybrid_partition_node_count: 4,
             event_log_enabled: false,
