@@ -125,7 +125,7 @@ INSERT INTO t6 VALUES (1, 50, '1-50');
 statement ok
 FLUSH;
 
-sleep 5s
+sleep 10s
 
 statement ok
 DROP SOURCE iceberg_demo_source;
