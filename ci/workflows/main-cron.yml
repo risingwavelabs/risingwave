@@ -15,6 +15,8 @@ anchors:
         mount-buildkite-agent: true
         propagate-environment: true
         upload-container-logs: always
+        environment:
+          - RW_CI_ENABLE_COVERAGE=1
     - docker-compose-standard: &docker-compose-standard
         <<: *docker-compose
         run: ci-standard-env
@@ -71,6 +73,17 @@ steps:
     timeout_in_minutes: 20
     retry: *auto-retry
 
+  - label: "check (release clippy)"
+    command: "ci/scripts/check-release.sh"
+    key: "check-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.env("CI_STEPS") =~ /(^|,)check-release(,|$$)/
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
   - label: "build simulation test"
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
@@ -89,6 +102,17 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "check release"
+    command: "ci/scripts/check-release.sh"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-check"
+      || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - group: "end-to-end test (release)"

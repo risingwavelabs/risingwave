@@ -47,19 +47,8 @@ echo "--- Show sccache stats"
 sccache --show-stats
 sccache --zero-stats
 
-echo "--- Run clippy check (dev, no connector)"
-cargo clippy --all-targets --features rw-static-link --no-default-features --locked -- -D warnings
-
-echo "--- Run clippy check (release)"
-cargo clippy --release --all-targets --features "rw-static-link" --locked -- -D warnings
-
-echo "--- Run cargo check on building the release binary (release)"
-cargo check -p risingwave_cmd_all --features "rw-static-link" --profile release
-cargo check -p risingwave_cmd --bin risectl --features "rw-static-link" --profile release
-
-echo "--- Show sccache stats"
-sccache --show-stats
-sccache --zero-stats
+# Additional clippy passes (no-connector, release) are run in check-release.sh (main-cron only).
+# This keeps PR check times ~15 min shorter.
 
 echo "--- Check unused dependencies"
 cargo machete

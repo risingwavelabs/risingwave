@@ -7,6 +7,10 @@ on:
       - grafana/**
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   verify-grafana-dashboards:
     name: Ensure grafana/generate.sh output is committed
