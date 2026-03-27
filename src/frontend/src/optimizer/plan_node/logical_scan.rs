@@ -635,7 +635,7 @@ impl ToStream for LogicalScan {
             .into())
         } else {
             if ctx.backfill_type() == BackfillType::SnapshotBackfill {
-                let (scan_ranges, residual) = self.predicate().clone().split_to_scan_ranges(
+                let (scan_ranges, _residual) = self.predicate().clone().split_to_scan_ranges(
                     self.table(),
                     self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
                 )?;
@@ -652,13 +652,11 @@ impl ToStream for LogicalScan {
                         Some(scan_ranges[0].eq_conds.clone()),
                     );
 
-                    if residual.always_true() {
-                        return Ok(scan.into());
-                    }
-
-                    return Ok(
-                        StreamFilter::new(generic::Filter::new(residual, scan.into())).into(),
-                    );
+                    return Ok(StreamFilter::new(generic::Filter::new(
+                        self.predicate().clone(),
+                        scan.into(),
+                    ))
+                    .into());
                 }
             }
 
