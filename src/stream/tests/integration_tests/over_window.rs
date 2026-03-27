@@ -95,6 +95,7 @@ async fn create_executor<S: StateStore>(
         metrics: Arc::new(StreamingMetrics::unused()),
         chunk_size: 1024,
         cache_policy: OverWindowCachePolicy::Recent,
+        enable_multi_range_optimization: true,
     });
     (tx, executor.boxed().execute())
 }
@@ -558,6 +559,162 @@ async fn test_over_window_sum() {
                 | 5  | p1 | 105 | 18 | 13 |
                 | 10 | p3 | 300 | 30 |    |
                 +----+----+-----+----+----+
+            - input: !barrier 4
+              output:
+              - !barrier 4
+        "#]],
+        snapshot_options(),
+    )
+    .await;
+}
+
+/// Test that sparse delta keys in the same chunk produce correct results.
+/// This exercises the multi-range optimization in `find_affected_ranges`, where
+/// distant delta keys are split into separate affected ranges instead of one
+/// large range spanning the entire distance.
+#[tokio::test]
+async fn test_over_window_lag_lead_sparse_delta() {
+    let store = MemoryStateStore::new();
+    let calls = vec![
+        // lag(x, 1)
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            return_type: DataType::Int32,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
+        },
+        // lead(x, 1)
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+            return_type: DataType::Int32,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
+        },
+    ];
+
+    check_with_script(
+        || create_executor(calls.clone(), store.clone()),
+        r###"
+        - !barrier 1
+        - !chunk |2
+              I  T  I   i
+            +  1 p1 100 10
+            +  5 p1 101 15
+            + 10 p1 102 20
+            + 15 p1 103 25
+            + 20 p1 104 30
+        - !barrier 2
+        - !chunk |2
+              I  T  I   i
+            +  3 p1 110 33
+            + 18 p1 111 38
+        - !barrier 3
+        - recovery
+        - !barrier 3
+        - !chunk |2
+              I  T  I   i
+            -  3 p1 110 33
+            + 25 p1 112 50
+        - !barrier 4
+        "###,
+        expect![[r#"
+            - input: !barrier 1
+              output:
+              - !barrier 1
+            - input: !chunk |-
+                +---+----+----+-----+----+
+                | + | 1  | p1 | 100 | 10 |
+                | + | 5  | p1 | 101 | 15 |
+                | + | 10 | p1 | 102 | 20 |
+                | + | 15 | p1 | 103 | 25 |
+                | + | 20 | p1 | 104 | 30 |
+                +---+----+----+-----+----+
+              output:
+              - !chunk |-
+                +---+----+----+-----+----+----+----+
+                | + | 1  | p1 | 100 | 10 |    | 15 |
+                | + | 5  | p1 | 101 | 15 | 10 | 20 |
+                | + | 10 | p1 | 102 | 20 | 15 | 25 |
+                | + | 15 | p1 | 103 | 25 | 20 | 30 |
+                | + | 20 | p1 | 104 | 30 | 25 |    |
+                +---+----+----+-----+----+----+----+
+                applied result:
+                +----+----+-----+----+----+----+
+                | 1  | p1 | 100 | 10 |    | 15 |
+                | 5  | p1 | 101 | 15 | 10 | 20 |
+                | 10 | p1 | 102 | 20 | 15 | 25 |
+                | 15 | p1 | 103 | 25 | 20 | 30 |
+                | 20 | p1 | 104 | 30 | 25 |    |
+                +----+----+-----+----+----+----+
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: !chunk |-
+                +---+----+----+-----+----+
+                | + | 3  | p1 | 110 | 33 |
+                | + | 18 | p1 | 111 | 38 |
+                +---+----+----+-----+----+
+              output:
+              - !chunk |-
+                +----+----+----+-----+----+----+----+
+                | U- | 1  | p1 | 100 | 10 |    | 15 |
+                | U+ | 1  | p1 | 100 | 10 |    | 33 |
+                |  + | 3  | p1 | 110 | 33 | 10 | 15 |
+                | U- | 5  | p1 | 101 | 15 | 10 | 20 |
+                | U+ | 5  | p1 | 101 | 15 | 33 | 20 |
+                | U- | 15 | p1 | 103 | 25 | 20 | 30 |
+                | U+ | 15 | p1 | 103 | 25 | 20 | 38 |
+                |  + | 18 | p1 | 111 | 38 | 25 | 30 |
+                | U- | 20 | p1 | 104 | 30 | 25 |    |
+                | U+ | 20 | p1 | 104 | 30 | 38 |    |
+                +----+----+----+-----+----+----+----+
+                applied result:
+                +----+----+-----+----+----+----+
+                | 1  | p1 | 100 | 10 |    | 33 |
+                | 3  | p1 | 110 | 33 | 10 | 15 |
+                | 5  | p1 | 101 | 15 | 33 | 20 |
+                | 10 | p1 | 102 | 20 | 15 | 25 |
+                | 15 | p1 | 103 | 25 | 20 | 38 |
+                | 18 | p1 | 111 | 38 | 25 | 30 |
+                | 20 | p1 | 104 | 30 | 38 |    |
+                +----+----+-----+----+----+----+
+            - input: !barrier 3
+              output:
+              - !barrier 3
+            - input: recovery
+              output: []
+            - input: !barrier 3
+              output:
+              - !barrier 3
+            - input: !chunk |-
+                +---+----+----+-----+----+
+                | - | 3  | p1 | 110 | 33 |
+                | + | 25 | p1 | 112 | 50 |
+                +---+----+----+-----+----+
+              output:
+              - !chunk |-
+                +----+----+----+-----+----+----+----+
+                | U- | 1  | p1 | 100 | 10 |    | 33 |
+                | U+ | 1  | p1 | 100 | 10 |    | 15 |
+                |  - | 3  | p1 | 110 | 33 | 10 | 15 |
+                | U- | 5  | p1 | 101 | 15 | 33 | 20 |
+                | U+ | 5  | p1 | 101 | 15 | 10 | 20 |
+                | U- | 20 | p1 | 104 | 30 | 38 |    |
+                | U+ | 20 | p1 | 104 | 30 | 38 | 50 |
+                |  + | 25 | p1 | 112 | 50 | 30 |    |
+                +----+----+----+-----+----+----+----+
+                applied result:
+                +----+----+-----+----+----+----+
+                | 1  | p1 | 100 | 10 |    | 15 |
+                | 5  | p1 | 101 | 15 | 10 | 20 |
+                | 10 | p1 | 102 | 20 | 15 | 25 |
+                | 15 | p1 | 103 | 25 | 20 | 38 |
+                | 18 | p1 | 111 | 38 | 25 | 30 |
+                | 20 | p1 | 104 | 30 | 38 | 50 |
+                | 25 | p1 | 112 | 50 | 30 |    |
+                +----+----+-----+----+----+----+
             - input: !barrier 4
               output:
               - !barrier 4

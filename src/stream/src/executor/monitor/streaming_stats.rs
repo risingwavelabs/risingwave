@@ -154,6 +154,7 @@ pub struct StreamingMetrics {
     over_window_range_cache_lookup_count: LabelGuardedIntCounterVec,
     over_window_range_cache_left_miss_count: LabelGuardedIntCounterVec,
     over_window_range_cache_right_miss_count: LabelGuardedIntCounterVec,
+    over_window_affected_range_count: LabelGuardedIntCounterVec,
     over_window_accessed_entry_count: LabelGuardedIntCounterVec,
     over_window_compute_count: LabelGuardedIntCounterVec,
     over_window_same_output_count: LabelGuardedIntCounterVec,
@@ -883,6 +884,14 @@ impl StreamingMetrics {
             )
             .unwrap();
 
+        let over_window_affected_range_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_over_window_affected_range_count",
+            "Over window affected range count",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let over_window_accessed_entry_count = register_guarded_int_counter_vec_with_registry!(
             "stream_over_window_accessed_entry_count",
             "Over window accessed entry count",
@@ -1376,6 +1385,7 @@ impl StreamingMetrics {
             over_window_range_cache_lookup_count,
             over_window_range_cache_left_miss_count,
             over_window_range_cache_right_miss_count,
+            over_window_affected_range_count,
             over_window_accessed_entry_count,
             over_window_compute_count,
             over_window_same_output_count,
@@ -1742,6 +1752,9 @@ impl StreamingMetrics {
             over_window_range_cache_right_miss_count: self
                 .over_window_range_cache_right_miss_count
                 .with_guarded_label_values(label_list),
+            over_window_affected_range_count: self
+                .over_window_affected_range_count
+                .with_guarded_label_values(label_list),
             over_window_accessed_entry_count: self
                 .over_window_accessed_entry_count
                 .with_guarded_label_values(label_list),
@@ -1914,6 +1927,7 @@ pub struct OverWindowMetrics {
     pub over_window_range_cache_lookup_count: LabelGuardedIntCounter,
     pub over_window_range_cache_left_miss_count: LabelGuardedIntCounter,
     pub over_window_range_cache_right_miss_count: LabelGuardedIntCounter,
+    pub over_window_affected_range_count: LabelGuardedIntCounter,
     pub over_window_accessed_entry_count: LabelGuardedIntCounter,
     pub over_window_compute_count: LabelGuardedIntCounter,
     pub over_window_same_output_count: LabelGuardedIntCounter,

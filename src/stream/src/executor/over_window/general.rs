@@ -134,6 +134,7 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
 
     pub chunk_size: usize,
     pub cache_policy: CachePolicy,
+    pub enable_multi_range_optimization: bool,
 }
 
 /// Information about the window function calls.
@@ -155,10 +156,11 @@ pub(super) struct Calls {
     // We should try our best to remove these flags while maintaining the performance in the future.
     pub(super) numbering_only: bool,
     pub(super) has_rank: bool,
+    pub(super) enable_multi_range_optimization: bool,
 }
 
 impl Calls {
-    fn new(calls: Vec<WindowFuncCall>) -> Self {
+    fn new(calls: Vec<WindowFuncCall>, enable_multi_range_optimization: bool) -> Self {
         let rows_frames = calls
             .iter()
             .filter_map(|call| call.frame.bounds.as_rows())
@@ -195,6 +197,7 @@ impl Calls {
             all_arg_indices,
             numbering_only,
             has_rank,
+            enable_multi_range_optimization,
         }
     }
 
@@ -209,7 +212,7 @@ impl Calls {
 
 impl<S: StateStore> OverWindowExecutor<S> {
     pub fn new(args: OverWindowExecutorArgs<S>) -> Self {
-        let calls = Calls::new(args.calls);
+        let calls = Calls::new(args.calls, args.enable_multi_range_optimization);
 
         let input_info = args.input.info().clone();
         let input_schema = &input_info.schema;
@@ -504,6 +507,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
             metrics
                 .over_window_range_cache_right_miss_count
                 .inc_by(stats.right_miss_count);
+            metrics
+                .over_window_affected_range_count
+                .inc_by(stats.affected_range_count);
             metrics
                 .over_window_accessed_entry_count
                 .inc_by(stats.accessed_entry_count);

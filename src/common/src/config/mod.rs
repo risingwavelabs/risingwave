@@ -443,6 +443,10 @@ pub mod default {
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
         }
+
+        pub fn stream_enable_over_window_multi_range() -> bool {
+            true
+        }
     }
 }
 

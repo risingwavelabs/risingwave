@@ -49,6 +49,7 @@ pub(super) struct OverPartitionStats {
     pub right_miss_count: u64,
 
     // stats for window function state computation
+    pub affected_range_count: u64,
     pub accessed_entry_count: u64,
     pub compute_count: u64,
     pub same_output_count: u64,
@@ -168,6 +169,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         // Find affected ranges, this also ensures that all rows in the affected ranges are loaded into the cache.
         let (part_with_delta, affected_ranges) =
             self.find_affected_ranges(table, &mut delta).await?;
+        let affected_range_count = affected_ranges.len() as u64;
 
         let snapshot = part_with_delta.snapshot();
         let delta = part_with_delta.delta();
@@ -316,6 +318,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             }
         }
 
+        self.stats.affected_range_count += affected_range_count;
         self.stats.accessed_entry_count += accessed_entry_count;
         self.stats.compute_count += compute_count;
         self.stats.same_output_count += same_output_count;
@@ -475,10 +478,6 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
     /// any sentinel node in the cache, which means some entries in the affected range may be
     /// in the state table, it returns an `Err((bool, bool))` to notify the caller that the
     /// left side or the right side or both sides of the cache should be extended.
-    ///
-    /// TODO(rc): Currently at most one range will be in the result vector. Ideally we should
-    /// recognize uncontinuous changes in the delta and find multiple ranges, but that will be
-    /// too complex for now.
     fn find_affected_ranges_readonly<'delta>(
         &self,
         part_with_delta: DeltaBTreeMap<'delta, CacheKey, OwnedRow>,
@@ -505,6 +504,19 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         let first_key = part_with_delta.first_key().unwrap();
         let last_key = part_with_delta.last_key().unwrap();
+
+        // When all frames are bounded ROWS (no RANGE/SESSION/UNBOUNDED) and there are
+        // multiple delta keys, we can compute per-key affected ranges and merge them.
+        // This avoids loading and computing the entire span between distant delta keys.
+        let use_multi_range = self.calls.enable_multi_range_optimization
+            && !self.calls.start_is_unbounded
+            && !self.calls.end_is_unbounded
+            && self.calls.range_frames.is_empty()
+            && part_with_delta.delta().len() > 1;
+
+        if use_multi_range {
+            return self.find_affected_ranges_multi_rows(part_with_delta, first_key, last_key);
+        }
 
         let first_curr_key = if self.calls.end_is_unbounded || delta_first_key == first_key {
             // If the frame end is unbounded, or, the first key is in delta, then the frame corresponding
@@ -666,6 +678,122 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 last_frame_end,
             )])
         }
+    }
+
+    /// For purely bounded `ROWS` frames, compute per-delta-key affected ranges and merge
+    /// overlapping ones. This produces multiple disjoint ranges when delta keys are sparse,
+    /// avoiding loading and computing the entire span between distant changes.
+    fn find_affected_ranges_multi_rows<'delta>(
+        &self,
+        part_with_delta: DeltaBTreeMap<'delta, CacheKey, OwnedRow>,
+        first_key: &'delta CacheKey,
+        last_key: &'delta CacheKey,
+    ) -> std::result::Result<Vec<AffectedRange<'delta>>, (bool, bool)> {
+        let bounds = &self.calls.super_rows_frame_bounds;
+        let mut need_extend_leftward = false;
+        let mut need_extend_rightward = false;
+
+        let check_sentinel = |key: &CacheKey, left: &mut bool, right: &mut bool| {
+            if key.is_smallest() {
+                *left = true;
+            } else if key.is_largest() {
+                *right = true;
+            }
+        };
+
+        // Compute per-delta-key affected ranges.
+        let mut raw_ranges: Vec<AffectedRange<'delta>> = Vec::new();
+
+        for dk in part_with_delta.delta().keys() {
+            // Find the first and last curr keys affected by this delta key.
+            let first_curr = if dk == first_key {
+                first_key
+            } else {
+                find_first_curr_for_rows_frame(bounds, part_with_delta, dk)
+            };
+            let last_curr = if dk == last_key {
+                last_key
+            } else {
+                find_last_curr_for_rows_frame(bounds, part_with_delta, dk)
+            };
+
+            // Check for sentinels.
+            check_sentinel(
+                first_curr,
+                &mut need_extend_leftward,
+                &mut need_extend_rightward,
+            );
+            check_sentinel(
+                last_curr,
+                &mut need_extend_leftward,
+                &mut need_extend_rightward,
+            );
+            if need_extend_leftward || need_extend_rightward {
+                return Err((need_extend_leftward, need_extend_rightward));
+            }
+
+            if first_curr > last_curr {
+                // This delta key doesn't affect any existing rows (e.g. deleted key with
+                // no neighbors in range).
+                continue;
+            }
+
+            // Find the frame boundaries for the affected curr keys.
+            let frame_start = if first_curr == first_key {
+                first_key
+            } else {
+                find_frame_start_for_rows_frame(bounds, part_with_delta, first_curr)
+            };
+            let frame_end = if last_curr == last_key {
+                last_key
+            } else {
+                find_frame_end_for_rows_frame(bounds, part_with_delta, last_curr)
+            };
+
+            check_sentinel(
+                frame_start,
+                &mut need_extend_leftward,
+                &mut need_extend_rightward,
+            );
+            check_sentinel(
+                frame_end,
+                &mut need_extend_leftward,
+                &mut need_extend_rightward,
+            );
+            if need_extend_leftward || need_extend_rightward {
+                return Err((need_extend_leftward, need_extend_rightward));
+            }
+
+            raw_ranges.push(AffectedRange::new(
+                frame_start,
+                first_curr,
+                last_curr,
+                frame_end,
+            ));
+        }
+
+        if raw_ranges.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Merge overlapping ranges. raw_ranges are ordered because delta keys are from a BTreeMap.
+        let mut merged: Vec<AffectedRange<'delta>> = Vec::new();
+        let mut cur = raw_ranges[0];
+
+        for r in &raw_ranges[1..] {
+            // If this range's frame_start overlaps with (or is adjacent to) the current
+            // range's frame_end, merge them.
+            if r.first_frame_start <= cur.last_frame_end {
+                cur.last_curr_key = std::cmp::max(cur.last_curr_key, r.last_curr_key);
+                cur.last_frame_end = std::cmp::max(cur.last_frame_end, r.last_frame_end);
+            } else {
+                merged.push(cur);
+                cur = *r;
+            }
+        }
+        merged.push(cur);
+
+        Ok(merged)
     }
 
     async fn extend_cache_to_boundary(
