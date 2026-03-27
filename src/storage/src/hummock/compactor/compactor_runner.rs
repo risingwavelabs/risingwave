@@ -108,6 +108,7 @@ impl CompactorRunner {
                 retain_multiple_version: false,
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
                 use_block_based_filter,
+                sstable_filter_kind: context.storage_opts.sstable_filter_kind,
                 table_vnode_partition: task.table_vnode_partition.clone(),
                 table_schemas: task
                     .table_schemas

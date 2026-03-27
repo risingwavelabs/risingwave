@@ -388,6 +388,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
+            sstable_filter_kind: context.storage_opts.sstable_filter_kind,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
         };

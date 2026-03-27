@@ -453,6 +453,7 @@ sstable_size_mb = 256
 parallel_compact_size_mb = 512
 block_size_kb = 64
 bloom_false_positive = 0.001
+sstable_filter_kind = "xor16"
 state_store = ""
 data_directory = ""
 backup_storage_url = ""

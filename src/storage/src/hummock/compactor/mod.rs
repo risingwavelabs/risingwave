@@ -62,6 +62,7 @@ use iceberg_compaction::iceberg_compactor_runner::{
 use iceberg_compaction::{IcebergTaskQueue, PushResult};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
+use risingwave_common::system_param::SstableFilterKind;
 use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_map};
 use risingwave_hummock_sdk::{
     HummockCompactionTaskId, HummockSstableObjectId, LocalSstableInfo, compact_task_to_string,
@@ -88,7 +89,8 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockResult, ObjectIdManager, SstableBuilderOptions, Xor16FilterBuilder,
+    GetObjectId, HummockResult, ObjectIdManager, SstableBuilderOptions, Xor8FilterBuilder,
+    Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -98,8 +100,9 @@ use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact
 use crate::hummock::compactor::iceberg_compaction::TaskKey;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
-    BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
-    UnifiedSstableWriterFactory, validate_ssts,
+    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, FilterBuilder,
+    SharedComapctorObjectIdManager, SstableWriterFactory, UnifiedSstableWriterFactory,
+    validate_ssts,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -210,28 +213,58 @@ impl Compactor {
 
         let (split_table_outputs, table_stats_map) = {
             let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
-            if self.task_config.use_block_based_filter {
-                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    compaction_catalog_agent_ref,
-                    task_progress.clone(),
-                    self.object_id_getter.clone(),
-                )
-                .instrument_await("compact".verbose())
-                .await?
-            } else {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
-                    factory,
-                    iter,
-                    compaction_filter,
-                    compaction_catalog_agent_ref,
-                    task_progress.clone(),
-                    self.object_id_getter.clone(),
-                )
-                .instrument_await("compact".verbose())
-                .await?
+            match (
+                self.task_config.sstable_filter_kind,
+                self.task_config.use_block_based_filter,
+            ) {
+                (SstableFilterKind::Xor8, true) => {
+                    self.compact_key_range_impl::<_, BlockedXor8FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
+                (SstableFilterKind::Xor8, false) => {
+                    self.compact_key_range_impl::<_, Xor8FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
+                (SstableFilterKind::Xor16, true) => {
+                    self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
+                (SstableFilterKind::Xor16, false) => {
+                    self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
             }
         };
 

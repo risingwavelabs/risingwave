@@ -555,6 +555,7 @@ impl SharedBufferCompactRunner {
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
+        let sstable_filter_kind = context.storage_opts.sstable_filter_kind;
         let compactor = Compactor::new(
             context,
             options,
@@ -566,6 +567,7 @@ impl SharedBufferCompactRunner {
                 stats_target_table_ids: None,
                 table_vnode_partition,
                 use_block_based_filter,
+                sstable_filter_kind,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
             },

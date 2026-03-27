@@ -16,7 +16,7 @@ use risingwave_common::config::{
     EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig, extract_storage_memory_config,
 };
 use risingwave_common::system_param::reader::{SystemParamsRead, SystemParamsReader};
-use risingwave_common::system_param::system_params_for_test;
+use risingwave_common::system_param::{SstableFilterKind, system_params_for_test};
 
 #[derive(Clone, Debug)]
 pub struct StorageOpts {
@@ -30,6 +30,8 @@ pub struct StorageOpts {
     pub block_size_kb: u32,
     /// False positive probability of bloom filter.
     pub bloom_false_positive: f64,
+    /// The xor filter family used when building SST filters.
+    pub sstable_filter_kind: SstableFilterKind,
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
     pub share_buffers_sync_parallelism: u32,
     /// Worker threads number of dedicated tokio runtime for share buffer compaction. 0 means use
@@ -219,6 +221,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             min_sstable_size_mb: c.storage.min_sstable_size_mb,
             block_size_kb: p.block_size_kb(),
             bloom_false_positive: p.bloom_false_positive(),
+            sstable_filter_kind: p.sstable_filter_kind(),
             share_buffers_sync_parallelism: c.storage.share_buffers_sync_parallelism,
             share_buffer_compaction_worker_threads_number: c
                 .storage

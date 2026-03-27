@@ -18,6 +18,7 @@ use std::f64;
 use std::sync::Arc;
 
 use bytes::BufMut;
+use risingwave_pb::hummock::PbSstableFilterType;
 
 use super::Sstable;
 use super::filter::FilterBuilder;
@@ -189,6 +190,10 @@ impl FilterBuilder for BloomFilterBuilder {
 
     fn approximate_building_memory(&self) -> usize {
         self.approximate_len()
+    }
+
+    fn filter_type(&self) -> PbSstableFilterType {
+        PbSstableFilterType::SstableFilterUnspecified
     }
 }
 

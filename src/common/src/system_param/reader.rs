@@ -18,7 +18,7 @@ use std::str::FromStr;
 use risingwave_license::LicenseKeyRef;
 use risingwave_pb::meta::PbSystemParams;
 
-use super::{AdaptiveParallelismStrategy, ParamValue, default};
+use super::{AdaptiveParallelismStrategy, ParamValue, SstableFilterKind, default};
 use crate::for_all_params;
 
 /// Information about a system parameter.
@@ -164,6 +164,16 @@ where
 
     fn bloom_false_positive(&self) -> f64 {
         self.inner().bloom_false_positive.unwrap()
+    }
+
+    fn sstable_filter_kind(&self) -> SstableFilterKind {
+        self.inner()
+            .sstable_filter_kind
+            .as_ref()
+            .map(|kind| SstableFilterKind::from_str(kind))
+            .transpose()
+            .expect("invalid sstable_filter_kind system param")
+            .unwrap_or_else(default::sstable_filter_kind)
     }
 
     fn state_store(&self) -> &str {

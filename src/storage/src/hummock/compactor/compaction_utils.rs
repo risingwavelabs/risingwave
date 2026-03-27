@@ -22,6 +22,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
+use risingwave_common::system_param::SstableFilterKind;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
@@ -30,7 +31,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, can_concat};
 use risingwave_pb::hummock::compact_task::PbTaskType;
-use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbTableSchema};
+use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbSstableFilterType, PbTableSchema};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
@@ -130,6 +131,7 @@ pub struct TaskConfig {
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub(crate) stats_target_table_ids: Option<HashSet<TableId>>,
     pub(crate) use_block_based_filter: bool,
+    pub(crate) sstable_filter_kind: SstableFilterKind,
 
     pub(crate) table_vnode_partition: BTreeMap<TableId, u32>,
     /// `TableId` -> `TableSchema`
@@ -156,6 +158,7 @@ impl TaskConfig {
             retain_multiple_version: false,
             stats_target_table_ids: None,
             use_block_based_filter,
+            sstable_filter_kind: SstableFilterKind::Xor16,
             table_vnode_partition: BTreeMap::default(),
             table_schemas,
             disable_drop_column_optimization: false,
@@ -554,6 +557,13 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
     let all_ssts_are_blocked_filter = sstable_infos
         .iter()
         .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked);
+    let current_filter_type = match context.storage_opts.sstable_filter_kind {
+        SstableFilterKind::Xor8 => PbSstableFilterType::SstableFilterXor8,
+        SstableFilterKind::Xor16 => PbSstableFilterType::SstableFilterXor16,
+    };
+    let all_ssts_match_filter_family = sstable_infos
+        .iter()
+        .all(|table_info| table_info.filter_type_compatible_with(current_filter_type));
 
     let delete_key_count = sstable_infos
         .iter()
@@ -566,7 +576,12 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
 
     let single_table = compact_task.build_compact_table_ids().len() == 1;
     context.storage_opts.enable_fast_compaction
+        && matches!(
+            context.storage_opts.sstable_filter_kind,
+            SstableFilterKind::Xor16
+        )
         && all_ssts_are_blocked_filter
+        && all_ssts_match_filter_family
         && !compact_task.contains_range_tombstone()
         && !compact_task.contains_ttl()
         && !compact_task.contains_split_sst()
