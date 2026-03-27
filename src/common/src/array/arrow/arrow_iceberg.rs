@@ -568,51 +568,6 @@ mod test {
     }
 
     #[test]
-    fn variant_extension_type_maps_to_jsonb() {
-        let json_values = Arc::new(arrow_array::StringArray::from(vec![
-            Some(r#""iceberg""#),
-            None,
-        ])) as ArrayRef;
-        let variant_array = json_to_variant(&json_values).unwrap();
-        let field = variant_array.field("variant_col");
-
-        assert_eq!(
-            IcebergArrowConvert.type_from_field(&field).unwrap(),
-            DataType::Jsonb
-        );
-    }
-
-    #[test]
-    fn variant_array_converts_to_jsonb() {
-        let json_values = Arc::new(arrow_array::StringArray::from(vec![
-            Some(r#"{"k":[1,true,null]}"#),
-            None,
-            Some(r#""rw""#),
-        ])) as ArrayRef;
-        let variant_array = json_to_variant(&json_values).unwrap();
-        let field = variant_array.field("variant_col");
-        let array = Arc::new(variant_array.into_inner()) as ArrayRef;
-
-        let converted = IcebergArrowConvert
-            .array_from_arrow_array(&field, &array)
-            .unwrap();
-        let values = converted
-            .into_jsonb()
-            .iter()
-            .map(|value| value.map(|value| value.to_owned_scalar()))
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            values,
-            vec![
-                Some(r#"{"k":[1,true,null]}"#.parse().unwrap()),
-                None,
-                Some(r#""rw""#.parse().unwrap()),
-            ],
-        );
-    }
-
-    #[test]
     fn all_variant_internal_types_convert_to_jsonb() {
         let long_string = "x".repeat(64);
         let binary_bytes = [0x0a_u8, 0x0b, 0x0c, 0x0d];
@@ -637,7 +592,8 @@ mod test {
         let time = NaiveTime::from_hms_micro_opt(12, 33, 54, 123_456).unwrap();
         let uuid = Uuid::parse_str("123e4567-e89b-12d3-a456-426614174000").unwrap();
 
-        let mut builder = VariantArrayBuilder::new(24);
+        let mut builder = VariantArrayBuilder::new(25);
+        builder.append_null(); // null Arrow row (not variant null)
         builder.append_variant(Variant::Null);
         builder.append_variant(Variant::BooleanTrue);
         builder.append_variant(Variant::BooleanFalse);
@@ -673,6 +629,13 @@ mod test {
 
         let variant_array = builder.build();
         let field = variant_array.field("variant_col");
+
+        // Variant extension type should map to Jsonb (merged from variant_extension_type_maps_to_jsonb)
+        assert_eq!(
+            IcebergArrowConvert.type_from_field(&field).unwrap(),
+            DataType::Jsonb
+        );
+
         let array = Arc::new(variant_array.into_inner()) as ArrayRef;
 
         let converted = IcebergArrowConvert
@@ -701,6 +664,7 @@ mod test {
         assert_eq!(
             values,
             vec![
+                None, // null Arrow row
                 Some("null".parse().unwrap()),
                 Some("true".parse().unwrap()),
                 Some("false".parse().unwrap()),
