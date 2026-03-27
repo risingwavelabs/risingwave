@@ -1001,12 +1001,9 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint <= pk_prefix.len() {
                 let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
                 let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
-                let prefix_len = self.pk_serializer.deserialize_prefix_len(
-                    &serialized_pk_prefix,
-                    self.read_prefix_len_hint
-                        .try_into()
-                        .expect("prefix len hint should fit u32"),
-                )?;
+                let prefix_len = self
+                    .pk_serializer
+                    .deserialize_prefix_len(&serialized_pk_prefix, self.read_prefix_len_hint)?;
                 Some(Bytes::from(serialized_pk_prefix[..prefix_len].to_vec()))
             } else {
                 None
