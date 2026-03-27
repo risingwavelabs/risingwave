@@ -121,7 +121,7 @@ impl StreamActorManager {
         let prefix = node
             .pk_prefix
             .iter()
-            .zip(pk_types.iter())
+            .zip_eq(pk_types.iter())
             .map(|(raw, data_type)| {
                 deserialize_datum(raw.as_slice(), data_type)
                     .map_err(anyhow::Error::from)
