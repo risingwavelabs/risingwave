@@ -461,8 +461,8 @@ impl Agg<StreamPlanRef> {
                 agg_types::single_value_state_iff_in_append_only!() if in_append_only => {
                     AggCallState::Value
                 }
-                agg_types::single_value_state!() => AggCallState::Value,
-                agg_types::materialized_input_state!() => {
+                AggType::UserDefined(_) if agg_call.order_by.is_empty() => AggCallState::Value,
+                agg_types::materialized_input_state!() | AggType::UserDefined(_) => {
                     // columns with order requirement in state table
                     let sort_keys = {
                         match agg_call.agg_type {
@@ -512,6 +512,11 @@ impl Agg<StreamPlanRef> {
                                 .iter()
                                 .map(|o| (o.order_type, o.column_index))
                                 .collect(),
+                            AggType::UserDefined(_) => agg_call
+                                .order_by
+                                .iter()
+                                .map(|o| (o.order_type, o.column_index))
+                                .collect(),
                             _ => unreachable!(),
                         }
                     };
@@ -540,7 +545,8 @@ impl Agg<StreamPlanRef> {
                             | PbAggKind::PercentileDisc
                             | PbAggKind::Mode,
                         )
-                        | AggType::WrapScalar(_) => {
+                        | AggType::WrapScalar(_)
+                        | AggType::UserDefined(_) => {
                             agg_call.inputs.iter().map(|i| i.index).collect()
                         }
                         _ => vec![],
@@ -549,6 +555,7 @@ impl Agg<StreamPlanRef> {
                     let state = gen_materialized_input_state(sort_keys, extra_keys, include_keys);
                     AggCallState::MaterializedInput(Box::new(state))
                 }
+                agg_types::single_value_state!() => AggCallState::Value,
                 agg_types::rewritten!() => {
                     unreachable!("should have been rewritten")
                 }
