@@ -13,29 +13,60 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Hummock Manager",
             [
-                panels.timeseries_latency(
-                    "Lock Time",
-                    "",
+                panels.subheader("Compaction & GC"),
+                panels.timeseries_count(
+                    "Write Stop Compaction Groups",
+                    "When certain per compaction group threshold is exceeded (e.g. number of level 0 sub-level in LSMtree), write op to that compaction group is stopped temporarily. Check log for detail reason of write stop.",
                     [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, method, lock_name, lock_type))",
-                                f"Lock Time p{legend}"
-                                + " - {{method}} @ {{lock_type}} @ {{lock_name}}",
-                            ),
-                            [50, 99, "max"],
+                        panels.target(
+                            f"{metric('storage_write_stop_compaction_groups')}",
+                            "compaction_group_{{compaction_group_id}}",
                         ),
                     ],
                 ),
-                panels.subheader("Processing"),
-                panels.timeseries_latency(
-                    "Real Process Time",
+                panels.timeseries_count(
+                    "Full GC Trigger Count",
+                    "total number of attempts to trigger full GC",
+                    [
+                        panels.target(
+                            f"{metric('storage_full_gc_trigger_count')}",
+                            "full_gc_trigger_count",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency_ms(
+                    "Compaction Event Loop Time",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('meta_hummock_manager_real_process_time_bucket')}[$__rate_interval])) by (le, method))",
-                                f"Real Process Time p{legend}" + " - {{method}}",
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"meta consumed latency p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 99, "max"],
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"meta iteration latency p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 99, "max"],
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"compactor consumed latency p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 99, "max"],
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"compactor iteration latency p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                             ),
                             [50, 99, "max"],
                         ),
@@ -199,6 +230,16 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     ],
                 ),
                 panels.timeseries_count(
+                    "Table Change Log Min Epoch",
+                    "Per table change log minimum retained epoch",
+                    [
+                        panels.target(
+                            f"{metric('storage_table_change_log_min_epoch')}",
+                            "{{table_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
                     "Delta Log Total Number",
                     "total number of hummock version delta log",
                     [
@@ -225,65 +266,7 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                         ),
                     ],
                 ),
-                panels.subheader("Compaction & GC"),
-                panels.timeseries_count(
-                    "Write Stop Compaction Groups",
-                    "When certain per compaction group threshold is exceeded (e.g. number of level 0 sub-level in LSMtree), write op to that compaction group is stopped temporarily. Check log for detail reason of write stop.",
-                    [
-                        panels.target(
-                            f"{metric('storage_write_stop_compaction_groups')}",
-                            "compaction_group_{{compaction_group_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Full GC Trigger Count",
-                    "total number of attempts to trigger full GC",
-                    [
-                        panels.target(
-                            f"{metric('storage_full_gc_trigger_count')}",
-                            "full_gc_trigger_count",
-                        ),
-                    ],
-                ),
-                panels.timeseries_latency_ms(
-                    "Compaction Event Loop Time",
-                    "",
-                    [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                                f"meta consumed latency p{legend}"
-                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
-                            [50, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('storage_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                                f"meta iteration latency p{legend}"
-                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
-                            [50, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_consumed_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                                f"compactor consumed latency p{legend}"
-                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
-                            [50, 99, "max"],
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(irate({metric('compactor_compaction_event_loop_iteration_latency_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                                f"compactor iteration latency p{legend}"
-                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
-                            [50, 99, "max"],
-                        ),
-                    ],
-                ),
+
                 panels.subheader("Time Travel"),
                 panels.timeseries_count(
                     "State Table Count",
@@ -345,6 +328,34 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                         panels.target(
                             f"sum(rate({metric('storage_time_travel_version_replay_latency_count')}[$__rate_interval]))",
                             "time_travel_version_replay_ops",
+                        ),
+                    ],
+                ),
+                panels.subheader("Processing"),
+                panels.timeseries_latency(
+                    "Real Process Time",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('meta_hummock_manager_real_process_time_bucket')}[$__rate_interval])) by (le, method))",
+                                f"Real Process Time p{legend}" + " - {{method}}",
+                            ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Lock Time",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('hummock_manager_lock_time_bucket')}[$__rate_interval])) by (le, method, lock_name, lock_type))",
+                                f"Lock Time p{legend}"
+                                + " - {{method}} @ {{lock_type}} @ {{lock_name}}",
+                            ),
+                            [50, 99, "max"],
                         ),
                     ],
                 ),

@@ -41,7 +41,7 @@ pub struct VectorFileInfo {
 impl From<PbVectorFileInfo> for VectorFileInfo {
     fn from(pb: PbVectorFileInfo) -> Self {
         Self {
-            object_id: pb.object_id.into(),
+            object_id: pb.object_id,
             file_size: pb.file_size,
             start_vector_id: pb.start_vector_id.try_into().unwrap(),
             vector_count: pb.vector_count.try_into().unwrap(),
@@ -53,7 +53,7 @@ impl From<PbVectorFileInfo> for VectorFileInfo {
 impl From<VectorFileInfo> for PbVectorFileInfo {
     fn from(info: VectorFileInfo) -> Self {
         Self {
-            object_id: info.object_id.inner(),
+            object_id: info.object_id,
             file_size: info.file_size,
             start_vector_id: info.start_vector_id.try_into().unwrap(),
             vector_count: info.vector_count.try_into().unwrap(),
@@ -169,7 +169,7 @@ pub struct HnswGraphFileInfo {
 impl From<PbHnswGraphFileInfo> for HnswGraphFileInfo {
     fn from(pb: PbHnswGraphFileInfo) -> Self {
         Self {
-            object_id: pb.object_id.into(),
+            object_id: pb.object_id,
             file_size: pb.file_size,
         }
     }
@@ -178,7 +178,7 @@ impl From<PbHnswGraphFileInfo> for HnswGraphFileInfo {
 impl From<HnswGraphFileInfo> for PbHnswGraphFileInfo {
     fn from(info: HnswGraphFileInfo) -> Self {
         Self {
-            object_id: info.object_id.inner(),
+            object_id: info.object_id,
             file_size: info.file_size,
         }
     }

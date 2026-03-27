@@ -40,13 +40,14 @@ use crate::handler::{HandlerArgs, RwPgResponseBuilderExt};
 pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let mut binder = Binder::new_for_system(&session);
+    let catalog_reader = session.env().catalog_reader().read_guard();
 
     Binder::validate_cross_db_reference(&session.database(), &object_name)?;
     let not_found_err =
         CatalogError::not_found("table, source, sink or view", object_name.to_string());
 
     // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
-    let (columns, pk_columns, dist_columns, indices, relname, description) =
+    let (columns, pk_columns, dist_columns, indices, relname, description, target_table_name) =
         if let Ok(relation) = binder.bind_relation_by_name(&object_name, None, None, false) {
             match relation {
                 Relation::Source(s) => {
@@ -71,6 +72,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
                         vec![],
                         s.catalog.name,
                         None, // Description
+                        None,
                     )
                 }
                 Relation::BaseTable(t) => {
@@ -93,6 +95,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
                         t.table_indexes,
                         t.table_catalog.name.clone(),
                         t.table_catalog.description.clone(),
+                        None,
                     )
                 }
                 Relation::SystemTable(t) => {
@@ -109,6 +112,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
                         vec![],
                         t.sys_table_catalog.name.clone(),
                         None, // Description
+                        None,
                     )
                 }
                 Relation::Share(_) => {
@@ -129,6 +133,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
                             vec![],
                             vec![],
                             view.view_catalog.name.clone(),
+                            None,
                             None,
                         )
                     } else {
@@ -151,6 +156,10 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
                 .iter()
                 .map(|idx| columns[*idx].column_desc.clone())
                 .collect_vec();
+            let target_table_name = sink
+                .sink_catalog
+                .target_table
+                .and_then(|table_id| catalog_reader.get_table_name_by_id(table_id).ok());
             (
                 columns,
                 pk_columns,
@@ -158,6 +167,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
                 vec![],
                 sink.sink_catalog.name.clone(),
                 None,
+                target_table_name,
             )
         } else {
             return Err(not_found_err.into());
@@ -231,6 +241,15 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
         is_hidden: None,
         description,
     });
+
+    if let Some(target_table) = target_table_name {
+        rows.push(ShowColumnRow {
+            name: ShowColumnName::special("target table name"),
+            r#type: target_table,
+            is_hidden: None,
+            description: None,
+        });
+    };
 
     // TODO: table name and description as title of response
     // TODO: recover the original user statement
@@ -491,6 +510,45 @@ mod tests {
             "_rw_timestamp".into() => "timestamp with time zone".into(),
             "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1)".into(),
             "table description".into() => "t".into(),
+        };
+
+        assert_eq!(columns, expected_columns);
+    }
+
+    #[tokio::test]
+    async fn test_describe_handler_with_target_table() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql("CREATE TABLE t(v int);").await.unwrap();
+
+        frontend.run_sql("CREATE TABLE tt(v int);").await.unwrap();
+
+        frontend.run_sql("CREATE SINK ssss INTO tt AS SELECT * FROM t WITH (type = 'append-only', force_append_only = 'true');").await.unwrap();
+
+        let sql = "describe ssss;";
+        let mut pg_response = frontend.run_sql(sql).await.unwrap();
+
+        let mut columns = HashMap::new();
+        #[for_await]
+        for row_set in pg_response.values_stream() {
+            let row_set = row_set.unwrap();
+            for row in row_set {
+                columns.insert(
+                    std::str::from_utf8(row.index(0).as_ref().unwrap())
+                        .unwrap()
+                        .to_owned(),
+                    std::str::from_utf8(row.index(1).as_ref().unwrap())
+                        .unwrap()
+                        .to_owned(),
+                );
+            }
+        }
+
+        let expected_columns: HashMap<String, String> = maplit::hashmap! {
+            "v".into() => "integer".into(),
+            "\"t._row_id\"".into() => "serial".into(),
+            "distribution key".into() => "t._row_id".into(),
+            "table description".into() => "ssss".into(),
+            "target table name".into() => "tt".into(),
         };
 
         assert_eq!(columns, expected_columns);

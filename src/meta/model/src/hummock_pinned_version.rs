@@ -35,7 +35,7 @@ impl From<Model> for HummockPinnedVersion {
     fn from(value: Model) -> Self {
         Self {
             context_id: value.context_id,
-            min_pinned_id: value.min_pinned_id as _,
+            min_pinned_id: value.min_pinned_id,
         }
     }
 }

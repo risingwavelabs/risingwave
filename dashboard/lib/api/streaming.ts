@@ -30,7 +30,6 @@ import {
 } from "../../proto/gen/catalog"
 import {
   FragmentToRelationMap,
-  ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
   RelationIdInfos,
   TableFragments,
 } from "../../proto/gen/meta"
@@ -271,9 +270,13 @@ export async function getSchemas() {
 
 // Returns a map of object id to a list of object ids that it depends on
 export async function getObjectDependencies() {
-  let objDependencies: ObjectDependencies[] = (
-    await api.get("/object_dependencies")
-  ).map(ObjectDependencies.fromJSON)
+  type ObjectDependencyRow = {
+    objectId: number
+    referencedObjectId: number
+  }
+  const objDependencies: ObjectDependencyRow[] = await api.get(
+    "/object_dependencies"
+  )
   const objDependencyGroup = new Map<number, number[]>()
   objDependencies.forEach((x) => {
     if (!objDependencyGroup.has(x.objectId)) {

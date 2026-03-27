@@ -35,6 +35,7 @@
 #![feature(portable_simd)]
 #![feature(map_try_insert)]
 #![feature(never_type)]
+#![feature(backtrace_frames)]
 
 pub mod hummock;
 pub mod memory;

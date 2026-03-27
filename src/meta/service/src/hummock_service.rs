@@ -19,7 +19,6 @@ use compact_task::PbTaskStatus;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::SYS_CATALOG_START_ID;
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::backup_restore::BackupManagerRef;
@@ -36,8 +35,8 @@ use risingwave_pb::iceberg_compaction::{
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::RwReceiverStream;
-use crate::hummock::HummockManagerRef;
 use crate::hummock::compaction::selector::ManualCompactionOption;
+use crate::hummock::{HummockManagerRef, ManualCompactionTriggerResult};
 
 pub struct HummockServiceImpl {
     hummock_manager: HummockManagerRef,
@@ -86,10 +85,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<UnpinVersionBeforeResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .unpin_version_before(
-                req.context_id,
-                HummockVersionId::new(req.unpin_version_before),
-            )
+            .unpin_version_before(req.context_id, req.unpin_version_before)
             .await?;
         Ok(Response::new(UnpinVersionBeforeResponse { status: None }))
     }
@@ -131,10 +127,7 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<TriggerCompactionDeterministicResponse>, Status> {
         let req = request.into_inner();
         self.hummock_manager
-            .trigger_compaction_deterministic(
-                HummockVersionId::new(req.version_id),
-                req.compaction_groups,
-            )
+            .trigger_compaction_deterministic(req.version_id, req.compaction_groups)
             .await?;
         Ok(Response::new(TriggerCompactionDeterministicResponse {}))
     }
@@ -156,7 +149,7 @@ impl HummockManagerService for HummockServiceImpl {
         let req = request.into_inner();
         let version_deltas = self
             .hummock_manager
-            .list_version_deltas(HummockVersionId::new(req.start_id), req.num_limit)
+            .list_version_deltas(req.start_id, req.num_limit)
             .await?;
         let resp = ListVersionDeltasResponse {
             version_deltas: Some(PbHummockVersionDeltas {
@@ -179,8 +172,8 @@ impl HummockManagerService for HummockServiceImpl {
             .await?;
         Ok(Response::new(GetNewObjectIdsResponse {
             status: None,
-            start_id: object_id_range.start_id.inner(),
-            end_id: object_id_range.end_id.inner(),
+            start_id: object_id_range.start_id,
+            end_id: object_id_range.end_id,
         }))
     }
 
@@ -192,7 +185,8 @@ impl HummockManagerService for HummockServiceImpl {
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
             level: request.level as usize,
-            sst_ids: request.sst_ids.into_iter().map(|id| id.into()).collect(),
+            sst_ids: request.sst_ids,
+            exclusive: request.exclusive.unwrap_or(false),
             ..Default::default()
         };
 
@@ -234,12 +228,18 @@ impl HummockManagerService for HummockServiceImpl {
             &option
         );
 
-        self.hummock_manager
+        let should_retry = match self
+            .hummock_manager
             .trigger_manual_compaction(compaction_group_id, option)
-            .await?;
+            .await?
+        {
+            ManualCompactionTriggerResult::Submitted => false,
+            ManualCompactionTriggerResult::Retry => true,
+        };
 
         Ok(Response::new(TriggerManualCompactionResponse {
             status: None,
+            should_retry: Some(should_retry),
         }))
     }
 
@@ -526,8 +526,8 @@ impl HummockManagerService for HummockServiceImpl {
             .flat_map(|(object_id, v)| {
                 v.into_iter()
                     .map(move |(compaction_group_id, sst_ids)| BranchedObject {
-                        object_id: object_id.inner(),
-                        sst_id: sst_ids.into_iter().map(|id| id.inner()).collect(),
+                        object_id,
+                        sst_id: sst_ids,
                         compaction_group_id,
                     })
             })
@@ -564,6 +564,8 @@ impl HummockManagerService for HummockServiceImpl {
             periodic_ttl_reclaim_compaction_interval_sec,
             periodic_tombstone_reclaim_compaction_interval_sec,
             periodic_scheduling_compaction_group_split_interval_sec,
+            enable_compaction_group_normalize,
+            max_normalize_splits_per_round,
             do_not_config_object_storage_lifecycle,
             partition_vnode_count,
             table_high_write_throughput_threshold,
@@ -667,6 +669,39 @@ impl HummockManagerService for HummockServiceImpl {
             .merge_compaction_group(req.left_group_id, req.right_group_id)
             .await?;
         Ok(Response::new(MergeCompactionGroupResponse {}))
+    }
+
+    async fn get_table_change_logs(
+        &self,
+        request: Request<GetTableChangeLogsRequest>,
+    ) -> Result<Response<GetTableChangeLogsResponse>, Status> {
+        let GetTableChangeLogsRequest {
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids,
+            exclude_empty,
+            limit,
+        } = request.into_inner();
+        let table_change_logs = self
+            .hummock_manager
+            .get_table_change_logs(
+                epoch_only,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids
+                    .map(|t| t.table_ids.into_iter().collect::<HashSet<_>>())
+                    .clone(),
+                exclude_empty,
+                limit,
+            )
+            .await
+            .into_iter()
+            .map(|(i, l)| (i.as_raw_id(), l.to_protobuf()))
+            .collect();
+        Ok(Response::new(GetTableChangeLogsResponse {
+            table_change_logs,
+        }))
     }
 }
 

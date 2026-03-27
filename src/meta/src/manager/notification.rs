@@ -203,6 +203,7 @@ impl NotificationManager {
                 objects: vec![PbObject {
                     object_info: object_info.into(),
                 }],
+                dependencies: vec![],
             }),
         )
         .await
@@ -317,7 +318,7 @@ struct NotificationManagerCore {
     /// The notification sender to compactor nodes.
     compactor_senders: SenderMap,
     /// The notification sender to compute nodes.
-    compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    compute_senders: SenderMap,
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
     exiting: bool,

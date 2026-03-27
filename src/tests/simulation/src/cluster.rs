@@ -146,6 +146,7 @@ impl Configuration {
             meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
+            per_session_queries: vec![].into(),
             ..Default::default()
         }
     }

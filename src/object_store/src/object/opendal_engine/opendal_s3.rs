@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use opendal::Operator;
-use opendal::layers::LoggingLayer;
+use opendal::layers::{HttpClientLayer, LoggingLayer};
 use opendal::raw::HttpClient;
 use opendal::services::S3;
 use risingwave_common::config::ObjectStoreConfig;
@@ -46,9 +46,9 @@ impl OpendalObjectStore {
         let http_client = Self::new_http_client(&config)?;
 
         let op: Operator = Operator::new(builder)?
+            .layer(HttpClientLayer::new(http_client))
             .layer(LoggingLayer::default())
             .finish();
-        op.update_http_client(|_| http_client);
 
         Ok(Self {
             op,
@@ -86,11 +86,12 @@ impl OpendalObjectStore {
             .endpoint(&format!("{}{}", endpoint_prefix, address))
             .disable_config_load();
 
+        let http_client = Self::new_http_client(&config)?;
+
         let op: Operator = Operator::new(builder)?
+            .layer(HttpClientLayer::new(http_client))
             .layer(LoggingLayer::default())
             .finish();
-        let http_client = Self::new_http_client(&config)?;
-        op.update_http_client(|_| http_client);
 
         Ok(Self {
             op,

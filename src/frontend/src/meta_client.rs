@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Context;
 use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
-use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_pb::backup_service::MetaSnapshotMetadata;
+use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
+use risingwave_pb::backup_service::{BackupJobStatus, MetaSnapshotMetadata};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -34,8 +35,8 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_iceberg_compaction_status_response::IcebergCompactionStatus;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
-use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -61,7 +62,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn flush(&self, database_id: DatabaseId) -> Result<HummockVersionId>;
 
-    async fn wait(&self) -> Result<()>;
+    async fn backup_meta(&self, remarks: Option<String>) -> Result<u64>;
+    async fn get_backup_job_status(&self, job_id: u64) -> Result<(BackupJobStatus, String)>;
+    async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()>;
 
     async fn recover(&self) -> Result<()>;
 
@@ -84,8 +87,6 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_actor_states(&self) -> Result<Vec<ActorState>>;
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>>;
-
-    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
 
@@ -112,9 +113,18 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<HashMap<TableId, Table>>;
 
     /// Returns vector of (`worker_id`, `min_pinned_version_id`)
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>>;
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, HummockVersionId)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
+
+    async fn get_hummock_table_change_log(
+        &self,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs>;
 
     async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion>;
 
@@ -124,7 +134,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_hummock_compaction_group_configs(&self) -> Result<Vec<CompactionGroupInfo>>;
 
-    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>>;
+    async fn list_hummock_active_write_limits(
+        &self,
+    ) -> Result<HashMap<CompactionGroupId, WriteLimit>>;
 
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 
@@ -158,6 +170,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>>;
 
     async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>>;
+
+    async fn list_iceberg_compaction_status(&self) -> Result<Vec<IcebergCompactionStatus>>;
 
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
@@ -235,8 +249,16 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.flush(database_id).await
     }
 
-    async fn wait(&self) -> Result<()> {
-        self.0.wait().await
+    async fn backup_meta(&self, remarks: Option<String>) -> Result<u64> {
+        self.0.backup_meta(remarks).await
+    }
+
+    async fn get_backup_job_status(&self, job_id: u64) -> Result<(BackupJobStatus, String)> {
+        self.0.get_backup_job_status(job_id).await
+    }
+
+    async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()> {
+        self.0.delete_meta_snapshot(snapshot_ids).await
     }
 
     async fn recover(&self) -> Result<()> {
@@ -275,10 +297,6 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_actor_splits(&self) -> Result<Vec<ActorSplit>> {
         self.0.list_actor_splits().await
-    }
-
-    async fn list_object_dependencies(&self) -> Result<Vec<PbObjectDependencies>> {
-        self.0.list_object_dependencies().await
     }
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
@@ -325,7 +343,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         Ok(tables)
     }
 
-    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>> {
+    async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, HummockVersionId)>> {
         let pinned_versions = self
             .0
             .risectl_get_pinned_versions_summary()
@@ -342,6 +360,26 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion> {
         self.0.get_current_version().await
+    }
+
+    async fn get_hummock_table_change_log(
+        &self,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        self.0
+            .get_table_change_logs(
+                true,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids,
+                exclude_empty,
+                limit,
+            )
+            .await
     }
 
     async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion> {
@@ -366,7 +404,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.risectl_list_compaction_group().await
     }
 
-    async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>> {
+    async fn list_hummock_active_write_limits(
+        &self,
+    ) -> Result<HashMap<CompactionGroupId, WriteLimit>> {
         self.0.list_active_write_limit().await
     }
 
@@ -551,5 +591,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>> {
         self.0.list_refresh_table_states().await
+    }
+
+    async fn list_iceberg_compaction_status(&self) -> Result<Vec<IcebergCompactionStatus>> {
+        self.0.list_iceberg_compaction_status().await
     }
 }

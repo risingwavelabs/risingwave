@@ -37,10 +37,10 @@ pub struct BatchFilter {
 impl BatchFilter {
     pub fn new(core: generic::Filter<PlanRef>) -> Self {
         // TODO: derive from input
-        let base = PlanBase::new_batch_with_core(
+        let base = PlanBase::new_batch_with_core_and_orders(
             &core,
             core.input.distribution().clone(),
-            core.input.order().clone(),
+            core.input.orders(),
         );
         BatchFilter { base, core }
     }

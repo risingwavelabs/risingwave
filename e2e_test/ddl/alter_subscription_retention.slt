@@ -1,0 +1,53 @@
+statement ok
+create table retention_t (v1 int);
+
+statement ok
+create materialized view retention_mv as select v1 from retention_t;
+
+statement ok
+create subscription retention_sub from retention_mv with (retention = '1D');
+
+# Verify initial retention via rw_subscriptions
+query TI
+select definition, retention_seconds from rw_catalog.rw_subscriptions where name = 'retention_sub';
+----
+CREATE SUBSCRIPTION retention_sub FROM retention_mv WITH (retention = '1D') 86400
+
+# Alter retention using SET RETENTION TO syntax
+statement ok
+alter subscription retention_sub set retention to '2D';
+
+# Verify updated retention via rw_subscriptions
+query TI
+select definition, retention_seconds from rw_catalog.rw_subscriptions where name = 'retention_sub';
+----
+CREATE SUBSCRIPTION retention_sub FROM retention_mv WITH (retention = '2D') 172800
+
+query TT
+show create subscription retention_sub;
+----
+public.retention_sub CREATE SUBSCRIPTION retention_sub FROM retention_mv WITH (retention = '2D')
+
+# Alter retention using SET RETENTION = syntax
+statement ok
+alter subscription retention_sub set retention = '3H';
+
+# Verify updated retention via rw_subscriptions
+query TI
+select definition, retention_seconds from rw_catalog.rw_subscriptions where name = 'retention_sub';
+----
+CREATE SUBSCRIPTION retention_sub FROM retention_mv WITH (retention = '3H') 10800
+
+query TT
+show create subscription retention_sub;
+----
+public.retention_sub CREATE SUBSCRIPTION retention_sub FROM retention_mv WITH (retention = '3H')
+
+statement ok
+drop subscription retention_sub;
+
+statement ok
+drop materialized view retention_mv;
+
+statement ok
+drop table retention_t;

@@ -96,7 +96,7 @@ pub async fn add_test_tables(
     )
     .await;
     let mut compact_task = hummock_manager
-        .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+        .get_compact_task(compaction_group_id, &mut *default_compaction_selector())
         .await
         .unwrap()
         .unwrap();
@@ -350,7 +350,6 @@ pub async fn setup_compute_env_with_metric(
             Property {
                 is_streaming: true,
                 is_serving: true,
-                is_unschedulable: false,
                 parallelism: fake_parallelism as _,
                 ..Default::default()
             },
@@ -380,7 +379,9 @@ pub async fn setup_compute_env(
 
 pub async fn get_sst_ids(hummock_manager: &HummockManager, number: u32) -> Vec<u64> {
     let range = hummock_manager.get_new_object_ids(number).await.unwrap();
-    (range.start_id.inner()..range.end_id.inner()).collect_vec()
+    (range.start_id..range.end_id)
+        .map(|id| id.as_raw_id())
+        .collect_vec()
 }
 
 pub async fn add_ssts(
@@ -431,7 +432,7 @@ pub fn compaction_selector_context<'a>(
 pub async fn get_compaction_group_id_by_table_id(
     hummock_manager_ref: HummockManagerRef,
     table_id: impl Into<TableId>,
-) -> u64 {
+) -> CompactionGroupId {
     let version = hummock_manager_ref.get_current_version().await;
     let mapping = version.state_table_info.build_table_compaction_group_id();
     *mapping.get(&table_id.into()).unwrap()

@@ -753,6 +753,7 @@ impl LocalHummockStorage {
         let table_memory_metrics = Arc::new(TableMemoryMetrics::new(
             hummock_version_reader.stats(),
             option.table_id,
+            option.fragment_id,
             option.is_replicated,
         ));
         Self {

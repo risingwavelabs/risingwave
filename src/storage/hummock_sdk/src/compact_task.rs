@@ -23,13 +23,14 @@ use risingwave_pb::hummock::{
     LevelType, PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats,
     PbValidationTask,
 };
+use risingwave_pb::id::WorkerId;
 
-use crate::HummockSstableObjectId;
 use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{TableWatermarks, WatermarkSerdeType};
+use crate::{CompactionGroupId, HummockSstableObjectId};
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
@@ -49,7 +50,7 @@ pub struct CompactTask {
     pub base_level: u32,
     pub task_status: PbTaskStatus,
     /// compaction group the task belongs to.
-    pub compaction_group_id: u64,
+    pub compaction_group_id: CompactionGroupId,
     /// compaction group id when the compaction task is created
     pub compaction_group_version_id: u64,
     /// `existing_table_ids` for compaction drop key
@@ -80,6 +81,8 @@ pub struct CompactTask {
     pub max_sub_compaction: u32,
 
     pub max_kv_count_for_xor16: Option<u64>,
+
+    pub max_vnode_key_range_bytes: Option<u64>,
 }
 
 impl CompactTask {
@@ -126,6 +129,10 @@ impl CompactTask {
                 .values()
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
+            + self
+                .max_vnode_key_range_bytes
+                .map(|_| size_of::<u32>())
+                .unwrap_or_default()
             + self
                 .value_table_watermarks
                 .values()
@@ -197,7 +204,7 @@ impl CompactTask {
         self.input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .any(|sst| sst.sst_id.inner() != sst.object_id.inner())
+            .any(|sst| sst.sst_id.as_raw_id() != sst.object_id.as_raw_id())
     }
 
     pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> + use<> {
@@ -236,6 +243,14 @@ impl CompactTask {
             .sum::<u64>();
 
         crate::filter_utils::is_kv_count_too_large_for_xor16(kv_count, self.max_kv_count_for_xor16)
+    }
+
+    /// Returns the effective vnode key-range hint limit (in bytes) for this compaction task.
+    ///
+    /// The hint is only meaningful when all input SSTs belong to a single table.
+    pub fn effective_max_vnode_key_range_bytes(&self) -> Option<usize> {
+        let limit = self.max_vnode_key_range_bytes.filter(|&v| v > 0)? as usize;
+        (self.build_compact_table_ids().len() == 1).then_some(limit)
     }
 }
 
@@ -338,6 +353,7 @@ impl From<PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -403,6 +419,7 @@ impl From<&PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -458,6 +475,7 @@ impl From<CompactTask> for PbCompactTask {
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -513,6 +531,7 @@ impl From<&CompactTask> for PbCompactTask {
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -520,7 +539,7 @@ impl From<&CompactTask> for PbCompactTask {
 #[derive(Clone, PartialEq, Default)]
 pub struct ValidationTask {
     pub sst_infos: Vec<SstableInfo>,
-    pub sst_id_to_worker_id: HashMap<HummockSstableObjectId, u32>,
+    pub sst_id_to_worker_id: HashMap<HummockSstableObjectId, WorkerId>,
 }
 
 impl From<PbValidationTask> for ValidationTask {
@@ -531,11 +550,7 @@ impl From<PbValidationTask> for ValidationTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            sst_id_to_worker_id: pb_validation_task
-                .sst_id_to_worker_id
-                .into_iter()
-                .map(|(object_id, worker_id)| (object_id.into(), worker_id))
-                .collect(),
+            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.into_iter().collect(),
         }
     }
 }
@@ -548,11 +563,7 @@ impl From<ValidationTask> for PbValidationTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            sst_id_to_worker_id: validation_task
-                .sst_id_to_worker_id
-                .into_iter()
-                .map(|(object_id, worker_id)| (object_id.inner(), worker_id))
-                .collect(),
+            sst_id_to_worker_id: validation_task.sst_id_to_worker_id,
         }
     }
 }
@@ -588,11 +599,7 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.into(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }
@@ -608,11 +615,7 @@ impl From<ReportTask> for PbReportTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }

@@ -351,6 +351,7 @@ impl PostCollectCommand {
                 info,
                 job_type,
                 cross_db_snapshot_backfill_info,
+                resolved_split_assignment,
             } => {
                 match &job_type {
                     CreateStreamingJobType::SinkIntoTable(_) | CreateStreamingJobType::Normal => {
@@ -424,7 +425,7 @@ impl PostCollectCommand {
                         stream_job_fragments.stream_job_id(),
                         &upstream_fragment_downstreams,
                         new_sink_downstream,
-                        Some(&info.init_split_assignment),
+                        Some(&resolved_split_assignment),
                     )
                     .await?;
 
@@ -438,7 +439,7 @@ impl PostCollectCommand {
                     .apply_source_change(source_change)
                     .await;
             }
-            PostCollectCommand::RescheduleFragment { reschedules, .. } => {
+            PostCollectCommand::Reschedule { reschedules, .. } => {
                 let fragment_splits = reschedules
                     .iter()
                     .map(|(fragment_id, reschedule)| {
@@ -452,14 +453,16 @@ impl PostCollectCommand {
                     .await?;
             }
 
-            PostCollectCommand::ReplaceStreamJob(replace_plan) => {
+            PostCollectCommand::ReplaceStreamJob {
+                plan: replace_plan,
+                resolved_split_assignment,
+            } => {
                 let ReplaceStreamJobPlan {
                     old_fragments,
                     new_fragments,
                     upstream_fragment_downstreams,
                     to_drop_state_table_ids,
                     auto_refresh_schema_sinks,
-                    init_split_assignment,
                     ..
                 } = &replace_plan;
                 // Update actors and actor_dispatchers for new table fragments.
@@ -470,7 +473,7 @@ impl PostCollectCommand {
                         new_fragments.stream_job_id,
                         upstream_fragment_downstreams,
                         None,
-                        Some(init_split_assignment),
+                        Some(&resolved_split_assignment),
                     )
                     .await?;
 

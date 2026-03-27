@@ -12,17 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use futures::stream::BoxStream;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult,
+};
 use risingwave_pb::hummock::{
     PbHummockVersion, SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
 use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
 };
-use risingwave_pb::id::{JobId, TableId};
+use risingwave_pb::id::{HummockSstableId, JobId, TableId};
 use tokio::sync::mpsc::UnboundedSender;
 
 pub type CompactionEventItem = std::result::Result<SubscribeCompactionEventResponse, tonic::Status>;
@@ -51,11 +56,12 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     }
     async fn trigger_manual_compaction(
         &self,
-        compaction_group_id: u64,
+        compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
-        sst_ids: Vec<u64>,
-    ) -> Result<()>;
+        sst_ids: Vec<HummockSstableId>,
+        exclusive: bool,
+    ) -> Result<bool>;
     async fn trigger_full_gc(
         &self,
         sst_retention_time_sec: u64,
@@ -81,4 +87,14 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         UnboundedSender<SubscribeIcebergCompactionEventRequest>,
         BoxStream<'static, IcebergCompactionEventItem>,
     )>;
+
+    async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs>;
 }

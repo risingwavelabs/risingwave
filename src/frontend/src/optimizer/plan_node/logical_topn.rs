@@ -323,8 +323,7 @@ impl ToStream for LogicalTopN {
             )));
         }
         Ok(if !self.group_key().is_empty() {
-            let logical_input = try_enforce_locality_requirement(self.input(), self.group_key());
-            let input = logical_input.to_stream(ctx)?;
+            let input = self.input().to_stream(ctx)?;
             let input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
                 .streaming_enforce_if_not_satisfies(input)?;
             let core = self.core.clone_with_input(input);
@@ -334,11 +333,34 @@ impl ToStream for LogicalTopN {
         })
     }
 
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() || self.group_key().is_empty() {
+            return None;
+        }
+
+        // GroupTopN stores rows with group keys as the primary key prefix in its internal state
+        // table, so it can directly satisfy locality requests on a prefix of its group key.
+        let group_key = self.group_key().to_vec();
+        if columns.len() > group_key.len() || columns != &group_key[..columns.len()] {
+            return None;
+        }
+
+        // Similar to agg, return the current plan directly instead of asking input for better
+        // locality first. The locality can be provided by the current TopN itself after
+        // `to_stream`, while its input does not have it yet during logical rewrite.
+        Some(self.clone_with_input(self.input()).into())
+    }
+
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
+        let logical_input = if self.group_key().is_empty() {
+            self.input()
+        } else {
+            try_enforce_locality_requirement(self.input(), self.group_key())
+        };
+        let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
 
         if self.limit_attr().max_one_row() {
