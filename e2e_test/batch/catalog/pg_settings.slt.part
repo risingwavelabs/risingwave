@@ -108,8 +108,8 @@ SELECT * FROM pg_catalog.pg_settings where name='dummy';
 query TT
 SELECT min(name) name, context FROM pg_catalog.pg_settings GROUP BY context;
 ----
-adaptive_parallelism_strategy	postmaster
 application_name	user
+adaptive_parallelism_strategy	postmaster
 block_size_kb	internal
 
 # Tab-completion of `SET` command
