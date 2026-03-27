@@ -764,7 +764,6 @@ mod tests {
                 Property {
                     is_streaming: true,
                     is_serving: true,
-                    is_unschedulable: false,
                     parallelism: 4,
                     ..Default::default()
                 },

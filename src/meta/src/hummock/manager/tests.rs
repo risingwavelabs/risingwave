@@ -187,7 +187,6 @@ async fn setup_compute_env_with_meta_opts(
             Property {
                 is_streaming: true,
                 is_serving: true,
-                is_unschedulable: false,
                 parallelism: 4,
                 ..Default::default()
             },
@@ -3098,7 +3097,7 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
         .unwrap();
 
     let task = hummock_manager
-        .get_compact_task(cg_64, &mut default_compaction_selector())
+        .get_compact_task(cg_64, &mut *default_compaction_selector())
         .await
         .unwrap()
         .expect("should produce a compaction task");
