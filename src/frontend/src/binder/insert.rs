@@ -139,19 +139,32 @@ impl Binder {
             .generated_column_names()
             .collect::<HashSet<_>>();
 
-        if !generated_column_names.is_empty()
-            && !cols_to_insert_by_user.is_empty()
-            && let Some(col_name) = cols_to_insert_by_user
-                .iter()
-                .map(|col| col.real_value())
-                .find(|col_name| generated_column_names.contains(col_name.as_str()))
-        {
-            return Err(ErrorCode::InsertViolation(format!(
-            "cannot insert a non-DEFAULT value into column \"{0}\"\n  DETAIL: Column \"{0}\" is a generated column.",
-            col_name
-        ))
-        .into());
-        }
+        let check_generated_insert_violation = |bound_column_nums: Option<usize>| -> Result<()> {
+            let generated_column_name = if let Some(column_num) = bound_column_nums {
+                table_catalog
+                    .first_generated_column()
+                    .and_then(|(index, column_name)| {
+                        (column_num > index).then_some(column_name.to_owned())
+                    })
+            } else {
+                cols_to_insert_by_user
+                    .iter()
+                    .map(|col| col.real_value())
+                    .find(|col_name| generated_column_names.contains(col_name.as_str()))
+            };
+
+            if let Some(column_name) = generated_column_name {
+                return Err(ErrorCode::InsertViolation(format!(
+                    "cannot insert a non-DEFAULT value into column \"{0}\"\n  DETAIL: Column \"{0}\" is a generated column.",
+                    column_name
+                ))
+                .into());
+            }
+
+            Ok(())
+        };
+
+        check_generated_insert_violation(None)?;
 
         if !generated_column_names.is_empty() && !returning_items.is_empty() {
             return Err(RwError::from(ErrorCode::BindError(
@@ -228,24 +241,11 @@ impl Binder {
         let bound_query;
         let cast_exprs;
         let all_nullable = nullables.iter().all(|(nullable, _)| *nullable);
-        let check_generated_insert_violation = |bound_column_nums: usize| -> Result<()> {
-            if let Some((index, column_name)) = table_catalog.first_generated_column()
-                && cols_to_insert_by_user.is_empty()
-                && bound_column_nums > index
-            {
-                return Err(ErrorCode::InsertViolation(format!(
-                    "cannot insert a non-DEFAULT value into column \"{0}\"\n  DETAIL: Column \"{0}\" is a generated column.",
-                    column_name
-                ))
-                .into());
-            }
-            Ok(())
-        };
 
         let bound_column_nums = match source.as_simple_values() {
             None => {
                 bound_query = self.bind_query(&source)?;
-                check_generated_insert_violation(bound_query.schema().len())?;
+                check_generated_insert_violation(Some(bound_query.schema().len()))?;
                 let actual_types = bound_query.data_types();
                 let type_match = expected_types == actual_types;
                 cast_exprs = if all_nullable && type_match {
@@ -273,7 +273,7 @@ impl Binder {
                     .first()
                     .expect("values list should not be empty")
                     .len();
-                check_generated_insert_violation(values_len)?;
+                check_generated_insert_violation(Some(values_len))?;
                 let mut values = self.bind_values(values, Some(&expected_types))?;
                 // let mut bound_values = values.clone();
 
