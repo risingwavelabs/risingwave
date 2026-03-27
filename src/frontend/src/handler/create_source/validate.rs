@@ -250,6 +250,33 @@ pub fn validate_compatibility(
         props.insert("schema.name".into(), "dbo".into());
     }
 
+    if connector == KAFKA_CONNECTOR {
+        // Check both "topic" and "kafka.topic" (legacy alias used by some tests/users).
+        let has_topic = props.get("topic").is_some_and(|t| !t.is_empty())
+            || props.get("kafka.topic").is_some_and(|t| !t.is_empty());
+        let has_regex = props.get("topic.regex").is_some_and(|p| !p.is_empty());
+
+        // Only validate conflict and regex syntax here. We intentionally skip
+        // the "neither set" check because topic may come from a secret reference
+        // which is not visible in the raw props map at DDL time.
+        // The runtime validation in KafkaSplitEnumerator::new() will catch
+        // truly missing topics after secrets are resolved.
+        if has_topic && has_regex {
+            return Err(RwError::from(ProtocolError(
+                "`topic` and `topic.regex` cannot be specified at the same time".to_owned(),
+            )));
+        }
+        if has_regex {
+            let pattern = &props["topic.regex"];
+            if let Err(e) = regex::Regex::new(pattern) {
+                let err_msg = e.to_string();
+                return Err(RwError::from(ProtocolError(format!(
+                    "invalid topic.regex pattern '{pattern}': {err_msg}",
+                ))));
+            }
+        }
+    }
+
     // Validate cdc.source.wait.streaming.start.timeout for all CDC connectors
     if (connector == MYSQL_CDC_CONNECTOR
         || connector == POSTGRES_CDC_CONNECTOR

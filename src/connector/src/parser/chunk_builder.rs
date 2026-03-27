@@ -30,8 +30,8 @@ use thiserror_ext::AsReport;
 use super::MessageMeta;
 use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
-    extract_pulsar_message_id_data_from_meta, extract_subject_from_meta,
-    extract_timestamp_from_meta,
+    extract_partition_from_meta, extract_pulsar_message_id_data_from_meta,
+    extract_subject_from_meta, extract_timestamp_from_meta, extract_topic_from_meta,
 };
 use crate::source::{SourceColumnDesc, SourceColumnType, SourceCtrlOpts, SourceMeta};
 
@@ -383,13 +383,18 @@ impl SourceStreamChunkRowWriter<'_> {
                         .unwrap_or(None),
                 )),
                 (_, &Some(AdditionalColumnType::Partition(_))) => {
-                    // the meta info does not involve spec connector
-                    Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
-                    ))
+                    Ok(A::output_for(match self.row_meta {
+                        Some(row_meta) => {
+                            extract_partition_from_meta(row_meta.source_meta, row_meta.split_id)
+                        }
+                        None => DatumCow::Borrowed(None),
+                    }))
                 }
+                (_, &Some(AdditionalColumnType::TopicName(_))) => Ok(A::output_for(
+                    self.row_meta
+                        .as_ref()
+                        .and_then(|ele| extract_topic_from_meta(ele.source_meta)),
+                )),
                 (_, &Some(AdditionalColumnType::Offset(_))) => {
                     // the meta info does not involve spec connector
                     Ok(A::output_for(

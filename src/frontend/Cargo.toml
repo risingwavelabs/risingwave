@@ -71,6 +71,7 @@ prometheus-http-query = "0.8.3"
 prost = { workspace = true }
 quick-xml = { version = "0.39", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
+regex = { workspace = true }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }

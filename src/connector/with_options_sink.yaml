@@ -758,7 +758,8 @@ KafkaConfig:
   fields:
   - name: topic
     field_type: String
-    required: true
+    required: false
+    default: Default::default
     alias:
     - kafka.topic
   - name: properties.sync.call.timeout

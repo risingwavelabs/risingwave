@@ -291,7 +291,9 @@ impl EnforceSecret for KafkaConnectionProps {
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaCommon {
     // connection related props are moved to `KafkaConnection`
-    #[serde(rename = "topic", alias = "kafka.topic")]
+    // `#[serde(default)]` allows regex sources to omit `topic`. Kafka sink must
+    // validate non-empty topic separately (see sink/kafka.rs).
+    #[serde(rename = "topic", alias = "kafka.topic", default)]
     pub topic: String,
 
     #[serde(

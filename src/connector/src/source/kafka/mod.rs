@@ -160,6 +160,13 @@ pub struct KafkaProperties {
     #[serde(rename = "upsert")]
     pub upsert: Option<String>,
 
+    /// A regex pattern for matching multiple Kafka topics.
+    /// When set, the source will consume from all topics matching this pattern.
+    /// New topics matching the pattern will be discovered dynamically.
+    /// Mutually exclusive with `topic` — exactly one must be specified.
+    #[serde(rename = "topic.regex")]
+    pub topic_regex: Option<String>,
+
     #[serde(flatten)]
     pub common: KafkaCommon,
 
@@ -218,6 +225,29 @@ impl KafkaProperties {
             self.group_id_prefix.as_deref().unwrap_or("rw-consumer"),
             fragment_id
         )
+    }
+
+    /// Returns true if this source uses `topic.regex` for multi-topic consumption.
+    pub fn is_multi_topic(&self) -> bool {
+        self.topic_regex.as_deref().is_some_and(|p| !p.is_empty())
+    }
+
+    /// Validate topic configuration: exactly one of `topic` or `topic.regex` must be set.
+    pub fn validate_topic_config(&self) -> ConnectorResult<()> {
+        let has_topic = !self.common.topic.is_empty();
+        let has_regex = self.topic_regex.as_deref().is_some_and(|p| !p.is_empty());
+
+        match (has_topic, has_regex) {
+            (false, false) => Err(anyhow::anyhow!(
+                "either `topic` or `topic.regex` must be specified for Kafka source"
+            )
+            .into()),
+            (true, true) => Err(anyhow::anyhow!(
+                "`topic` and `topic.regex` cannot be specified at the same time"
+            )
+            .into()),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -322,5 +352,79 @@ mod test {
             "broker1".to_owned() => "10.0.0.1:8001".to_owned()
         };
         assert_eq!(props.privatelink_common.broker_rewrite_map, Some(hashmap));
+    }
+
+    #[test]
+    fn test_topic_regex_config() {
+        // topic.regex without topic
+        let config: BTreeMap<String, String> = btreemap! {
+            "properties.bootstrap.server".to_owned() => "127.0.0.1:9092".to_owned(),
+            "topic.regex".to_owned() => "events\\..*".to_owned(),
+        };
+        let props: KafkaProperties =
+            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+        assert!(props.is_multi_topic());
+        assert_eq!(props.topic_regex.as_deref(), Some("events\\..*"));
+        assert!(props.common.topic.is_empty());
+        assert!(props.validate_topic_config().is_ok());
+    }
+
+    #[test]
+    fn test_topic_and_regex_conflict() {
+        // Both topic and topic.regex set - should fail validation
+        let config: BTreeMap<String, String> = btreemap! {
+            "properties.bootstrap.server".to_owned() => "127.0.0.1:9092".to_owned(),
+            "topic".to_owned() => "test".to_owned(),
+            "topic.regex".to_owned() => "events\\..*".to_owned(),
+        };
+        let props: KafkaProperties =
+            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+        assert!(props.validate_topic_config().is_err());
+    }
+
+    #[test]
+    fn test_neither_topic_nor_regex() {
+        // Neither topic nor topic.regex - should fail validation
+        let config: BTreeMap<String, String> = btreemap! {
+            "properties.bootstrap.server".to_owned() => "127.0.0.1:9092".to_owned(),
+        };
+        let props: KafkaProperties =
+            serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap();
+        assert!(props.validate_topic_config().is_err());
+    }
+
+    #[test]
+    fn test_kafka_split_id_format() {
+        use crate::source::SplitMetaData;
+
+        // Split ID always uses "topic:partition" format (Decision D1).
+        let split = KafkaSplit::new(0, None, None, "test_topic".to_owned());
+        assert_eq!(split.id().as_ref(), "test_topic:0");
+
+        // legacy_split_id returns the old format for migration.
+        assert_eq!(split.legacy_split_id().unwrap().as_ref(), "0");
+
+        // Different topic same partition should have different split ID.
+        let split2 = KafkaSplit::new(3, None, None, "events.orders".to_owned());
+        let split3 = KafkaSplit::new(3, None, None, "events.users".to_owned());
+        assert_ne!(split2.id(), split3.id());
+        assert_eq!(split2.id().as_ref(), "events.orders:3");
+        assert_eq!(split3.id().as_ref(), "events.users:3");
+    }
+
+    #[test]
+    fn test_kafka_split_backward_compat_deserialization() {
+        // Old checkpoint JSON (without multi_topic field) should deserialize fine.
+        let json = serde_json::json!({
+            "topic": "test",
+            "partition": 0,
+            "start_offset": 100,
+            "stop_offset": null
+        });
+        let split: KafkaSplit = serde_json::from_value(json).unwrap();
+        assert_eq!(split.topic, "test");
+        assert_eq!(split.partition, 0);
+        // New id() always returns "topic:partition".
+        assert_eq!(crate::source::SplitMetaData::id(&split).as_ref(), "test:0");
     }
 }

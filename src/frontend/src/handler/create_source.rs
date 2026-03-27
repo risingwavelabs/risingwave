@@ -1000,6 +1000,69 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         check_connector_match_connection_type(connector.as_str(), &connection_type)?;
     }
 
+    if with_properties
+        .get_connector()
+        .is_some_and(|connector| connector == KAFKA_CONNECTOR)
+    {
+        let (options, secret_refs) = with_properties.clone().into_parts();
+        let resolved_properties =
+            LocalSecretManager::global().fill_secrets(options, secret_refs)?;
+        let has_topic = resolved_properties
+            .get("topic")
+            .is_some_and(|topic| !topic.is_empty())
+            || resolved_properties
+                .get("kafka.topic")
+                .is_some_and(|topic| !topic.is_empty());
+        let topic_regex = resolved_properties
+            .get("topic.regex")
+            .filter(|p| !p.is_empty());
+
+        match (has_topic, topic_regex) {
+            (false, None) => {
+                return Err(RwError::from(ProtocolError(
+                    "either `topic` or `topic.regex` must be specified for Kafka source".to_owned(),
+                )));
+            }
+            (true, Some(_)) => {
+                return Err(RwError::from(ProtocolError(
+                    "`topic` and `topic.regex` cannot be specified at the same time".to_owned(),
+                )));
+            }
+            (_, Some(pattern)) => {
+                if let Err(e) = regex::Regex::new(pattern) {
+                    let err_msg = e.to_string();
+                    return Err(RwError::from(ProtocolError(format!(
+                        "invalid topic.regex pattern '{pattern}': {err_msg}",
+                    ))));
+                }
+
+                // regex source + schema registry: the default subject derivation
+                // uses `{topic}-value` which is undefined for multi-topic sources.
+                // Require `record_name_strategy` (topic-independent) or reject.
+                if schema_has_schema_registry(&format_encode) {
+                    let name_strategy = resolved_properties.get("schema.registry.name.strategy");
+                    let is_topic_dependent = match name_strategy.map(|s| s.as_str()) {
+                        None | Some("topic_name_strategy") | Some("topic_record_name_strategy") => {
+                            true
+                        }
+                        Some("record_name_strategy") => false,
+                        _ => true,
+                    };
+                    if is_topic_dependent {
+                        return Err(RwError::from(ProtocolError(
+                            "topic.regex source with schema registry requires \
+                             `schema.registry.name.strategy` = 'record_name_strategy', \
+                             because the default topic-based subject derivation \
+                             is not defined for multi-topic sources"
+                                .to_owned(),
+                        )));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     let pk_names = bind_source_pk(
         &format_encode,
         &source_info,
@@ -1412,8 +1475,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_source_addition_columns() {
         // test derive include column for format plain
-        let sql =
-            "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format plain encode json".to_owned();
+        let sql = "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka', topic = 'test') format plain encode json".to_owned();
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
         let session = frontend.session_ref();

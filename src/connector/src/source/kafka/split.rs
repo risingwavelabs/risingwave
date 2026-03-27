@@ -36,8 +36,14 @@ pub struct KafkaSplit {
 
 impl SplitMetaData for KafkaSplit {
     fn id(&self) -> SplitId {
-        // TODO: should avoid constructing a string every time
-        format!("{}", self.partition).into()
+        // Format: "topic:partition" — `:` is not a valid Kafka topic name character,
+        // so this is unambiguous. See Decision D1 & D2 in the design doc.
+        format!("{}:{}", self.topic, self.partition).into()
+    }
+
+    fn legacy_split_id(&self) -> Option<SplitId> {
+        // Return the old format "{partition}" for upgrade migration fallback.
+        Some(format!("{}", self.partition).into())
     }
 
     fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
