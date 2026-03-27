@@ -288,7 +288,7 @@ impl Distill for StreamTableScan {
                 .core
                 .primary_key()
                 .iter()
-                .zip(prefix.iter())
+                .zip_eq_fast(prefix.iter())
                 .map(|(pk, datum)| {
                     let field = &self.core.table_catalog.columns()[pk.column_index];
                     format!("{} = {:?}", field.name(), datum)
