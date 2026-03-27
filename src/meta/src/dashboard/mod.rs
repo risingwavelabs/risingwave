@@ -325,7 +325,7 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
         let mut fragment_to_relation_map = HashMap::new();
-        for (relation_id, tf) in table_fragments {
+        for (relation_id, (tf, _, _)) in table_fragments {
             for fragment_id in tf.fragments.keys() {
                 fragment_to_relation_map.insert(*fragment_id, relation_id);
             }
@@ -347,10 +347,14 @@ pub(super) mod handlers {
             .await
             .map_err(err)?;
         let mut map = HashMap::new();
-        for (id, tf) in table_fragments {
+        for (id, (tf, fragment_actors, _actor_status)) in table_fragments {
             let mut fragment_id_to_actor_ids = HashMap::new();
-            for (fragment_id, fragment) in &tf.fragments {
-                let actor_ids = fragment.actors.iter().map(|a| a.actor_id).collect_vec();
+            for fragment_id in tf.fragments.keys() {
+                let actor_ids = fragment_actors
+                    .get(fragment_id)
+                    .into_iter()
+                    .flat_map(|actors| actors.iter().map(|a| a.actor_id))
+                    .collect_vec();
                 fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
             }
             map.insert(
@@ -370,8 +374,9 @@ pub(super) mod handlers {
         Path(job_id): Path<u32>,
     ) -> Result<Json<PbTableFragments>> {
         let job_id = JobId::new(job_id);
-        let table_fragments = srv
+        let (table_fragments, fragment_actors, actor_status) = srv
             .metadata_manager
+            .catalog_controller
             .get_job_fragments_by_id(job_id)
             .await
             .map_err(err)?;
@@ -389,9 +394,12 @@ pub(super) mod handlers {
             )
             .await
             .map_err(err)?;
-        Ok(Json(
-            table_fragments.to_protobuf(&upstream_fragments, &dispatchers),
-        ))
+        Ok(Json(table_fragments.to_protobuf(
+            &fragment_actors,
+            &upstream_fragments,
+            &dispatchers,
+            actor_status,
+        )))
     }
 
     pub async fn list_users(Extension(srv): Extension<Service>) -> Result<Json<Vec<PbUserInfo>>> {
@@ -940,9 +948,9 @@ impl DashboardService {
 
         let api_router = Router::new()
             .route("/version", get(get_version))
-            .route("/clusters/:ty", get(list_clusters))
+            .route("/clusters/{ty}", get(list_clusters))
             .route("/streaming_jobs", get(list_streaming_jobs))
-            .route("/fragments/job_id/:job_id", get(list_fragments_by_job_id))
+            .route("/fragments/job_id/{job_id}", get(list_fragments_by_job_id))
             .route("/relation_id_infos", get(get_relation_id_infos))
             .route(
                 "/fragment_to_relation_map",
@@ -969,15 +977,15 @@ impl DashboardService {
                 get(get_streaming_stats_from_prometheus),
             )
             // /monitor/await_tree/{worker_id}/?format={text or json}
-            .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
+            .route("/monitor/await_tree/{worker_id}", get(dump_await_tree))
             // /monitor/await_tree/?format={text or json}
             .route("/monitor/await_tree/", get(dump_await_tree_all))
-            .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
+            .route("/monitor/dump_heap_profile/{worker_id}", get(heap_profile))
             .route(
-                "/monitor/list_heap_profile/:worker_id",
+                "/monitor/list_heap_profile/{worker_id}",
                 get(list_heap_profile),
             )
-            .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
+            .route("/monitor/analyze/{worker_id}/{*path}", get(analyze_heap))
             // /monitor/diagnose/?format={text or json}
             .route("/monitor/diagnose/", get(diagnose))
             .layer(

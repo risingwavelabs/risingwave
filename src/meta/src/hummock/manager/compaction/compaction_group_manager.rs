@@ -192,9 +192,11 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            &mut versioning.table_change_log,
             self.env.notification_manager(),
             None,
             &self.metrics,
+            &self.env.opts,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -289,9 +291,11 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            &mut versioning.table_change_log,
             self.env.notification_manager(),
             None,
             &self.metrics,
+            &self.env.opts,
         );
         let mut new_version_delta = version.new_delta();
         let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
@@ -616,12 +620,15 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::EnableOptimizeL0IntervalSelection(c) => {
                 target.enable_optimize_l0_interval_selection = Some(*c);
             }
-            MutableConfig::VnodeAlignedLevelSizeThreshold(c) => {
-                target.vnode_aligned_level_size_threshold =
-                    (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+            #[allow(deprecated)]
+            MutableConfig::VnodeAlignedLevelSizeThreshold(_) => {
+                // Deprecated. Keep accepting the field for old clients but do not apply it.
             }
             MutableConfig::MaxKvCountForXor16(c) => {
                 target.max_kv_count_for_xor16 = (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+            }
+            MutableConfig::MaxVnodeKeyRangeBytes(c) => {
+                target.max_vnode_key_range_bytes = (*c > 0).then_some(*c);
             }
         }
     }

@@ -212,6 +212,13 @@ pub trait CatalogWriter: Send + Sync {
         payload: Vec<u8>,
     ) -> Result<()>;
 
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> Result<()>;
+
     async fn alter_name(
         &self,
         object_id: alter_name_request::Object,
@@ -277,7 +284,7 @@ pub trait CatalogWriter: Send + Sync {
         if_not_exists: bool,
     ) -> Result<()>;
 
-    async fn wait(&self) -> Result<()>;
+    async fn wait(&self, job_id: Option<JobId>) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -701,6 +708,19 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_subscription_retention(subscription_id, retention_seconds, definition)
+            .await?;
+        self.wait_version(version).await
+    }
+
     async fn alter_resource_group(
         &self,
         table_id: TableId,
@@ -735,15 +755,22 @@ impl CatalogWriter for CatalogWriterImpl {
         iceberg_source: PbSource,
         if_not_exists: bool,
     ) -> Result<()> {
-        let version = self
-            .meta_client
-            .create_iceberg_table(table_job_info, sink_job_info, iceberg_source, if_not_exists)
-            .await?;
+        let version = Box::pin(self.meta_client.create_iceberg_table(
+            table_job_info,
+            sink_job_info,
+            iceberg_source,
+            if_not_exists,
+        ))
+        .await?;
         self.wait_version(version).await
     }
 
-    async fn wait(&self) -> Result<()> {
-        let version = self.meta_client.wait().await.map_err(|e| anyhow!(e))?;
+    async fn wait(&self, job_id: Option<JobId>) -> Result<()> {
+        let version = self
+            .meta_client
+            .wait(job_id)
+            .await
+            .map_err(|e| anyhow!(e))?;
         self.wait_version(version).await
     }
 }

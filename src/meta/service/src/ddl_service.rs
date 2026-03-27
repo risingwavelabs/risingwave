@@ -909,6 +909,29 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn alter_subscription_retention(
+        &self,
+        request: Request<AlterSubscriptionRetentionRequest>,
+    ) -> Result<Response<AlterSubscriptionRetentionResponse>, Status> {
+        let AlterSubscriptionRetentionRequest {
+            subscription_id,
+            retention_seconds,
+            definition,
+        } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSubscriptionRetention {
+                subscription_id,
+                retention_seconds,
+                definition,
+            })
+            .await?;
+        Ok(Response::new(AlterSubscriptionRetentionResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn alter_set_schema(
         &self,
         request: Request<AlterSetSchemaRequest>,
@@ -946,6 +969,7 @@ impl DdlService for DdlServiceImpl {
         }
 
         match req.payload.unwrap() {
+            #[expect(deprecated)]
             create_connection_request::Payload::PrivateLink(_) => {
                 panic!("Private Link Connection has been deprecated")
             }
@@ -1045,8 +1069,9 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(GetTablesResponse { tables }))
     }
 
-    async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
-        let version = self.ddl_controller.wait().await?;
+    async fn wait(&self, request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
+        let req = request.into_inner();
+        let version = self.ddl_controller.wait(req.job_id).await?;
         Ok(Response::new(WaitResponse {
             version: Some(version),
         }))
@@ -1617,6 +1642,7 @@ impl DdlService for DdlServiceImpl {
 
         // Mark sink as background creation, so that it won't block source creation.
         sink.create_type = PbCreateType::Background as _;
+        sink.auto_refresh_schema_from_table = Some(table_catalog.id);
 
         let mut fragment_graph = fragment_graph.unwrap();
 

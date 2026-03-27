@@ -15,6 +15,7 @@
 use foyer::{
     Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig, Throttle,
 };
+use serde::de::Error as _;
 
 use super::*;
 
@@ -81,7 +82,10 @@ pub struct StorageConfig {
     pub max_cached_recent_versions_number: usize,
 
     /// max prefetch block number
-    #[serde(default = "default::storage::max_prefetch_block_number")]
+    #[serde(
+        default = "default::storage::max_prefetch_block_number",
+        deserialize_with = "deserialize_max_prefetch_block_number"
+    )]
     pub max_prefetch_block_number: usize,
 
     #[serde(default = "default::storage::disable_remote_compactor")]
@@ -209,6 +213,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
     pub time_travel_version_cache_capacity: u64,
 
+    #[serde(default = "default::storage::table_change_log_cache_capacity")]
+    pub table_change_log_cache_capacity: u64,
+
     // iceberg compaction
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
@@ -218,7 +225,12 @@ pub struct StorageConfig {
     pub iceberg_compaction_min_size_per_partition_mb: u32,
     #[serde(default = "default::storage::iceberg_compaction_max_file_count_per_partition")]
     pub iceberg_compaction_max_file_count_per_partition: u32,
+    /// DEPRECATED: This config will be deprecated in the future version.
+    /// Use sink config `compaction.write_parquet_max_row_group_rows` instead.
     #[serde(default = "default::storage::iceberg_compaction_write_parquet_max_row_group_rows")]
+    #[deprecated(
+        note = "This config is deprecated. Use sink config `compaction.write_parquet_max_row_group_rows` instead."
+    )]
     pub iceberg_compaction_write_parquet_max_row_group_rows: usize,
 
     /// The ratio of iceberg compaction max parallelism to the number of CPU cores
@@ -494,6 +506,19 @@ pub struct ObjectStoreConfig {
 
     #[serde(default = "default::object_store_config::upload_part_size")]
     pub upload_part_size: usize,
+}
+
+fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.max_prefetch_block_number must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 impl ObjectStoreConfig {
@@ -1056,6 +1081,10 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             10
+        }
+
+        pub fn table_change_log_cache_capacity() -> u64 {
+            60
         }
 
         pub fn sst_skip_bloom_filter_in_serde() -> bool {

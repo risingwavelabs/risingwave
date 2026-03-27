@@ -195,3 +195,55 @@
     select count(*) from t1;
   expected_outputs:
   - batch_plan
+- id: agg_rollup_selection
+  sql: |
+    create table t_rollup (a int, b int, c int);
+    create materialized view mv_rollup as
+      select a, c, sum(b) as s, count(*) as cnt
+      from t_rollup
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b) as s, count(*) as cnt
+    from t_rollup
+    group by a;
+  expected_outputs:
+  - batch_plan
+- id: agg_rollup_distinct_not_selected
+  sql: |
+    create table t_rollup_distinct (a int, b int, c int);
+    create materialized view mv_rollup_distinct as
+      select a, c, count(distinct b) as cnt_distinct
+      from t_rollup_distinct
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, count(distinct b) as cnt_distinct
+    from t_rollup_distinct
+    group by a;
+  expected_outputs:
+  - batch_plan
+- id: agg_rollup_duplicate_query_aggs1
+  sql: |
+    create table t_rollup_dup (a int, b int, c int);
+    create materialized view mv_rollup_dup as
+      select a, c, sum(b) as s
+      from t_rollup_dup
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, sum(b) as s1, sum(b) as s2
+    from t_rollup_dup
+    group by a;
+  expected_outputs:
+  - batch_plan
+- id: agg_rollup_duplicate_query_aggs2
+  sql: |
+    create table t_rollup_dup (a int, b int, c int);
+    create materialized view mv_rollup_dup as
+      select a, c, count(b) as s1, count(b) as s2
+      from t_rollup_dup
+      group by a, c;
+    set enable_mv_selection = true;
+    select a, count(b) as s
+    from t_rollup_dup
+    group by a;
+  expected_outputs:
+    - batch_plan

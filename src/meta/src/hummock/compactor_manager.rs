@@ -612,7 +612,7 @@ mod tests {
             hummock_manager
                 .get_compact_task(
                     StaticCompactionGroupId::StateDefault,
-                    &mut default_compaction_selector(),
+                    &mut *default_compaction_selector(),
                 )
                 .await
                 .unwrap()

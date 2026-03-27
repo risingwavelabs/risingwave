@@ -21,14 +21,14 @@ use crate::error::Result;
 impl Binder {
     pub fn bind_columns_to_context(
         &mut self,
-        name: String,
+        table_name: String,
         column_catalogs: &[ColumnCatalog],
     ) -> Result<()> {
         let columns = column_catalogs
             .iter()
             .map(|c| (c.is_hidden, Field::from(&c.column_desc)))
             .collect_vec();
-        self.bind_table_to_context(columns, name, None)
+        self.bind_table_to_context(columns, table_name, None, None)
     }
 
     pub fn get_column_binding_index(
@@ -38,6 +38,6 @@ impl Binder {
     ) -> Result<usize> {
         Ok(self
             .context
-            .get_column_binding_index(&Some(table_name), column_name)?)
+            .get_column_binding_index(&None, &Some(table_name), column_name)?)
     }
 }
