@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use anyhow::anyhow;
@@ -30,8 +31,8 @@ use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BackfillInfo, BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData,
+    BackfillInfo, BoxSourceChunkStream, CreateSplitReaderResult, SourceContext, SourceCtrlOpts,
+    SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::common::ThrottleType;
@@ -111,6 +112,10 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     rate_limit_rps: Option<u32>,
 
     progress: CreateMviewProgressReporter,
+
+    /// Flag signaled by bounded source readers (e.g., Kafka with `enable.partition.eof`)
+    /// when all partitions have been fully consumed.
+    bounded_eof_flag: Option<Arc<AtomicBool>>,
 }
 
 /// Local variables used in the backfill stage.
@@ -291,6 +296,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             system_params,
             rate_limit_rps,
             progress,
+            bounded_eof_flag: None,
         }
     }
 
@@ -298,7 +304,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         &self,
         source_desc: &SourceDesc,
         splits: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<(BoxSourceChunkStream, HashMap<SplitId, BackfillInfo>)> {
+    ) -> StreamExecutorResult<(BoxSourceChunkStream, CreateSplitReaderResult)> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -313,6 +319,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit_rps),
                 split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
+                enable_partition_eof: true,
             },
             source_desc.source.config.clone(),
             None,
@@ -329,10 +336,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .build_stream(Some(splits), column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok((
-            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            res.backfill_info,
-        ))
+        Ok((apply_rate_limit(stream, self.rate_limit_rps).boxed(), res))
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -394,14 +398,15 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         };
         backfill_stage.debug_assert_consistent();
 
-        let (source_chunk_reader, backfill_info) = self
+        let (source_chunk_reader, reader_result) = self
             .build_stream_source_reader(
                 &source_desc,
                 backfill_stage.get_latest_unfinished_splits()?,
             )
             .instrument_await("source_build_reader")
             .await?;
-        for (split_id, info) in &backfill_info {
+        self.bounded_eof_flag = reader_result.bounded_eof_flag;
+        for (split_id, info) in &reader_result.backfill_info {
             let state = backfill_stage.states.get_mut(split_id).unwrap();
             match info {
                 BackfillInfo::NoDataToBackfill => {
@@ -512,12 +517,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.actor_ctx.fragment_id.to_string(),
                             ]);
 
-                            let (reader, _backfill_info) = self
+                            let (reader, reader_result) = self
                                 .build_stream_source_reader(
                                     &source_desc,
                                     backfill_stage.get_latest_unfinished_splits()?,
                                 )
                                 .await?;
+                            self.bounded_eof_flag = reader_result.bounded_eof_flag;
 
                             backfill_stream = select_with_strategy(
                                 input.by_ref().map(Either::Left),
@@ -608,13 +614,15 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 );
                                                 self.rate_limit_rps = entry.rate_limit;
                                                 // rebuild reader
-                                                let (reader, _backfill_info) = self
+                                                let (reader, reader_result) = self
                                                     .build_stream_source_reader(
                                                         &source_desc,
                                                         backfill_stage
                                                             .get_latest_unfinished_splits()?,
                                                     )
                                                     .await?;
+                                                self.bounded_eof_flag =
+                                                    reader_result.bounded_eof_flag;
 
                                                 backfill_stream = select_with_strategy(
                                                     input.by_ref().map(Either::Left),
@@ -630,8 +638,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     this: &SourceBackfillExecutorInner<impl StateStore>,
                                     backfill_stage: &BackfillStage,
                                     source_desc: &SourceDesc,
-                                ) -> StreamExecutorResult<BoxSourceChunkStream>
-                                {
+                                ) -> StreamExecutorResult<(
+                                    BoxSourceChunkStream,
+                                    CreateSplitReaderResult,
+                                )> {
                                     // rebuild backfill_stream
                                     // Note: we don't put this part in a method, due to some complex lifetime issues.
 
@@ -644,14 +654,31 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     );
 
                                     // Replace the source reader with a new one of the new state.
-                                    let (reader, _backfill_info) = this
+                                    let (reader, reader_result) = this
                                         .build_stream_source_reader(
                                             source_desc,
                                             latest_unfinished_splits,
                                         )
                                         .await?;
 
-                                    Ok(reader)
+                                    Ok((reader, reader_result))
+                                }
+
+                                // Check if bounded reader has signaled all partitions consumed.
+                                // Must be done BEFORE set_states/commit so the Finished
+                                // transitions are persisted in the same barrier epoch.
+                                if let Some(ref flag) = self.bounded_eof_flag
+                                    && flag.load(std::sync::atomic::Ordering::Acquire)
+                                {
+                                    for state in backfill_stage.states.values_mut() {
+                                        if matches!(state.state, BackfillState::Backfilling(_)) {
+                                            tracing::info!(
+                                                source_id = %self.source_id,
+                                                "marking backfill split finished due to bounded reader EOF"
+                                            );
+                                            state.state = BackfillState::Finished;
+                                        }
+                                    }
                                 }
 
                                 self.backfill_state_store
@@ -732,12 +759,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                             )
                                             .await?
                                     {
-                                        let reader = rebuild_reader_on_split_changed(
-                                            &self,
-                                            &backfill_stage,
-                                            &source_desc,
-                                        )
-                                        .await?;
+                                        let (reader, reader_result) =
+                                            rebuild_reader_on_split_changed(
+                                                &self,
+                                                &backfill_stage,
+                                                &source_desc,
+                                            )
+                                            .await?;
+                                        self.bounded_eof_flag = reader_result.bounded_eof_flag;
 
                                         backfill_stream = select_with_strategy(
                                             input.by_ref().map(Either::Left),

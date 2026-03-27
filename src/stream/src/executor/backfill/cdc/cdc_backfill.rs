@@ -895,6 +895,7 @@ async fn parse_debezium_chunk(
         SourceCtrlOpts {
             chunk_size: chunk.capacity(),
             split_txn: false,
+            enable_partition_eof: false,
         },
     );
 

@@ -152,6 +152,7 @@ impl SourceExecutor {
             SourceCtrlOpts {
                 chunk_size: self.chunk_size,
                 split_txn: false,
+                enable_partition_eof: true,
             },
             ConnectorProperties::default(),
             None,

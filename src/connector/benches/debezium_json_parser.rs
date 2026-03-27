@@ -63,6 +63,7 @@ macro_rules! create_debezium_bench_helpers {
                                 SourceStreamChunkBuilder::new(get_descs(), SourceCtrlOpts {
                                     chunk_size: NUM_RECORDS,
                                     split_txn: false,
+                                    enable_partition_eof: false,
                                 });
                             for record in records {
                                 let writer = builder.row_writer();
