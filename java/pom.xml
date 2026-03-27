@@ -343,6 +343,7 @@
                 <artifactId>kms</artifactId>
                 <version>${aws.version}</version>
             </dependency>
+            <!-- bumped from 4.1.0 to pick up upstream bug fixes -->
             <dependency>
                 <groupId>org.apache.hive</groupId>
                 <artifactId>hive-metastore</artifactId>
