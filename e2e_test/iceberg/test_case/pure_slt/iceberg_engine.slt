@@ -191,6 +191,30 @@ statement ok
 DROP TABLE price;
 
 statement ok
+CREATE TABLE t_order_key (
+  id BIGINT PRIMARY KEY,
+  v1 INT,
+  v2 VARCHAR
+) WITH (
+  commit_checkpoint_interval = 1,
+  order_key = 'v1 desc nulls last, id asc'
+) ENGINE = ICEBERG;
+
+statement ok
+INSERT INTO t_order_key VALUES (1, 10, 'a'), (2, 20, 'b');
+
+statement ok
+FLUSH;
+
+query I retry 6 backoff 1s
+select count(*) > 0 from rw_iceberg_files where schema_name = 'public' and source_name = '__iceberg_source_t_order_key' and sort_order_id is not null;
+----
+t
+
+statement ok
+DROP TABLE t_order_key;
+
+statement ok
 DROP CONNECTION my_conn;
 
 # test iceberg_tables and iceberg_namespace_properties before creating hosted catalog
