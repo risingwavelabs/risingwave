@@ -51,6 +51,7 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::{FullGcState, GcManager};
+use crate::hummock::manager::sequence::PrefetchedSequence;
 use crate::hummock::model::ext::to_table_change_log;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
@@ -188,6 +189,8 @@ pub struct HummockManager {
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
 
+    /// In-memory cache of prefetched compaction task ids to reduce per-task DB round-trips.
+    prefetched_compaction_task_ids: PrefetchedSequence,
     table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
 }
 
@@ -385,6 +388,7 @@ impl HummockManager {
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
             gc_manager,
+            prefetched_compaction_task_ids: PrefetchedSequence::new(),
             table_id_to_table_option: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);

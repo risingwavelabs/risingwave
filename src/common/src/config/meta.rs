@@ -338,6 +338,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compaction_task_max_progress_interval_secs")]
     pub compaction_task_max_progress_interval_secs: u64,
 
+    /// The number of compaction task ids to prefetch from the meta store in one batch.
+    #[serde(default = "default::meta::compaction_task_id_refill_capacity")]
+    pub compaction_task_id_refill_capacity: u32,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub compaction_config: CompactionConfig,
@@ -748,6 +752,10 @@ pub mod default {
 
         pub fn compaction_task_max_progress_interval_secs() -> u64 {
             60 * 10 // 10min
+        }
+
+        pub fn compaction_task_id_refill_capacity() -> u32 {
+            64
         }
 
         pub fn cut_table_size_limit() -> u64 {

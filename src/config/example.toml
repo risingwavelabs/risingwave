@@ -57,6 +57,7 @@ table_high_write_throughput_threshold = 16777216
 table_low_write_throughput_threshold = 4194304
 compaction_task_max_heartbeat_interval_secs = 30
 compaction_task_max_progress_interval_secs = 600
+compaction_task_id_refill_capacity = 64
 hybrid_partition_vnode_count = 4
 event_log_enabled = true
 event_log_channel_max_size = 10
