@@ -77,7 +77,6 @@ async fn test_alter_fragment_no_shuffle() -> Result<()> {
 #[tokio::test]
 async fn test_alter_fragment() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     // Table fragments still use the legacy bounded(4) default on the untouched path.
     let initial_table_parallelism = 4;
     cluster.run("create table t1 (c1 int, c2 int);").await?;
