@@ -122,6 +122,7 @@ impl Binder {
             table_catalog.database_id,
         )?;
 
+        let has_user_specified_columns = !cols_to_insert_by_user.is_empty();
         let default_columns_from_catalog =
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
         let table_id = table_catalog.id;
@@ -164,7 +165,9 @@ impl Binder {
             Ok(())
         };
 
-        check_generated_insert_violation(None)?;
+        if has_user_specified_columns {
+            check_generated_insert_violation(None)?;
+        }
 
         if !generated_column_names.is_empty() && !returning_items.is_empty() {
             return Err(RwError::from(ErrorCode::BindError(
@@ -245,7 +248,9 @@ impl Binder {
         let bound_column_nums = match source.as_simple_values() {
             None => {
                 bound_query = self.bind_query(&source)?;
-                check_generated_insert_violation(Some(bound_query.schema().len()))?;
+                if !has_user_specified_columns {
+                    check_generated_insert_violation(Some(bound_query.schema().len()))?;
+                }
                 let actual_types = bound_query.data_types();
                 let type_match = expected_types == actual_types;
                 cast_exprs = if all_nullable && type_match {
@@ -273,7 +278,9 @@ impl Binder {
                     .first()
                     .expect("values list should not be empty")
                     .len();
-                check_generated_insert_violation(Some(values_len))?;
+                if !has_user_specified_columns {
+                    check_generated_insert_violation(Some(values_len))?;
+                }
                 let mut values = self.bind_values(values, Some(&expected_types))?;
                 // let mut bound_values = values.clone();
 

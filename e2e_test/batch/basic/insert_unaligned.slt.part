@@ -109,4 +109,12 @@ statement error
 insert into t values (0, 1, 2);
 
 statement ok
+insert into t (v1, v3) values (1, 2);
+
+query I
+SELECT * FROM t;
+----
+1 2 2
+
+statement ok
 drop table t;
