@@ -227,6 +227,7 @@ impl TableCatalogBuilder {
             refreshable: false, // Internal tables are not refreshable
             vector_index_info: None,
             cdc_table_type: None,
+            disable_bloom_filter: false,
         }
     }
 
@@ -420,7 +421,9 @@ pub fn infer_kv_log_store_table_catalog_inner(
         .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
         .collect_vec();
 
-    table_catalog_builder.build(dist_key, read_prefix_len_hint)
+    let mut table_catalog = table_catalog_builder.build(dist_key, read_prefix_len_hint);
+    table_catalog.disable_bloom_filter = true;
+    table_catalog
 }
 
 pub fn infer_synced_kv_log_store_table_catalog_inner(
@@ -465,7 +468,9 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
         .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
         .collect_vec();
 
-    table_catalog_builder.build(dist_key, read_prefix_len_hint)
+    let mut table_catalog = table_catalog_builder.build(dist_key, read_prefix_len_hint);
+    table_catalog.disable_bloom_filter = true;
+    table_catalog
 }
 
 /// Check that all leaf nodes must be stream table scan,

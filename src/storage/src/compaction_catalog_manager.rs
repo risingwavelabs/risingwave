@@ -51,6 +51,10 @@ pub enum FilterKeyExtractorImpl {
 
 impl FilterKeyExtractorImpl {
     pub fn from_table(table_catalog: &Table) -> Self {
+        if table_catalog.disable_bloom_filter {
+            return FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor);
+        }
+
         let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
 
         if read_prefix_len == 0 || read_prefix_len > table_catalog.get_pk().len() {
@@ -845,7 +849,35 @@ mod tests {
             refreshable: false,
             vector_index_info: None,
             cdc_table_type: None,
+            disable_bloom_filter: false,
         }
+    }
+
+    #[test]
+    fn test_disable_bloom_filter_uses_dummy_extractor() {
+        let mut prost_table = build_table_with_prefix_column_num(1);
+        prost_table.disable_bloom_filter = true;
+
+        let extractor = FilterKeyExtractorImpl::from_table(&prost_table);
+        let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
+        let schema = vec![DataType::Int64, DataType::Varchar];
+        let serializer = OrderedRowSerde::new(schema, order_types);
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Int64(100)),
+            Some(ScalarImpl::Utf8("abc".into())),
+        ]);
+        let mut row_bytes = vec![];
+        serializer.serialize(&row, &mut row_bytes);
+
+        let table_prefix = {
+            let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
+            buf.put_u32(1);
+            buf.to_vec()
+        };
+        let vnode_prefix = &dummy_vnode()[..];
+        let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
+
+        assert!(extractor.extract(&full_key).is_empty());
     }
 
     #[test]
