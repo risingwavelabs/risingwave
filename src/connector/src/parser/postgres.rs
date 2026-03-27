@@ -29,7 +29,7 @@ use crate::parser::utils::log_error;
 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
 /// Adapter for PostgreSQL `vector` type in CDC snapshot reads.
-/// It supports both text format (`[1,2,3]`) and binary format from pgvector.
+/// It parses pgvector binary format.
 struct PgVectorAdapter(Vec<f32>);
 
 impl<'a> FromSql<'a> for PgVectorAdapter {
@@ -41,33 +41,11 @@ impl<'a> FromSql<'a> for PgVectorAdapter {
         _ty: &Type,
         raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        // PostgreSQL usually sends values in binary format through tokio-postgres.
-        // Keep this text fallback for compatibility with format negotiation fallback paths.
-        if raw.starts_with(b"[") {
-            return Self::parse_text(raw);
-        }
         Self::parse_binary(raw)
     }
 }
 
 impl PgVectorAdapter {
-    fn parse_text(raw: &[u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        let s = std::str::from_utf8(raw)?;
-        let s = s
-            .strip_prefix('[')
-            .ok_or("vector must start with [")?
-            .strip_suffix(']')
-            .ok_or("vector must end with ]")?;
-        let elems = if s.trim().is_empty() {
-            vec![]
-        } else {
-            s.split(',')
-                .map(|v| v.trim().parse::<f32>())
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        Ok(Self(elems))
-    }
-
     fn parse_binary(raw: &[u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
         // Binary format from pgvector extension:
         // int16 dimension, int16 unused, repeated float4 values.
@@ -231,12 +209,6 @@ mod tests {
     use crate::parser::scalar_adapter::EnumString;
     const DB: &str = "postgres";
     const USER: &str = "kexiang";
-
-    #[test]
-    fn test_pg_vector_adapter_parse_text() {
-        let v = PgVectorAdapter::parse_text(b"[1.5,-2.25,3]").unwrap();
-        assert_eq!(v.0, vec![1.5, -2.25, 3.0]);
-    }
 
     #[test]
     fn test_pg_vector_adapter_parse_binary() {

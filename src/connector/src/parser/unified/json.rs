@@ -680,26 +680,6 @@ impl JsonParseOptions {
             })
             .into(),
             // ---- Vector -----
-            (DataType::Vector(size), ValueType::String) => {
-                let text = value.as_str().unwrap();
-                match VectorVal::from_text(text, *size) {
-                    Ok(v) => v.into(),
-                    Err(err) => {
-                        static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
-                            LazyLock::new(LogSuppressor::default);
-                        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
-                            tracing::warn!(
-                                error = %err,
-                                expected_dim = *size,
-                                text_len = text.len(),
-                                suppressed_count,
-                                "failed to parse vector text, padding with `NULL`"
-                            );
-                        }
-                        Err(create_error())?
-                    }
-                }
-            }
             (DataType::Vector(size), ValueType::Array) => {
                 let array = value.as_array().unwrap();
                 if array.len() != *size {
@@ -708,8 +688,19 @@ impl JsonParseOptions {
                 let mut elems = Vec::with_capacity(array.len());
                 for v in array {
                     let value = match v.value_type() {
-                        ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128 => {
-                            v.try_as_i64().map_err(|_| create_error())? as f32
+                        ValueType::I64 | ValueType::I128 => {
+                            let i128_value = v.try_as_i128().map_err(|_| create_error())?;
+                            if i128_value < f32::MIN as i128 || i128_value > f32::MAX as i128 {
+                                Err(create_error())?
+                            }
+                            i128_value as f32
+                        }
+                        ValueType::U64 | ValueType::U128 => {
+                            let u128_value = v.try_as_u128().map_err(|_| create_error())?;
+                            if u128_value > f32::MAX as u128 {
+                                Err(create_error())?
+                            }
+                            u128_value as f32
                         }
                         ValueType::F64 => {
                             let f64_value = v.try_as_f64().map_err(|_| create_error())?;

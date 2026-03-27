@@ -1,7 +1,7 @@
 services:
   # TODO: Rename this to `postgres`
   db:
-    image: postgis/postgis:15-3.5-alpine
+    image: public.ecr.aws/w1p7b4n3/postgres:15-gis3.5-vector0.8.2-alpine
     environment:
       - POSTGRES_USER=postgres
       # Test with a password containing special characters #21943, for example 0x5c.
