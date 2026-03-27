@@ -102,6 +102,24 @@
     select * from joined1234;
   expected_outputs:
     - explain_output
+- name: snapshot backfill prefix equality pushdown
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a = 1 and b = 2;
+  expected_outputs:
+    - stream_plan
+- name: snapshot backfill skips non-prefix equality
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where b = 2;
+  expected_outputs:
+    - stream_plan
+- name: snapshot backfill skips residual-on-top-of-prefix
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a = 1 and c = 3;
+  expected_outputs:
+    - stream_plan
 - name: |
     Test backfill order, auto, stream share cycle.
     For auto derived backfill order with cycle, it should not return any order plan, and return a NOTICE

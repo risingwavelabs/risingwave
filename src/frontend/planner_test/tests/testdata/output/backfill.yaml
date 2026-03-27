@@ -222,6 +222,29 @@
       "public.fact4" -> "public.fact1";
       "public.fact4" -> "public.fact2";
     }
+- name: snapshot backfill prefix equality pushdown
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a = 1 and b = 2;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_prefix: a = Some(Int32(1)) AND b = Some(Int32(2)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill skips non-prefix equality
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where b = 2;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamFilter { predicate: (t.b = 2:Int32) }
+      └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill skips residual-on-top-of-prefix
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a = 1 and c = 3;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamFilter { predicate: (t.c = 3:Int32) }
+      └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_prefix: a = Some(Int32(1)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
 - name: |
     Test backfill order, auto, stream share cycle.
     For auto derived backfill order with cycle, it should not return any order plan, and return a NOTICE

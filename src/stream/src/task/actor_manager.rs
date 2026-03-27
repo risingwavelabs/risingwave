@@ -24,7 +24,10 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::config::{MetricLevel, StreamingConfig, merge_streaming_config_section};
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::DataType;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::id::{ExecutorId, GlobalOperatorId};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -80,6 +83,55 @@ pub(crate) struct StreamActorManager {
 }
 
 impl StreamActorManager {
+    fn decode_pk_prefix(
+        node: &StreamScanNode,
+        table_desc: &StorageTableDesc,
+    ) -> StreamResult<Option<OwnedRow>> {
+        if node.pk_prefix.is_empty() {
+            return Ok(None);
+        }
+
+        if node.pk_prefix.len() > table_desc.pk.len() {
+            return Err(anyhow::anyhow!(
+                "pk_prefix length {} exceeds table pk length {}",
+                node.pk_prefix.len(),
+                table_desc.pk.len()
+            )
+            .into());
+        }
+
+        let pk_types = table_desc
+            .pk
+            .iter()
+            .take(node.pk_prefix.len())
+            .map(|order| {
+                let column_idx = order.column_index as usize;
+                let column = table_desc
+                    .columns
+                    .get(column_idx)
+                    .expect("pk column index should exist in table desc");
+                let data_type = column
+                    .column_type
+                    .as_ref()
+                    .expect("storage table desc column type should exist");
+                DataType::from(data_type)
+            })
+            .collect_vec();
+
+        let prefix = node
+            .pk_prefix
+            .iter()
+            .zip(pk_types.iter())
+            .map(|(raw, data_type)| {
+                deserialize_datum(raw.as_slice(), data_type)
+                    .map_err(anyhow::Error::from)
+                    .map_err(Into::into)
+            })
+            .collect::<StreamResult<Vec<_>>>()?;
+
+        Ok(Some(OwnedRow::new(prefix)))
+    }
+
     fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> ExecutorId {
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
@@ -140,6 +192,7 @@ impl StreamActorManager {
         .await?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
+        let pk_prefix = Self::decode_pk_prefix(node, table_desc)?;
 
         let output_indices = node
             .output_indices
@@ -179,6 +232,7 @@ impl StreamActorManager {
             barrier_rx,
             self.streaming_metrics.clone(),
             node.snapshot_backfill_epoch,
+            pk_prefix,
         )
         .boxed();
 
