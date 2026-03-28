@@ -502,7 +502,7 @@ pub struct SessionConfig {
 
     /// Enable DataFusion Engine
     /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     enable_datafusion_engine: bool,
 
     /// Prefer hash join over sort merge join in DataFusion engine
