@@ -35,7 +35,8 @@ pub trait GlueSchemaCache {
     /// Gets the a specific schema by id, which is used as *writer schema*.
     async fn get_by_id(&self, schema_version_id: uuid::Uuid) -> ConnectorResult<Arc<Schema>>;
     /// Gets the latest schema by arn, which is used as *reader schema*.
-    async fn get_by_name(&self, schema_arn: &str) -> ConnectorResult<Arc<Schema>>;
+    /// Returns (Schema, Version, Content)
+    async fn get_by_name(&self, schema_arn: &str) -> ConnectorResult<(Arc<Schema>, String, String)>;
 }
 
 #[derive(Debug)]
@@ -64,7 +65,7 @@ impl GlueSchemaCache for GlueSchemaCacheImpl {
         }
     }
 
-    async fn get_by_name(&self, schema_arn: &str) -> ConnectorResult<Arc<Schema>> {
+    async fn get_by_name(&self, schema_arn: &str) -> ConnectorResult<(Arc<Schema>, String, String)> {
         match self {
             Self::Real(inner) => inner.get_by_name(schema_arn).await,
             Self::Mock(inner) => inner.get_by_name(schema_arn).await,
@@ -123,7 +124,7 @@ impl GlueSchemaCache for RealGlueSchemaCache {
     }
 
     /// Gets the latest schema by arn, which is used as *reader schema*.
-    async fn get_by_name(&self, schema_arn: &str) -> ConnectorResult<Arc<Schema>> {
+    async fn get_by_name(&self, schema_arn: &str) -> ConnectorResult<(Arc<Schema>, String, String)> {
         let res = self
             .glue_client
             .get_schema_version()
@@ -140,8 +141,9 @@ impl GlueSchemaCache for RealGlueSchemaCache {
         let definition = res
             .schema_definition()
             .context("glue sdk response without definition")?;
-        self.parse_and_cache_schema(schema_version_id, definition)
-            .await
+        let schema = self.parse_and_cache_schema(schema_version_id, definition)
+            .await?;
+        Ok((schema, schema_version_id.to_string(), definition.to_string()))
     }
 }
 
@@ -210,11 +212,13 @@ impl GlueSchemaCache for MockGlueSchemaCache {
             .clone())
     }
 
-    async fn get_by_name(&self, schema_arn: &str) -> ConnectorResult<Arc<Schema>> {
+    async fn get_by_name(&self, schema_arn: &str) -> ConnectorResult<(Arc<Schema>, String, String)> {
         let schema_version_id = self
             .arn_to_latest_id
             .get(schema_arn)
             .context("schema arn not found in mock registry")?;
-        self.get_by_id(*schema_version_id).await
+        let schema = self.get_by_id(*schema_version_id).await?;
+        // Mock implementation: just use version id as version string, and canonical form as content
+        Ok((schema.clone(), schema_version_id.to_string(), schema.canonical_form()))
     }
 }
