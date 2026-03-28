@@ -54,3 +54,112 @@ query ?
 select 'a'::varchar = 'a '::varchar;
 ----
 f
+
+# int <-> bytea explicit casts (PG18)
+
+# int2 -> bytea (big-endian encoding)
+query T
+SELECT 1::int2::bytea;
+----
+\x0001
+
+query T
+SELECT 256::int2::bytea;
+----
+\x0100
+
+query T
+SELECT 0::int2::bytea;
+----
+\x0000
+
+query T
+SELECT (-1)::int2::bytea;
+----
+\xffff
+
+# int4 -> bytea
+query T
+SELECT 1::int4::bytea;
+----
+\x00000001
+
+query T
+SELECT 65536::int4::bytea;
+----
+\x00010000
+
+query T
+SELECT (-1)::int4::bytea;
+----
+\xffffffff
+
+# int8 -> bytea
+query T
+SELECT 1::int8::bytea;
+----
+\x0000000000000001
+
+query T
+SELECT (-1)::int8::bytea;
+----
+\xffffffffffffffff
+
+# bytea -> int2
+query I
+SELECT '\x0001'::bytea::int2;
+----
+1
+
+query I
+SELECT '\xffff'::bytea::int2;
+----
+-1
+
+query I
+SELECT '\x0000'::bytea::int2;
+----
+0
+
+# bytea -> int4
+query I
+SELECT '\x00000001'::bytea::int4;
+----
+1
+
+query I
+SELECT '\xffffffff'::bytea::int4;
+----
+-1
+
+# bytea -> int8
+query I
+SELECT '\x0000000000000001'::bytea::int8;
+----
+1
+
+query I
+SELECT '\xffffffffffffffff'::bytea::int8;
+----
+-1
+
+# Length mismatch errors
+statement error
+SELECT '\x00'::bytea::int2;
+
+statement error
+SELECT '\x000000'::bytea::int4;
+
+statement error
+SELECT '\x00000000000000'::bytea::int8;
+
+# NULL handling
+query T
+SELECT NULL::int2::bytea;
+----
+NULL
+
+query I
+SELECT NULL::bytea::int2;
+----
+NULL

@@ -313,6 +313,7 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
     // 4. int32 <-> bool is explicit
     // 5. timestamp/timestamptz -> time is assign
     // 6. int2/int4/int8 -> int256 is implicit and int256 -> float8 is explicit
+    // 7. int2/int4/int8 <-> bytea is explicit (PG18)
     //
     // Remember to update test cases including `pg_cast.slt.part` and `test_func_sig_map` when
     // changing this table.
@@ -320,9 +321,9 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
     const CAST_TABLE: &[(&str, DataTypeName)] = &[
         // 123456789ABCDEFG
         (". e            a ", Boolean),     // 0
-        (" .iiiiii       a ", Int16),       // 1
-        ("ea.iiiii       a ", Int32),       // 2
-        (" aa.iiii       ae", Int64),       // 3
+        (" .iiiiii      ea ", Int16),       // 1
+        ("ea.iiiii      ea ", Int32),       // 2
+        (" aa.iiii      eae", Int64),       // 3
         (" aaa.ii        a ", Decimal),     // 4
         (" aaaa.i        a ", Float32),     // 5
         (" aaaaa.        a ", Float64),     // 6
@@ -333,7 +334,7 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
         ("           .i  a ", Time),        // B
         ("           a.  a ", Interval),    // C
         ("eeeeeee      . a ", Jsonb),       // D
-        ("              .a ", Bytea),       // E
+        (" eee          .a ", Bytea),       // E
         ("eeeeeeeeeeeeeee. ", Varchar),     // F
         ("   e      e     .", Serial),      // G
     ];

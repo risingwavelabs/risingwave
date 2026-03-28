@@ -192,6 +192,42 @@ fn pgwire_send(elem: i64, writer: &mut impl std::io::Write) {
     writer.write_all(&elem.to_be_bytes()).unwrap();
 }
 
+#[function("cast(int2) -> bytea")]
+fn int2_to_bytea(elem: i16, writer: &mut impl std::io::Write) {
+    writer.write_all(&elem.to_be_bytes()).unwrap();
+}
+
+#[function("cast(int4) -> bytea")]
+fn int4_to_bytea(elem: i32, writer: &mut impl std::io::Write) {
+    writer.write_all(&elem.to_be_bytes()).unwrap();
+}
+
+#[function("cast(int8) -> bytea")]
+fn int8_to_bytea(elem: i64, writer: &mut impl std::io::Write) {
+    writer.write_all(&elem.to_be_bytes()).unwrap();
+}
+
+#[function("cast(bytea) -> int2")]
+fn bytea_to_int2(elem: &[u8]) -> Result<i16> {
+    let bytes =
+        <[u8; 2]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_report_string().into()))?;
+    Ok(i16::from_be_bytes(bytes))
+}
+
+#[function("cast(bytea) -> int4")]
+fn bytea_to_int4(elem: &[u8]) -> Result<i32> {
+    let bytes =
+        <[u8; 4]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_report_string().into()))?;
+    Ok(i32::from_be_bytes(bytes))
+}
+
+#[function("cast(bytea) -> int8")]
+fn bytea_to_int8(elem: &[u8]) -> Result<i64> {
+    let bytes =
+        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_report_string().into()))?;
+    Ok(i64::from_be_bytes(bytes))
+}
+
 #[function("cast(boolean) -> varchar")]
 pub fn bool_to_varchar(input: bool, writer: &mut impl std::fmt::Write) {
     writer
