@@ -1704,7 +1704,7 @@ pub fn resolve_no_shuffle_actor_mapping<
 }
 
 pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWorkerSlotMapping {
-    let fragment_worker_slot_mapping = match fragment.distribution_type {
+    let fragment_worker_mapping = match fragment.distribution_type {
         DistributionType::Single => {
             let actor = fragment.actors.values().exactly_one().unwrap();
             WorkerSlotMapping::new_single(WorkerSlotId::new(actor.worker_id as _, 0))
@@ -1738,7 +1738,7 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
 
     PbFragmentWorkerSlotMapping {
         fragment_id: fragment.fragment_id,
-        mapping: Some(fragment_worker_slot_mapping.to_protobuf()),
+        mapping: Some(fragment_worker_mapping.to_protobuf()),
     }
 }
 
