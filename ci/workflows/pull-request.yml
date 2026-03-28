@@ -69,6 +69,7 @@ other-sql-backend: &other-sql-backend
 
 steps:
   - label: "check ci image rebuild"
+    if: build.branch != "shanicky/over-window-pr-only"
     plugins:
       - monorepo-diff#v1.2.0:
           diff: "git diff --name-only origin/main"
@@ -111,6 +112,7 @@ steps:
   - label: "build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
+    if: build.branch != "shanicky/over-window-pr-only"
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
@@ -128,9 +130,11 @@ steps:
   - label: "end-to-end test"
     command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-e2e-tests"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+      )
     depends_on:
       - "build"
     plugins:
@@ -142,9 +146,11 @@ steps:
   - label: "e2e preload-memory test"
     command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true ci/scripts/e2e-test-serial.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-preload-memory-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-preload-memory-tests"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-tests?(,|$$)/
+      )
     depends_on:
       - "build"
     plugins:
@@ -158,9 +164,11 @@ steps:
     key: "slow-e2e-test"
     command: "ci/scripts/slow-e2e-test.sh -p ci-dev -m ci-3streaming-2serving-3fe"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-slow-e2e-tests"
-      || build.env("CI_STEPS") =~ /(^|,)slow-e2e-tests?(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-slow-e2e-tests"
+        || build.env("CI_STEPS") =~ /(^|,)slow-e2e-tests?(,|$$)/
+      )
     depends_on:
       - "build"
       - "build-other"
@@ -188,9 +196,67 @@ steps:
   - label: "end-to-end test (parallel)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-e2e-tests"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?(,|$$)/
+      )
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 45
+    parallelism: 4
+    retry: *auto-retry
+
+  - label: "end-to-end test (parallel, ci-dev, repro group 1)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
+    if: build.branch == "shanicky/over-window-pr-only"
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 45
+    parallelism: 4
+    retry: *auto-retry
+
+  - label: "end-to-end test (parallel, ci-dev, repro group 2)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
+    if: build.branch == "shanicky/over-window-pr-only"
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 45
+    parallelism: 4
+    retry: *auto-retry
+
+  - label: "end-to-end test (parallel, ci-dev, repro group 3)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
+    if: build.branch == "shanicky/over-window-pr-only"
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 45
+    parallelism: 4
+    retry: *auto-retry
+
+  - label: "end-to-end test (parallel, ci-dev, repro group 4)"
+    command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
+    if: build.branch == "shanicky/over-window-pr-only"
     depends_on:
       - "build"
       - "build-other"
@@ -216,9 +282,11 @@ steps:
   - label: "end-to-end source test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-source-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-e2e-source-tests"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      )
     depends_on:
       - "build"
       - "build-other"
@@ -234,9 +302,11 @@ steps:
   - label: "end-to-end sink test"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-sink-tests"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-e2e-sink-tests"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
+      )
     depends_on:
       - "build"
       - "build-other"
@@ -450,9 +520,11 @@ steps:
   - label: "regress test"
     command: "ci/scripts/regress-test.sh -p ci-dev"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-regress-test"
-      || build.env("CI_STEPS") =~ /(^|,)regress-tests?(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-regress-test"
+        || build.env("CI_STEPS") =~ /(^|,)regress-tests?(,|$$)/
+      )
     depends_on: "build"
     plugins:
       - docker-compose#v5.5.0:
@@ -468,9 +540,11 @@ steps:
   - label: "unit test"
     command: "ci/scripts/run-unit-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-unit-test"
-      || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-unit-test"
+        || build.env("CI_STEPS") =~ /(^|,)unit-tests?(,|$$)/
+      )
     plugins:
       - *cargo-cache
       - ./ci/plugins/swapfile
@@ -482,9 +556,11 @@ steps:
   - label: "check"
     command: "ci/scripts/check.sh"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-check"
-      || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-check"
+        || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+      )
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
@@ -494,9 +570,11 @@ steps:
   - label: "check dylint"
     command: "ci/scripts/check-dylint.sh"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-check"
-      || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-check"
+        || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+      )
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
@@ -506,9 +584,11 @@ steps:
   - label: "documentation"
     command: "ci/scripts/doc.sh"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-check"
-      || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-check"
+        || build.env("CI_STEPS") =~ /(^|,)check(,|$$)/
+      )
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
@@ -518,9 +598,11 @@ steps:
   - label: "unit test (deterministic simulation)"
     command: "ci/scripts/deterministic-unit-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-unit-test-deterministic-simulation"
+        || build.env("CI_STEPS") =~ /(^|,)unit-tests?-deterministic-simulation(,|$$)/
+      )
     plugins:
       - docker-compose#v5.5.0: *docker-compose
     timeout_in_minutes: 12
@@ -529,9 +611,11 @@ steps:
   - label: "integration test (deterministic simulation)"
     command: "TEST_NUM=5 ci/scripts/deterministic-it-test.sh pull-request"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-integration-test-deterministic-simulation"
+        || build.env("CI_STEPS") =~ /(^|,)integration-tests?-deterministic-simulation(,|$$)/
+      )
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
@@ -544,9 +628,11 @@ steps:
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=4 ci/scripts/deterministic-e2e-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)e2e-tests?-deterministic-simulation(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-e2e-test-deterministic-simulation"
+        || build.env("CI_STEPS") =~ /(^|,)e2e-tests?-deterministic-simulation(,|$$)/
+      )
     depends_on: "build-simulation"
     plugins:
       - seek-oss/aws-sm#v2.3.2:
@@ -564,9 +650,11 @@ steps:
   - label: "recovery test (deterministic simulation)"
     command: "TEST_NUM=4 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
-      || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
+        || build.env("CI_STEPS") =~ /(^|,)recovery-tests?-deterministic-simulation(,|$$)/
+      )
     depends_on: "build-simulation"
     plugins:
       # - seek-oss/aws-sm#v2.3.2:
@@ -584,8 +672,10 @@ steps:
   - label: "preload memory recovery test (deterministic simulation)"
     command: "DEFAULT_ENABLE_MEM_PRELOAD_STATE_TABLE=true TEST_NUM=4 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.0 ci/scripts/deterministic-recovery-test.sh"
     if: |
-      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
-      || build.pull_request.labels includes "ci/run-preload-memory-tests"
+      build.branch != "shanicky/over-window-pr-only" && (
+        !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+        || build.pull_request.labels includes "ci/run-preload-memory-tests"
+      )
     depends_on: "build-simulation"
     plugins:
       - docker-compose#v5.5.0: *docker-compose
@@ -815,6 +905,7 @@ steps:
 
   # Only if all steps are successful, we upload coverage reports.
   - label: "upload coverage reports"
+    if: build.branch != "shanicky/over-window-pr-only"
     command: "ci/scripts/upload-coverage.sh"
     plugins:
       - seek-oss/aws-sm#v2.3.2:
