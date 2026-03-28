@@ -855,6 +855,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_connector::sink::mqtt::MqttSink;
         use risingwave_connector::sink::pulsar::PulsarSink;
         use risingwave_connector::sink::redis::RedisSink;
+        use risingwave_connector::sink::sqs::SqsSink;
 
         convert_args!(hashmap!(
                 GooglePubSubSink::SINK_NAME => hashmap!(
@@ -899,6 +900,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 RedisSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Template],
                     Format::Upsert => vec![Encode::Json, Encode::Template],
+                ),
+                SqsSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json],
                 ),
         ))
     });

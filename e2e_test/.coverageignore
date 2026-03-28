@@ -15,3 +15,6 @@ e2e_test/source_legacy/pulsar/**/*.slt*
 
 # Manually executed in `e2e_test/subscription/main.py`
 e2e_test/subscription/**/*.slt*
+
+# Requires LocalStack; executed via the sqs-sink risedev profile
+e2e_test/sink/sqs_sink_localstack.slt
