@@ -286,6 +286,10 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
 
+    /// Enable sort buffer in `LocalityProviderExecutor` after backfilling.
+    #[serde(default = "default::developer::enable_locality_sort_buffer")]
+    pub enable_locality_sort_buffer: bool,
+
     #[serde(default, flatten)]
     #[serde_prefix_all(skip)]
     #[config_doc(omitted)]
