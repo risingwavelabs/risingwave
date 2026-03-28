@@ -24,11 +24,11 @@ use serde::Serializer;
 
 use super::{
     Array, ArrayBuilder, ArrayImpl, ArrayResult, DatumRef, DefaultOrdered, ListArray,
-    ListArrayBuilder, ListRef, ListValue, MapType, ScalarImpl, ScalarRef, ScalarRefImpl,
-    StructArray, StructRef,
+    ListArrayBuilder, ListRef, ListValue, ListWrite, ListWriter, MapType, ScalarImpl, ScalarRef,
+    ScalarRefImpl, StructArray, StructRef,
 };
 use crate::bitmap::Bitmap;
-use crate::types::{DataType, Scalar, ToText};
+use crate::types::{DataType, Scalar, ToDatumRef, ToText};
 use crate::util::memcmp_encoding;
 
 #[derive(Debug, Clone, EstimateSize)]
@@ -555,5 +555,52 @@ impl MapValue {
             ListValue::new(key_array),
             ListValue::new(value_array),
         )?)
+    }
+}
+
+impl MapArrayBuilder {
+    /// Create a writer for appending a single map value.
+    pub fn writer(&mut self) -> MapWriter<'_> {
+        MapWriter::new(self)
+    }
+}
+
+/// Writer for appending a single map entry to a [`MapArrayBuilder`].
+///
+/// Physically, [`MapArray`] is represented as `List<Struct<key, value>>`,
+/// so this writer delegates to an underlying [`ListWriter`].
+pub struct MapWriter<'a> {
+    inner: ListWriter<'a>,
+}
+
+impl<'a> MapWriter<'a> {
+    pub fn new(builder: &'a mut MapArrayBuilder) -> Self {
+        Self {
+            inner: builder.inner.writer(),
+        }
+    }
+
+    pub fn finish(self) {
+        self.inner.finish();
+    }
+
+    pub fn rollback(self) {
+        self.inner.rollback();
+    }
+}
+
+pub trait MapWrite {
+    fn write(&mut self, entry: impl ToDatumRef);
+
+    fn write_iter(&mut self, entries: impl IntoIterator<Item = impl ToDatumRef>) {
+        for e in entries {
+            self.write(e);
+        }
+    }
+}
+
+impl<'a> MapWrite for MapWriter<'a> {
+    fn write(&mut self, entry: impl ToDatumRef) {
+        self.inner.write(entry);
     }
 }
