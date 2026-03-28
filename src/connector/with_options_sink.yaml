@@ -206,6 +206,10 @@ DeltaLakeConfig:
     required: false
     default: DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE
     allow_alter_on_fly: true
+  - name: is_exactly_once
+    field_type: bool
+    comments: Whether to enable exactly-once commit deduplication, the default is false.
+    required: false
   - name: r#type
     field_type: String
     required: true
