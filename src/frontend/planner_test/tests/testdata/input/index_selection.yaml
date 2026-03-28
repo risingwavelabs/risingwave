@@ -630,3 +630,10 @@
     select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c limit 5;
   expected_outputs:
     - batch_plan
+- name: non-covering function index where PK column is not in index - should not panic
+  sql: |
+    create table t (a varchar primary key, b int, c int);
+    create index idx on t(lower(a)) include(b);
+    select * from t where lower(a) = 'hello';
+  expected_outputs:
+    - batch_plan

@@ -1065,3 +1065,13 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 5, offset: 0 }
           └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }
+- name: non-covering function index where PK column is not in index - should not panic
+  sql: |
+    create table t (a varchar primary key, b int, c int);
+    create index idx on t(lower(a)) include(b);
+    select * from t where lower(a) = 'hello';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchLookupJoin { type: Inner, predicate: idx.t.a IS NOT DISTINCT FROM t.a, output: [t.a, t.b, t.c], lookup table: t }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(idx.t.a) }
+        └─BatchScan { table: idx, columns: [idx.t.a], scan_ranges: [idx.LOWER = Utf8("hello")], distribution: SomeShard }
