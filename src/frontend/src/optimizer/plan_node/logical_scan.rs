@@ -27,7 +27,7 @@ use super::utils::{Distill, childless_record};
 use super::{
     BackfillType, BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
     LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamFilter,
-    StreamTableScan, ToBatch, ToStream, generic,
+    StreamProject, StreamTableScan, ToBatch, ToStream, generic,
 };
 use crate::TableCatalog;
 use crate::binder::BoundBaseTable;
@@ -644,19 +644,19 @@ impl ToStream for LogicalScan {
                     && scan_ranges[0].has_eq_conds()
                     && is_full_range(&scan_ranges[0].range)
                 {
-                    let mut core = self.core.clone();
-                    core.predicate = Condition::true_cond();
+                    let (core, predicate, project_expr) = self.predicate_pull_up();
                     let scan = StreamTableScan::new_with_pk_prefix(
                         core,
                         ctx.backfill_type().to_stream_scan_type(),
                         Some(scan_ranges[0].eq_conds.clone()),
                     );
 
-                    return Ok(StreamFilter::new(generic::Filter::new(
-                        self.predicate().clone(),
-                        scan.into(),
-                    ))
-                    .into());
+                    let mut plan: crate::optimizer::plan_node::StreamPlanRef =
+                        StreamFilter::new(generic::Filter::new(predicate, scan.into())).into();
+                    if let Some(exprs) = project_expr {
+                        plan = StreamProject::new(generic::Project::new(exprs, plan)).into();
+                    }
+                    return Ok(plan);
                 }
             }
 
