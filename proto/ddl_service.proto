@@ -29,6 +29,12 @@ message DropDatabaseRequest {
   uint32 database_id = 1;
 }
 
+message CascadeObject {
+  string object = 1;
+  optional string schema_name = 2;
+  string object_name = 3;
+}
+
 message DropDatabaseResponse {
   common.Status status = 1;
   WaitVersion version = 2;
@@ -427,6 +433,7 @@ message DropTableRequest {
 message DropTableResponse {
   common.Status status = 1;
   WaitVersion version = 2;
+  repeated CascadeObject cascade_objects = 3;
 }
 
 // Used by risectl (and in the future, dashboard)
