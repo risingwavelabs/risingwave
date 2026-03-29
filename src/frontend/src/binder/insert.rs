@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
 use itertools::Itertools;
@@ -21,6 +21,8 @@ use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::Type as ExprType;
+use risingwave_pb::plan_common::DefaultColumnDesc;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem};
 
 use super::BoundQuery;
@@ -123,8 +125,6 @@ impl Binder {
         )?;
 
         let has_user_specified_columns = !cols_to_insert_by_user.is_empty();
-        let default_columns_from_catalog =
-            table_catalog.default_columns().collect::<BTreeMap<_, _>>();
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
@@ -135,6 +135,26 @@ impl Binder {
             .cloned()
             .collect_vec();
         let cols_to_insert_in_table = table_catalog.columns_to_insert().cloned().collect_vec();
+        // Reorder default columns based on `cols_to_insert_in_table`.
+        let default_columns_from_catalog = cols_to_insert_in_table
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, col)| {
+                if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                    expr,
+                    ..
+                })) = col.column_desc.generated_or_default_column.as_ref()
+                {
+                    Some((
+                        idx,
+                        ExprImpl::from_expr_proto(expr.as_ref().unwrap())
+                            .expect("expr in default columns corrupted"),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<HashMap<_, _>>();
 
         let generated_column_names = table_catalog
             .generated_column_names()
@@ -200,11 +220,13 @@ impl Binder {
             &cols_to_insert_by_user,
             &table_name,
         )?;
+        // Collect the types of columns explicitly specified by the user.
         let expected_types: Vec<DataType> = col_indices_to_insert
             .iter()
             .map(|idx| cols_to_insert_in_table[*idx].data_type().clone())
             .collect();
 
+        // Collect the nullable of columns explicitly specified by the user.
         let nullables: Vec<(bool, &str)> = col_indices_to_insert
             .iter()
             .map(|idx| {
@@ -453,11 +475,17 @@ impl Binder {
     }
 }
 
-/// Returned indices have the same length as `cols_to_insert_in_table`.
-/// The first elements have the same order as `cols_to_insert_by_user`.
-/// The rest are what's not specified by the user.
+/// # Parameters
+/// - `cols_to_insert_in_table`: the list of columns that are visible and non-generated
 ///
-/// Also checks there are no duplicate nor unknown columns provided by the user.
+/// - `cols_to_insert_by_user`:
+///   The list of column identifiers explicitly specified by the user
+///   in the INSERT statement.
+///
+/// - `table_name`: The name of the target table.
+///
+/// # Return
+/// - the first
 fn get_col_indices_to_insert(
     cols_to_insert_in_table: &[ColumnCatalog],
     cols_to_insert_by_user: &[Ident],
@@ -469,47 +497,42 @@ fn get_col_indices_to_insert(
 
     let mut col_indices_to_insert: Vec<usize> = Vec::new();
 
-    let mut col_name_to_idx: HashMap<String, usize> = HashMap::new();
-    for (col_idx, col) in cols_to_insert_in_table.iter().enumerate() {
-        col_name_to_idx.insert(col.name().to_owned(), col_idx);
-    }
+    // Build a map from column name to column index in the table catalog
+    let col_name_to_idx: HashMap<String, usize> = cols_to_insert_in_table
+        .iter()
+        .enumerate()
+        .map(|(idx, col)| (col.name().to_owned(), idx))
+        .collect();
 
+    let mut seen = HashSet::with_capacity(cols_to_insert_by_user.len());
     for col_name in cols_to_insert_by_user {
-        let col_name = &col_name.real_value();
-        match col_name_to_idx.get_mut(col_name) {
-            Some(value_ref) => {
-                if *value_ref == usize::MAX {
-                    return Err(RwError::from(ErrorCode::BindError(
-                        "Column specified more than once".to_owned(),
-                    )));
-                }
-                col_indices_to_insert.push(*value_ref);
-                *value_ref = usize::MAX; // mark this column name, for duplicate
-                // detection
-            }
-            None => {
-                // Invalid column name found
-                return Err(RwError::from(ErrorCode::BindError(format!(
-                    "Column {} not found in table {}",
-                    col_name, table_name
-                ))));
-            }
+        let col_name = col_name.real_value();
+        if !seen.insert(col_name.clone()) {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Column specified more than once".to_owned(),
+            )));
         }
+
+        let idx = col_name_to_idx.get(&col_name).ok_or_else(|| {
+            RwError::from(ErrorCode::BindError(format!(
+                "Column {} not found in table {}",
+                col_name, table_name
+            )))
+        })?;
+
+        col_indices_to_insert.push(*idx);
     }
 
     // columns that are in the target table but not in the provided target columns
     let default_column_indices = if col_indices_to_insert.len() != cols_to_insert_in_table.len() {
-        let mut cols = vec![];
-        for col in cols_to_insert_in_table {
-            if let Some(col_to_insert_idx) = col_name_to_idx.get(col.name()) {
-                if *col_to_insert_idx != usize::MAX {
-                    cols.push(*col_to_insert_idx);
-                }
-            } else {
-                unreachable!();
-            }
-        }
-        cols
+        cols_to_insert_in_table
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, col)| {
+                let column_name = col.name();
+                (!seen.contains(column_name)).then_some(idx)
+            })
+            .collect()
     } else {
         vec![]
     };
