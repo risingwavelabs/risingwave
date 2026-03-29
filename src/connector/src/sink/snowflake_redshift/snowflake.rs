@@ -17,7 +17,6 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -746,8 +745,11 @@ impl SinglePhaseCommitCoordinator for SnowflakeSinkCommitter {
                 &add_columns
                     .fields
                     .into_iter()
-                    .map(|f| (f.name, DataType::from(f.data_type.unwrap()).to_string()))
-                    .collect_vec(),
+                    .map(|f| {
+                        let dt = DataType::from(f.data_type.unwrap());
+                        Ok((f.name, convert_snowflake_data_type(&dt)?))
+                    })
+                    .collect::<Result<Vec<_>>>()?,
             )
             .await
     }
@@ -953,7 +955,11 @@ fn convert_snowflake_data_type(data_type: &DataType) -> Result<String> {
         DataType::Timestamp => "TIMESTAMP".to_owned(),
         DataType::Timestamptz => "TIMESTAMP_TZ".to_owned(),
         DataType::Jsonb => "STRING".to_owned(),
-        DataType::Decimal => "DECIMAL".to_owned(),
+        // RisingWave uses rust_decimal with MAX_PRECISION=28, so we need at most 28 significant
+        // digits. Snowflake's DECIMAL without explicit precision defaults to (38,0) which drops
+        // all fractional digits. We use (38, 10) to match the Iceberg sink convention:
+        // 28 integer digits + 10 fractional digits = 38 total, covering all RisingWave values.
+        DataType::Decimal => "DECIMAL(38, 10)".to_owned(),
         DataType::Bytea => "BINARY".to_owned(),
         DataType::Time => "TIME".to_owned(),
         _ => {
@@ -975,8 +981,11 @@ fn build_create_pipe_sql(
     target_table_name: &str,
 ) -> String {
     let pipe_name = format!(r#""{}"."{}"."{}""#, database, schema, pipe_name);
+    // Trailing `/` is required to enforce exact directory matching.
+    // Without it, a PIPE for table "dim_project" would also match files under
+    // "dim_project_contract/" since Snowflake uses prefix matching.
     let stage = format!(
-        r#""{}"."{}"."{}"/{}"#,
+        r#""{}"."{}"."{}"/{}/"#,
         database, schema, stage, target_table_name
     );
     let table_name = format!(r#""{}"."{}"."{}""#, database, schema, table_name);
