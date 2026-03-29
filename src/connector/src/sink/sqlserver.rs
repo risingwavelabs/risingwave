@@ -54,6 +54,7 @@ pub struct SqlServerConfig {
     #[serde(rename = "sqlserver.user")]
     pub user: String,
     #[serde(rename = "sqlserver.password")]
+    #[with_option(allow_alter_on_fly)]
     pub password: String,
     #[serde(rename = "sqlserver.database")]
     pub database: String,
