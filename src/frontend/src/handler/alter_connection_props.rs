@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{BTreeMap, HashSet};
+
+use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
+use risingwave_pb::catalog::connection::Info as ConnectionInfo;
+
 use super::RwPgResponse;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, ObjectName, SqlOption, StatementType};
-use crate::utils::resolve_connection_ref_and_secret_ref;
+use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_for_alter};
 use crate::{Binder, WithOptions};
 
 pub async fn handle_alter_connection_connector_props(
@@ -32,7 +37,7 @@ pub async fn handle_alter_connection_connector_props(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let connection_id = {
+    let (connection_id, old_props) = {
         let reader = session.env().catalog_reader().read_guard();
         let (connection, schema_name) =
             reader.get_connection_by_name(db_name, schema_path, &real_connection_name)?;
@@ -45,7 +50,20 @@ pub async fn handle_alter_connection_connector_props(
             connection.id
         );
 
-        connection.id
+        let props: BTreeMap<String, String> = match &connection.info {
+            ConnectionInfo::ConnectionParams(params) => params
+                .properties
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            #[expect(deprecated)]
+            ConnectionInfo::PrivateLinkService(_) => {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "Private Link Service connections cannot be altered; please create a new connection".to_owned(),
+                ).into());
+            }
+        };
+        (connection.id, props)
     };
 
     let meta_client = session.env().meta_client();
@@ -54,7 +72,7 @@ pub async fn handle_alter_connection_connector_props(
         &session,
         None,
     )?;
-    let (changed_props, changed_secret_refs) = resolved_with_options.into_parts();
+    let (user_set_props, changed_secret_refs) = resolved_with_options.into_parts();
 
     if connector_conn_ref.is_some() {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -62,6 +80,24 @@ pub async fn handle_alter_connection_connector_props(
         )
         .into());
     }
+
+    // Record which keys the user explicitly touched.
+    let touched_set_keys: HashSet<String> = user_set_props.keys().cloned().collect();
+    let touched_drop_keys: HashSet<String> = HashSet::new(); // ALTER CONNECTION SET does not support DROP
+
+    // Merge old props with user-set props (user values override).
+    let mut merged_props = old_props.clone();
+    for (k, v) in &user_set_props {
+        merged_props.insert(k.clone(), v.clone());
+    }
+
+    // Resolve PrivateLink-related properties and compute effective delta.
+    let changed_props = resolve_privatelink_for_alter(
+        &old_props,
+        &merged_props,
+        &touched_set_keys,
+        &touched_drop_keys,
+    )?;
 
     meta_client
         .alter_connection_connector_props(
@@ -71,5 +107,13 @@ pub async fn handle_alter_connection_connector_props(
         )
         .await?;
 
-    Ok(RwPgResponse::empty_result(StatementType::ALTER_CONNECTION))
+    if user_set_props.contains_key(KAFKA_PROPS_BROKER_KEY)
+        || user_set_props.contains_key(KAFKA_PROPS_BROKER_KEY_ALIAS)
+    {
+        Ok(RwPgResponse::builder(StatementType::ALTER_CONNECTION)
+            .notice("changing properties.bootstrap.server may point to a different Kafka cluster and cause data inconsistency".to_owned())
+            .into())
+    } else {
+        Ok(RwPgResponse::empty_result(StatementType::ALTER_CONNECTION))
+    }
 }

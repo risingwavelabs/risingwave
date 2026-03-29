@@ -177,9 +177,10 @@ select * from non_shared_conn_source_mv order by x;
 statement ok
 alter secret s_broker_conn with ( backend = 'meta' ) as 'message_queue_sasl_2:19093';
 
-# KafkaConnection only allows altering SASL/security fields, not bootstrap server.
 # Changing the broker is done by altering the underlying secret, and `ALTER CONNECTION` triggers
 # re-applying secrets and broadcasting updated props to dependent sources.
+# Note: altering `properties.bootstrap.server` directly is also allowed, but will emit a NOTICE
+# warning about potential data inconsistency from pointing to a different Kafka cluster.
 statement ok
 alter connection kafka_conn_non_shared connector with (properties.sasl.username = 'dev1');
 

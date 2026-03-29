@@ -146,6 +146,8 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
         [
             "group.id.prefix".to_owned(),
             "properties.sync.call.timeout".to_owned(),
+            "properties.bootstrap.server".to_owned(),
+            "kafka.brokers".to_owned(),
             "properties.security.protocol".to_owned(),
             "properties.ssl.endpoint.identification.algorithm".to_owned(),
             "properties.sasl.mechanism".to_owned(),
@@ -162,6 +164,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.fetch.queue.backoff.ms".to_owned(),
             "properties.fetch.max.bytes".to_owned(),
             "properties.enable.auto.commit".to_owned(),
+            "broker.rewrite.endpoints".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map
@@ -220,6 +223,8 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         std::any::type_name::<KafkaConfig>().to_owned(),
         [
             "properties.sync.call.timeout".to_owned(),
+            "properties.bootstrap.server".to_owned(),
+            "kafka.brokers".to_owned(),
             "properties.security.protocol".to_owned(),
             "properties.ssl.endpoint.identification.algorithm".to_owned(),
             "properties.sasl.mechanism".to_owned(),
@@ -242,6 +247,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "properties.message.timeout.ms".to_owned(),
             "properties.max.in.flight.requests.per.connection".to_owned(),
             "properties.request.required.acks".to_owned(),
+            "broker.rewrite.endpoints".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // SnowflakeV2Config
@@ -279,11 +285,14 @@ pub static CONNECTION_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSe
     map.try_insert(
         std::any::type_name::<KafkaConnection>().to_owned(),
         [
+            "properties.bootstrap.server".to_owned(),
+            "kafka.brokers".to_owned(),
             "properties.security.protocol".to_owned(),
             "properties.ssl.endpoint.identification.algorithm".to_owned(),
             "properties.sasl.mechanism".to_owned(),
             "properties.sasl.username".to_owned(),
             "properties.sasl.password".to_owned(),
+            "broker.rewrite.endpoints".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // Jdbc
