@@ -4,6 +4,9 @@ create table t(v1 int, v2 int as v1 + v1, v3 int default 10, v4 int);
 statement ok
 INSERT INTO t(v1, v4) VALUES (1, 4);
 
+statement ok
+flush;
+
 query T
 SELECT * FROM t;
 ----
@@ -12,11 +15,14 @@ SELECT * FROM t;
 statement ok
 INSERT INTO t(v3) VALUES (1);
 
-query T
+statement ok
+flush;
+
+query T rowsort
 SELECT * FROM t;
 ----
 1 2 10 4
-    1
+NULL NULL 1 NULL
 
 statement ok
 drop table t;

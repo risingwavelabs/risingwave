@@ -485,7 +485,15 @@ impl Binder {
 /// - `table_name`: The name of the target table.
 ///
 /// # Return
-/// - the first
+/// - `(col_indices_to_insert, default_column_indices)`
+///
+///   - `col_indices_to_insert`:
+///     Column indices corresponding to user-specified columns in the INSERT statement,
+///     preserving the user-defined order.
+///
+///   - `default_column_indices`:
+///     Column indices of remaining columns in the target table that are not explicitly
+///     provided by the user and should be filled with DEFAULT values.
 fn get_col_indices_to_insert(
     cols_to_insert_in_table: &[ColumnCatalog],
     cols_to_insert_by_user: &[Ident],
