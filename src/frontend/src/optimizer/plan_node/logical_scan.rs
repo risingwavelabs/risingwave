@@ -18,6 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::util::scan_range::is_full_range;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::AsOf;
 
@@ -25,8 +26,8 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
     BackfillType, BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
-    LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamTableScan, ToBatch,
-    ToStream, generic,
+    LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamFilter,
+    StreamProject, StreamTableScan, ToBatch, ToStream, generic,
 };
 use crate::TableCatalog;
 use crate::binder::BoundBaseTable;
@@ -633,6 +634,32 @@ impl ToStream for LogicalScan {
             )
             .into())
         } else {
+            if ctx.backfill_type() == BackfillType::SnapshotBackfill {
+                let (scan_ranges, _residual) = self.predicate().clone().split_to_scan_ranges(
+                    self.table(),
+                    self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
+                )?;
+
+                if scan_ranges.len() == 1
+                    && scan_ranges[0].has_eq_conds()
+                    && is_full_range(&scan_ranges[0].range)
+                {
+                    let (core, predicate, project_expr) = self.predicate_pull_up();
+                    let scan = StreamTableScan::new_with_pk_prefix(
+                        core,
+                        ctx.backfill_type().to_stream_scan_type(),
+                        Some(scan_ranges[0].eq_conds.clone()),
+                    );
+
+                    let mut plan: crate::optimizer::plan_node::StreamPlanRef =
+                        StreamFilter::new(generic::Filter::new(predicate, scan.into())).into();
+                    if let Some(exprs) = project_expr {
+                        plan = StreamProject::new(generic::Project::new(exprs, plan)).into();
+                    }
+                    return Ok(plan);
+                }
+            }
+
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);
             if let Some(exprs) = project_expr {

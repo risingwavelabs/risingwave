@@ -16,6 +16,7 @@ use std::cmp::min;
 use std::collections::VecDeque;
 use std::future::{Future, pending, ready};
 use std::mem::take;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -77,6 +78,7 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     snapshot_epoch: Option<u64>,
+    pk_prefix: Option<OwnedRow>,
 }
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
@@ -93,6 +95,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
         snapshot_epoch: Option<u64>,
+        pk_prefix: Option<OwnedRow>,
     ) -> Self {
         assert_eq!(&upstream.info.schema, upstream_table.schema());
         if upstream_table.pk_in_output_indices().is_none() {
@@ -121,6 +124,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             actor_ctx,
             metrics,
             snapshot_epoch,
+            pk_prefix,
         }
     }
 
@@ -214,6 +218,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             first_recv_barrier_epoch,
                             initial_backfill_paused,
                             &self.actor_ctx,
+                            self.pk_prefix.as_ref(),
                         );
 
                         pin_mut!(snapshot_stream);
@@ -816,7 +821,12 @@ async fn make_snapshot_stream(
     rate_limit: RateLimit,
     chunk_size: usize,
     snapshot_rebuild_interval: Duration,
-) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
+    pk_prefix: Option<&OwnedRow>,
+) -> StreamExecutorResult<
+    VnodeStream<Pin<Box<dyn Stream<Item = StreamExecutorResult<ChangeLogRow>> + Send>>>,
+> {
+    type BoxedChangeLogRowStream =
+        Pin<Box<dyn Stream<Item = StreamExecutorResult<ChangeLogRow>> + Send>>;
     let data_types = upstream_table.schema().data_types();
     let vnode_streams = try_join_all(backfill_state.latest_progress().filter_map(
         move |(vnode, progress)| {
@@ -833,18 +843,40 @@ async fn make_snapshot_stream(
                 }) => None,
             };
             start_pk.map(|(start_pk, row_count)| {
-                upstream_table
-                    .batch_iter_vnode(
-                        HummockReadEpoch::Committed(snapshot_epoch),
-                        start_pk,
-                        vnode,
-                        PrefetchOptions::prefetch_for_large_range_scan(),
-                        snapshot_rebuild_interval,
-                    )
-                    .map_ok(move |stream| {
-                        let stream = stream.map_ok(ChangeLogRow::Insert).map_err(Into::into);
-                        (vnode, stream, row_count)
-                    })
+                async move {
+                    let stream: BoxedChangeLogRowStream = if let Some(pk_prefix) = pk_prefix {
+                        Box::pin(
+                            upstream_table
+                                .batch_iter_vnode_with_pk_prefix(
+                                    HummockReadEpoch::Committed(snapshot_epoch),
+                                    start_pk,
+                                    pk_prefix,
+                                    vnode,
+                                    PrefetchOptions::prefetch_for_large_range_scan(),
+                                    snapshot_rebuild_interval,
+                                )
+                                .await?
+                                .map_ok(ChangeLogRow::Insert)
+                                .map_err(Into::into),
+                        )
+                    } else {
+                        Box::pin(
+                            upstream_table
+                                .batch_iter_vnode(
+                                    HummockReadEpoch::Committed(snapshot_epoch),
+                                    start_pk,
+                                    vnode,
+                                    PrefetchOptions::prefetch_for_large_range_scan(),
+                                    snapshot_rebuild_interval,
+                                )
+                                .await?
+                                .map_ok(ChangeLogRow::Insert)
+                                .map_err(Into::into),
+                        )
+                    };
+                    Ok::<_, StreamExecutorError>((vnode, stream, row_count))
+                }
+                .boxed()
             })
         },
     ))
@@ -870,6 +902,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     first_recv_barrier_epoch: EpochPair,
     initial_backfill_paused: bool,
     actor_ctx: &'a ActorContextRef,
+    pk_prefix: Option<&'a OwnedRow>,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
@@ -881,6 +914,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         *rate_limit,
         chunk_size,
         actor_ctx.config.developer.snapshot_iter_rebuild_interval(),
+        pk_prefix,
     )
     .await?;
 

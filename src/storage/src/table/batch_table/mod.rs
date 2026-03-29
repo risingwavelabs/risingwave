@@ -975,6 +975,69 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         Ok(iter.map_ok(|(_, row)| row))
     }
 
+    pub async fn batch_iter_vnode_with_pk_prefix(
+        &self,
+        epoch: HummockReadEpoch,
+        start_pk: Option<&OwnedRow>,
+        pk_prefix: &OwnedRow,
+        vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+        rebuild_interval: Duration,
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static + use<S, SD>>
+    {
+        assert!(
+            !rebuild_interval.is_zero(),
+            "rebuild_interval should be positive"
+        );
+
+        let start_key = if let Some(start_pk) = start_pk {
+            self.start_bound_from_pk(Some(start_pk))
+        } else {
+            self.serialize_pk_bound(pk_prefix, Unbounded, true)
+        };
+        let end_key = self.serialize_pk_bound(pk_prefix, Unbounded, false);
+
+        let prefix_hint =
+            if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint <= pk_prefix.len() {
+                let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
+                let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+                let prefix_len = self
+                    .pk_serializer
+                    .deserialize_prefix_len(&serialized_pk_prefix, self.read_prefix_len_hint)?;
+                Some(Bytes::from(serialized_pk_prefix[..prefix_len].to_vec()))
+            } else {
+                None
+            };
+
+        let snapshot = Arc::new(
+            self.store
+                .new_read_snapshot(
+                    epoch,
+                    NewReadSnapshotOptions {
+                        table_id: self.table_id,
+                        table_option: self.table_option,
+                    },
+                )
+                .await?,
+        );
+        let (table_key_range, read_options, pk_serializer) = self.vnode_read_context(
+            prefix_hint,
+            (start_key.as_ref(), end_key.as_ref()),
+            vnode,
+            prefetch_options,
+        );
+        let iter = iter_with_timeout_rebuild(
+            snapshot,
+            table_key_range,
+            self.table_id,
+            read_options,
+            rebuild_interval,
+        )
+        .await?;
+        let iter = self.iter_stream_from_state_store_iter::<(), _>(iter, pk_serializer);
+        Ok(iter.map_ok(|(_, row)| row))
+    }
+
     pub async fn next_epoch(&self, epoch: u64) -> StorageResult<u64> {
         self.store
             .next_epoch(

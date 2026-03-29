@@ -19,8 +19,10 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::serialize_datum_into;
 use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
@@ -45,6 +47,7 @@ pub struct StreamTableScan {
     core: generic::TableScan,
     batch_plan_id: PlanNodeId,
     stream_scan_type: StreamScanType,
+    pk_prefix: Option<Vec<Datum>>,
 }
 
 impl StreamTableScan {
@@ -57,6 +60,14 @@ impl StreamTableScan {
     pub fn new_with_stream_scan_type(
         core: generic::TableScan,
         stream_scan_type: StreamScanType,
+    ) -> Self {
+        Self::new_with_pk_prefix(core, stream_scan_type, None)
+    }
+
+    pub fn new_with_pk_prefix(
+        core: generic::TableScan,
+        stream_scan_type: StreamScanType,
+        pk_prefix: Option<Vec<Datum>>,
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
 
@@ -98,6 +109,7 @@ impl StreamTableScan {
             core,
             batch_plan_id,
             stream_scan_type,
+            pk_prefix,
         }
     }
 
@@ -129,6 +141,10 @@ impl StreamTableScan {
 
     pub fn stream_scan_type(&self) -> StreamScanType {
         self.stream_scan_type
+    }
+
+    pub fn pk_prefix(&self) -> Option<&[Datum]> {
+        self.pk_prefix.as_deref()
     }
 
     // TODO: Add note to reviewer about safety, because of `generic::TableScan` limitation.
@@ -268,6 +284,21 @@ impl Distill for StreamTableScan {
         let mut vec = Vec::with_capacity(4);
         vec.push(("table", Pretty::from(self.core.table_name().to_owned())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
+        if let Some(prefix) = &self.pk_prefix {
+            let prefix = self
+                .core
+                .primary_key()
+                .iter()
+                .take(prefix.len())
+                .zip_eq_fast(prefix.iter())
+                .map(|(pk, datum)| {
+                    let field = &self.core.table_catalog.columns()[pk.column_index];
+                    format!("{} = {:?}", field.name(), datum)
+                })
+                .collect_vec()
+                .join(" AND ");
+            vec.push(("pk_prefix", Pretty::from(prefix)));
+        }
 
         if verbose {
             vec.push(("stream_scan_type", Pretty::debug(&self.stream_scan_type)));
@@ -420,6 +451,17 @@ impl StreamTableScan {
             state_table: Some(catalog),
             arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
+            pk_prefix: self
+                .pk_prefix
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|datum| {
+                    let mut encoded = vec![];
+                    serialize_datum_into(&datum, &mut encoded);
+                    encoded
+                })
+                .collect(),
             ..Default::default()
         }));
 
@@ -443,7 +485,7 @@ impl ExprRewritable<Stream> for StreamTableScan {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new_with_stream_scan_type(core, self.stream_scan_type).into()
+        Self::new_with_pk_prefix(core, self.stream_scan_type, self.pk_prefix.clone()).into()
     }
 }
 
