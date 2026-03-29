@@ -75,6 +75,7 @@ INTEGRATION_TEST_MAP = {
     "schema-registry-json": ["bohan"],
     "mysql-cdc-json": ["siyuan"],
     "postgres-cdc-json": ["siyuan"],
+    "postgres-cdc-pg18-json": ["siyuan"],
     "mongodb-cdc-json": ["siyuan"],
     "mysql-sink-json": ["siyuan"],
     "postgres-sink-json": ["siyuan"],
