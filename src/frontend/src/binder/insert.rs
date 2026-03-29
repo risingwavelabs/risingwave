@@ -298,7 +298,6 @@ impl Binder {
             }
         };
 
-        let has_user_specified_columns = !cols_to_insert_by_user.is_empty();
         let num_target_cols = if has_user_specified_columns {
             cols_to_insert_by_user.len()
         } else {
