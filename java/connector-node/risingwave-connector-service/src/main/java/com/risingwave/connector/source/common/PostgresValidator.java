@@ -811,6 +811,13 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         case "geometry":
                             // PostGIS GEOMETRY -> BYTEA (stored as EWKB bytes)
                             return val == Data.DataType.TypeName.BYTEA_VALUE;
+                        case "vector":
+                            // pgvector VECTOR -> VECTOR
+                            return val == Data.DataType.TypeName.VECTOR_VALUE;
+                        case "halfvec":
+                        case "sparsevec":
+                            // Not supported by RisingWave yet.
+                            return false;
                         case "ltree":
                             return false;
                         case "hstore":

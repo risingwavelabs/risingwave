@@ -18,12 +18,12 @@ use std::sync::LazyLock;
 use base64::Engine;
 use itertools::Itertools;
 use num_bigint::BigInt;
-use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::array::{Finite32, ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
-    ToOwnedDatum,
+    ToOwnedDatum, VectorVal,
 };
 use risingwave_connector_codec::decoder::utils::scaled_bigint_to_rust_decimal;
 use simd_json::base::ValueAsObject;
@@ -679,6 +679,46 @@ impl JsonParseOptions {
                 builder.finish()
             })
             .into(),
+            // ---- Vector -----
+            (DataType::Vector(size), ValueType::Array) => {
+                let array = value.as_array().unwrap();
+                if array.len() != *size {
+                    Err(create_error())?
+                }
+                let mut elems = Vec::with_capacity(array.len());
+                for v in array {
+                    let value = match v.value_type() {
+                        ValueType::I64 | ValueType::I128 => {
+                            let i128_value = v.try_as_i128().map_err(|_| create_error())?;
+                            if i128_value < f32::MIN as i128 || i128_value > f32::MAX as i128 {
+                                Err(create_error())?
+                            }
+                            i128_value as f32
+                        }
+                        ValueType::U64 | ValueType::U128 => {
+                            let u128_value = v.try_as_u128().map_err(|_| create_error())?;
+                            if u128_value > f32::MAX as u128 {
+                                Err(create_error())?
+                            }
+                            u128_value as f32
+                        }
+                        ValueType::F64 => {
+                            let f64_value = v.try_as_f64().map_err(|_| create_error())?;
+                            if !f64_value.is_finite()
+                                || f64_value < f32::MIN as f64
+                                || f64_value > f32::MAX as f64
+                            {
+                                Err(create_error())?
+                            }
+                            f64_value as f32
+                        }
+                        _ => Err(create_error())?,
+                    };
+                    let finite = Finite32::try_from(value).map_err(|_| create_error())?;
+                    elems.push(finite);
+                }
+                VectorVal::from(elems).into()
+            }
 
             // ---- Bytea -----
             (DataType::Bytea, ValueType::String) => {

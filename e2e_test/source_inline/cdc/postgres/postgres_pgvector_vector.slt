@@ -1,0 +1,126 @@
+control substitution on
+
+# PostgreSQL pgvector CDC test: vector -> vector
+
+statement ok
+drop table if exists test_pgvector_cdc;
+
+statement ok
+drop source if exists pgvector_source;
+
+system ok
+psql -c "
+    CREATE EXTENSION IF NOT EXISTS vector;
+    DROP TABLE IF EXISTS test_pgvector_cdc CASCADE;
+    CREATE TABLE test_pgvector_cdc (
+        id int PRIMARY KEY,
+        name varchar,
+        embedding vector(3)
+    );
+    INSERT INTO test_pgvector_cdc VALUES
+        (1, 'a', '[0.1,0.2,0.3]'),
+        (2, 'b', '[1.1,1.2,1.3]');
+"
+
+statement ok
+create source pgvector_source with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'pgvector_slot'
+);
+
+statement ok
+create table test_pgvector_cdc (
+    id int primary key,
+    name varchar,
+    embedding vector(3)
+) from pgvector_source table 'public.test_pgvector_cdc';
+
+# Backfill should load 2 rows and keep embedding non-null.
+query II retry 20 backoff 1s
+select count(*), count(*) filter (where embedding is null) from test_pgvector_cdc;
+----
+2 0
+
+# Compare upstream and RW vector text values for backfill rows.
+query IIT retry 20 backoff 1s
+select
+  ours.id,
+  ours.embedding::varchar = upstream.embedding_text as same_embedding,
+  ours.embedding::varchar
+from test_pgvector_cdc as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, embedding::text as embedding_text from test_pgvector_cdc where id in (1,2) order by id'
+  )
+) as upstream(id, embedding_text)
+on ours.id = upstream.id
+order by ours.id;
+----
+1 t [0.1,0.2,0.3]
+2 t [1.1,1.2,1.3]
+
+# Incremental UPDATE + INSERT + DELETE
+system ok
+psql -c "
+    UPDATE test_pgvector_cdc SET embedding='[9.1,9.2,9.3]', name='a2' WHERE id=1;
+    INSERT INTO test_pgvector_cdc VALUES (3, 'c', '[2.1,2.2,2.3]');
+    DELETE FROM test_pgvector_cdc WHERE id=2;
+"
+
+# Final row count and null check.
+query II retry 20 backoff 1s
+select count(*), count(*) filter (where embedding is null) from test_pgvector_cdc;
+----
+2 0
+
+# Final content check.
+query ITT retry 20 backoff 1s
+select id, name, embedding::varchar from test_pgvector_cdc order by id;
+----
+1 a2 [9.1,9.2,9.3]
+3 c [2.1,2.2,2.3]
+
+# Compare final upstream and RW values.
+query IIT retry 20 backoff 1s
+select
+  ours.id,
+  ours.embedding::varchar = upstream.embedding_text as same_embedding,
+  ours.embedding::varchar
+from test_pgvector_cdc as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, embedding::text as embedding_text from test_pgvector_cdc order by id'
+  )
+) as upstream(id, embedding_text)
+on ours.id = upstream.id
+order by ours.id;
+----
+1 t [9.1,9.2,9.3]
+3 t [2.1,2.2,2.3]
+
+statement ok
+drop table test_pgvector_cdc;
+
+statement ok
+drop source pgvector_source;
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_pgvector_cdc CASCADE;
+"
