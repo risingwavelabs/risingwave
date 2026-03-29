@@ -43,6 +43,7 @@ use tokio::sync::watch::Receiver;
 use super::root_catalog::Catalog;
 use super::{DatabaseId, SecretId, SinkId, SubscriptionId, TableId};
 use crate::error::Result;
+use crate::observer::CompletedObserverRecovery;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::current::notice_to_user;
 use crate::user::UserId;
@@ -291,6 +292,7 @@ pub trait CatalogWriter: Send + Sync {
 pub struct CatalogWriterImpl {
     meta_client: MetaClient,
     catalog_updated_rx: Receiver<CatalogVersion>,
+    completed_observer_recovery_rx: Receiver<CompletedObserverRecovery>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
 }
 
@@ -779,23 +781,224 @@ impl CatalogWriterImpl {
     pub fn new(
         meta_client: MetaClient,
         catalog_updated_rx: Receiver<CatalogVersion>,
+        completed_observer_recovery_rx: Receiver<CompletedObserverRecovery>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
     ) -> Self {
         Self {
             meta_client,
             catalog_updated_rx,
+            completed_observer_recovery_rx,
             hummock_snapshot_manager,
         }
     }
 
     async fn wait_version(&self, version: WaitVersion) -> Result<()> {
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow_and_update() < version.catalog_version {
-            rx.changed().await.map_err(|e| anyhow!(e))?;
-        }
-        self.hummock_snapshot_manager
+        wait_version_update(
+            self.catalog_updated_rx.clone(),
+            self.completed_observer_recovery_rx.clone(),
+            self.hummock_snapshot_manager.clone(),
+            version,
+        )
+        .await
+    }
+}
+
+fn completed_recovery_covers_wait_version(
+    recovery: &CompletedObserverRecovery,
+    version: &WaitVersion,
+) -> bool {
+    recovery.epoch != 0 && recovery.catalog_version >= version.catalog_version
+}
+
+async fn wait_version_update(
+    mut catalog_updated_rx: Receiver<CatalogVersion>,
+    mut completed_observer_recovery_rx: Receiver<CompletedObserverRecovery>,
+    hummock_snapshot_manager: HummockSnapshotManagerRef,
+    version: WaitVersion,
+) -> Result<()> {
+    let completed_observer_recovery = *completed_observer_recovery_rx.borrow();
+
+    // A recovery may already have completed before this wait starts.
+    // If that recovered catalog version already covers the target DDL, the local frontend state
+    // is sufficient even when the streaming mapping version has been reset by meta restart.
+    if completed_recovery_covers_wait_version(&completed_observer_recovery, &version) {
+        hummock_snapshot_manager
             .wait(version.hummock_version_id)
             .await;
-        Ok(())
+        return Ok(());
+    }
+
+    // Race all version waits against observer recovery.
+    // If the observer re-subscribes (e.g. after meta restart), finishes replaying the
+    // buffered notifications that arrived before the snapshot, and the recovered catalog
+    // version already covers this DDL, the frontend has all committed state visible locally.
+    tokio::select! {
+        result = async {
+            while *catalog_updated_rx.borrow_and_update() < version.catalog_version {
+                catalog_updated_rx.changed().await.map_err(|e| anyhow!(e))?;
+            }
+            Ok::<(), anyhow::Error>(())
+        } => { result?; }
+        result = async {
+            loop {
+                completed_observer_recovery_rx
+                    .changed()
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                let completed_observer_recovery = *completed_observer_recovery_rx.borrow();
+                if completed_recovery_covers_wait_version(
+                    &completed_observer_recovery,
+                    &version,
+                ) {
+                    break Ok::<(), anyhow::Error>(());
+                }
+            }
+        } => {
+            result?;
+        }
+    }
+
+    hummock_snapshot_manager
+        .wait(version.hummock_version_id)
+        .await;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use risingwave_pb::ddl_service::WaitVersion;
+    use tokio::sync::watch;
+
+    use super::wait_version_update;
+    use crate::observer::CompletedObserverRecovery;
+    use crate::scheduler::HummockSnapshotManager;
+    use crate::test_utils::MockFrontendMetaClient;
+
+    fn completed_recovery(epoch: u64, catalog_version: u64) -> CompletedObserverRecovery {
+        CompletedObserverRecovery {
+            epoch,
+            catalog_version,
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_version_update_waits_for_catalog_version() {
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
+        let (_completed_observer_recovery_tx, completed_observer_recovery_rx) =
+            watch::channel(CompletedObserverRecovery::default());
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+
+        let wait_future = wait_version_update(
+            catalog_updated_rx,
+            completed_observer_recovery_rx,
+            hummock_snapshot_manager,
+            WaitVersion {
+                catalog_version: 2,
+                hummock_version_id: 0.into(),
+            },
+        );
+        tokio::pin!(wait_future);
+
+        catalog_updated_tx.send(1).unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), wait_future.as_mut())
+                .await
+                .is_err()
+        );
+
+        catalog_updated_tx.send(2).unwrap();
+
+        wait_future.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_version_update_unblocks_if_completed_recovery_already_covers_target() {
+        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(10u64);
+        let (_completed_observer_recovery_tx, completed_observer_recovery_rx) =
+            watch::channel(completed_recovery(1, 5));
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+
+        wait_version_update(
+            catalog_updated_rx,
+            completed_observer_recovery_rx,
+            hummock_snapshot_manager,
+            WaitVersion {
+                catalog_version: 5,
+                hummock_version_id: 0.into(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_version_update_ignores_completed_recovery_that_does_not_cover_target() {
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0u64);
+        let (_completed_observer_recovery_tx, completed_observer_recovery_rx) =
+            watch::channel(completed_recovery(1, 4));
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+
+        let wait_future = wait_version_update(
+            catalog_updated_rx,
+            completed_observer_recovery_rx,
+            hummock_snapshot_manager,
+            WaitVersion {
+                catalog_version: 5,
+                hummock_version_id: 0.into(),
+            },
+        );
+        tokio::pin!(wait_future);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), wait_future.as_mut())
+                .await
+                .is_err()
+        );
+
+        catalog_updated_tx.send(5).unwrap();
+
+        wait_future.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_version_update_unblocks_when_completed_reinit_happens_during_catalog_wait() {
+        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(0u64);
+        let (completed_observer_recovery_tx, completed_observer_recovery_rx) =
+            watch::channel(CompletedObserverRecovery::default());
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+
+        let wait_future = wait_version_update(
+            catalog_updated_rx,
+            completed_observer_recovery_rx,
+            hummock_snapshot_manager,
+            WaitVersion {
+                catalog_version: 5,
+                hummock_version_id: 0.into(),
+            },
+        );
+        tokio::pin!(wait_future);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), wait_future.as_mut())
+                .await
+                .is_err()
+        );
+
+        // Once observer recovery finishes, the fresh snapshot and replayed buffered
+        // notifications already contain all committed state.
+        completed_observer_recovery_tx.send_replace(completed_recovery(1, 5));
+
+        wait_future.await.unwrap();
     }
 }

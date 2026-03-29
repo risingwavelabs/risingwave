@@ -159,8 +159,7 @@ impl NotificationServiceImpl {
         let mappings = self
             .metadata_manager
             .catalog_controller
-            .get_worker_slot_mappings();
-
+            .get_worker_slot_mappings_snapshot();
         let notification_version = self.env.notification_manager().current_version().await;
         Ok((mappings, notification_version))
     }
@@ -260,14 +259,6 @@ impl NotificationServiceImpl {
 
         let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
             self.get_worker_slot_mapping_snapshot().await?;
-
-        let streaming_job_count = self.metadata_manager.count_streaming_job().await?;
-        if streaming_job_count > 0 && streaming_worker_slot_mappings.is_empty() {
-            tracing::warn!(
-                streaming_job_count,
-                "frontend subscribe returns empty streaming_worker_slot_mappings while streaming jobs exist; meta may still be recovering"
-            );
-        }
 
         let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
 

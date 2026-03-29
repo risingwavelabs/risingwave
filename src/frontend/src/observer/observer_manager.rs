@@ -39,10 +39,17 @@ use crate::catalog::root_catalog::Catalog;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CompletedObserverRecovery {
+    pub epoch: u64,
+    pub catalog_version: CatalogVersion,
+}
+
 pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     version: CatalogVersion,
     catalog_updated_tx: Sender<CatalogVersion>,
+    completed_observer_recovery_tx: Sender<CompletedObserverRecovery>,
     catalog: Arc<RwLock<Catalog>>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -203,6 +210,8 @@ impl ObserverState for FrontendObserverNode {
             ));
 
         let snapshot_version = version.unwrap();
+        drop(catalog_guard);
+        drop(user_guard);
         self.version = snapshot_version.catalog_version;
         self.catalog_updated_tx
             .send(snapshot_version.catalog_version)
@@ -212,6 +221,10 @@ impl ObserverState for FrontendObserverNode {
         LocalSecretManager::global().init_secrets(secrets);
         LicenseManager::get().update_cluster_resource(cluster_resource.unwrap());
     }
+
+    fn handle_initialization_finished(&mut self) {
+        self.signal_completed_recovery();
+    }
 }
 
 impl FrontendObserverNode {
@@ -219,6 +232,7 @@ impl FrontendObserverNode {
         worker_node_manager: WorkerNodeManagerRef,
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
+        completed_observer_recovery_tx: Sender<CompletedObserverRecovery>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
@@ -230,6 +244,7 @@ impl FrontendObserverNode {
             worker_node_manager,
             catalog,
             catalog_updated_tx,
+            completed_observer_recovery_tx,
             user_info_manager,
             hummock_snapshot_manager,
             system_params_manager,
@@ -470,16 +485,17 @@ impl FrontendObserverNode {
         match info {
             Info::StreamingWorkerSlotMapping(streaming_worker_slot_mapping) => {
                 let fragment_id = streaming_worker_slot_mapping.fragment_id;
-                let mapping = || {
-                    WorkerSlotMapping::from_protobuf(
-                        streaming_worker_slot_mapping.mapping.as_ref().unwrap(),
-                    )
-                };
+                let mapping = WorkerSlotMapping::from_protobuf(
+                    streaming_worker_slot_mapping
+                        .mapping
+                        .as_ref()
+                        .expect("streaming worker slot mapping notification should carry mapping"),
+                );
 
                 match resp.operation() {
                     Operation::Add => {
                         self.worker_node_manager
-                            .insert_streaming_fragment_mapping(fragment_id, mapping());
+                            .insert_streaming_fragment_mapping(fragment_id, mapping);
                     }
                     Operation::Delete => {
                         self.worker_node_manager
@@ -487,7 +503,7 @@ impl FrontendObserverNode {
                     }
                     Operation::Update => {
                         self.worker_node_manager
-                            .update_streaming_fragment_mapping(fragment_id, mapping());
+                            .update_streaming_fragment_mapping(fragment_id, mapping);
                     }
                     _ => panic!("receive an unsupported notify {:?}", resp),
                 }
@@ -524,6 +540,13 @@ impl FrontendObserverNode {
     /// Update max committed epoch in `HummockSnapshotManager`.
     fn handle_hummock_snapshot_notification(&self, deltas: HummockVersionDeltas) {
         self.hummock_snapshot_manager.update(deltas);
+    }
+
+    fn signal_completed_recovery(&mut self) {
+        self.completed_observer_recovery_tx.send_modify(|recovery| {
+            recovery.epoch += 1;
+            recovery.catalog_version = self.version;
+        });
     }
 
     fn handle_secret_notification(&mut self, resp: SubscribeResponse) {
@@ -579,4 +602,153 @@ fn convert_worker_slot_mapping(
             },
         )
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+    use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManager;
+    use risingwave_common::catalog::CatalogVersion;
+    use risingwave_common::config::RpcClientConfig;
+    use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
+    use risingwave_common::session_config::SessionConfig;
+    use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+    use risingwave_common_service::ObserverState;
+    use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
+    use risingwave_pb::meta::subscribe_response::{Info, Operation};
+    use risingwave_pb::meta::{
+        FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeResponse,
+    };
+    use risingwave_rpc_client::ComputeClientPool;
+    use tokio::sync::watch;
+
+    use super::{CompletedObserverRecovery, FrontendObserverNode};
+    use crate::catalog::FragmentId;
+    use crate::catalog::root_catalog::Catalog;
+    use crate::scheduler::HummockSnapshotManager;
+    use crate::test_utils::MockFrontendMetaClient;
+    use crate::user::user_manager::UserInfoManager;
+
+    fn make_observer_node() -> (
+        FrontendObserverNode,
+        watch::Receiver<CatalogVersion>,
+        watch::Receiver<CompletedObserverRecovery>,
+    ) {
+        let worker_node_manager = Arc::new(WorkerNodeManager::new());
+        let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
+        let (completed_observer_recovery_tx, completed_observer_recovery_rx) =
+            watch::channel(CompletedObserverRecovery::default());
+        let catalog = Arc::new(RwLock::new(Catalog::default()));
+        let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
+        let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(Arc::new(
+            MockFrontendMetaClient {},
+        )));
+        let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
+        let session_params = Arc::new(RwLock::new(SessionConfig::default()));
+        let compute_client_pool = Arc::new(ComputeClientPool::new(1, RpcClientConfig::default()));
+
+        (
+            FrontendObserverNode::new(
+                worker_node_manager,
+                catalog,
+                catalog_updated_tx,
+                completed_observer_recovery_tx,
+                user_info_manager,
+                hummock_snapshot_manager,
+                system_params_manager,
+                session_params,
+                compute_client_pool,
+            ),
+            catalog_updated_rx,
+            completed_observer_recovery_rx,
+        )
+    }
+
+    fn streaming_mapping_notification(fragment_id: FragmentId, version: u64) -> SubscribeResponse {
+        SubscribeResponse {
+            status: None,
+            operation: Operation::Add as i32,
+            info: Some(Info::StreamingWorkerSlotMapping(
+                FragmentWorkerSlotMapping {
+                    fragment_id,
+                    mapping: Some(
+                        WorkerSlotMapping::new_single(WorkerSlotId::new(1.into(), 0)).to_protobuf(),
+                    ),
+                },
+            )),
+            version,
+        }
+    }
+
+    fn snapshot_notification() -> SubscribeResponse {
+        SubscribeResponse {
+            status: None,
+            operation: Operation::Snapshot as i32,
+            info: Some(Info::Snapshot(MetaSnapshot {
+                hummock_version: Some(Default::default()),
+                session_params: Some(GetSessionParamsResponse {
+                    params: serde_json::to_string(&SessionConfig::default()).unwrap(),
+                }),
+                version: Some(SnapshotVersion {
+                    catalog_version: 0,
+                    worker_node_version: 0,
+                    streaming_worker_slot_mapping_version: 0,
+                }),
+                cluster_resource: Some(Default::default()),
+                ..Default::default()
+            })),
+            version: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn initialization_snapshot_refreshes_streaming_mapping() {
+        let (mut observer_node, _catalog_version_rx, _reinit_rx) = make_observer_node();
+
+        observer_node.handle_initialization_notification(snapshot_notification());
+
+        observer_node.handle_notification(streaming_mapping_notification(2.into(), 0));
+        observer_node
+            .worker_node_manager
+            .get_streaming_fragment_mapping(&2.into())
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn initialization_notification_does_not_signal_reinitialized_before_finish() {
+        let (mut observer_node, _catalog_version_rx, mut reinit_rx) = make_observer_node();
+
+        observer_node.handle_initialization_notification(snapshot_notification());
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery::default()
+        );
+
+        observer_node.handle_initialization_finished();
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery {
+                epoch: 1,
+                catalog_version: 0,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn initialization_finished_signals_completed_recovery() {
+        let (mut observer_node, _catalog_version_rx, mut reinit_rx) = make_observer_node();
+
+        observer_node.handle_initialization_notification(snapshot_notification());
+        observer_node.handle_initialization_finished();
+
+        assert_eq!(
+            *reinit_rx.borrow_and_update(),
+            CompletedObserverRecovery {
+                epoch: 1,
+                catalog_version: 0,
+            }
+        );
+    }
 }

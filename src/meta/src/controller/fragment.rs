@@ -74,11 +74,13 @@ use crate::controller::scale::{
 };
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
-    get_sink_fragment_by_ids, has_table_been_migrated, rebuild_fragment_mapping,
-    resolve_no_shuffle_actor_mapping,
+    get_sink_fragment_by_ids, has_table_been_migrated, resolve_no_shuffle_actor_mapping,
 };
 use crate::error::MetaError;
-use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
+use crate::manager::{
+    ActiveStreamingWorkerNodes, IGNORED_NOTIFICATION_VERSION, LocalNotification,
+    NotificationManager, NotificationVersion,
+};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, StreamingJobModelContextExt as _,
@@ -178,6 +180,7 @@ impl NotificationManager {
         &self,
         operation: NotificationOperation,
         fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
+        version: NotificationVersion,
     ) {
         let fragment_ids = fragment_mappings
             .iter()
@@ -187,10 +190,17 @@ impl NotificationManager {
             return;
         }
         // notify all fragment mappings to frontend.
-        for fragment_mapping in fragment_mappings {
-            self.notify_frontend_without_version(
+        let final_notification_index = fragment_mappings.len() - 1;
+        for (index, fragment_mapping) in fragment_mappings.into_iter().enumerate() {
+            let notification_version = if index == final_notification_index {
+                version
+            } else {
+                IGNORED_NOTIFICATION_VERSION
+            };
+            self.notify_frontend_with_version(
                 operation,
                 NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
+                notification_version,
             );
         }
 
@@ -1155,12 +1165,8 @@ impl CatalogController {
         Ok(actor_infos)
     }
 
-    pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
-        let guard = self.env.shared_actor_info.read_guard();
-        guard
-            .iter_over_fragments()
-            .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
-            .collect_vec()
+    pub fn get_worker_slot_mappings_snapshot(&self) -> Vec<PbFragmentWorkerSlotMapping> {
+        self.env.shared_actor_infos().snapshot()
     }
 
     pub async fn list_fragment_descs_with_node(
@@ -2054,21 +2060,31 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
-    use risingwave_common::hash::{ActorMapping, VirtualNode, VnodeCount};
+    use risingwave_common::hash::{
+        ActorMapping, VirtualNode, VnodeCount, WorkerSlotId, WorkerSlotMapping,
+    };
     use risingwave_common::id::JobId;
     use risingwave_common::util::iter_util::ZipEqDebug;
     use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::*;
+    use risingwave_pb::common::HostAddress;
+    use risingwave_pb::meta::subscribe_response::{
+        Info as NotificationInfo, Operation as NotificationOperation,
+    };
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+    use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, SubscribeType};
     use risingwave_pb::plan_common::PbExprContext;
     use risingwave_pb::source::{PbConnectorSplit, PbConnectorSplits};
     use risingwave_pb::stream_plan::stream_node::PbNodeBody;
     use risingwave_pb::stream_plan::{MergeNode, PbStreamNode, PbUnionNode};
+    use tokio::sync::mpsc;
 
     use super::ActorInfo;
     use crate::MetaResult;
+    use crate::controller::SqlMetaStore;
     use crate::controller::catalog::CatalogController;
+    use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationManager, WorkerKey};
     use crate::model::{Fragment, StreamActor};
 
     type ActorUpstreams = BTreeMap<crate::model::FragmentId, HashSet<crate::model::ActorId>>;
@@ -2369,5 +2385,65 @@ mod tests {
         );
 
         assert_eq!(policy, "upstream_fragment([1, 2, 3])");
+    }
+
+    #[tokio::test]
+    async fn test_notify_fragment_mapping_only_advances_version_on_last_notification() {
+        let notification_manager = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let worker_key = WorkerKey(HostAddress {
+            host: "frontend".to_owned(),
+            port: 4566,
+        });
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        notification_manager.insert_sender(SubscribeType::Frontend, worker_key, tx);
+
+        notification_manager.notify_fragment_mapping(
+            NotificationOperation::Add,
+            vec![
+                PbFragmentWorkerSlotMapping {
+                    fragment_id: 1.into(),
+                    mapping: Some(
+                        WorkerSlotMapping::new_single(WorkerSlotId::new(1.into(), 0)).to_protobuf(),
+                    ),
+                },
+                PbFragmentWorkerSlotMapping {
+                    fragment_id: 2.into(),
+                    mapping: Some(
+                        WorkerSlotMapping::new_single(WorkerSlotId::new(2.into(), 0)).to_protobuf(),
+                    ),
+                },
+                PbFragmentWorkerSlotMapping {
+                    fragment_id: 3.into(),
+                    mapping: Some(
+                        WorkerSlotMapping::new_single(WorkerSlotId::new(3.into(), 0)).to_protobuf(),
+                    ),
+                },
+            ],
+            42,
+        );
+
+        let received = [rx.recv().await, rx.recv().await, rx.recv().await]
+            .into_iter()
+            .map(|notification| notification.expect("should receive notification"))
+            .map(|notification| notification.expect("notification should succeed"))
+            .map(|response| {
+                let fragment_id = match response.info {
+                    Some(NotificationInfo::StreamingWorkerSlotMapping(mapping)) => {
+                        mapping.fragment_id
+                    }
+                    other => panic!("unexpected notification info: {other:?}"),
+                };
+                (fragment_id, response.version)
+            })
+            .collect_vec();
+
+        assert_eq!(
+            received,
+            vec![
+                (1.into(), IGNORED_NOTIFICATION_VERSION),
+                (2.into(), IGNORED_NOTIFICATION_VERSION),
+                (3.into(), 42),
+            ]
+        );
     }
 }

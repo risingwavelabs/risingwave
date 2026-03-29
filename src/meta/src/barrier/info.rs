@@ -53,7 +53,7 @@ use crate::barrier::{
 };
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
-use crate::manager::NotificationManagerRef;
+use crate::manager::{IGNORED_NOTIFICATION_VERSION, NotificationManagerRef};
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, StreamJobFragments};
 use crate::stream::UpstreamSinkInfo;
 use crate::{MetaError, MetaResult};
@@ -142,6 +142,14 @@ impl SharedActorInfos {
         self.inner.read()
     }
 
+    pub fn snapshot(&self) -> Vec<PbFragmentWorkerSlotMapping> {
+        self.inner
+            .read()
+            .iter_over_fragments()
+            .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
+            .collect_vec()
+    }
+
     pub fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
         let core = self.inner.read();
         core.iter_over_fragments()
@@ -207,25 +215,31 @@ impl SharedActorInfos {
     }
 
     pub(super) fn remove_database(&self, database_id: DatabaseId) {
-        if let Some(database) = self.inner.write().info.remove(&database_id) {
-            let mapping = database
-                .into_values()
-                .map(|fragment| rebuild_fragment_mapping(&fragment))
-                .collect_vec();
-            if !mapping.is_empty() {
-                self.notification_manager
-                    .notify_fragment_mapping(Operation::Delete, mapping);
-            }
+        let mut guard = self.inner.write();
+        let Some(database) = guard.info.remove(&database_id) else {
+            return;
+        };
+        let mapping = database
+            .into_values()
+            .map(|fragment| rebuild_fragment_mapping(&fragment))
+            .collect_vec();
+        if !mapping.is_empty() {
+            // Keep the write lock until notifications are enqueued so version order matches
+            // mutation order across concurrent writers.
+            self.notification_manager.notify_fragment_mapping(
+                Operation::Delete,
+                mapping,
+                IGNORED_NOTIFICATION_VERSION,
+            );
         }
     }
 
     pub(super) fn retain_databases(&self, database_ids: impl IntoIterator<Item = DatabaseId>) {
         let database_ids: HashSet<_> = database_ids.into_iter().collect();
 
+        let mut guard = self.inner.write();
         let mut mapping = Vec::new();
-        for fragment in self
-            .inner
-            .write()
+        for fragment in guard
             .info
             .extract_if(|database_id, _| !database_ids.contains(database_id))
             .flat_map(|(_, fragments)| fragments.into_values())
@@ -233,8 +247,13 @@ impl SharedActorInfos {
             mapping.push(rebuild_fragment_mapping(&fragment));
         }
         if !mapping.is_empty() {
-            self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+            // Keep the write lock until notifications are enqueued so version order matches
+            // mutation order across concurrent writers.
+            self.notification_manager.notify_fragment_mapping(
+                Operation::Delete,
+                mapping,
+                IGNORED_NOTIFICATION_VERSION,
+            );
         }
     }
 
@@ -346,17 +365,39 @@ impl SharedActorInfoWriter<'_> {
     }
 
     pub(super) fn finish(self) {
-        if let Some(mapping) = self.added_fragment_mapping {
-            self.notification_manager
-                .notify_fragment_mapping(Operation::Add, mapping);
+        let notification_manager = self.notification_manager;
+        let added_fragment_mapping = self.added_fragment_mapping;
+        let updated_fragment_mapping = self.updated_fragment_mapping;
+        let deleted_fragment_mapping = self.deleted_fragment_mapping;
+        if added_fragment_mapping.is_none()
+            && updated_fragment_mapping.is_none()
+            && deleted_fragment_mapping.is_none()
+        {
+            return;
         }
-        if let Some(mapping) = self.updated_fragment_mapping {
-            self.notification_manager
-                .notify_fragment_mapping(Operation::Update, mapping);
+
+        // Keep the write lock until notifications are enqueued so version order matches
+        // mutation order across concurrent writers.
+        if let Some(mapping) = added_fragment_mapping {
+            notification_manager.notify_fragment_mapping(
+                Operation::Add,
+                mapping,
+                IGNORED_NOTIFICATION_VERSION,
+            );
         }
-        if let Some(mapping) = self.deleted_fragment_mapping {
-            self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+        if let Some(mapping) = updated_fragment_mapping {
+            notification_manager.notify_fragment_mapping(
+                Operation::Update,
+                mapping,
+                IGNORED_NOTIFICATION_VERSION,
+            );
+        }
+        if let Some(mapping) = deleted_fragment_mapping {
+            notification_manager.notify_fragment_mapping(
+                Operation::Delete,
+                mapping,
+                IGNORED_NOTIFICATION_VERSION,
+            );
         }
     }
 }

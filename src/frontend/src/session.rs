@@ -121,7 +121,7 @@ use crate::handler::{RwPgResponse, handle};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
-use crate::observer::FrontendObserverNode;
+use crate::observer::{CompletedObserverRecovery, FrontendObserverNode};
 use crate::rpc::{FrontendServiceImpl, MonitorServiceImpl};
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
@@ -354,10 +354,13 @@ impl FrontendEnv {
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
+        let (completed_observer_recovery_tx, completed_observer_recovery_rx) =
+            watch::channel(CompletedObserverRecovery::default());
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = Arc::new(CatalogWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx.clone(),
+            completed_observer_recovery_rx,
             hummock_snapshot_manager.clone(),
         ));
         let catalog_reader = CatalogReader::new(catalog.clone());
@@ -407,6 +410,7 @@ impl FrontendEnv {
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
+            completed_observer_recovery_tx,
             user_info_manager,
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
