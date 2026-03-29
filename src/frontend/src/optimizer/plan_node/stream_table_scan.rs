@@ -20,6 +20,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::serialize_datum_into;
 use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
@@ -289,7 +290,7 @@ impl Distill for StreamTableScan {
                 .primary_key()
                 .iter()
                 .take(prefix.len())
-                .zip(prefix.iter())
+                .zip_eq_fast(prefix.iter())
                 .map(|(pk, datum)| {
                     let field = &self.core.table_catalog.columns()[pk.column_index];
                     format!("{} = {:?}", field.name(), datum)
