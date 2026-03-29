@@ -1,0 +1,452 @@
+statement ok
+set rw_implicit_flush to true;
+
+# Case: global=default, streaming_parallelism_for_table=default
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_table to default;
+
+statement ok
+create table t_dd (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_dd';
+----
+bounded(4)
+
+statement ok
+drop table t_dd;
+
+# Case: global=default, streaming_parallelism_for_table=6
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_table to 6;
+
+statement ok
+create table t_df (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_df';
+----
+6
+
+statement ok
+drop table t_df;
+
+# Case: global=default, streaming_parallelism_for_table='ratio(0.5)'
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_table to 'ratio(0.5)';
+
+statement ok
+create table t_dr (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_dr';
+----
+ratio(0.5)
+
+statement ok
+drop table t_dr;
+
+# Case: global=default, streaming_parallelism_for_table='bounded(16)'
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_table to 'bounded(16)';
+
+statement ok
+create table t_db (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_db';
+----
+bounded(16)
+
+statement ok
+drop table t_db;
+
+# Case: global=default, streaming_parallelism_for_table=adaptive
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_table to adaptive;
+
+statement ok
+create table t_da (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_da';
+----
+adaptive
+
+statement ok
+drop table t_da;
+
+# Case: global=8, streaming_parallelism_for_table=default
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_table to default;
+
+statement ok
+create table t_fd (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_fd';
+----
+8
+
+statement ok
+drop table t_fd;
+
+# Case: global=8, streaming_parallelism_for_table=6
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_table to 6;
+
+statement ok
+create table t_ff (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_ff';
+----
+6
+
+statement ok
+drop table t_ff;
+
+# Case: global=8, streaming_parallelism_for_table='ratio(0.5)'
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_table to 'ratio(0.5)';
+
+statement ok
+create table t_fr (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_fr';
+----
+ratio(0.5)
+
+statement ok
+drop table t_fr;
+
+# Case: global=8, streaming_parallelism_for_table='bounded(16)'
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_table to 'bounded(16)';
+
+statement ok
+create table t_fb (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_fb';
+----
+bounded(16)
+
+statement ok
+drop table t_fb;
+
+# Case: global=8, streaming_parallelism_for_table=adaptive
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_table to adaptive;
+
+statement ok
+create table t_fa (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_fa';
+----
+adaptive
+
+statement ok
+drop table t_fa;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_table=default
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_table to default;
+
+statement ok
+create table t_rd (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_rd';
+----
+ratio(0.5)
+
+statement ok
+drop table t_rd;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_table=6
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_table to 6;
+
+statement ok
+create table t_rf (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_rf';
+----
+6
+
+statement ok
+drop table t_rf;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_table='ratio(0.5)'
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_table to 'ratio(0.5)';
+
+statement ok
+create table t_rr (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_rr';
+----
+ratio(0.5)
+
+statement ok
+drop table t_rr;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_table='bounded(16)'
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_table to 'bounded(16)';
+
+statement ok
+create table t_rb (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_rb';
+----
+bounded(16)
+
+statement ok
+drop table t_rb;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_table=adaptive
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_table to adaptive;
+
+statement ok
+create table t_ra (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_ra';
+----
+adaptive
+
+statement ok
+drop table t_ra;
+
+# Case: global='bounded(32)', streaming_parallelism_for_table=default
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_table to default;
+
+statement ok
+create table t_bd (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_bd';
+----
+bounded(32)
+
+statement ok
+drop table t_bd;
+
+# Case: global='bounded(32)', streaming_parallelism_for_table=6
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_table to 6;
+
+statement ok
+create table t_bf (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_bf';
+----
+6
+
+statement ok
+drop table t_bf;
+
+# Case: global='bounded(32)', streaming_parallelism_for_table='ratio(0.5)'
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_table to 'ratio(0.5)';
+
+statement ok
+create table t_br (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_br';
+----
+ratio(0.5)
+
+statement ok
+drop table t_br;
+
+# Case: global='bounded(32)', streaming_parallelism_for_table='bounded(16)'
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_table to 'bounded(16)';
+
+statement ok
+create table t_bb (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_bb';
+----
+bounded(16)
+
+statement ok
+drop table t_bb;
+
+# Case: global='bounded(32)', streaming_parallelism_for_table=adaptive
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_table to adaptive;
+
+statement ok
+create table t_ba (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_ba';
+----
+adaptive
+
+statement ok
+drop table t_ba;
+
+# Case: global=adaptive, streaming_parallelism_for_table=default
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_table to default;
+
+statement ok
+create table t_ad (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_ad';
+----
+adaptive
+
+statement ok
+drop table t_ad;
+
+# Case: global=adaptive, streaming_parallelism_for_table=6
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_table to 6;
+
+statement ok
+create table t_af (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_af';
+----
+6
+
+statement ok
+drop table t_af;
+
+# Case: global=adaptive, streaming_parallelism_for_table='ratio(0.5)'
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_table to 'ratio(0.5)';
+
+statement ok
+create table t_ar (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_ar';
+----
+ratio(0.5)
+
+statement ok
+drop table t_ar;
+
+# Case: global=adaptive, streaming_parallelism_for_table='bounded(16)'
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_table to 'bounded(16)';
+
+statement ok
+create table t_ab (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_ab';
+----
+bounded(16)
+
+statement ok
+drop table t_ab;
+
+# Case: global=adaptive, streaming_parallelism_for_table=adaptive
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_table to adaptive;
+
+statement ok
+create table t_aa (v int);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 't_aa';
+----
+adaptive
+
+statement ok
+drop table t_aa;

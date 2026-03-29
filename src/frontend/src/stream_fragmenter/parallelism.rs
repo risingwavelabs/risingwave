@@ -31,7 +31,10 @@ pub(crate) struct ResolvedParallelism {
 fn resolve_global_parallelism(
     global_streaming_parallelism: ConfigParallelism,
 ) -> ConfigParallelism {
-    global_streaming_parallelism
+    match global_streaming_parallelism {
+        ConfigParallelism::Default => ConfigParallelism::Bounded(NonZeroU64::new(64).unwrap()),
+        other => other,
+    }
 }
 
 fn resolve_default_parallelism(
@@ -65,12 +68,7 @@ pub(crate) fn derive_parallelism(
         };
 
     match effective_parallelism {
-        // No explicit session-level override: let meta use the system param
-        // `adaptive_parallelism_strategy` to decide.
-        ConfigParallelism::Default => ResolvedParallelism {
-            parallelism: None,
-            adaptive_strategy: None,
-        },
+        ConfigParallelism::Default => unreachable!("effective streaming parallelism must be set"),
         ConfigParallelism::Fixed(n) => ResolvedParallelism {
             parallelism: Some(Parallelism {
                 parallelism: n.get(),
@@ -132,7 +130,9 @@ mod tests {
         assert_eq!(derive_parallelism(None, None, global).parallelism, None);
         assert_eq!(
             derive_parallelism(None, None, global).adaptive_strategy,
-            None
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(64).unwrap()
+            ))
         );
     }
 
@@ -165,7 +165,9 @@ mod tests {
         assert_eq!(derive_parallelism(None, specific, global).parallelism, None);
         assert_eq!(
             derive_parallelism(None, specific, global).adaptive_strategy,
-            None
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(64).unwrap()
+            ))
         );
     }
 
@@ -323,7 +325,9 @@ mod tests {
                 ConfigParallelism::Default
             )
             .adaptive_strategy,
-            None
+            Some(AdaptiveParallelismStrategy::Bounded(
+                NonZeroUsize::new(64).unwrap()
+            ))
         );
         assert_eq!(
             derive_parallelism(
@@ -333,6 +337,17 @@ mod tests {
             )
             .adaptive_strategy,
             Some(AdaptiveParallelismStrategy::Ratio(0.5))
+        );
+    }
+
+    #[test]
+    fn test_backfill_parallelism_adaptive_resolves_strategy() {
+        assert_eq!(
+            derive_backfill_parallelism(ConfigBackfillParallelism::Adaptive),
+            ResolvedParallelism {
+                parallelism: None,
+                adaptive_strategy: Some(AdaptiveParallelismStrategy::Auto),
+            }
         );
     }
 
@@ -348,14 +363,16 @@ mod tests {
     }
 
     #[test]
-    fn test_backfill_parallelism_fixed_preserves_explicit_override() {
+    fn test_backfill_parallelism_bounded_resolves_strategy() {
         assert_eq!(
-            derive_backfill_parallelism(ConfigBackfillParallelism::Fixed(
+            derive_backfill_parallelism(ConfigBackfillParallelism::Bounded(
                 NonZeroU64::new(2).unwrap()
             )),
             ResolvedParallelism {
-                parallelism: Some(Parallelism { parallelism: 2 }),
-                adaptive_strategy: None,
+                parallelism: None,
+                adaptive_strategy: Some(AdaptiveParallelismStrategy::Bounded(
+                    NonZeroUsize::new(2).unwrap()
+                )),
             }
         );
     }

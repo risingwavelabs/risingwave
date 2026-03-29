@@ -93,9 +93,9 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
-    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
-    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
+    StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
+    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -550,7 +550,7 @@ impl DdlController {
     pub async fn reschedule_streaming_job_backfill_parallelism(
         &self,
         job_id: JobId,
-        parallelism: Option<StreamingParallelism>,
+        parallelism: Option<ParallelismPolicy>,
         mut deferred: bool,
     ) -> MetaResult<()> {
         tracing::info!("altering backfill parallelism for job {}", job_id);
@@ -1893,30 +1893,42 @@ impl DdlController {
         // 3. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
-        let initial_parallelism = specified_backfill_parallelism.or(specified_parallelism);
-        let parallelism = self.resolve_stream_parallelism(
-            initial_parallelism,
-            max_parallelism,
-            &cluster_info,
-            resource_group.clone(),
-        )?;
+        let resolve_effective_parallelism = |specified_parallelism: Option<NonZeroUsize>,
+                                             adaptive_parallelism_strategy: Option<
+            risingwave_common::system_param::AdaptiveParallelismStrategy,
+        >|
+         -> MetaResult<NonZeroUsize> {
+            let resolved_parallelism = self.resolve_stream_parallelism(
+                specified_parallelism,
+                max_parallelism,
+                &cluster_info,
+                resource_group.clone(),
+            )?;
 
-        let parallelism = if initial_parallelism.is_some() {
-            parallelism.get()
-        } else {
-            // Prefer job-level override for initial scheduling, fallback to system strategy.
-            let adaptive_strategy = match stream_ctx.adaptive_parallelism_strategy {
-                Some(strategy) => strategy,
-                None => self
-                    .env
-                    .system_params_reader()
-                    .await
-                    .adaptive_parallelism_strategy(),
+            let resolved_parallelism = if specified_parallelism.is_some() {
+                resolved_parallelism.get()
+            } else {
+                adaptive_parallelism_strategy
+                    .unwrap_or_default()
+                    .compute_target_parallelism(resolved_parallelism.get())
             };
-            adaptive_strategy.compute_target_parallelism(parallelism.get())
+
+            Ok(NonZeroUsize::new(resolved_parallelism).expect("parallelism must be positive"))
         };
 
-        let parallelism = NonZeroUsize::new(parallelism).expect("parallelism must be positive");
+        let has_backfill_override = specified_backfill_parallelism.is_some()
+            || stream_ctx.backfill_adaptive_parallelism_strategy.is_some();
+        let parallelism = if has_backfill_override {
+            resolve_effective_parallelism(
+                specified_backfill_parallelism,
+                stream_ctx.backfill_adaptive_parallelism_strategy,
+            )?
+        } else {
+            resolve_effective_parallelism(
+                specified_parallelism,
+                stream_ctx.adaptive_parallelism_strategy,
+            )?
+        };
         let actor_graph_builder = ActorGraphBuilder::new(id, complete_graph, parallelism)?;
 
         let ActorGraphBuildResult {
