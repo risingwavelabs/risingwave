@@ -34,8 +34,8 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_storage::StateStoreImpl;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::error::{StreamError, StreamResult};
@@ -398,8 +398,34 @@ pub(crate) struct ResetPartialGraphOutput {
     pub(crate) root_err: Option<ScoredStreamError>,
 }
 
+/// A pending exchange request that arrived before the partial graph was created.
+pub(in crate::task) enum PendingExchangeRequest {
+    TakeReceiver(UpDownActorIds, TakeReceiverRequest),
+    CreateBarrierGroup {
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+        upstream_fragment_id: FragmentId,
+        result_sender: oneshot::Sender<StreamResult<permit::Receiver>>,
+    },
+}
+
+impl PendingExchangeRequest {
+    /// Reject this pending request with an error.
+    fn reject(self, msg: &str) {
+        match self {
+            Self::TakeReceiver(_, TakeReceiverRequest::Remote { result_sender, .. }) => {
+                let _ = result_sender.send(Err(anyhow!("{msg}").into()));
+            }
+            Self::TakeReceiver(_, TakeReceiverRequest::Local(_)) => {}
+            Self::CreateBarrierGroup { result_sender, .. } => {
+                let _ = result_sender.send(Err(anyhow!("{msg}").into()));
+            }
+        }
+    }
+}
+
 pub(in crate::task) enum PartialGraphStatus {
-    ReceivedExchangeRequest(Vec<(UpDownActorIds, TakeReceiverRequest)>),
+    ReceivedExchangeRequest(Vec<PendingExchangeRequest>),
     Running(PartialGraphState),
     Suspended(SuspendedPartialGraphState),
     Resetting,
@@ -411,10 +437,8 @@ impl PartialGraphStatus {
     pub(crate) async fn abort(&mut self) {
         match self {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, request) in pending_requests.drain(..) {
-                    if let TakeReceiverRequest::Remote { result_sender, .. } = request {
-                        let _ = result_sender.send(Err(anyhow!("partial graph aborted").into()));
-                    }
+                for request in pending_requests.drain(..) {
+                    request.reject("partial graph aborted");
                 }
             }
             PartialGraphStatus::Running(state) => {
@@ -482,10 +506,8 @@ impl PartialGraphStatus {
     ) -> BoxFuture<'static, ResetPartialGraphOutput> {
         match replace(self, PartialGraphStatus::Resetting) {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, request) in pending_requests {
-                    if let TakeReceiverRequest::Remote { result_sender, .. } = request {
-                        let _ = result_sender.send(Err(anyhow!("partial graph reset").into()));
-                    }
+                for request in pending_requests {
+                    request.reject("partial graph reset");
                 }
                 async move { ResetPartialGraphOutput { root_err: None } }.boxed()
             }
@@ -586,6 +608,11 @@ pub(crate) struct PartialGraphState {
     pub(super) actor_pending_new_output_requests:
         HashMap<ActorId, Vec<(ActorId, NewOutputRequest)>>,
 
+    /// Pre-created data channel receivers for multiplexed barrier coalescing.
+    /// Keyed by `(upstream_actor_id, downstream_actor_id)`.
+    /// These are created during `create_barrier_group` and consumed during `new_actor_output_request`.
+    pre_created_data_receivers: HashMap<(ActorId, ActorId), permit::Receiver>,
+
     pub(crate) graph_state: PartialGraphManagedBarrierState,
 
     table_ids: HashSet<TableId>,
@@ -611,6 +638,7 @@ impl PartialGraphState {
             partial_graph_id,
             actor_states: Default::default(),
             actor_pending_new_output_requests: Default::default(),
+            pre_created_data_receivers: Default::default(),
             graph_state: PartialGraphManagedBarrierState::new(&actor_manager),
             table_ids: Default::default(),
             actor_manager,
@@ -809,6 +837,16 @@ impl PartialGraphState {
                 result_sender,
                 upstream_fragment_id,
             } => {
+                if let Some(rx) = self
+                    .pre_created_data_receivers
+                    .remove(&(upstream_actor_id, actor_id))
+                {
+                    let _ = result_sender.send(Ok(rx));
+                    // The CoalescedBarrierRemote output request was already sent during
+                    // create_barrier_group, so we don't need to send another one.
+                    return;
+                }
+
                 let upstream_fragment_id_str = upstream_fragment_id.to_string();
                 let fragment_channel_buffered_bytes = self
                     .actor_manager
@@ -836,6 +874,73 @@ impl PartialGraphState {
                 .or_default()
                 .push((actor_id, request));
         }
+    }
+
+    /// Create a barrier group for multiplexed barrier coalescing.
+    ///
+    /// Creates per-actor data channels, a barrier-only channel with coalescer + coordinator,
+    /// and sends `CoalescedBarrierRemote` output requests to each upstream actor's `DispatchExecutor`.
+    ///
+    /// The data channel receivers are stored in `pre_created_data_receivers` so that subsequent
+    /// `TakeReceiver(Remote)` requests (for per-actor data gRPC streams) will find them.
+    pub(super) fn create_barrier_group(
+        &mut self,
+        up_actor_ids: &[ActorId],
+        down_actor_id: ActorId,
+        upstream_fragment_id: FragmentId,
+    ) -> StreamResult<permit::Receiver> {
+        use crate::executor::exchange::multiplexed::create_multiplexed_output;
+
+        let config = self.local_barrier_manager.env.global_config();
+        let upstream_fragment_id_str = upstream_fragment_id.to_string();
+        let fragment_channel_buffered_bytes = self
+            .actor_manager
+            .streaming_metrics
+            .fragment_channel_buffered_bytes
+            .with_guarded_label_values(&[&upstream_fragment_id_str]);
+
+        // Create N per-actor data channels.
+        let mut data_senders = Vec::with_capacity(up_actor_ids.len());
+        for &up_id in up_actor_ids {
+            let (tx, rx) = permit::channel_from_config_with_metrics(
+                config,
+                permit::ChannelMetrics {
+                    sender_actor_channel_buffered_bytes: fragment_channel_buffered_bytes.clone(),
+                    receiver_actor_channel_buffered_bytes: fragment_channel_buffered_bytes.clone(),
+                },
+            );
+            data_senders.push(tx);
+            self.pre_created_data_receivers
+                .insert((up_id, down_actor_id), rx);
+        }
+
+        // Create multiplexed output (barrier channel + coalescer + coordinator).
+        let barrier_concurrent = config.developer.exchange_concurrent_barriers;
+        let (channels, coordinator, barrier_rx) =
+            create_multiplexed_output(up_actor_ids, data_senders, barrier_concurrent);
+
+        // Spawn the coordinator task.
+        tokio::spawn(coordinator.run());
+
+        // Send CoalescedBarrierRemote output requests to each upstream actor's DispatchExecutor.
+        for chs in channels {
+            let actor_id = chs.upstream_actor_id;
+            let request = NewOutputRequest::CoalescedBarrierRemote {
+                upstream_actor_id: chs.upstream_actor_id,
+                data_tx: chs.data_tx,
+                barrier_tx: chs.barrier_tx,
+            };
+            if let Some(actor) = self.actor_states.get_mut(&actor_id) {
+                let _ = actor.new_output_request_tx.send((down_actor_id, request));
+            } else {
+                self.actor_pending_new_output_requests
+                    .entry(actor_id)
+                    .or_default()
+                    .push((down_actor_id, request));
+            }
+        }
+
+        Ok(barrier_rx)
     }
 
     /// Handles [`LocalBarrierEvent`] from [`crate::task::barrier_manager::LocalBarrierManager`].

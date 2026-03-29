@@ -1357,6 +1357,7 @@ impl DispatcherMessageBatch {
             }
             Self::BarrierBatch(barrier_batch) => StreamMessageBatch::BarrierBatch(BarrierBatch {
                 barriers: barrier_batch.iter().map(|b| b.to_protobuf()).collect(),
+                ..Default::default()
             }),
             Self::Watermark(watermark) => StreamMessageBatch::Watermark(watermark.to_protobuf()),
         };
