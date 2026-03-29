@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use super::prelude::{PlanRef, *};
-use crate::expr::{Expr, ExprType, FunctionCall};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
 use crate::optimizer::optimizer_context::MaterializedViewCandidate;
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef, PlanAggCall};
 use crate::optimizer::plan_node::{
@@ -268,7 +268,6 @@ impl MvSelectionRule {
             return None;
         }
 
-        let mv_input_to_query = Self::match_join_inputs(&query_join.inputs, &mv_join.inputs)?;
         let query_input_to_query = (0..query_join.inputs.len()).collect::<Vec<_>>();
         let query_base_offsets = Self::input_base_offsets(&query_join.inputs);
         let total_base_len = query_join.total_base_len();
@@ -279,34 +278,57 @@ impl MvSelectionRule {
             &query_base_offsets,
             total_base_len,
         )?;
-        let mv_conditions = Self::normalize_join_conditions(
-            &mv_join,
-            &mv_input_to_query,
-            &query_base_offsets,
-            total_base_len,
-        )?;
-        let rewritten_predicate = Self::subtract_conditions(query_conditions, mv_conditions)?;
 
         let query_output_to_base =
             Self::normalize_join_outputs(&query_join, &query_input_to_query, &query_base_offsets)?;
-        let mv_output_to_base =
-            Self::normalize_join_outputs(&mv_join, &mv_input_to_query, &query_base_offsets)?;
-        let base_to_mv_output =
-            Self::invert_mapping(&mv_output_to_base, query_join.total_base_len())?;
-        let rewritten_predicate =
-            Self::rewrite_condition_to_mv(rewritten_predicate, &base_to_mv_output)?;
-        let output_col_idx = query_output_to_base
-            .iter()
-            .map(|base_idx| base_to_mv_output.get(*base_idx).copied().flatten())
-            .collect::<Option<Vec<_>>>()?;
 
-        let mv_scan: LogicalPlanRef = Self::candidate_scan(candidate, plan.ctx())?.into();
-        let rewritten = LogicalFilter::create(mv_scan, rewritten_predicate);
-        if output_col_idx.iter().copied().eq(0..output_col_idx.len()) {
-            Some(rewritten)
-        } else {
-            Some(LogicalProject::with_out_col_idx(rewritten, output_col_idx.into_iter()).into())
+        for mv_input_to_query in Self::match_join_inputs(&query_join.inputs, &mv_join.inputs) {
+            let Some(mv_conditions) = Self::normalize_join_conditions(
+                &mv_join,
+                &mv_input_to_query,
+                &query_base_offsets,
+                total_base_len,
+            ) else {
+                continue;
+            };
+            let Some(rewritten_predicate) =
+                Self::subtract_conditions(query_conditions.clone(), mv_conditions)
+            else {
+                continue;
+            };
+            let Some(mv_output_to_base) =
+                Self::normalize_join_outputs(&mv_join, &mv_input_to_query, &query_base_offsets)
+            else {
+                continue;
+            };
+            let Some(base_to_mv_output) =
+                Self::invert_mapping(&mv_output_to_base, query_join.total_base_len())
+            else {
+                continue;
+            };
+            let Some(rewritten_predicate) =
+                Self::rewrite_condition_to_mv(rewritten_predicate, &base_to_mv_output)
+            else {
+                continue;
+            };
+            let Some(output_col_idx) = query_output_to_base
+                .iter()
+                .map(|base_idx| base_to_mv_output.get(*base_idx).copied().flatten())
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+
+            let mv_scan: LogicalPlanRef = Self::candidate_scan(candidate, plan.ctx())?.into();
+            let rewritten = LogicalFilter::create(mv_scan, rewritten_predicate);
+            return if output_col_idx.iter().copied().eq(0..output_col_idx.len()) {
+                Some(rewritten)
+            } else {
+                Some(LogicalProject::with_out_col_idx(rewritten, output_col_idx.into_iter()).into())
+            };
         }
+
+        None
     }
 
     fn extract_inner_join_rewrite(plan: &PlanRef) -> Option<InnerJoinRewrite> {
@@ -383,16 +405,18 @@ impl MvSelectionRule {
     fn match_join_inputs(
         query_inputs: &[JoinLeafRewrite],
         mv_inputs: &[JoinLeafRewrite],
-    ) -> Option<Vec<usize>> {
+    ) -> Vec<Vec<usize>> {
         fn dfs(
             mv_idx: usize,
             query_inputs: &[JoinLeafRewrite],
             mv_inputs: &[JoinLeafRewrite],
             used_query: &mut [bool],
             mapping: &mut [usize],
-        ) -> bool {
+            results: &mut Vec<Vec<usize>>,
+        ) {
             if mv_idx == mv_inputs.len() {
-                return true;
+                results.push(mapping.to_vec());
+                return;
             }
             for query_idx in 0..query_inputs.len() {
                 if used_query[query_idx]
@@ -403,17 +427,30 @@ impl MvSelectionRule {
                 }
                 used_query[query_idx] = true;
                 mapping[mv_idx] = query_idx;
-                if dfs(mv_idx + 1, query_inputs, mv_inputs, used_query, mapping) {
-                    return true;
-                }
+                dfs(
+                    mv_idx + 1,
+                    query_inputs,
+                    mv_inputs,
+                    used_query,
+                    mapping,
+                    results,
+                );
                 used_query[query_idx] = false;
             }
-            false
         }
 
         let mut used_query = vec![false; query_inputs.len()];
         let mut mapping = vec![usize::MAX; mv_inputs.len()];
-        dfs(0, query_inputs, mv_inputs, &mut used_query, &mut mapping).then_some(mapping)
+        let mut results = vec![];
+        dfs(
+            0,
+            query_inputs,
+            mv_inputs,
+            &mut used_query,
+            &mut mapping,
+            &mut results,
+        );
+        results
     }
 
     fn normalize_join_conditions(
@@ -561,6 +598,14 @@ impl MvSelectionRule {
     }
 
     fn canonicalize_expr(expr: crate::expr::ExprImpl) -> crate::expr::ExprImpl {
+        if let Some((input_ref, const_expr)) = expr.as_eq_const() {
+            return FunctionCall::new_unchecked(
+                ExprType::Equal,
+                vec![input_ref.into(), const_expr],
+                expr.return_type(),
+            )
+            .into();
+        }
         if let Some((lhs, rhs)) = expr.as_eq_cond() {
             return FunctionCall::new_unchecked(
                 ExprType::Equal,
@@ -568,6 +613,30 @@ impl MvSelectionRule {
                 expr.return_type(),
             )
             .into();
+        }
+        if let ExprImpl::FunctionCall(function_call) = &expr
+            && function_call.func_type() == ExprType::IsNotDistinctFrom
+        {
+            let (_, lhs, rhs) = function_call.clone().decompose_as_binary();
+            match (lhs, rhs) {
+                (ExprImpl::InputRef(input_ref), const_expr) if const_expr.is_const() => {
+                    return FunctionCall::new_unchecked(
+                        ExprType::IsNotDistinctFrom,
+                        vec![(*input_ref).into(), const_expr],
+                        expr.return_type(),
+                    )
+                    .into();
+                }
+                (const_expr, ExprImpl::InputRef(input_ref)) if const_expr.is_const() => {
+                    return FunctionCall::new_unchecked(
+                        ExprType::IsNotDistinctFrom,
+                        vec![(*input_ref).into(), const_expr],
+                        expr.return_type(),
+                    )
+                    .into();
+                }
+                _ => {}
+            }
         }
         if let Some((lhs, rhs)) = expr.as_is_not_distinct_from_cond() {
             return FunctionCall::new_unchecked(

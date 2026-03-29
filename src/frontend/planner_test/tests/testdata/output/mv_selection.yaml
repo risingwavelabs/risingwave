@@ -320,3 +320,24 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (mv_multi_join.a = 1:Int32) }
       └─BatchScan { table: mv_multi_join, columns: [mv_multi_join.a], distribution: SomeShard }
+- id: inner_join_self_join_selection
+  sql: |
+    create table t_self (a int, b int);
+    create materialized view mv_self_join as
+      select l.a
+      from t_self as l
+      join t_self as r
+      on l.b = r.b;
+    set enable_mv_selection = true;
+    select l.a
+    from t_self as r
+    join (
+      select a, b
+      from t_self
+      where a = 1
+    ) as l
+    on r.b = l.b;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (mv_self_join.a = 1:Int32) }
+      └─BatchScan { table: mv_self_join, columns: [mv_self_join.a], distribution: SomeShard }
