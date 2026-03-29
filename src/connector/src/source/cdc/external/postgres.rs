@@ -252,7 +252,15 @@ impl PostgresExternalTableReader {
         let field_names = rw_schema
             .fields
             .iter()
-            .map(|f| Self::quote_column(&f.name))
+            .map(|f| {
+                let quoted = Self::quote_column(&f.name);
+                match &f.data_type {
+                    // For columns mapped to VARCHAR, cast to text in snapshot query so
+                    // custom PG types can be read as textual representation.
+                    DataType::Varchar => format!("{quoted}::text AS {quoted}"),
+                    _ => quoted,
+                }
+            })
             .join(",");
 
         Ok(Self {
