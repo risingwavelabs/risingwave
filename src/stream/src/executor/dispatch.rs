@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
@@ -48,7 +47,10 @@ use crate::executor::prelude::*;
 use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, NewOutputRequest};
 
+mod dispatch_sync_log_store;
 mod output_mapping;
+
+pub use dispatch_sync_log_store::SyncLogStoreDispatchExecutor;
 pub use output_mapping::DispatchOutputMapping;
 use risingwave_common::id::FragmentId;
 
@@ -110,7 +112,7 @@ impl DispatchExecutorMetrics {
     }
 }
 
-struct DispatchExecutorInner {
+pub struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: ActorId,
     actor_config: Arc<StreamingConfig>,
@@ -514,6 +516,45 @@ impl DispatchExecutor {
     }
 }
 
+async fn dispatch_message_batch(
+    inner: &mut DispatchExecutorInner,
+    batch: MessageBatch,
+) -> StreamResult<Option<Vec<Barrier>>> {
+    match batch {
+        MessageBatch::Chunk(chunk) => {
+            inner
+                .dispatch(MessageBatch::Chunk(chunk))
+                .instrument(tracing::info_span!("dispatch_chunk"))
+                .instrument_await("dispatch_chunk")
+                .await?;
+            Ok(None)
+        }
+        MessageBatch::BarrierBatch(barrier_batch) => {
+            assert!(!barrier_batch.is_empty());
+            let yielded_barriers = barrier_batch.clone();
+            inner
+                .dispatch(MessageBatch::BarrierBatch(barrier_batch))
+                .instrument(tracing::info_span!("dispatch_barrier_batch"))
+                .instrument_await("dispatch_barrier_batch")
+                .await?;
+            inner
+                .metrics
+                .metrics
+                .barrier_batch_size
+                .observe(yielded_barriers.len() as f64);
+            Ok(Some(yielded_barriers))
+        }
+        MessageBatch::Watermark(watermark) => {
+            inner
+                .dispatch(MessageBatch::Watermark(watermark))
+                .instrument(tracing::info_span!("dispatch_watermark"))
+                .instrument_await("dispatch_watermark")
+                .await?;
+            Ok(None)
+        }
+    }
+}
+
 impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
@@ -529,36 +570,11 @@ impl StreamConsumer for DispatchExecutor {
                     // end_of_stream
                     break;
                 };
-                match message {
-                    chunk @ MessageBatch::Chunk(_) => {
-                        self.inner
-                            .dispatch(chunk)
-                            .instrument(tracing::info_span!("dispatch_chunk"))
-                            .instrument_await("dispatch_chunk")
-                            .await?;
-                    }
-                    MessageBatch::BarrierBatch(barrier_batch) => {
-                        assert!(!barrier_batch.is_empty());
-                        self.inner
-                            .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
-                            .instrument(tracing::info_span!("dispatch_barrier_batch"))
-                            .instrument_await("dispatch_barrier_batch")
-                            .await?;
-                        self.inner
-                            .metrics
-                            .metrics
-                            .barrier_batch_size
-                            .observe(barrier_batch.len() as f64);
-                        for barrier in barrier_batch {
-                            yield barrier;
-                        }
-                    }
-                    watermark @ MessageBatch::Watermark(_) => {
-                        self.inner
-                            .dispatch(watermark)
-                            .instrument(tracing::info_span!("dispatch_watermark"))
-                            .instrument_await("dispatch_watermark")
-                            .await?;
+                if let Some(barrier_batch) =
+                    dispatch_message_batch(&mut self.inner, message).await?
+                {
+                    for barrier in barrier_batch {
+                        yield barrier;
                     }
                 }
             }
