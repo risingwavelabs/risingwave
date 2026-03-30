@@ -13,7 +13,7 @@ SELECT * FROM t;
 ----
 1 2 10 4
 
-# Only provide v3; v1/v2 should be NULL in this row, and let v4 use its default. 
+# Only provide v3; v1/v2 should be NULL in this row, and let v4 use its default.
 statement ok
 INSERT INTO t(v3) VALUES (1);
 
