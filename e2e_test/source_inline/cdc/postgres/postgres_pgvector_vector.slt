@@ -41,6 +41,35 @@ create table test_pgvector_cdc (
     embedding vector(3)
 ) from pgvector_source table 'public.test_pgvector_cdc';
 
+# Auto schema mapping should derive embedding as vector(3).
+statement ok
+create table test_pgvector_cdc_auto
+from pgvector_source table 'public.test_pgvector_cdc';
+
+query T
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_pgvector_cdc_auto' and c.name = 'embedding';
+----
+vector(3)
+
+# Upstream vector without dimension should fail auto schema mapping.
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_pgvector_nodim CASCADE;
+    CREATE TABLE test_pgvector_nodim (
+        id int PRIMARY KEY,
+        embedding vector
+    );
+    INSERT INTO test_pgvector_nodim VALUES
+        (1, '[0.1,0.2,0.3]');
+"
+
+statement error missing dimension
+create table test_pgvector_nodim_auto (*)
+from pgvector_source table 'public.test_pgvector_nodim';
+
 # Backfill should load 2 rows and keep embedding non-null.
 query II retry 20 backoff 1s
 select count(*), count(*) filter (where embedding is null) from test_pgvector_cdc;
@@ -118,9 +147,13 @@ statement ok
 drop table test_pgvector_cdc;
 
 statement ok
+drop table test_pgvector_cdc_auto;
+
+statement ok
 drop source pgvector_source;
 
 system ok
 psql -c "
     DROP TABLE IF EXISTS test_pgvector_cdc CASCADE;
+    DROP TABLE IF EXISTS test_pgvector_nodim CASCADE;
 "

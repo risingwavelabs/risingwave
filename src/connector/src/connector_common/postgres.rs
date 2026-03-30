@@ -47,6 +47,20 @@ const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     ORDER BY array_position(i.indkey, a.attnum)
 "#;
 
+/// Discover PostgreSQL formatted type names (e.g. `vector(768)`) for each column.
+/// We use this to keep user-defined type modifiers that are not preserved by sea-schema.
+const DISCOVER_FORMATTED_TYPE_QUERY: &str = r#"
+    SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) as formatted_type
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = $1
+      AND c.relname = $2
+      AND a.attnum > 0
+      AND NOT a.attisdropped
+    ORDER BY a.attnum
+"#;
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
@@ -141,6 +155,34 @@ impl PostgresExternalTable {
                 &empty_map,
             )
             .await?;
+
+        let formatted_types = sqlx::query(DISCOVER_FORMATTED_TYPE_QUERY)
+            .bind(schema)
+            .bind(table)
+            .fetch_all(&connection)
+            .await
+            .context("Failed to discover PostgreSQL formatted column types")?;
+        let formatted_type_by_column: HashMap<String, String> = formatted_types
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("column_name"),
+                    row.get::<String, _>("formatted_type"),
+                )
+            })
+            .collect();
+
+        // sea-schema reports pgvector as `Unknown("vector")` and drops the dimension.
+        // Patch it with PostgreSQL's formatted type text so we can derive vector(n).
+        let mut columns = columns;
+        for col in &mut columns {
+            if let SeaType::Unknown(name) = &col.col_type
+                && name.eq_ignore_ascii_case("vector")
+                && let Some(formatted_type) = formatted_type_by_column.get(&col.name)
+            {
+                col.col_type = SeaType::Unknown(formatted_type.clone());
+            }
+        }
 
         // Use direct system table query for primary key discovery
         let pk_columns = Self::discover_primary_key(&connection, schema, table).await?;
@@ -501,13 +543,45 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
             bail!("{:?} type not supported", col_type);
         }
         SeaType::Unknown(name) => {
-            // NOTES: user-defined enum type is classified as `Unknown`
-            tracing::warn!("Unknown Postgres data type: {name}, map to varchar");
-            DataType::Varchar
+            if let Some(dim) = parse_pgvector_dimension(name)? {
+                DataType::Vector(dim)
+            } else {
+                // NOTES: user-defined enum type is classified as `Unknown`
+                tracing::warn!("Unknown Postgres data type: {name}, map to varchar");
+                DataType::Varchar
+            }
         }
     };
 
     Ok(dtype)
+}
+
+fn parse_pgvector_dimension(type_name: &str) -> ConnectorResult<Option<usize>> {
+    let normalized = type_name.trim().to_ascii_lowercase();
+    if normalized == "vector" {
+        bail!("pgvector type `vector` is missing dimension, expected `vector(n)`")
+    }
+    if !normalized.starts_with("vector(") || !normalized.ends_with(')') {
+        return Ok(None);
+    }
+
+    let dim_text = normalized
+        .trim_start_matches("vector(")
+        .trim_end_matches(')')
+        .trim();
+    let dim = dim_text
+        .parse::<usize>()
+        .map_err(|_| anyhow!("invalid pgvector dimension in type `{type_name}`"))?;
+
+    if !(1..=DataType::VEC_MAX_SIZE).contains(&dim) {
+        bail!(
+            "pgvector dimension out of range in type `{}`: expect 1..={}",
+            type_name,
+            DataType::VEC_MAX_SIZE
+        );
+    }
+
+    Ok(Some(dim))
 }
 
 // Used for sink connector
@@ -595,5 +669,23 @@ fn sea_type_to_pg_type(sea_type: &SeaType) -> ConnectorResult<tokio_postgres::ty
             ))
         }
         _ => bail!("unsupported type: {:?}", sea_type),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_pgvector_dimension;
+
+    #[test]
+    fn test_parse_pgvector_dimension() {
+        assert_eq!(parse_pgvector_dimension("vector(3)").unwrap(), Some(3));
+        assert_eq!(parse_pgvector_dimension("VECTOR(768)").unwrap(), Some(768));
+        assert_eq!(parse_pgvector_dimension("varchar").unwrap(), None);
+    }
+
+    #[test]
+    fn test_parse_pgvector_dimension_requires_size() {
+        let err = parse_pgvector_dimension("vector").unwrap_err();
+        assert!(err.to_string().contains("missing dimension"));
     }
 }

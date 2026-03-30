@@ -690,27 +690,27 @@ impl JsonParseOptions {
                     let value = match v.value_type() {
                         ValueType::I64 | ValueType::I128 => {
                             let i128_value = v.try_as_i128().map_err(|_| create_error())?;
-                            if i128_value < f32::MIN as i128 || i128_value > f32::MAX as i128 {
-                                Err(create_error())?
-                            }
-                            i128_value as f32
+                            i128_value
+                                .to_string()
+                                .parse::<f32>()
+                                .map_err(|_| create_error())?
                         }
                         ValueType::U64 | ValueType::U128 => {
                             let u128_value = v.try_as_u128().map_err(|_| create_error())?;
-                            if u128_value > f32::MAX as u128 {
-                                Err(create_error())?
-                            }
-                            u128_value as f32
+                            u128_value
+                                .to_string()
+                                .parse::<f32>()
+                                .map_err(|_| create_error())?
                         }
                         ValueType::F64 => {
                             let f64_value = v.try_as_f64().map_err(|_| create_error())?;
-                            if !f64_value.is_finite()
-                                || f64_value < f32::MIN as f64
-                                || f64_value > f32::MAX as f64
-                            {
+                            if !f64_value.is_finite() {
                                 Err(create_error())?
                             }
-                            f64_value as f32
+                            f64_value
+                                .to_string()
+                                .parse::<f32>()
+                                .map_err(|_| create_error())?
                         }
                         _ => Err(create_error())?,
                     };
