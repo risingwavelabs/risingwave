@@ -331,6 +331,21 @@ async fn incremental_scan_stream(
             continue;
         }
 
+        if let Some(last_snapshot_id) = last_snapshot
+            && let Some(last_ingested_snapshot) = table
+                .metadata()
+                .snapshots()
+                .find(|snapshot| snapshot.snapshot_id() == last_snapshot_id)
+        {
+            let lag_secs =
+                ((current_snapshot.timestamp_ms() - last_ingested_snapshot.timestamp_ms()).max(0)
+                    / 1000) as i64;
+            metrics
+                .iceberg_source_snapshot_lag_seconds
+                .with_guarded_label_values(&label_values)
+                .set(lag_secs);
+        }
+
         // New snapshot discovered.
         metrics
             .iceberg_source_snapshots_discovered_total
@@ -350,7 +365,8 @@ async fn incremental_scan_stream(
         .build()
         .context("failed to build iceberg scan")?;
 
-        let list_start = std::time::Instant::now();
+        let mut list_duration = std::time::Duration::default();
+        let mut active_since = std::time::Instant::now();
         let mut data_file_count: u64 = 0;
         let mut eq_delete_count: u64 = 0;
         let mut pos_delete_count: u64 = 0;
@@ -379,10 +395,12 @@ async fn incremental_scan_stream(
                 .with_guarded_label_values(&label_values)
                 .observe(scan_task.deletes.len() as f64);
 
+            list_duration += active_since.elapsed();
             yield scan_task;
+            active_since = std::time::Instant::now();
         }
 
-        let list_duration = list_start.elapsed();
+        list_duration += active_since.elapsed();
         metrics
             .iceberg_source_list_duration_seconds
             .with_guarded_label_values(&label_values)

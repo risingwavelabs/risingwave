@@ -141,17 +141,15 @@ impl<S: StateStore> BatchIcebergListExecutor<S> {
                         self.associated_table_id.to_string(),
                     ]);
 
-                    if !iceberg_table_name.is_empty() {
-                        iceberg_metrics
-                            .iceberg_source_scan_errors_total
-                            .with_guarded_label_values(&[
-                                metrics_labels[0],
-                                metrics_labels[1],
-                                metrics_labels[2],
-                                "list_error",
-                            ])
-                            .inc();
-                    }
+                    iceberg_metrics
+                        .iceberg_source_scan_errors_total
+                        .with_guarded_label_values(&[
+                            metrics_labels[0],
+                            metrics_labels[1],
+                            metrics_labels[2],
+                            "list_error",
+                        ])
+                        .inc();
 
                     if is_refreshing {
                         tracing::info!(
