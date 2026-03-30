@@ -331,6 +331,8 @@ test_snapshot_backfill() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/failed_tests.slt'
 
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/pk_predicate_pushdown.slt'
+
   kill_cluster
 }
 
