@@ -1038,6 +1038,95 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         Ok(iter.map_ok(|(_, row)| row))
     }
 
+    /// Like `batch_iter_vnode_with_pk_prefix` but additionally supports range bounds
+    /// on the column after the equality prefix.
+    pub async fn batch_iter_vnode_with_pk_range(
+        &self,
+        epoch: HummockReadEpoch,
+        start_pk: Option<&OwnedRow>,
+        pk_prefix: &OwnedRow,
+        range_bounds: &(Bound<OwnedRow>, Bound<OwnedRow>),
+        vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+        rebuild_interval: Duration,
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static + use<S, SD>>
+    {
+        assert!(
+            !rebuild_interval.is_zero(),
+            "rebuild_interval should be positive"
+        );
+
+        // For DESC PK columns, the planner's lower/upper bounds are in logical (ascending)
+        // order, but storage key ordering is reversed. Swap bounds so that the serialized
+        // start_key < end_key in storage key space, matching what batch's
+        // `convert_to_range_bounds` does.
+        let next_col_idx = pk_prefix.len();
+        let order_type = self.pk_serializer.get_order_types()[next_col_idx];
+        let (logical_start, logical_end) = if order_type.is_ascending() {
+            (&range_bounds.0, &range_bounds.1)
+        } else {
+            (&range_bounds.1, &range_bounds.0)
+        };
+
+        let range_start = match logical_start {
+            Included(row) => Included(row),
+            Excluded(row) => Excluded(row),
+            Unbounded => Unbounded,
+        };
+        let range_end = match logical_end {
+            Included(row) => Included(row),
+            Excluded(row) => Excluded(row),
+            Unbounded => Unbounded,
+        };
+
+        let start_key = if let Some(start_pk) = start_pk {
+            self.start_bound_from_pk(Some(start_pk))
+        } else {
+            self.serialize_pk_bound(pk_prefix, range_start, true)
+        };
+        let end_key = self.serialize_pk_bound(pk_prefix, range_end, false);
+
+        let prefix_hint =
+            if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint <= pk_prefix.len() {
+                let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
+                let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+                let prefix_len = self
+                    .pk_serializer
+                    .deserialize_prefix_len(&serialized_pk_prefix, self.read_prefix_len_hint)?;
+                Some(Bytes::from(serialized_pk_prefix[..prefix_len].to_vec()))
+            } else {
+                None
+            };
+
+        let snapshot = Arc::new(
+            self.store
+                .new_read_snapshot(
+                    epoch,
+                    NewReadSnapshotOptions {
+                        table_id: self.table_id,
+                        table_option: self.table_option,
+                    },
+                )
+                .await?,
+        );
+        let (table_key_range, read_options, pk_serializer) = self.vnode_read_context(
+            prefix_hint,
+            (start_key.as_ref(), end_key.as_ref()),
+            vnode,
+            prefetch_options,
+        );
+        let iter = iter_with_timeout_rebuild(
+            snapshot,
+            table_key_range,
+            self.table_id,
+            read_options,
+            rebuild_interval,
+        )
+        .await?;
+        let iter = self.iter_stream_from_state_store_iter::<(), _>(iter, pk_serializer);
+        Ok(iter.map_ok(|(_, row)| row))
+    }
+
     pub async fn next_epoch(&self, epoch: u64) -> StorageResult<u64> {
         self.store
             .next_epoch(

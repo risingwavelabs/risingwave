@@ -16,6 +16,7 @@ use std::cmp::min;
 use std::collections::VecDeque;
 use std::future::{Future, pending, ready};
 use std::mem::take;
+use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -78,7 +79,8 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     snapshot_epoch: Option<u64>,
-    pk_prefix: Option<OwnedRow>,
+    /// (eq_prefix, range_bounds) for pk scan range pushdown
+    pk_scan_range: Option<(OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>,
 }
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
@@ -95,7 +97,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
         snapshot_epoch: Option<u64>,
-        pk_prefix: Option<OwnedRow>,
+        pk_scan_range: Option<(OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>,
     ) -> Self {
         assert_eq!(&upstream.info.schema, upstream_table.schema());
         if upstream_table.pk_in_output_indices().is_none() {
@@ -124,7 +126,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             actor_ctx,
             metrics,
             snapshot_epoch,
-            pk_prefix,
+            pk_scan_range,
         }
     }
 
@@ -218,7 +220,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             first_recv_barrier_epoch,
                             initial_backfill_paused,
                             &self.actor_ctx,
-                            self.pk_prefix.as_ref(),
+                            self.pk_scan_range.as_ref(),
                         );
 
                         pin_mut!(snapshot_stream);
@@ -821,7 +823,7 @@ async fn make_snapshot_stream(
     rate_limit: RateLimit,
     chunk_size: usize,
     snapshot_rebuild_interval: Duration,
-    pk_prefix: Option<&OwnedRow>,
+    pk_scan_range: Option<&(OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>,
 ) -> StreamExecutorResult<
     VnodeStream<Pin<Box<dyn Stream<Item = StreamExecutorResult<ChangeLogRow>> + Send>>>,
 > {
@@ -844,36 +846,38 @@ async fn make_snapshot_stream(
             };
             start_pk.map(|(start_pk, row_count)| {
                 async move {
-                    let stream: BoxedChangeLogRowStream = if let Some(pk_prefix) = pk_prefix {
-                        Box::pin(
-                            upstream_table
-                                .batch_iter_vnode_with_pk_prefix(
-                                    HummockReadEpoch::Committed(snapshot_epoch),
-                                    start_pk,
-                                    pk_prefix,
-                                    vnode,
-                                    PrefetchOptions::prefetch_for_large_range_scan(),
-                                    snapshot_rebuild_interval,
-                                )
-                                .await?
-                                .map_ok(ChangeLogRow::Insert)
-                                .map_err(Into::into),
-                        )
-                    } else {
-                        Box::pin(
-                            upstream_table
-                                .batch_iter_vnode(
-                                    HummockReadEpoch::Committed(snapshot_epoch),
-                                    start_pk,
-                                    vnode,
-                                    PrefetchOptions::prefetch_for_large_range_scan(),
-                                    snapshot_rebuild_interval,
-                                )
-                                .await?
-                                .map_ok(ChangeLogRow::Insert)
-                                .map_err(Into::into),
-                        )
-                    };
+                    let stream: BoxedChangeLogRowStream =
+                        if let Some((pk_prefix, range_bounds)) = pk_scan_range {
+                            Box::pin(
+                                upstream_table
+                                    .batch_iter_vnode_with_pk_range(
+                                        HummockReadEpoch::Committed(snapshot_epoch),
+                                        start_pk,
+                                        pk_prefix,
+                                        range_bounds,
+                                        vnode,
+                                        PrefetchOptions::prefetch_for_large_range_scan(),
+                                        snapshot_rebuild_interval,
+                                    )
+                                    .await?
+                                    .map_ok(ChangeLogRow::Insert)
+                                    .map_err(Into::into),
+                            )
+                        } else {
+                            Box::pin(
+                                upstream_table
+                                    .batch_iter_vnode(
+                                        HummockReadEpoch::Committed(snapshot_epoch),
+                                        start_pk,
+                                        vnode,
+                                        PrefetchOptions::prefetch_for_large_range_scan(),
+                                        snapshot_rebuild_interval,
+                                    )
+                                    .await?
+                                    .map_ok(ChangeLogRow::Insert)
+                                    .map_err(Into::into),
+                            )
+                        };
                     Ok::<_, StreamExecutorError>((vnode, stream, row_count))
                 }
                 .boxed()
@@ -902,7 +906,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     first_recv_barrier_epoch: EpochPair,
     initial_backfill_paused: bool,
     actor_ctx: &'a ActorContextRef,
-    pk_prefix: Option<&'a OwnedRow>,
+    pk_scan_range: Option<&'a (OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
@@ -914,7 +918,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         *rate_limit,
         chunk_size,
         actor_ctx.config.developer.snapshot_iter_rebuild_interval(),
-        pk_prefix,
+        pk_scan_range,
     )
     .await?;
 

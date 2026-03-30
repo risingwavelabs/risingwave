@@ -14,6 +14,7 @@
 
 use core::time::Duration;
 use std::fmt::Debug;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
@@ -83,27 +84,16 @@ pub(crate) struct StreamActorManager {
 }
 
 impl StreamActorManager {
-    fn decode_pk_prefix(
+    /// Decode a scan range (eq prefix + range bounds) from the StreamScanNode proto.
+    fn decode_pk_scan_range(
         node: &StreamScanNode,
         table_desc: &StorageTableDesc,
-    ) -> StreamResult<Option<OwnedRow>> {
-        if node.pk_prefix.is_empty() {
-            return Ok(None);
-        }
+    ) -> StreamResult<Option<(OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>> {
+        use risingwave_pb::batch_plan::scan_range;
 
-        if node.pk_prefix.len() > table_desc.pk.len() {
-            return Err(anyhow::anyhow!(
-                "pk_prefix length {} exceeds table pk length {}",
-                node.pk_prefix.len(),
-                table_desc.pk.len()
-            )
-            .into());
-        }
-
-        let pk_types = table_desc
+        let pk_types: Vec<DataType> = table_desc
             .pk
             .iter()
-            .take(node.pk_prefix.len())
             .map(|order| {
                 let column_idx = order.column_index as usize;
                 let column = table_desc
@@ -118,18 +108,68 @@ impl StreamActorManager {
             })
             .collect_vec();
 
-        let prefix = node
-            .pk_prefix
-            .iter()
-            .zip_eq(pk_types.iter())
-            .map(|(raw, data_type)| {
-                deserialize_datum(raw.as_slice(), data_type)
-                    .map_err(anyhow::Error::from)
-                    .map_err(Into::into)
-            })
-            .collect::<StreamResult<Vec<_>>>()?;
+        // Prefer pk_scan_range (new field with full range support)
+        if let Some(pb_scan_range) = &node.pk_scan_range {
+            let mut index = 0;
+            let pk_prefix = OwnedRow::new(
+                pb_scan_range
+                    .eq_conds
+                    .iter()
+                    .map(|v| {
+                        let ty = pk_types
+                            .get(index)
+                            .ok_or_else(|| anyhow::anyhow!("pk_prefix index out of bounds"))?;
+                        index += 1;
+                        deserialize_datum(v.as_slice(), ty)
+                            .map_err(anyhow::Error::from)
+                            .map_err(Into::into)
+                    })
+                    .collect::<StreamResult<Vec<_>>>()?,
+            );
 
-        Ok(Some(OwnedRow::new(prefix)))
+            if pb_scan_range.lower_bound.is_none() && pb_scan_range.upper_bound.is_none() {
+                return Ok(Some((pk_prefix, (Bound::Unbounded, Bound::Unbounded))));
+            }
+
+            let build_bound =
+                |bound: &scan_range::Bound, idx: usize| -> StreamResult<Bound<OwnedRow>> {
+                    let mut i = idx;
+                    let row = OwnedRow::new(
+                        bound
+                            .value
+                            .iter()
+                            .map(|v| {
+                                let ty = pk_types.get(i).ok_or_else(|| {
+                                    anyhow::anyhow!("range bound index out of bounds")
+                                })?;
+                                i += 1;
+                                deserialize_datum(v.as_slice(), ty)
+                                    .map_err(anyhow::Error::from)
+                                    .map_err(Into::into)
+                            })
+                            .collect::<StreamResult<Vec<_>>>()?,
+                    );
+                    if bound.inclusive {
+                        Ok(Bound::Included(row))
+                    } else {
+                        Ok(Bound::Excluded(row))
+                    }
+                };
+
+            let next_col_bounds = match (
+                pb_scan_range.lower_bound.as_ref(),
+                pb_scan_range.upper_bound.as_ref(),
+            ) {
+                (Some(lb), Some(ub)) => (build_bound(lb, index)?, build_bound(ub, index)?),
+                (None, Some(ub)) => (Bound::Unbounded, build_bound(ub, index)?),
+                (Some(lb), None) => (build_bound(lb, index)?, Bound::Unbounded),
+                (None, None) => unreachable!(),
+            };
+
+            return Ok(Some((pk_prefix, next_col_bounds)));
+        }
+
+        Ok(None)
     }
 
     fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> ExecutorId {
@@ -192,7 +232,7 @@ impl StreamActorManager {
         .await?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
-        let pk_prefix = Self::decode_pk_prefix(node, table_desc)?;
+        let pk_scan_range = Self::decode_pk_scan_range(node, table_desc)?;
 
         let output_indices = node
             .output_indices
@@ -232,7 +272,7 @@ impl StreamActorManager {
             barrier_rx,
             self.streaming_metrics.clone(),
             node.snapshot_backfill_epoch,
-            pk_prefix,
+            pk_scan_range,
         )
         .boxed();
 
