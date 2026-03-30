@@ -61,6 +61,7 @@ impl HummockManager {
                 FullGc,
 
                 GroupScheduleMerge,
+                PurgeStaleCompactionGroup,
             }
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
@@ -188,6 +189,24 @@ impl HummockManager {
                 triggers.push(Box::pin(group_scheduling_merge_trigger));
             }
 
+            let periodic_purge_stale_compaction_group_interval_sec = hummock_manager
+                .env
+                .opts
+                .periodic_purge_stale_compaction_group_interval_sec;
+
+            if periodic_purge_stale_compaction_group_interval_sec > 0 {
+                let mut purge_stale_compaction_group_trigger_interval = tokio::time::interval(
+                    Duration::from_secs(periodic_purge_stale_compaction_group_interval_sec),
+                );
+                purge_stale_compaction_group_trigger_interval
+                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                purge_stale_compaction_group_trigger_interval.reset();
+                let purge_stale_compaction_group_trigger =
+                    IntervalStream::new(purge_stale_compaction_group_trigger_interval)
+                        .map(|_| HummockTimerEvent::PurgeStaleCompactionGroup);
+                triggers.push(Box::pin(purge_stale_compaction_group_trigger));
+            }
+
             let event_stream = select_all(triggers);
             use futures::pin_mut;
             pin_mut!(event_stream);
@@ -195,9 +214,10 @@ impl HummockManager {
             let shutdown_rx_shared = shutdown_rx.shared();
 
             tracing::info!(
-                "Hummock timer task [GroupSchedulingSplit interval {} sec] [GroupSchedulingMerge interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
+                "Hummock timer task [GroupSchedulingSplit interval {} sec] [GroupSchedulingMerge interval {} sec] [PurgeStaleCompactionGroup interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
                 periodic_scheduling_compaction_group_split_interval_sec,
                 periodic_scheduling_compaction_group_merge_interval_sec,
+                periodic_purge_stale_compaction_group_interval_sec,
                 CHECK_PENDING_TASK_PERIOD_SEC,
                 STAT_REPORT_PERIOD_SEC,
                 COMPACTION_HEARTBEAT_PERIOD_SEC
@@ -233,6 +253,10 @@ impl HummockManager {
                                     }
 
                                     hummock_manager.on_handle_schedule_group_merge().await;
+                                }
+
+                                HummockTimerEvent::PurgeStaleCompactionGroup => {
+                                    hummock_manager.purge_stale_compaction_groups().await;
                                 }
 
                                 HummockTimerEvent::Report => {
@@ -483,6 +507,34 @@ impl HummockManager {
             }
         });
         (join_handle, shutdown_tx)
+    }
+
+    async fn purge_stale_compaction_groups(&self) {
+        let valid_table_ids: HashSet<_> = match self
+            .metadata_manager
+            .catalog_controller
+            .list_fragment_state_tables()
+            .await
+        {
+            Ok(fragment_state_tables) => fragment_state_tables
+                .into_iter()
+                .flat_map(|fragment| fragment.state_table_ids.into_inner())
+                .collect(),
+            Err(err) => {
+                warn!(
+                    error = %err.as_report(),
+                    "failed to list fragment state tables for stale compaction group purge"
+                );
+                return;
+            }
+        };
+
+        if let Err(err) = self.purge(&valid_table_ids).await {
+            warn!(
+                error = %err.as_report(),
+                "failed to purge stale compaction groups"
+            );
+        }
     }
 }
 

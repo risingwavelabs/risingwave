@@ -167,6 +167,11 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::vacuum_spin_interval_ms")]
     pub vacuum_spin_interval_ms: u64,
 
+    /// Interval of reconciling live state tables and purging stale dynamic compaction groups.
+    /// Set to 0 to disable the periodic purge.
+    #[serde(default = "default::meta::periodic_purge_stale_compaction_group_interval_sec")]
+    pub periodic_purge_stale_compaction_group_interval_sec: u64,
+
     /// Interval of invoking iceberg garbage collection, to expire old snapshots.
     #[serde(default = "default::meta::iceberg_gc_interval_sec")]
     pub iceberg_gc_interval_sec: u64,
@@ -677,6 +682,10 @@ pub mod default {
 
         pub fn vacuum_spin_interval_ms() -> u64 {
             100
+        }
+
+        pub fn periodic_purge_stale_compaction_group_interval_sec() -> u64 {
+            0
         }
 
         pub fn iceberg_gc_interval_sec() -> u64 {

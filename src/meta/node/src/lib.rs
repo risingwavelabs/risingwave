@@ -388,6 +388,9 @@ pub fn start(
                     .developer
                     .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
+                periodic_purge_stale_compaction_group_interval_sec: config
+                    .meta
+                    .periodic_purge_stale_compaction_group_interval_sec,
                 iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
