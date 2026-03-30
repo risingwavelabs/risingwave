@@ -269,10 +269,10 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                                     sink_id = %self.param.sink_id,
                                     "coordinated log sinker stops"
                                 );
-                                log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                                log_reader.truncate(TruncateOffset::Barrier { epoch }, vec![])?;
                                 return pending().await;
                             }
-                            log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                            log_reader.truncate(TruncateOffset::Barrier { epoch }, vec![])?;
                         } else {
                             let metadata = sink_writer.barrier(false).await?;
                             if let Some(metadata) = metadata {

@@ -523,10 +523,10 @@ impl LogSinker for PostgresSinkWriter {
             match item {
                 LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
                     self.write_batch(chunk).await?;
-                    log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
+                    log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id }, vec![])?;
                 }
                 LogStoreReadItem::Barrier { .. } => {
-                    log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                    log_reader.truncate(TruncateOffset::Barrier { epoch }, vec![])?;
                 }
             }
         }

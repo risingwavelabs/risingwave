@@ -1370,7 +1370,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         let (objects, delete_notification_objs, old_fragment_ids, new_fragment_ids) =
-            Self::finish_replace_streaming_job_inner(
+            Box::pin(Self::finish_replace_streaming_job_inner(
                 tmp_id,
                 replace_upstream,
                 sink_into_table_context,
@@ -1378,7 +1378,7 @@ impl CatalogController {
                 streaming_job,
                 drop_table_connector_ctx,
                 auto_refresh_schema_sinks,
-            )
+            ))
             .await?;
 
         txn.commit().await?;
@@ -1843,6 +1843,33 @@ impl CatalogController {
                     .await?;
                     table.columns = new_log_store_table_columns;
                     table.value_indices = new_log_store_table_value_indices.into();
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(
+                            ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
+                                .into(),
+                        )),
+                    });
+                }
+                if let Some(new_error_table) = finish_sink_context.new_error_table {
+                    let error_table_id = new_error_table.id;
+                    let new_error_table_columns: ColumnCatalogArray =
+                        new_error_table.columns.clone().into();
+                    let new_error_table_value_indices = new_error_table.value_indices.clone();
+                    let (mut table, table_obj) = Table::find_by_id(error_table_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("table", original_job_id))?;
+                    Table::update(table::ActiveModel {
+                        table_id: Set(error_table_id),
+                        columns: Set(new_error_table_columns.clone()),
+                        value_indices: Set(new_error_table_value_indices.clone().into()),
+                        ..Default::default()
+                    })
+                    .exec(txn)
+                    .await?;
+                    table.columns = new_error_table_columns;
+                    table.value_indices = new_error_table_value_indices.into();
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
                             ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
@@ -3403,6 +3430,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
     pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
     pub new_log_store_table: Option<PbTable>,
+    pub new_error_table: Option<PbTable>,
 }
 
 async fn update_connector_props_fragments<F>(

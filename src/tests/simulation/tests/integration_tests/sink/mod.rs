@@ -17,6 +17,8 @@ mod basic;
 #[cfg(madsim)]
 mod err_isolation;
 #[cfg(madsim)]
+mod error_table;
+#[cfg(madsim)]
 mod rate_limit;
 #[cfg(madsim)]
 mod recovery;

@@ -21,7 +21,9 @@ use futures::future::BoxFuture;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 
-use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
+use crate::sink::log_store::{
+    LogStoreReadItem, LogStoreResult, ReportedSinkErrorRow, TruncateOffset,
+};
 use crate::sink::{
     LogSinker, SinglePhaseCommitCoordinator, SinkLogReader, TwoPhaseCommitCoordinator,
 };
@@ -40,7 +42,11 @@ pub trait DynLogReader: Send {
     async fn dyn_start_from(&mut self, start_offset: Option<u64>) -> LogStoreResult<()>;
     async fn dyn_next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)>;
 
-    fn dyn_truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
+    fn dyn_truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()>;
 }
 
 #[async_trait]
@@ -53,8 +59,12 @@ impl<R: SinkLogReader> DynLogReader for R {
         R::next_item(self).await
     }
 
-    fn dyn_truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        R::truncate(self, offset)
+    fn dyn_truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
+        R::truncate(self, offset, error_rows)
     }
 }
 
@@ -72,8 +82,12 @@ impl SinkLogReader for &mut dyn DynLogReader {
         (*self).dyn_next_item()
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        (*self).dyn_truncate(offset)
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
+        (*self).dyn_truncate(offset, error_rows)
     }
 }
 

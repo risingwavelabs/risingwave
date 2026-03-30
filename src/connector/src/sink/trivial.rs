@@ -128,7 +128,7 @@ impl<T: TrivialSinkType> LogSinker for TrivialSink<T> {
                         );
                     }
 
-                    log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
+                    log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id }, vec![])?;
                 }
                 LogStoreReadItem::Barrier { schema_change, .. } => {
                     if T::TRACE_LOG {
@@ -144,7 +144,7 @@ impl<T: TrivialSinkType> LogSinker for TrivialSink<T> {
                         info!(?schema_change, "trivial sink receive schema change");
                     }
 
-                    log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                    log_reader.truncate(TruncateOffset::Barrier { epoch }, vec![])?;
                 }
             }
         }

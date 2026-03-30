@@ -111,7 +111,9 @@ use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::file_sink::fs::FsSink;
-use crate::sink::log_store::{LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset};
+use crate::sink::log_store::{
+    LogReader, LogStoreReadItem, LogStoreResult, ReportedSinkErrorRow, TruncateOffset,
+};
 use crate::sink::snowflake_redshift::snowflake::SNOWFLAKE_SINK_V2;
 use crate::sink::utils::feature_gated_sink_mod;
 
@@ -788,7 +790,11 @@ pub trait SinkLogReader: Send {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()>;
 }
 
 impl<R: LogReader> SinkLogReader for &mut R {
@@ -798,8 +804,12 @@ impl<R: LogReader> SinkLogReader for &mut R {
         <R as LogReader>::next_item(*self)
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        <R as LogReader>::truncate(*self, offset)
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
+        <R as LogReader>::truncate(*self, offset, error_rows)
     }
 
     fn start_from(

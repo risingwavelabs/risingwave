@@ -20,7 +20,8 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{
-    FlushCurrentEpochOptions, LogStoreResult, LogWriter, LogWriterPostFlushCurrentEpoch,
+    FlushCurrentEpochOptions, FlushCurrentEpochResult, LogStoreResult, LogWriter,
+    LogWriterPostFlushCurrentEpoch,
 };
 use risingwave_storage::store::LocalStateStore;
 use tokio::sync::mpsc::UnboundedSender;
@@ -137,9 +138,10 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         &mut self,
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
-    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
+    ) -> LogStoreResult<FlushCurrentEpochResult<'_>> {
         let epoch = self.state.epoch().curr;
         let mut writer = self.state.start_writer(false);
+        let mut reported_error_rows = vec![];
 
         // When the stream is paused, donot flush barrier to ensure there is no dirty data in state store.
         // Besides, barrier on a paused stream is useless in log store because it won't change the log store state.
@@ -162,17 +164,10 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         }
         flush_info.report(&self.metrics);
 
-        if let Some(truncate_offset) = self.tx.pop_truncation(epoch) {
+        if let Some((truncate_offset, new_reported_error_rows)) = self.tx.pop_truncation(epoch) {
             self.last_truncate_offset = Some(truncate_offset);
+            reported_error_rows.extend(new_reported_error_rows);
         }
-        let post_seal_epoch = self.state.seal_current_epoch(
-            next_epoch,
-            self.last_truncate_offset
-                .map(|(epoch, seq_id)| {
-                    LogStoreVnodeProgress::Aligned(self.state.vnodes().clone(), epoch, seq_id)
-                })
-                .unwrap_or(LogStoreVnodeProgress::None),
-        );
         let has_schema_change = options.schema_change.is_some();
         // Barrier's new_vnode_bitmap field does not need to be passed to log-reader, because when sink is decoupled, we
         // always rebuild sink when update vnode bitmap.
@@ -184,32 +179,47 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             options.is_stop,
         );
         if has_schema_change {
-            let truncate_offset = self.tx.wait_for_barrier_truncation(epoch).await?;
+            let (truncate_offset, new_reported_error_rows) =
+                self.tx.wait_for_barrier_truncation(epoch).await?;
             assert_eq!(truncate_offset, (epoch, None));
             self.last_truncate_offset = Some(truncate_offset);
+            reported_error_rows.extend(new_reported_error_rows);
         }
+        let post_seal_epoch = self.state.seal_current_epoch(
+            next_epoch,
+            self.last_truncate_offset
+                .map(|(epoch, seq_id)| {
+                    LogStoreVnodeProgress::Aligned(self.state.vnodes().clone(), epoch, seq_id)
+                })
+                .unwrap_or(LogStoreVnodeProgress::None),
+        );
         let update_vnode_bitmap_tx = &mut self.update_vnode_bitmap_tx;
         let tx = &mut self.tx;
         self.seq_id = FIRST_SEQ_ID;
-        Ok(LogWriterPostFlushCurrentEpoch::new(move || {
-            async move {
-                {
-                    let new_vnodes = options.new_vnode_bitmap;
+        Ok(FlushCurrentEpochResult {
+            post_flush: LogWriterPostFlushCurrentEpoch::new(move || {
+                async move {
+                    {
+                        let new_vnodes = options.new_vnode_bitmap;
 
-                    post_seal_epoch
-                        .post_yield_barrier(new_vnodes.clone())
-                        .await?;
-                    if let Some(new_vnodes) = new_vnodes {
-                        update_vnode_bitmap_tx
-                            .send((new_vnodes, next_epoch))
-                            .map_err(|_| anyhow!("fail to send update vnode bitmap to reader"))?;
-                        tx.clear();
+                        post_seal_epoch
+                            .post_yield_barrier(new_vnodes.clone())
+                            .await?;
+                        if let Some(new_vnodes) = new_vnodes {
+                            update_vnode_bitmap_tx
+                                .send((new_vnodes, next_epoch))
+                                .map_err(|_| {
+                                    anyhow!("fail to send update vnode bitmap to reader")
+                                })?;
+                            tx.clear();
+                        }
+                        Ok(())
                     }
-                    Ok(())
                 }
-            }
-            .boxed()
-        }))
+                .boxed()
+            }),
+            reported_error_rows,
+        })
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {

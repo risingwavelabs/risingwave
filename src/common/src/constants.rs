@@ -94,3 +94,48 @@ pub mod log_store {
         });
     }
 }
+
+pub mod sink_error {
+    use std::sync::LazyLock;
+
+    use crate::types::DataType;
+    use crate::util::sort_util::OrderType;
+
+    pub const EPOCH_COLUMN_NAME: &str = "sink_error_epoch";
+    pub const ROW_ID_COLUMN_NAME: &str = "sink_error_row_id";
+    pub const VNODE_COLUMN_NAME: &str = "sink_error_vnode";
+    pub const ROW_OP_COLUMN_NAME: &str = "sink_error_row_op";
+    pub const READ_EPOCH_COLUMN_NAME: &str = "sink_error_read_epoch";
+    pub const EXTRA_INFO_COLUMN_NAME: &str = "sink_error_extra_info";
+
+    pub const EPOCH_COLUMN_TYPE: DataType = DataType::Int64;
+    pub const ROW_ID_COLUMN_TYPE: DataType = DataType::Int32;
+    pub const VNODE_COLUMN_TYPE: DataType = DataType::Int16;
+    pub const ROW_OP_COLUMN_TYPE: DataType = DataType::Int16;
+    pub const READ_EPOCH_COLUMN_TYPE: DataType = DataType::Int64;
+    pub const EXTRA_INFO_COLUMN_TYPE: DataType = DataType::Jsonb;
+
+    pub const PREDEFINED_COLUMNS: [(&str, DataType); 6] = [
+        (EPOCH_COLUMN_NAME, EPOCH_COLUMN_TYPE),
+        (ROW_ID_COLUMN_NAME, ROW_ID_COLUMN_TYPE),
+        (VNODE_COLUMN_NAME, VNODE_COLUMN_TYPE),
+        (ROW_OP_COLUMN_NAME, ROW_OP_COLUMN_TYPE),
+        (READ_EPOCH_COLUMN_NAME, READ_EPOCH_COLUMN_TYPE),
+        (EXTRA_INFO_COLUMN_NAME, EXTRA_INFO_COLUMN_TYPE),
+    ];
+
+    pub const EPOCH_COLUMN_INDEX: usize = 0;
+    pub const ROW_ID_COLUMN_INDEX: usize = 1;
+    pub const VNODE_COLUMN_INDEX: usize = 2;
+    pub const ROW_OP_COLUMN_INDEX: usize = 3;
+    pub const READ_EPOCH_COLUMN_INDEX: usize = 4;
+    pub const EXTRA_INFO_COLUMN_INDEX: usize = 5;
+
+    pub static PK_ORDERING: LazyLock<[OrderType; 3]> = LazyLock::new(|| {
+        [
+            OrderType::ascending(),
+            OrderType::ascending(),
+            OrderType::ascending(),
+        ]
+    });
+}

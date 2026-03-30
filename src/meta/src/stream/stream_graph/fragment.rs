@@ -512,6 +512,21 @@ fn rewrite_log_store_table(
     log_store_table.value_indices = (0..log_store_table.columns.len() as i32).collect();
 }
 
+/// Rewrite sink error table columns for schema change.
+fn rewrite_sink_error_table(
+    error_table: &mut PbTable,
+    removed_sink_column_names: &HashSet<String>,
+    newly_added_columns: &[ColumnCatalog],
+) {
+    error_table
+        .columns
+        .retain(|col| !removed_sink_column_names.contains(&col.column_desc.as_ref().unwrap().name));
+    extend_sink_columns(&mut error_table.columns, newly_added_columns, |name| {
+        name.clone()
+    });
+    error_table.value_indices = (0..error_table.columns.len() as i32).collect();
+}
+
 /// Rewrite `StreamScan` + Merge to match the new upstream schema.
 fn rewrite_stream_scan_and_merge(
     stream_scan_node: &mut StreamNode,
@@ -734,6 +749,15 @@ fn rewrite_project_node(
     Ok(())
 }
 
+/// Result of `rewrite_refresh_schema_sink_fragment`:
+/// (new fragment, new column catalogs, new log store table, new error table)
+type RewriteSinkFragmentResult = (
+    Fragment,
+    Vec<PbColumnCatalog>,
+    Option<PbTable>,
+    Option<PbTable>,
+);
+
 pub fn rewrite_refresh_schema_sink_fragment(
     original_sink_fragment: &Fragment,
     sink: &PbSink,
@@ -742,9 +766,13 @@ pub fn rewrite_refresh_schema_sink_fragment(
     upstream_table: &PbTable,
     upstream_table_fragment_id: FragmentId,
     id_generator_manager: &IdGeneratorManager,
-) -> MetaResult<(Fragment, Vec<PbColumnCatalog>, Option<PbTable>)> {
+) -> MetaResult<RewriteSinkFragmentResult> {
     let removed_column_ids: HashSet<_> =
         removed_columns.iter().map(|col| col.column_id()).collect();
+    let removed_sink_column_names: HashSet<_> = removed_columns
+        .iter()
+        .map(|col| col.column_desc.name.clone())
+        .collect();
     let removed_log_store_column_names: HashSet<_> = removed_columns
         .iter()
         .map(|col| format!("{}_{}", upstream_table.name, col.column_desc.name))
@@ -806,6 +834,12 @@ pub fn rewrite_refresh_schema_sink_fragment(
     } else {
         None
     };
+    let new_error_table = if let Some(error_table) = &mut sink_node_body.error_table {
+        rewrite_sink_error_table(error_table, &removed_sink_column_names, newly_added_columns);
+        Some(error_table.clone())
+    } else {
+        None
+    };
     sink_node_body.sink_desc.as_mut().unwrap().column_catalogs = new_sink_columns.clone();
 
     let stream_scan_node = if stream_input_is_project {
@@ -843,7 +877,12 @@ pub fn rewrite_refresh_schema_sink_fragment(
     } else {
         sink_node.fields = scan_rewrite.output_fields;
     }
-    Ok((new_sink_fragment, new_sink_columns, new_log_store_table))
+    Ok((
+        new_sink_fragment,
+        new_sink_columns,
+        new_log_store_table,
+        new_error_table,
+    ))
 }
 
 /// Adjacency list (G) of backfill orders.
@@ -2404,7 +2443,6 @@ mod tests {
             value_indices: (0..columns.len()).map(|i| i as i32).collect(),
             ..Default::default()
         };
-
         let original_fragment = Fragment {
             fragment_id: 1.into(),
             fragment_type_mask: FragmentTypeMask::default(),
@@ -2426,7 +2464,7 @@ mod tests {
             },
         };
 
-        let (new_fragment, _, _) = rewrite_refresh_schema_sink_fragment(
+        let (new_fragment, _, _, _) = rewrite_refresh_schema_sink_fragment(
             &original_fragment,
             &sink,
             std::slice::from_ref(&new_column),
@@ -2527,6 +2565,11 @@ mod tests {
             value_indices: (0..columns.len()).map(|i| i as i32).collect(),
             ..Default::default()
         };
+        let error_table = PbTable {
+            columns: columns.iter().map(|col| col.to_protobuf()).collect(),
+            value_indices: (0..columns.len()).map(|i| i as i32).collect(),
+            ..Default::default()
+        };
 
         let original_fragment = Fragment {
             fragment_id: 1.into(),
@@ -2538,6 +2581,7 @@ mod tests {
                 node_body: Some(NodeBody::Sink(Box::new(SinkNode {
                     sink_desc: Some(sink_desc),
                     table: Some(log_store_table),
+                    error_table: Some(error_table),
                     log_store_type: SinkLogStoreType::KvLogStore as i32,
                     ..Default::default()
                 }))),
@@ -2550,16 +2594,17 @@ mod tests {
             },
         };
 
-        let (new_fragment, new_schema, new_log_store_table) = rewrite_refresh_schema_sink_fragment(
-            &original_fragment,
-            &sink,
-            &[],
-            std::slice::from_ref(&removed_column),
-            &upstream_table,
-            7.into(),
-            id_gen_manager,
-        )
-        .unwrap();
+        let (new_fragment, new_schema, new_log_store_table, new_error_table) =
+            rewrite_refresh_schema_sink_fragment(
+                &original_fragment,
+                &sink,
+                &[],
+                std::slice::from_ref(&removed_column),
+                &upstream_table,
+                7.into(),
+                id_gen_manager,
+            )
+            .unwrap();
 
         assert_eq!(new_schema.len(), 2);
         assert!(
@@ -2607,6 +2652,13 @@ mod tests {
         assert_eq!(
             new_log_store_table.value_indices,
             (0..columns.len()).map(|i| i as i32).collect::<Vec<_>>()
+        );
+        let new_error_table = new_error_table.expect("error table should be updated");
+        assert!(
+            new_error_table
+                .columns
+                .iter()
+                .all(|col| col.column_desc.as_ref().unwrap().name != "tmp")
         );
     }
 }

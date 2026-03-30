@@ -42,6 +42,7 @@ use super::derive::{derive_columns, derive_pk};
 use super::stream::prelude::*;
 use super::utils::{
     Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
+    infer_sink_error_table_catalog_inner,
 };
 use super::{
     ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanRef as PlanRef, StreamProject,
@@ -751,6 +752,13 @@ impl StreamSink {
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
         infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc().columns)
     }
+
+    /// The error table schema is:
+    /// | write epoch | error row id | vnode | row op | read epoch | extra info | visible sink columns |
+    /// Pk is: | error epoch | vnode | error row id |
+    fn infer_sink_error_table_catalog(&self) -> TableCatalog {
+        infer_sink_error_table_catalog_inner(self.sink_desc().columns.as_slice())
+    }
 }
 
 impl PlanTreeNodeUnary<Stream> for StreamSink {
@@ -803,10 +811,14 @@ impl StreamNode for StreamSink {
         let table = self
             .infer_kv_log_store_table_catalog()
             .with_id(state.gen_table_id_wrapped());
+        let error_table = self
+            .infer_sink_error_table_catalog()
+            .with_id(state.gen_table_id_wrapped());
 
         PbNodeBody::Sink(Box::new(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
+            error_table: Some(error_table.to_internal_table_prost()),
             log_store_type: self.log_store_type as i32,
             rate_limit: self.base.ctx().overwrite_options().sink_rate_limit,
         }))

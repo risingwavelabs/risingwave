@@ -220,7 +220,8 @@ pub fn visit_stream_node_tables_inner<F>(
             // Sink
             NodeBody::Sink(node) => {
                 // A sink with a kv log store should have a state table.
-                optional!(node.table, "Sink")
+                optional!(node.table, "Sink");
+                optional!(node.error_table, "SinkError");
             }
 
             // Now
