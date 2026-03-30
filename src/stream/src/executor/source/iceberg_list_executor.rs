@@ -338,8 +338,8 @@ async fn incremental_scan_stream(
                 .find(|snapshot| snapshot.snapshot_id() == last_snapshot_id)
         {
             let lag_secs =
-                ((current_snapshot.timestamp_ms() - last_ingested_snapshot.timestamp_ms()).max(0)
-                    / 1000) as i64;
+                (current_snapshot.timestamp_ms() - last_ingested_snapshot.timestamp_ms()).max(0)
+                    / 1000;
             metrics
                 .iceberg_source_snapshot_lag_seconds
                 .with_guarded_label_values(&label_values)
