@@ -139,9 +139,8 @@ impl HummockManager {
             .unwrap();
     }
 
-    /// Unregisters stale members and groups
-    /// The caller should ensure `table_fragments_list` remain unchanged during `purge`.
-    /// Currently `purge` is only called during meta service start ups.
+    /// Unregisters stale members and groups.
+    /// The caller should ensure the set of valid table ids remains stable during `purge`.
     pub async fn purge(&self, valid_ids: &HashSet<TableId>) -> Result<()> {
         let to_unregister = self
             .versioning

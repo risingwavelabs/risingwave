@@ -30,7 +30,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
@@ -256,6 +256,10 @@ impl HummockManager {
                                 }
 
                                 HummockTimerEvent::PurgeStaleCompactionGroup => {
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
                                     hummock_manager.purge_stale_compaction_groups().await;
                                 }
 
@@ -510,6 +514,42 @@ impl HummockManager {
     }
 
     async fn purge_stale_compaction_groups(&self) {
+        let creating_jobs = match self
+            .metadata_manager
+            .catalog_controller
+            .list_creating_jobs(true, true, None)
+            .await
+        {
+            Ok(creating_jobs) => creating_jobs,
+            Err(err) => {
+                warn!(
+                    error = %err.as_report(),
+                    "failed to list creating jobs for stale compaction group purge"
+                );
+                return;
+            }
+        };
+        if !creating_jobs.is_empty() {
+            info!(
+                job_count = creating_jobs.len(),
+                "skip stale compaction group purge because creating jobs exist"
+            );
+            return;
+        }
+
+        let dropped_table_ids = self
+            .metadata_manager
+            .catalog_controller
+            .list_pending_dropped_table_ids()
+            .await;
+        if !dropped_table_ids.is_empty() {
+            info!(
+                table_count = dropped_table_ids.len(),
+                "skip stale compaction group purge because dropped tables are pending cleanup"
+            );
+            return;
+        }
+
         let valid_table_ids: HashSet<_> = match self
             .metadata_manager
             .catalog_controller
@@ -756,13 +796,20 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use chrono::Utc;
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::CompactionGroupId;
     use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_meta_model::WorkerId;
+    use risingwave_meta_model::{
+        CreateType, JobId, JobStatus, UserId, WorkerId, object, sink, streaming_job,
+    };
+    use risingwave_pb::catalog::PbTable;
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, WorkerType};
+    use risingwave_pb::user::PbUserInfo;
+    use sea_orm::ActiveValue::Set;
+    use sea_orm::{ActiveModelTrait, EntityTrait, TransactionTrait};
 
     use crate::controller::catalog::CatalogController;
     use crate::controller::cluster::{ClusterController, ClusterControllerRef};
@@ -824,6 +871,74 @@ mod tests {
             .await
             .unwrap();
         (env, hummock_manager, cluster_ctl, worker_id)
+    }
+
+    async fn create_creating_sink_job(
+        catalog_controller: &CatalogController,
+        job_id: JobId,
+        owner_id: UserId,
+    ) -> crate::MetaResult<()> {
+        let inner = catalog_controller.get_inner_read_guard().await;
+        let txn = inner.db.begin().await?;
+        let now = Utc::now().naive_utc();
+
+        object::ActiveModel {
+            oid: Set(job_id.as_object_id()),
+            obj_type: Set(object::ObjectType::Sink),
+            owner_id: Set(owner_id),
+            schema_id: Set(None),
+            database_id: Set(None),
+            initialized_at: Set(now),
+            created_at: Set(now),
+            initialized_at_cluster_version: Set(None),
+            created_at_cluster_version: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+
+        sink::ActiveModel {
+            sink_id: Set(job_id.as_sink_id()),
+            name: Set(format!("creating_sink_{}", job_id.as_raw_id())),
+            columns: Set(Default::default()),
+            plan_pk: Set(Default::default()),
+            distribution_key: Set(Default::default()),
+            downstream_pk: Set(Default::default()),
+            sink_type: Set(sink::SinkType::AppendOnly),
+            ignore_delete: Set(false),
+            properties: Set(Default::default()),
+            definition: Set("create sink".to_owned()),
+            connection_id: Set(None),
+            db_name: Set(String::new()),
+            sink_from_name: Set(String::new()),
+            sink_format_desc: Set(None),
+            target_table: Set(None),
+            secret_ref: Set(None),
+            original_target_columns: Set(None),
+            auto_refresh_schema_from_table: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Creating),
+            create_type: Set(CreateType::Background),
+            timezone: Set(None),
+            config_override: Set(None),
+            adaptive_parallelism_strategy: Set(None),
+            parallelism: Set(risingwave_meta_model::StreamingParallelism::Adaptive),
+            backfill_parallelism: Set(None),
+            backfill_orders: Set(None),
+            max_parallelism: Set(1),
+            specific_resource_group: Set(None),
+            is_serverless_backfill: Set(false),
+        }
+        .insert(&txn)
+        .await?;
+
+        txn.commit().await?;
+
+        Ok(())
     }
 
     async fn get_compaction_group_id_by_table_id(
@@ -888,5 +1003,139 @@ mod tests {
         assert_eq!(member_table_ids(&version, cg_64), vec![64]);
         assert_eq!(member_table_ids(&version, cg_65), vec![65]);
         assert_no_group_overlap(&version);
+    }
+
+    #[tokio::test]
+    async fn test_purge_stale_compaction_groups_skips_when_creating_jobs_exist() {
+        let mut opts = MetaOpts::test(false);
+        opts.periodic_purge_stale_compaction_group_interval_sec = 1;
+
+        let (_env, hummock_manager, _, _worker_id) =
+            setup_compute_env_with_meta_opts(81, opts).await;
+        hummock_manager
+            .register_table_ids_for_test(&[(101, 2.into())])
+            .await
+            .unwrap();
+
+        let catalog_controller = hummock_manager
+            .metadata_manager()
+            .catalog_controller
+            .clone();
+        catalog_controller
+            .create_user(PbUserInfo {
+                name: "purge_skip_user".to_owned(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let creating_owner_id = catalog_controller
+            .get_user_by_name("purge_skip_user")
+            .await
+            .unwrap()
+            .user_id;
+        let creating_job_id = JobId::new(20_001);
+        create_creating_sink_job(
+            catalog_controller.as_ref(),
+            creating_job_id,
+            creating_owner_id,
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            hummock_manager
+                .get_current_version()
+                .await
+                .state_table_info
+                .info()
+                .contains_key(&TableId::new(101))
+        );
+
+        hummock_manager.purge_stale_compaction_groups().await;
+
+        assert!(
+            hummock_manager
+                .get_current_version()
+                .await
+                .state_table_info
+                .info()
+                .contains_key(&TableId::new(101)),
+            "stale compaction group should be preserved when creating jobs exist"
+        );
+
+        let inner = catalog_controller.get_inner_read_guard().await;
+        let txn = inner.db.begin().await.unwrap();
+        object::Entity::delete_by_id(creating_job_id.as_object_id())
+            .exec(&txn)
+            .await
+            .unwrap();
+        txn.commit().await.unwrap();
+
+        hummock_manager.purge_stale_compaction_groups().await;
+
+        assert!(
+            !hummock_manager
+                .get_current_version()
+                .await
+                .state_table_info
+                .info()
+                .contains_key(&TableId::new(101)),
+            "stale compaction group should be purged once creating jobs are gone"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_purge_stale_compaction_groups_skips_when_pending_dropped_tables_exist() {
+        let mut opts = MetaOpts::test(false);
+        opts.periodic_purge_stale_compaction_group_interval_sec = 1;
+
+        let (_env, hummock_manager, _, _worker_id) =
+            setup_compute_env_with_meta_opts(82, opts).await;
+        hummock_manager
+            .register_table_ids_for_test(&[(102, 2.into())])
+            .await
+            .unwrap();
+
+        let catalog_controller = hummock_manager
+            .metadata_manager()
+            .catalog_controller
+            .clone();
+        {
+            let mut inner = catalog_controller.get_inner_write_guard().await;
+            inner.dropped_tables.insert(
+                TableId::new(202),
+                PbTable {
+                    id: 202.into(),
+                    schema_id: Default::default(),
+                    database_id: Default::default(),
+                    name: "pending_drop_table".to_owned(),
+                    columns: vec![],
+                    pk: vec![],
+                    stream_key: vec![],
+                    ..Default::default()
+                },
+            );
+        }
+
+        assert!(
+            hummock_manager
+                .get_current_version()
+                .await
+                .state_table_info
+                .info()
+                .contains_key(&TableId::new(102))
+        );
+
+        hummock_manager.purge_stale_compaction_groups().await;
+
+        assert!(
+            hummock_manager
+                .get_current_version()
+                .await
+                .state_table_info
+                .info()
+                .contains_key(&TableId::new(102)),
+            "stale compaction group should be preserved when dropped tables are pending cleanup"
+        );
     }
 }

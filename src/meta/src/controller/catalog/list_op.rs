@@ -23,6 +23,16 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::load_streaming_jobs_by_ids;
 
 impl CatalogController {
+    pub async fn list_pending_dropped_table_ids(&self) -> HashSet<TableId> {
+        self.inner
+            .read()
+            .await
+            .dropped_tables
+            .keys()
+            .copied()
+            .collect()
+    }
+
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.inner.read().await.list_time_travel_table_ids().await
     }
