@@ -23,6 +23,8 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::load_streaming_jobs_by_ids;
 
 impl CatalogController {
+    /// Lists table ids whose catalog entries have been dropped but whose Hummock cleanup has not
+    /// finished yet.
     pub async fn list_pending_dropped_table_ids(&self) -> HashSet<TableId> {
         self.inner
             .read()

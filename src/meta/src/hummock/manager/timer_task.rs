@@ -513,6 +513,12 @@ impl HummockManager {
         (join_handle, shutdown_tx)
     }
 
+    /// Best-effort cleanup for stale dynamic compaction groups.
+    ///
+    /// This runtime path is intentionally conservative: it only calls `purge` when the catalog is
+    /// in a stable window. If any streaming job is still creating, or any dropped table is still
+    /// pending post-collect Hummock cleanup, the whole round is skipped to avoid unregistering
+    /// still-live state tables.
     async fn purge_stale_compaction_groups(&self) {
         let creating_jobs = match self
             .metadata_manager
