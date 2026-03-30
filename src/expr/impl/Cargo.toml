@@ -38,7 +38,7 @@ futures-async-stream = { workspace = true }
 futures-util = "0.3"
 ginepro = { git = "https://github.com/risingwavelabs/ginepro.git", rev = "109c6f48f1db0926f4783548250f3e31680ff98c", optional = true }
 hex = "0.4"
-hmac = "0.12"
+hmac = "0.13"
 iceberg = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
