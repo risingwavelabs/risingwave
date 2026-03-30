@@ -47,7 +47,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
+    PkRangeBounds, PkScanRange, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -84,11 +84,11 @@ pub(crate) struct StreamActorManager {
 }
 
 impl StreamActorManager {
-    /// Decode a scan range (eq prefix + range bounds) from the StreamScanNode proto.
+    /// Decode a scan range (eq prefix + range bounds) from the `StreamScanNode` proto.
     fn decode_pk_scan_range(
         node: &StreamScanNode,
         table_desc: &StorageTableDesc,
-    ) -> StreamResult<Option<(OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>> {
+    ) -> StreamResult<Option<PkScanRange>> {
         use risingwave_pb::batch_plan::scan_range;
 
         let pk_types: Vec<DataType> = table_desc
@@ -156,7 +156,7 @@ impl StreamActorManager {
                     }
                 };
 
-            let next_col_bounds = match (
+            let next_col_bounds: PkRangeBounds = match (
                 pb_scan_range.lower_bound.as_ref(),
                 pb_scan_range.upper_bound.as_ref(),
             ) {
