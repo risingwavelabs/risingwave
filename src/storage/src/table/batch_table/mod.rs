@@ -1060,13 +1060,21 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         // order, but storage key ordering is reversed. Swap bounds so that the serialized
         // start_key < end_key in storage key space, matching what batch's
         // `convert_to_range_bounds` does.
+        //
+        // If the equality prefix already covers the full PK, there is no "next column" whose
+        // order type can be consulted. In that case, keep the bounds as-is and let
+        // `serialize_pk_bound` interpret them against the full prefix directly.
         let next_col_idx = pk_prefix.len();
-        let order_type = self.pk_serializer.get_order_types()[next_col_idx];
-        let (logical_start, logical_end) = if order_type.is_ascending() {
-            (&range_bounds.0, &range_bounds.1)
-        } else {
-            (&range_bounds.1, &range_bounds.0)
-        };
+        let (logical_start, logical_end) =
+            if let Some(order_type) = self.pk_serializer.get_order_types().get(next_col_idx) {
+                if order_type.is_ascending() {
+                    (&range_bounds.0, &range_bounds.1)
+                } else {
+                    (&range_bounds.1, &range_bounds.0)
+                }
+            } else {
+                (&range_bounds.0, &range_bounds.1)
+            };
 
         let range_start = match logical_start {
             Included(row) => Included(row),
