@@ -817,11 +817,11 @@ mod tests {
         let (_env, hummock_manager, _, _worker_id) =
             setup_compute_env_with_meta_opts(80, opts).await;
         hummock_manager
-            .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+            .register_table_ids_for_test(&[(64, 2), (80, 2)])
             .await
             .unwrap();
         hummock_manager
-            .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into()), (83, 3.into())])
+            .register_table_ids_for_test(&[(65, 3), (81, 3), (83, 3)])
             .await
             .unwrap();
 

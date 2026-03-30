@@ -529,36 +529,36 @@ mod tests {
 
     #[test]
     fn test_gen_normalize_plan_returns_none_for_single_table_group() {
-        let left = group(1.into(), &[10], false);
-        let right = group(2.into(), &[5, 20], false);
+        let left = group(1, &[10], false);
+        let right = group(2, &[5, 20], false);
 
         assert_eq!(None, gen_normalize_plan(&left, &right));
     }
 
     #[test]
     fn test_gen_normalize_plan_returns_none_for_non_overlapping_groups() {
-        let left = group(1.into(), &[1, 2, 3], false);
-        let right = group(2.into(), &[4, 5, 6], false);
+        let left = group(1, &[1, 2, 3], false);
+        let right = group(2, &[4, 5, 6], false);
 
         assert_eq!(None, gen_normalize_plan(&left, &right));
     }
 
     #[test]
     fn test_gen_normalize_plan_returns_none_when_boundary_cannot_split_parent() {
-        let left = group(1.into(), &[5, 6, 7], false);
-        let right = group(2.into(), &[4, 8], false);
+        let left = group(1, &[5, 6, 7], false);
+        let right = group(2, &[4, 8], false);
 
         assert_eq!(None, gen_normalize_plan(&left, &right));
     }
 
     #[test]
     fn test_gen_normalize_plan_generates_expected_boundary() {
-        let left = group(1.into(), &[1, 4, 7], false);
-        let right = group(2.into(), &[2, 5, 8], false);
+        let left = group(1, &[1, 4, 7], false);
+        let right = group(2, &[2, 5, 8], false);
 
         assert_eq!(
             Some(NormalizePlan {
-                parent_group_id: 1.into(),
+                parent_group_id: 1,
                 parent_table_ids: vec![1.into(), 4.into(), 7.into()],
                 boundary_table_id: 4.into(),
             }),
@@ -569,15 +569,15 @@ mod tests {
     #[test]
     fn test_build_normalize_plan_skips_disabled_boundary_and_continues_later_segment() {
         let groups = vec![
-            group(1.into(), &[1, 4, 7], false),
-            group(2.into(), &[2, 5, 8], true),
-            group(3.into(), &[10, 13, 16], false),
-            group(4.into(), &[11, 14, 17], false),
+            group(1, &[1, 4, 7], false),
+            group(2, &[2, 5, 8], true),
+            group(3, &[10, 13, 16], false),
+            group(4, &[11, 14, 17], false),
         ];
 
         assert_eq!(
             Some(NormalizePlan {
-                parent_group_id: 3.into(),
+                parent_group_id: 3,
                 parent_table_ids: vec![10.into(), 13.into(), 16.into()],
                 boundary_table_id: 13.into(),
             }),
@@ -995,18 +995,16 @@ impl HummockManager {
             let mut version = HummockVersionTransaction::new(
                 &mut versioning.current_version,
                 &mut versioning.hummock_version_deltas,
-                &mut versioning.table_change_log,
                 self.env.notification_manager(),
                 None,
                 &self.metrics,
-                &self.env.opts,
             );
             let mut new_version_delta = version.new_delta();
             let split_key = plan.split_key();
             let split_sst_count = new_version_delta
                 .latest_version()
                 .count_new_ssts_in_group_split(plan.parent_group_id, split_key.clone());
-            let new_sst_start_id = next_sstable_id(&self.env, split_sst_count).await?;
+            let new_sst_start_id = next_sstable_object_id(&self.env, split_sst_count).await?;
             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
 
             #[expect(deprecated)]
@@ -1017,7 +1015,7 @@ impl HummockManager {
                         group_config: Some(config.clone()),
                         group_id: new_compaction_group_id,
                         parent_group_id: plan.parent_group_id,
-                        new_sst_start_id,
+                        new_sst_start_id: new_sst_start_id.inner(),
                         table_ids: vec![],
                         version: CompatibilityVersion::LATEST as _,
                         split_key: Some(split_key.into()),

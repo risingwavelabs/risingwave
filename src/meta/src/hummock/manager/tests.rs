@@ -2829,11 +2829,11 @@ async fn test_normalize_overlapping_compaction_groups_cascading() {
 
     // StateDefault(2): [64,80], MaterializedView(3): [65,81,83]
     hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into()), (83, 3.into())])
+        .register_table_ids_for_test(&[(65, 3), (81, 3), (83, 3)])
         .await
         .unwrap();
 
@@ -2888,11 +2888,11 @@ async fn test_normalize_overlapping_compaction_groups_with_limit() {
     let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
 
     hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into()), (83, 3.into())])
+        .register_table_ids_for_test(&[(65, 3), (81, 3), (83, 3)])
         .await
         .unwrap();
 
@@ -2920,11 +2920,11 @@ async fn test_normalize_overlapping_compaction_groups_respects_disable_auto_grou
     let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
 
     hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
         .await
         .unwrap();
 
@@ -2956,11 +2956,11 @@ async fn test_normalize_overlapping_compaction_groups_respects_disable_auto_grou
     let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
 
     hummock_manager
-        .register_table_ids_for_test(&[(10, 2.into()), (30, 2.into()), (40, 2.into())])
+        .register_table_ids_for_test(&[(10, 2), (30, 2), (40, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(20, 3.into()), (50, 3.into())])
+        .register_table_ids_for_test(&[(20, 3), (50, 3)])
         .await
         .unwrap();
 
@@ -2987,19 +2987,13 @@ async fn test_normalize_overlapping_compaction_groups_skips_disabled_boundary_bu
     let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
 
     hummock_manager
-        .register_table_ids_for_test(&[
-            (10, 2.into()),
-            (15, 2.into()),
-            (35, 2.into()),
-            (20, 3.into()),
-            (40, 3.into()),
-        ])
+        .register_table_ids_for_test(&[(10, 2), (15, 2), (35, 2), (20, 3), (40, 3)])
         .await
         .unwrap();
 
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(
-            StaticCompactionGroupId::StateDefault,
+            StaticCompactionGroupId::StateDefault.into(),
             &[35.into()],
             None,
         )
@@ -3034,11 +3028,11 @@ async fn test_normalize_overlapping_compaction_groups_noop_on_non_overlapping_in
     let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
 
     hummock_manager
-        .register_table_ids_for_test(&[(10, 2.into()), (11, 2.into())])
+        .register_table_ids_for_test(&[(10, 2), (11, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(20, 3.into()), (21, 3.into())])
+        .register_table_ids_for_test(&[(20, 3), (21, 3)])
         .await
         .unwrap();
 
@@ -3058,11 +3052,11 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
     ));
 
     hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
         .await
         .unwrap();
 
@@ -3079,8 +3073,9 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
         .await
         .unwrap();
 
+    let mut selector = default_compaction_selector();
     let task = hummock_manager
-        .get_compact_task(cg_64, &mut *default_compaction_selector())
+        .get_compact_task(cg_64, &mut selector)
         .await
         .unwrap()
         .expect("should produce a compaction task");
@@ -3135,16 +3130,11 @@ async fn test_schedule_group_split_runs_split_logic_after_normalize() {
     ));
 
     hummock_manager
-        .register_table_ids_for_test(&[
-            (64, 2.into()),
-            (80, 2.into()),
-            (200, 2.into()),
-            (201, 2.into()),
-        ])
+        .register_table_ids_for_test(&[(64, 2), (80, 2), (200, 2), (201, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
         .await
         .unwrap();
     hummock_meta_client
@@ -3158,7 +3148,7 @@ async fn test_schedule_group_split_runs_split_logic_after_normalize() {
         .await
         .unwrap();
     hummock_manager
-        .move_state_tables_to_dedicated_compaction_group(2.into(), &[200.into(), 201.into()], None)
+        .move_state_tables_to_dedicated_compaction_group(2, &[200.into(), 201.into()], None)
         .await
         .unwrap();
 
@@ -3196,11 +3186,11 @@ async fn test_schedule_group_merge_with_normalize_disabled() {
     let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
 
     hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
         .await
         .unwrap();
 
@@ -3216,11 +3206,11 @@ async fn test_schedule_group_split_with_normalize_disabled() {
     let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
 
     hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into())])
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
         .await
         .unwrap();
 
