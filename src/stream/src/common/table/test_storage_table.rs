@@ -14,9 +14,10 @@
 
 use std::collections::HashSet;
 
-use futures::{StreamExt, pin_mut};
+use futures::{StreamExt, TryStreamExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{self, OwnedRow, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -24,6 +25,7 @@ use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::table::batch_table::BatchTable;
 
@@ -281,6 +283,91 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         .await
         .unwrap();
     assert_eq!(get_no_exist_res, None);
+}
+
+#[tokio::test]
+async fn test_storage_table_batch_iter_vnode_with_full_pk_prefix() {
+    const TEST_TABLE_ID: TableId = TableId::new(234);
+    let test_env = prepare_hummock_test_env().await;
+
+    let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let order_types = vec![OrderType::ascending()];
+    let pk_indices = vec![0_usize];
+    let read_prefix_len_hint = 1;
+    let table = gen_pbtable(
+        TEST_TABLE_ID,
+        column_descs.clone(),
+        order_types.clone(),
+        pk_indices.clone(),
+        read_prefix_len_hint,
+    );
+
+    test_env.register_table(table.clone()).await;
+    let mut state =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    let batch_table = BatchTable::for_test(
+        test_env.storage.clone(),
+        TEST_TABLE_ID,
+        column_descs,
+        order_types,
+        pk_indices,
+        vec![0, 1, 2],
+    );
+
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state.init_epoch(epoch).await.unwrap();
+
+    state.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(10_i32.into()),
+        Some(100_i32.into()),
+    ]));
+    state.insert(OwnedRow::new(vec![
+        Some(2_i32.into()),
+        Some(20_i32.into()),
+        Some(200_i32.into()),
+    ]));
+
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state.commit_for_test(epoch).await.unwrap();
+    test_env.commit_epoch(epoch.prev).await;
+
+    let iter = batch_table
+        .batch_iter_vnode_with_pk_range(
+            HummockReadEpoch::Committed(epoch.prev),
+            None,
+            &OwnedRow::new(vec![Some(2_i32.into())]),
+            &(std::ops::Bound::Unbounded, std::ops::Bound::Unbounded),
+            VirtualNode::ZERO,
+            PrefetchOptions::new(true, true),
+            std::time::Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+    pin_mut!(iter);
+
+    let rows = iter.try_collect::<Vec<_>>().await.unwrap();
+    assert_eq!(
+        rows,
+        vec![OwnedRow::new(vec![
+            Some(2_i32.into()),
+            Some(20_i32.into()),
+            Some(200_i32.into()),
+        ])]
+    );
 }
 
 // test row-based encoding in batch mode
