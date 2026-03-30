@@ -390,6 +390,7 @@ impl StreamManagerService for StreamServiceImpl {
                         database_id,
                         schema_id,
                         config_override,
+                        adaptive_parallelism_strategy: None,
                     }
                 },
             )

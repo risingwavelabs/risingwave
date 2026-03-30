@@ -310,6 +310,7 @@ impl StreamContext {
                 .as_ref()
                 .map(ToString::to_string)
                 .unwrap_or_default(),
+            backfill_adaptive_parallelism_strategy: String::new(),
         }
     }
 

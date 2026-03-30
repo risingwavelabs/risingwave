@@ -43,6 +43,7 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
     HummockSstableObjectId, HummockVersionId, compact_task_to_string, statistics_compact_task,
 };
+use risingwave_meta_model::hummock_sequence::COMPACTION_TASK_ID;
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
@@ -75,7 +76,6 @@ use crate::hummock::metrics_utils::{
     trigger_local_table_stat,
 };
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::sequence::next_compaction_task_id;
 use crate::hummock::{HummockManager, commit_multi_var, start_measure_real_process_timer};
 use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
@@ -289,6 +289,19 @@ impl HummockManager {
 }
 
 impl HummockManager {
+    /// Gets one compaction task id with best-effort batching while ensuring concurrent callers
+    /// share the same refill instead of wasting an allocated range.
+    async fn next_compaction_task_id_with_prefetch(&self, refill_capacity: u32) -> Result<u64> {
+        self.prefetched_compaction_task_ids
+            .next(refill_capacity, |count| async move {
+                self.env
+                    .hummock_seq
+                    .next_interval(COMPACTION_TASK_ID, count)
+                    .await
+            })
+            .await
+    }
+
     pub async fn get_compact_tasks_impl(
         &self,
         compaction_groups: Vec<CompactionGroupId>,
@@ -343,6 +356,10 @@ impl HummockManager {
         let developer_config = Arc::new(CompactionDeveloperConfig::new_from_meta_opts(
             &self.env.opts,
         ));
+        // Reuse prefetched task ids from previous loops.
+        // Each group consumes at most one task_id (trivial tasks share the same id with normal
+        // task). When prefetched ids are exhausted, refill in fixed-size chunks to avoid
+        // per-group SQL transactions while keeping the in-memory cache small.
         'outside: for compaction_group_id in compaction_groups {
             if pick_tasks.len() >= max_select_count {
                 break;
@@ -368,8 +385,12 @@ impl HummockManager {
                 }
             };
 
-            // StoredIdGenerator already implements ids pre-allocation by ID_PREALLOCATE_INTERVAL.
-            let task_id = next_compaction_task_id(&self.env).await?;
+            // Use prefetched task id if available; when exhausted, refill in chunks first.
+            let task_id = self
+                .next_compaction_task_id_with_prefetch(
+                    self.env.opts.compaction_task_id_refill_capacity,
+                )
+                .await?;
 
             if !compaction_statuses.contains_key(&compaction_group_id) {
                 // lazy initialize.
@@ -1780,6 +1801,16 @@ impl GroupStateValidator {
         }
 
         Self::check_single_group_emergency(levels, compaction_config)
+    }
+}
+
+#[cfg(test)]
+mod prefetched_task_id_tests {
+    use crate::manager::MetaOpts;
+
+    #[test]
+    fn test_compaction_task_id_refill_capacity_default() {
+        assert_eq!(MetaOpts::test(false).compaction_task_id_refill_capacity, 64);
     }
 }
 

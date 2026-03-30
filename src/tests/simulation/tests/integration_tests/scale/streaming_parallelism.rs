@@ -26,12 +26,11 @@ use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_
 #[tokio::test]
 async fn test_streaming_parallelism_default() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     cluster.run("create table t1 (c1 int, c2 int);").await?;
     let materialize_fragment = cluster
         .locate_one_fragment([identity_contains("materialize")])
         .await?;
-    assert_eq!(materialize_fragment.inner.actors.len(), default_parallelism);
+    assert_eq!(materialize_fragment.inner.actors.len(), 4);
     Ok(())
 }
 
@@ -161,6 +160,9 @@ async fn test_parallelism_exceed_virtual_node_max_create() -> Result<()> {
     .await;
 
     let mut session = cluster.start_session();
+    session
+        .run("set streaming_parallelism_for_table = adaptive")
+        .await?;
     session.run("create table t(v int)").await?;
     session
         .run("select parallelism from rw_streaming_parallelism where name = 't'")
@@ -252,7 +254,9 @@ async fn test_parallelism_exceed_virtual_node_max_alter_adaptive() -> Result<()>
     session
         .run("select distinct parallelism from rw_fragment_parallelism where name = 't'")
         .await?
-        .assert_result_eq(format!("{}", vnode_max));
+        // The default system adaptive strategy is BOUNDED(64), so adaptive
+        // alter is capped before reaching the vnode upper bound.
+        .assert_result_eq("64");
 
     Ok(())
 }
