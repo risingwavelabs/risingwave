@@ -49,7 +49,7 @@ use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, Parti
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
 use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
-use crate::barrier::utils::collect_creating_job_commit_epoch_info;
+use crate::barrier::utils::{BarrierItemCollector, collect_creating_job_commit_epoch_info};
 use crate::barrier::{
     BackfillProgress, Command, CreateStreamingJobType, FragmentBackfillProgress, Reschedule,
 };
@@ -616,6 +616,9 @@ pub(in crate::barrier) struct DatabaseCheckpointControl {
     partial_graph_id: PartialGraphId,
     pub(super) state: BarrierWorkerState,
 
+    finishing_jobs_collector:
+        BarrierItemCollector<JobId, (Vec<BarrierCompleteResponse>, TrackingJob), ()>,
+
     /// Save the state and message of barrier in order.
     /// Key is the `prev_epoch`.
     command_ctx_queue: BTreeMap<u64, BarrierEpochState>,
@@ -635,6 +638,7 @@ impl DatabaseCheckpointControl {
             database_id,
             partial_graph_id: to_partial_graph_id(database_id, None),
             state: BarrierWorkerState::new(),
+            finishing_jobs_collector: BarrierItemCollector::new(),
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: None,
@@ -654,6 +658,7 @@ impl DatabaseCheckpointControl {
             database_id,
             partial_graph_id: to_partial_graph_id(database_id, None),
             state,
+            finishing_jobs_collector: BarrierItemCollector::new(),
             command_ctx_queue: Default::default(),
             completing_barrier: None,
             committed_epoch: Some(committed_epoch),
@@ -671,14 +676,17 @@ impl DatabaseCheckpointControl {
     }
 
     /// Enqueue a barrier command
-    fn enqueue_command(&mut self, prev_epoch: u64, creating_jobs_to_wait: HashSet<JobId>) {
+    fn enqueue_command(&mut self, epoch: EpochPair, creating_jobs_to_wait: HashSet<JobId>) {
+        let prev_epoch = epoch.prev;
         tracing::trace!(prev_epoch, ?creating_jobs_to_wait, "enqueue command");
+        if !creating_jobs_to_wait.is_empty() {
+            self.finishing_jobs_collector
+                .enqueue(epoch, creating_jobs_to_wait, ());
+        }
         self.command_ctx_queue.insert(
             prev_epoch,
             BarrierEpochState {
                 is_collected: false,
-                creating_jobs_to_wait,
-                finished_jobs: HashMap::new(),
             },
         );
     }
@@ -867,11 +875,6 @@ impl DatabaseCheckpointControl {
                 );
             }
             for (job_id, epoch, resps) in finished_jobs {
-                let epoch_state = &mut self
-                    .command_ctx_queue
-                    .get_mut(&epoch)
-                    .expect("should exist");
-                assert!(epoch_state.creating_jobs_to_wait.remove(&job_id));
                 debug!(epoch, %job_id, "finish creating job");
                 // It's safe to remove the creating job, because on CompleteJobType::Finished,
                 // all previous barriers have been collected and completed.
@@ -880,22 +883,20 @@ impl DatabaseCheckpointControl {
                     .remove(&job_id)
                     .expect("should exist");
                 let tracking_job = creating_streaming_job.into_tracking_job();
-
-                assert!(
-                    epoch_state
-                        .finished_jobs
-                        .insert(job_id, (resps, tracking_job))
-                        .is_none()
-                );
+                self.finishing_jobs_collector
+                    .collect(epoch, job_id, (resps, tracking_job));
             }
         }
         assert!(self.completing_barrier.is_none());
-        while let Some((_, state)) = self.command_ctx_queue.first_key_value()
+        self.finishing_jobs_collector.advance_collected();
+        let first_unfinished_job_epoch = self.finishing_jobs_collector.first_inflight_epoch();
+        while let Some((epoch, state)) = self.command_ctx_queue.first_key_value()
             && !state.is_inflight()
+            && first_unfinished_job_epoch
+                .is_none_or(|first_unfinished_epoch| *epoch < first_unfinished_epoch.prev)
         {
             {
                 let (epoch, state) = self.command_ctx_queue.pop_first().expect("non-empty");
-                assert!(state.creating_jobs_to_wait.is_empty());
                 assert!(state.is_collected);
 
                 let (resps, mut info) =
@@ -922,13 +923,20 @@ impl DatabaseCheckpointControl {
                     continue;
                 }
                 let mut staging_commit_info = self.database_info.take_staging_commit_info();
-                state
-                    .finished_jobs
-                    .into_iter()
-                    .for_each(|(_, (resps, tracking_job))| {
-                        resps_to_commit.extend(resps);
-                        staging_commit_info.finished_jobs.push(tracking_job);
-                    });
+                if let Some((_, finished_jobs, _)) = self
+                    .finishing_jobs_collector
+                    .take_collected_if(|collected_epoch| {
+                        assert!(epoch <= collected_epoch.prev);
+                        epoch == collected_epoch.prev
+                    })
+                {
+                    finished_jobs
+                        .into_iter()
+                        .for_each(|(_, (resps, tracking_job))| {
+                            resps_to_commit.extend(resps);
+                            staging_commit_info.finished_jobs.push(tracking_job);
+                        });
+                }
                 let task = task.get_or_insert_default();
                 Command::collect_commit_epoch_info(
                     &self.database_info,
@@ -1025,15 +1033,11 @@ impl DatabaseCheckpointControl {
 /// The state of barrier.
 struct BarrierEpochState {
     is_collected: bool,
-
-    creating_jobs_to_wait: HashSet<JobId>,
-
-    finished_jobs: HashMap<JobId, (Vec<BarrierCompleteResponse>, TrackingJob)>,
 }
 
 impl BarrierEpochState {
     fn is_inflight(&self) -> bool {
-        !self.is_collected || !self.creating_jobs_to_wait.is_empty()
+        !self.is_collected
     }
 }
 
@@ -1186,7 +1190,7 @@ impl DatabaseCheckpointControl {
             });
         span.record("epoch", barrier_info.curr_epoch());
 
-        let prev_epoch = barrier_info.prev_epoch();
+        let epoch = barrier_info.epoch();
         let ApplyCommandInfo { jobs_to_wait } = match self.apply_command(
             command,
             &mut notifiers,
@@ -1210,7 +1214,7 @@ impl DatabaseCheckpointControl {
         };
 
         // Record the in-flight barrier.
-        self.enqueue_command(prev_epoch, jobs_to_wait);
+        self.enqueue_command(epoch, jobs_to_wait);
 
         Ok(())
     }
