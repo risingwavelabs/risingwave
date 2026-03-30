@@ -302,7 +302,7 @@ impl Distill for StreamTableScan {
                 use std::ops::Bound;
                 let field = &self.core.table_catalog.columns()[pk_cols[range_col_idx].column_index];
                 let fmt_bound_val = |v: &Vec<risingwave_common::types::Datum>| -> String {
-                    v.first().map_or("NULL".to_string(), |d| format!("{:?}", d))
+                    v.first().map_or("NULL".to_owned(), |d| format!("{:?}", d))
                 };
                 match &scan_range.range.0 {
                     Bound::Included(v) => {

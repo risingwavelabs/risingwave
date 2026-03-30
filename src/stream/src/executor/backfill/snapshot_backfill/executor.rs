@@ -55,6 +55,9 @@ use crate::executor::{
 };
 use crate::task::CreateMviewProgressReporter;
 
+pub type PkRangeBounds = (Bound<OwnedRow>, Bound<OwnedRow>);
+pub type PkScanRange = (OwnedRow, PkRangeBounds);
+
 pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// Upstream table
     upstream_table: BatchTable<S>,
@@ -79,8 +82,8 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 
     snapshot_epoch: Option<u64>,
-    /// (eq_prefix, range_bounds) for pk scan range pushdown
-    pk_scan_range: Option<(OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>,
+    /// (`eq_prefix`, `range_bounds`) for pk scan range pushdown.
+    pk_scan_range: Option<PkScanRange>,
 }
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
@@ -97,7 +100,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
         snapshot_epoch: Option<u64>,
-        pk_scan_range: Option<(OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>,
+        pk_scan_range: Option<PkScanRange>,
     ) -> Self {
         assert_eq!(&upstream.info.schema, upstream_table.schema());
         if upstream_table.pk_in_output_indices().is_none() {
@@ -823,7 +826,7 @@ async fn make_snapshot_stream(
     rate_limit: RateLimit,
     chunk_size: usize,
     snapshot_rebuild_interval: Duration,
-    pk_scan_range: Option<&(OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>,
+    pk_scan_range: Option<&PkScanRange>,
 ) -> StreamExecutorResult<
     VnodeStream<Pin<Box<dyn Stream<Item = StreamExecutorResult<ChangeLogRow>> + Send>>>,
 > {
@@ -906,7 +909,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     first_recv_barrier_epoch: EpochPair,
     initial_backfill_paused: bool,
     actor_ctx: &'a ActorContextRef,
-    pk_scan_range: Option<&'a (OwnedRow, (Bound<OwnedRow>, Bound<OwnedRow>))>,
+    pk_scan_range: Option<&'a PkScanRange>,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
