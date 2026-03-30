@@ -52,6 +52,7 @@ async fn basic_test_inner(is_decouple: bool, test_type: TestSinkType) -> Result<
             .split("\n")
             .filter(|line| {
                 line.contains(table_name_prefix)
+                    && !line.to_ascii_lowercase().contains("sinkerror")
                     && line
                         .strip_prefix(table_name_prefix)
                         .unwrap()
