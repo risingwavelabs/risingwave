@@ -229,7 +229,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
     └─StreamFilter { predicate: (t.a = 1:Int32) AND (t.b = 2:Int32) }
-      └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_prefix: a = Some(Int32(1)) AND b = Some(Int32(2)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+      └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(1)) AND b = Some(Int32(2)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
 - name: snapshot backfill skips non-prefix equality
   sql: |
     create table t(a int, b int, c int, primary key(a, b));
@@ -245,7 +245,31 @@
   stream_plan: |-
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
     └─StreamFilter { predicate: (t.a = 1:Int32) AND (t.c = 3:Int32) }
-      └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_prefix: a = Some(Int32(1)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+      └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(1)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill range filter on pk
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a >= 10 and a <= 20;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamFilter { predicate: (t.a >= 10:Int32) AND (t.a <= 20:Int32) }
+      └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a >= Some(Int32(10)) AND a <= Some(Int32(20)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill prefix eq plus range
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a = 1 and b >= 10 and b <= 20;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamFilter { predicate: (t.a = 1:Int32) AND (t.b >= 10:Int32) AND (t.b <= 20:Int32) }
+      └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(1)) AND b >= Some(Int32(10)) AND b <= Some(Int32(20)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill prefix eq plus one-sided range
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a = 1 and b > 5;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamFilter { predicate: (t.a = 1:Int32) AND (t.b > 5:Int32) }
+      └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(1)) AND b > Some(Int32(5)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
 - name: |
     Test backfill order, auto, stream share cycle.
     For auto derived backfill order with cycle, it should not return any order plan, and return a NOTICE

@@ -18,7 +18,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, Schema};
-use risingwave_common::util::scan_range::is_full_range;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::AsOf;
 
@@ -640,15 +639,12 @@ impl ToStream for LogicalScan {
                     self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
                 )?;
 
-                if scan_ranges.len() == 1
-                    && scan_ranges[0].has_eq_conds()
-                    && is_full_range(&scan_ranges[0].range)
-                {
+                if scan_ranges.len() == 1 && !scan_ranges[0].is_full_table_scan() {
                     let (core, predicate, project_expr) = self.predicate_pull_up();
-                    let scan = StreamTableScan::new_with_pk_prefix(
+                    let scan = StreamTableScan::new_with_scan_range(
                         core,
                         ctx.backfill_type().to_stream_scan_type(),
-                        Some(scan_ranges[0].eq_conds.clone()),
+                        Some(scan_ranges.into_iter().next().unwrap()),
                     );
 
                     let mut plan: crate::optimizer::plan_node::StreamPlanRef =
