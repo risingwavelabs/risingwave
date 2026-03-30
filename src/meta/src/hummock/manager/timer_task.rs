@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -485,6 +486,40 @@ impl HummockManager {
 }
 
 impl HummockManager {
+    async fn maybe_normalize_compaction_groups(&self, schedule_type: &'static str) {
+        if !self.env.opts.enable_compaction_group_normalize {
+            return;
+        }
+
+        match self
+            .normalize_overlapping_compaction_groups_with_limit(
+                self.env
+                    .opts
+                    .max_normalize_splits_per_round
+                    .try_into()
+                    .unwrap_or(usize::MAX),
+            )
+            .await
+        {
+            Ok(split_count) => {
+                if split_count > 0 {
+                    tracing::info!(
+                        "normalize compaction groups finished with {} split(s) before {} scheduling",
+                        split_count,
+                        schedule_type
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    "failed to normalize compaction groups before {} scheduling",
+                    schedule_type
+                );
+            }
+        }
+    }
+
     async fn check_dead_task(&self) {
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
@@ -571,9 +606,10 @@ impl HummockManager {
     /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
     async fn on_handle_schedule_group_split(&self) {
         let table_write_throughput = self.table_write_throughput_statistic_manager.read().clone();
+        self.maybe_normalize_compaction_groups("split").await;
+
         let mut group_infos = self.calculate_compaction_group_statistic().await;
-        group_infos.sort_by_key(|group| group.group_size);
-        group_infos.reverse();
+        group_infos.sort_by_key(|group| Reverse(group.group_size));
 
         for group in group_infos {
             if group.table_statistic.len() == 1 {
@@ -584,6 +620,16 @@ impl HummockManager {
             self.try_split_compaction_group(&table_write_throughput, group)
                 .await;
         }
+    }
+
+    #[cfg(test)]
+    pub async fn schedule_group_split_for_test(&self) {
+        self.on_handle_schedule_group_split().await;
+    }
+
+    #[cfg(test)]
+    pub async fn schedule_group_merge_for_test(&self) {
+        self.on_handle_schedule_group_merge().await;
     }
 
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
@@ -602,6 +648,8 @@ impl HummockManager {
     /// 2. The compaction group is a small group.
     /// 3. All tables in compaction group is in a low throughput state.
     async fn on_handle_schedule_group_merge(&self) {
+        self.maybe_normalize_compaction_groups("merge").await;
+
         let created_tables = match self.metadata_manager.get_created_table_ids().await {
             Ok(created_tables) => HashSet::from_iter(created_tables),
             Err(err) => {
@@ -613,14 +661,7 @@ impl HummockManager {
             self.table_write_throughput_statistic_manager.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         // sort by first table id for deterministic merge order
-        group_infos.sort_by_key(|group| {
-            let table_ids = group
-                .table_statistic
-                .keys()
-                .cloned()
-                .collect::<BTreeSet<_>>();
-            table_ids.iter().next().cloned()
-        });
+        group_infos.sort_by_key(|group| group.table_statistic.keys().next().copied());
 
         let group_count = group_infos.len();
         if group_count < 2 {
@@ -653,5 +694,145 @@ impl HummockManager {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use itertools::Itertools;
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::CompactionGroupId;
+    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_meta_model::WorkerId;
+    use risingwave_pb::common::worker_node::Property;
+    use risingwave_pb::common::{HostAddress, WorkerType};
+
+    use crate::controller::catalog::CatalogController;
+    use crate::controller::cluster::{ClusterController, ClusterControllerRef};
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
+    use crate::manager::{MetaOpts, MetaSrvEnv};
+
+    async fn setup_compute_env_with_meta_opts(
+        port: i32,
+        opts: MetaOpts,
+    ) -> (
+        MetaSrvEnv,
+        HummockManagerRef,
+        ClusterControllerRef,
+        WorkerId,
+    ) {
+        let env = MetaSrvEnv::for_test_opts(opts, |_| ()).await;
+        let cluster_ctl = Arc::new(
+            ClusterController::new(env.clone(), Duration::from_secs(1))
+                .await
+                .unwrap(),
+        );
+        let catalog_ctl = Arc::new(CatalogController::new(env.clone()).await.unwrap());
+        let compactor_manager = Arc::new(CompactorManager::for_test());
+        let (compactor_streams_change_tx, _compactor_streams_change_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        let config = CompactionConfigBuilder::new()
+            .level0_tier_compact_file_number(1)
+            .level0_max_compact_file_number(130)
+            .level0_sub_level_compact_level_count(1)
+            .level0_overlapping_sub_level_compact_level_count(1)
+            .build();
+        let hummock_manager = HummockManager::with_config(
+            env.clone(),
+            cluster_ctl.clone(),
+            catalog_ctl,
+            Arc::new(Default::default()),
+            compactor_manager,
+            config,
+            compactor_streams_change_tx,
+        )
+        .await;
+
+        let worker_id = cluster_ctl
+            .add_worker(
+                WorkerType::ComputeNode,
+                HostAddress {
+                    host: "127.0.0.1".to_owned(),
+                    port,
+                },
+                Property {
+                    is_streaming: true,
+                    is_serving: true,
+                    parallelism: 4,
+                    ..Default::default()
+                },
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        (env, hummock_manager, cluster_ctl, worker_id)
+    }
+
+    async fn get_compaction_group_id_by_table_id(
+        hummock_manager: HummockManagerRef,
+        table_id: u32,
+    ) -> CompactionGroupId {
+        hummock_manager
+            .get_current_version()
+            .await
+            .state_table_info
+            .info()
+            .get(&TableId::new(table_id))
+            .unwrap()
+            .compaction_group_id
+    }
+
+    fn member_table_ids(version: &HummockVersion, group_id: CompactionGroupId) -> Vec<u32> {
+        version
+            .state_table_info
+            .compaction_group_member_table_ids(group_id)
+            .iter()
+            .map(|table_id| table_id.as_raw_id())
+            .collect_vec()
+    }
+
+    fn assert_no_group_overlap(version: &HummockVersion) {
+        let mut ranges = version
+            .levels
+            .keys()
+            .filter_map(|group_id| {
+                let members = member_table_ids(version, *group_id);
+                (!members.is_empty()).then(|| (*members.first().unwrap(), *members.last().unwrap()))
+            })
+            .collect_vec();
+        ranges.sort_by_key(|(min_table_id, _)| *min_table_id);
+        assert!(ranges.windows(2).all(|window| window[0].1 < window[1].0));
+    }
+
+    #[tokio::test]
+    async fn test_merge_scheduling_normalizes_when_split_scheduling_is_disabled() {
+        let mut opts = MetaOpts::test(false);
+        opts.enable_compaction_group_normalize = true;
+        opts.periodic_scheduling_compaction_group_split_interval_sec = 0;
+
+        let (_env, hummock_manager, _, _worker_id) =
+            setup_compute_env_with_meta_opts(80, opts).await;
+        hummock_manager
+            .register_table_ids_for_test(&[(64, 2), (80, 2)])
+            .await
+            .unwrap();
+        hummock_manager
+            .register_table_ids_for_test(&[(65, 3), (81, 3), (83, 3)])
+            .await
+            .unwrap();
+
+        let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+        let cg_65 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 65).await;
+
+        hummock_manager.on_handle_schedule_group_merge().await;
+
+        let version = hummock_manager.get_current_version().await;
+        assert_eq!(member_table_ids(&version, cg_64), vec![64]);
+        assert_eq!(member_table_ids(&version, cg_65), vec![65]);
+        assert_no_group_overlap(&version);
     }
 }

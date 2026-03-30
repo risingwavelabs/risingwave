@@ -17,6 +17,7 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use itertools::Itertools;
 use prometheus::Registry;
@@ -40,16 +41,19 @@ use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::HummockPinnedVersion;
 use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 
+use crate::controller::catalog::CatalogController;
+use crate::controller::cluster::ClusterController;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{ManualCompactionOption, default_compaction_selector};
 use crate::hummock::error::Error;
 use crate::hummock::table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use crate::hummock::test_utils::*;
-use crate::hummock::{HummockManagerRef, MockHummockMetaClient};
-use crate::manager::MetaSrvEnv;
+use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef, MockHummockMetaClient};
+use crate::manager::{MetaOpts, MetaSrvEnv};
 use crate::rpc::metrics::MetaMetrics;
 
 pub fn version_max_committed_epoch(version: &HummockVersion) -> u64 {
@@ -135,6 +139,119 @@ async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPin
         .into_iter()
         .map(Into::into)
         .collect()
+}
+
+async fn setup_compute_env_with_meta_opts(
+    port: i32,
+    opts: MetaOpts,
+) -> (
+    MetaSrvEnv,
+    HummockManagerRef,
+    crate::controller::cluster::ClusterControllerRef,
+    risingwave_meta_model::WorkerId,
+) {
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .build();
+    let env = MetaSrvEnv::for_test_opts(opts, |_| ()).await;
+    let cluster_ctl = Arc::new(
+        ClusterController::new(env.clone(), Duration::from_secs(1))
+            .await
+            .unwrap(),
+    );
+    let catalog_ctl = Arc::new(CatalogController::new(env.clone()).await.unwrap());
+    let compactor_manager = Arc::new(CompactorManager::for_test());
+    let (compactor_streams_change_tx, _compactor_streams_change_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+    let hummock_manager = HummockManager::with_config(
+        env.clone(),
+        cluster_ctl.clone(),
+        catalog_ctl,
+        Arc::new(MetaMetrics::default()),
+        compactor_manager,
+        config,
+        compactor_streams_change_tx,
+    )
+    .await;
+
+    let worker_id = cluster_ctl
+        .add_worker(
+            WorkerType::ComputeNode,
+            HostAddress {
+                host: "127.0.0.1".to_owned(),
+                port,
+            },
+            Property {
+                is_streaming: true,
+                is_serving: true,
+                parallelism: 4,
+                ..Default::default()
+            },
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    (env, hummock_manager, cluster_ctl, worker_id)
+}
+
+fn compaction_group_ranges(version: &HummockVersion) -> Vec<(u32, u32)> {
+    let mut ranges = version
+        .levels
+        .keys()
+        .filter_map(|group_id| {
+            let members = version
+                .state_table_info
+                .compaction_group_member_table_ids(*group_id)
+                .iter()
+                .map(|table_id| table_id.as_raw_id())
+                .collect_vec();
+            (!members.is_empty()).then(|| (*members.first().unwrap(), *members.last().unwrap()))
+        })
+        .collect_vec();
+    ranges.sort_by_key(|(min_table_id, _)| *min_table_id);
+    ranges
+}
+
+fn assert_compaction_groups_non_overlapping(version: &HummockVersion) {
+    let ranges = compaction_group_ranges(version);
+    assert!(ranges.windows(2).all(|window| window[0].1 < window[1].0));
+}
+
+fn has_overlapping_compaction_groups(version: &HummockVersion) -> bool {
+    let ranges = compaction_group_ranges(version);
+    ranges.windows(2).any(|window| window[0].1 >= window[1].0)
+}
+
+fn all_group_member_table_ids(version: &HummockVersion) -> Vec<u32> {
+    version
+        .levels
+        .keys()
+        .flat_map(|group_id| {
+            version
+                .state_table_info
+                .compaction_group_member_table_ids(*group_id)
+                .iter()
+                .map(|table_id| table_id.as_raw_id())
+                .collect_vec()
+        })
+        .sorted()
+        .collect_vec()
+}
+
+fn non_empty_compaction_group_count(version: &HummockVersion) -> usize {
+    version
+        .levels
+        .keys()
+        .filter(|group_id| {
+            !version
+                .state_table_info
+                .compaction_group_member_table_ids(**group_id)
+                .is_empty()
+        })
+        .count()
 }
 
 #[tokio::test]
@@ -2704,4 +2821,402 @@ async fn test_try_merge_compaction_group_error_propagation() {
         result.is_err(),
         "try_merge_compaction_group must return Err for overlapping groups, got Ok",
     );
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_cascading() {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    // StateDefault(2): [64,80], MaterializedView(3): [65,81,83]
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3), (81, 3), (83, 3)])
+        .await
+        .unwrap();
+
+    let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+    let cg_65 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 65).await;
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert_eq!(split_count, 2);
+
+    let current_version = hummock_manager.get_current_version().await;
+
+    let members_64 = current_version
+        .state_table_info
+        .compaction_group_member_table_ids(cg_64)
+        .iter()
+        .map(|table_id| table_id.as_raw_id())
+        .collect_vec();
+    let members_65 = current_version
+        .state_table_info
+        .compaction_group_member_table_ids(cg_65)
+        .iter()
+        .map(|table_id| table_id.as_raw_id())
+        .collect_vec();
+    assert_eq!(members_64, vec![64]);
+    assert_eq!(members_65, vec![65]);
+    assert_eq!(
+        all_group_member_table_ids(&current_version),
+        vec![64, 65, 80, 81, 83]
+    );
+    assert_eq!(
+        current_version
+            .levels
+            .keys()
+            .filter(|group_id| {
+                !current_version
+                    .state_table_info
+                    .compaction_group_member_table_ids(**group_id)
+                    .is_empty()
+            })
+            .count(),
+        4,
+        "normalize should create exactly two new non-empty groups"
+    );
+    assert_compaction_groups_non_overlapping(&current_version);
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_with_limit() {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3), (81, 3), (83, 3)])
+        .await
+        .unwrap();
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups_with_limit(1)
+        .await
+        .unwrap();
+    assert_eq!(split_count, 1);
+
+    let current_version = hummock_manager.get_current_version().await;
+    assert!(has_overlapping_compaction_groups(&current_version));
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups_with_limit(1)
+        .await
+        .unwrap();
+    assert_eq!(split_count, 1);
+
+    let current_version = hummock_manager.get_current_version().await;
+    assert_compaction_groups_non_overlapping(&current_version);
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_respects_disable_auto_group_scheduling() {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
+        .await
+        .unwrap();
+
+    let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+    hummock_manager
+        .update_compaction_config(&[cg_64], &[MutableConfig::DisableAutoGroupScheduling(true)])
+        .await
+        .unwrap();
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert_eq!(split_count, 0);
+
+    let current_version = hummock_manager.get_current_version().await;
+    let members = current_version
+        .state_table_info
+        .compaction_group_member_table_ids(cg_64)
+        .iter()
+        .map(|table_id| table_id.as_raw_id())
+        .collect_vec();
+    assert_eq!(members, vec![64, 80]);
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_respects_disable_auto_group_scheduling_on_right()
+ {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    hummock_manager
+        .register_table_ids_for_test(&[(10, 2), (30, 2), (40, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(20, 3), (50, 3)])
+        .await
+        .unwrap();
+
+    let cg_20 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 20).await;
+    hummock_manager
+        .update_compaction_config(&[cg_20], &[MutableConfig::DisableAutoGroupScheduling(true)])
+        .await
+        .unwrap();
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert_eq!(split_count, 0);
+
+    let current_version = hummock_manager.get_current_version().await;
+    let ranges = compaction_group_ranges(&current_version);
+    assert_eq!(ranges, vec![(10, 40), (20, 50)]);
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_skips_disabled_boundary_but_continues_later_segment()
+ {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    hummock_manager
+        .register_table_ids_for_test(&[(10, 2), (15, 2), (35, 2), (20, 3), (40, 3)])
+        .await
+        .unwrap();
+
+    hummock_manager
+        .move_state_tables_to_dedicated_compaction_group(
+            StaticCompactionGroupId::StateDefault.into(),
+            &[35.into()],
+            None,
+        )
+        .await
+        .unwrap();
+
+    let cg_10 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 10).await;
+    hummock_manager
+        .update_compaction_config(&[cg_10], &[MutableConfig::DisableAutoGroupScheduling(true)])
+        .await
+        .unwrap();
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert_eq!(split_count, 1);
+
+    let current_version = hummock_manager.get_current_version().await;
+    let members = current_version
+        .state_table_info
+        .compaction_group_member_table_ids(cg_10)
+        .iter()
+        .map(|table_id| table_id.as_raw_id())
+        .collect_vec();
+    assert_eq!(members, vec![10, 15]);
+    assert_compaction_groups_non_overlapping(&current_version);
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_noop_on_non_overlapping_input() {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    hummock_manager
+        .register_table_ids_for_test(&[(10, 2), (11, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(20, 3), (21, 3)])
+        .await
+        .unwrap();
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert_eq!(split_count, 0);
+}
+
+#[tokio::test]
+async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_tasks() {
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
+        .await
+        .unwrap();
+
+    let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+    let epoch = test_epoch(1);
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: vec![gen_local_sstable_info(1, vec![64, 80], epoch)],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let mut selector = default_compaction_selector();
+    let task = hummock_manager
+        .get_compact_task(cg_64, &mut selector)
+        .await
+        .unwrap()
+        .expect("should produce a compaction task");
+    let task_id = task.task_id;
+
+    assert!(
+        !hummock_manager
+            .compaction
+            .read()
+            .await
+            .get_compact_task_assignments_by_group_id(cg_64)
+            .is_empty()
+    );
+
+    let split_count = hummock_manager
+        .normalize_overlapping_compaction_groups()
+        .await
+        .unwrap();
+    assert!(split_count > 0);
+    assert!(
+        hummock_manager
+            .compaction
+            .read()
+            .await
+            .get_compact_task_assignments_by_group_id(cg_64)
+            .is_empty(),
+        "normalize should eagerly cancel parent-group task assignments"
+    );
+
+    let report_ok = hummock_manager
+        .report_compact_task(
+            task_id,
+            TaskStatus::Success,
+            vec![],
+            None,
+            HashMap::default(),
+        )
+        .await
+        .unwrap();
+    assert!(!report_ok);
+}
+
+#[tokio::test]
+async fn test_schedule_group_split_runs_split_logic_after_normalize() {
+    let mut opts = MetaOpts::test(false);
+    opts.enable_compaction_group_normalize = true;
+    let (_env, hummock_manager, _, worker_id) =
+        setup_compute_env_with_meta_opts(80, opts.clone()).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2), (80, 2), (200, 2), (201, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
+        .await
+        .unwrap();
+    hummock_meta_client
+        .commit_epoch(
+            test_epoch(1),
+            SyncResult {
+                uncommitted_ssts: vec![gen_local_sstable_info(1, vec![200, 201], test_epoch(1))],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    hummock_manager
+        .move_state_tables_to_dedicated_compaction_group(2, &[200.into(), 201.into()], None)
+        .await
+        .unwrap();
+
+    hummock_manager
+        .table_write_throughput_statistic_manager
+        .write()
+        .add_table_throughput_with_ts(
+            200.into(),
+            opts.table_high_write_throughput_threshold + 1,
+            chrono::Utc::now().timestamp(),
+        );
+
+    assert_eq!(
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 200).await,
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 201).await
+    );
+
+    hummock_manager.schedule_group_split_for_test().await;
+
+    let current_version = hummock_manager.get_current_version().await;
+    assert_compaction_groups_non_overlapping(&current_version);
+    assert_eq!(
+        all_group_member_table_ids(&current_version),
+        vec![64, 65, 80, 81, 200, 201]
+    );
+    assert_eq!(non_empty_compaction_group_count(&current_version), 6);
+    assert_ne!(
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 200).await,
+        get_compaction_group_id_by_table_id(hummock_manager.clone(), 201).await
+    );
+}
+
+#[tokio::test]
+async fn test_schedule_group_merge_with_normalize_disabled() {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
+        .await
+        .unwrap();
+
+    hummock_manager.schedule_group_merge_for_test().await;
+
+    let current_version = hummock_manager.get_current_version().await;
+    let ranges = compaction_group_ranges(&current_version);
+    assert_eq!(ranges, vec![(64, 80), (65, 81)]);
+}
+
+#[tokio::test]
+async fn test_schedule_group_split_with_normalize_disabled() {
+    let (_env, hummock_manager, _, _worker_id) = setup_compute_env(80).await;
+
+    hummock_manager
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids_for_test(&[(65, 3), (81, 3)])
+        .await
+        .unwrap();
+
+    hummock_manager.schedule_group_split_for_test().await;
+
+    let current_version = hummock_manager.get_current_version().await;
+    let ranges = compaction_group_ranges(&current_version);
+    assert_eq!(ranges, vec![(64, 80), (65, 81)]);
 }
