@@ -133,7 +133,6 @@ pub struct InflightFragmentInfo {
 #[derive(Clone, Debug)]
 pub struct FragmentParallelismInfo {
     pub distribution_type: FragmentDistributionType,
-    pub actor_count: usize,
     pub vnode_count: usize,
 }
 
@@ -412,31 +411,40 @@ impl CatalogController {
         Ok((pb_fragment, pb_actors, pb_actor_status, pb_actor_splits))
     }
 
-    pub fn running_fragment_parallelisms(
+    /// Returns distribution type and vnode count for all (or filtered) fragments.
+    ///
+    /// Reads directly from the persistent catalog (fragment table) rather than
+    /// from the in-memory `shared_actor_infos`.  This is critical because the
+    /// serving vnode mapping must be available even before the barrier manager's
+    /// recovery has completed and populated `shared_actor_infos`.
+    pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
-        let info = self.env.shared_actor_infos().read_guard();
-
-        let mut result = HashMap::new();
-        for (fragment_id, fragment) in info.iter_over_fragments() {
-            if let Some(id_filter) = &id_filter
-                && !id_filter.contains(fragment_id)
-            {
-                continue; // Skip fragments not in the filter
-            }
-
-            result.insert(
-                *fragment_id as _,
-                FragmentParallelismInfo {
-                    distribution_type: fragment.distribution_type.into(),
-                    actor_count: fragment.actors.len() as _,
-                    vnode_count: fragment.vnode_count,
-                },
-            );
+        let inner = self.inner.read().await;
+        let mut query = FragmentModel::find().select_only().columns([
+            fragment::Column::FragmentId,
+            fragment::Column::DistributionType,
+            fragment::Column::VnodeCount,
+        ]);
+        if let Some(id_filter) = id_filter {
+            query = query.filter(fragment::Column::FragmentId.is_in(id_filter));
         }
+        let fragments: Vec<(FragmentId, DistributionType, i32)> =
+            query.into_tuple().all(&inner.db).await?;
 
-        Ok(result)
+        Ok(fragments
+            .into_iter()
+            .map(|(fragment_id, distribution_type, vnode_count)| {
+                (
+                    fragment_id,
+                    FragmentParallelismInfo {
+                        distribution_type: PbFragmentDistributionType::from(distribution_type),
+                        vnode_count: vnode_count as usize,
+                    },
+                )
+            })
+            .collect())
     }
 
     pub async fn fragment_job_mapping(&self) -> MetaResult<HashMap<FragmentId, JobId>> {

@@ -362,14 +362,15 @@ impl MetadataManager {
         self.catalog_controller.list_sources().await
     }
 
-    pub fn running_fragment_parallelisms(
+    pub async fn running_fragment_parallelisms(
         &self,
         id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
         Ok(self
             .catalog_controller
-            .running_fragment_parallelisms(id_filter)?
+            .running_fragment_parallelisms(id_filter)
+            .await?
             .into_iter()
             .map(|(k, v)| (k as FragmentId, v))
             .collect())
