@@ -46,6 +46,7 @@ use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -484,7 +485,7 @@ pub async fn compute_node_serve(
             }
         })
         .add_service(
-            MonitorServiceServer::new(monitor_srv)
+            configured_monitor_service_server(MonitorServiceServer::new(monitor_srv))
                 .max_decoding_message_size(MONITOR_SERVICE_MESSAGE_SIZE_LIMIT),
         )
         .add_service(ConfigServiceServer::new(config_srv))

@@ -17,6 +17,7 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::monitor::EndpointExt;
+use risingwave_pb::configured_monitor_service_client;
 use risingwave_pb::monitor_service::TieredCacheTracingRequest;
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use tonic::transport::Endpoint;
@@ -43,7 +44,7 @@ pub async fn tiered_cache_tracing(
                 .connect_timeout(Duration::from_secs(5))
                 .monitored_connect("grpc-tiered-cache-tracing-client", Default::default())
                 .await?;
-            let mut client = MonitorServiceClient::new(channel);
+            let mut client = configured_monitor_service_client(MonitorServiceClient::new(channel));
             client
                 .tiered_cache_tracing(TieredCacheTracingRequest {
                     enable,
