@@ -604,13 +604,32 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
+    /// KV-count threshold for using blocked xor filters when output filter layout is "auto".
+    ///
+    /// When `sstable_filter_layout[level]` is "auto", compaction will build blocked xor filters if
+    /// the estimated total key count of the task exceeds this threshold. Otherwise it will build a
+    /// single non-blocked xor filter.
+    ///
+    /// Note: shared-buffer flush does not read compaction group config, and always uses the
+    /// built-in default threshold.
     #[serde(default = "default::compaction_config::blocked_xor_filter_kv_count_threshold")]
     #[serde(alias = "max_kv_count_for_xor16")]
     pub blocked_xor_filter_kv_count_threshold: Option<u64>,
     #[serde(default = "default::compaction_config::max_vnode_key_range_bytes")]
     pub max_vnode_key_range_bytes: Option<u64>,
+    /// Per-level xor filter family for compaction output.
+    ///
+    /// Index by LSM level: [0..max_level]. Note: L0 (index 0) is currently ignored by shared-buffer
+    /// flush, which always uses "xor16".
     #[serde(default = "default::compaction_config::sstable_filter_kind")]
     pub sstable_filter_kind: Vec<String>,
+    /// Per-level xor filter layout for compaction output.
+    ///
+    /// "auto" uses the kv-count heuristic; "plain"/"normal" forces non-blocked filters and ignores
+    /// kv-count threshold.
+    ///
+    /// Index by LSM level: [0..max_level]. Note: L0 (index 0) is currently ignored by shared-buffer
+    /// flush, which always uses "auto".
     #[serde(default = "default::compaction_config::sstable_filter_layout")]
     pub sstable_filter_layout: Vec<String>,
 }

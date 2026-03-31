@@ -234,6 +234,10 @@ enum HummockCommands {
         level0_stop_write_threshold_max_size: Option<u64>,
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
+        /// KV-count threshold for using blocked xor filters when output layout is "auto".
+        ///
+        /// Note: shared-buffer flush does not read compaction group config, so this setting only
+        /// applies to compaction tasks.
         #[clap(long)]
         blocked_xor_filter_kv_count_threshold: Option<u64>,
         #[clap(long)]
