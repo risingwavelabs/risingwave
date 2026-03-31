@@ -2385,33 +2385,8 @@ impl CatalogController {
             stmt.to_string()
         };
 
-        {
-            // Update secret dependencies atomically within the transaction.
-            // Add new dependencies for secrets that are newly referenced.
-            if !to_add_secret_dep.is_empty() {
-                ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
-                    object_dependency::ActiveModel {
-                        oid: Set(secret_id.into()),
-                        used_by: Set(preferred_id),
-                        ..Default::default()
-                    }
-                }))
-                .exec(&txn)
-                .await?;
-            }
-            // Remove dependencies for secrets that are no longer referenced.
-            // This allows the secrets to be deleted after this source no longer uses them.
-            if !to_remove_secret_dep.is_empty() {
-                let _ = ObjectDependency::delete_many()
-                    .filter(
-                        object_dependency::Column::Oid
-                            .is_in(to_remove_secret_dep)
-                            .and(object_dependency::Column::UsedBy.eq(preferred_id)),
-                    )
-                    .exec(&txn)
-                    .await?;
-            }
-        }
+        update_secret_dependencies(&txn, to_add_secret_dep, to_remove_secret_dep, preferred_id)
+            .await?;
 
         let active_source_model = source::ActiveModel {
             source_id: Set(source_id),
@@ -2559,30 +2534,13 @@ impl CatalogController {
             stmt.to_string()
         };
 
-        {
-            if !to_add_secret_dep.is_empty() {
-                ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
-                    object_dependency::ActiveModel {
-                        oid: Set(secret_id.into()),
-                        used_by: Set(sink_id.as_object_id()),
-                        ..Default::default()
-                    }
-                }))
-                .exec(&txn)
-                .await?;
-            }
-
-            if !to_remove_secret_dep.is_empty() {
-                let _ = ObjectDependency::delete_many()
-                    .filter(
-                        object_dependency::Column::Oid
-                            .is_in(to_remove_secret_dep)
-                            .and(object_dependency::Column::UsedBy.eq(sink_id.as_object_id())),
-                    )
-                    .exec(&txn)
-                    .await?;
-            }
-        }
+        update_secret_dependencies(
+            &txn,
+            to_add_secret_dep,
+            to_remove_secret_dep,
+            sink_id.as_object_id(),
+        )
+        .await?;
 
         let active_sink = sink::ActiveModel {
             sink_id: Set(sink_id),
@@ -2687,30 +2645,13 @@ impl CatalogController {
             stmt.to_string()
         };
 
-        {
-            if !to_add_secret_dep.is_empty() {
-                ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
-                    object_dependency::ActiveModel {
-                        oid: Set(secret_id.into()),
-                        used_by: Set(sink_id.as_object_id()),
-                        ..Default::default()
-                    }
-                }))
-                .exec(&txn)
-                .await?;
-            }
-
-            if !to_remove_secret_dep.is_empty() {
-                let _ = ObjectDependency::delete_many()
-                    .filter(
-                        object_dependency::Column::Oid
-                            .is_in(to_remove_secret_dep)
-                            .and(object_dependency::Column::UsedBy.eq(sink_id.as_object_id())),
-                    )
-                    .exec(&txn)
-                    .await?;
-            }
-        }
+        update_secret_dependencies(
+            &txn,
+            to_add_secret_dep,
+            to_remove_secret_dep,
+            sink_id.as_object_id(),
+        )
+        .await?;
 
         let active_sink = sink::ActiveModel {
             sink_id: Set(sink_id),
@@ -2890,27 +2831,13 @@ impl CatalogController {
         }
 
         // Update connection secret dependencies
-        if !to_add_secret_dep.is_empty() {
-            ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
-                object_dependency::ActiveModel {
-                    oid: Set(secret_id.into()),
-                    used_by: Set(connection_id.as_object_id()),
-                    ..Default::default()
-                }
-            }))
-            .exec(&txn)
-            .await?;
-        }
-        if !to_remove_secret_dep.is_empty() {
-            let _ = ObjectDependency::delete_many()
-                .filter(
-                    object_dependency::Column::Oid
-                        .is_in(to_remove_secret_dep)
-                        .and(object_dependency::Column::UsedBy.eq(connection_id.as_object_id())),
-                )
-                .exec(&txn)
-                .await?;
-        }
+        update_secret_dependencies(
+            &txn,
+            to_add_secret_dep,
+            to_remove_secret_dep,
+            connection_id.as_object_id(),
+        )
+        .await?;
 
         // Update the connection with new properties
         let updated_connection_params = risingwave_pb::catalog::ConnectionParams {
@@ -3520,5 +3447,39 @@ where
         .await?;
     }
 
+    Ok(())
+}
+
+async fn update_secret_dependencies(
+    txn: &DatabaseTransaction,
+    to_add_secrets: Vec<SecretId>,
+    to_remove_secrets: Vec<SecretId>,
+    sink_id: ObjectId,
+) -> MetaResult<()> {
+    // Update secret dependencies atomically within the transaction.
+    // Add new dependencies for secrets that are newly referenced.
+    if !to_add_secrets.is_empty() {
+        ObjectDependency::insert_many(to_add_secrets.into_iter().map(|secret_id| {
+            object_dependency::ActiveModel {
+                oid: Set(secret_id.into()),
+                used_by: Set(sink_id),
+                ..Default::default()
+            }
+        }))
+        .exec(txn)
+        .await?;
+    }
+    // Remove dependencies for secrets that are no longer referenced.
+    // This allows the secrets to be deleted after this source no longer uses them.
+    if !to_remove_secrets.is_empty() {
+        let _ = ObjectDependency::delete_many()
+            .filter(
+                object_dependency::Column::Oid
+                    .is_in(to_remove_secrets)
+                    .and(object_dependency::Column::UsedBy.eq(sink_id)),
+            )
+            .exec(txn)
+            .await?;
+    }
     Ok(())
 }
