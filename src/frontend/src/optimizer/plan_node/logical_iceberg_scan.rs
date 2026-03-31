@@ -14,6 +14,7 @@
 
 use std::hash::{Hash, Hasher};
 
+use datafusion::arrow::datatypes::Schema as ArrowSchema;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_connector::source::iceberg::IcebergFileScanTask;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
@@ -25,7 +26,7 @@ use super::{
     ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
@@ -75,6 +76,21 @@ impl LogicalIcebergScan {
             IcebergFileScanTask::EqualityDelete(_) => IcebergScanType::EqualityDeleteScan,
             IcebergFileScanTask::PositionDelete(_) => IcebergScanType::PositionDeleteScan,
         }
+    }
+
+    pub fn schema_from_tasks(&self) -> Result<ArrowSchema> {
+        let tasks = match &self.task {
+            IcebergFileScanTask::Data(tasks) => tasks,
+            IcebergFileScanTask::EqualityDelete(tasks) => tasks,
+            IcebergFileScanTask::PositionDelete(tasks) => tasks,
+        };
+        let schema = tasks
+            .first()
+            .ok_or_else(|| ErrorCode::InternalError("Iceberg file scan tasks are missing".into()))?
+            .schema();
+        let schema = iceberg::arrow::schema_to_arrow_schema(schema)
+            .map_err(|e| ErrorCode::ConnectorError(Box::new(e)))?;
+        Ok(schema)
     }
 }
 
