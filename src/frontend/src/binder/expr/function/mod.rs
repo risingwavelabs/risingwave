@@ -157,56 +157,66 @@ impl Binder {
         let mut args: Vec<ExprImpl> = Vec::new();
         let mut secret_refs: Vec<UdfArgSecretRef> = Vec::new();
 
-        for (idx, arg) in arg_list.args.iter().enumerate() {
-            match arg {
-                FunctionArg::Unnamed(FunctionArgExpr::SecretRef(secret_ref_value)) => {
-                    let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(
-                        &self.db_name,
-                        &secret_ref_value.secret_name,
-                    )?;
-                    let schema_path = self.bind_schema_path(schema_name.as_deref());
-                    let (secret_catalog, _) = self.catalog.get_secret_by_name(
-                        &self.db_name,
-                        schema_path,
-                        &secret_name,
-                    )?;
+        for arg in &arg_list.args {
+            // Extract secret ref from either unnamed or named function arg.
+            let secret_ref_value = match arg {
+                FunctionArg::Unnamed(FunctionArgExpr::SecretRef(v)) => Some(v),
+                FunctionArg::Named {
+                    arg: FunctionArgExpr::SecretRef(v),
+                    ..
+                } => Some(v),
+                _ => None,
+            };
 
-                    // Check USAGE privilege on the secret.
-                    self.check_privilege(
-                        ObjectCheckItem::new(
-                            secret_catalog.owner(),
-                            AclMode::Usage,
-                            secret_catalog.name.clone(),
-                            secret_catalog.id,
-                        ),
-                        self.database_id,
-                    )?;
+            if let Some(secret_ref_value) = secret_ref_value {
+                let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(
+                    &self.db_name,
+                    &secret_ref_value.secret_name,
+                )?;
+                let schema_path = self.bind_schema_path(schema_name.as_deref());
+                let (secret_catalog, _) =
+                    self.catalog
+                        .get_secret_by_name(&self.db_name, schema_path, &secret_name)?;
 
-                    // Track the secret dependency.
-                    self.included_secrets.insert(secret_catalog.id);
+                // Check USAGE privilege on the secret.
+                self.check_privilege(
+                    ObjectCheckItem::new(
+                        secret_catalog.owner(),
+                        AclMode::Usage,
+                        secret_catalog.name.clone(),
+                        secret_catalog.id,
+                    ),
+                    self.database_id,
+                )?;
 
-                    let ref_as = match secret_ref_value.ref_as {
-                        SecretRefAsType::Text => {
-                            risingwave_pb::secret::secret_ref::RefAsType::Text as i32
-                        }
-                        SecretRefAsType::File => {
-                            risingwave_pb::secret::secret_ref::RefAsType::File as i32
-                        }
-                    };
+                // Track the secret dependency.
+                self.included_secrets.insert(secret_catalog.id);
 
-                    secret_refs.push(UdfArgSecretRef {
-                        arg_index: idx as u32,
-                        secret_id: secret_catalog.id.as_raw_id(),
-                        ref_as,
-                    });
+                let ref_as = match secret_ref_value.ref_as {
+                    SecretRefAsType::Text => {
+                        risingwave_pb::secret::secret_ref::RefAsType::Text as i32
+                    }
+                    SecretRefAsType::File => {
+                        risingwave_pb::secret::secret_ref::RefAsType::File as i32
+                    }
+                };
 
-                    // Add a placeholder expression that will be replaced at runtime.
-                    args.push(ExprImpl::literal_varchar("".to_owned()));
-                }
-                _ => {
-                    let bound = self.bind_function_arg(arg)?;
-                    args.extend(bound);
-                }
+                // Use the current bound expression count as the arg index,
+                // not the syntactic position, since bind_function_arg can
+                // return 0 or multiple expressions (e.g., wildcard).
+                let bound_arg_index = args.len() as u32;
+
+                secret_refs.push(UdfArgSecretRef {
+                    arg_index: bound_arg_index,
+                    secret_id: secret_catalog.id.as_raw_id(),
+                    ref_as,
+                });
+
+                // Add a placeholder expression that will be replaced at runtime.
+                args.push(ExprImpl::literal_varchar("".to_owned()));
+            } else {
+                let bound = self.bind_function_arg(arg)?;
+                args.extend(bound);
             }
         }
 
@@ -303,6 +313,16 @@ impl Binder {
         } else {
             AggType::from_str(&func_name).ok()
         };
+
+        // Secret references are only supported in scalar UDF calls.
+        // Reject them early for window, aggregate, and table function paths.
+        if !secret_refs.is_empty() && (over.is_some() || agg_type.is_some()) {
+            return Err(ErrorCode::BindError(
+                "secret references are only supported in scalar user-defined function calls"
+                    .to_owned(),
+            )
+            .into());
+        }
 
         // try to bind it as a window function call
         if let Some(over) = over {
@@ -459,6 +479,12 @@ impl Binder {
                     arg_list.variadic,
                     "`VARIADIC` is not allowed in table function call"
                 );
+                if !secret_refs.is_empty() {
+                    return Err(ErrorCode::BindError(
+                        "secret references are not supported in table function calls".to_owned(),
+                    )
+                    .into());
+                }
                 self.ensure_table_function_allowed()?;
                 if udf.language == "sql" {
                     return self.bind_sql_udf(udf.clone(), args);
@@ -484,6 +510,13 @@ impl Binder {
                 "`VARIADIC` is not allowed in user-defined function call"
             );
             if udf.language == "sql" {
+                if !secret_refs.is_empty() {
+                    return Err(ErrorCode::BindError(
+                        "secret references are not supported in SQL user-defined functions"
+                            .to_owned(),
+                    )
+                    .into());
+                }
                 return self.bind_sql_udf(udf.clone(), args);
             }
             if !secret_refs.is_empty() {
