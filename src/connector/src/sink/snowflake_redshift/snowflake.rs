@@ -1129,30 +1129,28 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
 SCHEDULE = '{writer_target_interval_seconds} SECONDS'
 AS
 BEGIN
-    IF (EXISTS (SELECT 1 FROM {cdc_table_name} LIMIT 1)) THEN
-        LET max_row_id STRING;
+    LET max_row_id STRING;
 
-        SELECT COALESCE(MAX("{snowflake_sink_row_id}"), '0') INTO :max_row_id
-        FROM {cdc_table_name};
+    SELECT COALESCE(MAX("{snowflake_sink_row_id}"), '0') INTO :max_row_id
+    FROM {cdc_table_name};
 
-        MERGE INTO {target_table_name} AS target
-        USING (
-            SELECT *
-            FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_names_str} ORDER BY "{snowflake_sink_row_id}" DESC) AS dedupe_id
-                FROM {cdc_table_name}
-                WHERE "{snowflake_sink_row_id}" <= :max_row_id
-            ) AS subquery
-            WHERE dedupe_id = 1
-        ) AS source
-        ON {pk_names_eq_str}
-        WHEN MATCHED AND source."{snowflake_sink_op}" IN (2, 4) THEN DELETE
-        WHEN MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN UPDATE SET {all_column_names_set_str}
-        WHEN NOT MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN INSERT ({all_column_names_str}) VALUES ({all_column_names_insert_str});
+    MERGE INTO {target_table_name} AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_names_str} ORDER BY "{snowflake_sink_row_id}" DESC) AS dedupe_id
+            FROM {cdc_table_name}
+            WHERE "{snowflake_sink_row_id}" <= :max_row_id
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON {pk_names_eq_str}
+    WHEN MATCHED AND source."{snowflake_sink_op}" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN UPDATE SET {all_column_names_set_str}
+    WHEN NOT MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN INSERT ({all_column_names_str}) VALUES ({all_column_names_insert_str});
 
-        DELETE FROM {cdc_table_name}
-        WHERE "{snowflake_sink_row_id}" <= :max_row_id;
-    END IF;
+    DELETE FROM {cdc_table_name}
+    WHERE "{snowflake_sink_row_id}" <= :max_row_id;
 END;"#,
         task_name = full_task_name,
         compute_clause = compute_clause
@@ -1274,30 +1272,28 @@ WAREHOUSE = test_warehouse
 SCHEDULE = '3600 SECONDS'
 AS
 BEGIN
-    IF (EXISTS (SELECT 1 FROM "test_db"."test_schema"."test_cdc_table" LIMIT 1)) THEN
-        LET max_row_id STRING;
+    LET max_row_id STRING;
 
-        SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
-        FROM "test_db"."test_schema"."test_cdc_table";
+    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    FROM "test_db"."test_schema"."test_cdc_table";
 
-        MERGE INTO "test_db"."test_schema"."test_target_table" AS target
-        USING (
-            SELECT *
-            FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY "v1" ORDER BY "__row_id" DESC) AS dedupe_id
-                FROM "test_db"."test_schema"."test_cdc_table"
-                WHERE "__row_id" <= :max_row_id
-            ) AS subquery
-            WHERE dedupe_id = 1
-        ) AS source
-        ON target."v1" = source."v1"
-        WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
-        WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."v1" = source."v1", target."v2" = source."v2"
-        WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("v1", "v2") VALUES (source."v1", source."v2");
+    MERGE INTO "test_db"."test_schema"."test_target_table" AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "v1" ORDER BY "__row_id" DESC) AS dedupe_id
+            FROM "test_db"."test_schema"."test_cdc_table"
+            WHERE "__row_id" <= :max_row_id
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON target."v1" = source."v1"
+    WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."v1" = source."v1", target."v2" = source."v2"
+    WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("v1", "v2") VALUES (source."v1", source."v2");
 
-        DELETE FROM "test_db"."test_schema"."test_cdc_table"
-        WHERE "__row_id" <= :max_row_id;
-    END IF;
+    DELETE FROM "test_db"."test_schema"."test_cdc_table"
+    WHERE "__row_id" <= :max_row_id;
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
@@ -1326,30 +1322,78 @@ WAREHOUSE = multi_pk_warehouse
 SCHEDULE = '300 SECONDS'
 AS
 BEGIN
-    IF (EXISTS (SELECT 1 FROM "test_db"."test_schema"."cdc_multi_pk" LIMIT 1)) THEN
-        LET max_row_id STRING;
+    LET max_row_id STRING;
 
-        SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
-        FROM "test_db"."test_schema"."cdc_multi_pk";
+    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    FROM "test_db"."test_schema"."cdc_multi_pk";
 
-        MERGE INTO "test_db"."test_schema"."target_multi_pk" AS target
-        USING (
-            SELECT *
-            FROM (
-                SELECT *, ROW_NUMBER() OVER (PARTITION BY "id1", "id2" ORDER BY "__row_id" DESC) AS dedupe_id
-                FROM "test_db"."test_schema"."cdc_multi_pk"
-                WHERE "__row_id" <= :max_row_id
-            ) AS subquery
-            WHERE dedupe_id = 1
-        ) AS source
-        ON target."id1" = source."id1" AND target."id2" = source."id2"
-        WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
-        WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."id1" = source."id1", target."id2" = source."id2", target."val" = source."val"
-        WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id1", "id2", "val") VALUES (source."id1", source."id2", source."val");
+    MERGE INTO "test_db"."test_schema"."target_multi_pk" AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id1", "id2" ORDER BY "__row_id" DESC) AS dedupe_id
+            FROM "test_db"."test_schema"."cdc_multi_pk"
+            WHERE "__row_id" <= :max_row_id
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON target."id1" = source."id1" AND target."id2" = source."id2"
+    WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."id1" = source."id1", target."id2" = source."id2", target."val" = source."val"
+    WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id1", "id2", "val") VALUES (source."id1", source."id2", source."val");
 
-        DELETE FROM "test_db"."test_schema"."cdc_multi_pk"
-        WHERE "__row_id" <= :max_row_id;
-    END IF;
+    DELETE FROM "test_db"."test_schema"."cdc_multi_pk"
+    WHERE "__row_id" <= :max_row_id;
+END;"#;
+        assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
+    }
+
+    #[test]
+    fn test_snowflake_sink_commit_coordinator_serverless_task() {
+        let snowflake_task_context = SnowflakeTaskContext {
+            task_name: Some("test_serverless_task".to_owned()),
+            cdc_table_name: Some("serverless_cdc_table".to_owned()),
+            target_table_name: "serverless_target_table".to_owned(),
+            writer_target_interval_seconds: 120,
+            warehouse: None,
+            task_serverless: true,
+            task_target_completion_interval: Some("5 MINUTES".to_owned()),
+            pk_column_names: Some(vec!["id".to_owned()]),
+            all_column_names: Some(vec!["id".to_owned(), "val".to_owned()]),
+            database: "test_db".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema { fields: vec![] },
+            stage: None,
+            pipe_name: None,
+        };
+        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
+        let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_serverless_task"
+TARGET_COMPLETION_INTERVAL = '5 MINUTES'
+SCHEDULE = '120 SECONDS'
+AS
+BEGIN
+    LET max_row_id STRING;
+
+    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    FROM "test_db"."test_schema"."serverless_cdc_table";
+
+    MERGE INTO "test_db"."test_schema"."serverless_target_table" AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id" ORDER BY "__row_id" DESC) AS dedupe_id
+            FROM "test_db"."test_schema"."serverless_cdc_table"
+            WHERE "__row_id" <= :max_row_id
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON target."id" = source."id"
+    WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."id" = source."id", target."val" = source."val"
+    WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id", "val") VALUES (source."id", source."val");
+
+    DELETE FROM "test_db"."test_schema"."serverless_cdc_table"
+    WHERE "__row_id" <= :max_row_id;
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
