@@ -575,6 +575,44 @@ impl HummockManager {
             }
         };
 
+        // Re-check before mutating Hummock state to narrow the race window with concurrent create
+        // or drop operations.
+        let creating_jobs = match self
+            .metadata_manager
+            .catalog_controller
+            .list_creating_jobs(true, true, None)
+            .await
+        {
+            Ok(creating_jobs) => creating_jobs,
+            Err(err) => {
+                warn!(
+                    error = %err.as_report(),
+                    "failed to list creating jobs for stale compaction group purge"
+                );
+                return;
+            }
+        };
+        if !creating_jobs.is_empty() {
+            info!(
+                job_count = creating_jobs.len(),
+                "skip stale compaction group purge because creating jobs exist"
+            );
+            return;
+        }
+
+        let dropped_table_ids = self
+            .metadata_manager
+            .catalog_controller
+            .list_pending_dropped_table_ids()
+            .await;
+        if !dropped_table_ids.is_empty() {
+            info!(
+                table_count = dropped_table_ids.len(),
+                "skip stale compaction group purge because dropped tables are pending cleanup"
+            );
+            return;
+        }
+
         if let Err(err) = self.purge(&valid_table_ids).await {
             warn!(
                 error = %err.as_report(),
