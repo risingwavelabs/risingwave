@@ -1,0 +1,405 @@
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Core expression parser using winnow's Pratt parser combinator.
+//!
+//! This module provides a pure parser_v2 implementation that does NOT
+//! fall back to v1 parser. It's designed as a foundation for gradually
+//! migrating expression parsing to combinator style.
+
+use winnow::combinator::expression;
+use winnow::combinator::{alt, cut_err, trace};
+use winnow::combinator::{Infix, Prefix};
+use winnow::error::{ContextError, ErrMode};
+use winnow::{ModalResult, Parser};
+
+use super::{TokenStream, token};
+use crate::ast::{BinaryOperator, Expr, UnaryOperator, Value};
+use crate::keywords::Keyword;
+use crate::tokenizer::{Token, TokenWithLocation};
+
+/// Binding power for prefix operators (unary +, -)
+const PREFIX_POWER: i64 = 25;
+
+/// Binding power for logical OR (lowest precedence)
+const OR_POWER: i64 = 5;
+
+/// Binding power for logical AND
+const AND_POWER: i64 = 7;
+
+/// Binding power for comparison operators (=, <>, <, >, <=, >=)
+const CMP_POWER: i64 = 11;
+
+/// Binding power for addition/subtraction
+const ADD_POWER: i64 = 15;
+
+/// Binding power for multiplication/division/modulo
+const MUL_POWER: i64 = 17;
+
+/// Binding power for exponentiation (^, right associative)
+const EXP_POWER: i64 = 19;
+
+/// Parse a core expression.
+///
+/// This is a pure parser_v2 implementation using winnow's `expression` combinator.
+/// It does NOT fall back to v1 parser.
+///
+/// Supported operators (in precedence order, high to low):
+/// - unary `+`, `-` (highest)
+/// - `^` (right associative)
+/// - `*`, `/`, `%`
+/// - `+`, `-`
+/// - `=`, `<>`, `<`, `>`, `<=`, `>=`
+/// - `AND`
+/// - `OR` (lowest)
+pub fn expr_core<S>(input: &mut S) -> ModalResult<Expr>
+where
+    S: TokenStream,
+{
+    trace("expr_core", |input: &mut S| {
+        expression(atom_core)
+            .prefix(prefix_op_core)
+            .infix(infix_op_core)
+            .parse_next(input)
+    })
+    .parse_next(input)
+}
+
+/// Parse a core atomic expression (operand).
+///
+/// This only handles "safe" atoms that don't require v1 fallback:
+/// - Literals (numbers, strings, booleans, NULL)
+/// - Column references (simple identifiers)
+/// - Parenthesized expressions
+fn atom_core<S>(input: &mut S) -> ModalResult<Expr>
+where
+    S: TokenStream,
+{
+    trace(
+        "atom_core",
+        alt((
+            expr_parenthesized_core,
+            expr_literal,
+            expr_identifier,
+        )),
+    )
+    .parse_next(input)
+}
+
+/// Parse a parenthesized expression.
+/// Uses `expr_core` recursively.
+fn expr_parenthesized_core<S>(input: &mut S) -> ModalResult<Expr>
+where
+    S: TokenStream,
+{
+    trace(
+        "expr_parenthesized_core",
+        (
+            Token::LParen,
+            cut_err(expr_core),
+            cut_err(Token::RParen),
+        )
+            .map(|(_, e, _)| e),
+    )
+    .parse_next(input)
+}
+
+/// Parse prefix (unary) operators for core expressions.
+/// Only handles `+` and `-`.
+fn prefix_op_core<S>(input: &mut S) -> ModalResult<Prefix<S, Expr, ErrMode<ContextError>>>
+where
+    S: TokenStream,
+{
+    trace(
+        "prefix_op_core",
+        token.verify_map(|t: TokenWithLocation| match t.token {
+            Token::Minus => Some(Prefix(PREFIX_POWER, |_, e: Expr| {
+                Ok(Expr::UnaryOp {
+                    op: UnaryOperator::Minus,
+                    expr: Box::new(e),
+                })
+            })),
+            Token::Plus => Some(Prefix(PREFIX_POWER, |_, e: Expr| {
+                Ok(Expr::UnaryOp {
+                    op: UnaryOperator::Plus,
+                    expr: Box::new(e),
+                })
+            })),
+            _ => None,
+        }),
+    )
+    .parse_next(input)
+}
+
+/// Parse infix (binary) operators for core expressions.
+///
+/// Handles: OR, AND, comparisons, +, -, *, /, %, ^
+fn infix_op_core<S>(input: &mut S) -> ModalResult<Infix<S, Expr, ErrMode<ContextError>>>
+where
+    S: TokenStream,
+{
+    trace(
+        "infix_op_core",
+        token.verify_map(|t: TokenWithLocation| match &t.token {
+            // Logical OR (lowest precedence, left associative)
+            Token::Word(w) if w.keyword == Keyword::OR => {
+                Some(Infix::Left(OR_POWER, |_, a: Expr, b: Expr| {
+                    Ok(Expr::BinaryOp {
+                        left: Box::new(a),
+                        op: BinaryOperator::Or,
+                        right: Box::new(b),
+                    })
+                }))
+            }
+            // Logical AND (left associative)
+            Token::Word(w) if w.keyword == Keyword::AND => {
+                Some(Infix::Left(AND_POWER, |_, a: Expr, b: Expr| {
+                    Ok(Expr::BinaryOp {
+                        left: Box::new(a),
+                        op: BinaryOperator::And,
+                        right: Box::new(b),
+                    })
+                }))
+            }
+            // Comparison operators (neither associative - chains like a = b = c are invalid)
+            Token::Eq => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Eq,
+                    right: Box::new(b),
+                })
+            })),
+            Token::Neq => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::NotEq,
+                    right: Box::new(b),
+                })
+            })),
+            Token::Lt => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Lt,
+                    right: Box::new(b),
+                })
+            })),
+            Token::Gt => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Gt,
+                    right: Box::new(b),
+                })
+            })),
+            Token::LtEq => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::LtEq,
+                    right: Box::new(b),
+                })
+            })),
+            Token::GtEq => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::GtEq,
+                    right: Box::new(b),
+                })
+            })),
+            // Addition/subtraction (left associative)
+            Token::Plus => Some(Infix::Left(ADD_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Plus,
+                    right: Box::new(b),
+                })
+            })),
+            Token::Minus => Some(Infix::Left(ADD_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Minus,
+                    right: Box::new(b),
+                })
+            })),
+            // Multiplication/division/modulo (left associative)
+            Token::Mul => Some(Infix::Left(MUL_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Multiply,
+                    right: Box::new(b),
+                })
+            })),
+            Token::Div => Some(Infix::Left(MUL_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Divide,
+                    right: Box::new(b),
+                })
+            })),
+            Token::Mod => Some(Infix::Left(MUL_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Modulo,
+                    right: Box::new(b),
+                })
+            })),
+            // Exponentiation (right associative)
+            Token::Caret => Some(Infix::Right(EXP_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Pow,
+                    right: Box::new(b),
+                })
+            })),
+            _ => None,
+        }),
+    )
+    .parse_next(input)
+}
+
+/// Parse a literal value.
+fn expr_literal<S>(input: &mut S) -> ModalResult<Expr>
+where
+    S: TokenStream,
+{
+    trace(
+        "expr_literal",
+        token.verify_map(|t: TokenWithLocation| match t.token {
+            Token::Number(n) => Some(Expr::Value(Value::Number(n))),
+            Token::SingleQuotedString(s) => Some(Expr::Value(Value::SingleQuotedString(s))),
+            Token::NationalStringLiteral(s) => Some(Expr::Value(Value::NationalStringLiteral(s))),
+            Token::HexStringLiteral(s) => Some(Expr::Value(Value::HexStringLiteral(s))),
+            Token::DollarQuotedString(s) => Some(Expr::Value(Value::DollarQuotedString(s))),
+            Token::Word(w) => match w.keyword {
+                Keyword::TRUE => Some(Expr::Value(Value::Boolean(true))),
+                Keyword::FALSE => Some(Expr::Value(Value::Boolean(false))),
+                Keyword::NULL => Some(Expr::Value(Value::Null)),
+                _ => None,
+            },
+            _ => None,
+        }),
+    )
+    .parse_next(input)
+}
+
+/// Parse an identifier (column reference).
+fn expr_identifier<S>(input: &mut S) -> ModalResult<Expr>
+where
+    S: TokenStream,
+{
+    trace(
+        "expr_identifier",
+        token.verify_map(|t: TokenWithLocation| match t.token {
+            Token::Word(w) if w.keyword == Keyword::NoKeyword => Some(Expr::Identifier(
+                crate::ast::Ident::new_unchecked(w.value),
+            )),
+            _ => None,
+        }),
+    )
+    .parse_next(input)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tokenizer::Tokenizer;
+
+    fn parse_expr_core(sql: &str) -> Result<Expr, String> {
+        let mut tokenizer = Tokenizer::new(sql);
+        let tokens = tokenizer.tokenize_with_location().map_err(|e| e.to_string())?;
+        let mut parser = crate::parser::Parser(&tokens);
+        expr_core.parse_next(&mut parser).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn test_literal_number() {
+        let result = parse_expr_core("42").unwrap();
+        assert!(matches!(result, Expr::Value(Value::Number(n)) if n == "42"));
+    }
+
+    #[test]
+    fn test_literal_string() {
+        let result = parse_expr_core("'hello'").unwrap();
+        assert!(matches!(result, Expr::Value(Value::SingleQuotedString(s)) if s == "hello"));
+    }
+
+    #[test]
+    fn test_literal_boolean() {
+        let result = parse_expr_core("true").unwrap();
+        assert!(matches!(result, Expr::Value(Value::Boolean(true))));
+    }
+
+    #[test]
+    fn test_identifier() {
+        let result = parse_expr_core("foo").unwrap();
+        assert!(matches!(result, Expr::Identifier(_)));
+    }
+
+    #[test]
+    fn test_unary_minus() {
+        let result = parse_expr_core("-42").unwrap();
+        assert!(matches!(result, Expr::UnaryOp { op: UnaryOperator::Minus, .. }));
+    }
+
+    #[test]
+    fn test_binary_add() {
+        let result = parse_expr_core("1 + 2").unwrap();
+        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::Plus, .. }));
+    }
+
+    #[test]
+    fn test_precedence_mul_before_add() {
+        // Should parse as 1 + (2 * 3), not (1 + 2) * 3
+        let result = parse_expr_core("1 + 2 * 3").unwrap();
+        if let Expr::BinaryOp { left, op: BinaryOperator::Plus, right } = result {
+            assert!(matches!(left.as_ref(), Expr::Value(Value::Number(n)) if n == "1"));
+            assert!(matches!(right.as_ref(), Expr::BinaryOp { op: BinaryOperator::Multiply, .. }));
+        } else {
+            panic!("Expected Plus at top level");
+        }
+    }
+
+    #[test]
+    fn test_comparison() {
+        let result = parse_expr_core("a = 1").unwrap();
+        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::Eq, .. }));
+    }
+
+    #[test]
+    fn test_logical_and() {
+        let result = parse_expr_core("a AND b").unwrap();
+        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::And, .. }));
+    }
+
+    #[test]
+    fn test_logical_or() {
+        let result = parse_expr_core("a OR b").unwrap();
+        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::Or, .. }));
+    }
+
+    #[test]
+    fn test_parenthesized() {
+        let result = parse_expr_core("(1 + 2) * 3").unwrap();
+        // Should parse as (1 + 2) * 3, not 1 + (2 * 3)
+        if let Expr::BinaryOp { left, op: BinaryOperator::Multiply, .. } = result {
+            assert!(matches!(left.as_ref(), Expr::BinaryOp { op: BinaryOperator::Plus, .. }));
+        } else {
+            panic!("Expected Multiply at top level");
+        }
+    }
+
+    #[test]
+    fn test_complex_expr() {
+        // Test a complex expression with multiple operators
+        let result = parse_expr_core("a + b * c = d AND e > f").unwrap();
+        // Should be: ((a + (b * c)) = d) AND (e > f)
+        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::And, .. }));
+    }
+}
