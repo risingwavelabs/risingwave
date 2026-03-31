@@ -235,7 +235,7 @@ enum HummockCommands {
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
         #[clap(long)]
-        max_kv_count_for_xor16: Option<u64>,
+        blocked_xor_filter_kv_count_threshold: Option<u64>,
         #[clap(long)]
         max_vnode_key_range_bytes: Option<u64>,
     },
@@ -732,7 +732,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
-            max_kv_count_for_xor16,
+            blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes,
         }) => {
             cmd_impl::hummock::update_compaction_config(
@@ -787,7 +787,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
-                    max_kv_count_for_xor16,
+                    blocked_xor_filter_kv_count_threshold,
                     max_vnode_key_range_bytes,
                 ),
             )

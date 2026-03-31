@@ -15,16 +15,21 @@
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableFilterType};
 
-/// Determines whether the key count is large enough to warrant using a block-based filter.
+/// Determines whether the key count is large enough to warrant using a blocked xor filter.
 ///
 /// # Arguments
 /// * `kv_count` - The total number of keys
-/// * `max_kv_count` - Optional configured threshold. If None, uses `DEFAULT_MAX_KV_COUNT_FOR_XOR16`
+/// * `blocked_kv_count_threshold` - Optional configured threshold. If None, uses
+///   `DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD`.
 ///
 /// # Returns
-/// `true` if `kv_count` exceeds the threshold, indicating block-based filter should be used
-pub fn is_kv_count_too_large_for_xor16(kv_count: u64, max_kv_count: Option<u64>) -> bool {
-    let threshold = max_kv_count.unwrap_or(compaction_config::DEFAULT_MAX_KV_COUNT_FOR_XOR16);
+/// `true` if `kv_count` exceeds the threshold, indicating blocked xor filter should be used.
+pub fn should_use_blocked_xor_filter_by_kv_count(
+    kv_count: u64,
+    blocked_kv_count_threshold: Option<u64>,
+) -> bool {
+    let threshold = blocked_kv_count_threshold
+        .unwrap_or(compaction_config::DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD);
     kv_count > threshold
 }
 

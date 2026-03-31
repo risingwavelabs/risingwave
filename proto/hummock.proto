@@ -591,7 +591,12 @@ message CompactTask {
   uint64 compaction_group_version_id = 27;
   // The maximum key-value count threshold for using Xor16 filter.
   // When the number of keys exceeds this threshold, a BlockedXor16 filter will be used.
-  optional uint64 max_kv_count_for_xor16 = 28;
+  // KV-count threshold for using blocked xor filter in this task when `sstable_filter_layout` is
+  // AUTO.
+  //
+  // If the total kv-count of input SSTs exceeds this threshold, compaction will build blocked xor
+  // filters. Otherwise it will build a single non-blocked xor filter.
+  optional uint64 blocked_xor_filter_kv_count_threshold = 28;
   // Max bytes for vnode-level key range hints to embed into output SSTs.
   optional uint64 max_vnode_key_range_bytes = 29;
   // The xor filter family that output SSTs in this task should use.
@@ -915,7 +920,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       // Deprecated. Kept for backward compatibility and ignored by meta.
       uint64 vnode_aligned_level_size_threshold = 31 [deprecated = true];
       // The maximum key-value count threshold for using Xor16 filter
-      uint64 max_kv_count_for_xor16 = 32;
+      uint64 blocked_xor_filter_kv_count_threshold = 32;
       // Max bytes for vnode key-range hints recorded into each SST.
       uint64 max_vnode_key_range_bytes = 33;
       SstableFilterKind sstable_filter_kind = 34;
@@ -1155,7 +1160,8 @@ message CompactionConfig {
   // filter will be used instead of a single non-blocked xor filter.
   //
   // Typical value: 256 * 1024 (256K keys).
-  optional uint64 max_kv_count_for_xor16 = 32;
+  // KV-count threshold for using blocked xor filter when `sstable_filter_layout[level]` is AUTO.
+  optional uint64 blocked_xor_filter_kv_count_threshold = 32;
 
   // Max bytes for vnode key-range hints recorded into each SST.
   optional uint64 max_vnode_key_range_bytes = 33;

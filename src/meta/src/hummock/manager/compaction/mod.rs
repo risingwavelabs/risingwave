@@ -465,7 +465,9 @@ impl HummockManager {
                     task_type: compact_task.compaction_task_type,
                     split_weight_by_vnode: vnode_partition_count,
                     max_sub_compaction: group_config.compaction_config.max_sub_compaction,
-                    max_kv_count_for_xor16: group_config.compaction_config.max_kv_count_for_xor16,
+                    blocked_xor_filter_kv_count_threshold: group_config
+                        .compaction_config
+                        .blocked_xor_filter_kv_count_threshold,
                     max_vnode_key_range_bytes: group_config
                         .compaction_config
                         .max_vnode_key_range_bytes,

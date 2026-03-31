@@ -80,7 +80,7 @@ pub struct CompactTask {
 
     pub max_sub_compaction: u32,
 
-    pub max_kv_count_for_xor16: Option<u64>,
+    pub blocked_xor_filter_kv_count_threshold: Option<u64>,
 
     pub max_vnode_key_range_bytes: Option<u64>,
 
@@ -252,7 +252,10 @@ impl CompactTask {
             .map(|sst| sst.total_key_count)
             .sum::<u64>();
 
-        crate::filter_utils::is_kv_count_too_large_for_xor16(kv_count, self.max_kv_count_for_xor16)
+        crate::filter_utils::should_use_blocked_xor_filter_by_kv_count(
+            kv_count,
+            self.blocked_xor_filter_kv_count_threshold,
+        )
     }
 
     /// Returns the effective vnode key-range hint limit (in bytes) for this compaction task.
@@ -362,7 +365,8 @@ impl From<PbCompactTask> for CompactTask {
                 .collect(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
-            max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            blocked_xor_filter_kv_count_threshold: pb_compact_task
+                .blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
             sstable_filter_kind: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_kind)
                 .unwrap_or(PbSstableFilterType::SstableFilterXor16),
@@ -434,7 +438,8 @@ impl From<&PbCompactTask> for CompactTask {
                 .collect(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
-            max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            blocked_xor_filter_kv_count_threshold: pb_compact_task
+                .blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
             sstable_filter_kind: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_kind)
                 .unwrap_or(PbSstableFilterType::SstableFilterXor16),
@@ -496,7 +501,8 @@ impl From<CompactTask> for PbCompactTask {
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
-            max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
+            blocked_xor_filter_kv_count_threshold: compact_task
+                .blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
             sstable_filter_kind: compact_task.sstable_filter_kind.into(),
             sstable_filter_layout: compact_task.sstable_filter_layout.into(),
@@ -554,7 +560,8 @@ impl From<&CompactTask> for PbCompactTask {
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
-            max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
+            blocked_xor_filter_kv_count_threshold: compact_task
+                .blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
             sstable_filter_kind: compact_task.sstable_filter_kind.into(),
             sstable_filter_layout: compact_task.sstable_filter_layout.into(),

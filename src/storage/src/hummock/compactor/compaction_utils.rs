@@ -765,7 +765,7 @@ mod tests {
 
     fn test_compact_task(
         layout: PbSstableFilterLayout,
-        max_kv_count_for_xor16: Option<u64>,
+        blocked_xor_filter_kv_count_threshold: Option<u64>,
     ) -> CompactTask {
         let table_id = TableId::new(1);
         CompactTask {
@@ -786,7 +786,7 @@ mod tests {
             task_type: PbTaskType::Dynamic,
             sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
             sstable_filter_layout: layout,
-            max_kv_count_for_xor16,
+            blocked_xor_filter_kv_count_threshold,
             ..Default::default()
         }
     }

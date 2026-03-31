@@ -630,8 +630,9 @@ fn update_compaction_config(
             MutableConfig::VnodeAlignedLevelSizeThreshold(_) => {
                 // Deprecated. Keep accepting the field for old clients but do not apply it.
             }
-            MutableConfig::MaxKvCountForXor16(c) => {
-                target.max_kv_count_for_xor16 = (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+            MutableConfig::BlockedXorFilterKvCountThreshold(c) => {
+                target.blocked_xor_filter_kv_count_threshold =
+                    (*c != u64::MIN && *c != u64::MAX).then_some(*c);
             }
             MutableConfig::MaxVnodeKeyRangeBytes(c) => {
                 target.max_vnode_key_range_bytes = (*c > 0).then_some(*c);
