@@ -26,6 +26,10 @@ sleep 1
 
 set -euo pipefail
 
+export MQTT_URL="tcp://mqtt-server:1883"
+export RISEDEV_MQTT_URL="tcp://mqtt-server:1883"
+export RISEDEV_MQTT_WITH_OPTIONS_COMMON="connector='mqtt',url='tcp://mqtt-server:1883'"
+
 echo "--- testing mqtt sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/mqtt_sink.slt'
 

@@ -421,6 +421,103 @@ pub struct SqlServerConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct ClickHouseConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub http_port: u16,
+    pub native_port: u16,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct NatsConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+    pub monitor_port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct MqttConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct DorisConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub http_port: u16,
+    pub query_port: u16,
+    pub be_http_port: u16,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct StarrocksConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub http_port: u16,
+    pub query_port: u16,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct LakekeeperConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -474,6 +571,11 @@ pub enum ServiceConfig {
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
+    ClickHouse(ClickHouseConfig),
+    Nats(NatsConfig),
+    Mqtt(MqttConfig),
+    Doris(DorisConfig),
+    Starrocks(StarrocksConfig),
     Lakekeeper(LakekeeperConfig),
     Moat(MoatConfig),
 }
@@ -488,6 +590,11 @@ pub enum TaskGroup {
     MySql,
     Postgres,
     SqlServer,
+    ClickHouse,
+    Nats,
+    Mqtt,
+    Doris,
+    Starrocks,
     Redis,
     Lakekeeper,
     Moat,
@@ -514,6 +621,11 @@ impl ServiceConfig {
             Self::MySql(c) => &c.id,
             Self::Postgres(c) => &c.id,
             Self::SqlServer(c) => &c.id,
+            Self::ClickHouse(c) => &c.id,
+            Self::Nats(c) => &c.id,
+            Self::Mqtt(c) => &c.id,
+            Self::Doris(c) => &c.id,
+            Self::Starrocks(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
             Self::Lakekeeper(c) => &c.id,
             Self::Moat(c) => &c.id,
@@ -541,6 +653,11 @@ impl ServiceConfig {
             Self::MySql(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
+            Self::ClickHouse(c) => Some(c.http_port),
+            Self::Nats(c) => Some(c.port),
+            Self::Mqtt(c) => Some(c.port),
+            Self::Doris(c) => Some(c.query_port),
+            Self::Starrocks(c) => Some(c.query_port),
             Self::SchemaRegistry(c) => Some(c.port),
             Self::Lakekeeper(c) => Some(c.port),
             Self::Moat(c) => Some(c.port),
@@ -567,6 +684,11 @@ impl ServiceConfig {
             Self::MySql(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
+            Self::ClickHouse(c) => c.user_managed,
+            Self::Nats(c) => c.user_managed,
+            Self::Mqtt(c) => c.user_managed,
+            Self::Doris(c) => c.user_managed,
+            Self::Starrocks(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
             Self::Lakekeeper(c) => c.user_managed,
             Self::Moat(_c) => false,
@@ -605,6 +727,11 @@ impl ServiceConfig {
                 }
             }
             ServiceConfig::SqlServer(_) => SqlServer,
+            ServiceConfig::ClickHouse(_) => ClickHouse,
+            ServiceConfig::Nats(_) => Nats,
+            ServiceConfig::Mqtt(_) => Mqtt,
+            ServiceConfig::Doris(_) => Doris,
+            ServiceConfig::Starrocks(_) => Starrocks,
             ServiceConfig::Lakekeeper(_) => Lakekeeper,
             ServiceConfig::Moat(_) => Moat,
         }

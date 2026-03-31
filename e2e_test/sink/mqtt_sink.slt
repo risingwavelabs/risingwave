@@ -1,3 +1,5 @@
+control substitution on
+
 statement ok
 set sink_decouple = false;
 
@@ -20,8 +22,7 @@ FROM
   mqtt
 WITH
   (
-    connector='mqtt',
-    url='tcp://mqtt-server',
+    ${RISEDEV_MQTT_WITH_OPTIONS_COMMON},
     type = 'append-only',
     topic.field = 'topic',
     retain = 'false',
@@ -36,8 +37,7 @@ FROM
   mqtt_nested
 WITH
   (
-    connector='mqtt',
-    url='tcp://mqtt-server',
+    ${RISEDEV_MQTT_WITH_OPTIONS_COMMON},
     type = 'append-only',
     topic = '/nested/fallback',
     topic.field = 'info.topic',
@@ -55,8 +55,7 @@ CREATE TABLE mqtt_source
 )
 INCLUDE partition AS mqtt_topic
 WITH (
-    connector ='mqtt',
-    url ='tcp://mqtt-server',
+    ${RISEDEV_MQTT_WITH_OPTIONS_COMMON},
     topic = '/device/fixed/12,/device/fixed/13,/device/wildcard/#',
     qos = 'at_least_once',
 ) FORMAT PLAIN ENCODE JSON;
@@ -68,8 +67,7 @@ CREATE TABLE mqtt_nested_source
    temperature double
 )
 WITH (
-    connector='mqtt',
-    url='tcp://mqtt-server',
+    ${RISEDEV_MQTT_WITH_OPTIONS_COMMON},
     topic= '/nested/fallback',
     qos = 'at_least_once',
 ) FORMAT PLAIN ENCODE JSON;

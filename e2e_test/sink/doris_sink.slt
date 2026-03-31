@@ -1,3 +1,20 @@
+control substitution on
+
+system ok retry 30 backoff 1s
+test "$(doris -N -B -e "show backends;" | awk -F '\t' '$10 == "true" { count++ } END { print count + 0 }')" = "1"
+
+system ok
+doris -e "
+DROP DATABASE IF EXISTS ${DORIS_DATABASE};
+CREATE DATABASE ${DORIS_DATABASE};
+USE ${DORIS_DATABASE};
+CREATE TABLE demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 datev2,v8 datetime,v9 boolean,v10 json) UNIQUE KEY(\`v1\`)
+DISTRIBUTED BY HASH(\`v1\`) BUCKETS 1
+PROPERTIES (\"replication_allocation\" = \"tag.location.default: 1\");
+CREATE USER IF NOT EXISTS '${DORIS_USER}'@'%' IDENTIFIED BY '${DORIS_PASSWORD}';
+GRANT ALL ON *.* TO '${DORIS_USER}'@'%';
+"
+
 statement ok
 set sink_decouple = false;
 
@@ -11,12 +28,8 @@ statement ok
 CREATE SINK s6
 FROM
     mv6 WITH (
-    connector = 'doris',
+    ${RISEDEV_DORIS_WITH_OPTIONS_COMMON},
     type = 'append-only',
-    doris.url = 'http://doris-server:8030',
-    doris.user = 'users',
-    doris.password = '123456',
-    doris.database = 'demo',
     doris.table='demo_bhv_table',
     force_append_only='true'
 );
@@ -27,6 +40,9 @@ INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:0
 statement ok
 FLUSH;
 
+system ok retry 10 backoff 1s
+test "$(doris -N -B -e "SELECT count(*) FROM ${DORIS_DATABASE}.demo_bhv_table WHERE v1 = 1 AND v6 = 'test';")" = "1"
+
 statement ok
 DROP SINK s6;
 
@@ -35,3 +51,6 @@ DROP MATERIALIZED VIEW mv6;
 
 statement ok
 DROP TABLE t6;
+
+system ok
+doris -e "DROP DATABASE IF EXISTS ${DORIS_DATABASE};"

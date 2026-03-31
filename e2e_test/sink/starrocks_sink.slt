@@ -1,3 +1,25 @@
+control substitution on
+
+system ok retry 30 backoff 1s
+test "$(starrocks -N -B -e "SELECT 1;")" = "1"
+
+system ok
+starrocks -e "
+DROP DATABASE IF EXISTS ${STARROCKS_DATABASE};
+CREATE DATABASE ${STARROCKS_DATABASE};
+USE ${STARROCKS_DATABASE};
+CREATE table demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 date,v8 datetime,v9 boolean,v10 json,v11 decimal(10,5)) ENGINE=OLAP
+PRIMARY KEY(\`v1\`)
+DISTRIBUTED BY HASH(\`v1\`) properties(\"replication_num\" = \"1\");
+CREATE table demo_agg_table(id int, value string REPLACE_IF_NOT_NULL) ENGINE=OLAP
+AGGREGATE KEY(\`id\`)
+DISTRIBUTED BY HASH(\`id\`) properties(\"replication_num\" = \"1\");
+CREATE TABLE demo_reserved_words(id int, \`order\` string, \`from\` string) ENGINE=OLAP
+PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");
+CREATE USER IF NOT EXISTS '${STARROCKS_USER}'@'%' IDENTIFIED BY '${STARROCKS_PASSWORD}';
+GRANT ALL ON *.* TO '${STARROCKS_USER}'@'%';
+"
+
 statement ok
 set sink_decouple = false;
 
@@ -11,14 +33,8 @@ statement ok
 CREATE SINK s6
 FROM
     mv6 WITH (
-    connector = 'starrocks',
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    starrocks.host = 'starrocks-fe-server',
-    starrocks.mysqlport = '9030',
-    starrocks.httpport = '8030',
-    starrocks.user = 'users',
-    starrocks.password = '123456',
-    starrocks.database = 'demo',
     starrocks.table = 'demo_bhv_table',
     primary_key = 'v1'
 );
@@ -28,6 +44,9 @@ INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:0
 
 statement ok
 FLUSH;
+
+system ok retry 10 backoff 1s
+test "$(starrocks -N -B -e "SELECT count(*) FROM ${STARROCKS_DATABASE}.demo_bhv_table WHERE v1 = 1 AND v6 = 'test';")" = "1"
 
 statement ok
 DROP SINK s6;
@@ -45,15 +64,9 @@ statement ok
 CREATE SINK sink_agg_table
 FROM
     agg_table WITH (
-    connector = 'starrocks',
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
     type = 'append-only',
     force_append_only='true',
-    starrocks.host = 'starrocks-fe-server',
-    starrocks.mysqlport = '9030',
-    starrocks.httpport = '8030',
-    starrocks.user = 'users',
-    starrocks.password = '123456',
-    starrocks.database = 'demo',
     starrocks.table = 'demo_agg_table',
     primary_key = 'id'
 );
@@ -63,6 +76,9 @@ INSERT INTO agg_table VALUES (1, 'v');
 
 statement ok
 FLUSH;
+
+system ok retry 10 backoff 1s
+test "$(starrocks -N -B -e "SELECT count(*) FROM ${STARROCKS_DATABASE}.demo_agg_table WHERE id = 1 AND value = 'v';")" = "1"
 
 statement ok
 DROP SINK sink_agg_table;
@@ -77,14 +93,8 @@ statement ok
 CREATE SINK sink_reserved_words
 FROM reserved_words
 WITH (
-    connector = 'starrocks',
+    ${RISEDEV_STARROCKS_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    starrocks.host = 'starrocks-fe-server',
-    starrocks.mysqlport = '9030',
-    starrocks.httpport = '8030',
-    starrocks.user = 'users',
-    starrocks.password = '123456',
-    starrocks.database = 'demo',
     starrocks.table = 'demo_reserved_words',
     primary_key = 'id'
 );
@@ -95,8 +105,14 @@ INSERT INTO reserved_words VALUES (1, 'asc', 'x');
 statement ok
 FLUSH;
 
+system ok retry 10 backoff 1s
+test "$(starrocks -N -B -e "SELECT count(*) FROM ${STARROCKS_DATABASE}.demo_reserved_words WHERE id = 1 AND \`order\` = 'asc' AND \`from\` = 'x';")" = "1"
+
 statement ok
 DROP SINK sink_reserved_words;
 
 statement ok
 DROP TABLE reserved_words;
+
+system ok
+starrocks -e "DROP DATABASE IF EXISTS ${STARROCKS_DATABASE};"

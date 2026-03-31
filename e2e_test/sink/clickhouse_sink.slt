@@ -1,3 +1,20 @@
+control substitution on
+
+system ok
+clickhouse <<< 'DROP TABLE IF EXISTS demo_test;'
+
+system ok
+clickhouse <<'EOF'
+CREATE TABLE demo_test(
+  v1 Int32,
+  v2 Int64,
+  v3 String,
+  v4 Enum16('A' = 1, 'B' = 2),
+  v5 Decimal64(3),
+  v6 JSON
+) ENGINE = ReplacingMergeTree PRIMARY KEY (v1);
+EOF
+
 statement ok
 set sink_decouple = false;
 
@@ -9,13 +26,9 @@ CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
 statement ok
 CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3, mv6.v4 as v4, mv6.v5 as v5,mv6.v6 as v6 from mv6 WITH (
-    connector = 'clickhouse',
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
     type = 'append-only',
     force_append_only='true',
-    clickhouse.url = 'http://clickhouse-server:8123',
-    clickhouse.user = 'default',
-    clickhouse.password = 'default',
-    clickhouse.database = 'default',
     clickhouse.table='demo_test',
 );
 
@@ -25,6 +38,19 @@ INSERT INTO t6 VALUES (1, 50, '1-50', 1, 1.1,'{"sd":123,"sda":23}'), (2, 2, '2-2
 statement ok
 FLUSH;
 
+system ok
+result=$(clickhouse <<'EOF'
+SELECT count(),sum(v1),sum(v2),sum(v4 = 'A'),sum(v4 = 'B'),sum(v5 = toDecimal64(0, 3))
+FROM demo_test
+FORMAT TSVRaw;
+EOF
+)
+if [ "$result" = $'7\t53\t62\t4\t3\t3' ]; then
+  exit 0
+fi
+echo "$result"
+exit 1
+
 statement ok
 DROP SINK s6;
 
@@ -33,3 +59,6 @@ DROP MATERIALIZED VIEW mv6;
 
 statement ok
 DROP TABLE t6;
+
+system ok
+clickhouse <<< 'DROP TABLE IF EXISTS demo_test;' >/dev/null
