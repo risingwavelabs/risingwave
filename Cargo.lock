@@ -12423,6 +12423,7 @@ dependencies = [
  "strum 0.27.2",
  "thiserror 2.0.17",
  "thiserror-ext",
+ "tonic 0.12.3",
  "tracing",
  "walkdir",
  "workspace-hack",
@@ -15542,6 +15543,7 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+ "zstd 0.13.3",
 ]
 
 [[package]]

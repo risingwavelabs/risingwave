@@ -8,7 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [package.metadata.cargo-machete]
-ignored = ["enum-as-inner", "pbjson", "prost-helpers", "strum"]
+ignored = ["enum-as-inner", "pbjson", "prost-helpers", "strum", "tonic-zstd"]
 
 [dependencies]
 enum-as-inner = "0.6"
@@ -23,6 +23,7 @@ strum = { version = "0.27", features = ["derive"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tonic = { workspace = true }
+tonic-zstd = { workspace = true }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
