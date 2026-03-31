@@ -127,10 +127,9 @@ impl<'a> Stream for Parser<'a> {
         self.0.reset(&checkpoint.0)
     }
 
-    #[inline(always)]
-    fn raw(&self) -> &dyn std::fmt::Debug {
-        // We customized the `Debug` implementation in the wrapper, so don't return `self.0` here.
-        self
+    fn trace(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // We customized the `Debug` implementation in the wrapper, so don't delegate to `self.0` here.
+        write!(f, "{self:?}")
     }
 
     fn peek_token(&self) -> Option<Self::Token> {
