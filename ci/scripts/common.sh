@@ -233,7 +233,7 @@ sink_test_env_setup() {
         echo "--- Download connector node package"
         export CONNECTOR_LIBS_PATH="./connector-node/libs"
         buildkite-agent artifact download risingwave-connector.tar.gz ./
-        mkdir ./connector-node
+        mkdir -p ./connector-node
         tar xf ./risingwave-connector.tar.gz -C ./connector-node
     fi
 

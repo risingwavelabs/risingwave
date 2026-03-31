@@ -3,6 +3,7 @@
 Provides common functions for checking sink destinations in CI tests.
 Each sink_check.py can import what it needs - no mandatory base class.
 """
+import shlex
 import subprocess
 import sys
 
@@ -20,7 +21,7 @@ def docker_compose_exec(container, command, use_bash=True):
     if use_bash:
         args = ["docker", "compose", "exec", container, "bash", "-c", command]
     else:
-        args = ["docker", "compose", "exec", container] + command.split()
+        args = ["docker", "compose", "exec", container] + shlex.split(command)
     return subprocess.check_output(args).decode("utf-8")
 
 
