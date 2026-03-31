@@ -23,8 +23,6 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,18 +55,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         String dataType;
         Long charMaxLength;
         String udtName;
-        String formattedType;
+        Integer atttypmod;
 
-        ColumnInfo(String dataType, Long charMaxLength, String udtName, String formattedType) {
+        ColumnInfo(String dataType, Long charMaxLength, String udtName, Integer atttypmod) {
             this.dataType = dataType;
             this.charMaxLength = charMaxLength;
             this.udtName = udtName;
-            this.formattedType = formattedType;
+            this.atttypmod = atttypmod;
         }
     }
-
-    private static final Pattern VECTOR_DIM_PATTERN =
-            Pattern.compile("^\\s*vector\\s*\\(\\s*(\\d+)\\s*\\)\\s*$", Pattern.CASE_INSENSITIVE);
 
     public PostgresValidator(
             Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
@@ -246,8 +241,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 Long charMaxLength =
                         res.getObject(3) == null ? null : ((Number) res.getObject(3)).longValue();
                 var udtName = res.getString(4);
-                var formattedType = res.getString(5);
-                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName, formattedType));
+                Integer atttypmod =
+                        res.getObject(5) == null ? null : ((Number) res.getObject(5)).intValue();
+                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName, atttypmod));
             }
 
             for (var colDesc : tableSchema.getColumnDescs()) {
@@ -274,17 +270,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    private static Integer parseVectorDimension(String formattedType) {
-        if (formattedType == null) {
-            return null;
-        }
-        Matcher matcher = VECTOR_DIM_PATTERN.matcher(formattedType);
-        if (!matcher.matches()) {
-            return null;
-        }
-        return Integer.parseInt(matcher.group(1));
-    }
-
     private static String validateVectorDimension(
             ColumnInfo colInfo, Data.DataType expectedType, String colName) {
         if (expectedType.getTypeName().getNumber() != Data.DataType.TypeName.VECTOR_VALUE) {
@@ -295,13 +280,14 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
 
         int expectedDim = expectedType.getPrecision();
-        Integer upstreamDim = parseVectorDimension(colInfo.formattedType);
+        // For pgvector, PostgreSQL stores dimension in pg_attribute.atttypmod.
+        // `vector(n)` -> atttypmod = n, and dimension-less `vector` -> atttypmod = -1.
+        Integer upstreamDim =
+                (colInfo.atttypmod != null && colInfo.atttypmod > 0) ? colInfo.atttypmod : null;
         if (upstreamDim == null) {
             return "Incompatible vector dimension of column "
                     + colName
-                    + ": upstream type `"
-                    + colInfo.formattedType
-                    + "`, but expected vector("
+                    + ": upstream vector has no dimension, but expected vector("
                     + expectedDim
                     + ")";
         }

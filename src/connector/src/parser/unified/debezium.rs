@@ -27,10 +27,10 @@ use risingwave_pb::plan_common::additional_column::ColumnType;
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
+use crate::connector_common::{SslMode, create_pg_client};
 use crate::parser::TransactionControl;
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::schema_change::TableChangeType;
-use crate::connector_common::{SslMode, create_pg_client};
 use crate::source::cdc::build_cdc_table_id;
 use crate::source::cdc::external::mysql::{
     mysql_type_to_rw_type, timestamp_val_to_timestamptz, type_name_to_mysql_type,
@@ -77,10 +77,7 @@ fn parse_pgvector_dimension(type_text: &str) -> Option<usize> {
 
 fn parse_pgvector_dimension_from_ddl(ddl: &str, column_name: &str) -> Option<usize> {
     let quoted_col = regex::escape(column_name);
-    let pattern_quoted = format!(
-        r#"(?i)"{}"\s+vector\s*\(\s*(\d+)\s*\)"#,
-        quoted_col
-    );
+    let pattern_quoted = format!(r#"(?i)"{}"\s+vector\s*\(\s*(\d+)\s*\)"#, quoted_col);
     if let Ok(re) = Regex::new(&pattern_quoted)
         && let Some(caps) = re.captures(ddl)
         && let Some(dim_text) = caps.get(1)
@@ -138,15 +135,21 @@ async fn fetch_pgvector_dimensions_for_table(
     };
 
     let props = &cdc_props.properties;
-    let host = props.get("hostname").ok_or_else(|| AccessError::Uncategorized {
-        message: "missing `hostname` in postgres-cdc properties".to_owned(),
-    })?;
-    let port = props.get("port").ok_or_else(|| AccessError::Uncategorized {
-        message: "missing `port` in postgres-cdc properties".to_owned(),
-    })?;
-    let user = props.get("username").ok_or_else(|| AccessError::Uncategorized {
-        message: "missing `username` in postgres-cdc properties".to_owned(),
-    })?;
+    let host = props
+        .get("hostname")
+        .ok_or_else(|| AccessError::Uncategorized {
+            message: "missing `hostname` in postgres-cdc properties".to_owned(),
+        })?;
+    let port = props
+        .get("port")
+        .ok_or_else(|| AccessError::Uncategorized {
+            message: "missing `port` in postgres-cdc properties".to_owned(),
+        })?;
+    let user = props
+        .get("username")
+        .ok_or_else(|| AccessError::Uncategorized {
+            message: "missing `username` in postgres-cdc properties".to_owned(),
+        })?;
     let password = props.get("password").cloned().unwrap_or_default();
     let database = props
         .get("database.name")
@@ -172,7 +175,10 @@ async fn fetch_pgvector_dimensions_for_table(
     )
     .await
     .map_err(|err| AccessError::Uncategorized {
-        message: format!("failed to connect upstream postgres for schema change lookup: {err}"),
+        message: format!(
+            "failed to connect upstream postgres for schema change lookup: {}",
+            err.as_report()
+        ),
     })?;
 
     let rows = client
@@ -192,7 +198,10 @@ async fn fetch_pgvector_dimensions_for_table(
         )
         .await
         .map_err(|err| AccessError::Uncategorized {
-            message: format!("failed to query upstream postgres schema for {schema}.{table}: {err}"),
+            message: format!(
+                "failed to query upstream postgres schema for {schema}.{table}: {}",
+                err.as_report()
+            ),
         })?;
 
     let mut dims = std::collections::HashMap::new();
@@ -341,8 +350,10 @@ pub async fn parse_schema_change(
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
-    let mut pgvector_dims_cache: std::collections::HashMap<String, std::collections::HashMap<String, usize>> =
-        std::collections::HashMap::new();
+    let mut pgvector_dims_cache: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, usize>,
+    > = std::collections::HashMap::new();
 
     let upstream_ddl: String = accessor
         .access(&[UPSTREAM_DDL], &DataType::Varchar)?
@@ -444,10 +455,7 @@ pub async fn parse_schema_change(
                                         // RW's required `vector(n)` type safely.
                                         return Err(AccessError::CdcAutoSchemaChangeError {
                                             ty: type_name,
-                                            table_name: format!(
-                                                "{}.{}",
-                                                source_name, table_name
-                                            ),
+                                            table_name: format!("{}.{}", source_name, table_name),
                                         });
                                     }
                                 }
