@@ -216,6 +216,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding> std
             .field("stream_key", &self.info.stream_key)
             .field("schema", &self.info.schema)
             .field("actual_output_data_types", &self.actual_output_data_types)
+            .field(
+                "join_cache_evict_interval_rows",
+                &self.join_cache_evict_interval_rows,
+            )
             .finish()
     }
 }
@@ -1388,6 +1392,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
+    use risingwave_common::config::StreamingConfig;
     use risingwave_common::hash::{Key64, Key128};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
@@ -3708,6 +3713,208 @@ mod tests {
                 data_type: DataType::Int64,
                 val: ScalarImpl::Int64(100)
             }
+        );
+
+        Ok(())
+    }
+
+    async fn create_executor_with_evict_interval<const T: JoinTypePrimitive>(
+        evict_interval: u32,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64), // join key
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (tx_l, source_l) = MockSource::channel();
+        let source_l = source_l.into_executor(schema.clone(), vec![1]);
+        let (tx_r, source_r) = MockSource::channel();
+        let source_r = source_r.into_executor(schema, vec![1]);
+        let params_l = JoinParams::new(vec![0], vec![1]);
+        let params_r = JoinParams::new(vec![0], vec![1]);
+
+        let mem_state = MemoryStateStore::new();
+
+        let (state_l, degree_state_l) = create_in_memory_state_table(
+            mem_state.clone(),
+            &[DataType::Int64, DataType::Int64],
+            &[OrderType::ascending(), OrderType::ascending()],
+            &[0, 1],
+            0,
+        )
+        .await;
+
+        let (state_r, degree_state_r) = create_in_memory_state_table(
+            mem_state,
+            &[DataType::Int64, DataType::Int64],
+            &[OrderType::ascending(), OrderType::ascending()],
+            &[0, 1],
+            2,
+        )
+        .await;
+
+        let schema = match T {
+            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().clone(),
+            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().clone(),
+            _ => [source_l.schema().fields(), source_r.schema().fields()]
+                .concat()
+                .into_iter()
+                .collect(),
+        };
+        let schema_len = schema.len();
+        let info = ExecutorInfo::for_test(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
+
+        let mut streaming_config = StreamingConfig::default();
+        streaming_config.developer.join_hash_map_evict_interval_rows = evict_interval;
+
+        let executor = HashJoinExecutor::<Key64, MemoryStateStore, T, MemoryEncoding>::new(
+            ActorContext::for_test_with_config(123, streaming_config),
+            info,
+            source_l,
+            source_r,
+            params_l,
+            params_r,
+            vec![false],
+            (0..schema_len).collect_vec(),
+            None,
+            vec![],
+            state_l,
+            degree_state_l,
+            state_r,
+            degree_state_r,
+            Arc::new(AtomicU64::new(0)),
+            false,
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+            2048,
+            vec![(0, true)],
+        );
+        (tx_l, tx_r, executor.boxed().execute())
+    }
+
+    /// Tests that a hash join executor with `join_hash_map_evict_interval_rows = 0`
+    /// (periodic eviction disabled) produces correct results.
+    #[tokio::test]
+    async fn test_hash_join_evict_interval_disabled() -> StreamExecutorResult<()> {
+        let chunk_l = StreamChunk::from_pretty(
+            "  I I
+             + 1 4
+             + 2 5
+             + 3 6",
+        );
+        let chunk_r = StreamChunk::from_pretty(
+            "  I I
+             + 2 7
+             + 3 8",
+        );
+
+        // 0 disables periodic eviction
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor_with_evict_interval::<{ JoinType::Inner }>(0).await;
+
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_l.push_chunk(chunk_l);
+        hash_join.next_unwrap_pending();
+
+        tx_r.push_chunk(chunk_r);
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                + 2 5 2 7
+                + 3 6 3 8"
+            )
+        );
+
+        Ok(())
+    }
+
+    /// Tests that a hash join executor with `join_hash_map_evict_interval_rows = 1`
+    /// (evict after every row) produces correct results.
+    #[tokio::test]
+    async fn test_hash_join_evict_interval_one() -> StreamExecutorResult<()> {
+        let chunk_l = StreamChunk::from_pretty(
+            "  I I
+             + 1 4
+             + 2 5
+             + 3 6",
+        );
+        let chunk_r = StreamChunk::from_pretty(
+            "  I I
+             + 2 7
+             + 3 8",
+        );
+
+        // evict after every row
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor_with_evict_interval::<{ JoinType::Inner }>(1).await;
+
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_l.push_chunk(chunk_l);
+        hash_join.next_unwrap_pending();
+
+        tx_r.push_chunk(chunk_r);
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                + 2 5 2 7
+                + 3 6 3 8"
+            )
+        );
+
+        Ok(())
+    }
+
+    /// Tests that a hash join executor with a custom `join_hash_map_evict_interval_rows`
+    /// value produces correct results.
+    #[tokio::test]
+    async fn test_hash_join_evict_interval_custom() -> StreamExecutorResult<()> {
+        let chunk_l = StreamChunk::from_pretty(
+            "  I I
+             + 1 4
+             + 2 5
+             + 3 6
+             + 4 7
+             + 5 8",
+        );
+        let chunk_r = StreamChunk::from_pretty(
+            "  I I
+             + 1 9
+             + 3 10
+             + 5 11",
+        );
+
+        // evict every 2 rows
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor_with_evict_interval::<{ JoinType::Inner }>(2).await;
+
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_l.push_chunk(chunk_l);
+        hash_join.next_unwrap_pending();
+
+        tx_r.push_chunk(chunk_r);
+        let chunk = hash_join.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk,
+            StreamChunk::from_pretty(
+                " I I I I
+                + 1 4 1 9
+                + 3 6 3 10
+                + 5 8 5 11"
+            )
         );
 
         Ok(())

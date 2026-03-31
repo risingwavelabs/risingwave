@@ -157,6 +157,10 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             .field("stream_key", &self.info.stream_key)
             .field("schema", &self.info.schema)
             .field("actual_output_data_types", &self.actual_output_data_types)
+            .field(
+                "join_cache_evict_interval_rows",
+                &self.join_cache_evict_interval_rows,
+            )
             .finish()
     }
 }
