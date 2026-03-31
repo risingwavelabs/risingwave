@@ -368,12 +368,24 @@ impl From<PbCompactTask> for CompactTask {
             blocked_xor_filter_kv_count_threshold: pb_compact_task
                 .blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
-            sstable_filter_kind: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_kind)
-                .unwrap_or(PbSstableFilterType::SstableFilterXor16),
-            sstable_filter_layout: PbSstableFilterLayout::try_from(
+            sstable_filter_kind: match PbSstableFilterType::try_from(
+                pb_compact_task.sstable_filter_kind,
+            )
+            .unwrap_or(PbSstableFilterType::SstableFilterXor16)
+            {
+                PbSstableFilterType::SstableFilterUnspecified => {
+                    PbSstableFilterType::SstableFilterXor16
+                }
+                kind => kind,
+            },
+            sstable_filter_layout: match PbSstableFilterLayout::try_from(
                 pb_compact_task.sstable_filter_layout,
             )
-            .unwrap_or(PbSstableFilterLayout::Auto),
+            .unwrap_or(PbSstableFilterLayout::Auto)
+            {
+                PbSstableFilterLayout::Unspecified => PbSstableFilterLayout::Auto,
+                layout => layout,
+            },
         }
     }
 }
@@ -441,12 +453,24 @@ impl From<&PbCompactTask> for CompactTask {
             blocked_xor_filter_kv_count_threshold: pb_compact_task
                 .blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
-            sstable_filter_kind: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_kind)
-                .unwrap_or(PbSstableFilterType::SstableFilterXor16),
-            sstable_filter_layout: PbSstableFilterLayout::try_from(
+            sstable_filter_kind: match PbSstableFilterType::try_from(
+                pb_compact_task.sstable_filter_kind,
+            )
+            .unwrap_or(PbSstableFilterType::SstableFilterXor16)
+            {
+                PbSstableFilterType::SstableFilterUnspecified => {
+                    PbSstableFilterType::SstableFilterXor16
+                }
+                kind => kind,
+            },
+            sstable_filter_layout: match PbSstableFilterLayout::try_from(
                 pb_compact_task.sstable_filter_layout,
             )
-            .unwrap_or(PbSstableFilterLayout::Auto),
+            .unwrap_or(PbSstableFilterLayout::Auto)
+            {
+                PbSstableFilterLayout::Unspecified => PbSstableFilterLayout::Auto,
+                layout => layout,
+            },
         }
     }
 }
