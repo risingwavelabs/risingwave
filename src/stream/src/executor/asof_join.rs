@@ -35,9 +35,6 @@ use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::join::row::JoinEncoding;
 use crate::executor::prelude::*;
 
-/// Evict the cache every n rows.
-const EVICT_EVERY_N_ROWS: u32 = 16;
-
 fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
     HashSet::<usize>::from_iter(vec1).is_subset(&vec2.into_iter().collect())
 }
@@ -141,6 +138,8 @@ pub struct AsOfJoinExecutor<
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
 
     high_join_amplification_threshold: usize,
+    /// Number of processed rows between periodic manual evictions of the join cache.
+    join_cache_evict_interval_rows: u32,
     /// `AsOf` join description
     asof_desc: AsOfDesc,
 }
@@ -181,6 +180,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore, E: JoinEncoding> {
     chunk_size: usize,
     cnt_rows_received: &'a mut u32,
     high_join_amplification_threshold: usize,
+    join_cache_evict_interval_rows: u32,
 }
 
 impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
@@ -204,6 +204,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         high_join_amplification_threshold: usize,
         asof_desc: AsOfDesc,
     ) -> Self {
+        let join_cache_evict_interval_rows = ctx.config.developer.join_hash_map_evict_interval_rows;
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = [
@@ -332,6 +333,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             cnt_rows_received: 0,
             watermark_buffers,
             high_join_amplification_threshold,
+            join_cache_evict_interval_rows,
             asof_desc,
         }
     }
@@ -428,6 +430,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -452,6 +455,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -526,9 +530,13 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         side_update: &mut JoinSide<K, S, E>,
         side_match: &mut JoinSide<K, S, E>,
         cnt_rows_received: &mut u32,
+        join_cache_evict_interval_rows: u32,
     ) {
+        if join_cache_evict_interval_rows == 0 {
+            return;
+        }
         *cnt_rows_received += 1;
-        if *cnt_rows_received == EVICT_EVERY_N_ROWS {
+        if *cnt_rows_received >= join_cache_evict_interval_rows {
             side_update.ht.evict();
             side_match.ht.evict();
             *cnt_rows_received = 0;
@@ -609,6 +617,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             chunk_size,
             cnt_rows_received,
             high_join_amplification_threshold: _,
+            join_cache_evict_interval_rows,
         } = args;
 
         let (side_update, side_match) = (side_l, side_r);
@@ -626,7 +635,12 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             let Some((op, row)) = r else {
                 continue;
             };
-            Self::evict_cache(side_update, side_match, cnt_rows_received);
+            Self::evict_cache(
+                side_update,
+                side_match,
+                cnt_rows_received,
+                join_cache_evict_interval_rows,
+            );
 
             let matched_rows = if !side_update.ht.check_inequal_key_null(&row) {
                 Self::hash_eq_match(key, &mut side_match.ht).await?
@@ -729,6 +743,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             chunk_size,
             cnt_rows_received,
             high_join_amplification_threshold,
+            join_cache_evict_interval_rows,
         } = args;
 
         let (side_update, side_match) = (side_r, side_l);
@@ -756,7 +771,12 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             };
             let mut join_matched_rows_cnt = 0;
 
-            Self::evict_cache(side_update, side_match, cnt_rows_received);
+            Self::evict_cache(
+                side_update,
+                side_match,
+                cnt_rows_received,
+                join_cache_evict_interval_rows,
+            );
 
             let matched_rows = if !side_update.ht.check_inequal_key_null(&row) {
                 Self::hash_eq_match(key, &mut side_match.ht).await?

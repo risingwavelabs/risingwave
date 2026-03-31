@@ -42,9 +42,6 @@ use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::join::hash_join::CacheResult;
 use crate::executor::prelude::*;
 
-/// Evict the cache every n rows.
-const EVICT_EVERY_N_ROWS: u32 = 16;
-
 fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
     HashSet::<usize>::from_iter(vec1).is_subset(&vec2.into_iter().collect())
 }
@@ -202,6 +199,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
 
     /// Max number of rows that will be cached in the entry state.
     entry_state_max_rows: usize,
+    /// Number of processed rows between periodic manual evictions of the join cache.
+    join_cache_evict_interval_rows: u32,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding> std::fmt::Debug
@@ -242,6 +241,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore, E: JoinEncoding> {
     cnt_rows_received: &'a mut u32,
     high_join_amplification_threshold: usize,
     entry_state_max_rows: usize,
+    join_cache_evict_interval_rows: u32,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
@@ -323,6 +323,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             None => ctx.config.developer.hash_join_entry_state_max_rows,
             Some(entry_state_max_rows) => entry_state_max_rows,
         };
+        let join_cache_evict_interval_rows = ctx.config.developer.join_hash_map_evict_interval_rows;
         let side_l_column_n = input_l.schema().len();
 
         let schema_fields = match T {
@@ -567,6 +568,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             watermark_buffers,
             high_join_amplification_threshold,
             entry_state_max_rows,
+            join_cache_evict_interval_rows,
         }
     }
 
@@ -665,6 +667,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         cnt_rows_received: &mut self.cnt_rows_received,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
                         entry_state_max_rows: self.entry_state_max_rows,
+                        join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -691,6 +694,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         cnt_rows_received: &mut self.cnt_rows_received,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
                         entry_state_max_rows: self.entry_state_max_rows,
+                        join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -768,9 +772,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         side_update: &mut JoinSide<K, S, E>,
         side_match: &mut JoinSide<K, S, E>,
         cnt_rows_received: &mut u32,
+        join_cache_evict_interval_rows: u32,
     ) {
+        if join_cache_evict_interval_rows == 0 {
+            return;
+        }
         *cnt_rows_received += 1;
-        if *cnt_rows_received == EVICT_EVERY_N_ROWS {
+        if *cnt_rows_received >= join_cache_evict_interval_rows {
             side_update.ht.evict();
             side_match.ht.evict();
             *cnt_rows_received = 0;
@@ -925,6 +933,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             cnt_rows_received,
             high_join_amplification_threshold,
             entry_state_max_rows,
+            join_cache_evict_interval_rows,
             ..
         } = args;
 
@@ -966,7 +975,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             let Some((op, row)) = r else {
                 continue;
             };
-            Self::evict_cache(side_update, side_match, cnt_rows_received);
+            Self::evict_cache(
+                side_update,
+                side_match,
+                cnt_rows_received,
+                join_cache_evict_interval_rows,
+            );
 
             let cache_lookup_result = {
                 let probe_non_null_requirement_satisfied = side_update
