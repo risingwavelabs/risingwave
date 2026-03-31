@@ -683,10 +683,9 @@ impl ToStream for LogicalScan {
                 .session_ctx()
                 .config()
                 .enable_index_selection()
+            && let Some(rewritten) = StreamingIndexSelectionRule::rewrite(self)
         {
-            if let Some(rewritten) = StreamingIndexSelectionRule::rewrite(self) {
-                return rewritten.logical_rewrite_for_stream(ctx);
-            }
+            return rewritten.logical_rewrite_for_stream(ctx);
         }
 
         match self.base.stream_key().is_none() {
