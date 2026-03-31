@@ -19,6 +19,8 @@
 //! - Handles IN predicates by expanding into a `LogicalUnion` of `LogicalScan`s,
 //!   each with a branch-local equality predicate for correct post-backfill routing
 
+use std::ops::Bound;
+
 use super::index_selection_rule::TableScanIoEstimator;
 use super::prelude::PlanRef;
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
@@ -65,8 +67,7 @@ impl StreamingIndexSelectionRule {
         }
 
         let rule = IndexSelectionRule {};
-        let primary_table_row_size =
-            TableScanIoEstimator::estimate_row_size(logical_scan);
+        let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
         let primary_cost = std::cmp::min(
             rule.estimate_table_scan_cost(logical_scan, primary_table_row_size),
             rule.estimate_full_table_scan_cost(logical_scan, primary_table_row_size),
@@ -83,9 +84,7 @@ impl StreamingIndexSelectionRule {
             if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                 let index_cost = rule.estimate_table_scan_cost(
                     &index_scan,
-                    TableScanIoEstimator::estimate_row_size(
-                        &index_scan,
-                    ),
+                    TableScanIoEstimator::estimate_row_size(&index_scan),
                 );
                 if index_cost.le(&min_cost) {
                     min_cost = index_cost;
@@ -117,7 +116,13 @@ impl StreamingIndexSelectionRule {
             )
             .ok()?;
 
-        if scan_ranges.len() <= 1 || !scan_ranges.iter().all(|r| !r.is_full_table_scan()) {
+        if scan_ranges.len() <= 1
+            || !scan_ranges.iter().all(|r| {
+                !r.is_full_table_scan()
+                    && matches!(r.range.0, Bound::Unbounded)
+                    && matches!(r.range.1, Bound::Unbounded)
+            })
+        {
             return None;
         }
 
@@ -126,32 +131,29 @@ impl StreamingIndexSelectionRule {
 
         let branches: Vec<PlanRef> = scan_ranges
             .into_iter()
-            .map(|range| {
+            .map(|range| -> Option<PlanRef> {
                 // Build a branch predicate from this scan range's eq_conds.
                 // InputRef indices are in table-column space.
                 let mut conjunctions: Vec<ExprImpl> = range
                     .eq_conds
                     .iter()
                     .enumerate()
-                    .filter_map(|(i, datum)| {
+                    .map(|(i, datum)| {
                         let table_col_idx = pk[i].column_index;
                         let col_type = table_cols[table_col_idx].data_type().clone();
                         let input_ref = InputRef::new(table_col_idx, col_type.clone());
                         let literal = Literal::new(datum.clone(), col_type);
-                        FunctionCall::new(
-                            ExprType::Equal,
-                            vec![input_ref.into(), literal.into()],
-                        )
-                        .ok()
-                        .map(ExprImpl::from)
+                        FunctionCall::new(ExprType::Equal, vec![input_ref.into(), literal.into()])
+                            .map(ExprImpl::from)
                     })
-                    .collect();
+                    .collect::<Result<_, _>>()
+                    .ok()?;
                 // Add residual conditions so each branch is self-contained.
                 conjunctions.extend(residual.conjunctions.iter().cloned());
                 let branch_predicate = Condition { conjunctions };
-                logical_scan.clone_with_predicate(branch_predicate).into()
+                Some(logical_scan.clone_with_predicate(branch_predicate).into())
             })
-            .collect();
+            .collect::<Option<_>>()?;
 
         Some(LogicalUnion::create(true, branches))
     }

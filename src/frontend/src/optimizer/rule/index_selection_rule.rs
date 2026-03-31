@@ -708,12 +708,20 @@ impl IndexSelectionRule {
             .min_by(|(_, cost1), (_, cost2)| Ord::cmp(cost1, cost2))
     }
 
-    pub(crate) fn estimate_table_scan_cost(&self, scan: &LogicalScan, row_size: usize) -> IndexCost {
+    pub(crate) fn estimate_table_scan_cost(
+        &self,
+        scan: &LogicalScan,
+        row_size: usize,
+    ) -> IndexCost {
         let mut table_scan_io_estimator = TableScanIoEstimator::new(scan, row_size);
         table_scan_io_estimator.estimate(scan.predicate())
     }
 
-    pub(crate) fn estimate_full_table_scan_cost(&self, scan: &LogicalScan, row_size: usize) -> IndexCost {
+    pub(crate) fn estimate_full_table_scan_cost(
+        &self,
+        scan: &LogicalScan,
+        row_size: usize,
+    ) -> IndexCost {
         let mut table_scan_io_estimator = TableScanIoEstimator::new(scan, row_size);
         table_scan_io_estimator.estimate(&Condition::true_cond())
     }
@@ -992,5 +1000,4 @@ impl IndexSelectionRule {
     pub fn create() -> BoxedRule {
         Box::new(IndexSelectionRule {})
     }
-
 }
