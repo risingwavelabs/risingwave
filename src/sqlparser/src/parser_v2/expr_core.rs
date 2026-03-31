@@ -18,7 +18,7 @@
 
 use winnow::combinator::expression;
 use winnow::combinator::{alt, cut_err, trace};
-use winnow::combinator::{Infix, Prefix};
+use winnow::combinator::{Infix, Postfix, Prefix};
 use winnow::error::{ContextError, ErrMode};
 use winnow::{ModalResult, Parser};
 
@@ -48,8 +48,11 @@ const MUL_POWER: i64 = 17;
 /// Binding power for exponentiation (^, right associative)
 const EXP_POWER: i64 = 19;
 
-/// Binding power for LIKE/ILIKE (between comparisons and exponentiation)
+/// Binding power for LIKE/ILIKE (between comparisons and IS)
 const LIKE_POWER: i64 = 12;
+
+/// Binding power for IS NULL / IS NOT NULL (between LIKE and AND)
+const IS_NULL_POWER: i64 = 10;
 
 /// Parse a core expression.
 ///
@@ -72,6 +75,7 @@ where
     trace("expr_core", |input: &mut S| {
         expression(atom_core)
             .prefix(prefix_op_core)
+            .postfix(postfix_op_core)
             .infix(infix_op_core)
             .parse_next(input)
     })
@@ -138,6 +142,49 @@ where
                     expr: Box::new(e),
                 })
             })),
+            _ => None,
+        }),
+    )
+    .parse_next(input)
+}
+
+/// Parse postfix operators for core expressions.
+/// Handles: IS NULL, IS NOT NULL
+fn postfix_op_core<S>(input: &mut S) -> ModalResult<Postfix<S, Expr, ErrMode<ContextError>>>
+where
+    S: TokenStream,
+{
+    trace(
+        "postfix_op_core",
+        token.verify_map(|t: TokenWithLocation| match &t.token {
+            Token::Word(w) if w.keyword == Keyword::IS => {
+                Some(Postfix(IS_NULL_POWER, |input: &mut S, expr: Expr| {
+                    // Try to parse NOT NULL or just NULL
+                    // Use a tuple parser to match the pattern
+                    let is_not_null = match (Keyword::NOT).parse_next(input) {
+                        Ok(_) => {
+                            // After NOT, expect NULL
+                            match (Keyword::NULL).parse_next(input) {
+                                Ok(_) => true,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                        Err(_) => {
+                            // Try just NULL
+                            match (Keyword::NULL).parse_next(input) {
+                                Ok(_) => false,
+                                Err(e) => return Err(e),
+                            }
+                        }
+                    };
+                    
+                    if is_not_null {
+                        Ok(Expr::IsNotNull(Box::new(expr)))
+                    } else {
+                        Ok(Expr::IsNull(Box::new(expr)))
+                    }
+                }))
+            }
             _ => None,
         }),
     )
@@ -567,6 +614,53 @@ mod tests {
             assert!(matches!(expr.as_ref(), Expr::CompoundIdentifier(_)));
         } else {
             panic!("Expected ILike at top level");
+        }
+    }
+
+    #[test]
+    fn test_is_null() {
+        let result = parse_expr_core("a IS NULL").unwrap();
+        assert!(matches!(result, Expr::IsNull(_)));
+    }
+
+    #[test]
+    fn test_is_not_null() {
+        let result = parse_expr_core("a IS NOT NULL").unwrap();
+        assert!(matches!(result, Expr::IsNotNull(_)));
+    }
+
+    #[test]
+    fn test_is_null_precedence_with_and() {
+        // a IS NULL AND b should parse as (a IS NULL) AND b
+        let result = parse_expr_core("a IS NULL AND b").unwrap();
+        if let Expr::BinaryOp { left, op: BinaryOperator::And, right } = result {
+            assert!(matches!(left.as_ref(), Expr::IsNull(_)));
+            assert!(matches!(right.as_ref(), Expr::Identifier(_)));
+        } else {
+            panic!("Expected And at top level");
+        }
+    }
+
+    #[test]
+    fn test_is_null_with_arithmetic() {
+        // a + 1 IS NULL should parse as (a + 1) IS NULL
+        let result = parse_expr_core("a + 1 IS NULL").unwrap();
+        if let Expr::IsNull(expr) = result {
+            assert!(matches!(expr.as_ref(), Expr::BinaryOp { op: BinaryOperator::Plus, .. }));
+        } else {
+            panic!("Expected IsNull at top level");
+        }
+    }
+
+    #[test]
+    fn test_is_null_parenthesized_with_or() {
+        // (a IS NULL) OR b should parse correctly
+        let result = parse_expr_core("(a IS NULL) OR b").unwrap();
+        if let Expr::BinaryOp { left, op: BinaryOperator::Or, right } = result {
+            assert!(matches!(left.as_ref(), Expr::IsNull(_)));
+            assert!(matches!(right.as_ref(), Expr::Identifier(_)));
+        } else {
+            panic!("Expected Or at top level");
         }
     }
 }
