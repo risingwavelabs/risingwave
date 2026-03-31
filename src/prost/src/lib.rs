@@ -199,6 +199,28 @@ pub mod secret_serde;
 #[path = "serverless_backfill_controller.serde.rs"]
 pub mod serverless_backfill_controller_serde;
 
+pub const MONITOR_SERVICE_MESSAGE_SIZE_LIMIT: usize = 64 * 1024 * 1024;
+
+pub fn configured_monitor_service_client<T>(
+    client: monitor_service::monitor_service_client::MonitorServiceClient<T>,
+) -> monitor_service::monitor_service_client::MonitorServiceClient<T>
+where
+    T: tonic::client::GrpcService<tonic::body::Body>,
+    T::Error: Into<tonic::codegen::StdError>,
+    T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
+    <T::ResponseBody as tonic::codegen::Body>::Error: Into<tonic::codegen::StdError> + Send,
+{
+    client
+        .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
+        .max_decoding_message_size(MONITOR_SERVICE_MESSAGE_SIZE_LIMIT)
+}
+
+pub fn configured_monitor_service_server<T>(
+    server: monitor_service::monitor_service_server::MonitorServiceServer<T>,
+) -> monitor_service::monitor_service_server::MonitorServiceServer<T> {
+    server.send_compressed(tonic::codec::CompressionEncoding::Zstd)
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Error)]
 #[error("field `{0}` not found")]
 pub struct PbFieldNotFound(pub &'static str);
