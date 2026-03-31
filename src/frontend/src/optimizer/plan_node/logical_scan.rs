@@ -33,7 +33,9 @@ use crate::binder::BoundBaseTable;
 use crate::catalog::ColumnId;
 use crate::catalog::index_catalog::{IndexType, TableIndex, VectorIndex};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{
+    CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
 use crate::optimizer::ApplyResult;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -43,7 +45,7 @@ use crate::optimizer::plan_node::{
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order, WatermarkColumns};
-use crate::optimizer::rule::IndexSelectionRule;
+use crate::optimizer::rule::{IndexSelectionRule, StreamingIndexSelectionRule};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
@@ -343,7 +345,7 @@ impl LogicalScan {
         (scan_without_predicate, predicate, project_expr)
     }
 
-    fn clone_with_predicate(&self, predicate: Condition) -> Self {
+    pub fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::TableScan::new_inner(
             self.output_col_idx().clone(),
             self.table().clone(),
@@ -640,6 +642,7 @@ impl ToStream for LogicalScan {
                 )?;
 
                 if scan_ranges.len() == 1 && !scan_ranges[0].is_full_table_scan() {
+                    // Single scan range — direct pushdown.
                     let (core, predicate, project_expr) = self.predicate_pull_up();
                     let scan = StreamTableScan::new_with_scan_range(
                         core,
@@ -667,8 +670,29 @@ impl ToStream for LogicalScan {
 
     fn logical_rewrite_for_stream(
         &self,
-        _ctx: &mut RewriteStreamContext,
+        ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
+        // For snapshot backfill, apply streaming index selection rule which handles:
+        // 1. Covering index selection (picks lowest-cost covering index)
+        // 2. IN expansion (splits IN predicates into LogicalUnion of LogicalScans)
+        // This must happen here (not in to_stream) so that upper operators see the
+        // correct stream key from the rewritten plan.
+        if ctx.backfill_type() == Some(BackfillType::SnapshotBackfill)
+            && !self.predicate().always_true()
+            && self
+                .base
+                .ctx()
+                .session_ctx()
+                .config()
+                .enable_index_selection()
+        {
+            if let Some(rewritten) =
+                StreamingIndexSelectionRule::rewrite(self)
+            {
+                return rewritten.logical_rewrite_for_stream(ctx);
+            }
+        }
+
         match self.base.stream_key().is_none() {
             true => {
                 let mut output_col_idx = self.output_col_idx().clone();

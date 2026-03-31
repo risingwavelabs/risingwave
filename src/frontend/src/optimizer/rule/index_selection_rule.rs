@@ -708,12 +708,12 @@ impl IndexSelectionRule {
             .min_by(|(_, cost1), (_, cost2)| Ord::cmp(cost1, cost2))
     }
 
-    fn estimate_table_scan_cost(&self, scan: &LogicalScan, row_size: usize) -> IndexCost {
+    pub(crate) fn estimate_table_scan_cost(&self, scan: &LogicalScan, row_size: usize) -> IndexCost {
         let mut table_scan_io_estimator = TableScanIoEstimator::new(scan, row_size);
         table_scan_io_estimator.estimate(scan.predicate())
     }
 
-    fn estimate_full_table_scan_cost(&self, scan: &LogicalScan, row_size: usize) -> IndexCost {
+    pub(crate) fn estimate_full_table_scan_cost(&self, scan: &LogicalScan, row_size: usize) -> IndexCost {
         let mut table_scan_io_estimator = TableScanIoEstimator::new(scan, row_size);
         table_scan_io_estimator.estimate(&Condition::true_cond())
     }
@@ -735,7 +735,7 @@ impl IndexSelectionRule {
     }
 }
 
-struct TableScanIoEstimator<'a> {
+pub(crate) struct TableScanIoEstimator<'a> {
     table_scan: &'a LogicalScan,
     row_size: usize,
     cost: Option<IndexCost>,
@@ -907,9 +907,9 @@ enum MatchItem {
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, PartialOrd, Ord)]
-struct IndexCost {
+pub(crate) struct IndexCost {
     cost: usize,
-    primary_lookup: bool,
+    pub(crate) primary_lookup: bool,
 }
 
 impl Default for IndexCost {
@@ -951,7 +951,7 @@ impl IndexCost {
         )
     }
 
-    fn le(&self, other: &IndexCost) -> bool {
+    pub(crate) fn le(&self, other: &IndexCost) -> bool {
         self.cost < other.cost
     }
 }
@@ -992,4 +992,5 @@ impl IndexSelectionRule {
     pub fn create() -> BoxedRule {
         Box::new(IndexSelectionRule {})
     }
+
 }
