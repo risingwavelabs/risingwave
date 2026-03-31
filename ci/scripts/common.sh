@@ -217,6 +217,31 @@ check_link_info() {
   fi
 }
 
+# Set up the environment for E2E sink tests.
+# Arguments:
+#   $1: cargo build profile
+#   $2: "true" to download connector node, any other value to skip (default: "false")
+#   $3: seconds to sleep after cluster start (default: 1)
+sink_test_env_setup() {
+    local profile="$1"
+    local need_connector="${2:-false}"
+    local sleep_duration="${3:-1}"
+
+    download_and_prepare_rw "$profile" source
+
+    if [[ "$need_connector" == "true" ]]; then
+        echo "--- Download connector node package"
+        export CONNECTOR_LIBS_PATH="./connector-node/libs"
+        buildkite-agent artifact download risingwave-connector.tar.gz ./
+        mkdir ./connector-node
+        tar xf ./risingwave-connector.tar.gz -C ./connector-node
+    fi
+
+    echo "--- starting risingwave cluster"
+    risedev ci-start ci-sink-test
+    sleep "$sleep_duration"
+}
+
 # Set nextest partition argument based on BuildKite parallel job configuration
 if [ -n "${BUILDKITE_PARALLEL_JOB:-}" ] && [ -n "${BUILDKITE_PARALLEL_JOB_COUNT:-}" ]; then
   # Add 1 to BUILDKITE_PARALLEL_JOB to get 1-based index

@@ -1,47 +1,39 @@
 import subprocess
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from sink_check_utils import docker_compose_exec, check_row_counts, report_failures
 
-relations = ['demo.demo_primary_table','demo.demo_duplicate_table','demo.demo_aggregate_table','demo.demo_unique_table', 'demo.upsert_table', 'demo.starrocks_types']
 
-failed_cases = []
-for rel in relations:
+def starrocks_count(rel):
     sql = f'SELECT COUNT(*) FROM {rel};'
-    print(f"Running SQL: {sql} ON Starrocks")
-    command = f'mysql -uroot -P9030 -h127.0.0.1 -e "{sql}"'
-    output = subprocess.check_output(
-        ["docker", "compose", "exec", "starrocks-fe", "bash", "-c", command])
-    # output:
-    # COUNT(*)
-    # 0
-    rows = int(output.decode('utf-8').split('\n')[1])
-    print(f"{rows} rows in {rel}")
-    if rows < 1:
-        failed_cases.append(rel)
+    output = docker_compose_exec("starrocks-fe", f'mysql -uroot -P9030 -h127.0.0.1 -e "{sql}"')
+    return int(output.split('\n')[1])
+
+
+failed = check_row_counts(
+    ['demo.demo_primary_table', 'demo.demo_duplicate_table', 'demo.demo_aggregate_table',
+     'demo.demo_unique_table', 'demo.upsert_table', 'demo.starrocks_types'],
+    starrocks_count,
+    "Starrocks",
+)
 
 # update data
-subprocess.run(["docker", "compose", "exec", "postgres", "bash", "-c", "psql -h risingwave-standalone -p 4566 -d dev -U root -f update_delete.sql"], check=True)
+subprocess.run(["docker", "compose", "exec", "postgres", "bash", "-c",
+                 "psql -h risingwave-standalone -p 4566 -d dev -U root -f update_delete.sql"], check=True)
 
-# delete
-sql = f"SELECT COUNT(*) FROM demo.upsert_table;"
-command = f'mysql -uroot -P9030 -h127.0.0.1 -e "{sql}"'
-output = subprocess.check_output(
-    ["docker", "compose", "exec", "starrocks-fe", "bash", "-c", command])
-rows = int(output.decode('utf-8').split('\n')[1])
-print(f"{rows} rows in demo.upsert_table")
+# delete check
+rows = starrocks_count("demo.upsert_table")
 if rows != 3:
     print(f"rows expected 3, get {rows}")
-    failed_cases.append("delete demo.upsert_table")
+    failed.append("delete demo.upsert_table")
 
-# update
-sql = f"SELECT target_id FROM demo.upsert_table WHERE user_id = 3;"
-command = f'mysql -uroot -P9030 -h127.0.0.1 -e "{sql}"'
-output = subprocess.check_output(
-    ["docker", "compose", "exec", "starrocks-fe", "bash", "-c", command])
-id = int(output.decode('utf-8').split('\n')[1])
-if id != 30:
-    print(f"target_id expected 30, get {id}")
-    failed_cases.append("update demo.upsert_table")
+# update check
+sql = "SELECT target_id FROM demo.upsert_table WHERE user_id = 3;"
+output = docker_compose_exec("starrocks-fe", f'mysql -uroot -P9030 -h127.0.0.1 -e "{sql}"')
+target_id = int(output.split('\n')[1])
+if target_id != 30:
+    print(f"target_id expected 30, get {target_id}")
+    failed.append("update demo.upsert_table")
 
-if len(failed_cases) != 0:
-    print(f"Data check failed for case {failed_cases}")
-    sys.exit(1)
+report_failures(failed)
