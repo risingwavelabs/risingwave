@@ -380,12 +380,22 @@ impl HummockManager {
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
 
+        // A group can be used as a split parent for other dynamic groups. Destroying such a parent
+        // would violate version invariants and may cause panics in future group split operations.
+        let referenced_parent_groups: HashSet<CompactionGroupId> = versioning
+            .current_version
+            .levels
+            .values()
+            .map(|levels| levels.parent_group_id)
+            .collect();
+
         let groups_to_destroy = versioning
             .current_version
             .levels
             .keys()
             .copied()
             .filter(|group_id| *group_id > StaticCompactionGroupId::End)
+            .filter(|group_id| !referenced_parent_groups.contains(group_id))
             .filter(|group_id| {
                 versioning
                     .current_version

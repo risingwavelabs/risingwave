@@ -999,4 +999,119 @@ mod tests {
         assert_eq!(destroyed, 0);
         assert_eq!(group_count_before, group_count_after);
     }
+
+    #[tokio::test]
+    async fn test_purge_empty_compaction_groups_keeps_parent_group() {
+        let mut opts = MetaOpts::test(false);
+        opts.periodic_purge_stale_compaction_group_interval_sec = 1;
+
+        let (_env, hummock_manager, _, _worker_id) =
+            setup_compute_env_with_meta_opts(84, opts).await;
+
+        let parent_group_id = CompactionGroupId::new(110);
+        let child_group_id = CompactionGroupId::new(111);
+
+        // Create an empty dynamic parent group in version.
+        {
+            let mut versioning_guard = hummock_manager.versioning.write().await;
+            versioning_guard.current_version.levels.insert(
+                parent_group_id,
+                Levels {
+                    group_id: parent_group_id,
+                    parent_group_id: StaticCompactionGroupId::StateDefault,
+                    ..Default::default()
+                },
+            );
+            versioning_guard.current_version.levels.insert(
+                child_group_id,
+                Levels {
+                    group_id: child_group_id,
+                    parent_group_id,
+                    ..Default::default()
+                },
+            );
+        }
+
+        // Create a child group with a member table and make it reference `parent_group_id`.
+        hummock_manager
+            .register_table_ids_for_test(&[(201, child_group_id)])
+            .await
+            .unwrap();
+        {
+            let mut versioning_guard = hummock_manager.versioning.write().await;
+            let child_levels = versioning_guard
+                .current_version
+                .levels
+                .get_mut(&child_group_id)
+                .unwrap();
+            child_levels.parent_group_id = parent_group_id;
+        }
+
+        // Add configs for both groups so `get_compaction_group_map` won't miss them.
+        {
+            let mut compaction_group_manager =
+                hummock_manager.compaction_group_manager.write().await;
+            let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
+            let config = Arc::new(CompactionConfigBuilder::new().build());
+            compaction_groups_txn.create_compaction_groups(parent_group_id, config.clone());
+            compaction_groups_txn.create_compaction_groups(child_group_id, config);
+            let res: crate::hummock::error::Result<()> =
+                commit_multi_var!(hummock_manager.meta_store_ref(), compaction_groups_txn);
+            res.unwrap();
+        }
+
+        let destroyed = hummock_manager
+            .purge_empty_compaction_groups()
+            .await
+            .unwrap();
+        assert_eq!(destroyed, 0, "parent group should not be destroyed");
+
+        assert!(
+            hummock_manager
+                .get_current_version()
+                .await
+                .levels
+                .contains_key(&parent_group_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_purge_empty_compaction_groups_purges_stale_configs_only() {
+        let mut opts = MetaOpts::test(false);
+        opts.periodic_purge_stale_compaction_group_interval_sec = 1;
+
+        let (_env, hummock_manager, _, _worker_id) =
+            setup_compute_env_with_meta_opts(85, opts).await;
+
+        let stale_group_id = CompactionGroupId::new(999);
+        {
+            let mut compaction_group_manager =
+                hummock_manager.compaction_group_manager.write().await;
+            let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
+            let config = Arc::new(CompactionConfigBuilder::new().build());
+            compaction_groups_txn.create_compaction_groups(stale_group_id, config);
+            let res: crate::hummock::error::Result<()> =
+                commit_multi_var!(hummock_manager.meta_store_ref(), compaction_groups_txn);
+            res.unwrap();
+        }
+        assert!(
+            hummock_manager
+                .get_compaction_group_map()
+                .await
+                .contains_key(&stale_group_id)
+        );
+
+        let destroyed = hummock_manager
+            .purge_empty_compaction_groups()
+            .await
+            .unwrap();
+        assert_eq!(destroyed, 0);
+
+        assert!(
+            !hummock_manager
+                .get_compaction_group_map()
+                .await
+                .contains_key(&stale_group_id)
+        );
+    }
 }
