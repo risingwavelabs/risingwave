@@ -112,6 +112,20 @@ pub fn stream_enforce_eowc_requirement(
 #[derive(Debug, Clone, Default)]
 pub struct RewriteStreamContext {
     share_rewrite_map: HashMap<PlanNodeId, (LogicalPlanRef, ColIndexMapping)>,
+    backfill_type: Option<BackfillType>,
+}
+
+impl RewriteStreamContext {
+    pub fn new_with_backfill_type(backfill_type: BackfillType) -> Self {
+        Self {
+            share_rewrite_map: HashMap::new(),
+            backfill_type: Some(backfill_type),
+        }
+    }
+
+    pub fn backfill_type(&self) -> Option<BackfillType> {
+        self.backfill_type
+    }
 }
 
 impl RewriteStreamContext {

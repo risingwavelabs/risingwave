@@ -270,6 +270,63 @@
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
     └─StreamFilter { predicate: (t.a = 1:Int32) AND (t.b > 5:Int32) }
       └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(1)) AND b > Some(Int32(5)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill IN predicate produces UNION of scans
+  sql: |
+    create table t(a int, b int, c int, primary key(a, b));
+    select * from t where a IN (1, 3, 5);
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c, $src(hidden)], stream_key: [a, b, $src], pk_columns: [a, b, $src], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t.a, t.b, 0:Int32) }
+      │ └─StreamProject { exprs: [t.a, t.b, t.c, 0:Int32] }
+      │   └─StreamFilter { predicate: (t.a = 1:Int32) }
+      │     └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(1)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+      ├─StreamExchange { dist: HashShard(t.a, t.b, 1:Int32) }
+      │ └─StreamProject { exprs: [t.a, t.b, t.c, 1:Int32] }
+      │   └─StreamFilter { predicate: (t.a = 3:Int32) }
+      │     └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(3)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+      └─StreamExchange { dist: HashShard(t.a, t.b, 2:Int32) }
+        └─StreamProject { exprs: [t.a, t.b, t.c, 2:Int32] }
+          └─StreamFilter { predicate: (t.a = 5:Int32) }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(5)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill covering index selection
+  sql: |
+    create table t(a int, b int, c int, primary key(a));
+    create index idx_b on t(b) include(a, c);
+    select * from t where b = 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c], stream_key: [b, a], pk_columns: [b, a], pk_conflict: NoCheck }
+    └─StreamFilter { predicate: (idx_b.b = 1:Int32) }
+      └─StreamTableScan { table: idx_b, columns: [idx_b.a, idx_b.b, idx_b.c], pk_scan_range: b = Some(Int32(1)), stream_scan_type: SnapshotBackfill, stream_key: [idx_b.b, idx_b.a], pk: [b, a], dist: UpstreamHashShard(idx_b.b) }
+- name: snapshot backfill covering index with IN predicate
+  sql: |
+    create table t(a int, b int, c int, primary key(a));
+    create index idx_b on t(b) include(a, c);
+    select * from t where b IN (1, 2, 3);
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c, $src(hidden)], stream_key: [b, a, $src], pk_columns: [b, a, $src], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(idx_b.b, idx_b.a, 0:Int32) }
+      │ └─StreamProject { exprs: [idx_b.a, idx_b.b, idx_b.c, 0:Int32] }
+      │   └─StreamFilter { predicate: (idx_b.b = 1:Int32) }
+      │     └─StreamTableScan { table: idx_b, columns: [idx_b.a, idx_b.b, idx_b.c], pk_scan_range: b = Some(Int32(1)), stream_scan_type: SnapshotBackfill, stream_key: [idx_b.b, idx_b.a], pk: [b, a], dist: UpstreamHashShard(idx_b.b) }
+      ├─StreamExchange { dist: HashShard(idx_b.b, idx_b.a, 1:Int32) }
+      │ └─StreamProject { exprs: [idx_b.a, idx_b.b, idx_b.c, 1:Int32] }
+      │   └─StreamFilter { predicate: (idx_b.b = 2:Int32) }
+      │     └─StreamTableScan { table: idx_b, columns: [idx_b.a, idx_b.b, idx_b.c], pk_scan_range: b = Some(Int32(2)), stream_scan_type: SnapshotBackfill, stream_key: [idx_b.b, idx_b.a], pk: [b, a], dist: UpstreamHashShard(idx_b.b) }
+      └─StreamExchange { dist: HashShard(idx_b.b, idx_b.a, 2:Int32) }
+        └─StreamProject { exprs: [idx_b.a, idx_b.b, idx_b.c, 2:Int32] }
+          └─StreamFilter { predicate: (idx_b.b = 3:Int32) }
+            └─StreamTableScan { table: idx_b, columns: [idx_b.a, idx_b.b, idx_b.c], pk_scan_range: b = Some(Int32(3)), stream_scan_type: SnapshotBackfill, stream_key: [idx_b.b, idx_b.a], pk: [b, a], dist: UpstreamHashShard(idx_b.b) }
+- name: snapshot backfill index selection without explicit include
+  sql: |
+    create table t(a int, b int, c int, primary key(a));
+    create index idx_b on t(b);
+    select * from t where b = 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c], stream_key: [b, a], pk_columns: [b, a], pk_conflict: NoCheck }
+    └─StreamFilter { predicate: (idx_b.b = 1:Int32) }
+      └─StreamTableScan { table: idx_b, columns: [idx_b.a, idx_b.b, idx_b.c], pk_scan_range: b = Some(Int32(1)), stream_scan_type: SnapshotBackfill, stream_key: [idx_b.b, idx_b.a], pk: [b, a], dist: UpstreamHashShard(idx_b.b) }
 - name: |
     Test backfill order, auto, stream share cycle.
     For auto derived backfill order with cycle, it should not return any order plan, and return a NOTICE
