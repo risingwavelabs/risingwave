@@ -33,9 +33,7 @@ use crate::binder::BoundBaseTable;
 use crate::catalog::ColumnId;
 use crate::catalog::index_catalog::{IndexType, TableIndex, VectorIndex};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{
-    CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
-};
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::ApplyResult;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -345,7 +343,7 @@ impl LogicalScan {
         (scan_without_predicate, predicate, project_expr)
     }
 
-    pub fn clone_with_predicate(&self, predicate: Condition) -> Self {
+    pub(crate) fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::TableScan::new_inner(
             self.output_col_idx().clone(),
             self.table().clone(),
@@ -686,9 +684,7 @@ impl ToStream for LogicalScan {
                 .config()
                 .enable_index_selection()
         {
-            if let Some(rewritten) =
-                StreamingIndexSelectionRule::rewrite(self)
-            {
+            if let Some(rewritten) = StreamingIndexSelectionRule::rewrite(self) {
                 return rewritten.logical_rewrite_for_stream(ctx);
             }
         }
