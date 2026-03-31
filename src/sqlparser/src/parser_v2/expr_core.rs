@@ -16,9 +16,7 @@
 //! fall back to v1 parser. It's designed as a foundation for gradually
 //! migrating expression parsing to combinator style.
 
-use winnow::combinator::expression;
-use winnow::combinator::{alt, cut_err, fail, trace};
-use winnow::combinator::{Infix, Postfix, Prefix};
+use winnow::combinator::{Infix, Postfix, Prefix, alt, cut_err, expression, fail, trace};
 use winnow::error::{ContextError, ErrMode};
 use winnow::{ModalResult, Parser};
 
@@ -94,11 +92,7 @@ where
 {
     trace(
         "atom_core",
-        alt((
-            expr_parenthesized_core,
-            expr_literal,
-            expr_identifier,
-        )),
+        alt((expr_parenthesized_core, expr_literal, expr_identifier)),
     )
     .parse_next(input)
 }
@@ -111,12 +105,7 @@ where
 {
     trace(
         "expr_parenthesized_core",
-        (
-            Token::LParen,
-            cut_err(expr_core),
-            cut_err(Token::RParen),
-        )
-            .map(|(_, e, _)| e),
+        (Token::LParen, cut_err(expr_core), cut_err(Token::RParen)).map(|(_, e, _)| e),
     )
     .parse_next(input)
 }
@@ -164,10 +153,10 @@ where
                         Ok(_) => true,
                         Err(_) => false,
                     };
-                    
+
                     // Parse the target: NULL, TRUE, FALSE, or UNKNOWN
                     let target = keyword.parse_next(input)?;
-                    
+
                     match target {
                         Keyword::NULL => {
                             if is_not {
@@ -390,19 +379,20 @@ where
     trace("expr_identifier", |input: &mut S| {
         // Parse the first identifier part
         let first = parse_single_ident(input)?;
-        
+
         // Check for compound identifier (dot-separated parts)
         let mut parts = vec![first];
-        
+
         // Use `repeat` combinator for zero or more `.ident` sequences
         use winnow::combinator::repeat;
         let additional: Vec<_> = repeat(
             0..,
-            (Token::Period, parse_single_ident).map(|(_, ident)| ident)
-        ).parse_next(input)?;
-        
+            (Token::Period, parse_single_ident).map(|(_, ident)| ident),
+        )
+        .parse_next(input)?;
+
         parts.extend(additional);
-        
+
         if parts.len() == 1 {
             Ok(Expr::Identifier(parts.into_iter().next().unwrap()))
         } else {
@@ -418,19 +408,20 @@ fn parse_single_ident<S>(input: &mut S) -> ModalResult<crate::ast::Ident>
 where
     S: TokenStream,
 {
-    token.verify_map(|t: TokenWithLocation| match t.token {
-        // Any Word token can be an identifier (keyword or not)
-        Token::Word(w) => {
-            match w.quote_style {
-                // Quoted identifier (e.g., "CaseSensitive")
-                Some(quote) => Some(crate::ast::Ident::with_quote_unchecked(quote, w.value)),
-                // Simple unquoted identifier (may be a keyword like TABLE)
-                None => Some(crate::ast::Ident::new_unchecked(w.value)),
+    token
+        .verify_map(|t: TokenWithLocation| match t.token {
+            // Any Word token can be an identifier (keyword or not)
+            Token::Word(w) => {
+                match w.quote_style {
+                    // Quoted identifier (e.g., "CaseSensitive")
+                    Some(quote) => Some(crate::ast::Ident::with_quote_unchecked(quote, w.value)),
+                    // Simple unquoted identifier (may be a keyword like TABLE)
+                    None => Some(crate::ast::Ident::new_unchecked(w.value)),
+                }
             }
-        }
-        _ => None,
-    })
-    .parse_next(input)
+            _ => None,
+        })
+        .parse_next(input)
 }
 
 #[cfg(test)]
@@ -440,18 +431,26 @@ mod tests {
 
     fn parse_expr_core(sql: &str) -> Result<Expr, String> {
         let mut tokenizer = Tokenizer::new(sql);
-        let tokens = tokenizer.tokenize_with_location().map_err(|e| e.to_string())?;
+        let tokens = tokenizer
+            .tokenize_with_location()
+            .map_err(|e| e.to_string())?;
         let mut parser = crate::parser::Parser(&tokens);
-        let result = expr_core.parse_next(&mut parser).map_err(|e| e.to_string())?;
-        
+        let result = expr_core
+            .parse_next(&mut parser)
+            .map_err(|e| e.to_string())?;
+
         // Ensure all tokens were consumed (except EOF)
         // The parser should have consumed the entire expression
         // We check by verifying the remaining tokens are just EOF
         match parser.0.first() {
-            None | Some(crate::tokenizer::TokenWithLocation { token: crate::tokenizer::Token::EOF, .. }) => (),
+            None
+            | Some(crate::tokenizer::TokenWithLocation {
+                token: crate::tokenizer::Token::EOF,
+                ..
+            }) => (),
             Some(t) => return Err(format!("Unexpected trailing token: {:?}", t)),
         }
-        
+
         Ok(result)
     }
 
@@ -482,22 +481,45 @@ mod tests {
     #[test]
     fn test_unary_minus() {
         let result = parse_expr_core("-42").unwrap();
-        assert!(matches!(result, Expr::UnaryOp { op: UnaryOperator::Minus, .. }));
+        assert!(matches!(
+            result,
+            Expr::UnaryOp {
+                op: UnaryOperator::Minus,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn test_binary_add() {
         let result = parse_expr_core("1 + 2").unwrap();
-        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::Plus, .. }));
+        assert!(matches!(
+            result,
+            Expr::BinaryOp {
+                op: BinaryOperator::Plus,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn test_precedence_mul_before_add() {
         // Should parse as 1 + (2 * 3), not (1 + 2) * 3
         let result = parse_expr_core("1 + 2 * 3").unwrap();
-        if let Expr::BinaryOp { left, op: BinaryOperator::Plus, right } = result {
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Plus,
+            right,
+        } = result
+        {
             assert!(matches!(left.as_ref(), Expr::Value(Value::Number(n)) if n == "1"));
-            assert!(matches!(right.as_ref(), Expr::BinaryOp { op: BinaryOperator::Multiply, .. }));
+            assert!(matches!(
+                right.as_ref(),
+                Expr::BinaryOp {
+                    op: BinaryOperator::Multiply,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected Plus at top level");
         }
@@ -506,27 +528,56 @@ mod tests {
     #[test]
     fn test_comparison() {
         let result = parse_expr_core("a = 1").unwrap();
-        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::Eq, .. }));
+        assert!(matches!(
+            result,
+            Expr::BinaryOp {
+                op: BinaryOperator::Eq,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn test_logical_and() {
         let result = parse_expr_core("a AND b").unwrap();
-        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::And, .. }));
+        assert!(matches!(
+            result,
+            Expr::BinaryOp {
+                op: BinaryOperator::And,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn test_logical_or() {
         let result = parse_expr_core("a OR b").unwrap();
-        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::Or, .. }));
+        assert!(matches!(
+            result,
+            Expr::BinaryOp {
+                op: BinaryOperator::Or,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn test_parenthesized() {
         let result = parse_expr_core("(1 + 2) * 3").unwrap();
         // Should parse as (1 + 2) * 3, not 1 + (2 * 3)
-        if let Expr::BinaryOp { left, op: BinaryOperator::Multiply, .. } = result {
-            assert!(matches!(left.as_ref(), Expr::BinaryOp { op: BinaryOperator::Plus, .. }));
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Multiply,
+            ..
+        } = result
+        {
+            assert!(matches!(
+                left.as_ref(),
+                Expr::BinaryOp {
+                    op: BinaryOperator::Plus,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected Multiply at top level");
         }
@@ -537,7 +588,13 @@ mod tests {
         // Test a complex expression with multiple operators
         let result = parse_expr_core("a + b * c = d AND e > f").unwrap();
         // Should be: ((a + (b * c)) = d) AND (e > f)
-        assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::And, .. }));
+        assert!(matches!(
+            result,
+            Expr::BinaryOp {
+                op: BinaryOperator::And,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -557,7 +614,12 @@ mod tests {
         // Should parse as: (a LIKE 'x') AND b
         // LIKE has lower precedence than comparison, higher than AND
         let result = parse_expr_core("a LIKE 'x' AND b").unwrap();
-        if let Expr::BinaryOp { left, op: BinaryOperator::And, right } = result {
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } = result
+        {
             assert!(matches!(left.as_ref(), Expr::Like { .. }));
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
@@ -571,7 +633,13 @@ mod tests {
         // Arithmetic has higher precedence than LIKE
         let result = parse_expr_core("a + 1 LIKE 'x'").unwrap();
         if let Expr::Like { expr, .. } = result {
-            assert!(matches!(expr.as_ref(), Expr::BinaryOp { op: BinaryOperator::Plus, .. }));
+            assert!(matches!(
+                expr.as_ref(),
+                Expr::BinaryOp {
+                    op: BinaryOperator::Plus,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected Like at top level");
         }
@@ -581,7 +649,12 @@ mod tests {
     fn test_like_parenthesized_with_or() {
         // Should parse as: (a LIKE 'x') OR b
         let result = parse_expr_core("(a LIKE 'x') OR b").unwrap();
-        if let Expr::BinaryOp { left, op: BinaryOperator::Or, right } = result {
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Or,
+            right,
+        } = result
+        {
             assert!(matches!(left.as_ref(), Expr::Like { .. }));
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
@@ -625,7 +698,12 @@ mod tests {
     fn test_compound_identifier_with_expression() {
         // foo.bar + 1 should parse as (foo.bar) + 1
         let result = parse_expr_core("foo.bar + 1").unwrap();
-        if let Expr::BinaryOp { left, op: BinaryOperator::Plus, .. } = result {
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Plus,
+            ..
+        } = result
+        {
             assert!(matches!(left.as_ref(), Expr::CompoundIdentifier(_)));
         } else {
             panic!("Expected Plus at top level");
@@ -634,7 +712,7 @@ mod tests {
 
     #[test]
     fn test_compound_identifier_with_like() {
-        // schema.tbl.col ilike 'x' 
+        // schema.tbl.col ilike 'x'
         let result = parse_expr_core("schema.tbl.col ilike 'x'").unwrap();
         if let Expr::ILike { expr, .. } = result {
             assert!(matches!(expr.as_ref(), Expr::CompoundIdentifier(_)));
@@ -659,7 +737,12 @@ mod tests {
     fn test_is_null_precedence_with_and() {
         // a IS NULL AND b should parse as (a IS NULL) AND b
         let result = parse_expr_core("a IS NULL AND b").unwrap();
-        if let Expr::BinaryOp { left, op: BinaryOperator::And, right } = result {
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } = result
+        {
             assert!(matches!(left.as_ref(), Expr::IsNull(_)));
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
@@ -672,7 +755,13 @@ mod tests {
         // a + 1 IS NULL should parse as (a + 1) IS NULL
         let result = parse_expr_core("a + 1 IS NULL").unwrap();
         if let Expr::IsNull(expr) = result {
-            assert!(matches!(expr.as_ref(), Expr::BinaryOp { op: BinaryOperator::Plus, .. }));
+            assert!(matches!(
+                expr.as_ref(),
+                Expr::BinaryOp {
+                    op: BinaryOperator::Plus,
+                    ..
+                }
+            ));
         } else {
             panic!("Expected IsNull at top level");
         }
@@ -682,7 +771,12 @@ mod tests {
     fn test_is_null_parenthesized_with_or() {
         // (a IS NULL) OR b should parse correctly
         let result = parse_expr_core("(a IS NULL) OR b").unwrap();
-        if let Expr::BinaryOp { left, op: BinaryOperator::Or, right } = result {
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Or,
+            right,
+        } = result
+        {
             assert!(matches!(left.as_ref(), Expr::IsNull(_)));
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
@@ -730,7 +824,12 @@ mod tests {
     fn test_is_true_precedence_with_and() {
         // a IS TRUE AND b should parse as (a IS TRUE) AND b
         let result = parse_expr_core("a IS TRUE AND b").unwrap();
-        if let Expr::BinaryOp { left, op: BinaryOperator::And, right } = result {
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } = result
+        {
             assert!(matches!(left.as_ref(), Expr::IsTrue(_)));
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
@@ -742,7 +841,12 @@ mod tests {
     fn test_is_false_precedence_with_or() {
         // a IS FALSE OR b should parse as (a IS FALSE) OR b
         let result = parse_expr_core("a IS FALSE OR b").unwrap();
-        if let Expr::BinaryOp { left, op: BinaryOperator::Or, right } = result {
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Or,
+            right,
+        } = result
+        {
             assert!(matches!(left.as_ref(), Expr::IsFalse(_)));
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
