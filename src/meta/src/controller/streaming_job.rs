@@ -2496,7 +2496,7 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
 
         // check if the alter-ed props are valid for all connector
-        validate_sink_props(&sink, &alter_props)?;
+        validate_sink_props(&sink, &alter_props, &alter_secret_refs)?;
 
         let mut options_with_secret = WithOptionsSecResolved::new(
             sink.properties.0.clone(),
@@ -2524,11 +2524,18 @@ impl CatalogController {
                 })?
                 .try_into()
                 .unwrap();
-            if let Statement::CreateSink { stmt } = &mut stmt {
-                stmt.with_properties.0 =
-                    format_with_option_secret_resolved(&txn, &options_with_secret).await?;
-            } else {
-                panic!("definition is not a create sink statement")
+            match &mut stmt {
+                Statement::CreateSink { stmt } => {
+                    stmt.with_properties.0 =
+                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                }
+                _ => {
+                    return Err(MetaError::from(MetaErrorInner::Connector(
+                        ConnectorError::from(anyhow!(
+                            "Sink definition is not a CREATE SINK statement"
+                        )),
+                    )));
+                }
             }
 
             stmt.to_string()
@@ -2602,7 +2609,7 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &alter_props)?;
+        validate_sink_props(&sink, &alter_props, &alter_secret_refs)?;
 
         let mut options_with_secret = WithOptionsSecResolved::new(
             sink.properties.0.clone(),
@@ -2624,22 +2631,29 @@ impl CatalogController {
                 })?
                 .try_into()
                 .unwrap();
-            if let Statement::CreateTable {
-                with_options,
-                engine,
-                ..
-            } = &mut stmt
-            {
-                if !matches!(engine, Engine::Iceberg) {
-                    return Err(SinkError::Config(anyhow!(
-                        "only iceberg table can be altered as sink"
-                    ))
-                    .into());
+
+            match &mut stmt {
+                Statement::CreateTable {
+                    with_options,
+                    engine,
+                    ..
+                } => {
+                    if !matches!(engine, Engine::Iceberg) {
+                        return Err(SinkError::Config(anyhow!(
+                            "only iceberg table can be altered as sink"
+                        ))
+                        .into());
+                    }
+                    *with_options =
+                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
                 }
-                *with_options =
-                    format_with_option_secret_resolved(&txn, &options_with_secret).await?;
-            } else {
-                panic!("definition is not a create iceberg table statement")
+                _ => {
+                    return Err(MetaError::from(MetaErrorInner::Connector(
+                        ConnectorError::from(anyhow!(
+                            "definition is not a create iceberg table statement"
+                        )),
+                    )));
+                }
             }
 
             stmt.to_string()
@@ -2665,6 +2679,11 @@ impl CatalogController {
         };
         let active_source = source::ActiveModel {
             source_id: Set(source_id),
+            with_properties: Set(risingwave_meta_model::Property(
+                options_with_secret.as_plaintext().clone(),
+            )),
+            secret_ref: Set((!options_with_secret.as_secret().is_empty())
+                .then(|| SecretRef::from(options_with_secret.as_secret().clone()))),
             definition: Set(rewrite_sql.clone()),
             ..Default::default()
         };
@@ -3277,51 +3296,48 @@ impl CatalogController {
     }
 }
 
-/// Validate ALTER SINK connector properties, including allowed fields
-/// and the validity of the merged configuration.
-///
-/// Steps:
-/// 1. Read the connector field from the current sink properties.
-/// 2. Validate that connector type is not being changed
-/// 3. Check whether the modified fields support on-the-fly updates.
-/// 4. Merge the existing configuration with the new properties and validate it.
 fn validate_sink_props(
     sink: &sink::Model,
     alter_props: &BTreeMap<String, String>,
+    alter_secret_refs: &BTreeMap<String, PbSecretRef>,
 ) -> MetaResult<()> {
-    match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-        Some(connector) => {
-            let connector_type = connector.to_lowercase();
-            let field_names: Vec<String> = alter_props.keys().cloned().collect();
+    let connector = sink
+        .properties
+        .inner_ref()
+        .get(CONNECTOR_TYPE_KEY)
+        .ok_or_else(|| SinkError::Config(anyhow!("connector not specified when alter sink")))?;
 
-            if let Some(new_connector) = alter_props.get(CONNECTOR_TYPE_KEY)
-                && new_connector != connector
-            {
-                return Err(MetaError::invalid_parameter(format!(
-                    "Cannot change connector type from '{}' to '{}'. Drop and recreate the sink instead.",
-                    connector, new_connector
-                )));
-            }
-            check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+    let connector_type = connector.to_lowercase();
 
-            match_sink_name_str!(
-                connector_type.as_str(),
-                SinkType,
-                {
-                    let mut new_props = sink.properties.0.clone();
-                    new_props.extend(alter_props.clone());
-                    SinkType::validate_alter_config(&new_props)
-                },
-                |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
-            )?
-        }
-        None => {
-            return Err(
-                SinkError::Config(anyhow!("connector not specified when alter sink")).into(),
-            );
-        }
-    };
+    if let Some(new_connector) = alter_props.get(CONNECTOR_TYPE_KEY)
+        && new_connector != connector
+    {
+        return Err(MetaError::invalid_parameter(format!(
+            "Cannot change connector type from '{}' to '{}'. Drop and recreate the sink instead.",
+            connector, new_connector
+        )));
+    }
+
+    let field_names: Vec<String> = alter_props
+        .keys()
+        .chain(alter_secret_refs.keys())
+        .cloned()
+        .collect();
+
+    check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+    match_sink_name_str!(
+        connector_type.as_str(),
+        SinkType,
+        {
+            let mut new_props = sink.properties.0.clone();
+            new_props.extend(alter_props.clone());
+            SinkType::validate_alter_config(&new_props)
+        },
+        |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
+    )?;
+
     Ok(())
 }
 
@@ -3454,7 +3470,7 @@ async fn update_secret_dependencies(
     txn: &DatabaseTransaction,
     to_add_secrets: Vec<SecretId>,
     to_remove_secrets: Vec<SecretId>,
-    sink_id: ObjectId,
+    object_id: ObjectId,
 ) -> MetaResult<()> {
     // Update secret dependencies atomically within the transaction.
     // Add new dependencies for secrets that are newly referenced.
@@ -3462,7 +3478,7 @@ async fn update_secret_dependencies(
         ObjectDependency::insert_many(to_add_secrets.into_iter().map(|secret_id| {
             object_dependency::ActiveModel {
                 oid: Set(secret_id.into()),
-                used_by: Set(sink_id),
+                used_by: Set(object_id),
                 ..Default::default()
             }
         }))
@@ -3476,7 +3492,7 @@ async fn update_secret_dependencies(
             .filter(
                 object_dependency::Column::Oid
                     .is_in(to_remove_secrets)
-                    .and(object_dependency::Column::UsedBy.eq(sink_id)),
+                    .and(object_dependency::Column::UsedBy.eq(object_id)),
             )
             .exec(txn)
             .await?;
