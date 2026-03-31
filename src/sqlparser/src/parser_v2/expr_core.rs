@@ -315,20 +315,58 @@ where
     .parse_next(input)
 }
 
-/// Parse an identifier (column reference).
+/// Parse an identifier expression.
+/// Handles:
+/// - Simple identifiers: `foo`
+/// - Quoted identifiers: `"CaseSensitive"`
+/// - Compound identifiers: `foo.bar`, `schema.table.col`
 fn expr_identifier<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
-    trace(
-        "expr_identifier",
-        token.verify_map(|t: TokenWithLocation| match t.token {
-            Token::Word(w) if w.keyword == Keyword::NoKeyword => Some(Expr::Identifier(
-                crate::ast::Ident::new_unchecked(w.value),
-            )),
-            _ => None,
-        }),
-    )
+    trace("expr_identifier", |input: &mut S| {
+        // Parse the first identifier part
+        let first = parse_single_ident(input)?;
+        
+        // Check for compound identifier (dot-separated parts)
+        let mut parts = vec![first];
+        
+        // Use `repeat` combinator for zero or more `.ident` sequences
+        use winnow::combinator::repeat;
+        let additional: Vec<_> = repeat(
+            0..,
+            (Token::Period, parse_single_ident).map(|(_, ident)| ident)
+        ).parse_next(input)?;
+        
+        parts.extend(additional);
+        
+        if parts.len() == 1 {
+            Ok(Expr::Identifier(parts.into_iter().next().unwrap()))
+        } else {
+            Ok(Expr::CompoundIdentifier(parts))
+        }
+    })
+    .parse_next(input)
+}
+
+/// Parse a single identifier (simple or quoted).
+/// Accepts both keywords and non-keywords (like the v1 parser).
+fn parse_single_ident<S>(input: &mut S) -> ModalResult<crate::ast::Ident>
+where
+    S: TokenStream,
+{
+    token.verify_map(|t: TokenWithLocation| match t.token {
+        // Any Word token can be an identifier (keyword or not)
+        Token::Word(w) => {
+            match w.quote_style {
+                // Quoted identifier (e.g., "CaseSensitive")
+                Some(quote) => Some(crate::ast::Ident::with_quote_unchecked(quote, w.value)),
+                // Simple unquoted identifier (may be a keyword like TABLE)
+                None => Some(crate::ast::Ident::new_unchecked(w.value)),
+            }
+        }
+        _ => None,
+    })
     .parse_next(input)
 }
 
@@ -475,6 +513,60 @@ mod tests {
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
             panic!("Expected Or at top level");
+        }
+    }
+
+    #[test]
+    fn test_compound_identifier() {
+        let result = parse_expr_core("foo.bar").unwrap();
+        if let Expr::CompoundIdentifier(parts) = result {
+            assert_eq!(parts.len(), 2);
+        } else {
+            panic!("Expected CompoundIdentifier");
+        }
+    }
+
+    #[test]
+    fn test_compound_identifier_three_parts() {
+        let result = parse_expr_core("schema.table.col").unwrap();
+        if let Expr::CompoundIdentifier(parts) = result {
+            assert_eq!(parts.len(), 3);
+        } else {
+            panic!("Expected CompoundIdentifier with 3 parts");
+        }
+    }
+
+    #[test]
+    fn test_quoted_identifier() {
+        let result = parse_expr_core("\"CaseSensitive\"").unwrap();
+        if let Expr::Identifier(ident) = result {
+            // The identifier should have quote_style set
+            assert_eq!(ident.quote_style(), Some('"'));
+            assert_eq!(ident.real_value(), "CaseSensitive");
+        } else {
+            panic!("Expected Identifier");
+        }
+    }
+
+    #[test]
+    fn test_compound_identifier_with_expression() {
+        // foo.bar + 1 should parse as (foo.bar) + 1
+        let result = parse_expr_core("foo.bar + 1").unwrap();
+        if let Expr::BinaryOp { left, op: BinaryOperator::Plus, .. } = result {
+            assert!(matches!(left.as_ref(), Expr::CompoundIdentifier(_)));
+        } else {
+            panic!("Expected Plus at top level");
+        }
+    }
+
+    #[test]
+    fn test_compound_identifier_with_like() {
+        // schema.tbl.col ilike 'x' 
+        let result = parse_expr_core("schema.tbl.col ilike 'x'").unwrap();
+        if let Expr::ILike { expr, .. } = result {
+            assert!(matches!(expr.as_ref(), Expr::CompoundIdentifier(_)));
+        } else {
+            panic!("Expected ILike at top level");
         }
     }
 }
