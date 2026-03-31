@@ -22,7 +22,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{FunctionId, Schema};
+use risingwave_common::catalog::{FunctionId, Schema, SecretId};
 use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
@@ -182,6 +182,7 @@ pub async fn handle_execute(
                 bound,
                 dependent_relations,
                 dependent_udfs,
+                dependent_secrets,
                 ..
             } = bound_result;
             let create_mv = if let BoundStatement::CreateView(create_mv) = bound {
@@ -218,7 +219,7 @@ pub async fn handle_execute(
                 *query,
                 dependent_relations,
                 dependent_udfs,
-                Default::default(), // dependent_secrets: none in CTAS path
+                dependent_secrets,
                 columns,
                 emit_mode,
             )
@@ -274,6 +275,7 @@ pub struct BoundResult {
     pub(crate) dependent_relations: HashSet<ObjectId>,
     /// TODO(rc): merge with `dependent_relations`
     pub(crate) dependent_udfs: HashSet<FunctionId>,
+    pub(crate) dependent_secrets: HashSet<SecretId>,
 }
 
 fn gen_bound(mut binder: Binder, stmt: Statement) -> Result<BoundResult> {
@@ -291,6 +293,7 @@ fn gen_bound(mut binder: Binder, stmt: Statement) -> Result<BoundResult> {
         parsed_params: None,
         dependent_relations: binder.included_relations().clone(),
         dependent_udfs: binder.included_udfs().clone(),
+        dependent_secrets: binder.included_secrets().clone(),
     })
 }
 

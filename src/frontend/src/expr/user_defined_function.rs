@@ -28,6 +28,9 @@ pub struct UserDefinedFunction {
     pub catalog: Arc<FunctionCatalog>,
     /// Secret references for arguments that should be resolved from secrets at runtime.
     pub secret_refs: Vec<UdfArgSecretRef>,
+    /// Secret display names for EXPLAIN output. Not serialized to protobuf.
+    /// Each entry is (arg_index, secret_name).
+    pub secret_display_names: Vec<(u32, String)>,
 }
 
 impl UserDefinedFunction {
@@ -36,6 +39,7 @@ impl UserDefinedFunction {
             args,
             catalog,
             secret_refs: vec![],
+            secret_display_names: vec![],
         }
     }
 
@@ -43,11 +47,13 @@ impl UserDefinedFunction {
         catalog: Arc<FunctionCatalog>,
         args: Vec<ExprImpl>,
         secret_refs: Vec<UdfArgSecretRef>,
+        secret_display_names: Vec<(u32, String)>,
     ) -> Self {
         Self {
             args,
             catalog,
             secret_refs,
+            secret_display_names,
         }
     }
 
@@ -86,10 +92,16 @@ impl UserDefinedFunction {
             created_at_cluster_version: None,
         };
 
+        let secret_display_names = udf
+            .secret_refs
+            .iter()
+            .map(|sr| (sr.arg_index, format!("<secret:{}>", sr.secret_id)))
+            .collect();
         Ok(Self {
             args,
             catalog: Arc::new(catalog),
             secret_refs: udf.secret_refs.clone(),
+            secret_display_names,
         })
     }
 }
@@ -147,12 +159,21 @@ impl std::fmt::Debug for UserDefinedFunctionDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.func_call;
         let mut builder = f.debug_tuple(&that.catalog.name);
-        that.args.iter().for_each(|arg| {
-            builder.field(&ExprDisplay {
-                expr: arg,
-                input_schema: self.input_schema,
-            });
-        });
+        for (i, arg) in that.args.iter().enumerate() {
+            // Show secret name for secret-backed arguments instead of the placeholder.
+            if let Some((_, name)) = that
+                .secret_display_names
+                .iter()
+                .find(|(idx, _)| *idx == i as u32)
+            {
+                builder.field(&format_args!("Secret({})", name));
+            } else {
+                builder.field(&ExprDisplay {
+                    expr: arg,
+                    input_schema: self.input_schema,
+                });
+            }
+        }
         builder.finish()
     }
 }
