@@ -85,8 +85,8 @@ use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
     BackfillType, Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker,
-    PlanTreeNode, Stream, StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion,
-    StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
+    PlanTreeNode, RewriteStreamContext, Stream, StreamExchange, StreamPlanRef, StreamUnion,
+    StreamUpstreamSinkUnion, StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{
     LocalityProviderCounter, RwTimestampValidator, TemporalJoinValidator,
@@ -674,9 +674,9 @@ impl LogicalPlanRoot {
                 }
                 let mut optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
                 let (plan, out_col_change) = {
-                    let (plan, out_col_change) = optimized_plan
-                        .plan
-                        .logical_rewrite_for_stream(&mut Default::default())?;
+                    let (plan, out_col_change) = optimized_plan.plan.logical_rewrite_for_stream(
+                        &mut RewriteStreamContext::new_with_backfill_type(backfill_type),
+                    )?;
                     if out_col_change.is_injective() {
                         (plan, out_col_change)
                     } else {
