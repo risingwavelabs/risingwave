@@ -17,12 +17,12 @@
 //! migrating expression parsing to combinator style.
 
 use winnow::combinator::expression;
-use winnow::combinator::{alt, cut_err, trace};
+use winnow::combinator::{alt, cut_err, fail, trace};
 use winnow::combinator::{Infix, Postfix, Prefix};
 use winnow::error::{ContextError, ErrMode};
 use winnow::{ModalResult, Parser};
 
-use super::{TokenStream, token};
+use super::{TokenStream, keyword, token};
 use crate::ast::{BinaryOperator, Expr, UnaryOperator, Value};
 use crate::keywords::Keyword;
 use crate::tokenizer::{Token, TokenWithLocation};
@@ -149,7 +149,7 @@ where
 }
 
 /// Parse postfix operators for core expressions.
-/// Handles: IS NULL, IS NOT NULL
+/// Handles: IS [NOT] NULL, IS [NOT] TRUE, IS [NOT] FALSE, IS [NOT] UNKNOWN
 fn postfix_op_core<S>(input: &mut S) -> ModalResult<Postfix<S, Expr, ErrMode<ContextError>>>
 where
     S: TokenStream,
@@ -159,29 +159,45 @@ where
         token.verify_map(|t: TokenWithLocation| match &t.token {
             Token::Word(w) if w.keyword == Keyword::IS => {
                 Some(Postfix(IS_NULL_POWER, |input: &mut S, expr: Expr| {
-                    // Try to parse NOT NULL or just NULL
-                    // Use a tuple parser to match the pattern
-                    let is_not_null = match (Keyword::NOT).parse_next(input) {
-                        Ok(_) => {
-                            // After NOT, expect NULL
-                            match (Keyword::NULL).parse_next(input) {
-                                Ok(_) => true,
-                                Err(e) => return Err(e),
-                            }
-                        }
-                        Err(_) => {
-                            // Try just NULL
-                            match (Keyword::NULL).parse_next(input) {
-                                Ok(_) => false,
-                                Err(e) => return Err(e),
-                            }
-                        }
+                    // Check for optional NOT
+                    let is_not = match (Keyword::NOT).parse_next(input) {
+                        Ok(_) => true,
+                        Err(_) => false,
                     };
                     
-                    if is_not_null {
-                        Ok(Expr::IsNotNull(Box::new(expr)))
-                    } else {
-                        Ok(Expr::IsNull(Box::new(expr)))
+                    // Parse the target: NULL, TRUE, FALSE, or UNKNOWN
+                    let target = keyword.parse_next(input)?;
+                    
+                    match target {
+                        Keyword::NULL => {
+                            if is_not {
+                                Ok(Expr::IsNotNull(Box::new(expr)))
+                            } else {
+                                Ok(Expr::IsNull(Box::new(expr)))
+                            }
+                        }
+                        Keyword::TRUE => {
+                            if is_not {
+                                Ok(Expr::IsNotTrue(Box::new(expr)))
+                            } else {
+                                Ok(Expr::IsTrue(Box::new(expr)))
+                            }
+                        }
+                        Keyword::FALSE => {
+                            if is_not {
+                                Ok(Expr::IsNotFalse(Box::new(expr)))
+                            } else {
+                                Ok(Expr::IsFalse(Box::new(expr)))
+                            }
+                        }
+                        Keyword::UNKNOWN => {
+                            if is_not {
+                                Ok(Expr::IsNotUnknown(Box::new(expr)))
+                            } else {
+                                Ok(Expr::IsUnknown(Box::new(expr)))
+                            }
+                        }
+                        _ => fail.parse_next(input),
                     }
                 }))
             }
@@ -426,7 +442,17 @@ mod tests {
         let mut tokenizer = Tokenizer::new(sql);
         let tokens = tokenizer.tokenize_with_location().map_err(|e| e.to_string())?;
         let mut parser = crate::parser::Parser(&tokens);
-        expr_core.parse_next(&mut parser).map_err(|e| e.to_string())
+        let result = expr_core.parse_next(&mut parser).map_err(|e| e.to_string())?;
+        
+        // Ensure all tokens were consumed (except EOF)
+        // The parser should have consumed the entire expression
+        // We check by verifying the remaining tokens are just EOF
+        match parser.0.first() {
+            None | Some(crate::tokenizer::TokenWithLocation { token: crate::tokenizer::Token::EOF, .. }) => (),
+            Some(t) => return Err(format!("Unexpected trailing token: {:?}", t)),
+        }
+        
+        Ok(result)
     }
 
     #[test]
@@ -658,6 +684,66 @@ mod tests {
         let result = parse_expr_core("(a IS NULL) OR b").unwrap();
         if let Expr::BinaryOp { left, op: BinaryOperator::Or, right } = result {
             assert!(matches!(left.as_ref(), Expr::IsNull(_)));
+            assert!(matches!(right.as_ref(), Expr::Identifier(_)));
+        } else {
+            panic!("Expected Or at top level");
+        }
+    }
+
+    #[test]
+    fn test_is_true() {
+        let result = parse_expr_core("a IS TRUE").unwrap();
+        assert!(matches!(result, Expr::IsTrue(_)));
+    }
+
+    #[test]
+    fn test_is_not_true() {
+        let result = parse_expr_core("a IS NOT TRUE").unwrap();
+        assert!(matches!(result, Expr::IsNotTrue(_)));
+    }
+
+    #[test]
+    fn test_is_false() {
+        let result = parse_expr_core("a IS FALSE").unwrap();
+        assert!(matches!(result, Expr::IsFalse(_)));
+    }
+
+    #[test]
+    fn test_is_not_false() {
+        let result = parse_expr_core("a IS NOT FALSE").unwrap();
+        assert!(matches!(result, Expr::IsNotFalse(_)));
+    }
+
+    #[test]
+    fn test_is_unknown() {
+        let result = parse_expr_core("a IS UNKNOWN").unwrap();
+        assert!(matches!(result, Expr::IsUnknown(_)));
+    }
+
+    #[test]
+    fn test_is_not_unknown() {
+        let result = parse_expr_core("a IS NOT UNKNOWN").unwrap();
+        assert!(matches!(result, Expr::IsNotUnknown(_)));
+    }
+
+    #[test]
+    fn test_is_true_precedence_with_and() {
+        // a IS TRUE AND b should parse as (a IS TRUE) AND b
+        let result = parse_expr_core("a IS TRUE AND b").unwrap();
+        if let Expr::BinaryOp { left, op: BinaryOperator::And, right } = result {
+            assert!(matches!(left.as_ref(), Expr::IsTrue(_)));
+            assert!(matches!(right.as_ref(), Expr::Identifier(_)));
+        } else {
+            panic!("Expected And at top level");
+        }
+    }
+
+    #[test]
+    fn test_is_false_precedence_with_or() {
+        // a IS FALSE OR b should parse as (a IS FALSE) OR b
+        let result = parse_expr_core("a IS FALSE OR b").unwrap();
+        if let Expr::BinaryOp { left, op: BinaryOperator::Or, right } = result {
+            assert!(matches!(left.as_ref(), Expr::IsFalse(_)));
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
             panic!("Expected Or at top level");
