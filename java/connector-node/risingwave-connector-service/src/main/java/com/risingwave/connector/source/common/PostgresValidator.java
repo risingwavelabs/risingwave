@@ -23,6 +23,8 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,13 +57,18 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         String dataType;
         Long charMaxLength;
         String udtName;
+        String formattedType;
 
-        ColumnInfo(String dataType, Long charMaxLength, String udtName) {
+        ColumnInfo(String dataType, Long charMaxLength, String udtName, String formattedType) {
             this.dataType = dataType;
             this.charMaxLength = charMaxLength;
             this.udtName = udtName;
+            this.formattedType = formattedType;
         }
     }
+
+    private static final Pattern VECTOR_DIM_PATTERN =
+            Pattern.compile("^\\s*vector\\s*\\(\\s*(\\d+)\\s*\\)\\s*$", Pattern.CASE_INSENSITIVE);
 
     public PostgresValidator(
             Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
@@ -239,25 +246,75 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 Long charMaxLength =
                         res.getObject(3) == null ? null : ((Number) res.getObject(3)).longValue();
                 var udtName = res.getString(4);
-                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName));
+                var formattedType = res.getString(5);
+                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName, formattedType));
             }
 
-            for (var e : tableSchema.getColumnTypes().entrySet()) {
+            for (var colDesc : tableSchema.getColumnDescs()) {
+                var colName = colDesc.getName();
                 // skip validate internal columns
-                if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                if (colName.startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var colInfo = schema.get(e.getKey());
+                var colInfo = schema.get(colName);
                 if (colInfo == null) {
                     throw ValidatorUtils.invalidArgument(
-                            "Column '" + e.getKey() + "' not found in the upstream database");
+                            "Column '" + colName + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(colInfo, e.getValue())) {
+                var expectedType = colDesc.getDataType();
+                if (!isDataTypeCompatible(colInfo, expectedType.getTypeName())) {
                     throw ValidatorUtils.invalidArgument(
-                            "Incompatible data type of column " + e.getKey());
+                            "Incompatible data type of column " + colName);
+                }
+                var vectorDimError = validateVectorDimension(colInfo, expectedType, colName);
+                if (vectorDimError != null) {
+                    throw ValidatorUtils.invalidArgument(vectorDimError);
                 }
             }
         }
+    }
+
+    private static Integer parseVectorDimension(String formattedType) {
+        if (formattedType == null) {
+            return null;
+        }
+        Matcher matcher = VECTOR_DIM_PATTERN.matcher(formattedType);
+        if (!matcher.matches()) {
+            return null;
+        }
+        return Integer.parseInt(matcher.group(1));
+    }
+
+    private static String validateVectorDimension(
+            ColumnInfo colInfo, Data.DataType expectedType, String colName) {
+        if (expectedType.getTypeName().getNumber() != Data.DataType.TypeName.VECTOR_VALUE) {
+            return null;
+        }
+        if (colInfo.udtName == null || !colInfo.udtName.equalsIgnoreCase("vector")) {
+            return null;
+        }
+
+        int expectedDim = expectedType.getPrecision();
+        Integer upstreamDim = parseVectorDimension(colInfo.formattedType);
+        if (upstreamDim == null) {
+            return "Incompatible vector dimension of column "
+                    + colName
+                    + ": upstream type `"
+                    + colInfo.formattedType
+                    + "`, but expected vector("
+                    + expectedDim
+                    + ")";
+        }
+        if (upstreamDim != expectedDim) {
+            return "Incompatible vector dimension of column "
+                    + colName
+                    + ": upstream vector("
+                    + upstreamDim
+                    + "), but expected vector("
+                    + expectedDim
+                    + ")";
+        }
+        return null;
     }
 
     private static void primaryKeyCheck(TableSchema sourceSchema, Set<String> pkFields)

@@ -15,6 +15,7 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
+use regex::Regex;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::id::SourceId;
 use risingwave_common::types::{
@@ -29,6 +30,7 @@ use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation
 use crate::parser::TransactionControl;
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::schema_change::TableChangeType;
+use crate::connector_common::{SslMode, create_pg_client};
 use crate::source::cdc::build_cdc_table_id;
 use crate::source::cdc::external::mysql::{
     mysql_type_to_rw_type, timestamp_val_to_timestamptz, type_name_to_mysql_type,
@@ -59,6 +61,149 @@ fn is_bigserial_default(default_value_expression: &str) -> bool {
 
     // Return true if it is a `nextval()` function (bigserial default).
     expr.starts_with("nextval(")
+}
+
+fn parse_pgvector_dimension(type_text: &str) -> Option<usize> {
+    let normalized = type_text.trim().to_ascii_lowercase();
+    if !normalized.starts_with("vector(") || !normalized.ends_with(')') {
+        return None;
+    }
+    let dim_text = normalized
+        .trim_start_matches("vector(")
+        .trim_end_matches(')')
+        .trim();
+    dim_text.parse::<usize>().ok()
+}
+
+fn parse_pgvector_dimension_from_ddl(ddl: &str, column_name: &str) -> Option<usize> {
+    let quoted_col = regex::escape(column_name);
+    let pattern_quoted = format!(
+        r#"(?i)"{}"\s+vector\s*\(\s*(\d+)\s*\)"#,
+        quoted_col
+    );
+    if let Ok(re) = Regex::new(&pattern_quoted)
+        && let Some(caps) = re.captures(ddl)
+        && let Some(dim_text) = caps.get(1)
+        && let Ok(dim) = dim_text.as_str().parse::<usize>()
+    {
+        return Some(dim);
+    }
+
+    let pattern_unquoted = format!(r"(?i)\b{}\b\s+vector\s*\(\s*(\d+)\s*\)", quoted_col);
+    if let Ok(re) = Regex::new(&pattern_unquoted)
+        && let Some(caps) = re.captures(ddl)
+        && let Some(dim_text) = caps.get(1)
+        && let Ok(dim) = dim_text.as_str().parse::<usize>()
+    {
+        return Some(dim);
+    }
+    None
+}
+
+fn parse_schema_table_from_debezium_id(id: &str) -> Option<(String, String)> {
+    let trimmed = id.trim();
+    if trimmed.contains("\".\"") {
+        let parts = trimmed
+            .split("\".\"")
+            .map(|s| s.trim_matches('"').trim())
+            .collect_vec();
+        if parts.len() >= 2 {
+            let schema = parts[parts.len() - 2].to_owned();
+            let table = parts[parts.len() - 1].to_owned();
+            if !schema.is_empty() && !table.is_empty() {
+                return Some((schema, table));
+            }
+        }
+    }
+
+    let cleaned = trimmed.trim_matches('"');
+    let parts = cleaned.split('.').collect_vec();
+    if parts.len() >= 2 {
+        let schema = parts[parts.len() - 2].trim().to_owned();
+        let table = parts[parts.len() - 1].trim().to_owned();
+        if !schema.is_empty() && !table.is_empty() {
+            return Some((schema, table));
+        }
+    }
+    None
+}
+
+async fn fetch_pgvector_dimensions_for_table(
+    connector_props: &ConnectorProperties,
+    schema: &str,
+    table: &str,
+) -> AccessResult<std::collections::HashMap<String, usize>> {
+    let ConnectorProperties::PostgresCdc(cdc_props) = connector_props else {
+        return Ok(std::collections::HashMap::new());
+    };
+
+    let props = &cdc_props.properties;
+    let host = props.get("hostname").ok_or_else(|| AccessError::Uncategorized {
+        message: "missing `hostname` in postgres-cdc properties".to_owned(),
+    })?;
+    let port = props.get("port").ok_or_else(|| AccessError::Uncategorized {
+        message: "missing `port` in postgres-cdc properties".to_owned(),
+    })?;
+    let user = props.get("username").ok_or_else(|| AccessError::Uncategorized {
+        message: "missing `username` in postgres-cdc properties".to_owned(),
+    })?;
+    let password = props.get("password").cloned().unwrap_or_default();
+    let database = props
+        .get("database.name")
+        .ok_or_else(|| AccessError::Uncategorized {
+            message: "missing `database.name` in postgres-cdc properties".to_owned(),
+        })?;
+
+    let ssl_mode = props
+        .get("ssl.mode")
+        .and_then(|v| v.parse::<SslMode>().ok())
+        .unwrap_or_default();
+    let ssl_root_cert = props.get("ssl.root.cert").cloned();
+
+    let client = create_pg_client(
+        user,
+        &password,
+        host,
+        port,
+        database,
+        &ssl_mode,
+        &ssl_root_cert,
+        None,
+    )
+    .await
+    .map_err(|err| AccessError::Uncategorized {
+        message: format!("failed to connect upstream postgres for schema change lookup: {err}"),
+    })?;
+
+    let rows = client
+        .query(
+            r#"
+            SELECT a.attname AS column_name,
+                   pg_catalog.format_type(a.atttypid, a.atttypmod) AS formatted_type
+            FROM pg_catalog.pg_attribute a
+            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = $1
+              AND c.relname = $2
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+            "#,
+            &[&schema, &table],
+        )
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!("failed to query upstream postgres schema for {schema}.{table}: {err}"),
+        })?;
+
+    let mut dims = std::collections::HashMap::new();
+    for row in rows {
+        let col_name: String = row.get("column_name");
+        let formatted_type: String = row.get("formatted_type");
+        if let Some(dim) = parse_pgvector_dimension(&formatted_type) {
+            dims.insert(col_name, dim);
+        }
+    }
+    Ok(dims)
 }
 
 // Example of Debezium JSON value:
@@ -189,13 +334,15 @@ macro_rules! jsonb_access_field {
 /// Parse the schema change message from Debezium.
 /// The layout of MySQL schema change message can refer to
 /// <https://debezium.io/documentation/reference/2.6/connectors/mysql.html#mysql-schema-change-topic>
-pub fn parse_schema_change(
+pub async fn parse_schema_change(
     accessor: &impl Access,
     source_id: SourceId,
     source_name: &str,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
+    let mut pgvector_dims_cache: std::collections::HashMap<String, std::collections::HashMap<String, usize>> =
+        std::collections::HashMap::new();
 
     let upstream_ddl: String = accessor
         .access(&[UPSTREAM_DDL], &DataType::Varchar)?
@@ -239,6 +386,71 @@ pub fn parse_schema_change(
                                 tracing::debug!(target: "auto_schema_change",
                                     "Convert PostgreSQL user defined enum type '{}' to VARCHAR", type_name);
                                 DataType::Varchar
+                            } else if type_name.eq_ignore_ascii_case("vector")
+                                || parse_pgvector_dimension(type_name.as_str()).is_some()
+                            {
+                                // For pgvector, RW requires a concrete dimension `vector(n)`.
+                                // We resolve `n` in this order:
+                                // 1) Debezium typeName/typeExpression already contains `vector(n)`;
+                                // 2) parse upstream DDL text if it carries `vector(n)`;
+                                // 3) as a fallback, query upstream PostgreSQL catalogs with `format_type`.
+                                //
+                                // Important: Debezium `length` for custom types is not a reliable vector
+                                // dimension (it can be a placeholder), so we intentionally do NOT use it.
+                                let type_expression = col
+                                    .access_object_field("typeExpression")
+                                    .filter(|v| !v.is_jsonb_null())
+                                    .and_then(|v| v.as_str().ok().map(ToOwned::to_owned));
+                                let mut vector_dim = parse_pgvector_dimension(type_name.as_str())
+                                    .or_else(|| {
+                                        type_expression
+                                            .as_deref()
+                                            .and_then(parse_pgvector_dimension)
+                                    })
+                                    .or_else(|| {
+                                        parse_pgvector_dimension_from_ddl(
+                                            upstream_ddl.as_str(),
+                                            name.as_str(),
+                                        )
+                                    });
+                                if vector_dim.is_none()
+                                    && let Some((schema_name, table_name_only)) =
+                                        parse_schema_table_from_debezium_id(id.as_str())
+                                {
+                                    // Only when all local hints miss dimension, and only for schema-change
+                                    // vector columns, we issue one upstream lookup for this table (cached by
+                                    // schema.table within the same message parse).
+                                    let cache_key = format!("{}.{}", schema_name, table_name_only);
+                                    if !pgvector_dims_cache.contains_key(&cache_key) {
+                                        let fetched = fetch_pgvector_dimensions_for_table(
+                                            connector_props,
+                                            &schema_name,
+                                            &table_name_only,
+                                        )
+                                        .await?;
+                                        pgvector_dims_cache.insert(cache_key.clone(), fetched);
+                                    }
+                                    vector_dim = pgvector_dims_cache
+                                        .get(&cache_key)
+                                        .and_then(|m| m.get(name.as_str()).copied());
+                                }
+
+                                match vector_dim {
+                                    Some(dim) if (1..=DataType::VEC_MAX_SIZE).contains(&dim) => {
+                                        DataType::Vector(dim)
+                                    }
+                                    _ => {
+                                        // No fallback to VARCHAR: a dimension-less vector cannot be mapped to
+                                        // RW's required `vector(n)` type safely.
+                                        return Err(AccessError::CdcAutoSchemaChangeError {
+                                            ty: type_name,
+                                            table_name: format!(
+                                                "{}.{}",
+                                                source_name, table_name
+                                            ),
+                                        });
+                                    }
+                                }
                             } else {
                                 match ty {
                                     Some(ty) => match pg_type_to_rw_type(&ty) {

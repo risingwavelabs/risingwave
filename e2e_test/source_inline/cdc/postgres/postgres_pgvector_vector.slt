@@ -41,9 +41,17 @@ create table test_pgvector_cdc (
     embedding vector(3)
 ) from pgvector_source table 'public.test_pgvector_cdc';
 
+# Mismatched vector dimension must be rejected at DDL validation time.
+statement error Incompatible vector dimension
+create table test_pgvector_cdc_dim_mismatch (
+    id int primary key,
+    name varchar,
+    embedding vector(2)
+) from pgvector_source table 'public.test_pgvector_cdc';
+
 # Auto schema mapping should derive embedding as vector(3).
 statement ok
-create table test_pgvector_cdc_auto
+create table test_pgvector_cdc_auto (*)
 from pgvector_source table 'public.test_pgvector_cdc';
 
 query T
