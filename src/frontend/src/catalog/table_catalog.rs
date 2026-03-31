@@ -644,6 +644,15 @@ impl TableCatalog {
             .map(|c| c.name())
     }
 
+    pub fn first_generated_column(&self) -> Option<(usize, &str)> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_hidden())
+            .enumerate()
+            .find(|(_, c)| c.is_generated())
+            .map(|(idx, c)| (idx, c.name()))
+    }
+
     pub fn generated_col_idxes(&self) -> impl Iterator<Item = usize> + '_ {
         self.columns
             .iter()
