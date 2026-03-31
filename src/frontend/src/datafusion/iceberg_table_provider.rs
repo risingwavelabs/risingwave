@@ -96,7 +96,7 @@ impl IcebergTableProvider {
         let iceberg_properties = Arc::from(iceberg_properties);
 
         // For decimal types, catalog schema doesn't contain precision and scale information, we need to get the full schema from iceberg file scan tasks.
-        let iceberg_schema = plan.schema_from_tasks()?;
+        let iceberg_schema = schema_from_tasks(plan)?;
         let iceberg_field_map = iceberg_schema
             .fields()
             .iter()
@@ -141,4 +141,19 @@ impl IcebergTableProvider {
             task: plan.task.clone(),
         })
     }
+}
+
+fn schema_from_tasks(plan: &LogicalIcebergScan) -> RwResult<ArrowSchema> {
+    let tasks = match &plan.task {
+        IcebergFileScanTask::Data(tasks) => tasks,
+        IcebergFileScanTask::EqualityDelete(tasks) => tasks,
+        IcebergFileScanTask::PositionDelete(tasks) => tasks,
+    };
+    let schema = tasks
+        .first()
+        .ok_or_else(|| ErrorCode::InternalError("Iceberg file scan tasks are missing".into()))?
+        .schema();
+    let schema = iceberg::arrow::schema_to_arrow_schema(schema)
+        .map_err(|e| ErrorCode::ConnectorError(Box::new(e)))?;
+    Ok(schema)
 }
