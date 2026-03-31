@@ -370,6 +370,123 @@ impl HummockManager {
         Ok(())
     }
 
+    /// Periodically purge empty dynamic compaction groups from the latest Hummock version and
+    /// remove stale compaction group configs that are not referenced by the version.
+    ///
+    /// A dynamic compaction group is considered safe to destroy if it has **zero member tables**
+    /// in `state_table_info` of the latest version. This check is version-only and does not depend
+    /// on catalog state.
+    pub async fn purge_empty_compaction_groups(&self) -> Result<usize> {
+        let mut versioning_guard = self.versioning.write().await;
+        let versioning = versioning_guard.deref_mut();
+
+        let groups_to_destroy = versioning
+            .current_version
+            .levels
+            .keys()
+            .copied()
+            .filter(|group_id| *group_id > StaticCompactionGroupId::End)
+            .filter(|group_id| {
+                versioning
+                    .current_version
+                    .state_table_info
+                    .compaction_group_member_table_ids(*group_id)
+                    .is_empty()
+            })
+            .map(|group_id| {
+                (
+                    group_id,
+                    versioning
+                        .current_version
+                        .get_compaction_group_levels(group_id)
+                        .levels
+                        .len(),
+                )
+            })
+            .collect_vec();
+
+        if groups_to_destroy.is_empty() {
+            // No version mutation is required. Still purge stale group configs that are not
+            // referenced by the latest version.
+            let existing_groups =
+                HashSet::from_iter(get_compaction_group_ids(&versioning.current_version));
+            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
+
+            let stale_config_count = compaction_groups_txn
+                .tree_ref()
+                .keys()
+                .filter(|group_id| !existing_groups.contains(*group_id))
+                .count();
+            if stale_config_count == 0 {
+                tracing::debug!("periodic purge empty compaction groups: no-op");
+                return Ok(0);
+            }
+
+            compaction_groups_txn.purge(existing_groups);
+            commit_multi_var!(self.meta_store_ref(), compaction_groups_txn)?;
+
+            tracing::info!(
+                stale_config_count,
+                "periodic purge empty compaction groups finished"
+            );
+            return Ok(0);
+        }
+
+        let destroyed_group_count = groups_to_destroy.len();
+
+        let mut version = HummockVersionTransaction::new(
+            &mut versioning.current_version,
+            &mut versioning.hummock_version_deltas,
+            &mut versioning.table_change_log,
+            self.env.notification_manager(),
+            None,
+            &self.metrics,
+            &self.env.opts,
+        );
+        let mut new_version_delta = version.new_delta();
+
+        for (group_id, _) in &groups_to_destroy {
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(*group_id)
+                .or_default()
+                .group_deltas;
+            group_deltas.push(GroupDelta::GroupDestroy(PbGroupDestroy {}));
+        }
+
+        for (group_id, max_level) in &groups_to_destroy {
+            remove_compaction_group_in_sst_stat(&self.metrics, *group_id, *max_level);
+            // Clean up compaction schedule state for the removed group.
+            self.compaction_state.remove_compaction_group(*group_id);
+        }
+
+        new_version_delta.pre_apply();
+
+        // Purge may cause write to meta store. If it hurts performance while holding versioning
+        // lock, consider to make it in batch.
+        let mut compaction_group_manager = self.compaction_group_manager.write().await;
+        let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
+
+        let existing_groups =
+            HashSet::from_iter(get_compaction_group_ids(version.latest_version()));
+        let stale_config_count = compaction_groups_txn
+            .tree_ref()
+            .keys()
+            .filter(|group_id| !existing_groups.contains(*group_id))
+            .count();
+        compaction_groups_txn.purge(existing_groups);
+        commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
+
+        tracing::info!(
+            destroyed_group_count,
+            stale_config_count,
+            "periodic purge empty compaction groups finished"
+        );
+
+        Ok(destroyed_group_count)
+    }
+
     pub async fn update_compaction_config(
         &self,
         compaction_group_ids: &[CompactionGroupId],
