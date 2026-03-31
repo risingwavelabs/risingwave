@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::backtrace::Backtrace;
+use std::backtrace::{Backtrace, BacktraceStatus};
 use std::fmt::Display;
 
 use datafusion_common::DataFusionError;
@@ -30,8 +30,9 @@ struct ToDataFusionErrorWrapper(BoxedError, Option<Backtrace>);
 impl Display for ToDataFusionErrorWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)?;
+        #[cfg(debug_assertions)]
         if let Some(bt) = std::error::request_ref::<Backtrace>(self) {
-            write!(f, "{}{}", DataFusionError::BACK_TRACE_SEP, bt)?;
+            write!(f, "{}\n{}", DataFusionError::BACK_TRACE_SEP, bt)?;
         }
         Ok(())
     }
@@ -58,7 +59,10 @@ pub fn to_datafusion_error(error: impl Into<BoxedError>) -> DataFusionError {
     let error = error.into();
     let mut bt = None;
     if std::error::request_ref::<Backtrace>(error.as_ref()).is_none() {
-        bt = Some(Backtrace::capture());
+        let backtrace = Backtrace::capture();
+        if backtrace.status() == BacktraceStatus::Captured {
+            bt = Some(backtrace);
+        }
     }
     DataFusionError::External(Box::new(ToDataFusionErrorWrapper(error, bt)))
 }

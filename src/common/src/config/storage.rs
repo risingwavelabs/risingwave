@@ -15,6 +15,7 @@
 use foyer::{
     Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig, Throttle,
 };
+use serde::de::Error as _;
 
 use super::*;
 
@@ -81,7 +82,10 @@ pub struct StorageConfig {
     pub max_cached_recent_versions_number: usize,
 
     /// max prefetch block number
-    #[serde(default = "default::storage::max_prefetch_block_number")]
+    #[serde(
+        default = "default::storage::max_prefetch_block_number",
+        deserialize_with = "deserialize_max_prefetch_block_number"
+    )]
     pub max_prefetch_block_number: usize,
 
     #[serde(default = "default::storage::disable_remote_compactor")]
@@ -502,6 +506,19 @@ pub struct ObjectStoreConfig {
 
     #[serde(default = "default::object_store_config::upload_part_size")]
     pub upload_part_size: usize,
+}
+
+fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.max_prefetch_block_number must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 impl ObjectStoreConfig {
