@@ -146,10 +146,18 @@ impl CompactionConfigBuilder {
     }
 
     pub fn build(self) -> CompactionConfig {
-        if let Err(reason) = validate_compaction_config(&self.config) {
-            tracing::warn!("Bad compaction config: {}", reason);
+        let mut config = self.config;
+        if let Err(reason) = validate_compaction_config(&config) {
+            // Avoid crashing later in compaction task planning due to invalid per-level filter
+            // configs. Fallback to legacy behavior (xor16 + auto) and keep other fields unchanged.
+            tracing::warn!(
+                "Bad compaction config: {}. Falling back to default sstable filter kind/layout.",
+                reason
+            );
+            config.sstable_filter_kind.clear();
+            config.sstable_filter_layout.clear();
         }
-        self.config
+        config
     }
 }
 
