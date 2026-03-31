@@ -180,12 +180,21 @@ pub trait ExprRewriter {
     }
 
     fn rewrite_user_defined_function(&mut self, udf: UserDefinedFunction) -> ExprImpl {
-        let UserDefinedFunction { args, catalog } = udf;
+        let UserDefinedFunction {
+            args,
+            catalog,
+            secret_refs,
+        } = udf;
         let args = args
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        UserDefinedFunction { args, catalog }.into()
+        UserDefinedFunction {
+            args,
+            catalog,
+            secret_refs,
+        }
+        .into()
     }
 
     fn rewrite_now(&mut self, now: Now) -> ExprImpl {

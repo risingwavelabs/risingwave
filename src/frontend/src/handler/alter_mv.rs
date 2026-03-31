@@ -150,6 +150,7 @@ async fn handle_alter_mv_bound(
             query,
             dependent_relations,
             dependent_udfs,
+            Default::default(), // dependent_secrets: TODO track in alter MV path
             columns,
             emit_mode,
         )

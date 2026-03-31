@@ -105,6 +105,7 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
             version: PbUdfExprVersion::LATEST as _,
             is_async: c.is_async,
             is_batched: c.is_batched,
+            secret_refs: vec![],
         }
     }
 }

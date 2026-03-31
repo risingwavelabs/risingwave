@@ -17,6 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::types::DataType;
+use risingwave_pb::expr::UdfArgSecretRef;
 
 use super::{Expr, ExprDisplay, ExprImpl};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
@@ -25,11 +26,29 @@ use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 pub struct UserDefinedFunction {
     pub args: Vec<ExprImpl>,
     pub catalog: Arc<FunctionCatalog>,
+    /// Secret references for arguments that should be resolved from secrets at runtime.
+    pub secret_refs: Vec<UdfArgSecretRef>,
 }
 
 impl UserDefinedFunction {
     pub fn new(catalog: Arc<FunctionCatalog>, args: Vec<ExprImpl>) -> Self {
-        Self { args, catalog }
+        Self {
+            args,
+            catalog,
+            secret_refs: vec![],
+        }
+    }
+
+    pub fn new_with_secret_refs(
+        catalog: Arc<FunctionCatalog>,
+        args: Vec<ExprImpl>,
+        secret_refs: Vec<UdfArgSecretRef>,
+    ) -> Self {
+        Self {
+            args,
+            catalog,
+            secret_refs,
+        }
     }
 
     pub(super) fn from_expr_proto(
@@ -70,6 +89,7 @@ impl UserDefinedFunction {
         Ok(Self {
             args,
             catalog: Arc::new(catalog),
+            secret_refs: udf.secret_refs.clone(),
         })
     }
 }
@@ -111,6 +131,7 @@ impl Expr for UserDefinedFunction {
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
                 is_async: self.catalog.is_async,
                 is_batched: self.catalog.is_batched,
+                secret_refs: self.secret_refs.clone(),
                 version: PbUdfExprVersion::LATEST as _,
             }))),
         })

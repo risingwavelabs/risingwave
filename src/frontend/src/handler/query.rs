@@ -218,6 +218,7 @@ pub async fn handle_execute(
                 *query,
                 dependent_relations,
                 dependent_udfs,
+                Default::default(), // dependent_secrets: none in CTAS path
                 columns,
                 emit_mode,
             )

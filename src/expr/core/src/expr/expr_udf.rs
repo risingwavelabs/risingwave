@@ -28,7 +28,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr_context::FRAGMENT_ID;
 use risingwave_pb::expr::ExprNode;
 
-use super::{BoxedExpression, Build};
+use super::{BoxedExpression, Build, ExpressionBoxExt, LiteralExpression};
 use crate::expr::Expression;
 use crate::sig::{BuildOptions, UdfImpl, UdfKind};
 use crate::{ExprError, Result, bail};
@@ -218,8 +218,46 @@ impl Build for UserDefinedFunction {
                 .to_string(),
         );
 
+        let mut children: Vec<BoxedExpression> =
+            udf.children.iter().map(build_child).try_collect()?;
+
+        // Resolve secret references and replace placeholder children with literal values
+        // containing the actual secret content retrieved from the local secret store.
+        if !udf.secret_refs.is_empty() {
+            use risingwave_common::secret::LocalSecretManager;
+            use risingwave_pb::secret::SecretRef as PbSecretRef;
+
+            for secret_arg_ref in &udf.secret_refs {
+                let idx = secret_arg_ref.arg_index as usize;
+                if idx >= children.len() {
+                    bail!(
+                        "secret ref arg_index {} out of bounds (children len = {})",
+                        idx,
+                        children.len()
+                    );
+                }
+
+                let pb_secret_ref = PbSecretRef {
+                    secret_id: secret_arg_ref.secret_id.into(),
+                    ref_as: secret_arg_ref.ref_as,
+                };
+
+                let secret_value = LocalSecretManager::global()
+                    .fill_secret(pb_secret_ref)
+                    .context("failed to resolve secret for UDF argument")?;
+
+                children[idx] = LiteralExpression::new(
+                    DataType::Varchar,
+                    Some(risingwave_common::types::ScalarImpl::Utf8(
+                        secret_value.into(),
+                    )),
+                )
+                .boxed();
+            }
+        }
+
         Ok(Self {
-            children: udf.children.iter().map(build_child).try_collect()?,
+            children,
             arg_types,
             return_type,
             arg_schema,

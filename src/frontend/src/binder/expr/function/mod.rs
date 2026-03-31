@@ -24,14 +24,16 @@ use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType};
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
+use risingwave_pb::expr::UdfArgSecretRef;
 use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
-    OrderByExpr, Statement, Window,
+    OrderByExpr, SecretRefAsType, Statement, Window,
 };
 use risingwave_sqlparser::parser::Parser;
 
 use crate::binder::Binder;
 use crate::binder::bind_context::Clause;
+use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -150,12 +152,67 @@ impl Binder {
             );
         }
 
-        let mut args: Vec<_> = arg_list
-            .args
-            .iter()
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        // Bind function arguments, handling secret references separately.
+        // Secret references produce placeholder expressions and are recorded for UDF runtime resolution.
+        let mut args: Vec<ExprImpl> = Vec::new();
+        let mut secret_refs: Vec<UdfArgSecretRef> = Vec::new();
+
+        for (idx, arg) in arg_list.args.iter().enumerate() {
+            match arg {
+                FunctionArg::Unnamed(FunctionArgExpr::SecretRef(secret_ref_value)) => {
+                    let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(
+                        &self.db_name,
+                        &secret_ref_value.secret_name,
+                    )?;
+                    let schema_path = self.bind_schema_path(schema_name.as_deref());
+                    let (secret_catalog, _) = self.catalog.get_secret_by_name(
+                        &self.db_name,
+                        schema_path,
+                        &secret_name,
+                    )?;
+
+                    // Check USAGE privilege on the secret.
+                    self.check_privilege(
+                        ObjectCheckItem::new(
+                            secret_catalog.owner(),
+                            AclMode::Usage,
+                            secret_catalog.name.clone(),
+                            secret_catalog.id,
+                        ),
+                        self.database_id,
+                    )?;
+
+                    // Track the secret dependency.
+                    self.included_secrets.insert(secret_catalog.id);
+
+                    let ref_as = match secret_ref_value.ref_as {
+                        SecretRefAsType::Text => {
+                            risingwave_pb::secret::secret_ref::RefAsType::Text as i32
+                        }
+                        SecretRefAsType::File => {
+                            risingwave_pb::secret::secret_ref::RefAsType::File as i32
+                        }
+                    };
+
+                    secret_refs.push(UdfArgSecretRef {
+                        arg_index: idx as u32,
+                        secret_id: secret_catalog.id.as_raw_id(),
+                        ref_as,
+                    });
+
+                    // Add a placeholder expression that will be replaced at runtime.
+                    args.push(ExprImpl::literal_varchar("".to_owned()));
+                }
+                _ => {
+                    let bound = self.bind_function_arg(arg)?;
+                    args.extend(bound);
+                }
+            }
+        }
+
+        // Secret references are only supported in UDF calls.
+        // This early check is done before UDF lookup to provide a clear error message
+        // if secret refs are used with built-in functions.
 
         let mut referred_udfs = HashSet::new();
 
@@ -429,7 +486,24 @@ impl Binder {
             if udf.language == "sql" {
                 return self.bind_sql_udf(udf.clone(), args);
             }
+            if !secret_refs.is_empty() {
+                return Ok(UserDefinedFunction::new_with_secret_refs(
+                    udf.clone(),
+                    args,
+                    secret_refs,
+                )
+                .into());
+            }
             return Ok(UserDefinedFunction::new(udf.clone(), args).into());
+        }
+
+        // Secret references are only allowed in UDF arguments, not built-in functions.
+        if !secret_refs.is_empty() {
+            return Err(ErrorCode::BindError(
+                "secret references are only supported in user-defined function arguments"
+                    .to_owned(),
+            )
+            .into());
         }
 
         self.bind_builtin_scalar_function(&func_name, args, arg_list.variadic)
@@ -763,6 +837,10 @@ impl Binder {
             .into()),
             FunctionArgExpr::Wildcard(None) => Ok(vec![]),
             FunctionArgExpr::Wildcard(Some(_)) => unreachable!(),
+            FunctionArgExpr::SecretRef(_) => Err(ErrorCode::InvalidInputSyntax(
+                "secret reference is not allowed in this context".to_owned(),
+            )
+            .into()),
         }
     }
 

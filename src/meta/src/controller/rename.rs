@@ -279,6 +279,7 @@ impl QueryRewriter<'_> {
                         self.visit_expr(expr);
                     }
                 }
+                FunctionArgExpr::SecretRef(_) => {}
             },
         }
     }
