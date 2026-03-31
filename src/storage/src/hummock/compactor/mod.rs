@@ -62,7 +62,6 @@ use iceberg_compaction::iceberg_compactor_runner::{
 use iceberg_compaction::{IcebergTaskQueue, PushResult};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
-use risingwave_common::system_param::SstableFilterKind;
 use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_map};
 use risingwave_hummock_sdk::{
     HummockCompactionTaskId, HummockSstableObjectId, LocalSstableInfo, compact_task_to_string,
@@ -73,8 +72,8 @@ use risingwave_pb::hummock::subscribe_compaction_event_request::{
 };
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskProgress, ReportCompactionTaskRequest, SubscribeCompactionEventRequest,
-    SubscribeCompactionEventResponse,
+    CompactTaskProgress, PbSstableFilterType, ReportCompactionTaskRequest,
+    SubscribeCompactionEventRequest, SubscribeCompactionEventResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::{compact, merge_imms_in_memory};
@@ -217,7 +216,7 @@ impl Compactor {
                 self.task_config.sstable_filter_kind,
                 self.task_config.use_block_based_filter,
             ) {
-                (SstableFilterKind::Xor8, true) => {
+                (PbSstableFilterType::SstableFilterXor8, true) => {
                     self.compact_key_range_impl::<_, BlockedXor8FilterBuilder>(
                         factory,
                         iter,
@@ -229,7 +228,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (SstableFilterKind::Xor8, false) => {
+                (PbSstableFilterType::SstableFilterXor8, false) => {
                     self.compact_key_range_impl::<_, Xor8FilterBuilder>(
                         factory,
                         iter,
@@ -241,7 +240,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (SstableFilterKind::Xor16, true) => {
+                (PbSstableFilterType::SstableFilterXor16, true) => {
                     self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
                         factory,
                         iter,
@@ -253,7 +252,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
-                (SstableFilterKind::Xor16, false) => {
+                (PbSstableFilterType::SstableFilterXor16, false) => {
                     self.compact_key_range_impl::<_, Xor16FilterBuilder>(
                         factory,
                         iter,
@@ -265,6 +264,7 @@ impl Compactor {
                     .instrument_await("compact".verbose())
                     .await?
                 }
+                (kind, _) => unreachable!("unsupported sstable filter kind in compactor: {kind:?}"),
             }
         };
 

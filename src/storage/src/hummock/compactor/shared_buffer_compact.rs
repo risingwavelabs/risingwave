@@ -28,6 +28,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, FullKeyTracker, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, LocalSstableInfo};
+use risingwave_pb::hummock::PbSstableFilterType;
 use thiserror_ext::AsReport;
 use tracing::{error, warn};
 
@@ -555,7 +556,6 @@ impl SharedBufferCompactRunner {
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
-        let sstable_filter_kind = context.storage_opts.sstable_filter_kind;
         let compactor = Compactor::new(
             context,
             options,
@@ -567,7 +567,8 @@ impl SharedBufferCompactRunner {
                 stats_target_table_ids: None,
                 table_vnode_partition,
                 use_block_based_filter,
-                sstable_filter_kind,
+                // L0 flush writes overlapping SSTs, so keep a conservative filter family here.
+                sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
             },

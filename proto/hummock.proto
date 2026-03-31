@@ -22,6 +22,18 @@ enum SstableFilterType {
   SSTABLE_FILTER_XOR16 = 3;
 }
 
+// Layout strategy of the xor filter stored in SST.
+//
+// Note: the actual on-disk encoding is still determined by the filter bytes footer.
+// This enum is used for task planning and configuration.
+enum SstableFilterLayout {
+  SSTABLE_FILTER_LAYOUT_UNSPECIFIED = 0;
+  // Let the system decide whether to use a block-based filter (currently by kv-count threshold).
+  SSTABLE_FILTER_LAYOUT_AUTO = 1;
+  // Always use a single non-blocked filter. Ignore kv-count threshold.
+  SSTABLE_FILTER_LAYOUT_PLAIN = 2;
+}
+
 // Key range for a single vnode within an SST.
 // Keys are always represented as closed intervals: [min_key, max_key].
 message VnodeUserKeyRange {
@@ -582,6 +594,10 @@ message CompactTask {
   optional uint64 max_kv_count_for_xor16 = 28;
   // Max bytes for vnode-level key range hints to embed into output SSTs.
   optional uint64 max_vnode_key_range_bytes = 29;
+  // The xor filter family that output SSTs in this task should use.
+  SstableFilterType sstable_filter_kind = 30;
+  // The xor filter layout to use for output SSTs in this task.
+  SstableFilterLayout sstable_filter_layout = 31;
 }
 
 message LevelHandler {
@@ -849,6 +865,18 @@ message RiseCtlUpdateCompactionConfigRequest {
     string compression_algorithm = 2;
   }
 
+  message SstableFilterKind {
+    // LSM level index to update, e.g. 0 for L0 and 6 for L6.
+    uint32 level = 1;
+    string filter_kind = 2;
+  }
+
+  message SstableFilterLayout {
+    // LSM level index to update. See `SstableFilterKind.level`.
+    uint32 level = 1;
+    string layout = 2;
+  }
+
   message MutableConfig {
     oneof mutable_config {
       uint64 max_bytes_for_level_base = 1;
@@ -890,6 +918,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 max_kv_count_for_xor16 = 32;
       // Max bytes for vnode key-range hints recorded into each SST.
       uint64 max_vnode_key_range_bytes = 33;
+      SstableFilterKind sstable_filter_kind = 34;
+      SstableFilterLayout sstable_filter_layout = 35;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -1127,6 +1157,25 @@ message CompactionConfig {
 
   // Max bytes for vnode key-range hints recorded into each SST.
   optional uint64 max_vnode_key_range_bytes = 33;
+
+  // The xor filter family to use for each output level (for compaction tasks).
+  //
+  // Index by LSM level.
+  //
+  // `sstable_filter_kind[0]` is reserved for L0 and currently ignored by shared-buffer flush, which
+  // always uses xor16. `sstable_filter_kind[1]` applies to L1 output, `sstable_filter_kind[6]`
+  // applies to L6 output, etc.
+  repeated string sstable_filter_kind = 34;
+
+  // The xor filter layout to use for each output level (for compaction tasks).
+  //
+  // Supported values:
+  // - "auto": decide by heuristics (currently by kv-count threshold)
+  // - "plain" or "normal": always use a single non-blocked filter, ignoring kv-count threshold
+  //
+  // Note: `sstable_filter_layout[0]` is reserved for L0 and currently ignored by shared-buffer
+  // flush, which always uses "auto".
+  repeated string sstable_filter_layout = 35;
 }
 
 message TableStats {

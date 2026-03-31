@@ -469,6 +469,8 @@ impl HummockManager {
                     max_vnode_key_range_bytes: group_config
                         .compaction_config
                         .max_vnode_key_range_bytes,
+                    sstable_filter_kind: compact_task.sstable_filter_kind,
+                    sstable_filter_layout: compact_task.sstable_filter_layout,
                     ..Default::default()
                 };
 

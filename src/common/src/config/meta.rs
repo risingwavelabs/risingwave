@@ -608,6 +608,10 @@ pub struct CompactionConfig {
     pub max_kv_count_for_xor16: Option<u64>,
     #[serde(default = "default::compaction_config::max_vnode_key_range_bytes")]
     pub max_vnode_key_range_bytes: Option<u64>,
+    #[serde(default = "default::compaction_config::sstable_filter_kind")]
+    pub sstable_filter_kind: Vec<String>,
+    #[serde(default = "default::compaction_config::sstable_filter_layout")]
+    pub sstable_filter_layout: Vec<String>,
 }
 
 pub mod default {
@@ -1007,6 +1011,30 @@ pub mod default {
 
         pub fn max_vnode_key_range_bytes() -> Option<u64> {
             DEFAULT_MAX_VNODE_KEY_RANGE_BYTES
+        }
+
+        pub fn sstable_filter_kind() -> Vec<String> {
+            vec![
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+            ]
+        }
+
+        pub fn sstable_filter_layout() -> Vec<String> {
+            vec![
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+            ]
         }
     }
 }

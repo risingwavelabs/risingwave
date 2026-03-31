@@ -14,6 +14,9 @@
 
 use risingwave_common::config::CompactionConfig as CompactionConfigOpt;
 use risingwave_common::config::meta::default::compaction_config;
+use risingwave_hummock_sdk::filter_utils::{
+    parse_sstable_filter_kind, parse_sstable_filter_layout,
+};
 use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 
@@ -47,6 +50,8 @@ impl CompactionConfigBuilder {
                     "Zstd".to_owned(),
                     "Zstd".to_owned(),
                 ],
+                sstable_filter_kind: compaction_config::sstable_filter_kind(),
+                sstable_filter_layout: compaction_config::sstable_filter_layout(),
                 compaction_filter_mask: compaction_config::compaction_filter_mask(),
                 max_sub_compaction: compaction_config::max_sub_compaction(),
                 max_space_reclaim_bytes: compaction_config::max_space_reclaim_bytes(),
@@ -135,6 +140,8 @@ impl CompactionConfigBuilder {
             .enable_optimize_l0_interval_selection(Some(opt.enable_optimize_l0_interval_selection))
             .max_kv_count_for_xor16(opt.max_kv_count_for_xor16)
             .max_vnode_key_range_bytes(opt.max_vnode_key_range_bytes)
+            .sstable_filter_kind(opt.sstable_filter_kind.clone())
+            .sstable_filter_layout(opt.sstable_filter_layout.clone())
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -154,6 +161,31 @@ pub fn validate_compaction_config(config: &CompactionConfig) -> Result<(), Strin
             "{} is too small for level0_stop_write_threshold_sub_level_number, expect >= {}",
             config.level0_stop_write_threshold_sub_level_number, sub_level_number_threshold_min
         ));
+    }
+    if !config.sstable_filter_kind.is_empty() {
+        if config.sstable_filter_kind.len() < config.max_level as usize + 1 {
+            return Err(format!(
+                "sstable_filter_kind must provide at least {} entries for max_level {}",
+                config.max_level + 1,
+                config.max_level
+            ));
+        }
+        for filter_kind in &config.sstable_filter_kind {
+            parse_sstable_filter_kind(filter_kind)?;
+        }
+    }
+
+    if !config.sstable_filter_layout.is_empty() {
+        if config.sstable_filter_layout.len() < config.max_level as usize + 1 {
+            return Err(format!(
+                "sstable_filter_layout must provide at least {} entries for max_level {}",
+                config.max_level + 1,
+                config.max_level
+            ));
+        }
+        for layout in &config.sstable_filter_layout {
+            parse_sstable_filter_layout(layout)?;
+        }
     }
     Ok(())
 }
@@ -186,6 +218,8 @@ builder_field! {
     level0_tier_compact_file_number: u64,
     compaction_mode: i32,
     compression_algorithm: Vec<String>,
+    sstable_filter_kind: Vec<String>,
+    sstable_filter_layout: Vec<String>,
     compaction_filter_mask: u32,
     target_file_size_base: u64,
     max_sub_compaction: u32,
@@ -206,4 +240,39 @@ builder_field! {
     enable_optimize_l0_interval_selection: Option<bool>,
     max_kv_count_for_xor16: Option<u64>,
     max_vnode_key_range_bytes: Option<u64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CompactionConfigBuilder, validate_compaction_config};
+
+    #[test]
+    fn test_validate_compaction_config_accepts_missing_filter_config() {
+        let mut config = CompactionConfigBuilder::new().build();
+        config.sstable_filter_kind.clear();
+        config.sstable_filter_layout.clear();
+        assert!(validate_compaction_config(&config).is_ok());
+    }
+
+    #[test]
+    fn test_validate_compaction_config_rejects_short_filter_layout() {
+        let mut config = CompactionConfigBuilder::new().build();
+        config.sstable_filter_layout = vec!["auto".to_owned()];
+        assert!(validate_compaction_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_compaction_config_rejects_invalid_filter_layout_value() {
+        let mut config = CompactionConfigBuilder::new().build();
+        config.sstable_filter_layout = vec!["auto".to_owned(); config.max_level as usize + 1];
+        config.sstable_filter_layout[0] = "blocked".to_owned();
+        assert!(validate_compaction_config(&config).is_err());
+    }
+
+    #[test]
+    fn test_validate_compaction_config_rejects_short_filter_kind() {
+        let mut config = CompactionConfigBuilder::new().build();
+        config.sstable_filter_kind = vec!["xor16".to_owned()];
+        assert!(validate_compaction_config(&config).is_err());
+    }
 }

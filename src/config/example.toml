@@ -105,6 +105,8 @@ level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = true
 max_kv_count_for_xor16 = 262144
 max_vnode_key_range_bytes = ""
+sstable_filter_kind = ["xor16", "xor16", "xor16", "xor16", "xor16", "xor16", "xor16"]
+sstable_filter_layout = ["auto", "auto", "auto", "auto", "auto", "auto", "auto"]
 
 [meta.developer]
 cached_traces_num = 256
@@ -450,7 +452,6 @@ sstable_size_mb = 256
 parallel_compact_size_mb = 512
 block_size_kb = 64
 bloom_false_positive = 0.001
-sstable_filter_kind = "xor16"
 state_store = ""
 data_directory = ""
 backup_storage_url = ""

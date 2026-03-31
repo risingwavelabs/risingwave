@@ -25,7 +25,6 @@ pub mod common;
 pub mod diff;
 pub mod local_manager;
 pub mod reader;
-pub mod sstable_filter_kind;
 
 use std::fmt::Debug;
 use std::ops::RangeBounds;
@@ -37,7 +36,6 @@ use risingwave_pb::meta::PbSystemParams;
 
 use self::diff::SystemParamsDiff;
 pub use crate::system_param::adaptive_parallelism_strategy::AdaptiveParallelismStrategy;
-pub use crate::system_param::sstable_filter_kind::SstableFilterKind;
 
 pub type SystemParamsError = String;
 
@@ -86,7 +84,6 @@ macro_rules! for_all_params {
             { parallel_compact_size_mb,                 u32,                            Some(512_u32),                  false,  "The size of parallel task for one compact/flush job.", },
             { block_size_kb,                            u32,                            Some(64_u32),                   false,  "Size of each block in bytes in SST.", },
             { bloom_false_positive,                     f64,                            Some(0.001_f64),                false,  "False positive probability of bloom filter.", },
-            { sstable_filter_kind,                      risingwave_common::system_param::SstableFilterKind, Some(risingwave_common::system_param::SstableFilterKind::Xor16), false,  "The xor filter family used when building SST filters.", },
             { state_store,                              String,                         None,                           false,  "URL for the state store", },
             { data_directory,                           String,                         None,                           false,  "Remote directory for storing data and metadata objects.", },
             { backup_storage_url,                       String,                         None,                           true,   "Remote storage url for storing snapshots.", },

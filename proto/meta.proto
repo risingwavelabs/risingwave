@@ -836,7 +836,8 @@ message SystemParams {
   optional string adaptive_parallelism_strategy = 19;
   optional bool per_database_isolation = 20;
   optional bool enforce_secret = 21;
-  optional string sstable_filter_kind = 22;
+  reserved 22;
+  reserved "sstable_filter_kind";
 }
 
 message GetSystemParamsRequest {}

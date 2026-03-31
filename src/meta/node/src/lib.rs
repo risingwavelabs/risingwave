@@ -25,7 +25,6 @@ pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::license::LicenseKey;
-use risingwave_common::system_param::SstableFilterKind;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -137,11 +136,6 @@ pub struct MetaNodeOpts {
     #[clap(long, hide = true, env = "RW_BLOOM_FALSE_POSITIVE")]
     #[override_opts(path = system.bloom_false_positive)]
     pub bloom_false_positive: Option<f64>,
-
-    /// Xor filter family used when building SST filters.
-    #[clap(long, hide = true, env = "RW_SSTABLE_FILTER_KIND")]
-    #[override_opts(path = system.sstable_filter_kind)]
-    pub sstable_filter_kind: Option<SstableFilterKind>,
 
     /// State store url
     #[clap(long, hide = true, env = "RW_STATE_STORE")]
