@@ -48,6 +48,9 @@ const MUL_POWER: i64 = 17;
 /// Binding power for exponentiation (^, right associative)
 const EXP_POWER: i64 = 19;
 
+/// Binding power for LIKE/ILIKE (between comparisons and exponentiation)
+const LIKE_POWER: i64 = 12;
+
 /// Parse a core expression.
 ///
 /// This is a pure parser_v2 implementation using winnow's `expression` combinator.
@@ -59,6 +62,7 @@ const EXP_POWER: i64 = 19;
 /// - `*`, `/`, `%`
 /// - `+`, `-`
 /// - `=`, `<>`, `<`, `>`, `<=`, `>=`
+/// - `LIKE`, `ILIKE`
 /// - `AND`
 /// - `OR` (lowest)
 pub fn expr_core<S>(input: &mut S) -> ModalResult<Expr>
@@ -213,6 +217,28 @@ where
                     right: Box::new(b),
                 })
             })),
+            // LIKE / ILIKE (left associative, lower precedence than comparisons)
+            // These construct Expr::Like / Expr::ILike, not BinaryOp
+            Token::Word(w) if w.keyword == Keyword::LIKE => {
+                Some(Infix::Left(LIKE_POWER, |_, a: Expr, b: Expr| {
+                    Ok(Expr::Like {
+                        negated: false,
+                        expr: Box::new(a),
+                        pattern: Box::new(b),
+                        escape_char: None,
+                    })
+                }))
+            }
+            Token::Word(w) if w.keyword == Keyword::ILIKE => {
+                Some(Infix::Left(LIKE_POWER, |_, a: Expr, b: Expr| {
+                    Ok(Expr::ILike {
+                        negated: false,
+                        expr: Box::new(a),
+                        pattern: Box::new(b),
+                        escape_char: None,
+                    })
+                }))
+            }
             // Addition/subtraction (left associative)
             Token::Plus => Some(Infix::Left(ADD_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
@@ -401,5 +427,54 @@ mod tests {
         let result = parse_expr_core("a + b * c = d AND e > f").unwrap();
         // Should be: ((a + (b * c)) = d) AND (e > f)
         assert!(matches!(result, Expr::BinaryOp { op: BinaryOperator::And, .. }));
+    }
+
+    #[test]
+    fn test_like() {
+        let result = parse_expr_core("a LIKE 'x'").unwrap();
+        assert!(matches!(result, Expr::Like { negated: false, .. }));
+    }
+
+    #[test]
+    fn test_ilike() {
+        let result = parse_expr_core("a ILIKE 'x'").unwrap();
+        assert!(matches!(result, Expr::ILike { negated: false, .. }));
+    }
+
+    #[test]
+    fn test_like_precedence_with_and() {
+        // Should parse as: (a LIKE 'x') AND b
+        // LIKE has lower precedence than comparison, higher than AND
+        let result = parse_expr_core("a LIKE 'x' AND b").unwrap();
+        if let Expr::BinaryOp { left, op: BinaryOperator::And, right } = result {
+            assert!(matches!(left.as_ref(), Expr::Like { .. }));
+            assert!(matches!(right.as_ref(), Expr::Identifier(_)));
+        } else {
+            panic!("Expected And at top level");
+        }
+    }
+
+    #[test]
+    fn test_like_with_arithmetic() {
+        // Should parse as: (a + 1) LIKE 'x'
+        // Arithmetic has higher precedence than LIKE
+        let result = parse_expr_core("a + 1 LIKE 'x'").unwrap();
+        if let Expr::Like { expr, .. } = result {
+            assert!(matches!(expr.as_ref(), Expr::BinaryOp { op: BinaryOperator::Plus, .. }));
+        } else {
+            panic!("Expected Like at top level");
+        }
+    }
+
+    #[test]
+    fn test_like_parenthesized_with_or() {
+        // Should parse as: (a LIKE 'x') OR b
+        let result = parse_expr_core("(a LIKE 'x') OR b").unwrap();
+        if let Expr::BinaryOp { left, op: BinaryOperator::Or, right } = result {
+            assert!(matches!(left.as_ref(), Expr::Like { .. }));
+            assert!(matches!(right.as_ref(), Expr::Identifier(_)));
+        } else {
+            panic!("Expected Or at top level");
+        }
     }
 }
