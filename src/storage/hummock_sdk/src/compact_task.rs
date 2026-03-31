@@ -575,6 +575,25 @@ pub struct ValidationTask {
     pub sst_id_to_worker_id: HashMap<HummockSstableObjectId, WorkerId>,
 }
 
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::PbCompactTask;
+
+    use super::CompactTask;
+
+    #[test]
+    fn test_blocked_xor_filter_kv_count_threshold_roundtrip() {
+        let mut pb = PbCompactTask::default();
+        pb.blocked_xor_filter_kv_count_threshold = Some(123);
+
+        let task = CompactTask::from(&pb);
+        assert_eq!(task.blocked_xor_filter_kv_count_threshold, Some(123));
+
+        let pb2 = PbCompactTask::from(&task);
+        assert_eq!(pb2.blocked_xor_filter_kv_count_threshold, Some(123));
+    }
+}
+
 impl From<PbValidationTask> for ValidationTask {
     fn from(pb_validation_task: PbValidationTask) -> Self {
         Self {
