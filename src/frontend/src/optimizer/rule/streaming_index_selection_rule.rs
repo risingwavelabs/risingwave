@@ -101,11 +101,11 @@ impl StreamingIndexSelectionRule {
 
     /// Expands a predicate with multiple scan ranges into a `LogicalUnion` of `LogicalScan`s.
     ///
-    /// Each branch gets a complete predicate reconstructed from the scan range's eq_conds
+    /// Each branch gets a complete predicate reconstructed from the scan range's `eq_conds`
     /// and range bounds, plus residual conditions. This handles:
     /// - IN predicates: `a IN (1, 2, 3)` → 3 branches with `a = 1`, `a = 2`, `a = 3`
     /// - Multi-range: `a >= 1 AND a < 5 OR a >= 10 AND a < 20` → 2 branches with range bounds
-    /// - Mixed: eq_conds prefix + range bound on next column
+    /// - Mixed: `eq_conds` prefix + range bound on next column
     ///
     /// Only applies when all scan ranges are non-trivial (selective).
     /// `split_to_scan_ranges` guarantees the ranges are non-overlapping.
@@ -140,8 +140,7 @@ impl StreamingIndexSelectionRule {
                 for (i, datum) in range.eq_conds.iter().enumerate() {
                     let table_col_idx = pk[i].column_index;
                     let col_type = table_cols[table_col_idx].data_type().clone();
-                    let input_ref: ExprImpl =
-                        InputRef::new(table_col_idx, col_type.clone()).into();
+                    let input_ref: ExprImpl = InputRef::new(table_col_idx, col_type.clone()).into();
                     let literal: ExprImpl = Literal::new(datum.clone(), col_type).into();
                     let eq = FunctionCall::new(ExprType::Equal, vec![input_ref, literal])
                         .ok()
