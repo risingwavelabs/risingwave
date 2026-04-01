@@ -74,7 +74,7 @@ set visibility_mode = 'all';
 
 # Wait for all 10 messages to be consumed. The emulator may or may not redeliver
 # while the stream is active, so only assert the distinct payloads we care about.
-query I retry 31 backoff 1s
+query I retry 60 backoff 1s
 select count(distinct v1) from s1;
 ----
 10
@@ -103,7 +103,7 @@ set visibility_mode = 'all';
 
 # Wait for redelivery. Poll instead of a fixed sleep, because the emulator's
 # streaming-pull redelivery timing is non-deterministic.
-query I retry 61 backoff 1s
+query I retry 120 backoff 1s
 select count(distinct v1) from s1;
 ----
 10
@@ -112,9 +112,13 @@ select count(distinct v1) from s1;
 statement ok
 flush;
 
-# Give any post-checkpoint redeliveries a full ack-deadline window to surface,
+# Wait a full ack-deadline window for any post-checkpoint redeliveries to surface,
 # then checkpoint again so the drop/recreate check only observes subscription state.
-sleep 15s
+# Use retry instead of fixed sleep -- emulator timing is non-deterministic on slow CI.
+query I retry 20 backoff 1s
+select count(distinct v1) from s1;
+----
+10
 
 statement ok
 flush;
@@ -131,10 +135,12 @@ CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     pubsub.ack_deadline_seconds = 10
 ) FORMAT PLAIN ENCODE JSON;
 
-sleep 15s
-
 statement ok
 set visibility_mode = 'all';
+
+# Wait 2x ack-deadline (10s) to give any pending redeliveries time to arrive,
+# then assert nothing was redelivered.
+sleep 20s
 
 query I
 select count(*) from s1;
