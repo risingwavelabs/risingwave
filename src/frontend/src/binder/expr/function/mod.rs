@@ -519,21 +519,6 @@ impl Binder {
                 return self.bind_sql_udf(udf.clone(), args);
             }
             if !secret_refs.is_empty() {
-                // Validate that secret-backed arg positions have compatible types.
-                // Secrets resolve to Varchar (TEXT mode) or Varchar file path (FILE mode).
-                for sr in &secret_refs {
-                    let idx = sr.arg_index as usize;
-                    if idx < udf.arg_types.len() {
-                        let expected = &udf.arg_types[idx];
-                        if *expected != DataType::Varchar && *expected != DataType::Bytea {
-                            return Err(ErrorCode::BindError(format!(
-                                "secret reference at argument position {} requires Varchar or Bytea type, but function expects {}",
-                                idx, expected
-                            ))
-                            .into());
-                        }
-                    }
-                }
                 return Ok(UserDefinedFunction::new_with_secret_refs(
                     udf.clone(),
                     args,
