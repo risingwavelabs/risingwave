@@ -16,8 +16,8 @@ use risingwave_common::util::recursive::{Recurse, tracker};
 
 use super::{
     AggCall, CorrelatedInputRef, EXPR_DEPTH_THRESHOLD, EXPR_TOO_DEEP_NOTICE, ExprImpl,
-    FunctionCall, FunctionCallWithLambda, InputRef, Literal, Parameter, Subquery, TableFunction,
-    UserDefinedFunction, WindowFunction,
+    FunctionCall, FunctionCallWithLambda, InputRef, Literal, Parameter, SecretRef, Subquery,
+    TableFunction, UserDefinedFunction, WindowFunction,
 };
 use crate::expr::Now;
 use crate::session::current::notice_to_user;
@@ -55,6 +55,7 @@ pub fn default_rewrite_expr<R: ExprRewriter + ?Sized>(
             ExprImpl::UserDefinedFunction(inner) => rewriter.rewrite_user_defined_function(*inner),
             ExprImpl::Parameter(inner) => rewriter.rewrite_parameter(*inner),
             ExprImpl::Now(inner) => rewriter.rewrite_now(*inner),
+            ExprImpl::SecretRef(inner) => rewriter.rewrite_secret_ref(*inner),
         }
     })
 }
@@ -180,24 +181,19 @@ pub trait ExprRewriter {
     }
 
     fn rewrite_user_defined_function(&mut self, udf: UserDefinedFunction) -> ExprImpl {
-        let UserDefinedFunction {
-            args,
-            catalog,
-            secret_refs,
-        } = udf;
+        let UserDefinedFunction { args, catalog } = udf;
         let args = args
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        UserDefinedFunction {
-            args,
-            catalog,
-            secret_refs,
-        }
-        .into()
+        UserDefinedFunction { args, catalog }.into()
     }
 
     fn rewrite_now(&mut self, now: Now) -> ExprImpl {
         now.into()
+    }
+
+    fn rewrite_secret_ref(&mut self, secret_ref: SecretRef) -> ExprImpl {
+        secret_ref.into()
     }
 }

@@ -17,7 +17,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::{FunctionId, Schema};
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::UdfArgSecretRef;
 
 use super::{Expr, ExprDisplay, ExprImpl};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
@@ -26,29 +25,11 @@ use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 pub struct UserDefinedFunction {
     pub args: Vec<ExprImpl>,
     pub catalog: Arc<FunctionCatalog>,
-    /// Secret references for arguments resolved from secrets at runtime.
-    pub secret_refs: Vec<UdfArgSecretRef>,
 }
 
 impl UserDefinedFunction {
     pub fn new(catalog: Arc<FunctionCatalog>, args: Vec<ExprImpl>) -> Self {
-        Self {
-            args,
-            catalog,
-            secret_refs: vec![],
-        }
-    }
-
-    pub fn new_with_secret_refs(
-        catalog: Arc<FunctionCatalog>,
-        args: Vec<ExprImpl>,
-        secret_refs: Vec<UdfArgSecretRef>,
-    ) -> Self {
-        Self {
-            args,
-            catalog,
-            secret_refs,
-        }
+        Self { args, catalog }
     }
 
     pub(super) fn from_expr_proto(
@@ -89,7 +70,6 @@ impl UserDefinedFunction {
         Ok(Self {
             args,
             catalog: Arc::new(catalog),
-            secret_refs: udf.secret_refs.clone(),
         })
     }
 }
@@ -131,7 +111,6 @@ impl Expr for UserDefinedFunction {
                 always_retry_on_network_error: self.catalog.always_retry_on_network_error,
                 is_async: self.catalog.is_async,
                 is_batched: self.catalog.is_batched,
-                secret_refs: self.secret_refs.clone(),
                 version: PbUdfExprVersion::LATEST as _,
             }))),
         })
@@ -147,15 +126,11 @@ impl std::fmt::Debug for UserDefinedFunctionDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.func_call;
         let mut builder = f.debug_tuple(&that.catalog.name);
-        for (i, arg) in that.args.iter().enumerate() {
-            if let Some(sr) = that.secret_refs.iter().find(|sr| sr.arg_index == i as u32) {
-                builder.field(&format_args!("Secret(id:{})", sr.secret_id));
-            } else {
-                builder.field(&ExprDisplay {
-                    expr: arg,
-                    input_schema: self.input_schema,
-                });
-            }
+        for arg in &that.args {
+            builder.field(&ExprDisplay {
+                expr: arg,
+                input_schema: self.input_schema,
+            });
         }
         builder.finish()
     }
