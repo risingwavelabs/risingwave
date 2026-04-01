@@ -265,6 +265,9 @@ impl KafkaSplitReader {
 
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
 
+        // enable_eof is set by bounded readers (backfill, batch) to:
+        // 1. Handle rdkafka PartitionEOF events for invisible-tail detection
+        // 2. Guard the stop_offsets emptiness check (streaming also has empty stop_offsets)
         let enable_eof = self.source_ctx.source_ctrl_opts.enable_partition_eof;
 
         #[for_await]
@@ -282,13 +285,16 @@ impl KafkaSplitReader {
                 }
             }
 
-            if msgs.is_empty() {
-                if stop_offsets.is_empty() {
-                    if !res.is_empty() {
-                        yield std::mem::take(&mut res);
-                    }
-                    break 'for_outer_loop;
+            // Check if PartitionEOF events (or prior offset guards) emptied stop_offsets.
+            // Only in bounded mode — streaming sources also have empty stop_offsets.
+            if enable_eof && stop_offsets.is_empty() {
+                if !res.is_empty() {
+                    yield std::mem::take(&mut res);
                 }
+                break 'for_outer_loop;
+            }
+
+            if msgs.is_empty() {
                 continue;
             }
 
@@ -324,45 +330,51 @@ impl KafkaSplitReader {
                 };
                 num_messages += 1;
 
-                let split_id: SplitId = msg.partition().to_string().into();
+                // Bounded offset guards — skip when no stop_offsets to avoid per-message allocation
+                if !stop_offsets.is_empty() {
+                    let split_id: SplitId = msg.partition().to_string().into();
 
-                // PRE-PUSH GUARD: stop_offset is exclusive — skip rows at or beyond it
-                if let Entry::Occupied(o) = stop_offsets.entry(split_id.clone())
-                    && cur_offset >= *o.get()
-                {
-                    tracing::debug!(
-                        "bounded stop offset reached split {}, offset {}",
-                        o.key(),
-                        cur_offset
-                    );
-                    o.remove();
-                    if stop_offsets.is_empty() {
-                        if !res.is_empty() {
-                            yield std::mem::take(&mut res);
+                    // PRE-PUSH GUARD: stop_offset is exclusive — skip rows at or beyond it.
+                    // Also handles log compaction where the exact stop_offset may be missing.
+                    if let Entry::Occupied(o) = stop_offsets.entry(split_id)
+                        && cur_offset >= *o.get()
+                    {
+                        tracing::debug!(
+                            "bounded stop offset reached split {}, offset {}",
+                            o.key(),
+                            cur_offset
+                        );
+                        o.remove();
+                        if stop_offsets.is_empty() {
+                            if !res.is_empty() {
+                                yield std::mem::take(&mut res);
+                            }
+                            break 'for_outer_loop;
                         }
-                        break 'for_outer_loop;
+                        continue;
                     }
-                    continue;
                 }
 
                 let source_message = SourceMessage::from_kafka_message(msg, require_message_header);
-                let split_id_for_stop = source_message.split_id.clone();
                 res.push(source_message);
 
-                // POST-PUSH FAST-PATH: last valid in-range row
-                if let Entry::Occupied(o) = stop_offsets.entry(split_id_for_stop)
-                    && cur_offset == *o.get() - 1
-                {
-                    tracing::debug!(
-                        "stop offset reached for split {}, stop reading, offset: {}, stop offset: {}",
-                        o.key(),
-                        cur_offset,
-                        o.get()
-                    );
-                    o.remove();
-                    if stop_offsets.is_empty() {
-                        yield std::mem::take(&mut res);
-                        break 'for_outer_loop;
+                // POST-PUSH FAST-PATH: check after push using the split_id from source_message
+                if !stop_offsets.is_empty() {
+                    let split_id = res.last().unwrap().split_id.clone();
+                    if let Entry::Occupied(o) = stop_offsets.entry(split_id)
+                        && cur_offset == *o.get() - 1
+                    {
+                        tracing::debug!(
+                            "stop offset reached for split {}, stop reading, offset: {}, stop offset: {}",
+                            o.key(),
+                            cur_offset,
+                            o.get()
+                        );
+                        o.remove();
+                        if stop_offsets.is_empty() {
+                            yield std::mem::take(&mut res);
+                            break 'for_outer_loop;
+                        }
                     }
                 }
 
@@ -379,16 +391,6 @@ impl KafkaSplitReader {
                     yield res;
                     break 'for_outer_loop;
                 }
-            }
-
-            // After processing chunk: check if EOF events emptied stop_offsets.
-            // Only check when in bounded mode (enable_eof), otherwise streaming
-            // sources with no stop_offsets would break after the first chunk.
-            if enable_eof && stop_offsets.is_empty() {
-                if !res.is_empty() {
-                    yield std::mem::take(&mut res);
-                }
-                break 'for_outer_loop;
             }
 
             let mut cur = Vec::with_capacity(res.capacity());
