@@ -392,7 +392,7 @@ fn task_main(
                     ));
                 }
                 ServiceConfig::Starrocks(c) => {
-                    StarrocksService::new(c.clone()).execute(&mut ctx)?;
+                    StarrocksService::new(c.clone())?.execute(&mut ctx)?;
                     let mut task = risedev::TcpReadyCheckTask::new(
                         c.address.clone(),
                         c.query_port,

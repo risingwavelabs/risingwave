@@ -1729,11 +1729,15 @@ template:
     id: starrocks-${query-port}
     address: "127.0.0.1"
     http-port: 28030
+    rpc-port: 29020
     query-port: 29030
+    be-http-port: 28040
+    be-heartbeat-port: 29050
     user: users
     password: "123456"
     database: demo
-    image: "starrocks/allin1-ubuntu"
+    fe-image: "starrocks/fe-ubuntu:3.1.7"
+    be-image: "starrocks/be-ubuntu:3.1.7"
     persist-data: false
     user-managed: false
 

@@ -504,13 +504,17 @@ pub struct StarrocksConfig {
 
     pub address: String,
     pub http_port: u16,
+    pub rpc_port: u16,
     pub query_port: u16,
+    pub be_http_port: u16,
+    pub be_heartbeat_port: u16,
 
     pub user: String,
     pub password: String,
     pub database: String,
 
-    pub image: String,
+    pub fe_image: String,
+    pub be_image: String,
     pub user_managed: bool,
     pub persist_data: bool,
 }

@@ -232,7 +232,7 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"STARROCKS_HOST="{host}""#).unwrap();
                 writeln!(env, r#"STARROCKS_HTTP_PORT="{http_port}""#).unwrap();
                 writeln!(env, r#"STARROCKS_QUERY_PORT="{query_port}""#).unwrap();
-                writeln!(env, r#"STARROCKS_CONTAINER="risedev-{}""#, c.id).unwrap();
+                writeln!(env, r#"STARROCKS_CONTAINER="risedev-{}-fe""#, c.id).unwrap();
                 writeln!(env, r#"STARROCKS_USER="{user}""#).unwrap();
                 writeln!(env, r#"STARROCKS_PASSWORD="{password}""#).unwrap();
                 writeln!(env, r#"STARROCKS_DATABASE="{database}""#).unwrap();
