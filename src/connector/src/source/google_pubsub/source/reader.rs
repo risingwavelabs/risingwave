@@ -45,15 +45,20 @@ struct DisposableMessageStream(Option<MessageStream>);
 impl Drop for DisposableMessageStream {
     fn drop(&mut self) {
         if let Some(stream) = self.0.take() {
-            tokio::spawn(async move {
-                let count = stream.dispose().await;
-                if count > 0 {
-                    tracing::info!(
-                        "disposed pubsub streaming pull, nacked {} in-flight messages",
-                        count
-                    );
-                }
+            // Use block_in_place + block_on to guarantee dispose() completes
+            // before Drop returns. A tokio::spawn here would race with task
+            // cancellation during RECOVER: if the spawned task never runs, the
+            // gRPC stream stays open and the library's internal ack-deadline
+            // extension keeps the message locked, preventing redelivery.
+            let count = tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(stream.dispose())
             });
+            if count > 0 {
+                tracing::info!(
+                    "disposed pubsub streaming pull, nacked {} in-flight messages",
+                    count
+                );
+            }
         }
     }
 }
