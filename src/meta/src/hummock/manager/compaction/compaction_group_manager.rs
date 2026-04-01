@@ -378,10 +378,12 @@ impl HummockManager {
     /// A dynamic compaction group is considered safe to destroy if it has **zero member tables**
     /// in `state_table_info` of the latest version.
     ///
-    /// Note that we intentionally do **not** require the group to have no SSTs. Once the member
-    /// set is empty, no table should be able to read from SSTs in this group anymore, so removing
-    /// the group from the latest version is safe. Physical object GC is still protected by pinned
-    /// versions, which may retain references to those objects until they are unpinned.
+    /// Note that we intentionally do **not** require the group to have no SSTs. This cleanup
+    /// relies on the invariant that `state_table_info` in the latest version contains all tables
+    /// that can read data from the version. Once the member set is empty, no table should be able
+    /// to read from SSTs in this group anymore, so removing the group from the latest version is
+    /// safe. Physical object GC is still protected by pinned versions, which may retain references
+    /// to those objects until they are unpinned.
     ///
     /// This cleanup will never destroy a group that is referenced as `parent_group_id` by another
     /// compaction group. Such parent groups may still be needed by group split scheduling, and
