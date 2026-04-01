@@ -29,8 +29,8 @@ pub mod gcs;
 pub mod obs;
 
 pub mod azblob;
-pub mod opendal_s3;
 pub mod oss;
+pub mod s3;
 
 pub mod fs;
 
