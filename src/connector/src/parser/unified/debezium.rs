@@ -15,7 +15,6 @@
 use std::str::FromStr;
 
 use itertools::Itertools;
-use regex::Regex;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
 use risingwave_common::id::SourceId;
 use risingwave_common::types::{
@@ -61,40 +60,6 @@ fn is_bigserial_default(default_value_expression: &str) -> bool {
 
     // Return true if it is a `nextval()` function (bigserial default).
     expr.starts_with("nextval(")
-}
-
-fn parse_pgvector_dimension(type_text: &str) -> Option<usize> {
-    let normalized = type_text.trim().to_ascii_lowercase();
-    if !normalized.starts_with("vector(") || !normalized.ends_with(')') {
-        return None;
-    }
-    let dim_text = normalized
-        .trim_start_matches("vector(")
-        .trim_end_matches(')')
-        .trim();
-    dim_text.parse::<usize>().ok()
-}
-
-fn parse_pgvector_dimension_from_ddl(ddl: &str, column_name: &str) -> Option<usize> {
-    let quoted_col = regex::escape(column_name);
-    let pattern_quoted = format!(r#"(?i)"{}"\s+vector\s*\(\s*(\d+)\s*\)"#, quoted_col);
-    if let Ok(re) = Regex::new(&pattern_quoted)
-        && let Some(caps) = re.captures(ddl)
-        && let Some(dim_text) = caps.get(1)
-        && let Ok(dim) = dim_text.as_str().parse::<usize>()
-    {
-        return Some(dim);
-    }
-
-    let pattern_unquoted = format!(r"(?i)\b{}\b\s+vector\s*\(\s*(\d+)\s*\)", quoted_col);
-    if let Ok(re) = Regex::new(&pattern_unquoted)
-        && let Some(caps) = re.captures(ddl)
-        && let Some(dim_text) = caps.get(1)
-        && let Ok(dim) = dim_text.as_str().parse::<usize>()
-    {
-        return Some(dim);
-    }
-    None
 }
 
 fn parse_schema_table_from_debezium_id(id: &str) -> Option<(String, String)> {
@@ -185,12 +150,14 @@ async fn fetch_pgvector_dimensions_for_table(
         .query(
             r#"
             SELECT a.attname AS column_name,
-                   pg_catalog.format_type(a.atttypid, a.atttypmod) AS formatted_type
+                   a.atttypmod AS atttypmod
             FROM pg_catalog.pg_attribute a
             JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
             JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
             WHERE n.nspname = $1
               AND c.relname = $2
+              AND t.typname = 'vector'
               AND a.attnum > 0
               AND NOT a.attisdropped
             "#,
@@ -207,8 +174,10 @@ async fn fetch_pgvector_dimensions_for_table(
     let mut dims = std::collections::HashMap::new();
     for row in rows {
         let col_name: String = row.get("column_name");
-        let formatted_type: String = row.get("formatted_type");
-        if let Some(dim) = parse_pgvector_dimension(&formatted_type) {
+        let atttypmod: i32 = row.get("atttypmod");
+        if atttypmod > 0
+            && let Ok(dim) = usize::try_from(atttypmod)
+        {
             dims.insert(col_name, dim);
         }
     }
@@ -397,56 +366,31 @@ pub async fn parse_schema_change(
                                 tracing::debug!(target: "auto_schema_change",
                                     "Convert PostgreSQL user defined enum type '{}' to VARCHAR", type_name);
                                 DataType::Varchar
-                            } else if type_name.eq_ignore_ascii_case("vector")
-                                || parse_pgvector_dimension(type_name.as_str()).is_some()
-                            {
-                                // For pgvector, RW requires a concrete dimension `vector(n)`.
-                                // We resolve `n` in this order:
-                                // 1) Debezium typeName/typeExpression already contains `vector(n)`;
-                                // 2) parse upstream DDL text if it carries `vector(n)`;
-                                // 3) as a fallback, query upstream PostgreSQL catalogs with `format_type`.
-                                //
-                                // Important: Debezium `length` for custom types is not a reliable vector
-                                // dimension (it can be a placeholder), so we intentionally do NOT use it.
-                                let type_expression = col
-                                    .access_object_field("typeExpression")
-                                    .filter(|v| !v.is_jsonb_null())
-                                    .and_then(|v| v.as_str().ok().map(ToOwned::to_owned));
-                                let mut vector_dim = parse_pgvector_dimension(type_name.as_str())
-                                    .or_else(|| {
-                                        type_expression
-                                            .as_deref()
-                                            .and_then(parse_pgvector_dimension)
-                                    })
-                                    .or_else(|| {
-                                        parse_pgvector_dimension_from_ddl(
-                                            upstream_ddl.as_str(),
-                                            name.as_str(),
-                                        )
+                            } else if type_name.eq_ignore_ascii_case("vector") {
+                                let Some((schema_name, table_name_only)) =
+                                    parse_schema_table_from_debezium_id(id.as_str())
+                                else {
+                                    return Err(AccessError::CdcAutoSchemaChangeError {
+                                        ty: type_name,
+                                        table_name: format!("{}.{}", source_name, table_name),
                                     });
-                                if vector_dim.is_none()
-                                    && let Some((schema_name, table_name_only)) =
-                                        parse_schema_table_from_debezium_id(id.as_str())
-                                {
-                                    // Only when all local hints miss dimension, and only for schema-change
-                                    // vector columns, we issue one upstream lookup for this table (cached by
-                                    // schema.table within the same message parse).
-                                    let cache_key = format!("{}.{}", schema_name, table_name_only);
-                                    if !pgvector_dims_cache.contains_key(&cache_key) {
-                                        let fetched = fetch_pgvector_dimensions_for_table(
-                                            connector_props,
-                                            &schema_name,
-                                            &table_name_only,
-                                        )
-                                        .await?;
-                                        pgvector_dims_cache.insert(cache_key.clone(), fetched);
-                                    }
-                                    vector_dim = pgvector_dims_cache
-                                        .get(&cache_key)
-                                        .and_then(|m| m.get(name.as_str()).copied());
+                                };
+
+                                let cache_key = format!("{}.{}", schema_name, table_name_only);
+                                if !pgvector_dims_cache.contains_key(&cache_key) {
+                                    let fetched = fetch_pgvector_dimensions_for_table(
+                                        connector_props,
+                                        &schema_name,
+                                        &table_name_only,
+                                    )
+                                    .await?;
+                                    pgvector_dims_cache.insert(cache_key.clone(), fetched);
                                 }
 
-                                match vector_dim {
+                                match pgvector_dims_cache
+                                    .get(&cache_key)
+                                    .and_then(|m| m.get(name.as_str()).copied())
+                                {
                                     Some(dim) if (1..=DataType::VEC_MAX_SIZE).contains(&dim) => {
                                         DataType::Vector(dim)
                                     }

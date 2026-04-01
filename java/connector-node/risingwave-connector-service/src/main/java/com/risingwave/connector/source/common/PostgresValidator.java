@@ -857,10 +857,6 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                         case "vector":
                             // pgvector VECTOR -> VECTOR
                             return val == Data.DataType.TypeName.VECTOR_VALUE;
-                        case "halfvec":
-                        case "sparsevec":
-                            // Not supported by RisingWave yet.
-                            return false;
                         case "ltree":
                             return false;
                         case "hstore":
