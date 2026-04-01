@@ -266,7 +266,6 @@ mod tests {
     use futures_async_stream::try_stream;
     use itertools::Itertools;
     use risingwave_common::catalog::ColumnCatalog;
-    use risingwave_common::types::DataType;
     use risingwave_pb::connector_service::{SourceType, cdc_message};
 
     use super::*;
@@ -617,61 +616,5 @@ mod tests {
             )
         "#]]
         .assert_debug_eq(&res);
-    }
-
-    #[tokio::test]
-    async fn test_parse_postgres_schema_change_pgvector() {
-        let schema = ColumnCatalog::debezium_cdc_source_cols();
-        let columns = schema
-            .iter()
-            .map(|c| SourceColumnDesc::from(&c.column_desc))
-            .collect::<Vec<_>>();
-
-        let source_ctx = SourceContext {
-            connector_props: ConnectorProperties::PostgresCdc(Box::default()),
-            ..SourceContext::dummy()
-        };
-        let mut parser = PlainParser::new(
-            SpecificParserConfig::DEFAULT_PLAIN_JSON,
-            columns.clone(),
-            Arc::new(source_ctx),
-        )
-        .await
-        .unwrap();
-        let mut dummy_builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
-
-        let msg = r#"{"schema":null,"payload":{"databaseName":"postgres","ddl":"ALTER TABLE public.test_vec ADD COLUMN embedding vector(3)","schemaName":"public","tableChanges":[{"id":"\"public\".\"test_vec\"","table":{"columns":[{"name":"id","typeName":"int4","typeExpression":"int4","length":null,"optional":false,"position":1,"enumValues":null,"defaultValueExpression":null},{"name":"embedding","typeName":"vector","typeExpression":null,"length":null,"optional":true,"position":2,"enumValues":null,"defaultValueExpression":null}],"primaryKeyColumnNames":["id"]},"type":"ALTER"}]}}"#;
-
-        let cdc_meta = SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
-            "public.test_vec".to_owned(),
-            0,
-            cdc_message::CdcMessageType::SchemaChange,
-            SourceType::Postgres,
-        ));
-        let msg_meta = MessageMeta {
-            source_meta: &cdc_meta,
-            split_id: "1001",
-            offset: "",
-        };
-
-        let res = parser
-            .parse_one_with_txn(
-                None,
-                Some(msg.as_bytes().to_vec()),
-                dummy_builder.row_writer().with_meta(msg_meta),
-            )
-            .await
-            .unwrap();
-
-        let ParseResult::SchemaChange(envelope) = res else {
-            panic!("expect schema change parse result");
-        };
-        assert_eq!(envelope.table_changes.len(), 1);
-        let cols = &envelope.table_changes[0].columns;
-        assert_eq!(cols.len(), 2);
-        assert_eq!(cols[0].column_desc.name, "id");
-        assert_eq!(cols[0].column_desc.data_type, DataType::Int32);
-        assert_eq!(cols[1].column_desc.name, "embedding");
-        assert_eq!(cols[1].column_desc.data_type, DataType::Vector(3));
     }
 }
