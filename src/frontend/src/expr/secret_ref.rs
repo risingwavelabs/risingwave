@@ -24,12 +24,28 @@ use crate::catalog::SecretId;
 ///
 /// The secret value is never stored in the plan — only the `secret_id` is serialized.
 /// At execution time, the expression is resolved to a literal via `LocalSecretManager`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct SecretRef {
     pub secret_id: SecretId,
     pub ref_as: RefAsType,
     /// Human-readable name for EXPLAIN output. Not serialized to proto.
+    /// Excluded from `PartialEq`/`Hash` since it's display-only and lost during proto round-trip.
     pub secret_name: String,
+}
+
+impl PartialEq for SecretRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.secret_id == other.secret_id && self.ref_as == other.ref_as
+    }
+}
+
+impl Eq for SecretRef {}
+
+impl std::hash::Hash for SecretRef {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.secret_id.hash(state);
+        self.ref_as.hash(state);
+    }
 }
 
 impl Expr for SecretRef {
