@@ -417,19 +417,15 @@ impl CatalogController {
     /// from the in-memory `shared_actor_infos`.  This is critical because the
     /// serving vnode mapping must be available even before the barrier manager's
     /// recovery has completed and populated `shared_actor_infos`.
-    pub async fn running_fragment_parallelisms(
+    pub async fn fragment_parallelisms(
         &self,
-        id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
         let inner = self.inner.read().await;
-        let mut query = FragmentModel::find().select_only().columns([
+        let query = FragmentModel::find().select_only().columns([
             fragment::Column::FragmentId,
             fragment::Column::DistributionType,
             fragment::Column::VnodeCount,
         ]);
-        if let Some(id_filter) = id_filter {
-            query = query.filter(fragment::Column::FragmentId.is_in(id_filter));
-        }
         let fragments: Vec<(FragmentId, DistributionType, i32)> =
             query.into_tuple().all(&inner.db).await?;
 
