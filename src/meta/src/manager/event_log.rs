@@ -28,7 +28,7 @@ type ShutdownSender = tokio::sync::oneshot::Sender<()>;
 /// Channel determines expiration strategy.
 ///
 /// Currently all channels apply the same one strategy: keep latest N events.
-/// 
+///
 /// `BarrierComplete` is retained separately per database
 #[derive(Hash, PartialEq, Eq)]
 enum ChannelId {
