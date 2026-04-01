@@ -1,0 +1,62 @@
+# Benchmark configuration for OverWindow LAG on dense updates.
+benchmark_name: over_window_lag_dense
+
+# SQL to set up the initial schema and data (run once)
+setup_sql: |
+  CREATE TABLE over_window_src (
+    pk INT,
+    ord BIGINT,
+    id BIGINT,
+    val INT,
+    PRIMARY KEY (pk, id)
+  );
+
+  CREATE MATERIALIZED VIEW over_window_lag_mv AS
+  SELECT
+    pk,
+    ord,
+    id,
+    val,
+    LAG(val, 1) OVER (PARTITION BY pk ORDER BY ord, id) AS lag_val
+  FROM over_window_src;
+
+# SQL to prepare the data before each run
+prepare_sql: |
+  DELETE FROM over_window_src;
+  INSERT INTO over_window_src
+  SELECT
+    1 AS pk,
+    i AS ord,
+    i AS id,
+    i::INT AS val
+  FROM generate_series(1, 100000) AS t(i);
+  FLUSH;
+
+# SQL to clean up after each run
+conclude_sql: |
+  -- no-op; table is reset in prepare_sql
+
+# SQL to clean up everything after all runs are complete
+cleanup_sql: |
+  DROP MATERIALIZED VIEW IF EXISTS over_window_lag_mv;
+  DROP TABLE IF EXISTS over_window_src;
+
+# SQL to benchmark
+benchmark_sql: |
+  -- Dense contiguous updates in one region.
+  UPDATE over_window_src
+  SET val = val + 1
+  WHERE pk = 1 AND id BETWEEN 40000 AND 41023;
+  FLUSH;
+  SELECT COUNT(*) FROM over_window_lag_mv WHERE pk = 1;
+
+# Number of times to run the benchmark
+runs: 8
+
+# Optional KPI snapshots from the compute-node metrics endpoint.
+metrics_endpoint: http://127.0.0.1:1222/metrics
+kpi_metrics:
+  - stream_over_window_affected_range_count
+  - stream_over_window_accessed_entry_count
+  - stream_over_window_compute_count
+  - stream_over_window_same_output_count

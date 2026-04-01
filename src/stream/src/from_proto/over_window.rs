@@ -88,6 +88,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
 
             chunk_size: params.config.developer.chunk_size,
             cache_policy,
+            enable_multi_range_optimization: params.config.developer.enable_over_window_multi_range,
         });
         Ok((params.info, exec).into())
     }

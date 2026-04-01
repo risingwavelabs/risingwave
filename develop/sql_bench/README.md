@@ -11,6 +11,7 @@ These sql benchmarks should be lightweight, and enable us to rapidly iterate on 
 
 This folder contains SQL benchmarks which are run using [`hyperfine`](https://github.com/sharkdp/hyperfine).
 Benchmarks are defined using YAML configurations and executed through a Python runner.
+The runner also supports optional KPI metric snapshots from a Prometheus text endpoint.
 
 **NOTE: These benchmarks are not run in CI.**
 
@@ -46,17 +47,44 @@ prepare_sql: |
 conclude_sql: |
   DELETE FROM example;
 
-# SQL to benchmark (baseline version)
-baseline_sql: |
-  SELECT * FROM example ...;
-
-# SQL to benchmark (optimized version)
+# SQL to benchmark
 benchmark_sql: |
   SELECT * FROM example ...;
 
 # Number of times to run the benchmark
 runs: 3
+
+# Optional: Prometheus text endpoint for KPI snapshots
+metrics_endpoint: http://127.0.0.1:1222/metrics
+
+# Optional: metric names to capture before and after the benchmark
+kpi_metrics:
+  - stream_over_window_affected_range_count
+  - stream_over_window_accessed_entry_count
+  - stream_over_window_compute_count
+  - stream_over_window_same_output_count
+
+# Optional: wait for benchmark completion using a Prometheus counter delta
+completion:
+  metric_name: stream_mview_input_row_count
+  table_id_sql: |
+    SELECT id FROM rw_catalog.rw_materialized_views
+    WHERE name = 'your_mv_name'
+    ORDER BY id DESC
+    LIMIT 1;
+  target_delta: 600000
+  timeout_sec: 900
+  poll_interval_sec: 1
 ```
+
+You can override `metrics_endpoint` without editing YAML by setting:
+
+```bash
+RW_SQL_BENCH_METRICS_ENDPOINT=http://127.0.0.1:1222/metrics
+```
+
+`completion.metric_name` should be a counter metric. For example,
+`stream_mview_input_row_count` is monotonic and usually does not go back to zero unless the process restarts.
 
 ## Running Benchmarks
 
@@ -75,6 +103,25 @@ risedev sql-bench run <benchmark_name> -d
 # Use a specific RisingWave profile
 risedev sql-bench run <benchmark_name> -p <profile>
 ```
+
+## OverWindow Benchmarks
+
+The following benchmark configs are included for OverWindow optimization work:
+
+- `over_window_lag_sparse`: sparse, far-apart updates on a large partition
+- `over_window_lag_dense`: dense contiguous updates
+- `over_window_lag_mixed`: sparse + dense updates in the same run
+- `over_window_lag_streaming`: fixed-row streaming run stopped by metric delta
+
+These scenarios are intended to measure:
+
+- sparse-case throughput/latency gains
+- dense-case regression bounds
+- KPI deltas for OverWindow compute/access behavior
+- streaming end-to-end time with a fixed processed row count
+
+For streaming A/B tests, avoid source-rate bottlenecks when possible.
+If total time is dominated by `datagen.rows.per.second`, OverWindow execution differences may not show up in wall-clock results.
 
 ## Debugging
 

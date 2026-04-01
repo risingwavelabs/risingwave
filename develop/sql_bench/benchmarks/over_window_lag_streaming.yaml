@@ -1,0 +1,89 @@
+# Benchmark configuration for OverWindow LAG on streaming datagen input.
+# Uses fixed seeds for reproducibility across runs.
+benchmark_name: over_window_lag_streaming
+
+# SQL to set up the initial schema and data (run once)
+setup_sql: |
+  DROP MATERIALIZED VIEW IF EXISTS over_window_stream_lag_mv;
+  DROP SOURCE IF EXISTS over_window_stream_src;
+
+  CREATE SOURCE over_window_stream_src (
+    device_id INT,
+    seq BIGINT,
+    ts BIGINT,
+    reading INT
+  ) WITH (
+    connector = 'datagen',
+    fields.device_id.kind = 'random',
+    fields.device_id.min = '1',
+    fields.device_id.max = '1',
+    fields.device_id.seed = '42',
+    fields.seq.kind = 'sequence',
+    fields.seq.start = '1',
+    fields.seq.end = '6000000',
+    -- Random event-time creates out-of-order inserts in ORDER BY ts, seq.
+    -- This makes OverWindow maintenance significantly heavier than pure append-order input.
+    fields.ts.kind = 'random',
+    fields.ts.min = '1',
+    fields.ts.max = '200000',
+    fields.ts.seed = '4242',
+    fields.reading.kind = 'random',
+    fields.reading.min = '1',
+    fields.reading.max = '10000',
+    fields.reading.seed = '42',
+    -- Keep source fast to reduce source-rate bottleneck in A/B comparisons.
+    datagen.rows.per.second = '80000'
+  ) FORMAT PLAIN ENCODE JSON;
+
+  CREATE MATERIALIZED VIEW over_window_stream_lag_mv AS
+  SELECT
+    device_id,
+    seq,
+    ts,
+    reading,
+    LAG(reading, 1) OVER (PARTITION BY device_id ORDER BY ts, seq) AS prev_reading
+  FROM over_window_stream_src;
+
+# SQL to prepare the data before each run
+prepare_sql: |
+  -- no-op
+
+# SQL to clean up after each run
+conclude_sql: |
+  -- no-op
+
+# SQL to clean up everything after all runs are complete
+cleanup_sql: |
+  DROP MATERIALIZED VIEW IF EXISTS over_window_stream_lag_mv;
+  DROP SOURCE IF EXISTS over_window_stream_src;
+
+# SQL to benchmark.
+# Completion is controlled by `completion` below (Prometheus counter delta).
+benchmark_sql: |
+  -- no-op
+
+# Wait for completion based on a Prometheus counter.
+# `stream_mview_input_row_count` is a monotonic counter and does not drop to zero.
+completion:
+  metric_name: stream_mview_input_row_count
+  table_id_sql: |
+    SELECT id
+    FROM rw_catalog.rw_materialized_views
+    WHERE name = 'over_window_stream_lag_mv'
+    ORDER BY id DESC
+    LIMIT 1;
+  # Keep a fixed, larger amount of processed rows per run to better expose compute-path differences.
+  target_delta: 100000
+  timeout_sec: 900
+  poll_interval_sec: 1
+
+# Number of times to run the benchmark
+runs: 3
+
+# Optional KPI snapshots from the compute-node metrics endpoint.
+metrics_endpoint: http://127.0.0.1:1222/metrics
+kpi_metrics:
+  - stream_over_window_affected_range_count
+  - stream_over_window_accessed_entry_count
+  - stream_over_window_compute_count
+  - stream_over_window_same_output_count
