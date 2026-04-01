@@ -140,8 +140,7 @@ impl StreamingIndexSelectionRule {
                 for (i, datum) in range.eq_conds.iter().enumerate() {
                     let table_col_idx = pk[i].column_index;
                     let col_type = table_cols[table_col_idx].data_type().clone();
-                    let input_ref: ExprImpl =
-                        InputRef::new(table_col_idx, col_type.clone()).into();
+                    let input_ref: ExprImpl = InputRef::new(table_col_idx, col_type.clone()).into();
                     let literal: ExprImpl = Literal::new(datum.clone(), col_type).into();
                     let eq = FunctionCall::new(ExprType::Equal, vec![input_ref, literal])
                         .ok()
