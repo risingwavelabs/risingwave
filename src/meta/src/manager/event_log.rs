@@ -65,14 +65,10 @@ pub fn start_event_log_manager(enabled: bool, event_log_channel_max_size: u32) -
                     };
                     let mut write = event_logs_shared.write();
                     let channel_id: ChannelId = (&event_log).into();
-                    let max_n = match &channel_id {
-                        ChannelId::BarrierComplete(_) => 10,
-                        ChannelId::EventType(_) => event_log_channel_max_size as usize,
-                    };
                     let channel = write.entry(channel_id).or_default();
                     channel.push_back(event_log);
                     // Apply expiration strategies.
-                    keep_latest_n(channel, max_n);
+                    keep_latest_n(channel, event_log_channel_max_size as _);
                 },
             }
         }
