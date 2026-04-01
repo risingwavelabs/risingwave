@@ -15,19 +15,13 @@
 use std::sync::Arc;
 
 use risingwave_common::config::streaming::JoinEncodingType;
-use risingwave_common::hash::{HashKey, HashKeyDispatcher};
-use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::AsOfJoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::AsOfJoinNode;
 
 use super::*;
-use crate::common::table::state_table::{StateTable, StateTableBuilder};
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::asof_join::*;
-use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    ActorContextRef, AsOfDesc, AsOfJoinType, CpuEncoding, JoinType, MemoryEncoding,
-};
-use crate::task::AtomicU64Ref;
+use crate::executor::{AsOfCpuEncoding, AsOfDesc, AsOfJoinType, AsOfMemoryEncoding, JoinType};
 
 pub struct AsOfJoinExecutorBuilder;
 
@@ -69,17 +63,10 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect_vec(),
         );
-        let null_safe = node.get_null_safe().clone();
         let output_indices = node
             .get_output_indices()
             .iter()
             .map(|&x| x as usize)
-            .collect_vec();
-
-        let join_key_data_types = params_l
-            .join_key_indices
-            .iter()
-            .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
 
         let state_table_l = StateTableBuilder::new(table_l, store.clone(), Some(vnodes.clone()))
@@ -96,6 +83,9 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
         let as_of_desc_proto = node.get_asof_desc()?;
         let asof_desc = AsOfDesc::from_protobuf(as_of_desc_proto)?;
 
+        let null_safe = node.get_null_safe().clone();
+        let use_cache = node.use_cache.unwrap_or(true);
+
         // Previously, the `join_encoding_type` is persisted in the plan node.
         // Now it's always `Unspecified` and we should refer to the job's config override.
         #[allow(deprecated)]
@@ -103,103 +93,45 @@ impl ExecutorBuilder for AsOfJoinExecutorBuilder {
             .get_join_encoding_type()
             .map_or(params.config.developer.join_encoding_type, Into::into);
 
-        let args = AsOfJoinExecutorDispatcherArgs {
-            ctx: params.actor_context,
-            info: params.info.clone(),
-            source_l,
-            source_r,
-            params_l,
-            params_r,
-            null_safe,
-            output_indices,
-            state_table_l,
-            state_table_r,
-            lru_manager: params.watermark_epoch,
-            metrics: params.executor_stats,
-            join_type_proto,
-            join_key_data_types,
-            chunk_size: params.config.developer.chunk_size,
-            high_join_amplification_threshold: (params.config.developer)
-                .high_join_amplification_threshold,
-            asof_desc,
-            join_encoding_type,
-        };
-
-        let exec = args.dispatch()?;
-        Ok((params.info, exec).into())
-    }
-}
-
-struct AsOfJoinExecutorDispatcherArgs<S: StateStore> {
-    ctx: ActorContextRef,
-    info: ExecutorInfo,
-    source_l: Executor,
-    source_r: Executor,
-    params_l: JoinParams,
-    params_r: JoinParams,
-    null_safe: Vec<bool>,
-    output_indices: Vec<usize>,
-    state_table_l: StateTable<S>,
-    state_table_r: StateTable<S>,
-    lru_manager: AtomicU64Ref,
-    metrics: Arc<StreamingMetrics>,
-    join_type_proto: JoinTypeProto,
-    join_key_data_types: Vec<DataType>,
-    chunk_size: usize,
-    high_join_amplification_threshold: usize,
-    asof_desc: AsOfDesc,
-    join_encoding_type: JoinEncodingType,
-}
-
-impl<S: StateStore> HashKeyDispatcher for AsOfJoinExecutorDispatcherArgs<S> {
-    type Output = StreamResult<Box<dyn Execute>>;
-
-    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
-        /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
-            ($join_type:ident, $join_encoding:ident) => {
-                Ok(
-                    AsOfJoinExecutor::<K, S, { AsOfJoinType::$join_type }, $join_encoding>::new(
-                        self.ctx,
-                        self.info,
-                        self.source_l,
-                        self.source_r,
-                        self.params_l,
-                        self.params_r,
-                        self.null_safe,
-                        self.output_indices,
-                        self.state_table_l,
-                        self.state_table_r,
-                        self.lru_manager,
-                        self.metrics,
-                        self.chunk_size,
-                        self.high_join_amplification_threshold,
-                        self.asof_desc,
-                    )
-                    .boxed(),
+            ($join_type:ident, $encoding:ident) => {
+                AsOfJoinExecutor::<_, { AsOfJoinType::$join_type }, $encoding>::new(
+                    params.actor_context,
+                    params.info.clone(),
+                    source_l,
+                    source_r,
+                    params_l,
+                    params_r,
+                    null_safe,
+                    output_indices,
+                    state_table_l,
+                    state_table_r,
+                    params.watermark_epoch,
+                    params.executor_stats,
+                    params.config.developer.chunk_size,
+                    asof_desc,
+                    use_cache,
+                    params.config.developer.high_join_amplification_threshold,
                 )
+                .boxed()
             };
         }
 
-        macro_rules! build_match {
-            ($($join_type:ident),*) => {
-                match (self.join_type_proto, self.join_encoding_type) {
-                    (JoinTypeProto::Unspecified, _) => unreachable!(),
-                    $(
-                        (JoinTypeProto::$join_type, JoinEncodingType::Memory) => build!($join_type, MemoryEncoding),
-                        (JoinTypeProto::$join_type, JoinEncodingType::Cpu) => build!($join_type, CpuEncoding),
-                    )*
-                }
-            };
-        }
-
-        build_match! {
-            Inner,
-            LeftOuter
-        }
-    }
-
-    fn data_types(&self) -> &[DataType] {
-        &self.join_key_data_types
+        let exec = match (join_type_proto, join_encoding_type) {
+            (JoinTypeProto::Inner, JoinEncodingType::Memory) => {
+                build!(Inner, AsOfMemoryEncoding)
+            }
+            (JoinTypeProto::Inner, JoinEncodingType::Cpu) => {
+                build!(Inner, AsOfCpuEncoding)
+            }
+            (JoinTypeProto::LeftOuter, JoinEncodingType::Memory) => {
+                build!(LeftOuter, AsOfMemoryEncoding)
+            }
+            (JoinTypeProto::LeftOuter, JoinEncodingType::Cpu) => {
+                build!(LeftOuter, AsOfCpuEncoding)
+            }
+            (JoinTypeProto::Unspecified, _) => unreachable!(),
+        };
+        Ok((params.info, exec).into())
     }
 }

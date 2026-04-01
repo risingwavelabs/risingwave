@@ -12,8 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
-use std::marker::PhantomData;
+//! `AsOf` join executor with optional LRU cache.
+//!
+//! When `use_cache` is false, the executor directly queries the state table.
+//! When `use_cache` is true, the `AsOfJoinHashMap` maintains an LRU cache.
+//! Controlled by the session variable `streaming_asof_join_use_cache`.
+
+use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::ops::Bound;
 use std::time::Duration;
 
@@ -21,23 +27,19 @@ use either::Either;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
-use risingwave_common::hash::{HashKey, NullBitmap};
+use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::sort_util::cmp_rows_ascending;
 use tokio::time::Instant;
 
-use self::builder::JoinChunkBuilder;
 use super::barrier_align::*;
-use super::join::hash_join::*;
+use super::join::asof_join::*;
+use super::join::builder::JoinStreamChunkBuilder;
+use super::join::row::JoinRow;
 use super::join::*;
 use super::watermark::*;
-use crate::executor::join::builder::JoinStreamChunkBuilder;
-use crate::executor::join::row::JoinEncoding;
+use crate::executor::join::builder::JoinChunkBuilder;
 use crate::executor::prelude::*;
-
-fn is_subset(vec1: Vec<usize>, vec2: Vec<usize>) -> bool {
-    HashSet::<usize>::from_iter(vec1).is_subset(&vec2.into_iter().collect())
-}
 
 pub struct JoinParams {
     /// Indices of the join keys
@@ -55,65 +57,42 @@ impl JoinParams {
     }
 }
 
-struct JoinSide<K: HashKey, S: StateStore, E: JoinEncoding> {
+struct JoinSide<S: StateStore, E: AsOfRowEncoding> {
     /// Store all data from a one side stream
-    ht: JoinHashMap<K, S, E>,
+    ht: AsOfJoinHashMap<S, E>,
     /// Indices of the join key columns
     join_key_indices: Vec<usize>,
     /// The data type of all columns without degree.
     all_data_types: Vec<DataType>,
-    /// The start position for the side in output new columns
-    start_pos: usize,
     /// The mapping from input indices of a side to output columns.
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
-    /// Whether degree table is needed for this side.
-    need_degree_table: bool,
-    _marker: std::marker::PhantomData<E>,
+    /// The index of the inequality column.
+    inequal_key_idx: usize,
 }
 
-impl<K: HashKey, S: StateStore, E: JoinEncoding> std::fmt::Debug for JoinSide<K, S, E> {
+impl<S: StateStore, E: AsOfRowEncoding> std::fmt::Debug for JoinSide<S, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
             .field("col_types", &self.all_data_types)
-            .field("start_pos", &self.start_pos)
             .field("i2o_mapping", &self.i2o_mapping)
-            .field("need_degree_table", &self.need_degree_table)
             .finish()
     }
 }
 
-impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinSide<K, S, E> {
-    // WARNING: Please do not call this until we implement it.
-    fn is_dirty(&self) -> bool {
-        unimplemented!()
-    }
-
-    #[expect(dead_code)]
-    fn clear_cache(&mut self) {
-        assert!(
-            !self.is_dirty(),
-            "cannot clear cache while states of hash join are dirty"
-        );
-
-        // TODO: not working with rearranged chain
-        // self.ht.clear();
-    }
-
+impl<S: StateStore, E: AsOfRowEncoding> JoinSide<S, E> {
     pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.ht.init(epoch).await
     }
 }
 
-/// `AsOfJoinExecutor` takes two input streams and runs equal hash join on them.
-/// The output columns are the concatenation of left and right columns.
-pub struct AsOfJoinExecutor<
-    K: HashKey,
-    S: StateStore,
-    const T: AsOfJoinTypePrimitive,
-    E: JoinEncoding,
-> {
+/// `AsOfJoinExecutor` for streaming as-of joins.
+///
+/// This executor uses `AsOfJoinHashMap` to support both execution modes:
+/// it can either maintain an LRU cache or query the state table directly,
+/// depending on the `use_cache` configuration.
+pub struct AsOfJoinExecutor<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -124,28 +103,30 @@ pub struct AsOfJoinExecutor<
     /// The data types of the formed new columns
     actual_output_data_types: Vec<DataType>,
     /// The parameters of the left join executor
-    side_l: JoinSide<K, S, E>,
+    side_l: JoinSide<S, E>,
     /// The parameters of the right join executor
-    side_r: JoinSide<K, S, E>,
+    side_r: JoinSide<S, E>,
+
+    /// Whether nulls are considered equal for each join key column
+    null_safe: Vec<bool>,
 
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time
     chunk_size: usize,
-    /// Count the messages received, clear to 0 when counted to `EVICT_EVERY_N_MESSAGES`
-    cnt_rows_received: u32,
-
     /// watermark column index -> `BufferedWatermarks`
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
-
-    high_join_amplification_threshold: usize,
-    /// Number of processed rows between periodic manual evictions of the join cache.
-    join_cache_evict_interval_rows: u32,
     /// `AsOf` join description
     asof_desc: AsOfDesc,
+    /// Row counter for periodic cache eviction
+    cnt_rows_received: u32,
+    /// Number of processed rows between periodic manual evictions of the join cache.
+    join_cache_evict_interval_rows: u32,
+    /// Threshold for logging high join amplification warnings.
+    high_join_amplification_threshold: usize,
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding> std::fmt::Debug
-    for AsOfJoinExecutor<K, S, T, E>
+impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> std::fmt::Debug
+    for AsOfJoinExecutor<S, T, E>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AsOfJoinExecutor")
@@ -157,39 +138,33 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             .field("stream_key", &self.info.stream_key)
             .field("schema", &self.info.schema)
             .field("actual_output_data_types", &self.actual_output_data_types)
-            .field(
-                "join_cache_evict_interval_rows",
-                &self.join_cache_evict_interval_rows,
-            )
             .finish()
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding> Execute
-    for AsOfJoinExecutor<K, S, T, E>
+impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> Execute
+    for AsOfJoinExecutor<S, T, E>
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
-struct EqJoinArgs<'a, K: HashKey, S: StateStore, E: JoinEncoding> {
+struct EqJoinArgs<'a, S: StateStore, E: AsOfRowEncoding> {
     ctx: &'a ActorContextRef,
-    side_l: &'a mut JoinSide<K, S, E>,
-    side_r: &'a mut JoinSide<K, S, E>,
+    side_l: &'a mut JoinSide<S, E>,
+    side_r: &'a mut JoinSide<S, E>,
+    null_safe: &'a [bool],
     asof_desc: &'a AsOfDesc,
     actual_output_data_types: &'a [DataType],
-    // inequality_watermarks: &'a Watermark,
     chunk: StreamChunk,
     chunk_size: usize,
     cnt_rows_received: &'a mut u32,
-    high_join_amplification_threshold: usize,
     join_cache_evict_interval_rows: u32,
+    high_join_amplification_threshold: usize,
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
-    AsOfJoinExecutor<K, S, T, E>
-{
+impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoinExecutor<S, T, E> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -205,16 +180,20 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        high_join_amplification_threshold: usize,
         asof_desc: AsOfDesc,
+        use_cache: bool,
+        high_join_amplification_threshold: usize,
     ) -> Self {
         let join_cache_evict_interval_rows = ctx
             .config
             .developer
             .join_hash_map_evict_interval_rows
             .max(1);
-        let side_l_column_n = input_l.schema().len();
-
+        let cache_epoch = if use_cache {
+            Some(watermark_epoch)
+        } else {
+            None
+        };
         let schema_fields = [
             input_l.schema().fields.clone(),
             input_r.schema().fields.clone(),
@@ -230,19 +209,11 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             .map(|&idx| original_output_data_types[idx].clone())
             .collect_vec();
 
-        // Data types of of hash join state.
         let state_all_data_types_l = input_l.schema().data_types();
         let state_all_data_types_r = input_r.schema().data_types();
 
-        let state_pk_indices_l = input_l.stream_key().to_vec();
-        let state_pk_indices_r = input_r.stream_key().to_vec();
-
         let state_join_key_indices_l = params_l.join_key_indices;
         let state_join_key_indices_r = params_r.join_key_indices;
-
-        // If pk is contained in join key.
-        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
-        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
 
         let join_key_data_types_l = state_join_key_indices_l
             .iter()
@@ -255,8 +226,6 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             .collect_vec();
 
         assert_eq!(join_key_data_types_l, join_key_data_types_r);
-
-        let null_matched = K::Bitmap::from_bool_vec(null_safe);
 
         let (left_to_output, right_to_output) = {
             let (left_len, right_len) = if is_left_semi_or_anti(T) {
@@ -272,13 +241,10 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         let l2o_indexed = MultiMap::from_iter(left_to_output.iter().copied());
         let r2o_indexed = MultiMap::from_iter(right_to_output.iter().copied());
 
-        // handle inequality watermarks
-        // https://github.com/risingwavelabs/risingwave/issues/18503
-        // let inequality_watermarks = None;
         let watermark_buffers = BTreeMap::new();
 
-        let inequal_key_idx_l = Some(asof_desc.left_idx);
-        let inequal_key_idx_r = Some(asof_desc.right_idx);
+        let inequal_key_idx_l = asof_desc.left_idx;
+        let inequal_key_idx_r = asof_desc.right_idx;
 
         Self {
             ctx: ctx.clone(),
@@ -286,18 +252,15 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             input_l: Some(input_l),
             input_r: Some(input_r),
             actual_output_data_types,
+            null_safe,
             side_l: JoinSide {
-                ht: JoinHashMap::new(
-                    watermark_epoch.clone(),
-                    join_key_data_types_l,
+                ht: AsOfJoinHashMap::new(
                     state_join_key_indices_l.clone(),
-                    state_all_data_types_l.clone(),
                     state_table_l,
                     params_l.deduped_pk_indices,
-                    None,
-                    null_matched.clone(),
-                    pk_contained_in_jk_l,
                     inequal_key_idx_l,
+                    state_all_data_types_l.clone(),
+                    cache_epoch.clone(),
                     metrics.clone(),
                     ctx.id,
                     ctx.fragment_id,
@@ -307,22 +270,16 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                 all_data_types: state_all_data_types_l,
                 i2o_mapping: left_to_output,
                 i2o_mapping_indexed: l2o_indexed,
-                start_pos: 0,
-                need_degree_table: false,
-                _marker: PhantomData,
+                inequal_key_idx: inequal_key_idx_l,
             },
             side_r: JoinSide {
-                ht: JoinHashMap::new(
-                    watermark_epoch,
-                    join_key_data_types_r,
+                ht: AsOfJoinHashMap::new(
                     state_join_key_indices_r.clone(),
-                    state_all_data_types_r.clone(),
                     state_table_r,
                     params_r.deduped_pk_indices,
-                    None,
-                    null_matched,
-                    pk_contained_in_jk_r,
                     inequal_key_idx_r,
+                    state_all_data_types_r.clone(),
+                    cache_epoch,
                     metrics.clone(),
                     ctx.id,
                     ctx.fragment_id,
@@ -330,19 +287,32 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                 ),
                 join_key_indices: state_join_key_indices_r,
                 all_data_types: state_all_data_types_r,
-                start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
-                need_degree_table: false,
-                _marker: PhantomData,
+                inequal_key_idx: inequal_key_idx_r,
             },
             metrics,
             chunk_size,
-            cnt_rows_received: 0,
             watermark_buffers,
-            high_join_amplification_threshold,
-            join_cache_evict_interval_rows,
             asof_desc,
+            cnt_rows_received: 0,
+            join_cache_evict_interval_rows,
+            high_join_amplification_threshold,
+        }
+    }
+
+    /// Periodically evict the LRU cache to prevent memory buildup between barriers.
+    fn evict_cache(
+        side_l: &mut JoinSide<S, E>,
+        side_r: &mut JoinSide<S, E>,
+        cnt_rows_received: &mut u32,
+        join_cache_evict_interval_rows: u32,
+    ) {
+        *cnt_rows_received += 1;
+        if *cnt_rows_received >= join_cache_evict_interval_rows {
+            side_l.ht.evict_cache();
+            side_r.ht.evict_cache();
+            *cnt_rows_received = 0;
         }
     }
 
@@ -363,7 +333,6 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
         let first_epoch = barrier.epoch;
-        // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
         self.side_l.init(first_epoch).await?;
         self.side_r.init(first_epoch).await?;
@@ -371,7 +340,6 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
 
-        // initialized some metrics
         let join_actor_input_waiting_duration_ns = self
             .metrics
             .join_actor_input_waiting_duration_ns
@@ -431,14 +399,14 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                         ctx: &self.ctx,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
+                        null_safe: &self.null_safe,
                         asof_desc: &self.asof_desc,
                         actual_output_data_types: &self.actual_output_data_types,
-                        // inequality_watermarks: &self.inequality_watermarks,
                         chunk,
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
-                        high_join_amplification_threshold: self.high_join_amplification_threshold,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
+                        high_join_amplification_threshold: self.high_join_amplification_threshold,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -456,14 +424,14 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                         ctx: &self.ctx,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
+                        null_safe: &self.null_safe,
                         asof_desc: &self.asof_desc,
                         actual_output_data_types: &self.actual_output_data_types,
-                        // inequality_watermarks: &self.inequality_watermarks,
                         chunk,
                         chunk_size: self.chunk_size,
                         cnt_rows_received: &mut self.cnt_rows_received,
-                        high_join_amplification_threshold: self.high_join_amplification_threshold,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
+                        high_join_amplification_threshold: self.high_join_amplification_threshold,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -515,37 +483,18 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         &mut self,
         epoch: EpochPair,
     ) -> StreamExecutorResult<(
-        JoinHashMapPostCommit<'_, K, S, E>,
-        JoinHashMapPostCommit<'_, K, S, E>,
+        AsOfJoinHashMapPostCommit<'_, S, E>,
+        AsOfJoinHashMapPostCommit<'_, S, E>,
     )> {
-        // All changes to the state has been buffered in the mem-table of the state table. Just
-        // `commit` them here.
         let left = self.side_l.ht.flush(epoch).await?;
         let right = self.side_r.ht.flush(epoch).await?;
         Ok((left, right))
     }
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
-        // All changes to the state has been buffered in the mem-table of the state table. Just
-        // `commit` them here.
         self.side_l.ht.try_flush().await?;
         self.side_r.ht.try_flush().await?;
         Ok(())
-    }
-
-    // We need to manually evict the cache.
-    fn evict_cache(
-        side_update: &mut JoinSide<K, S, E>,
-        side_match: &mut JoinSide<K, S, E>,
-        cnt_rows_received: &mut u32,
-        join_cache_evict_interval_rows: u32,
-    ) {
-        *cnt_rows_received += 1;
-        if *cnt_rows_received >= join_cache_evict_interval_rows {
-            side_update.ht.evict();
-            side_match.ht.evict();
-            *cnt_rows_received = 0;
-        }
     }
 
     fn handle_watermark(
@@ -596,33 +545,20 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         Ok(watermarks_to_emit)
     }
 
-    /// the data the hash table and match the coming
-    /// data chunk with the executor state
-    async fn hash_eq_match(
-        key: &K,
-        ht: &mut JoinHashMap<K, S, E>,
-    ) -> StreamExecutorResult<Option<HashValueType<E>>> {
-        if !key.null_bitmap().is_subset(ht.null_matched()) {
-            Ok(None)
-        } else {
-            ht.take_state(key).await.map(Some)
-        }
-    }
-
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn eq_join_left(args: EqJoinArgs<'_, K, S, E>) {
+    async fn eq_join_left(args: EqJoinArgs<'_, S, E>) {
         let EqJoinArgs {
             ctx: _,
             side_l,
             side_r,
+            null_safe,
             asof_desc,
             actual_output_data_types,
-            // inequality_watermarks,
             chunk,
             chunk_size,
             cnt_rows_received,
-            high_join_amplification_threshold: _,
             join_cache_evict_interval_rows,
+            high_join_amplification_threshold: _,
         } = args;
 
         let (side_update, side_match) = (side_l, side_r);
@@ -635,8 +571,10 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                 side_match.i2o_mapping.clone(),
             ));
 
-        let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
-        for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
+        // The inequality key is always a single column; wrap in an array for `project()`.
+        let inequal_key_idx_update = [side_update.inequal_key_idx];
+
+        for r in chunk.rows_with_holes() {
             let Some((op, row)) = r else {
                 continue;
             };
@@ -647,37 +585,81 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                 join_cache_evict_interval_rows,
             );
 
-            let matched_rows = if !side_update.ht.check_inequal_key_null(&row) {
-                Self::hash_eq_match(key, &mut side_match.ht).await?
-            } else {
-                None
-            };
-            let inequal_key = side_update.ht.serialize_inequal_key_from_row(row);
-
-            if let Some(matched_rows) = matched_rows {
-                let matched_row_by_inequality = match asof_desc.inequality_type {
-                    AsOfInequalityType::Lt => matched_rows.lower_bound_by_inequality(
-                        Bound::Excluded(&inequal_key),
-                        &side_match.all_data_types,
-                    ),
-                    AsOfInequalityType::Le => matched_rows.lower_bound_by_inequality(
-                        Bound::Included(&inequal_key),
-                        &side_match.all_data_types,
-                    ),
-                    AsOfInequalityType::Gt => matched_rows.upper_bound_by_inequality(
-                        Bound::Excluded(&inequal_key),
-                        &side_match.all_data_types,
-                    ),
-                    AsOfInequalityType::Ge => matched_rows.upper_bound_by_inequality(
-                        Bound::Included(&inequal_key),
-                        &side_match.all_data_types,
-                    ),
-                };
+            // Check null-safe: if any non-null-safe join key column is NULL, skip matching.
+            // Rows that can never match are not stored in state (consistent with old behavior).
+            let join_key_null_not_safe = side_update
+                .join_key_indices
+                .iter()
+                .zip_eq(null_safe.iter())
+                .any(|(idx, ns)| !ns && row.datum_at(*idx).is_none());
+            if join_key_null_not_safe {
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        if let Some(matched_row_by_inequality) = matched_row_by_inequality {
-                            let matched_row = matched_row_by_inequality?;
+                        if let Some(chunk) =
+                            join_chunk_builder.forward_if_not_matched(Op::Insert, row)
+                        {
+                            yield chunk;
+                        }
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        if let Some(chunk) =
+                            join_chunk_builder.forward_if_not_matched(Op::Delete, row)
+                        {
+                            yield chunk;
+                        }
+                    }
+                }
+                continue;
+            }
 
+            let join_key = row.project(&side_update.join_key_indices);
+
+            let inequal_key_is_null = side_update.ht.check_inequal_key_null(&row);
+            let inequal_key = row.project(&inequal_key_idx_update);
+
+            if !inequal_key_is_null {
+                let matched_row_by_inequality = match asof_desc.inequality_type {
+                    AsOfInequalityType::Lt => {
+                        side_match
+                            .ht
+                            .lower_bound_by_inequality_with_jk_prefix(
+                                &join_key,
+                                Bound::Excluded(&inequal_key),
+                            )
+                            .await
+                    }
+                    AsOfInequalityType::Le => {
+                        side_match
+                            .ht
+                            .lower_bound_by_inequality_with_jk_prefix(
+                                &join_key,
+                                Bound::Included(&inequal_key),
+                            )
+                            .await
+                    }
+                    AsOfInequalityType::Gt => {
+                        side_match
+                            .ht
+                            .upper_bound_by_inequality_with_jk_prefix(
+                                &join_key,
+                                Bound::Excluded(&inequal_key),
+                            )
+                            .await
+                    }
+                    AsOfInequalityType::Ge => {
+                        side_match
+                            .ht
+                            .upper_bound_by_inequality_with_jk_prefix(
+                                &join_key,
+                                Bound::Included(&inequal_key),
+                            )
+                            .await
+                    }
+                }?
+                .map(|row| JoinRow::new(row, 0));
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        if let Some(matched_row) = matched_row_by_inequality {
                             if let Some(chunk) =
                                 join_chunk_builder.with_match_on_insert(&row, &matched_row)
                             {
@@ -688,12 +670,10 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                         {
                             yield chunk;
                         }
-                        side_update.ht.insert_row(key, row)?;
+                        side_update.ht.insert(row)?;
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        if let Some(matched_row_by_inequality) = matched_row_by_inequality {
-                            let matched_row = matched_row_by_inequality?;
-
+                        if let Some(matched_row) = matched_row_by_inequality {
                             if let Some(chunk) =
                                 join_chunk_builder.with_match_on_delete(&row, &matched_row)
                             {
@@ -704,14 +684,12 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                         {
                             yield chunk;
                         }
-                        side_update.ht.delete_row(key, row)?;
+                        side_update.ht.delete(row)?;
                     }
                 }
-                // Insert back the state taken from ht.
-                side_match.ht.update_state(key, matched_rows);
             } else {
-                // Row which violates null-safe bitmap will never be matched so we need not
-                // store.
+                // Inequality key is NULL, which can never satisfy the inequality predicate,
+                // so we skip storing and only forward as unmatched for left outer join.
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if let Some(chunk) =
@@ -735,20 +713,24 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         }
     }
 
+    fn cmp_pk_rows(pk1: &impl Row, pk2: &impl Row) -> Ordering {
+        cmp_rows_ascending(pk1, pk2)
+    }
+
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn eq_join_right(args: EqJoinArgs<'_, K, S, E>) {
+    async fn eq_join_right(args: EqJoinArgs<'_, S, E>) {
         let EqJoinArgs {
             ctx,
             side_l,
             side_r,
+            null_safe,
             asof_desc,
             actual_output_data_types,
-            // inequality_watermarks,
             chunk,
             chunk_size,
             cnt_rows_received,
-            high_join_amplification_threshold,
             join_cache_evict_interval_rows,
+            high_join_amplification_threshold,
         } = args;
 
         let (side_update, side_match) = (side_r, side_l);
@@ -760,7 +742,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             side_match.i2o_mapping.clone(),
         );
 
-        let join_matched_rows_metrics = ctx
+        let join_matched_join_keys = ctx
             .streaming_metrics
             .join_matched_join_keys
             .with_guarded_label_values(&[
@@ -769,13 +751,13 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                 &side_update.ht.table_id().to_string(),
             ]);
 
-        let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
-        for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
+        // The inequality key is always a single column; wrap in an array for `project()`.
+        let inequal_key_idx_update = [side_update.inequal_key_idx];
+
+        for r in chunk.rows_with_holes() {
             let Some((op, row)) = r else {
                 continue;
             };
-            let mut join_matched_rows_cnt = 0;
-
             Self::evict_cache(
                 side_update,
                 side_match,
@@ -783,58 +765,47 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                 join_cache_evict_interval_rows,
             );
 
-            let matched_rows = if !side_update.ht.check_inequal_key_null(&row) {
-                Self::hash_eq_match(key, &mut side_match.ht).await?
-            } else {
-                None
-            };
-            let inequal_key = side_update.ht.serialize_inequal_key_from_row(row);
+            // Check null-safe: if any non-null-safe join key column is NULL, skip.
+            // Rows that can never match are not stored in state (consistent with old behavior).
+            let join_key_null_not_safe = side_update
+                .join_key_indices
+                .iter()
+                .zip_eq(null_safe.iter())
+                .any(|(idx, ns)| !ns && row.datum_at(*idx).is_none());
+            if join_key_null_not_safe {
+                continue;
+            }
 
-            if let Some(matched_rows) = matched_rows {
-                let update_rows = Self::hash_eq_match(key, &mut side_update.ht).await?.expect("None is not expected because we have checked null in key when getting matched_rows");
-                let right_inequality_index = update_rows.inequality_index();
-                let (row_to_delete_r, row_to_insert_r) =
-                    if let Some(pks) = right_inequality_index.get(&inequal_key) {
-                        assert!(!pks.is_empty());
-                        let row_pk = side_update.ht.serialize_pk_from_row(row);
+            let join_key = row.project(&side_update.join_key_indices);
+
+            let inequal_key_is_null = side_update.ht.check_inequal_key_null(&row);
+            let inequal_key = row.project(&inequal_key_idx_update);
+
+            let mut join_matched_rows_cnt = 0;
+
+            if !inequal_key_is_null {
+                let (row_to_delete_r, row_to_insert_r) = {
+                    let (first_row, second_row) = side_update
+                        .ht
+                        .first_two_by_inequality_with_jk_prefix(&join_key, &inequal_key)
+                        .await?;
+                    if let Some(first_row) = first_row {
+                        let row_pk = side_update.ht.get_pk_from_row(row);
+                        let first_pk = side_update.ht.get_pk_from_row(&first_row).to_owned_row();
                         match op {
                             Op::Insert | Op::UpdateInsert => {
                                 // If there are multiple rows match the inequality key in the right table, we use one with smallest pk.
-                                let smallest_pk = pks.first_key_sorted().unwrap();
-                                if smallest_pk > &row_pk {
-                                    // smallest_pk is in the cache index, so it must exist in the cache.
-                                    if let Some(to_delete_row) = update_rows
-                                        .get_by_indexed_pk(smallest_pk, &side_update.all_data_types)
-                                    {
-                                        (
-                                            Some(Either::Left(to_delete_row?.row)),
-                                            Some(Either::Right(row)),
-                                        )
-                                    } else {
-                                        // Something wrong happened. Ignore this row in non strict consistency mode.
-                                        (None, None)
-                                    }
+                                if Self::cmp_pk_rows(&first_pk, &row_pk) == Ordering::Greater {
+                                    (Some(Either::Left(first_row)), Some(Either::Right(row)))
                                 } else {
                                     // No affected row in the right table.
                                     (None, None)
                                 }
                             }
                             Op::Delete | Op::UpdateDelete => {
-                                let smallest_pk = pks.first_key_sorted().unwrap();
-                                if smallest_pk == &row_pk {
-                                    if let Some(second_smallest_pk) = pks.second_key_sorted() {
-                                        if let Some(to_insert_row) = update_rows.get_by_indexed_pk(
-                                            second_smallest_pk,
-                                            &side_update.all_data_types,
-                                        ) {
-                                            (
-                                                Some(Either::Right(row)),
-                                                Some(Either::Left(to_insert_row?.row)),
-                                            )
-                                        } else {
-                                            // Something wrong happened. Ignore this row in non strict consistency mode.
-                                            (None, None)
-                                        }
+                                if Self::cmp_pk_rows(&first_pk, &row_pk) == Ordering::Equal {
+                                    if let Some(second_row) = second_row {
+                                        (Some(Either::Right(row)), Some(Either::Left(second_row)))
                                     } else {
                                         (Some(Either::Right(row)), None)
                                     }
@@ -851,8 +822,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                             // Decide the row_to_insert later
                             Op::Delete | Op::UpdateDelete => (Some(Either::Right(row)), None),
                         }
-                    };
-
+                    }
+                };
                 // 4 cases for row_to_delete_r and row_to_insert_r:
                 // 1. Some(_), Some(_): delete row_to_delete_r and insert row_to_insert_r
                 // 2. None, Some(_)   : row_to_delete to be decided by the nearest inequality key
@@ -861,22 +832,40 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                 if row_to_delete_r.is_none() && row_to_insert_r.is_none() {
                     // no row to delete or insert.
                 } else {
-                    let prev_inequality_key =
-                        right_inequality_index.upper_bound_key(Bound::Excluded(&inequal_key));
-                    let next_inequality_key =
-                        right_inequality_index.lower_bound_key(Bound::Excluded(&inequal_key));
-                    let affected_row_r = match asof_desc.inequality_type {
-                        AsOfInequalityType::Lt | AsOfInequalityType::Le => next_inequality_key
-                            .and_then(|k| {
-                                update_rows.get_first_by_inequality(k, &side_update.all_data_types)
-                            }),
-                        AsOfInequalityType::Gt | AsOfInequalityType::Ge => prev_inequality_key
-                            .and_then(|k| {
-                                update_rows.get_first_by_inequality(k, &side_update.all_data_types)
-                            }),
-                    }
-                    .transpose()?
-                    .map(|r| Either::Left(r.row));
+                    let prev_inequality_key = side_update
+                        .ht
+                        .upper_bound_by_inequality_with_jk_prefix(
+                            &join_key,
+                            Bound::Excluded(&inequal_key),
+                        )
+                        .await?
+                        .map(|r| r.project(&inequal_key_idx_update));
+                    let next_inequality_key = side_update
+                        .ht
+                        .lower_bound_by_inequality_with_jk_prefix(
+                            &join_key,
+                            Bound::Excluded(&inequal_key),
+                        )
+                        .await?
+                        .map(|r| r.project(&inequal_key_idx_update));
+
+                    let affected_inequality_key_r = match asof_desc.inequality_type {
+                        AsOfInequalityType::Lt | AsOfInequalityType::Le => &next_inequality_key,
+                        AsOfInequalityType::Gt | AsOfInequalityType::Ge => &prev_inequality_key,
+                    };
+                    let affected_row_r =
+                        if let Some(affected_inequality_key_r) = affected_inequality_key_r {
+                            side_update
+                                .ht
+                                .first_by_inequality_with_jk_prefix(
+                                    &join_key,
+                                    &affected_inequality_key_r,
+                                )
+                                .await?
+                        } else {
+                            None
+                        }
+                        .map(Either::Left);
 
                     let (row_to_delete_r, row_to_insert_r) =
                         match (&row_to_delete_r, &row_to_insert_r) {
@@ -887,28 +876,39 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                         };
                     let range = match asof_desc.inequality_type {
                         AsOfInequalityType::Lt => (
-                            prev_inequality_key.map_or_else(|| Bound::Unbounded, Bound::Included),
-                            Bound::Excluded(&inequal_key),
+                            prev_inequality_key
+                                .map(Either::Left)
+                                .map_or_else(|| Bound::Unbounded, Bound::Included),
+                            Bound::Excluded(Either::Right(&inequal_key)),
                         ),
                         AsOfInequalityType::Le => (
-                            prev_inequality_key.map_or_else(|| Bound::Unbounded, Bound::Excluded),
-                            Bound::Included(&inequal_key),
+                            prev_inequality_key
+                                .map(Either::Left)
+                                .map_or_else(|| Bound::Unbounded, Bound::Excluded),
+                            Bound::Included(Either::Right(&inequal_key)),
                         ),
                         AsOfInequalityType::Gt => (
-                            Bound::Excluded(&inequal_key),
-                            next_inequality_key.map_or_else(|| Bound::Unbounded, Bound::Included),
+                            Bound::Excluded(Either::Right(&inequal_key)),
+                            next_inequality_key
+                                .map(Either::Left)
+                                .map_or_else(|| Bound::Unbounded, Bound::Included),
                         ),
                         AsOfInequalityType::Ge => (
-                            Bound::Included(&inequal_key),
-                            next_inequality_key.map_or_else(|| Bound::Unbounded, Bound::Excluded),
+                            Bound::Included(Either::Right(&inequal_key)),
+                            next_inequality_key
+                                .map(Either::Left)
+                                .map_or_else(|| Bound::Unbounded, Bound::Excluded),
                         ),
                     };
 
-                    let rows_l =
-                        matched_rows.range_by_inequality(range, &side_match.all_data_types);
-                    for row_l in rows_l {
+                    let rows_l_stream = side_match
+                        .ht
+                        .range_by_inequality_with_jk_prefix(&join_key, &range)
+                        .await?;
+                    #[for_await]
+                    for row_l in rows_l_stream {
+                        let row_l = row_l?;
                         join_matched_rows_cnt += 1;
-                        let row_l = row_l?.row;
                         if let Some(row_to_delete_r) = &row_to_delete_r {
                             if let Some(chunk) =
                                 join_chunk_builder.append_row(Op::Delete, row_to_delete_r, &row_l)
@@ -935,32 +935,27 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                         }
                     }
                 }
-                // Insert back the state taken from ht.
-                side_match.ht.update_state(key, matched_rows);
-                side_update.ht.update_state(key, update_rows);
 
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        side_update.ht.insert_row(key, row)?;
+                        side_update.ht.insert(row)?;
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        side_update.ht.delete_row(key, row)?;
+                        side_update.ht.delete(row)?;
                     }
                 }
             } else {
-                // Row which violates null-safe bitmap will never be matched so we need not
-                // store.
-                // Noop here because we only support left outer AsOf join.
+                // Inequality key is NULL, which can never satisfy the inequality predicate,
+                // so we skip storing. No action needed on the right side.
             }
-            join_matched_rows_metrics.observe(join_matched_rows_cnt as _);
+            join_matched_join_keys.observe(join_matched_rows_cnt as _);
             if join_matched_rows_cnt > high_join_amplification_threshold {
-                let join_key_data_types = side_update.ht.join_key_data_types();
-                let key = key.deserialize(join_key_data_types)?;
+                let join_key = row.project(&side_update.join_key_indices);
                 tracing::warn!(target: "high_join_amplification",
                     matched_rows_len = join_matched_rows_cnt,
                     update_table_id = %side_update.ht.table_id(),
                     match_table_id = %side_match.ht.table_id(),
-                    join_key = ?key,
+                    join_key = ?join_key,
                     actor_id = %ctx.id,
                     fragment_id = %ctx.fragment_id,
                     "large rows matched for join key when AsOf join updating right side",
@@ -979,14 +974,12 @@ mod tests {
 
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
-    use risingwave_common::hash::Key64;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
-    use crate::executor::MemoryEncoding;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
 
     async fn create_in_memory_state_table(
@@ -1065,9 +1058,9 @@ mod tests {
             .into_iter()
             .collect();
         let schema_len = schema.len();
-        let info = ExecutorInfo::for_test(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
+        let info = ExecutorInfo::for_test(schema, vec![1], "AsOfJoinExecutor".to_owned(), 0);
 
-        let executor = AsOfJoinExecutor::<Key64, MemoryStateStore, T, MemoryEncoding>::new(
+        let executor = AsOfJoinExecutor::<MemoryStateStore, T, AsOfCpuEncoding>::new(
             ActorContext::for_test(123),
             info,
             source_l,
@@ -1081,14 +1074,15 @@ mod tests {
             Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),
             1024,
-            2048,
             asof_desc,
+            false,
+            2048, // high_join_amplification_threshold
         );
         (tx_l, tx_r, executor.boxed().execute())
     }
 
     #[tokio::test]
-    async fn test_as_of_inner_join() -> StreamExecutorResult<()> {
+    async fn test_asof_inner_join() -> StreamExecutorResult<()> {
         let asof_desc = AsOfDesc {
             left_idx: 0,
             right_idx: 2,
@@ -1236,7 +1230,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_as_of_left_outer_join() -> StreamExecutorResult<()> {
+    async fn test_asof_left_outer_join() -> StreamExecutorResult<()> {
         let asof_desc = AsOfDesc {
             left_idx: 1,
             right_idx: 2,
