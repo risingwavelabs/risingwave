@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -160,9 +159,6 @@ pub struct CreateSplitReaderOpt {
 pub struct CreateSplitReaderResult {
     pub latest_splits: Option<Vec<SplitImpl>>,
     pub backfill_info: HashMap<SplitId, BackfillInfo>,
-    /// Flag set by bounded readers (e.g., Kafka with `enable.partition.eof`) when
-    /// all partitions have been fully consumed. Executors poll this to detect completion.
-    pub bounded_eof_flag: Option<Arc<AtomicBool>>,
 }
 
 pub async fn create_split_readers<P: SourceProperties>(
@@ -177,7 +173,6 @@ pub async fn create_split_readers<P: SourceProperties>(
     let mut res = CreateSplitReaderResult {
         backfill_info: HashMap::new(),
         latest_splits: None,
-        bounded_eof_flag: None,
     };
     if opt.support_multiple_splits {
         let mut reader = P::SplitReader::new(
@@ -192,7 +187,6 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(reader.seek_to_latest().await?);
         }
         res.backfill_info = reader.backfill_info();
-        res.bounded_eof_flag = reader.bounded_eof_flag();
         Ok((reader.into_stream().boxed(), res))
     } else {
         let mut readers = try_join_all(splits.into_iter().map(|split| {
@@ -215,7 +209,6 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(latest_splits);
         }
         res.backfill_info = readers.iter().flat_map(|r| r.backfill_info()).collect();
-        res.bounded_eof_flag = readers.iter().find_map(|r| r.bounded_eof_flag());
         Ok((
             select_all(readers.into_iter().map(|r| r.into_stream())).boxed(),
             res,
@@ -572,6 +565,18 @@ pub type BoxSourceChunkWithStateStream =
 pub type BoxStreamingFileSourceChunkStream =
     BoxStream<'static, crate::error::ConnectorResult<Option<StreamChunk>>>;
 
+/// Event from a source chunk stream that may signal bounded completion.
+pub enum SourceChunkEvent {
+    /// A normal data chunk.
+    Chunk(StreamChunk),
+    /// Bounded source reader has consumed all partitions to their stop offsets.
+    BoundedEof,
+}
+
+/// Stream of [`SourceChunkEvent`]s, used by bounded readers (e.g., source backfill).
+pub type BoxSourceChunkEventStream =
+    BoxStream<'static, crate::error::ConnectorResult<SourceChunkEvent>>;
+
 // Manually expand the trait alias to improve IDE experience.
 pub trait SourceChunkStream:
     Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
@@ -604,12 +609,6 @@ pub trait SplitReader: Sized + Send {
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()
-    }
-
-    /// Returns a shared flag that the reader sets to `true` when all partitions
-    /// have been consumed up to their stop offsets. Only meaningful for bounded reads.
-    fn bounded_eof_flag(&self) -> Option<Arc<AtomicBool>> {
-        None
     }
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {

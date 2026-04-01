@@ -14,11 +14,11 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use anyhow::anyhow;
 use either::Either;
+use futures::TryStreamExt;
 use futures::stream::{PollNext, select_with_strategy};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -31,8 +31,8 @@ use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BackfillInfo, BoxSourceChunkStream, CreateSplitReaderResult, SourceContext, SourceCtrlOpts,
-    SplitId, SplitImpl, SplitMetaData,
+    BackfillInfo, BoxSourceChunkEventStream, CreateSplitReaderResult, SourceChunkEvent,
+    SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::common::ThrottleType;
@@ -112,10 +112,6 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     rate_limit_rps: Option<u32>,
 
     progress: CreateMviewProgressReporter,
-
-    /// Flag signaled by bounded source readers (e.g., Kafka with `enable.partition.eof`)
-    /// when all partitions have been fully consumed.
-    bounded_eof_flag: Option<Arc<AtomicBool>>,
 }
 
 /// Local variables used in the backfill stage.
@@ -296,7 +292,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             system_params,
             rate_limit_rps,
             progress,
-            bounded_eof_flag: None,
         }
     }
 
@@ -304,7 +299,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         &self,
         source_desc: &SourceDesc,
         splits: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<(BoxSourceChunkStream, CreateSplitReaderResult)> {
+    ) -> StreamExecutorResult<(BoxSourceChunkEventStream, CreateSplitReaderResult)> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -336,7 +331,18 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .build_stream(Some(splits), column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok((apply_rate_limit(stream, self.rate_limit_rps).boxed(), res))
+        let rate_limited = apply_rate_limit(stream, self.rate_limit_rps).boxed();
+        // Wrap the plain chunk stream with an in-band EOF sentinel.
+        // When the bounded reader finishes (stream terminates), the chained
+        // `BoundedEof` event is delivered in causal order after all data chunks,
+        // eliminating the race condition of the previous out-of-band AtomicBool approach.
+        let wrapped = rate_limited
+            .map_ok(SourceChunkEvent::Chunk)
+            .chain(futures::stream::once(async {
+                Ok(SourceChunkEvent::BoundedEof)
+            }))
+            .boxed();
+        Ok((wrapped, res))
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -405,7 +411,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             )
             .instrument_await("source_build_reader")
             .await?;
-        self.bounded_eof_flag = reader_result.bounded_eof_flag;
         for (split_id, info) in &reader_result.backfill_info {
             let state = backfill_stage.states.get_mut(split_id).unwrap();
             match info {
@@ -517,14 +522,12 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 self.actor_ctx.fragment_id.to_string(),
                             ]);
 
-                            let (reader, reader_result) = self
+                            let (reader, _reader_result) = self
                                 .build_stream_source_reader(
                                     &source_desc,
                                     backfill_stage.get_latest_unfinished_splits()?,
                                 )
                                 .await?;
-                            self.bounded_eof_flag = reader_result.bounded_eof_flag;
-
                             backfill_stream = select_with_strategy(
                                 input.by_ref().map(Either::Left),
                                 reader.map(Either::Right),
@@ -614,16 +617,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 );
                                                 self.rate_limit_rps = entry.rate_limit;
                                                 // rebuild reader
-                                                let (reader, reader_result) = self
+                                                let (reader, _reader_result) = self
                                                     .build_stream_source_reader(
                                                         &source_desc,
                                                         backfill_stage
                                                             .get_latest_unfinished_splits()?,
                                                     )
                                                     .await?;
-                                                self.bounded_eof_flag =
-                                                    reader_result.bounded_eof_flag;
-
                                                 backfill_stream = select_with_strategy(
                                                     input.by_ref().map(Either::Left),
                                                     reader.map(Either::Right),
@@ -639,7 +639,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     backfill_stage: &BackfillStage,
                                     source_desc: &SourceDesc,
                                 ) -> StreamExecutorResult<(
-                                    BoxSourceChunkStream,
+                                    BoxSourceChunkEventStream,
                                     CreateSplitReaderResult,
                                 )> {
                                     // rebuild backfill_stream
@@ -662,23 +662,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         .await?;
 
                                     Ok((reader, reader_result))
-                                }
-
-                                // Check if bounded reader has signaled all partitions consumed.
-                                // Must be done BEFORE set_states/commit so the Finished
-                                // transitions are persisted in the same barrier epoch.
-                                if let Some(ref flag) = self.bounded_eof_flag
-                                    && flag.load(std::sync::atomic::Ordering::Acquire)
-                                {
-                                    for state in backfill_stage.states.values_mut() {
-                                        if matches!(state.state, BackfillState::Backfilling(_)) {
-                                            tracing::info!(
-                                                source_id = %self.source_id,
-                                                "marking backfill split finished due to bounded reader EOF"
-                                            );
-                                            state.state = BackfillState::Finished;
-                                        }
-                                    }
                                 }
 
                                 self.backfill_state_store
@@ -759,15 +742,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                             )
                                             .await?
                                     {
-                                        let (reader, reader_result) =
+                                        let (reader, _reader_result) =
                                             rebuild_reader_on_split_changed(
                                                 &self,
                                                 &backfill_stage,
                                                 &source_desc,
                                             )
                                             .await?;
-                                        self.bounded_eof_flag = reader_result.bounded_eof_flag;
-
                                         backfill_stream = select_with_strategy(
                                             input.by_ref().map(Either::Left),
                                             reader.map(Either::Right),
@@ -801,46 +782,76 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     // backfill
                     Either::Right(msg) => {
-                        let chunk = msg?;
+                        match msg? {
+                            SourceChunkEvent::BoundedEof => {
+                                tracing::info!(
+                                    source_id = %self.source_id,
+                                    "bounded reader EOF, transitioning backfill splits"
+                                );
+                                for (_split_id, state) in backfill_stage.states.iter_mut() {
+                                    match &state.state {
+                                        BackfillState::Backfilling(Some(offset)) => {
+                                            state.state =
+                                                BackfillState::SourceCachingUp(offset.clone());
+                                        }
+                                        BackfillState::Backfilling(None) => {
+                                            state.state = BackfillState::Finished;
+                                        }
+                                        BackfillState::SourceCachingUp(_)
+                                        | BackfillState::Finished => {}
+                                    }
+                                }
+                                // Replace reader with pending stream. This structurally
+                                // prevents a duplicate BoundedEof from ever arriving.
+                                backfill_stream = select_with_strategy(
+                                    input.by_ref().map(Either::Left),
+                                    futures::stream::pending().boxed().map(Either::Right),
+                                    select_strategy,
+                                );
+                            }
+                            SourceChunkEvent::Chunk(chunk) => {
+                                if last_barrier_time.elapsed().as_millis()
+                                    > max_wait_barrier_time_ms
+                                {
+                                    // Pause to let barrier catch up via backpressure of snapshot stream.
+                                    pause_control.self_pause();
+                                    pause_reader!();
 
-                        if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
-                            // Pause to let barrier catch up via backpressure of snapshot stream.
-                            pause_control.self_pause();
-                            pause_reader!();
+                                    // Exceeds the max wait barrier time, the source will be paused.
+                                    // Currently we can guarantee the
+                                    // source is not paused since it received stream
+                                    // chunks.
+                                    tracing::warn!(
+                                        "source {} paused, wait barrier for {:?}",
+                                        self.info.identity,
+                                        last_barrier_time.elapsed()
+                                    );
 
-                            // Exceeds the max wait barrier time, the source will be paused.
-                            // Currently we can guarantee the
-                            // source is not paused since it received stream
-                            // chunks.
-                            tracing::warn!(
-                                "source {} paused, wait barrier for {:?}",
-                                self.info.identity,
-                                last_barrier_time.elapsed()
-                            );
+                                    // Only update `max_wait_barrier_time_ms` to capture
+                                    // `barrier_interval_ms`
+                                    // changes here to avoid frequently accessing the shared
+                                    // `system_params`.
+                                    max_wait_barrier_time_ms =
+                                        self.system_params.load().barrier_interval_ms() as u128
+                                            * WAIT_BARRIER_MULTIPLE_TIMES;
+                                }
+                                let mut new_vis = BitmapBuilder::zeroed(chunk.visibility().len());
 
-                            // Only update `max_wait_barrier_time_ms` to capture
-                            // `barrier_interval_ms`
-                            // changes here to avoid frequently accessing the shared
-                            // `system_params`.
-                            max_wait_barrier_time_ms =
-                                self.system_params.load().barrier_interval_ms() as u128
-                                    * WAIT_BARRIER_MULTIPLE_TIMES;
-                        }
-                        let mut new_vis = BitmapBuilder::zeroed(chunk.visibility().len());
+                                for (i, (_, row)) in chunk.rows().enumerate() {
+                                    let split_id = row.datum_at(split_idx).unwrap().into_utf8();
+                                    let offset = row.datum_at(offset_idx).unwrap().into_utf8();
+                                    let vis = backfill_stage.handle_backfill_row(split_id, offset);
+                                    new_vis.set(i, vis);
+                                }
 
-                        for (i, (_, row)) in chunk.rows().enumerate() {
-                            let split_id = row.datum_at(split_idx).unwrap().into_utf8();
-                            let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-                            let vis = backfill_stage.handle_backfill_row(split_id, offset);
-                            new_vis.set(i, vis);
-                        }
-
-                        let new_vis = new_vis.finish();
-                        let card = new_vis.count_ones();
-                        if card != 0 {
-                            let new_chunk = chunk.clone_with_vis(new_vis);
-                            yield Message::Chunk(new_chunk);
-                            source_backfill_row_count.inc_by(card as u64);
+                                let new_vis = new_vis.finish();
+                                let card = new_vis.count_ones();
+                                if card != 0 {
+                                    let new_chunk = chunk.clone_with_vis(new_vis);
+                                    yield Message::Chunk(new_chunk);
+                                    source_backfill_row_count.inc_by(card as u64);
+                                }
+                            }
                         }
                     }
                 }

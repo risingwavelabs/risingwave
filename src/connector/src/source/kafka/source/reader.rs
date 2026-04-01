@@ -15,8 +15,6 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::mem::swap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -51,7 +49,6 @@ pub struct KafkaSplitReader {
     max_num_messages: usize,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
-    bounded_eof_flag: Option<Arc<AtomicBool>>,
 }
 
 #[async_trait]
@@ -184,13 +181,6 @@ impl SplitReader for KafkaSplitReader {
                 .expect("max.num.messages expect usize"),
         };
 
-        let has_stop_offsets = offsets.values().any(|(_, stop)| stop.is_some());
-        let bounded_eof_flag = if enable_partition_eof && has_stop_offsets {
-            Some(Arc::new(AtomicBool::new(false)))
-        } else {
-            None
-        };
-
         Ok(Self {
             consumer,
             offsets,
@@ -201,7 +191,6 @@ impl SplitReader for KafkaSplitReader {
             max_num_messages,
             parser_config,
             source_ctx,
-            bounded_eof_flag,
         })
     }
 
@@ -213,10 +202,6 @@ impl SplitReader for KafkaSplitReader {
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         self.backfill_info.clone()
-    }
-
-    fn bounded_eof_flag(&self) -> Option<Arc<AtomicBool>> {
-        self.bounded_eof_flag.clone()
     }
 
     async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
@@ -302,9 +287,6 @@ impl KafkaSplitReader {
                     if !res.is_empty() {
                         yield std::mem::take(&mut res);
                     }
-                    if let Some(ref flag) = self.bounded_eof_flag {
-                        flag.store(true, Ordering::Release);
-                    }
                     break 'for_outer_loop;
                 }
                 continue;
@@ -358,9 +340,6 @@ impl KafkaSplitReader {
                         if !res.is_empty() {
                             yield std::mem::take(&mut res);
                         }
-                        if let Some(ref flag) = self.bounded_eof_flag {
-                            flag.store(true, Ordering::Release);
-                        }
                         break 'for_outer_loop;
                     }
                     continue;
@@ -383,9 +362,6 @@ impl KafkaSplitReader {
                     o.remove();
                     if stop_offsets.is_empty() {
                         yield std::mem::take(&mut res);
-                        if let Some(ref flag) = self.bounded_eof_flag {
-                            flag.store(true, Ordering::Release);
-                        }
                         break 'for_outer_loop;
                     }
                 }
@@ -411,9 +387,6 @@ impl KafkaSplitReader {
             if enable_eof && stop_offsets.is_empty() {
                 if !res.is_empty() {
                     yield std::mem::take(&mut res);
-                }
-                if let Some(ref flag) = self.bounded_eof_flag {
-                    flag.store(true, Ordering::Release);
                 }
                 break 'for_outer_loop;
             }
