@@ -29,7 +29,7 @@ pub struct UserDefinedFunction {
     /// Secret references for arguments that should be resolved from secrets at runtime.
     pub secret_refs: Vec<UdfArgSecretRef>,
     /// Secret display names for EXPLAIN output. Not serialized to protobuf.
-    /// Each entry is (arg_index, secret_name).
+    /// Each entry is (`arg_index`, `secret_name`).
     pub secret_display_names: Vec<(u32, String)>,
 }
 
