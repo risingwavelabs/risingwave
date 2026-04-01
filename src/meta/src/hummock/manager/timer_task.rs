@@ -749,11 +749,13 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::CompactionGroupId;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::level::Levels;
+    use risingwave_hummock_sdk::level::{Level, Levels};
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::common::worker_node::Property;
     use risingwave_pb::common::{HostAddress, WorkerType};
+    use risingwave_pb::hummock::PbLevelType;
 
     use crate::controller::catalog::CatalogController;
     use crate::controller::cluster::{ClusterController, ClusterControllerRef};
@@ -945,6 +947,61 @@ mod tests {
             !hummock_manager
                 .get_compaction_group_map()
                 .await
+                .contains_key(&group_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_purge_empty_compaction_groups_removes_empty_dynamic_group_with_ssts() {
+        let mut opts = MetaOpts::test(false);
+        opts.periodic_purge_stale_compaction_group_interval_sec = 1;
+
+        let (_env, hummock_manager, _, _worker_id) =
+            setup_compute_env_with_meta_opts(86, opts).await;
+
+        let group_id = CompactionGroupId::new(101);
+        {
+            let mut versioning_guard = hummock_manager.versioning.write().await;
+            let mut levels = Levels {
+                group_id,
+                parent_group_id: StaticCompactionGroupId::StateDefault,
+                ..Default::default()
+            };
+            levels.l0.sub_levels.push(Level {
+                level_type: PbLevelType::Overlapping,
+                table_infos: vec![SstableInfo::default()],
+                total_file_size: 1,
+                sub_level_id: 1,
+                ..Default::default()
+            });
+            versioning_guard
+                .current_version
+                .levels
+                .insert(group_id, levels);
+        }
+
+        {
+            let mut compaction_group_manager =
+                hummock_manager.compaction_group_manager.write().await;
+            let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
+            let config = Arc::new(CompactionConfigBuilder::new().build());
+            compaction_groups_txn.create_compaction_groups(group_id, config);
+            let res: crate::hummock::error::Result<()> =
+                commit_multi_var!(hummock_manager.meta_store_ref(), compaction_groups_txn);
+            res.unwrap();
+        }
+
+        let destroyed = hummock_manager
+            .purge_empty_compaction_groups()
+            .await
+            .unwrap();
+        assert_eq!(destroyed, 1);
+
+        assert!(
+            !hummock_manager
+                .get_current_version()
+                .await
+                .levels
                 .contains_key(&group_id)
         );
     }

@@ -373,9 +373,17 @@ impl HummockManager {
     /// Periodically purge empty dynamic compaction groups from the latest Hummock version and
     /// remove stale compaction group configs that are not referenced by the version.
     ///
+    /// ## Safety / Semantics
+    ///
     /// A dynamic compaction group is considered safe to destroy if it has **zero member tables**
-    /// in `state_table_info` of the latest version. This check is version-only and does not depend
-    /// on catalog state.
+    /// in `state_table_info` of the latest version.
+    ///
+    /// Note that we intentionally do **not** require the group to have no SSTs. Once the member
+    /// set is empty, no table should be able to read from SSTs in this group anymore, so removing
+    /// the group from the latest version is safe. Physical object GC is still protected by pinned
+    /// versions, which may retain references to those objects until they are unpinned.
+    ///
+    /// This cleanup is version-only and does not query or depend on catalog state.
     pub async fn purge_empty_compaction_groups(&self) -> Result<usize> {
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
