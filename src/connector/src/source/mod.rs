@@ -240,8 +240,11 @@ impl WaitCheckpointTask {
                         let ack_future = context
                             .publish(reply_subject.clone(), "+ACK".into())
                             .await
-                            .map_err(|e| e.to_string())?;
-                        ack_future.into_future().await.map_err(|e| e.to_string())?;
+                            .map_err(|e| e.to_report_string())?;
+                        ack_future
+                            .into_future()
+                            .await
+                            .map_err(|e| e.to_report_string())?;
                         Ok::<(), String>(())
                     };
                     match tokio::time::timeout(ACK_RPC_TIMEOUT, fut).await {
