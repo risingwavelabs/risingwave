@@ -428,13 +428,19 @@ impl HummockManager {
             .collect();
 
         if groups_to_destroy.is_empty() {
-            // No groups to destroy — just purge stale configs.
+            // No groups to destroy — just purge stale configs if any.
             let mut compaction_group_manager = self.compaction_group_manager.write().await;
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
             let existing_groups =
                 HashSet::from_iter(get_compaction_group_ids(&versioning.current_version));
-            compaction_groups_txn.purge(existing_groups);
-            commit_multi_var!(self.meta_store_ref(), compaction_groups_txn)?;
+            if compaction_groups_txn
+                .tree_ref()
+                .keys()
+                .any(|k| !existing_groups.contains(k))
+            {
+                compaction_groups_txn.purge(existing_groups);
+                commit_multi_var!(self.meta_store_ref(), compaction_groups_txn)?;
+            }
             return Ok(0);
         }
 
