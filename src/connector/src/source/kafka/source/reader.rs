@@ -285,16 +285,15 @@ impl KafkaSplitReader {
                 }
             }
 
-            // Check if PartitionEOF events (or prior offset guards) emptied stop_offsets.
-            // Only in bounded mode — streaming sources also have empty stop_offsets.
-            if enable_eof && stop_offsets.is_empty() {
-                if !res.is_empty() {
-                    yield std::mem::take(&mut res);
-                }
-                break 'for_outer_loop;
-            }
-
             if msgs.is_empty() {
+                // Chunk contained only PartitionEOF events, no data messages.
+                // If all partitions are done, break; otherwise wait for more.
+                if enable_eof && stop_offsets.is_empty() {
+                    if !res.is_empty() {
+                        yield std::mem::take(&mut res);
+                    }
+                    break 'for_outer_loop;
+                }
                 continue;
             }
 
@@ -391,6 +390,17 @@ impl KafkaSplitReader {
                     yield res;
                     break 'for_outer_loop;
                 }
+            }
+
+            // After processing all messages in the chunk, check if PartitionEOF events
+            // (received at the top of this loop) emptied stop_offsets.
+            // Must be checked AFTER message processing to avoid dropping data messages
+            // that arrived in the same ready_chunks batch as the PartitionEOF event.
+            if enable_eof && stop_offsets.is_empty() {
+                if !res.is_empty() {
+                    yield std::mem::take(&mut res);
+                }
+                break 'for_outer_loop;
             }
 
             let mut cur = Vec::with_capacity(res.capacity());

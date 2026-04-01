@@ -788,7 +788,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     source_id = %self.source_id,
                                     "bounded reader EOF, transitioning backfill splits"
                                 );
-                                for (_split_id, state) in backfill_stage.states.iter_mut() {
+                                for state in backfill_stage.states.values_mut() {
                                     match &state.state {
                                         BackfillState::Backfilling(Some(offset)) => {
                                             state.state =
