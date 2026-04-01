@@ -1090,8 +1090,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".batch_plan.SourceNode",
         ".batch_plan.IcebergScanNode",
         ".iceberg_compaction.IcebergCompactionTask",
-        ".expr.UserDefinedFunction",
-        ".expr.UserDefinedFunctionMetadata",
     ];
 
     // Build protobuf structs.

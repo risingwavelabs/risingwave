@@ -26,11 +26,8 @@ use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 pub struct UserDefinedFunction {
     pub args: Vec<ExprImpl>,
     pub catalog: Arc<FunctionCatalog>,
-    /// Secret references for arguments that should be resolved from secrets at runtime.
+    /// Secret references for arguments resolved from secrets at runtime.
     pub secret_refs: Vec<UdfArgSecretRef>,
-    /// Secret display names for EXPLAIN output. Not serialized to protobuf.
-    /// Each entry is (`arg_index`, `secret_name`).
-    pub secret_display_names: Vec<(u32, String)>,
 }
 
 impl UserDefinedFunction {
@@ -39,7 +36,6 @@ impl UserDefinedFunction {
             args,
             catalog,
             secret_refs: vec![],
-            secret_display_names: vec![],
         }
     }
 
@@ -47,13 +43,11 @@ impl UserDefinedFunction {
         catalog: Arc<FunctionCatalog>,
         args: Vec<ExprImpl>,
         secret_refs: Vec<UdfArgSecretRef>,
-        secret_display_names: Vec<(u32, String)>,
     ) -> Self {
         Self {
             args,
             catalog,
             secret_refs,
-            secret_display_names,
         }
     }
 
@@ -92,16 +86,10 @@ impl UserDefinedFunction {
             created_at_cluster_version: None,
         };
 
-        let secret_display_names = udf
-            .secret_refs
-            .iter()
-            .map(|sr| (sr.arg_index, format!("<secret:{}>", sr.secret_id)))
-            .collect();
         Ok(Self {
             args,
             catalog: Arc::new(catalog),
             secret_refs: udf.secret_refs.clone(),
-            secret_display_names,
         })
     }
 }
@@ -160,13 +148,8 @@ impl std::fmt::Debug for UserDefinedFunctionDisplay<'_> {
         let that = self.func_call;
         let mut builder = f.debug_tuple(&that.catalog.name);
         for (i, arg) in that.args.iter().enumerate() {
-            // Show secret name for secret-backed arguments instead of the placeholder.
-            if let Some((_, name)) = that
-                .secret_display_names
-                .iter()
-                .find(|(idx, _)| *idx == i as u32)
-            {
-                builder.field(&format_args!("Secret({})", name));
+            if let Some(sr) = that.secret_refs.iter().find(|sr| sr.arg_index == i as u32) {
+                builder.field(&format_args!("Secret(id:{})", sr.secret_id));
             } else {
                 builder.field(&ExprDisplay {
                     expr: arg,

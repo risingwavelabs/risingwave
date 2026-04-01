@@ -156,7 +156,6 @@ impl Binder {
         // Secret references produce placeholder expressions and are recorded for UDF runtime resolution.
         let mut args: Vec<ExprImpl> = Vec::new();
         let mut secret_refs: Vec<UdfArgSecretRef> = Vec::new();
-        let mut secret_display_names: Vec<(u32, String)> = Vec::new();
 
         for arg in &arg_list.args {
             // Extract secret ref from either unnamed or named function arg.
@@ -212,8 +211,6 @@ impl Binder {
                     secret_id: secret_catalog.id.as_raw_id(),
                     ref_as,
                 });
-                secret_display_names.push((bound_arg_index, secret_catalog.name.clone()));
-
                 // Add a placeholder expression that will be replaced at runtime.
                 args.push(ExprImpl::literal_varchar("".to_owned()));
             } else {
@@ -541,7 +538,6 @@ impl Binder {
                     udf.clone(),
                     args,
                     secret_refs,
-                    secret_display_names,
                 )
                 .into());
             }

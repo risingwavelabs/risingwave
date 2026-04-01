@@ -184,7 +184,6 @@ pub trait ExprRewriter {
             args,
             catalog,
             secret_refs,
-            secret_display_names,
         } = udf;
         let args = args
             .into_iter()
@@ -194,7 +193,6 @@ pub trait ExprRewriter {
             args,
             catalog,
             secret_refs,
-            secret_display_names,
         }
         .into()
     }
