@@ -4037,7 +4037,7 @@ mod tests {
         );
         let build_side = vec![build_chunk];
 
-        let mut next_row_id = ChunkedData::with_chunk_sizes([2].into_iter()).unwrap();
+        let mut next_row_id = ChunkedData::with_chunk_sizes([2]).unwrap();
         next_row_id[RowId::new(0, 0)] = Some(RowId::new(0, 1));
         next_row_id[RowId::new(0, 1)] = None;
 
@@ -4073,7 +4073,7 @@ mod tests {
         );
         let build_side = vec![build_chunk];
 
-        let mut next_row_id = ChunkedData::with_chunk_sizes([2].into_iter()).unwrap();
+        let mut next_row_id = ChunkedData::with_chunk_sizes([2]).unwrap();
         next_row_id[RowId::new(0, 0)] = Some(RowId::new(0, 1));
         next_row_id[RowId::new(0, 1)] = None;
 
