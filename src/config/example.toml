@@ -234,6 +234,7 @@ enable_shared_source = true
 switch_jdbc_pg_to_native = false
 max_barrier_batch_size = 1024
 hash_join_entry_state_max_rows = 30000
+join_hash_map_evict_interval_rows = 16
 now_progress_ratio = ""
 enable_explain_analyze_stats = true
 snapshot_iter_rebuild_interval_secs = 600
