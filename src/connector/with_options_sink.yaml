@@ -622,6 +622,10 @@ IcebergConfig:
     field_type: String
     required: false
     default: Default::default
+  - name: order_key
+    field_type: String
+    required: false
+    default: Default::default
   - name: commit_checkpoint_interval
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 60.

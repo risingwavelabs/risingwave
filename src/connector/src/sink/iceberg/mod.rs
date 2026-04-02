@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -200,6 +200,8 @@ pub const ORDER_KEY: &str = "order_key";
 pub const ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: u64 = 128;
 
 const PARQUET_CREATED_BY: &str = concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
+static ORDER_KEY_COLUMN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("valid order key regex"));
 
 fn default_commit_retry_num() -> u32 {
     8
@@ -976,7 +978,8 @@ impl IcebergSink {
                 order_key,
                 param.columns.iter().map(|column| column.name.as_str()),
             )
-            .context("invalid order_key")?;
+            .context("invalid order_key")
+            .map_err(SinkError::Config)?;
         }
 
         let unique_column_ids = if config.r#type == SINK_TYPE_UPSERT && !config.force_append_only {
@@ -1961,12 +1964,9 @@ impl SinkWriter for IcebergSinkWriter {
                 inner.uncommitted_write_bytes = 0;
                 let format_version = inner.table.metadata().format_version();
                 let partition_type = inner.table.metadata().default_partition_type();
-                let table_sort_order_id = table_sort_order_id(inner.table.metadata());
                 let data_files = result
                     .into_iter()
                     .map(|f| {
-                        let f = apply_sort_order_id_to_data_file(f, table_sort_order_id)
-                            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
                         // Truncate large column statistics BEFORE serialization
                         let truncated = truncate_datafile(f);
                         SerializedDataFile::try_from(truncated, partition_type, format_version)
@@ -3086,8 +3086,7 @@ pub fn parse_order_key_exprs(
         }
 
         let column = tokens[0];
-        let valid_column = Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap();
-        if !valid_column.is_match(column) {
+        if !ORDER_KEY_COLUMN_RE.is_match(column) {
             bail!(
                 "Invalid order key column `{column}`\nHINT: Only plain column names are supported in order_key"
             );
@@ -3197,54 +3196,6 @@ fn build_sort_order(order_key: &str, schema: &iceberg::spec::Schema) -> Result<S
     builder
         .build(schema)
         .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-}
-
-fn table_sort_order_id(table: &iceberg::spec::TableMetadata) -> Option<i32> {
-    let sort_order = table.default_sort_order();
-    (!sort_order.is_unsorted()).then_some(table.default_sort_order_id() as i32)
-}
-
-fn apply_sort_order_id_to_data_file(
-    data_file: DataFile,
-    sort_order_id: Option<i32>,
-) -> anyhow::Result<DataFile> {
-    if !matches!(
-        data_file.content_type(),
-        iceberg::spec::DataContentType::Data
-    ) {
-        return Ok(data_file);
-    }
-
-    let Some(sort_order_id) = sort_order_id else {
-        return Ok(data_file);
-    };
-
-    iceberg::spec::DataFileBuilder::default()
-        .content(data_file.content_type())
-        .file_path(data_file.file_path().to_owned())
-        .file_format(data_file.file_format())
-        .partition(data_file.partition().clone())
-        .record_count(data_file.record_count())
-        .file_size_in_bytes(data_file.file_size_in_bytes())
-        .column_sizes(data_file.column_sizes().clone())
-        .value_counts(data_file.value_counts().clone())
-        .null_value_counts(data_file.null_value_counts().clone())
-        .nan_value_counts(data_file.nan_value_counts().clone())
-        .lower_bounds(data_file.lower_bounds().clone())
-        .upper_bounds(data_file.upper_bounds().clone())
-        .key_metadata(data_file.key_metadata().map(|v| v.to_vec()))
-        .split_offsets(data_file.split_offsets().map(|v| v.to_vec()))
-        .equality_ids(data_file.equality_ids())
-        .sort_order_id(sort_order_id)
-        .first_row_id(data_file.first_row_id())
-        .partition_spec_id(data_file.partition_spec_id())
-        .referenced_data_file(data_file.referenced_data_file())
-        .content_offset(data_file.content_offset())
-        .content_size_in_bytes(data_file.content_size_in_bytes())
-        .build()
-        .map_err(|err| {
-            anyhow!("failed to rebuild data file with sort_order_id {sort_order_id}: {err}")
-        })
 }
 
 pub fn commit_branch(sink_type: &str, write_mode: IcebergWriteMode) -> String {
@@ -3571,6 +3522,7 @@ mod test {
             force_append_only: false,
             primary_key: Some(vec!["v1".to_owned()]),
             partition_by: Some("v1, identity(v1), truncate(4,v2), bucket(5,v1), year(v3), month(v4), day(v5), hour(v6), void(v1)".to_owned()),
+            order_key: None,
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))

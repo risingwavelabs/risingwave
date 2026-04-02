@@ -120,11 +120,6 @@ select sum(record_count) from rw_iceberg_files where source_name = 'iceberg_e2e_
 ----
 7
 
-query I
-select count(*) > 0 from rw_iceberg_files where source_name = 'iceberg_e2e_auto_create_table' and sort_order_id is not null;
-----
-t
-
 statement ok
 INSERT INTO t6 VALUES (1, 50, '1-50');
 
