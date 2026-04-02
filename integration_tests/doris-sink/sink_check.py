@@ -1,47 +1,34 @@
 import subprocess
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from sink_check_utils import docker_compose_exec, check_row_counts, report_failures
 
-relations = ['demo.demo_bhv_table', 'demo.upsert_table']
 
-failed_cases = []
-for rel in relations:
+def doris_count(rel):
     sql = f'SELECT COUNT(*) FROM {rel};'
-    print(f"Running SQL: {sql} ON Doris")
-    command = f'mysql -uroot -P9030 -hfe -e "{sql}"'
-    output = subprocess.check_output(
-        ["docker", "compose", "exec", "mysql", "bash", "-c", command])
-    # output:
-    # COUNT(*)
-    # 0
-    rows = int(output.decode('utf-8').split('\n')[1])
-    print(f"{rows} rows in {rel}")
-    if rows < 1:
-        failed_cases.append(rel)
+    output = docker_compose_exec("mysql", f'mysql -uroot -P9030 -hfe -e "{sql}"')
+    return int(output.split('\n')[1])
+
+
+failed = check_row_counts(['demo.demo_bhv_table', 'demo.upsert_table'], doris_count, "Doris")
 
 # update data
-subprocess.run(["docker", "compose", "exec", "postgres", "bash", "-c", "psql -h risingwave-standalone -p 4566 -d dev -U root -f update_delete.sql"], check=True)
+subprocess.run(["docker", "compose", "exec", "postgres", "bash", "-c",
+                 "psql -h risingwave-standalone -p 4566 -d dev -U root -f update_delete.sql"], check=True)
 
-# delete
-sql = f"SELECT COUNT(*) FROM demo.upsert_table;"
-command = f'mysql -uroot -P9030 -hfe -e "{sql}"'
-output = subprocess.check_output(
-    ["docker", "compose", "exec", "mysql", "bash", "-c", command])
-rows = int(output.decode('utf-8').split('\n')[1])
-print(f"{rows} rows in demo.upsert_table")
+# delete check
+rows = doris_count("demo.upsert_table")
 if rows != 3:
     print(f"rows expected 3, get {rows}")
-    failed_cases.append("delete demo.upsert_table")
+    failed.append("delete demo.upsert_table")
 
-# update
-sql = f"SELECT target_id FROM demo.upsert_table WHERE user_id = 3;"
-command = f'mysql -uroot -P9030 -hfe -e "{sql}"'
-output = subprocess.check_output(
-    ["docker", "compose", "exec", "mysql", "bash", "-c", command])
-id = int(output.decode('utf-8').split('\n')[1])
-if id != 30:
-    print(f"target_id expected 30, get {id}")
-    failed_cases.append("update demo.upsert_table")
+# update check
+sql = "SELECT target_id FROM demo.upsert_table WHERE user_id = 3;"
+output = docker_compose_exec("mysql", f'mysql -uroot -P9030 -hfe -e "{sql}"')
+target_id = int(output.split('\n')[1])
+if target_id != 30:
+    print(f"target_id expected 30, get {target_id}")
+    failed.append("update demo.upsert_table")
 
-if len(failed_cases) != 0:
-    print(f"Data check failed for case {failed_cases}")
-    sys.exit(1)
+report_failures(failed)

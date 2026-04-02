@@ -24,9 +24,10 @@ use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{ConnectionId, FragmentId, StreamingParallelism};
+use risingwave_meta_model::{ConnectionId, FragmentId, SourceId, StreamingParallelism};
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
@@ -58,6 +59,7 @@ pub struct StreamServiceImpl {
     stream_manager: GlobalStreamManagerRef,
     metadata_manager: MetadataManager,
     refresh_manager: GlobalRefreshManagerRef,
+    iceberg_compaction_manager: IcebergCompactionManagerRef,
 }
 
 impl StreamServiceImpl {
@@ -68,6 +70,7 @@ impl StreamServiceImpl {
         stream_manager: GlobalStreamManagerRef,
         metadata_manager: MetadataManager,
         refresh_manager: GlobalRefreshManagerRef,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         StreamServiceImpl {
             env,
@@ -76,6 +79,7 @@ impl StreamServiceImpl {
             stream_manager,
             metadata_manager,
             refresh_manager,
+            iceberg_compaction_manager,
         }
     }
 }
@@ -114,6 +118,34 @@ impl StreamManagerService for StreamServiceImpl {
             .collect();
         Ok(Response::new(ListRefreshTableStatesResponse {
             states: refresh_table_states,
+        }))
+    }
+
+    async fn list_iceberg_compaction_status(
+        &self,
+        _request: Request<ListIcebergCompactionStatusRequest>,
+    ) -> TonicResponse<ListIcebergCompactionStatusResponse> {
+        let statuses = self
+            .iceberg_compaction_manager
+            .list_compaction_statuses()
+            .await
+            .into_iter()
+            .map(
+                |status| list_iceberg_compaction_status_response::IcebergCompactionStatus {
+                    sink_id: status.sink_id.as_raw_id(),
+                    task_type: status.task_type,
+                    trigger_interval_sec: status.trigger_interval_sec,
+                    trigger_snapshot_count: status.trigger_snapshot_count as u64,
+                    schedule_state: status.schedule_state,
+                    next_compaction_after_sec: status.next_compaction_after_sec,
+                    pending_snapshot_count: status.pending_snapshot_count.map(|count| count as u64),
+                    is_triggerable: status.is_triggerable,
+                },
+            )
+            .collect();
+
+        Ok(Response::new(ListIcebergCompactionStatusResponse {
+            statuses,
         }))
     }
 
@@ -272,7 +304,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         let mut info = HashMap::new();
         for job_id in table_ids {
-            let table_fragments = self
+            let (table_fragments, fragment_actors, _actor_status) = self
                 .metadata_manager
                 .catalog_controller
                 .get_job_fragments_by_id(job_id)
@@ -293,15 +325,16 @@ impl StreamManagerService for StreamServiceImpl {
                         .into_iter()
                         .map(|(id, fragment)| FragmentInfo {
                             id,
-                            actors: fragment
-                                .actors
+                            actors: fragment_actors
+                                .get(&id)
                                 .into_iter()
-                                .map(|actor| ActorInfo {
-                                    id: actor.actor_id,
+                                .flat_map(|actors| actors.iter().map(|actor| actor.actor_id))
+                                .map(|actor_id| ActorInfo {
+                                    id: actor_id,
                                     node: Some(fragment.nodes.clone()),
                                     dispatcher: dispatchers
                                         .get_mut(&fragment.fragment_id)
-                                        .and_then(|dispatchers| dispatchers.remove(&actor.actor_id))
+                                        .and_then(|dispatchers| dispatchers.remove(&actor_id))
                                         .unwrap_or_default(),
                                 })
                                 .collect_vec(),
@@ -357,6 +390,7 @@ impl StreamManagerService for StreamServiceImpl {
                         database_id,
                         schema_id,
                         config_override,
+                        adaptive_parallelism_strategy: None,
                     }
                 },
             )
@@ -706,6 +740,7 @@ impl StreamManagerService for StreamServiceImpl {
                         request.object_id.into(),
                         request.changed_props.clone().into_iter().collect(),
                         request.changed_secret_refs.clone().into_iter().collect(),
+                        false, // SQL ALTER SOURCE enforces alter-on-fly check
                     )
                     .await?;
 
@@ -883,6 +918,172 @@ impl StreamManagerService for StreamServiceImpl {
 
         Ok(Response::new(ListUnmigratedTablesResponse {
             tables: unmigrated_tables,
+        }))
+    }
+
+    /// Orchestrated source property update with pause/update/resume workflow.
+    /// This is the "safe" version that pauses sources before updating and resumes after.
+    async fn alter_source_properties_safe(
+        &self,
+        request: Request<AlterSourcePropertiesSafeRequest>,
+    ) -> Result<Response<AlterSourcePropertiesSafeResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+        let options = request.options.unwrap_or_default();
+
+        tracing::info!(
+            source_id = source_id,
+            reset_splits = options.reset_splits,
+            "Starting orchestrated source property update"
+        );
+
+        // Get the database ID for the source
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(SourceId::from(source_id))
+            .await?;
+
+        // Step 1: Pause the stream (already commits state)
+        tracing::info!(source_id = source_id, "Pausing stream");
+        self.barrier_scheduler
+            .run_command(database_id, Command::Pause)
+            .await?;
+
+        // Step 2: Update catalog and get the new properties
+        let result = async {
+            let secret_manager = LocalSecretManager::global();
+
+            let options_with_secret = self
+                .metadata_manager
+                .catalog_controller
+                .update_source_props_by_source_id(
+                    source_id.into(),
+                    request.changed_props.clone().into_iter().collect(),
+                    request.changed_secret_refs.clone().into_iter().collect(),
+                    true, // risectl admin operation skips alter-on-fly check
+                )
+                .await?;
+
+            // Validate the source
+            self.stream_manager
+                .source_manager
+                .validate_source_once(source_id.into(), options_with_secret.clone())
+                .await?;
+
+            let (props, secret_refs) = options_with_secret.into_parts();
+            let new_props_plaintext: HashMap<String, String> = secret_manager
+                .fill_secrets(props, secret_refs)
+                .map_err(MetaError::from)?
+                .into_iter()
+                .collect();
+
+            // Step 3: Issue ConnectorPropsChange barrier
+            tracing::info!(
+                source_id = source_id,
+                "Issuing ConnectorPropsChange barrier"
+            );
+            let mut mutation = HashMap::default();
+            mutation.insert(source_id.into(), new_props_plaintext);
+            self.barrier_scheduler
+                .run_command(database_id, Command::ConnectorPropsChange(mutation))
+                .await?;
+
+            // Step 4: Optional split reset
+            if options.reset_splits {
+                tracing::info!(source_id = source_id, "Resetting source splits");
+                self.stream_manager
+                    .source_manager
+                    .reset_source_splits(source_id.into())
+                    .await?;
+            }
+
+            Ok::<_, MetaError>(())
+        }
+        .await;
+
+        // Step 5: Resume the stream (even if previous steps failed)
+        tracing::info!(source_id = source_id, "Resuming stream");
+        let resume_result = self
+            .barrier_scheduler
+            .run_command(database_id, Command::Resume)
+            .await;
+
+        // Return the first error if any
+        result?;
+        resume_result?;
+
+        tracing::info!(
+            source_id = source_id,
+            "Orchestrated source property update completed successfully"
+        );
+
+        Ok(Response::new(AlterSourcePropertiesSafeResponse {}))
+    }
+
+    /// Reset source split assignments (UNSAFE - admin only).
+    /// This clears persisted split metadata and triggers re-discovery.
+    async fn reset_source_splits(
+        &self,
+        request: Request<ResetSourceSplitsRequest>,
+    ) -> Result<Response<ResetSourceSplitsResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+
+        tracing::warn!(
+            source_id = source_id,
+            "UNSAFE: Resetting source splits - this may cause data duplication or loss"
+        );
+
+        self.stream_manager
+            .source_manager
+            .reset_source_splits(source_id.into())
+            .await?;
+
+        Ok(Response::new(ResetSourceSplitsResponse {}))
+    }
+
+    /// Inject specific offsets into source splits (UNSAFE - admin only).
+    /// This can cause data duplication or loss depending on the correctness of the provided offsets.
+    async fn inject_source_offsets(
+        &self,
+        request: Request<InjectSourceOffsetsRequest>,
+    ) -> Result<Response<InjectSourceOffsetsResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+        let split_offsets = request.split_offsets;
+
+        // Validate split IDs exist before proceeding
+        let applied_split_ids = self
+            .stream_manager
+            .source_manager
+            .validate_inject_source_offsets(source_id.into(), &split_offsets)
+            .await?;
+
+        tracing::warn!(
+            source_id = source_id,
+            num_offsets = split_offsets.len(),
+            "UNSAFE: Injecting source offsets - this may cause data duplication or loss"
+        );
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(SourceId::from(source_id))
+            .await?;
+
+        self.barrier_scheduler
+            .run_command(
+                database_id,
+                Command::InjectSourceOffsets {
+                    source_id: SourceId::from(source_id),
+                    split_offsets,
+                },
+            )
+            .await?;
+
+        Ok(Response::new(InjectSourceOffsetsResponse {
+            applied_split_ids,
         }))
     }
 }

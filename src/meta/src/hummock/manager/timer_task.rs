@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -381,19 +382,20 @@ impl HummockManager {
             .set(compaction_group_count as i64);
 
         for (group_id, group_levels) in &current_version.levels {
-            if let Some(compaction_group_config) = id_to_config.get(group_id) {
-                trigger_lsm_stat(
-                    &self.metrics,
-                    compaction_group_config.compaction_config(),
-                    group_levels,
-                    *group_id,
-                );
-            } else {
+            let Some(compaction_group_config) = id_to_config.get(group_id) else {
                 warn!(
                     compaction_group_id = %group_id,
-                    "Missing compaction group config when reporting metrics. Skip lsm metrics."
+                    "Missing compaction group config when reporting metrics. Skip."
                 );
-            }
+                continue;
+            };
+
+            trigger_lsm_stat(
+                &self.metrics,
+                compaction_group_config.compaction_config(),
+                group_levels,
+                *group_id,
+            );
 
             let member_table_ids = current_version
                 .state_table_info
@@ -472,6 +474,40 @@ impl HummockManager {
 }
 
 impl HummockManager {
+    async fn maybe_normalize_compaction_groups(&self, schedule_type: &'static str) {
+        if !self.env.opts.enable_compaction_group_normalize {
+            return;
+        }
+
+        match self
+            .normalize_overlapping_compaction_groups_with_limit(
+                self.env
+                    .opts
+                    .max_normalize_splits_per_round
+                    .try_into()
+                    .unwrap_or(usize::MAX),
+            )
+            .await
+        {
+            Ok(split_count) => {
+                if split_count > 0 {
+                    tracing::info!(
+                        "normalize compaction groups finished with {} split(s) before {} scheduling",
+                        split_count,
+                        schedule_type
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    "failed to normalize compaction groups before {} scheduling",
+                    schedule_type
+                );
+            }
+        }
+    }
+
     async fn check_dead_task(&self) {
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
@@ -565,9 +601,10 @@ impl HummockManager {
     /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
     async fn on_handle_schedule_group_split(&self) {
         let table_write_throughput = self.table_write_throughput_statistic_manager.read().clone();
+        self.maybe_normalize_compaction_groups("split").await;
+
         let mut group_infos = self.calculate_compaction_group_statistic().await;
-        group_infos.sort_by_key(|group| group.group_size);
-        group_infos.reverse();
+        group_infos.sort_by_key(|group| Reverse(group.group_size));
 
         for group in group_infos {
             if group.table_statistic.len() == 1 {
@@ -580,16 +617,23 @@ impl HummockManager {
         }
     }
 
+    #[cfg(test)]
+    pub async fn schedule_group_split_for_test(&self) {
+        self.on_handle_schedule_group_split().await;
+    }
+
+    #[cfg(test)]
+    pub async fn schedule_group_merge_for_test(&self) {
+        self.on_handle_schedule_group_merge().await;
+    }
+
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
         for cg_id in self.compaction_group_ids().await {
-            if let Err(e) = self.compaction_state.try_sched_compaction(cg_id, task_type) {
-                tracing::error!(
-                    error = %e.as_report(),
-                    "Failed to schedule {:?} compaction for compaction group {}",
-                    task_type,
-                    cg_id,
-                );
-            }
+            self.compaction_state.try_sched_compaction(
+                cg_id,
+                task_type,
+                super::compaction::ScheduleTrigger::Periodic,
+            );
         }
     }
 
@@ -599,6 +643,8 @@ impl HummockManager {
     /// 2. The compaction group is a small group.
     /// 3. All tables in compaction group is in a low throughput state.
     async fn on_handle_schedule_group_merge(&self) {
+        self.maybe_normalize_compaction_groups("merge").await;
+
         let created_tables = match self.metadata_manager.get_created_table_ids().await {
             Ok(created_tables) => HashSet::from_iter(created_tables),
             Err(err) => {
@@ -610,14 +656,7 @@ impl HummockManager {
             self.table_write_throughput_statistic_manager.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         // sort by first table id for deterministic merge order
-        group_infos.sort_by_key(|group| {
-            let table_ids = group
-                .table_statistic
-                .keys()
-                .cloned()
-                .collect::<BTreeSet<_>>();
-            table_ids.iter().next().cloned()
-        });
+        group_infos.sort_by_key(|group| group.table_statistic.keys().next().copied());
 
         let group_count = group_infos.len();
         if group_count < 2 {
@@ -655,147 +694,290 @@ impl HummockManager {
 
 #[cfg(test)]
 mod tests {
-    use std::future::pending;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::time::Duration;
+    mod merge_scheduling {
+        use std::sync::Arc;
+        use std::time::Duration;
 
-    use tokio::sync::{Mutex, Notify, watch};
+        use itertools::Itertools;
+        use risingwave_common::catalog::TableId;
+        use risingwave_hummock_sdk::CompactionGroupId;
+        use risingwave_hummock_sdk::version::HummockVersion;
+        use risingwave_meta_model::WorkerId;
+        use risingwave_pb::common::worker_node::Property;
+        use risingwave_pb::common::{HostAddress, WorkerType};
 
-    use super::spawn_periodic_loop;
+        use crate::controller::catalog::CatalogController;
+        use crate::controller::cluster::{ClusterController, ClusterControllerRef};
+        use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+        use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
+        use crate::manager::{MetaOpts, MetaSrvEnv};
 
-    #[tokio::test(start_paused = true)]
-    async fn test_spawn_periodic_loop_isolated_progress() {
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let slow_counter = Arc::new(AtomicUsize::new(0));
-        let fast_counter = Arc::new(AtomicUsize::new(0));
+        async fn setup_compute_env_with_meta_opts(
+            port: i32,
+            opts: MetaOpts,
+        ) -> (
+            MetaSrvEnv,
+            HummockManagerRef,
+            ClusterControllerRef,
+            WorkerId,
+        ) {
+            let env = MetaSrvEnv::for_test_opts(opts, |_| ()).await;
+            let cluster_ctl = Arc::new(
+                ClusterController::new(env.clone(), Duration::from_secs(1))
+                    .await
+                    .unwrap(),
+            );
+            let catalog_ctl = Arc::new(CatalogController::new(env.clone()).await.unwrap());
+            let compactor_manager = Arc::new(CompactorManager::for_test());
+            let (compactor_streams_change_tx, _compactor_streams_change_rx) =
+                tokio::sync::mpsc::unbounded_channel();
+            let config = CompactionConfigBuilder::new()
+                .level0_tier_compact_file_number(1)
+                .level0_max_compact_file_number(130)
+                .level0_sub_level_compact_level_count(1)
+                .level0_overlapping_sub_level_compact_level_count(1)
+                .build();
+            let hummock_manager = HummockManager::with_config(
+                env.clone(),
+                cluster_ctl.clone(),
+                catalog_ctl,
+                Arc::new(Default::default()),
+                compactor_manager,
+                config,
+                compactor_streams_change_tx,
+            )
+            .await;
 
-        let slow_handle = spawn_periodic_loop(
-            "test_slow",
-            Duration::from_millis(10),
-            shutdown_rx.clone(),
-            {
-                let slow_counter = slow_counter.clone();
-                move || {
-                    let slow_counter = slow_counter.clone();
-                    async move {
-                        slow_counter.fetch_add(1, Ordering::Relaxed);
-                        tokio::time::sleep(Duration::from_millis(30)).await;
-                    }
-                }
-            },
-        );
-
-        let fast_handle =
-            spawn_periodic_loop("test_fast", Duration::from_millis(10), shutdown_rx, {
-                let fast_counter = fast_counter.clone();
-                move || {
-                    let fast_counter = fast_counter.clone();
-                    async move {
-                        fast_counter.fetch_add(1, Ordering::Relaxed);
-                    }
-                }
-            });
-
-        tokio::time::sleep(Duration::from_millis(120)).await;
-        shutdown_tx.send(true).unwrap();
-        slow_handle.await.unwrap();
-        fast_handle.await.unwrap();
-
-        let slow = slow_counter.load(Ordering::Relaxed);
-        let fast = fast_counter.load(Ordering::Relaxed);
-        assert!(fast > 0);
-        assert!(fast > slow);
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn test_shared_mutex_guards_concurrent_handlers() {
-        struct DecrOnDrop(Arc<AtomicUsize>);
-
-        impl Drop for DecrOnDrop {
-            fn drop(&mut self) {
-                self.0.fetch_sub(1, Ordering::SeqCst);
-            }
+            let worker_id = cluster_ctl
+                .add_worker(
+                    WorkerType::ComputeNode,
+                    HostAddress {
+                        host: "127.0.0.1".to_owned(),
+                        port,
+                    },
+                    Property {
+                        is_streaming: true,
+                        is_serving: true,
+                        parallelism: 4,
+                        ..Default::default()
+                    },
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            (env, hummock_manager, cluster_ctl, worker_id)
         }
 
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let scheduling_mutex = Arc::new(Mutex::new(()));
-        let in_critical = Arc::new(AtomicUsize::new(0));
-        let max_in_critical = Arc::new(AtomicUsize::new(0));
+        async fn get_compaction_group_id_by_table_id(
+            hummock_manager: HummockManagerRef,
+            table_id: u32,
+        ) -> CompactionGroupId {
+            hummock_manager
+                .get_current_version()
+                .await
+                .state_table_info
+                .info()
+                .get(&TableId::new(table_id))
+                .unwrap()
+                .compaction_group_id
+        }
 
-        let split_handle = spawn_periodic_loop(
-            "test_split",
-            Duration::from_millis(10),
-            shutdown_rx.clone(),
-            {
-                let scheduling_mutex = scheduling_mutex.clone();
-                let in_critical = in_critical.clone();
-                let max_in_critical = max_in_critical.clone();
-                move || {
-                    let scheduling_mutex = scheduling_mutex.clone();
-                    let in_critical = in_critical.clone();
-                    let max_in_critical = max_in_critical.clone();
-                    async move {
-                        let _guard = scheduling_mutex.lock().await;
-                        let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
-                        let _decr = DecrOnDrop(in_critical);
-                        max_in_critical.fetch_max(now, Ordering::SeqCst);
-                        tokio::time::sleep(Duration::from_millis(15)).await;
-                    }
-                }
-            },
-        );
+        fn member_table_ids(version: &HummockVersion, group_id: CompactionGroupId) -> Vec<u32> {
+            version
+                .state_table_info
+                .compaction_group_member_table_ids(group_id)
+                .iter()
+                .map(|table_id| table_id.as_raw_id())
+                .collect_vec()
+        }
 
-        let merge_handle =
-            spawn_periodic_loop("test_merge", Duration::from_millis(10), shutdown_rx, {
-                let scheduling_mutex = scheduling_mutex.clone();
-                let in_critical = in_critical.clone();
-                let max_in_critical = max_in_critical.clone();
-                move || {
-                    let scheduling_mutex = scheduling_mutex.clone();
-                    let in_critical = in_critical.clone();
-                    let max_in_critical = max_in_critical.clone();
-                    async move {
-                        let _guard = scheduling_mutex.lock().await;
-                        let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
-                        let _decr = DecrOnDrop(in_critical);
-                        max_in_critical.fetch_max(now, Ordering::SeqCst);
-                        tokio::time::sleep(Duration::from_millis(15)).await;
-                    }
-                }
-            });
+        fn assert_no_group_overlap(version: &HummockVersion) {
+            let mut ranges = version
+                .levels
+                .keys()
+                .filter_map(|group_id| {
+                    let members = member_table_ids(version, *group_id);
+                    (!members.is_empty())
+                        .then(|| (*members.first().unwrap(), *members.last().unwrap()))
+                })
+                .collect_vec();
+            ranges.sort_by_key(|(min_table_id, _)| *min_table_id);
+            assert!(ranges.windows(2).all(|window| window[0].1 < window[1].0));
+        }
 
-        tokio::time::sleep(Duration::from_millis(120)).await;
-        shutdown_tx.send(true).unwrap();
-        split_handle.await.unwrap();
-        merge_handle.await.unwrap();
+        #[tokio::test]
+        async fn test_merge_scheduling_normalizes_when_split_scheduling_is_disabled() {
+            let mut opts = MetaOpts::test(false);
+            opts.enable_compaction_group_normalize = true;
+            opts.periodic_scheduling_compaction_group_split_interval_sec = 0;
 
-        assert_eq!(max_in_critical.load(Ordering::SeqCst), 1);
+            let (_env, hummock_manager, _, _worker_id) =
+                setup_compute_env_with_meta_opts(80, opts).await;
+            hummock_manager
+                .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+                .await
+                .unwrap();
+            hummock_manager
+                .register_table_ids_for_test(&[(65, 3.into()), (81, 3.into()), (83, 3.into())])
+                .await
+                .unwrap();
+
+            let cg_64 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 64).await;
+            let cg_65 = get_compaction_group_id_by_table_id(hummock_manager.clone(), 65).await;
+
+            hummock_manager.on_handle_schedule_group_merge().await;
+
+            let version = hummock_manager.get_current_version().await;
+            assert_eq!(member_table_ids(&version, cg_64), vec![64]);
+            assert_eq!(member_table_ids(&version, cg_65), vec![65]);
+            assert_no_group_overlap(&version);
+        }
     }
 
-    #[tokio::test]
-    async fn test_spawn_periodic_loop_shutdown_preempts_handler() {
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let started = Arc::new(Notify::new());
+    mod periodic_loop {
+        use std::future::pending;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
 
-        let handle = spawn_periodic_loop("test_preempt", Duration::from_millis(10), shutdown_rx, {
-            let started = started.clone();
-            move || {
-                let started = started.clone();
-                async move {
-                    started.notify_one();
-                    // A never-ending handler which should be cancelled by shutdown.
-                    pending::<()>().await;
+        use tokio::sync::{Mutex, Notify, watch};
+
+        use super::super::spawn_periodic_loop;
+
+        #[tokio::test(start_paused = true)]
+        async fn test_spawn_periodic_loop_isolated_progress() {
+            let (shutdown_tx, shutdown_rx) = watch::channel(false);
+            let slow_counter = Arc::new(AtomicUsize::new(0));
+            let fast_counter = Arc::new(AtomicUsize::new(0));
+
+            let slow_handle = spawn_periodic_loop(
+                "test_slow",
+                Duration::from_millis(10),
+                shutdown_rx.clone(),
+                {
+                    let slow_counter = slow_counter.clone();
+                    move || {
+                        let slow_counter = slow_counter.clone();
+                        async move {
+                            slow_counter.fetch_add(1, Ordering::Relaxed);
+                            tokio::time::sleep(Duration::from_millis(30)).await;
+                        }
+                    }
+                },
+            );
+
+            let fast_handle =
+                spawn_periodic_loop("test_fast", Duration::from_millis(10), shutdown_rx, {
+                    let fast_counter = fast_counter.clone();
+                    move || {
+                        let fast_counter = fast_counter.clone();
+                        async move {
+                            fast_counter.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                });
+
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            shutdown_tx.send(true).unwrap();
+            slow_handle.await.unwrap();
+            fast_handle.await.unwrap();
+
+            let slow = slow_counter.load(Ordering::Relaxed);
+            let fast = fast_counter.load(Ordering::Relaxed);
+            assert!(fast > 0);
+            assert!(fast > slow);
+        }
+
+        #[tokio::test(start_paused = true)]
+        async fn test_shared_mutex_guards_concurrent_handlers() {
+            struct DecrOnDrop(Arc<AtomicUsize>);
+
+            impl Drop for DecrOnDrop {
+                fn drop(&mut self) {
+                    self.0.fetch_sub(1, Ordering::SeqCst);
                 }
             }
-        });
 
-        started.notified().await;
-        shutdown_tx.send(true).unwrap();
+            let (shutdown_tx, shutdown_rx) = watch::channel(false);
+            let scheduling_mutex = Arc::new(Mutex::new(()));
+            let in_critical = Arc::new(AtomicUsize::new(0));
+            let max_in_critical = Arc::new(AtomicUsize::new(0));
 
-        tokio::time::timeout(Duration::from_secs(1), handle)
-            .await
-            .expect("handler loop should stop promptly")
-            .unwrap();
+            let split_handle = spawn_periodic_loop(
+                "test_split",
+                Duration::from_millis(10),
+                shutdown_rx.clone(),
+                {
+                    let scheduling_mutex = scheduling_mutex.clone();
+                    let in_critical = in_critical.clone();
+                    let max_in_critical = max_in_critical.clone();
+                    move || {
+                        let scheduling_mutex = scheduling_mutex.clone();
+                        let in_critical = in_critical.clone();
+                        let max_in_critical = max_in_critical.clone();
+                        async move {
+                            let _guard = scheduling_mutex.lock().await;
+                            let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
+                            let _decr = DecrOnDrop(in_critical);
+                            max_in_critical.fetch_max(now, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(15)).await;
+                        }
+                    }
+                },
+            );
+
+            let merge_handle =
+                spawn_periodic_loop("test_merge", Duration::from_millis(10), shutdown_rx, {
+                    let scheduling_mutex = scheduling_mutex.clone();
+                    let in_critical = in_critical.clone();
+                    let max_in_critical = max_in_critical.clone();
+                    move || {
+                        let scheduling_mutex = scheduling_mutex.clone();
+                        let in_critical = in_critical.clone();
+                        let max_in_critical = max_in_critical.clone();
+                        async move {
+                            let _guard = scheduling_mutex.lock().await;
+                            let now = in_critical.fetch_add(1, Ordering::SeqCst) + 1;
+                            let _decr = DecrOnDrop(in_critical);
+                            max_in_critical.fetch_max(now, Ordering::SeqCst);
+                            tokio::time::sleep(Duration::from_millis(15)).await;
+                        }
+                    }
+                });
+
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            shutdown_tx.send(true).unwrap();
+            split_handle.await.unwrap();
+            merge_handle.await.unwrap();
+
+            assert_eq!(max_in_critical.load(Ordering::SeqCst), 1);
+        }
+
+        #[tokio::test]
+        async fn test_spawn_periodic_loop_shutdown_preempts_handler() {
+            let (shutdown_tx, shutdown_rx) = watch::channel(false);
+            let started = Arc::new(Notify::new());
+
+            let handle =
+                spawn_periodic_loop("test_preempt", Duration::from_millis(10), shutdown_rx, {
+                    let started = started.clone();
+                    move || {
+                        let started = started.clone();
+                        async move {
+                            started.notify_one();
+                            // A never-ending handler which should be cancelled by shutdown.
+                            pending::<()>().await;
+                        }
+                    }
+                });
+
+            started.notified().await;
+            shutdown_tx.send(true).unwrap();
+
+            tokio::time::timeout(Duration::from_secs(1), handle)
+                .await
+                .expect("handler loop should stop promptly")
+                .unwrap();
+        }
     }
 }

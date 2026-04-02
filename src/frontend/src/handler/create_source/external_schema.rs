@@ -65,7 +65,7 @@ feature_gated_function!(
 );
 
 /// Resolves the schema of the source from external schema file.
-/// See <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
+/// See <https://docs.risingwave.com/sql/commands/sql-create-source> for more information.
 ///
 /// Note: the returned schema strictly corresponds to the schema.
 /// Other special columns like additional columns (`INCLUDE`), and `row_id` column are not included.

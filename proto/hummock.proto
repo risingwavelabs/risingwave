@@ -15,6 +15,19 @@ enum BloomFilterType {
   BLOCKED = 2;
 }
 
+// Key range for a single vnode within an SST.
+// Keys are always represented as closed intervals: [min_key, max_key].
+message VnodeUserKeyRange {
+  bytes min_key = 1;
+  bytes max_key = 2;
+}
+
+// Optional per-vnode statistics for SSTs with few vnodes.
+// Enables more precise query pruning by providing vnode-level key ranges.
+message VnodeStatistics {
+  map<uint32, VnodeUserKeyRange> vnode_user_key_ranges = 1;
+}
+
 message SstableInfo {
   uint64 object_id = 1;
   uint64 sst_id = 2;
@@ -34,6 +47,10 @@ message SstableInfo {
   // In order to calculate more finely in the compaction strategy, we need to re-calculate the sst_size after split sst
   // `sst_size` represents the size of the sst instead of the object size(usually used in the meta).
   uint64 sst_size = 14;
+
+  // Optional per-vnode statistics for query pruning when the SST spans only a small set of vnodes.
+  // Only emitted when SST contains multiple vnodes to avoid redundancy with key_range.
+  VnodeStatistics vnode_statistics = 15;
 }
 
 enum LevelType {
@@ -352,6 +369,45 @@ message HummockVersionCheckpoint {
   map<uint64, StaleObjects> stale_objects = 2;
 }
 
+// Compression algorithm used for checkpoint data serialization.
+enum CheckpointCompressionAlgorithm {
+  // No compression (uncompressed).
+  CHECKPOINT_COMPRESSION_UNSPECIFIED = 0;
+  // Zstd compression (default, good balance between ratio and speed).
+  CHECKPOINT_COMPRESSION_ZSTD = 1;
+  // Lz4 compression (faster but lower compression ratio).
+  CHECKPOINT_COMPRESSION_LZ4 = 2;
+}
+
+// Envelope message wrapping a compressed or uncompressed HummockVersionCheckpoint.
+// When compression_algorithm is NONE (or UNSPECIFIED), payload contains raw PbHummockVersionCheckpoint bytes.
+// Otherwise, payload contains the compressed PbHummockVersionCheckpoint bytes.
+//
+// Backward compatibility:
+// - Old code (unaware of this message) writes raw PbHummockVersionCheckpoint directly.
+// - New code tries to decode as HummockVersionCheckpointEnvelope first.
+//   If it fails (old format), it falls back to decoding as PbHummockVersionCheckpoint.
+// - Legacy bytes may occasionally decode as an envelope due to protobuf's unknown-field
+//   skipping, so readers treat `checksum` as the discriminator: all new envelopes set it,
+//   while old raw checkpoints do not have field 3.
+//
+// Format detection logic:
+// 1. Try to decode bytes as HummockVersionCheckpointEnvelope
+// 2. If checksum.is_some(), treat as new envelope format:
+//    a. Verify checksum against payload
+//    b. Decompress payload according to compression_algorithm
+//    c. Decode decompressed bytes as PbHummockVersionCheckpoint
+// 3. If checksum.is_none() or decode fails, treat as legacy format:
+//    - Decode bytes directly as PbHummockVersionCheckpoint
+message HummockVersionCheckpointEnvelope {
+  CheckpointCompressionAlgorithm compression_algorithm = 1;
+  // Compressed (or uncompressed if algorithm is NONE) PbHummockVersionCheckpoint bytes.
+  bytes payload = 2;
+  // xxhash64 checksum of the payload bytes (compressed data) for integrity verification.
+  // Presence of this field distinguishes new envelope format from legacy raw checkpoints.
+  optional uint64 checksum = 3;
+}
+
 message HummockVersionArchive {
   HummockVersion version = 1;
   // some version_deltas since version
@@ -379,6 +435,26 @@ message GetCurrentVersionRequest {}
 message GetCurrentVersionResponse {
   common.Status status = 1;
   HummockVersion current_version = 2;
+}
+
+message GetTableChangeLogsRequest {
+  message TableFilter {
+    repeated uint32 table_ids = 1;
+  }
+  // If true, returns only the epoch without the full log bodies.
+  bool epoch_only = 1;
+  bool exclude_empty = 2;
+  // Defines the epoch range to fetch.
+  optional uint64 start_epoch_inclusive = 3;
+  optional uint64 end_epoch_inclusive = 4;
+  // Defines the tables to fetch.
+  optional TableFilter table_ids = 5;
+  // Limit the number of `EpochNewChangeLog` returned for each table.
+  optional uint32 limit = 6;
+}
+
+message GetTableChangeLogsResponse {
+  map<uint32, TableChangeLog> table_change_logs = 1;
 }
 
 message UnpinVersionRequest {
@@ -496,6 +572,8 @@ message CompactTask {
   // The maximum key-value count threshold for using Xor16 filter.
   // When the number of keys exceeds this threshold, a BlockedXor16 filter will be used.
   optional uint64 max_kv_count_for_xor16 = 28;
+  // Max bytes for vnode-level key range hints to embed into output SSTs.
+  optional uint64 max_vnode_key_range_bytes = 29;
 }
 
 message LevelHandler {
@@ -683,10 +761,12 @@ message TriggerManualCompactionRequest {
   uint32 table_id = 3;
   uint32 level = 4;
   repeated uint64 sst_ids = 5;
+  optional bool exclusive = 6;
 }
 
 message TriggerManualCompactionResponse {
   common.Status status = 1;
+  optional bool should_retry = 2;
 }
 
 message TriggerFullGCRequest {
@@ -796,9 +876,12 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint32 sst_allowed_trivial_move_max_count = 29;
       // Enable the optimization of the interval selection for the level0 compaction
       bool enable_optimize_l0_interval_selection = 30;
-      uint64 vnode_aligned_level_size_threshold = 31;
+      // Deprecated. Kept for backward compatibility and ignored by meta.
+      uint64 vnode_aligned_level_size_threshold = 31 [deprecated = true];
       // The maximum key-value count threshold for using Xor16 filter
       uint64 max_kv_count_for_xor16 = 32;
+      // Max bytes for vnode key-range hints recorded into each SST.
+      uint64 max_vnode_key_range_bytes = 33;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -957,6 +1040,7 @@ service HummockManagerService {
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
   rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
   rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
+  rpc GetTableChangeLogs(GetTableChangeLogsRequest) returns (GetTableChangeLogsResponse);
 
   // iceberg
   rpc SubscribeIcebergCompactionEvent(stream iceberg_compaction.SubscribeIcebergCompactionEventRequest) returns (stream iceberg_compaction.SubscribeIcebergCompactionEventResponse);
@@ -1023,16 +1107,8 @@ message CompactionConfig {
   // Enable the optimization of the interval selection for the level0 compaction
   optional bool enable_optimize_l0_interval_selection = 30;
 
-  // Enable strict one-vnode-per-SST for levels that meet the size threshold.
-  // Only effective when both conditions are met:
-  //   1. target_level > base_level (deeper levels only)
-  //   2. level.total_file_size >= this threshold
-  //
-  // This prevents generating too many small SSTs when level size is small.
-  // Each SST will contain exactly one vnode, enabling precise query pruning.
-  //
-  // Typical value: 50GB.
-  optional uint64 vnode_aligned_level_size_threshold = 31;
+  // Deprecated. Kept for backward compatibility and ignored by meta.
+  optional uint64 vnode_aligned_level_size_threshold = 31 [deprecated = true];
 
   // The maximum key-value count threshold for using Xor16 filter instead of BlockedXor16 filter.
   // When the number of keys in a compaction task or SST exceeds this threshold,
@@ -1040,6 +1116,9 @@ message CompactionConfig {
   //
   // Typical value: 256 * 1024 (256K keys).
   optional uint64 max_kv_count_for_xor16 = 32;
+
+  // Max bytes for vnode key-range hints recorded into each SST.
+  optional uint64 max_vnode_key_range_bytes = 33;
 }
 
 message TableStats {

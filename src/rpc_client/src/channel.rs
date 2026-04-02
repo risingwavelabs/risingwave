@@ -17,7 +17,7 @@ use std::task::{Context, Poll};
 use futures::Future;
 use http::HeaderValue;
 use risingwave_common::util::tracing::TracingContext;
-use tonic::body::BoxBody;
+use tonic::body::Body;
 use tower::Service;
 
 /// A service wrapper that hacks the gRPC request and response for observability.
@@ -34,9 +34,9 @@ pub struct WrappedChannel {
 }
 
 #[cfg(not(madsim))]
-impl Service<http::Request<BoxBody>> for WrappedChannel {
+impl Service<http::Request<Body>> for WrappedChannel {
     type Error = tonic::transport::Error;
-    type Response = http::Response<BoxBody>;
+    type Response = http::Response<Body>;
 
     type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
 
@@ -44,7 +44,7 @@ impl Service<http::Request<BoxBody>> for WrappedChannel {
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, mut req: http::Request<BoxBody>) -> Self::Future {
+    fn call(&mut self, mut req: http::Request<Body>) -> Self::Future {
         // This is necessary because tonic internally uses `tower::buffer::Buffer`.
         // See https://github.com/tower-rs/tower/issues/547#issuecomment-767629149
         // for details on why this is necessary

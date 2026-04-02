@@ -46,6 +46,7 @@ use risingwave_dml::dml_manager::DmlManager;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -130,7 +131,6 @@ pub async fn compute_node_serve(
             parallelism: opts.parallelism as u32,
             is_streaming: opts.role.for_streaming(),
             is_serving: opts.role.for_serving(),
-            is_unschedulable: false,
             internal_rpc_host_addr: "".to_owned(),
             resource_group: Some(opts.resource_group.clone()),
             is_iceberg_compactor: false,
@@ -481,7 +481,9 @@ pub async fn compute_node_serve(
                 AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
             }
         })
-        .add_service(MonitorServiceServer::new(monitor_srv))
+        .add_service(configured_monitor_service_server(
+            MonitorServiceServer::new(monitor_srv),
+        ))
         .add_service(ConfigServiceServer::new(config_srv))
         .add_service(HealthServer::new(health_srv))
         .monitored_serve_with_shutdown(

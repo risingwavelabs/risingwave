@@ -128,6 +128,12 @@ pub struct MetaOpts {
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
     pub enable_hummock_data_archive: bool,
+    /// Compression algorithm for hummock version checkpoint: "zstd", "lz4", or "none".
+    pub checkpoint_compression_algorithm: risingwave_common::config::CheckpointCompression,
+    /// Chunk size in bytes for reading large checkpoints.
+    pub checkpoint_read_chunk_size: usize,
+    /// Maximum number of concurrent chunk reads for large checkpoints.
+    pub checkpoint_read_max_in_flight_chunks: usize,
     pub hummock_time_travel_snapshot_interval: u64,
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
@@ -193,8 +199,12 @@ pub struct MetaOpts {
     /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule `periodic_scheduling_compaction_group_split_interval_sec` for all compaction groups with this interval.
+    /// Schedule the regular compaction-group split job for all compaction groups with this interval.
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
+    /// Whether to enable overlap normalization before the regular split and merge schedulers.
+    pub enable_compaction_group_normalize: bool,
+    /// Maximum normalize splits in one scheduler round. Must be greater than 0.
+    pub max_normalize_splits_per_round: u64,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
@@ -208,6 +218,7 @@ pub struct MetaOpts {
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_task_max_progress_interval_secs: u64,
+    pub compaction_task_id_refill_capacity: u32,
     pub compaction_config: Option<CompactionConfig>,
 
     /// hybrid compaction group config
@@ -279,6 +290,9 @@ pub struct MetaOpts {
     pub actor_cnt_per_worker_parallelism_hard_limit: usize,
     pub actor_cnt_per_worker_parallelism_soft_limit: usize,
 
+    pub table_change_log_insert_batch_size: u64,
+    pub table_change_log_delete_batch_size: u64,
+
     pub license_key_path: Option<PathBuf>,
 
     pub compute_client_config: RpcClientConfig,
@@ -314,6 +328,10 @@ impl MetaOpts {
             iceberg_gc_interval_sec: 3600,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
+            checkpoint_compression_algorithm:
+                risingwave_common::config::CheckpointCompression::Zstd,
+            checkpoint_read_chunk_size: 128 * 1024 * 1024,
+            checkpoint_read_max_in_flight_chunks: 4,
             hummock_time_travel_snapshot_interval: 0,
             hummock_time_travel_sst_info_fetch_batch_size: 10_000,
             hummock_time_travel_sst_info_insert_batch_size: 10,
@@ -330,7 +348,7 @@ impl MetaOpts {
             gc_history_retention_time_sec: 3600 * 24 * 7,
             max_inflight_time_travel_query: 1000,
             enable_committed_sst_sanity_check: false,
-            periodic_compaction_interval_sec: 60,
+            periodic_compaction_interval_sec: 300,
             node_num_monitor_interval_sec: 10,
             protect_drop_table_with_incoming_sink: false,
             prometheus_endpoint: None,
@@ -343,6 +361,8 @@ impl MetaOpts {
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
             periodic_scheduling_compaction_group_split_interval_sec: 60,
+            enable_compaction_group_normalize: false,
+            max_normalize_splits_per_round: 4,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
             compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,
             table_high_write_throughput_threshold: 128 * 1024 * 1024,
@@ -351,6 +371,7 @@ impl MetaOpts {
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_task_max_progress_interval_secs: 1,
+            compaction_task_id_refill_capacity: 64,
             compaction_config: None,
             hybrid_partition_node_count: 4,
             event_log_enabled: false,
@@ -388,6 +409,8 @@ impl MetaOpts {
             enable_legacy_table_migration: true,
             refresh_scheduler_interval_sec: 60,
             pause_on_next_bootstrap_offline: false,
+            table_change_log_insert_batch_size: 1000,
+            table_change_log_delete_batch_size: 1000,
         }
     }
 }

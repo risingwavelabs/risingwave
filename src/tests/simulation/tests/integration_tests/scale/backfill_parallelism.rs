@@ -15,6 +15,7 @@
 use std::time::Duration;
 
 use anyhow::{Result, bail};
+use risingwave_common::error::AsReport;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
@@ -28,12 +29,28 @@ async fn wait_parallelism(
     expected: &str,
 ) -> Result<()> {
     for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 10) {
-        let res = session
+        let res = match session
             .run(format!(
                 "select distinct parallelism from rw_fragment_parallelism where name = '{}' order by parallelism;",
                 name
             ))
-            .await?;
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                // Background DDL may not have notified the catalog yet; treat as transient.
+                if err.chain().any(|cause| {
+                    cause
+                        .to_report_string()
+                        .contains("table not found")
+                })
+                {
+                    sleep(Duration::from_millis(200)).await;
+                    continue;
+                }
+                return Err(err);
+            }
+        };
         if res.trim() == expected {
             return Ok(());
         }
@@ -47,7 +64,14 @@ async fn wait_parallelism(
 }
 
 async fn wait_jobs_finished(session: &mut risingwave_simulation::cluster::Session) -> Result<()> {
-    for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 20) {
+    wait_jobs_finished_with_multiplier(session, 20).await
+}
+
+async fn wait_jobs_finished_with_multiplier(
+    session: &mut risingwave_simulation::cluster::Session,
+    multiplier: u64,
+) -> Result<()> {
+    for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * multiplier) {
         let res = session.run("show jobs;").await?;
         if res.trim().is_empty() {
             return Ok(());
@@ -55,6 +79,17 @@ async fn wait_jobs_finished(session: &mut risingwave_simulation::cluster::Sessio
         sleep(Duration::from_millis(500)).await;
     }
     bail!("jobs are still running after waiting");
+}
+
+async fn wait_jobs_running(session: &mut risingwave_simulation::cluster::Session) -> Result<()> {
+    for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 10) {
+        let res = session.run("show jobs;").await?;
+        if !res.trim().is_empty() {
+            return Ok(());
+        }
+        sleep(Duration::from_millis(200)).await;
+    }
+    bail!("jobs are still not running after waiting");
 }
 
 #[tokio::test]
@@ -86,6 +121,58 @@ async fn test_backfill_parallelism_switches_to_normal_after_completion() -> Resu
         .run("select distinct parallelism from rw_fragment_parallelism where name = 'm' order by parallelism;")
         .await?
         .assert_result_eq("3");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_backfill_parallelism_switches_to_normal_for_multiple_jobs() -> Result<()> {
+    let config = Configuration::for_background_ddl();
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session.run("set streaming_parallelism = 3;").await?;
+    session
+        .run("set streaming_parallelism_for_backfill = 2;")
+        .await?;
+    session.run("create table t(v int);").await?;
+    session
+        .run("insert into t select * from generate_series(1, 500);")
+        .await?;
+    session.run("set backfill_rate_limit = 1;").await?;
+    session.run("set background_ddl = true;").await?;
+
+    session
+        .run("create materialized view m1 as select * from t;")
+        .await?;
+    session
+        .run("create materialized view m2 as select * from t;")
+        .await?;
+
+    wait_parallelism(&mut session, "m1", "2").await?;
+    wait_parallelism(&mut session, "m2", "2").await?;
+    wait_jobs_finished_with_multiplier(&mut session, 60).await?;
+
+    wait_parallelism(&mut session, "m1", "3").await?;
+    wait_parallelism(&mut session, "m2", "3").await?;
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'm1' order by parallelism;")
+        .await?
+        .assert_result_eq("3");
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 'm2' order by parallelism;")
+        .await?
+        .assert_result_eq("3");
+
+    session
+        .run("select count(*) from m1;")
+        .await?
+        .assert_result_eq("500");
+    session
+        .run("select count(*) from m2;")
+        .await?
+        .assert_result_eq("500");
 
     Ok(())
 }
@@ -225,6 +312,47 @@ async fn test_backfill_parallelism_prefers_backfill_override_over_mview_override
         .run("select distinct parallelism from rw_fragment_parallelism where name = 'm2' order by parallelism;")
         .await?
         .assert_result_eq("2");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_alter_backfill_parallelism_during_backfill() -> Result<()> {
+    let mut config = Configuration::for_background_ddl();
+    let mut per_session_queries = (*config.per_session_queries).clone();
+    per_session_queries.push("SET streaming_use_snapshot_backfill = false".into());
+    config.per_session_queries = per_session_queries.into();
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session.run("set streaming_parallelism = 4;").await?;
+    session
+        .run("set streaming_parallelism_for_backfill = 2;")
+        .await?;
+    session.run("set backfill_rate_limit = 1;").await?;
+    session.run("set background_ddl = true;").await?;
+
+    session.run("create table t(v int);").await?;
+    session
+        .run("insert into t select * from generate_series(1, 800);")
+        .await?;
+    session
+        .run("create materialized view m as select * from t;")
+        .await?;
+
+    wait_parallelism(&mut session, "m", "2").await?;
+    wait_jobs_running(&mut session).await?;
+
+    session
+        .run("alter materialized view m set backfill_parallelism = 3;")
+        .await?;
+    wait_parallelism(&mut session, "m", "3").await?;
+    session
+        .run("alter materialized view m set backfill_rate_limit = default;")
+        .await?;
+
+    wait_jobs_finished(&mut session).await?;
+    wait_parallelism(&mut session, "m", "4").await?;
 
     Ok(())
 }

@@ -63,13 +63,13 @@ pub async fn handle_refresh_schema(
         .context("unable to parse original table definition")?;
 
     let (source, table, graph, job_type) = {
-        let result = get_replace_table_plan(
+        let result = Box::pin(get_replace_table_plan(
             &session,
             table_name,
             definition,
             &original_table,
             SqlColumnStrategy::Ignore,
-        )
+        ))
         .await;
         match result {
             Ok((source, table, graph, job_type)) => Ok((source, table, graph, job_type)),

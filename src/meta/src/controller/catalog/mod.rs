@@ -40,8 +40,8 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ActorId, ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array,
-    IndexId, JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
+    ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array, IndexId,
+    JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, TableIdArray,
     UserId, ViewId, connection, database, fragment, function, index, object, object_dependency,
     pending_sink_state, schema, secret, sink, source, streaming_job, subscription, table,
@@ -135,7 +135,6 @@ pub struct ReleaseContext {
     /// need to unregister from source manager.
     pub(crate) removed_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
 
-    pub(crate) removed_actors: HashSet<ActorId>,
     pub(crate) removed_fragments: HashSet<FragmentId>,
 
     /// Removed sink fragment by target fragment.
@@ -208,8 +207,23 @@ impl CatalogController {
             .await
     }
 
-    pub(crate) async fn current_notification_version(&self) -> NotificationVersion {
-        self.env.notification_manager().current_version().await
+    /// Trivially advance the notification version and notify to frontend,
+    /// return the notification version for frontend to wait for.
+    ///
+    /// Cannot simply return the current version, because the current version may not be sent
+    /// to frontend, and the frontend may endlessly wait for this version, until a frontend
+    /// related notification is sent.
+    pub(crate) async fn notify_frontend_trivial(&self) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![],
+                    dependencies: vec![],
+                }),
+            )
+            .await
     }
 }
 

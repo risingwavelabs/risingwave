@@ -22,7 +22,7 @@ use datafusion::physical_plan::ExecutionPlan;
 use datafusion::physical_planner::{DefaultPhysicalPlanner, PhysicalPlanner};
 use datafusion_common::Result as DFResult;
 
-use crate::datafusion::ProjectSetPlanner;
+use crate::datafusion::{ExpandPlanner, ProjectSetPlanner};
 
 #[derive(Debug)]
 pub struct RwCustomQueryPlanner;
@@ -44,6 +44,7 @@ impl QueryPlanner for RwCustomQueryPlanner {
     ) -> DFResult<Arc<dyn ExecutionPlan>> {
         static PLANNER: LazyLock<Arc<DefaultPhysicalPlanner>> = LazyLock::new(|| {
             Arc::new(DefaultPhysicalPlanner::with_extension_planners(vec![
+                Arc::new(ExpandPlanner),
                 Arc::new(ProjectSetPlanner),
             ]))
         });

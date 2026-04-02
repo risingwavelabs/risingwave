@@ -188,6 +188,9 @@ pub struct CacheRefillConfig {
     /// Data file cache refill levels.
     pub data_refill_levels: HashSet<u32>,
 
+    /// Meta file cache refill concurrency.
+    pub meta_refill_concurrency: usize,
+
     /// Data file cache refill concurrency.
     pub concurrency: usize,
 
@@ -221,6 +224,7 @@ impl CacheRefillConfig {
             timeout: Duration::from_millis(options.cache_refill_timeout_ms),
             data_refill_levels,
             concurrency: options.cache_refill_concurrency,
+            meta_refill_concurrency: options.cache_refill_meta_refill_concurrency,
             unit: options.cache_refill_unit,
             threshold: options.cache_refill_threshold,
             skip_recent_filter: options.cache_refill_skip_recent_filter,
@@ -259,10 +263,16 @@ impl CacheRefiller {
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
+        let meta_refill_concurrency = if config.meta_refill_concurrency == 0 {
+            None
+        } else {
+            Some(Arc::new(Semaphore::new(config.meta_refill_concurrency)))
+        };
         Self {
             queue: VecDeque::new(),
             context: CacheRefillContext {
                 config,
+                meta_refill_concurrency,
                 concurrency,
                 sstable_store,
             },
@@ -337,6 +347,7 @@ pub struct CacheRefillerEvent {
 #[derive(Clone)]
 pub(crate) struct CacheRefillContext {
     config: Arc<CacheRefillConfig>,
+    meta_refill_concurrency: Option<Arc<Semaphore>>,
     concurrency: Arc<Semaphore>,
     sstable_store: SstableStoreRef,
 }
@@ -381,12 +392,20 @@ impl CacheRefillTask {
                 let mut stats = StoreLocalStatistic::default();
                 GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
 
+                let permit = if let Some(c) = &context.meta_refill_concurrency {
+                    Some(c.acquire().await.unwrap())
+                } else {
+                    None
+                };
+
                 let now = Instant::now();
                 let res = context.sstable_store.sstable(info, &mut stats).await;
                 stats.discard();
                 GLOBAL_CACHE_REFILL_METRICS
                     .meta_refill_success_duration
                     .observe(now.elapsed().as_secs_f64());
+                drop(permit);
+
                 res
             })
             .collect_vec();

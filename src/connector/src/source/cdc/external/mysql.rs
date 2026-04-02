@@ -28,7 +28,7 @@ use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, F
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, F32, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType};
+use sea_schema::mysql::def::{ColumnDefault, ColumnKey, ColumnType, NumericAttr};
 use sea_schema::mysql::discovery::SchemaDiscovery;
 use sea_schema::mysql::query::SchemaQueryBuilder;
 use sea_schema::sea_query::{Alias, IntoIden};
@@ -259,57 +259,71 @@ pub fn timestamp_val_to_timestamptz(value_text: &str) -> ConnectorResult<String>
 }
 
 pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
-    macro_rules! column_type {
-        ($($name:literal => $variant:ident),* $(,)?) => {
-            match ty_name.to_lowercase().as_str() {
-                $(
-                    $name => Some(ColumnType::$variant(Default::default())),
-                )*
-                "json" => Some(ColumnType::Json),
-                "date" => Some(ColumnType::Date),
-                "bool" => Some(ColumnType::Bool),
-                "tinyblob" => Some(ColumnType::TinyBlob),
-                "mediumblob" => Some(ColumnType::MediumBlob),
-                "longblob" => Some(ColumnType::LongBlob),
-                _ => None,
-            }
-        };
-    }
+    // Debezium schema change message may include extra qualifiers, e.g. `BIGINT UNSIGNED`,
+    // `BIGINT(20) UNSIGNED`, `INT UNSIGNED ZEROFILL`, etc.
+    let ty = ty_name.trim().to_lowercase();
+    let base = ty
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .split('(')
+        .next()
+        .unwrap_or_default();
+    let is_unsigned = ty.contains("unsigned");
+    let is_zero_fill = ty.contains("zerofill");
 
-    column_type! {
-        "bit" => Bit,
-        "tinyint" => TinyInt,
-        "smallint" => SmallInt,
-        "mediumint" => MediumInt,
-        "int" => Int,
-        "bigint" => BigInt,
-        "decimal" => Decimal,
-        "float" => Float,
-        "double" => Double,
-        "time" => Time,
-        "datetime" => DateTime,
-        "timestamp" => Timestamp,
-        "char" => Char,
-        "nchar" => NChar,
-        "varchar" => Varchar,
-        "nvarchar" => NVarchar,
-        "binary" => Binary,
-        "varbinary" => Varbinary,
-        "text" => Text,
-        "tinytext" => TinyText,
-        "mediumtext" => MediumText,
-        "longtext" => LongText,
-        "blob" => Blob,
-        "enum" => Enum,
-        "set" => Set,
-        "geometry" => Geometry,
-        "point" => Point,
-        "linestring" => LineString,
-        "polygon" => Polygon,
-        "multipoint" => MultiPoint,
-        "multilinestring" => MultiLineString,
-        "multipolygon" => MultiPolygon,
-        "geometrycollection" => GeometryCollection,
+    let make_numeric_attr = || {
+        let mut attr = NumericAttr::default();
+        if is_unsigned {
+            attr.unsigned = Some(true);
+        }
+        if is_zero_fill {
+            attr.zero_fill = Some(true);
+        }
+        attr
+    };
+
+    match base {
+        "bit" => Some(ColumnType::Bit(make_numeric_attr())),
+        "tinyint" => Some(ColumnType::TinyInt(make_numeric_attr())),
+        "smallint" => Some(ColumnType::SmallInt(make_numeric_attr())),
+        "mediumint" => Some(ColumnType::MediumInt(make_numeric_attr())),
+        "int" => Some(ColumnType::Int(make_numeric_attr())),
+        "bigint" => Some(ColumnType::BigInt(make_numeric_attr())),
+        "decimal" => Some(ColumnType::Decimal(make_numeric_attr())),
+        "float" => Some(ColumnType::Float(make_numeric_attr())),
+        "double" => Some(ColumnType::Double(make_numeric_attr())),
+        "time" => Some(ColumnType::Time(Default::default())),
+        "datetime" => Some(ColumnType::DateTime(Default::default())),
+        "timestamp" => Some(ColumnType::Timestamp(Default::default())),
+        "char" => Some(ColumnType::Char(Default::default())),
+        "nchar" => Some(ColumnType::NChar(Default::default())),
+        "varchar" => Some(ColumnType::Varchar(Default::default())),
+        "nvarchar" => Some(ColumnType::NVarchar(Default::default())),
+        "binary" => Some(ColumnType::Binary(Default::default())),
+        "varbinary" => Some(ColumnType::Varbinary(Default::default())),
+        "text" => Some(ColumnType::Text(Default::default())),
+        "tinytext" => Some(ColumnType::TinyText(Default::default())),
+        "mediumtext" => Some(ColumnType::MediumText(Default::default())),
+        "longtext" => Some(ColumnType::LongText(Default::default())),
+        "blob" => Some(ColumnType::Blob(Default::default())),
+        "tinyblob" => Some(ColumnType::TinyBlob),
+        "mediumblob" => Some(ColumnType::MediumBlob),
+        "longblob" => Some(ColumnType::LongBlob),
+        "enum" => Some(ColumnType::Enum(Default::default())),
+        "set" => Some(ColumnType::Set(Default::default())),
+        "json" => Some(ColumnType::Json),
+        "date" => Some(ColumnType::Date),
+        "bool" => Some(ColumnType::Bool),
+        "geometry" => Some(ColumnType::Geometry(Default::default())),
+        "point" => Some(ColumnType::Point(Default::default())),
+        "linestring" => Some(ColumnType::LineString(Default::default())),
+        "polygon" => Some(ColumnType::Polygon(Default::default())),
+        "multipoint" => Some(ColumnType::MultiPoint(Default::default())),
+        "multilinestring" => Some(ColumnType::MultiLineString(Default::default())),
+        "multipolygon" => Some(ColumnType::MultiPolygon(Default::default())),
+        "geometrycollection" => Some(ColumnType::GeometryCollection(Default::default())),
+        _ => None,
     }
 }
 
@@ -325,11 +339,31 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
                 );
             }
         }
-        ColumnType::TinyInt(_) | ColumnType::SmallInt(_) => DataType::Int16,
+        // Unsigned integer family needs promotion to avoid overflow.
+        ColumnType::TinyInt(_) => DataType::Int16,
+        ColumnType::SmallInt(attr) => {
+            if attr.unsigned == Some(true) {
+                DataType::Int32
+            } else {
+                DataType::Int16
+            }
+        }
         ColumnType::Bool => DataType::Boolean,
         ColumnType::MediumInt(_) => DataType::Int32,
-        ColumnType::Int(_) => DataType::Int32,
-        ColumnType::BigInt(_) => DataType::Int64,
+        ColumnType::Int(attr) => {
+            if attr.unsigned == Some(true) {
+                DataType::Int64
+            } else {
+                DataType::Int32
+            }
+        }
+        ColumnType::BigInt(attr) => {
+            if attr.unsigned == Some(true) {
+                DataType::Decimal
+            } else {
+                DataType::Int64
+            }
+        }
         ColumnType::Decimal(_) => DataType::Decimal,
         ColumnType::Float(_) => DataType::Float32,
         ColumnType::Double(_) => DataType::Float64,

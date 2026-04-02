@@ -13,19 +13,56 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use jni::objects::{JByteArray, JObject, JString};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
-use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
+use risingwave_object_store::object::{ObjectError, ObjectStoreImpl, build_remote_object_store};
+use thiserror_ext::AsReport;
 use tokio::sync::OnceCell;
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
 
 static OBJECT_STORE_INSTANCE: OnceCell<Arc<ObjectStoreImpl>> = OnceCell::const_new();
+
+const PUT_OBJECT_TOTAL_TIMEOUT_ENV: &str = "RW_CDC_SCHEMA_HISTORY_PUT_OBJECT_TIMEOUT_MS";
+const DEFAULT_PUT_OBJECT_TOTAL_TIMEOUT_MS: u64 = 3_000;
+
+/// Total timeout for `Binding_putObject`.
+///
+/// - Defaults to 3 seconds.
+/// - Set `RW_CDC_SCHEMA_HISTORY_PUT_OBJECT_TIMEOUT_MS=0` to disable the timeout.
+fn put_object_total_timeout() -> Option<Duration> {
+    static TIMEOUT: OnceLock<Option<Duration>> = OnceLock::new();
+    *TIMEOUT.get_or_init(|| {
+        let ms = match std::env::var(PUT_OBJECT_TOTAL_TIMEOUT_ENV) {
+            Ok(v) => match v.trim().parse::<u64>() {
+                Ok(ms) => ms,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        value = %v,
+                        "Invalid {}, falling back to default {}ms",
+                        PUT_OBJECT_TOTAL_TIMEOUT_ENV,
+                        DEFAULT_PUT_OBJECT_TOTAL_TIMEOUT_MS,
+                    );
+                    DEFAULT_PUT_OBJECT_TOTAL_TIMEOUT_MS
+                }
+            },
+            Err(_) => DEFAULT_PUT_OBJECT_TOTAL_TIMEOUT_MS,
+        };
+
+        if ms == 0 {
+            None
+        } else {
+            Some(Duration::from_millis(ms))
+        }
+    })
+}
 
 /// Security safeguard: Check if file has .dat extension
 /// This prevents accidental overwriting of Hummock data or other critical files.
@@ -111,10 +148,24 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
         let object_name = prepend_data_directory(&object_name);
         let data_guard = to_guarded_slice(&data, env).map_err(|e| anyhow!(e))?;
         let data: Vec<u8> = data_guard.slice.to_vec();
+        let total_timeout = put_object_total_timeout();
         JAVA_BINDING_ASYNC_RUNTIME
             .block_on(async {
-                let object_store = get_object_store().await;
-                object_store.upload(&object_name, data.into()).await
+                let f = async {
+                    let object_store = get_object_store().await;
+                    object_store.upload(&object_name, data.into()).await
+                };
+
+                match total_timeout {
+                    Some(timeout) => match tokio::time::timeout(timeout, f).await {
+                        Ok(res) => res,
+                        Err(_) => Err(ObjectError::timeout(format!(
+                            "[Schema history] putObject timed out after {:?}. You can adjust it via {} (ms), or set it to 0 to disable.",
+                            timeout, PUT_OBJECT_TOTAL_TIMEOUT_ENV
+                        ))),
+                    },
+                    None => f.await,
+                }
             })
             .map_err(|e| anyhow!(e))?;
         Ok(())

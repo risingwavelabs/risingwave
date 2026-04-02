@@ -1,24 +1,18 @@
-import subprocess
 import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+from sink_check_utils import docker_compose_exec, check_row_counts, report_failures
 
 
-relations = [
-    'default.demo_test',
-    'default.demo_test_target_null',
-    'default.ck_types',
-]
+def clickhouse_count(rel):
+    sql = f'SELECT COUNT(*) FROM {rel};'
+    output = docker_compose_exec("clickhouse-server", f'clickhouse-client -q "{sql}"')
+    return int(output.strip())
 
-failed_cases = []
-for rel in relations:
-    sql = f"SELECT COUNT(*) FROM {rel};"
-    print(f"Running SQL: {sql} ON ClickHouse")
-    command = f'clickhouse-client -q "{sql}"'
-    rows = subprocess.check_output(["docker", "compose", "exec", "clickhouse-server", "bash", "-c", command])
-    rows = int(rows.decode('utf-8').strip())
-    print(f"{rows} rows in {rel}")
-    if rows < 1:
-        failed_cases.append(rel)
 
-if len(failed_cases) != 0:
-    print(f"Data check failed for case {failed_cases}")
-    sys.exit(1)
+failed = check_row_counts(
+    ['default.demo_test', 'default.demo_test_target_null', 'default.ck_types'],
+    clickhouse_count,
+    "ClickHouse",
+)
+report_failures(failed)

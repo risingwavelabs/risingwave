@@ -388,7 +388,9 @@ impl BatchOptimizedLogicalPlanRoot {
     }
 
     #[cfg(feature = "datafusion")]
-    pub fn gen_datafusion_logical_plan(self) -> Result<Arc<datafusion::logical_expr::LogicalPlan>> {
+    pub fn gen_datafusion_logical_plan(
+        &self,
+    ) -> Result<Arc<datafusion::logical_expr::LogicalPlan>> {
         use datafusion::logical_expr::{Expr as DFExpr, LogicalPlan, Projection, Sort};
         use datafusion_common::Column;
         use plan_visitor::LogicalPlanToDataFusionExt;
@@ -623,10 +625,25 @@ impl LogicalPlanRoot {
             ).into());
         }
 
-        if ctx.session_ctx().config().enable_locality_backfill()
-            && LocalityProviderCounter::count(plan.clone()) > 5
+        if LocalityProviderCounter::count(plan.clone()) > 5 {
+            // LocalityProviderCounter is non-zero only when locality backfill is enabled.
+            assert!(ctx.session_ctx().config().enable_locality_backfill());
+            risingwave_common::license::Feature::LocalityBackfill.check_available()?;
+        }
+
+        if ctx.missed_locality_providers() > 1
+            && risingwave_common::license::Feature::LocalityBackfill
+                .check_available()
+                .is_ok()
         {
-            risingwave_common::license::Feature::LocalityBackfill.check_available()?
+            // missed_locality_providers can only be non-zero when locality backfill is disabled.
+            assert!(!ctx.session_ctx().config().enable_locality_backfill());
+            ctx.warn_to_user(format!(
+                "This streaming job has {} operators that could benefit from locality backfill. \
+                Consider enabling it with `SET enable_locality_backfill = true` for potentially \
+                faster backfill performance, when existing data volume in upstream(s) is large.",
+                ctx.missed_locality_providers()
+            ));
         }
 
         Ok(optimized_plan.into_phase(plan))

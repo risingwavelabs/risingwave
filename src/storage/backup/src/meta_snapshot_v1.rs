@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_hummock_sdk::HummockRawObjectId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_pb::catalog::{
     Connection, Database, Function, Index, Schema, Secret, Sink, Source, Subscription, Table, View,
@@ -106,6 +107,10 @@ impl Metadata for ClusterMetadata {
     fn storage_directory(&self) -> BackupResult<String> {
         unreachable!("");
     }
+
+    fn table_change_log_object_ids(&self) -> HashSet<HummockRawObjectId> {
+        HashSet::default()
+    }
 }
 
 /// For backward compatibility, never remove fields and only append new field.
@@ -170,7 +175,7 @@ impl ClusterMetadata {
             .zip_eq_fast(default_cf_values.into_iter())
             .collect();
         let hummock_version =
-            HummockVersion::from_persisted_protobuf(&Self::decode_prost_message(&mut buf)?);
+            HummockVersion::from_persisted_protobuf_owned(Self::decode_prost_message(&mut buf)?);
         let version_stats = Self::decode_prost_message(&mut buf)?;
         let compaction_groups: Vec<CompactionGroup> = Self::decode_prost_message_list(&mut buf)?;
         let table_fragments: Vec<TableFragments> = Self::decode_prost_message_list(&mut buf)?;

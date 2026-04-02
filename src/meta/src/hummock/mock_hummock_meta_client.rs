@@ -23,7 +23,7 @@ use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
+use risingwave_hummock_sdk::change_log::{TableChangeLogs, build_table_change_log_delta};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -97,7 +97,7 @@ impl MockHummockMetaClient {
         self.hummock_manager
             .get_compact_task(
                 StaticCompactionGroupId::StateDefault,
-                &mut default_compaction_selector(),
+                &mut *default_compaction_selector(),
             )
             .await
             .unwrap_or(None)
@@ -231,7 +231,8 @@ impl HummockMetaClient for MockHummockMetaClient {
         _table_id: JobId,
         _level: u32,
         _sst_ids: Vec<HummockSstableId>,
-    ) -> Result<()> {
+        _exclusive: bool,
+    ) -> Result<bool> {
         todo!()
     }
 
@@ -282,15 +283,12 @@ impl HummockMetaClient for MockHummockMetaClient {
 
         let handle = tokio::spawn(async move {
             loop {
-                let group_and_type = hummock_manager_compact
-                    .auto_pick_compaction_group_and_type()
-                    .await;
-
-                if group_and_type.is_none() {
+                let snapshot = hummock_manager_compact.compaction_state.snapshot();
+                let Some((groups, task_type)) = snapshot.pick_compaction_groups_and_type() else {
                     break;
-                }
+                };
 
-                let (group, task_type) = group_and_type.unwrap();
+                let group = groups[0];
 
                 if let TaskType::Ttl = task_type {
                     match hummock_manager_compact
@@ -317,7 +315,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     _ => panic!("Error type when mock_hummock_meta_client subscribe_compact_tasks"),
                 };
                 if let Some(task) = hummock_manager_compact
-                    .get_compact_task(group, &mut selector)
+                    .get_compact_task(group, &mut *selector)
                     .await
                     .unwrap()
                 {
@@ -392,6 +390,28 @@ impl HummockMetaClient for MockHummockMetaClient {
         BoxStream<'static, IcebergCompactionEventItem>,
     )> {
         unimplemented!()
+    }
+
+    async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        Ok(self
+            .hummock_manager
+            .get_table_change_logs(
+                epoch_only,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids,
+                exclude_empty,
+                limit,
+            )
+            .await)
     }
 }
 

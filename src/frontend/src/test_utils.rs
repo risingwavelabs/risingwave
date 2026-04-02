@@ -36,6 +36,7 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -43,7 +44,7 @@ use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbStreamJobStatus,
     PbSubscription, PbTable, PbView, Table,
 };
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{PbObjectType, WorkerNode};
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
@@ -59,14 +60,16 @@ use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_iceberg_compaction_status_response::IcebergCompactionStatus;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse, SystemParams, list_sink_log_store_tables_response,
+    EventLog, FragmentDistribution, ObjectDependency as PbObjectDependency, PbTableParallelism,
+    PbThrottleTarget, RecoveryStatus, RefreshRequest, RefreshResponse, SystemParams,
+    list_sink_log_store_tables_response,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -140,7 +143,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql: Arc<str> = Arc::from(sql.into());
-        self.session_ref().run_statement(sql, vec![]).await
+        Box::pin(self.session_ref().run_statement(sql, vec![])).await
     }
 
     pub async fn run_sql_with_session(
@@ -149,7 +152,7 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql: Arc<str> = Arc::from(sql.into());
-        session_ref.run_statement(sql, vec![]).await
+        Box::pin(session_ref.run_statement(sql, vec![])).await
     }
 
     pub async fn run_user_sql(
@@ -160,9 +163,11 @@ impl LocalFrontend {
         user_id: UserId,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql: Arc<str> = Arc::from(sql.into());
-        self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql, vec![])
-            .await
+        Box::pin(
+            self.session_user_ref(database, user_name, user_id)
+                .run_statement(sql, vec![]),
+        )
+        .await
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
@@ -298,7 +303,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         mut table: PbTable,
         _graph: StreamFragmentGraph,
-        _dependencies: HashSet<ObjectId>,
+        dependencies: HashSet<ObjectId>,
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
@@ -307,6 +312,7 @@ impl CatalogWriter for MockCatalogWriter {
         table.maybe_vnode_count = VnodeCount::for_test().to_protobuf();
         self.catalog.write().create_table(&table);
         self.add_table_or_source_id(table.id.as_raw_id(), table.schema_id, table.database_id);
+        self.insert_object_dependencies(table.id.as_object_id(), dependencies);
         self.hummock_snapshot_manager.add_table_for_test(table.id);
         Ok(())
     }
@@ -322,10 +328,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_view(&self, mut view: PbView, _dependencies: HashSet<ObjectId>) -> Result<()> {
+    async fn create_view(&self, mut view: PbView, dependencies: HashSet<ObjectId>) -> Result<()> {
         view.id = self.gen_id();
         self.catalog.write().create_view(&view);
         self.add_table_or_source_id(view.id.as_raw_id(), view.schema_id, view.database_id);
+        self.insert_object_dependencies(view.id.as_object_id(), dependencies);
         Ok(())
     }
 
@@ -336,7 +343,7 @@ impl CatalogWriter for MockCatalogWriter {
         graph: StreamFragmentGraph,
         _job_type: PbTableJobType,
         if_not_exists: bool,
-        _dependencies: HashSet<ObjectId>,
+        dependencies: HashSet<ObjectId>,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
@@ -345,7 +352,7 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_materialized_view(
             table,
             graph,
-            HashSet::new(),
+            dependencies,
             streaming_job_resource_type::ResourceType::Regular(true),
             if_not_exists,
         )
@@ -384,10 +391,12 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         sink: PbSink,
         graph: StreamFragmentGraph,
-        _dependencies: HashSet<ObjectId>,
+        dependencies: HashSet<ObjectId>,
         _if_not_exists: bool,
     ) -> Result<()> {
-        self.create_sink_inner(sink, graph)
+        let sink_id = self.create_sink_inner(sink, graph)?;
+        self.insert_object_dependencies(sink_id.as_object_id(), dependencies);
+        Ok(())
     }
 
     async fn create_subscription(&self, subscription: PbSubscription) -> Result<()> {
@@ -663,6 +672,30 @@ impl CatalogWriter for MockCatalogWriter {
         Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
     }
 
+    async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> Result<()> {
+        for database in self.catalog.read().iter_databases() {
+            for schema in database.iter_schemas() {
+                if let Some(subscription) = schema.get_subscription_by_id(subscription_id) {
+                    let mut pb_subscription = subscription.to_proto();
+                    pb_subscription.retention_seconds = retention_seconds;
+                    pb_subscription.definition = definition;
+                    self.catalog.write().update_subscription(&pb_subscription);
+                    return Ok(());
+                }
+            }
+        }
+
+        Err(
+            ErrorCode::ItemNotFound(format!("subscription not found: {:?}", subscription_id))
+                .into(),
+        )
+    }
+
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
@@ -690,6 +723,15 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _job_id: JobId,
         _parallelism: PbTableParallelism,
+        _deferred: bool,
+    ) -> Result<()> {
+        todo!()
+    }
+
+    async fn alter_backfill_parallelism(
+        &self,
+        _job_id: JobId,
+        _parallelism: Option<PbTableParallelism>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
@@ -759,6 +801,10 @@ impl CatalogWriter for MockCatalogWriter {
         _if_not_exists: bool,
     ) -> Result<()> {
         todo!()
+    }
+
+    async fn wait(&self, _job_id: Option<JobId>) -> Result<()> {
+        Ok(())
     }
 }
 
@@ -896,12 +942,12 @@ impl MockCatalogWriter {
         Ok(source.id)
     }
 
-    fn create_sink_inner(&self, mut sink: PbSink, _graph: StreamFragmentGraph) -> Result<()> {
+    fn create_sink_inner(&self, mut sink: PbSink, _graph: StreamFragmentGraph) -> Result<SinkId> {
         sink.id = self.gen_id();
         sink.stream_job_status = PbStreamJobStatus::Created as _;
         self.catalog.write().create_sink(&sink);
         self.add_table_or_sink_id(sink.id.as_raw_id(), sink.schema_id, sink.database_id);
-        Ok(())
+        Ok(sink.id)
     }
 
     fn create_subscription_inner(&self, mut subscription: PbSubscription) -> Result<()> {
@@ -921,6 +967,48 @@ impl MockCatalogWriter {
             .read()
             .get(&schema_id)
             .unwrap()
+    }
+
+    fn get_object_type(&self, object_id: ObjectId) -> PbObjectType {
+        let catalog = self.catalog.read();
+        for database in catalog.iter_databases() {
+            for schema in database.iter_schemas() {
+                if let Some(table) = schema.get_created_table_by_id(object_id.as_table_id()) {
+                    return if table.is_mview() {
+                        PbObjectType::Mview
+                    } else {
+                        PbObjectType::Table
+                    };
+                }
+                if schema.get_source_by_id(object_id.as_source_id()).is_some() {
+                    return PbObjectType::Source;
+                }
+                if schema.get_view_by_id(object_id.as_view_id()).is_some() {
+                    return PbObjectType::View;
+                }
+                if schema.get_index_by_id(object_id.as_index_id()).is_some() {
+                    return PbObjectType::Index;
+                }
+            }
+        }
+        PbObjectType::Unspecified
+    }
+
+    fn insert_object_dependencies(&self, object_id: ObjectId, dependencies: HashSet<ObjectId>) {
+        if dependencies.is_empty() {
+            return;
+        }
+        let dependencies = dependencies
+            .into_iter()
+            .map(|referenced_object_id| PbObjectDependency {
+                object_id,
+                referenced_object_id,
+                referenced_object_type: self.get_object_type(referenced_object_id) as i32,
+            })
+            .collect();
+        self.catalog
+            .write()
+            .insert_object_dependencies(dependencies);
     }
 }
 
@@ -1067,10 +1155,6 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(INVALID_VERSION_ID)
     }
 
-    async fn wait(&self) -> RpcResult<()> {
-        Ok(())
-    }
-
     async fn cancel_creating_jobs(&self, _infos: PbJobs) -> RpcResult<Vec<u32>> {
         Ok(vec![])
     }
@@ -1201,6 +1285,21 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn backup_meta(&self, _remarks: Option<String>) -> RpcResult<u64> {
+        unimplemented!()
+    }
+
+    async fn get_backup_job_status(
+        &self,
+        _job_id: u64,
+    ) -> RpcResult<(risingwave_pb::backup_service::BackupJobStatus, String)> {
+        unimplemented!()
+    }
+
+    async fn delete_meta_snapshot(&self, _snapshot_ids: &[u64]) -> RpcResult<()> {
+        unimplemented!()
+    }
+
     async fn apply_throttle(
         &self,
         _throttle_target: PbThrottleTarget,
@@ -1284,6 +1383,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn list_iceberg_compaction_status(&self) -> RpcResult<Vec<IcebergCompactionStatus>> {
+        Ok(vec![])
+    }
+
     async fn get_fragment_by_id(
         &self,
         _fragment_id: FragmentId,
@@ -1328,6 +1431,17 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_unmigrated_tables(&self) -> RpcResult<HashMap<crate::catalog::TableId, String>> {
         unimplemented!()
+    }
+
+    async fn get_hummock_table_change_log(
+        &self,
+        _start_epoch_inclusive: Option<u64>,
+        _end_epoch_inclusive: Option<u64>,
+        _table_ids: Option<HashSet<TableId>>,
+        _exclude_empty: bool,
+        _limit: Option<u32>,
+    ) -> RpcResult<TableChangeLogs> {
+        Ok(HashMap::default())
     }
 }
 
