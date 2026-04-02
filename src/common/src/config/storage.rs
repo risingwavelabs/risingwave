@@ -489,6 +489,18 @@ pub struct ObjectStoreConfig {
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
 
+    /// Maximum number of concurrent object store requests (read, `streaming_read`, metadata, etc.).
+    /// 0 means unlimited. When set to a positive value, a semaphore will be used to limit
+    /// the number of in-flight requests to the object store, preventing HTTP connection pool
+    /// contention under high concurrency.
+    #[serde(default = "default::object_store_config::object_store_req_concurrency_limit")]
+    pub req_concurrency_limit: usize,
+
+    /// Maximum number of concurrent HTTP requests used by the `OpenDAL` GCS backend.
+    /// 0 means unlimited.
+    #[serde(default = "default::object_store_config::http_concurrent_limit")]
+    pub http_concurrent_limit: usize,
+
     // TODO: the following field will be deprecated after opendal is stabilized
     #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
     pub opendal_upload_concurrency: usize,
@@ -1246,6 +1258,14 @@ pub mod default {
 
         pub fn set_atomic_write_dir() -> bool {
             false
+        }
+
+        pub fn object_store_req_concurrency_limit() -> usize {
+            0
+        }
+
+        pub fn http_concurrent_limit() -> usize {
+            0
         }
 
         pub fn object_store_req_backoff_interval_ms() -> u64 {

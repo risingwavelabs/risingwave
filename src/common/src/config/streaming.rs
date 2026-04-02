@@ -286,6 +286,13 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
 
+    /// The maximum number of kv log store readers that can concurrently read historical data
+    /// (i.e., from the state store) during initialization. A reader is considered "initializing"
+    /// until it has read at least one row from the historical stream or the stream returns empty.
+    /// Set to 0 to disable the limit (unlimited concurrency).
+    #[serde(default = "default::developer::max_concurrent_kv_log_store_historical_read")]
+    pub max_concurrent_kv_log_store_historical_read: usize,
+
     #[serde(default, flatten)]
     #[serde_prefix_all(skip)]
     #[config_doc(omitted)]
