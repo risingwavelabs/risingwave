@@ -22,12 +22,13 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
-use risingwave_hummock_sdk::version::GroupDelta;
+use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion};
 use risingwave_meta_model::compaction_config;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompactionGroupInfo, PbGroupConstruct, PbGroupDestroy, PbStateTableInfoDelta,
+    CompactionConfig, CompactionGroupInfo, HummockVersionStats, PbGroupConstruct, PbGroupDestroy,
+    PbStateTableInfoDelta,
 };
 use sea_orm::EntityTrait;
 use tokio::sync::OnceCell;
@@ -422,37 +423,54 @@ impl HummockManager {
         results
     }
 
-    pub async fn calculate_compaction_group_statistic(&self) -> Vec<CompactionGroupStatistic> {
+    pub(crate) fn calculate_compaction_group_statistic_from_snapshot(
+        current_version: &HummockVersion,
+        version_stats: &HummockVersionStats,
+        id_to_config: &BTreeMap<CompactionGroupId, CompactionGroup>,
+    ) -> Vec<CompactionGroupStatistic> {
         let mut infos = vec![];
-        {
-            let versioning_guard = self.versioning.read().await;
-            let manager = self.compaction_group_manager.read().await;
-            let version = &versioning_guard.current_version;
-            for group_id in version.levels.keys() {
-                let mut group_info = CompactionGroupStatistic {
-                    group_id: *group_id,
-                    ..Default::default()
-                };
-                for table_id in version
-                    .state_table_info
-                    .compaction_group_member_table_ids(*group_id)
-                {
-                    let stats_size = versioning_guard
-                        .version_stats
-                        .table_stats
-                        .get(table_id)
-                        .map(|stats| stats.total_key_size + stats.total_value_size)
-                        .unwrap_or(0);
-                    let table_size = std::cmp::max(stats_size, 0) as u64;
-                    group_info.group_size += table_size;
-                    group_info.table_statistic.insert(*table_id, table_size);
-                    group_info.compaction_group_config =
-                        manager.try_get_compaction_group_config(*group_id).unwrap();
-                }
-                infos.push(group_info);
+        for group_id in current_version.levels.keys() {
+            let Some(compaction_group_config) = id_to_config.get(group_id) else {
+                tracing::warn!(
+                    compaction_group_id = %group_id,
+                    "Missing compaction group config when calculating group statistics. Skip."
+                );
+                continue;
+            };
+
+            let mut group_info = CompactionGroupStatistic {
+                group_id: *group_id,
+                compaction_group_config: compaction_group_config.clone(),
+                ..Default::default()
+            };
+
+            for table_id in current_version
+                .state_table_info
+                .compaction_group_member_table_ids(*group_id)
+            {
+                let stats_size = version_stats
+                    .table_stats
+                    .get(table_id)
+                    .map(|stats| stats.total_key_size + stats.total_value_size)
+                    .unwrap_or(0);
+                let table_size = stats_size.max(0) as u64;
+                group_info.group_size += table_size;
+                group_info.table_statistic.insert(*table_id, table_size);
             }
-        };
+
+            infos.push(group_info);
+        }
         infos
+    }
+
+    pub async fn calculate_compaction_group_statistic(&self) -> Vec<CompactionGroupStatistic> {
+        let id_to_config = self.get_compaction_group_map().await;
+        let versioning_guard = self.versioning.read().await;
+        Self::calculate_compaction_group_statistic_from_snapshot(
+            &versioning_guard.current_version,
+            &versioning_guard.version_stats,
+            &id_to_config,
+        )
     }
 
     pub(crate) async fn initial_compaction_group_config_after_load(
