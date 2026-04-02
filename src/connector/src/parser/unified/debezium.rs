@@ -26,7 +26,7 @@ use risingwave_pb::plan_common::additional_column::ColumnType;
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
-use crate::connector_common::{SslMode, create_pg_client};
+use crate::connector_common::{create_pg_client_from_properties, discover_pgvector_dimensions};
 use crate::parser::TransactionControl;
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::schema_change::TableChangeType;
@@ -62,6 +62,20 @@ fn is_bigserial_default(default_value_expression: &str) -> bool {
     expr.starts_with("nextval(")
 }
 
+/// Parse Debezium `tableChanges[].id` into `(schema_name, table_name)`.
+///
+/// Input examples observed in Debezium schema-change events:
+/// - `"public"."orders"` (quoted format)
+/// - `public.orders` (plain dotted format)
+/// - `db.public.orders` (database-prefixed dotted format)
+///
+/// Why two parsing branches:
+/// - Different Debezium versions/connectors may emit quoted or plain identifiers.
+/// - We normalize both forms so downstream lookup can consistently query upstream catalogs.
+///
+/// Output:
+/// - `Some((schema, table))` when both schema and table are successfully extracted.
+/// - `None` when the id is malformed or does not contain enough segments.
 fn parse_schema_table_from_debezium_id(id: &str) -> Option<(String, String)> {
     let trimmed = id.trim();
     if trimmed.contains("\".\"") {
@@ -99,89 +113,23 @@ async fn fetch_pgvector_dimensions_for_table(
         return Ok(std::collections::HashMap::new());
     };
 
-    let props = &cdc_props.properties;
-    let host = props
-        .get("hostname")
-        .ok_or_else(|| AccessError::Uncategorized {
-            message: "missing `hostname` in postgres-cdc properties".to_owned(),
-        })?;
-    let port = props
-        .get("port")
-        .ok_or_else(|| AccessError::Uncategorized {
-            message: "missing `port` in postgres-cdc properties".to_owned(),
-        })?;
-    let user = props
-        .get("username")
-        .ok_or_else(|| AccessError::Uncategorized {
-            message: "missing `username` in postgres-cdc properties".to_owned(),
-        })?;
-    let password = props.get("password").cloned().unwrap_or_default();
-    let database = props
-        .get("database.name")
-        .ok_or_else(|| AccessError::Uncategorized {
-            message: "missing `database.name` in postgres-cdc properties".to_owned(),
+    let client = create_pg_client_from_properties(&cdc_props.properties, None)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to connect upstream postgres for schema change lookup: {}",
+                err.as_report()
+            ),
         })?;
 
-    let ssl_mode = props
-        .get("ssl.mode")
-        .and_then(|v| v.parse::<SslMode>().ok())
-        .unwrap_or_default();
-    let ssl_root_cert = props.get("ssl.root.cert").cloned();
-
-    let client = create_pg_client(
-        user,
-        &password,
-        host,
-        port,
-        database,
-        &ssl_mode,
-        &ssl_root_cert,
-        None,
-    )
-    .await
-    .map_err(|err| AccessError::Uncategorized {
-        message: format!(
-            "failed to connect upstream postgres for schema change lookup: {}",
-            err.as_report()
-        ),
-    })?;
-
-    let rows = client
-        .query(
-            r#"
-            SELECT a.attname AS column_name,
-                   a.atttypmod AS atttypmod
-            FROM pg_catalog.pg_attribute a
-            JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
-            JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-            JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
-            WHERE n.nspname = $1
-              AND c.relname = $2
-              AND t.typname = 'vector'
-              AND a.attnum > 0
-              AND NOT a.attisdropped
-            "#,
-            &[&schema, &table],
-        )
+    discover_pgvector_dimensions(&client, schema, table)
         .await
         .map_err(|err| AccessError::Uncategorized {
             message: format!(
                 "failed to query upstream postgres schema for {schema}.{table}: {}",
                 err.as_report()
             ),
-        })?;
-
-    let mut dims = std::collections::HashMap::new();
-    for row in rows {
-        let col_name: String = row.get("column_name");
-        let atttypmod: i32 = row.get("atttypmod");
-        if atttypmod > 0
-            && let Ok(dim) = usize::try_from(atttypmod)
-        {
-            dims.insert(col_name, dim);
-        }
-    }
-    Ok(dims)
+        })
 }
 
 // Example of Debezium JSON value:
@@ -320,7 +268,7 @@ pub async fn parse_schema_change(
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
     let mut pgvector_dims_cache: std::collections::HashMap<
-        String,
+        (String, String),
         std::collections::HashMap<String, usize>,
     > = std::collections::HashMap::new();
 
@@ -376,12 +324,13 @@ pub async fn parse_schema_change(
                                     });
                                 };
 
-                                let cache_key = format!("{}.{}", schema_name, table_name_only);
+                                // Cache by normalized `(schema, table)` tuple to avoid split/join churn on id text.
+                                let cache_key = (schema_name, table_name_only);
                                 if !pgvector_dims_cache.contains_key(&cache_key) {
                                     let fetched = fetch_pgvector_dimensions_for_table(
                                         connector_props,
-                                        &schema_name,
-                                        &table_name_only,
+                                        &cache_key.0,
+                                        &cache_key.1,
                                     )
                                     .await?;
                                     pgvector_dims_cache.insert(cache_key.clone(), fetched);

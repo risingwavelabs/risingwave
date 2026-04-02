@@ -78,6 +78,63 @@ statement error missing dimension
 create table test_pgvector_nodim_auto (*)
 from pgvector_source table 'public.test_pgvector_nodim';
 
+# Auto schema change: add vector column in upstream PostgreSQL.
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_pgvector_schema_change CASCADE;
+    CREATE TABLE test_pgvector_schema_change (
+        id int PRIMARY KEY,
+        name varchar,
+        embedding vector(3)
+    );
+    INSERT INTO test_pgvector_schema_change VALUES
+        (1, 's1', '[0.1,0.2,0.3]');
+"
+
+statement ok
+create source pgvector_schema_change_source with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'pgvector_schema_change_slot',
+  auto.schema.change = 'true'
+);
+
+statement ok
+create table test_pgvector_schema_change_rw (*)
+from pgvector_schema_change_source table 'public.test_pgvector_schema_change';
+
+query I retry 20 backoff 1s
+select count(*) from test_pgvector_schema_change_rw;
+----
+1
+
+system ok
+psql -c "
+    ALTER TABLE test_pgvector_schema_change ADD COLUMN embedding2 vector(3);
+    INSERT INTO test_pgvector_schema_change VALUES
+        (2, 's2', '[1.1,1.2,1.3]', '[9.1,9.2,9.3]');
+"
+
+query T retry 20 backoff 1s
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_pgvector_schema_change_rw' and c.name = 'embedding2';
+----
+vector(3)
+
+query ITT retry 20 backoff 1s
+select id, name, embedding2::varchar
+from test_pgvector_schema_change_rw
+where id = 2;
+----
+2 s2 [9.1,9.2,9.3]
+
 # Backfill should load 2 rows and keep embedding non-null.
 query II retry 20 backoff 1s
 select count(*), count(*) filter (where embedding is null) from test_pgvector_cdc;
@@ -160,8 +217,15 @@ drop table test_pgvector_cdc_auto;
 statement ok
 drop source pgvector_source;
 
+statement ok
+drop table test_pgvector_schema_change_rw;
+
+statement ok
+drop source pgvector_schema_change_source;
+
 system ok
 psql -c "
     DROP TABLE IF EXISTS test_pgvector_cdc CASCADE;
     DROP TABLE IF EXISTS test_pgvector_nodim CASCADE;
+    DROP TABLE IF EXISTS test_pgvector_schema_change CASCADE;
 "

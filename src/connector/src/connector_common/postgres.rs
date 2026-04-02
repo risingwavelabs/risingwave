@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use anyhow::{Context, anyhow};
@@ -60,6 +60,100 @@ const DISCOVER_FORMATTED_TYPE_QUERY: &str = r#"
       AND NOT a.attisdropped
     ORDER BY a.attnum
 "#;
+
+/// Discover pgvector dimensions from PostgreSQL system tables.
+/// `vector(n)` is stored as `atttypmod = n`, while dimension-less `vector` uses `-1`.
+const DISCOVER_VECTOR_TYPEMOD_QUERY: &str = r#"
+    SELECT a.attname as column_name, a.atttypmod as atttypmod
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_type t ON t.oid = a.atttypid
+    WHERE n.nspname = $1
+      AND c.relname = $2
+      AND t.typname = 'vector'
+      AND a.attnum > 0
+      AND NOT a.attisdropped
+    ORDER BY a.attnum
+"#;
+
+pub struct PgConnectionConfig {
+    pub host: String,
+    pub port: String,
+    pub user: String,
+    pub password: String,
+    pub database: String,
+    pub ssl_mode: SslMode,
+    pub ssl_root_cert: Option<String>,
+}
+
+pub fn pg_connection_config_from_properties(
+    props: &BTreeMap<String, String>,
+) -> ConnectorResult<PgConnectionConfig> {
+    Ok(PgConnectionConfig {
+        host: props
+            .get("hostname")
+            .context("missing `hostname` in postgres-cdc properties")?
+            .clone(),
+        port: props
+            .get("port")
+            .context("missing `port` in postgres-cdc properties")?
+            .clone(),
+        user: props
+            .get("username")
+            .context("missing `username` in postgres-cdc properties")?
+            .clone(),
+        password: props.get("password").cloned().unwrap_or_default(),
+        database: props
+            .get("database.name")
+            .context("missing `database.name` in postgres-cdc properties")?
+            .clone(),
+        ssl_mode: props
+            .get("ssl.mode")
+            .and_then(|v| v.parse::<SslMode>().ok())
+            .unwrap_or_default(),
+        ssl_root_cert: props.get("ssl.root.cert").cloned(),
+    })
+}
+
+pub async fn create_pg_client_from_properties(
+    props: &BTreeMap<String, String>,
+    tcp_keepalive: Option<TcpKeepaliveConfig>,
+) -> ConnectorResult<PgClient> {
+    let config = pg_connection_config_from_properties(props)?;
+    create_pg_client(
+        &config.user,
+        &config.password,
+        &config.host,
+        &config.port,
+        &config.database,
+        &config.ssl_mode,
+        &config.ssl_root_cert,
+        tcp_keepalive,
+    )
+    .await
+    .map_err(Into::into)
+}
+
+pub async fn discover_pgvector_dimensions(
+    client: &PgClient,
+    schema: &str,
+    table: &str,
+) -> ConnectorResult<HashMap<String, usize>> {
+    let rows = client
+        .query(DISCOVER_VECTOR_TYPEMOD_QUERY, &[&schema, &table])
+        .await?;
+
+    let mut dims = HashMap::new();
+    for row in rows {
+        let col_name: String = row.get("column_name");
+        let atttypmod: i32 = row.get("atttypmod");
+        if atttypmod > 0 && let Ok(dim) = usize::try_from(atttypmod) {
+            dims.insert(col_name, dim);
+        }
+    }
+    Ok(dims)
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
