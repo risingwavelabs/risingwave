@@ -1007,7 +1007,7 @@ impl ExprImpl {
                 secret_id: sr.secret_id.into(),
                 ref_as: risingwave_pb::secret::secret_ref::RefAsType::try_from(sr.ref_as)
                     .unwrap_or(risingwave_pb::secret::secret_ref::RefAsType::Text),
-                secret_name: "<redacted>".to_owned(),
+                secret_name: format!("<secret:{}>", sr.secret_id),
             })),
         })
     }
@@ -1060,7 +1060,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::UserDefinedFunction(x) => write!(f, "{:?}", x),
             Self::Parameter(x) => write!(f, "{:?}", x),
             Self::Now(x) => write!(f, "{:?}", x),
-            Self::SecretRef(_) => write!(f, "Secret([REDACTED])"),
+            Self::SecretRef(x) => write!(f, "Secret({})", x.secret_name),
         }
     }
 }
@@ -1122,7 +1122,7 @@ impl std::fmt::Debug for ExprDisplay<'_> {
             }
             ExprImpl::Parameter(x) => write!(f, "{:?}", x),
             ExprImpl::Now(x) => write!(f, "{:?}", x),
-            ExprImpl::SecretRef(_) => write!(f, "Secret([REDACTED])"),
+            ExprImpl::SecretRef(x) => write!(f, "Secret({})", x.secret_name),
         }
     }
 }
@@ -1167,14 +1167,14 @@ mod tests {
     }
 
     #[test]
-    fn test_secret_ref_display_is_redacted() {
+    fn test_secret_ref_display_contains_name() {
         let expr = ExprImpl::SecretRef(Box::new(SecretRef {
             secret_id: 42.into(),
             ref_as: RefAsType::Text,
             secret_name: "test_secret".to_owned(),
         }));
 
-        assert_eq!(format!("{expr:?}"), "Secret([REDACTED])");
+        assert_eq!(format!("{expr:?}"), "Secret(test_secret)");
         assert_eq!(
             format!(
                 "{:?}",
@@ -1183,8 +1183,8 @@ mod tests {
                     input_schema: &Schema::empty(),
                 }
             ),
-            "Secret([REDACTED])"
+            "Secret(test_secret)"
         );
-        assert!(!format!("{expr:#?}").contains("test_secret"));
+        assert!(format!("{expr:#?}").contains("test_secret"));
     }
 }

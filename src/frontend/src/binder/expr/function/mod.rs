@@ -817,7 +817,7 @@ impl Binder {
                     crate::expr::SecretRef {
                         secret_id: secret_catalog.id,
                         ref_as,
-                        secret_name: "<redacted>".to_owned(),
+                        secret_name: secret_catalog.name.clone(),
                     }
                     .into(),
                 ])
