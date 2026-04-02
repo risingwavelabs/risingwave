@@ -90,6 +90,85 @@ where
     })
 }
 
+fn spawn_group_scheduling_loop(
+    name: &'static str,
+    hummock_manager: Arc<HummockManager>,
+    split_interval_sec: u64,
+    merge_interval_sec: u64,
+    mut shutdown_rx: watch::Receiver<bool>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        enum GroupSchedulingEvent {
+            Split,
+            Merge,
+        }
+
+        let mut triggers: Vec<BoxStream<'static, GroupSchedulingEvent>> = Vec::new();
+
+        if split_interval_sec > 0 {
+            let mut interval = tokio::time::interval(Duration::from_secs(split_interval_sec));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            interval.reset();
+            let split_trigger = IntervalStream::new(interval).map(|_| GroupSchedulingEvent::Split);
+            triggers.push(Box::pin(split_trigger));
+        }
+
+        if merge_interval_sec > 0 {
+            let mut interval = tokio::time::interval(Duration::from_secs(merge_interval_sec));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            interval.reset();
+            let merge_trigger = IntervalStream::new(interval).map(|_| GroupSchedulingEvent::Merge);
+            triggers.push(Box::pin(merge_trigger));
+        }
+
+        if triggers.is_empty() {
+            tracing::info!(
+                "Hummock timer handler loop [{}] is disabled (no scheduling intervals configured)",
+                name
+            );
+            return;
+        }
+
+        let event_stream = select_all(triggers);
+        pin_mut!(event_stream);
+
+        // NOTE: This loop intentionally does NOT preempt a running split/merge handler on shutdown,
+        // to keep the semantics aligned with the legacy single event loop implementation.
+        loop {
+            tokio::select! {
+                maybe_event = event_stream.next() => {
+                    let Some(event) = maybe_event else {
+                        tracing::warn!(
+                            "Hummock timer handler loop [{}] event stream ended unexpectedly",
+                            name
+                        );
+                        break;
+                    };
+
+                    if hummock_manager.env.opts.compaction_deterministic_test {
+                        continue;
+                    }
+
+                    match event {
+                        GroupSchedulingEvent::Split => {
+                            hummock_manager.on_handle_schedule_group_split().await;
+                        }
+                        GroupSchedulingEvent::Merge => {
+                            hummock_manager.on_handle_schedule_group_merge().await;
+                        }
+                    }
+                }
+                changed = shutdown_rx.changed() => {
+                    if changed.is_err() || *shutdown_rx.borrow() {
+                        tracing::info!("Hummock timer handler loop [{}] is stopped", name);
+                        break;
+                    }
+                }
+            }
+        }
+    })
+}
+
 impl HummockManager {
     pub fn hummock_timer_task(
         hummock_manager: Arc<Self>,
@@ -305,74 +384,17 @@ impl HummockManager {
                 || periodic_scheduling_compaction_group_merge_interval_sec > 0
             {
                 let hummock_manager = hummock_manager.clone();
-                let mut shutdown_rx = child_shutdown_rx.clone();
                 let split_interval_sec = periodic_scheduling_compaction_group_split_interval_sec;
                 let merge_interval_sec = periodic_scheduling_compaction_group_merge_interval_sec;
-
                 child_handles.push((
                     "group_scheduling",
-                    tokio::spawn(async move {
-                        enum GroupSchedulingEvent {
-                            Split,
-                            Merge,
-                        }
-
-                        let mut triggers: Vec<BoxStream<'static, GroupSchedulingEvent>> =
-                            Vec::new();
-
-                        if split_interval_sec > 0 {
-                            let mut interval =
-                                tokio::time::interval(Duration::from_secs(split_interval_sec));
-                            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                            interval.reset();
-                            let split_trigger = IntervalStream::new(interval)
-                                .map(|_| GroupSchedulingEvent::Split);
-                            triggers.push(Box::pin(split_trigger));
-                        }
-
-                        if merge_interval_sec > 0 {
-                            let mut interval =
-                                tokio::time::interval(Duration::from_secs(merge_interval_sec));
-                            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                            interval.reset();
-                            let merge_trigger = IntervalStream::new(interval)
-                                .map(|_| GroupSchedulingEvent::Merge);
-                            triggers.push(Box::pin(merge_trigger));
-                        }
-
-                        let event_stream = select_all(triggers);
-                        pin_mut!(event_stream);
-
-                        loop {
-                            tokio::select! {
-                                maybe_event = event_stream.next() => {
-                                    let Some(event) = maybe_event else {
-                                        tracing::info!("Hummock timer handler loop [group_scheduling] is stopped");
-                                        break;
-                                    };
-
-                                    if hummock_manager.env.opts.compaction_deterministic_test {
-                                        continue;
-                                    }
-
-                                    match event {
-                                        GroupSchedulingEvent::Split => {
-                                            hummock_manager.on_handle_schedule_group_split().await;
-                                        }
-                                        GroupSchedulingEvent::Merge => {
-                                            hummock_manager.on_handle_schedule_group_merge().await;
-                                        }
-                                    }
-                                }
-                                changed = shutdown_rx.changed() => {
-                                    if changed.is_err() || *shutdown_rx.borrow() {
-                                        tracing::info!("Hummock timer handler loop [group_scheduling] is stopped");
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }),
+                    spawn_group_scheduling_loop(
+                        "group_scheduling",
+                        hummock_manager,
+                        split_interval_sec,
+                        merge_interval_sec,
+                        child_shutdown_rx.clone(),
+                    ),
                 ));
             }
 
