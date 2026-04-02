@@ -694,13 +694,18 @@ impl ConnectorProperties {
         // enable split scale in just for Kinesis
         matches!(
             self,
-            ConnectorProperties::Kinesis(_) | ConnectorProperties::Nats(_)
+            ConnectorProperties::Kinesis(_)
+                | ConnectorProperties::Nats(_)
+                | ConnectorProperties::GooglePubsub(_)
         )
     }
 
     /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.
     pub fn enable_adaptive_splits(&self) -> bool {
-        matches!(self, ConnectorProperties::Nats(_))
+        matches!(
+            self,
+            ConnectorProperties::Nats(_) | ConnectorProperties::GooglePubsub(_)
+        )
     }
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
