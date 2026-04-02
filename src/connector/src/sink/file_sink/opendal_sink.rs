@@ -252,17 +252,18 @@ impl OpenDalSinkWriter {
         if let Some(sink_writer) = self.sink_writer.take() {
             match sink_writer {
                 FileWriterEnum::ParquetFileWriter(w) => {
-                    if w.bytes_written() > 0 {
-                        let metadata = w.close().await?;
+                    let bytes_written = w.bytes_written();
+                    if bytes_written > 0 {
+                        w.close().await?;
                         tracing::info!(
-                            "writer {} (executor_id: {}, created_time: {}) finish write file, metadata: {:?}",
+                            "writer {} (executor_id: {}, created_time: {}) finish write file, bytes_written: {}",
                             self.unique_writer_id,
                             self.executor_id,
                             self.created_time
                                 .duration_since(UNIX_EPOCH)
                                 .expect("Time went backwards")
                                 .as_secs(),
-                            metadata
+                            bytes_written
                         );
                     }
                 }
