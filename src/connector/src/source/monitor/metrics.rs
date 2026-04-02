@@ -281,7 +281,7 @@ impl SourceMetrics {
         let connector_ack_failure_count = register_int_counter_vec_with_registry!(
             "source_connector_ack_failure_count",
             "Total number of ack failures during checkpoint for source connectors",
-            &["connector_type", "error_type"],
+            &["source_name", "connector_type", "error_type"],
             registry
         )
         .unwrap();

@@ -147,32 +147,39 @@ impl WaitCheckpointTask {
         }
     }
 
-    pub async fn run(self) {
-        self.run_with_on_commit_success(|_source_id, _offset| {
+    pub async fn run(self, source_id: SourceId, source_name: &str) {
+        self.run_with_on_commit_success(source_id, source_name, |_source_id, _offset| {
             // Default implementation: no action on commit success
         })
         .await;
     }
 
-    pub async fn run_with_on_commit_success<F>(self, mut on_commit_success: F)
-    where
+    pub async fn run_with_on_commit_success<F>(
+        self,
+        source_id: SourceId,
+        source_name: &str,
+        mut on_commit_success: F,
+    ) where
         F: FnMut(u64, &str),
     {
         use std::str::FromStr;
+        let source_id_label = source_id.to_string();
         match self {
             WaitCheckpointTask::CommitCdcOffset(updated_offset) => {
                 if let Some((split_id, offset)) = updated_offset {
-                    let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
+                    let committed_source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
                     // notify cdc connector to commit offset
-                    match cdc::jni_source::commit_cdc_offset(source_id, offset.clone()) {
+                    match cdc::jni_source::commit_cdc_offset(committed_source_id, offset.clone()) {
                         Ok(()) => {
                             // Execute callback after successful commit
-                            on_commit_success(source_id, &offset);
+                            on_commit_success(committed_source_id, &offset);
                         }
                         Err(e) => {
                             tracing::error!(
+                                source_id = committed_source_id,
+                                source_name,
                                 error = %e.as_report(),
-                                "source#{source_id}: failed to commit cdc offset: {offset}.",
+                                "source#{committed_source_id}: failed to commit cdc offset: {offset}.",
                             )
                         }
                     }
@@ -194,16 +201,23 @@ impl WaitCheckpointTask {
             }
             WaitCheckpointTask::AckPubsubMessage(subscription, ack_id_arrs) => {
                 const ACK_RPC_TIMEOUT: Duration = Duration::from_secs(30);
-                async fn ack(subscription: &Subscription, ack_ids: Vec<String>) {
+                async fn ack(
+                    subscription: &Subscription,
+                    ack_ids: Vec<String>,
+                    source_id_label: &str,
+                    source_name: &str,
+                ) {
                     tracing::trace!("acking pubsub messages {:?}", ack_ids);
                     match tokio::time::timeout(ACK_RPC_TIMEOUT, subscription.ack(ack_ids)).await {
                         Ok(Ok(())) => {}
                         Ok(Err(e)) => {
                             crate::source::monitor::GLOBAL_SOURCE_METRICS
                                 .connector_ack_failure_count
-                                .with_label_values(&["pubsub", "error"])
+                                .with_label_values(&[source_name, "pubsub", "error"])
                                 .inc();
                             tracing::error!(
+                                source_id = source_id_label,
+                                source_name,
                                 error = %e.as_report(),
                                 "failed to ack pubsub messages",
                             )
@@ -211,9 +225,13 @@ impl WaitCheckpointTask {
                         Err(_) => {
                             crate::source::monitor::GLOBAL_SOURCE_METRICS
                                 .connector_ack_failure_count
-                                .with_label_values(&["pubsub", "timeout"])
+                                .with_label_values(&[source_name, "pubsub", "timeout"])
                                 .inc();
-                            tracing::error!("pubsub ack timed out after {ACK_RPC_TIMEOUT:?}",)
+                            tracing::error!(
+                                source_id = source_id_label,
+                                source_name,
+                                "pubsub ack timed out after {ACK_RPC_TIMEOUT:?}",
+                            )
                         }
                     }
                 }
@@ -223,11 +241,17 @@ impl WaitCheckpointTask {
                     for ack_id in arr.as_utf8().iter().flatten() {
                         ack_ids.push(ack_id.to_owned());
                         if ack_ids.len() >= MAX_ACK_BATCH_SIZE {
-                            ack(&subscription, std::mem::take(&mut ack_ids)).await;
+                            ack(
+                                &subscription,
+                                std::mem::take(&mut ack_ids),
+                                &source_id_label,
+                                source_name,
+                            )
+                            .await;
                         }
                     }
                 }
-                ack(&subscription, ack_ids).await;
+                ack(&subscription, ack_ids, &source_id_label, source_name).await;
             }
             WaitCheckpointTask::AckNatsJetStream(
                 ref context,
@@ -235,7 +259,12 @@ impl WaitCheckpointTask {
                 ref ack_policy,
             ) => {
                 const ACK_RPC_TIMEOUT: Duration = Duration::from_secs(30);
-                async fn ack(context: &JetStreamContext, reply_subject: String) {
+                async fn ack(
+                    context: &JetStreamContext,
+                    reply_subject: String,
+                    source_id_label: &str,
+                    source_name: &str,
+                ) {
                     let fut = async {
                         let ack_future = context
                             .publish(reply_subject.clone(), "+ACK".into())
@@ -252,16 +281,27 @@ impl WaitCheckpointTask {
                         Ok(Err(e)) => {
                             crate::source::monitor::GLOBAL_SOURCE_METRICS
                                 .connector_ack_failure_count
-                                .with_label_values(&["nats_jetstream", "error"])
+                                .with_label_values(&[source_name, "nats_jetstream", "error"])
                                 .inc();
-                            tracing::error!(error = %e, subject = ?reply_subject, "failed to ack NATS JetStream message");
+                            tracing::error!(
+                                source_id = source_id_label,
+                                source_name,
+                                error = %e,
+                                subject = ?reply_subject,
+                                "failed to ack NATS JetStream message",
+                            );
                         }
                         Err(_) => {
                             crate::source::monitor::GLOBAL_SOURCE_METRICS
                                 .connector_ack_failure_count
-                                .with_label_values(&["nats_jetstream", "timeout"])
+                                .with_label_values(&[source_name, "nats_jetstream", "timeout"])
                                 .inc();
-                            tracing::error!(subject = ?reply_subject, "NATS JetStream ack timed out after {ACK_RPC_TIMEOUT:?}");
+                            tracing::error!(
+                                source_id = source_id_label,
+                                source_name,
+                                subject = ?reply_subject,
+                                "NATS JetStream ack timed out after {ACK_RPC_TIMEOUT:?}",
+                            );
                         }
                     }
                 }
@@ -284,12 +324,18 @@ impl WaitCheckpointTask {
                             if reply_subject.is_empty() {
                                 continue;
                             }
-                            ack(context, reply_subject).await;
+                            ack(context, reply_subject, &source_id_label, source_name).await;
                         }
                     }
                     JetStreamAckPolicy::All => {
                         if let Some(reply_subject) = reply_subjects.last() {
-                            ack(context, reply_subject.clone()).await;
+                            ack(
+                                context,
+                                reply_subject.clone(),
+                                &source_id_label,
+                                source_name,
+                            )
+                            .await;
                         }
                     }
                 }
