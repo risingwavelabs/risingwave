@@ -70,6 +70,8 @@ impl SplitReader for KafkaSplitReader {
 
         let enable_partition_eof = source_ctx.source_ctrl_opts.enable_partition_eof;
         config.set(
+            // Emit RD_KAFKA_RESP_ERR__PARTITION_EOF event whenever the consumer reaches the end of a partition.
+            // The signal is triggered each time reaching the end of a partition, even if multiple partitions are being consumed.
             "enable.partition.eof",
             if enable_partition_eof {
                 "true"
