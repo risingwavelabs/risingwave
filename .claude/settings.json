@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(git pull:*)",
+      "Read(//Users/wangcongyi/.m2/repository/io/debezium/**)",
+      "Bash(find /Users/wangcongyi/singularity/risingwave/java -name *.jar -path *debezium*postgres*)",
+      "Read(//Users/wangcongyi/**)",
+      "Bash(find /Users/wangcongyi/singularity/risingwave/java -name *.jar)",
+      "Bash(mvn compile:*)",
+      "Bash(jobs -l)",
+      "Bash(mvn spotless:apply -pl connector-node/risingwave-source-cdc,connector-node/risingwave-connector-service)"
+    ]
+  }
+}
