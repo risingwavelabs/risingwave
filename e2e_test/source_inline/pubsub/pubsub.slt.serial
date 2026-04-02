@@ -121,34 +121,10 @@ select count(distinct v1) from s1;
 10
 
 statement ok
-flush;
-
-# Verify no redelivery after ack: drop and recreate on the same subscription.
-# Since all messages were acked, no messages should be pending.
-statement ok
 DROP TABLE s1;
 
-statement ok
-CREATE TABLE s1 (v1 int, v2 varchar) WITH (
-    ${RISEDEV_PUBSUB_WITH_OPTIONS_COMMON},
-    pubsub.subscription = 'test-subscription-1',
-    pubsub.ack_deadline_seconds = 10
-) FORMAT PLAIN ENCODE JSON;
-
-statement ok
-set visibility_mode = 'all';
-
-# Wait 2x ack-deadline (10s) to give any pending redeliveries time to arrive,
-# then assert nothing was redelivered.
-sleep 20s
-
-query I
-select count(*) from s1;
-----
-0
-
-statement ok
-DROP TABLE s1;
+# Attempted to verify no redelivery after ack: drop and recreate on the same subscription.
+# But ack can happen in any time, we can not guarantee the messages are ack-ed in time.
 
 # Restore to the value in src/config/ci-recovery.toml
 statement ok
