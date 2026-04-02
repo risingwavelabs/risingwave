@@ -156,16 +156,20 @@ quit(1);
         );
 
         ctx.pb.set_message("initializing replica set...");
-        let output = self.mongosh_eval(&init_script)?;
-        if !output.status.success() {
+        ctx.wait(|| {
+            let output = self.mongosh_eval(&init_script)?;
+            if output.status.success() {
+                return Ok(());
+            }
+
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(anyhow!(
+            Err(anyhow!(
                 "failed to initialize mongodb replica set: {}{}",
                 stdout.trim(),
                 stderr.trim()
-            ));
-        }
+            ))
+        })?;
 
         self.wait_replica_set_ready(ctx)?;
         Ok(())

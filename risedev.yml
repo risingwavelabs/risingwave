@@ -1084,7 +1084,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+        id: minio-local-clickhouse-sink-test
       - use: sqlite
+        id: sqlite-local-clickhouse-sink-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
@@ -1097,7 +1099,9 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
+        id: minio-local-nats-mqtt-test
       - use: sqlite
+        id: sqlite-local-nats-mqtt-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
@@ -1111,7 +1115,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+        id: minio-local-mongodb-sink-test
       - use: sqlite
+        id: sqlite-local-mongodb-sink-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
@@ -1124,7 +1130,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+        id: minio-local-search-sink-test
       - use: sqlite
+        id: sqlite-local-search-sink-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
@@ -1138,7 +1146,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+        id: minio-local-elasticsearch-sink-test
       - use: sqlite
+        id: sqlite-local-elasticsearch-sink-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
@@ -1151,7 +1161,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+        id: minio-local-opensearch-sink-test
       - use: sqlite
+        id: sqlite-local-opensearch-sink-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
@@ -1164,7 +1176,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+        id: minio-local-deltalake-sink-test
       - use: sqlite
+        id: sqlite-local-deltalake-sink-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
@@ -1176,7 +1190,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+        id: minio-local-doris-sink-test
       - use: sqlite
+        id: sqlite-local-doris-sink-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node
@@ -1189,7 +1205,9 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
+        id: minio-local-starrocks-sink-test
       - use: sqlite
+        id: sqlite-local-starrocks-sink-test
       - use: meta-node
         meta-backend: sqlite
       - use: compute-node

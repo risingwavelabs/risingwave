@@ -230,7 +230,9 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"MONGODB_HOST="{host}""#).unwrap();
                 writeln!(env, r#"MONGODB_PORT="{port}""#).unwrap();
                 writeln!(env, r#"MONGODB_URL="{url}""#).unwrap();
-                writeln!(env, r#"MONGODB_CONTAINER="risedev-{}""#, c.id).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"MONGODB_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
                 writeln!(
                     env,
                     r#"RISEDEV_MONGODB_WITH_OPTIONS_COMMON="connector='mongodb',mongodb.url='{url}'""#,
@@ -282,7 +284,9 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"DORIS_HOST="{host}""#).unwrap();
                 writeln!(env, r#"DORIS_HTTP_PORT="{http_port}""#).unwrap();
                 writeln!(env, r#"DORIS_QUERY_PORT="{query_port}""#).unwrap();
-                writeln!(env, r#"DORIS_CONTAINER="risedev-{}""#, c.id).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"DORIS_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
                 writeln!(env, r#"DORIS_USER="{user}""#).unwrap();
                 writeln!(env, r#"DORIS_PASSWORD="{password}""#).unwrap();
                 writeln!(env, r#"DORIS_DATABASE="{database}""#).unwrap();
@@ -302,7 +306,9 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"STARROCKS_HOST="{host}""#).unwrap();
                 writeln!(env, r#"STARROCKS_HTTP_PORT="{http_port}""#).unwrap();
                 writeln!(env, r#"STARROCKS_QUERY_PORT="{query_port}""#).unwrap();
-                writeln!(env, r#"STARROCKS_CONTAINER="risedev-{}-fe""#, c.id).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"STARROCKS_CONTAINER="risedev-{}-fe""#, c.id).unwrap();
+                }
                 writeln!(env, r#"STARROCKS_USER="{user}""#).unwrap();
                 writeln!(env, r#"STARROCKS_PASSWORD="{password}""#).unwrap();
                 writeln!(env, r#"STARROCKS_DATABASE="{database}""#).unwrap();
