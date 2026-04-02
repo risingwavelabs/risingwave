@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::Bound::Unbounded;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
+use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -82,6 +84,7 @@ pub(super) trait PartialGraphStat: Send + Sync + 'static {
 struct PartialGraphRunningState {
     barrier_item_collector:
         BarrierItemCollector<WorkerId, BarrierCompleteResponse, PartialGraphBarrierInfo>,
+    completing_epoch: Option<u64>,
     #[educe(Debug(ignore))]
     stat: Box<dyn PartialGraphStat>,
 }
@@ -90,12 +93,13 @@ impl PartialGraphRunningState {
     fn new(stat: Box<dyn PartialGraphStat>) -> Self {
         Self {
             barrier_item_collector: BarrierItemCollector::new(),
+            completing_epoch: None,
             stat,
         }
     }
 
     fn is_empty(&self) -> bool {
-        self.barrier_item_collector.is_empty()
+        self.barrier_item_collector.is_empty() && self.completing_epoch.is_none()
     }
 
     fn enqueue(&mut self, node_to_collect: NodeToCollect, mut info: PartialGraphBarrierInfo) {
@@ -514,20 +518,65 @@ impl PartialGraphManager {
         graph
     }
 
-    pub(super) fn take_collected_barrier(
+    pub(super) fn inflight_barrier_num(&self, partial_graph_id: PartialGraphId) -> usize {
+        self.running_graph(partial_graph_id)
+            .barrier_item_collector
+            .inflight_barrier_num()
+    }
+
+    pub(super) fn first_inflight_barrier(
+        &self,
+        partial_graph_id: PartialGraphId,
+    ) -> Option<EpochPair> {
+        self.running_graph(partial_graph_id)
+            .barrier_item_collector
+            .first_inflight_epoch()
+    }
+
+    pub(super) fn start_completing(
         &mut self,
         partial_graph_id: PartialGraphId,
-        epoch: u64,
-    ) -> (Vec<BarrierCompleteResponse>, PartialGraphBarrierInfo) {
+        epoch_end_bound: Bound<u64>,
+        mut on_non_checkpoint_epoch: impl FnMut(
+            EpochPair,
+            HashMap<WorkerId, BarrierCompleteResponse>,
+            PostCollectCommand,
+        ),
+    ) -> Option<(
+        u64,
+        HashMap<WorkerId, BarrierCompleteResponse>,
+        PartialGraphBarrierInfo,
+    )> {
         let graph = self.running_graph_mut(partial_graph_id);
-        let (_, resps, info) = graph
+        assert!(graph.completing_epoch.is_none());
+        let epoch_range: (Bound<u64>, Bound<u64>) = (Unbounded, epoch_end_bound);
+        while let Some((epoch, resps, info)) = graph
             .barrier_item_collector
-            .take_collected_if(|barrier_epoch| {
-                assert_eq!(barrier_epoch.prev, epoch);
-                true
-            })
-            .expect("true cond");
-        (resps.into_values().collect(), info)
+            .take_collected_if(|epoch| epoch_range.contains(&epoch.prev))
+        {
+            if info.post_collect_command.should_checkpoint() {
+                assert!(info.barrier_info.kind.is_checkpoint());
+            } else if !info.barrier_info.kind.is_checkpoint() {
+                info.notifiers
+                    .into_iter()
+                    .for_each(Notifier::notify_collected);
+                on_non_checkpoint_epoch(epoch, resps, info.post_collect_command);
+                continue;
+            }
+            let prev_epoch = info.barrier_info.prev_epoch();
+            graph.completing_epoch = Some(prev_epoch);
+            return Some((prev_epoch, resps, info));
+        }
+        None
+    }
+
+    pub(super) fn ack_completed(&mut self, partial_graph_id: PartialGraphId, prev_epoch: u64) {
+        assert_eq!(
+            self.running_graph_mut(partial_graph_id)
+                .completing_epoch
+                .take(),
+            Some(prev_epoch)
+        );
     }
 
     pub(super) fn has_pending_checkpoint_barrier(&self, partial_graph_id: PartialGraphId) -> bool {
