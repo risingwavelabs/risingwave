@@ -607,8 +607,10 @@ mod tests {
 
     #[test]
     fn test_blocked_xor_filter_kv_count_threshold_roundtrip() {
-        let mut pb = PbCompactTask::default();
-        pb.blocked_xor_filter_kv_count_threshold = Some(123);
+        let pb = PbCompactTask {
+            blocked_xor_filter_kv_count_threshold: Some(123),
+            ..Default::default()
+        };
 
         let task = CompactTask::from(&pb);
         assert_eq!(task.blocked_xor_filter_kv_count_threshold, Some(123));
