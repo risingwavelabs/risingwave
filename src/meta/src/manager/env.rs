@@ -121,7 +121,8 @@ pub struct MetaOpts {
     /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
     /// meta node.
     pub vacuum_spin_interval_ms: u64,
-    /// Interval of reconciling live state tables and purging stale dynamic compaction groups.
+    /// Interval of purging empty dynamic compaction groups from the latest Hummock version, and
+    /// purging stale compaction-group configs that are not referenced by the version.
     pub periodic_purge_stale_compaction_group_interval_sec: u64,
     /// Interval of invoking iceberg garbage collection, to expire old snapshots.
     pub iceberg_gc_interval_sec: u64,
