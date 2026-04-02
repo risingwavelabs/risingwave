@@ -103,7 +103,7 @@ set visibility_mode = 'all';
 
 # Wait for redelivery. Poll instead of a fixed sleep, because the emulator's
 # streaming-pull redelivery timing is non-deterministic.
-query I retry 120 backoff 1s
+query I retry 60 backoff 5s
 select count(distinct v1) from s1;
 ----
 10
