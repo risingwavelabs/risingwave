@@ -1007,7 +1007,7 @@ impl ExprImpl {
                 secret_id: sr.secret_id.into(),
                 ref_as: risingwave_pb::secret::secret_ref::RefAsType::try_from(sr.ref_as)
                     .unwrap_or(risingwave_pb::secret::secret_ref::RefAsType::Text),
-                secret_name: format!("<secret:{}>", sr.secret_id),
+                secret_name: "<redacted>".to_owned(),
             })),
         })
     }
@@ -1060,7 +1060,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::UserDefinedFunction(x) => write!(f, "{:?}", x),
             Self::Parameter(x) => write!(f, "{:?}", x),
             Self::Now(x) => write!(f, "{:?}", x),
-            Self::SecretRef(x) => write!(f, "Secret({})", x.secret_name),
+            Self::SecretRef(_) => write!(f, "Secret([REDACTED])"),
         }
     }
 }
@@ -1122,7 +1122,7 @@ impl std::fmt::Debug for ExprDisplay<'_> {
             }
             ExprImpl::Parameter(x) => write!(f, "{:?}", x),
             ExprImpl::Now(x) => write!(f, "{:?}", x),
-            ExprImpl::SecretRef(x) => write!(f, "Secret({})", x.secret_name),
+            ExprImpl::SecretRef(_) => write!(f, "Secret([REDACTED])"),
         }
     }
 }
@@ -1154,6 +1154,8 @@ use crate::utils::Condition;
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::secret::secret_ref::RefAsType;
+
     use super::*;
 
     #[test]
@@ -1162,5 +1164,27 @@ mod tests {
         e = FunctionCall::new(ExprType::Not, vec![e]).unwrap().into();
         let s = format!("{:#?}", e);
         assert!(s.contains("return_type: Boolean"))
+    }
+
+    #[test]
+    fn test_secret_ref_display_is_redacted() {
+        let expr = ExprImpl::SecretRef(Box::new(SecretRef {
+            secret_id: 42.into(),
+            ref_as: RefAsType::Text,
+            secret_name: "test_secret".to_owned(),
+        }));
+
+        assert_eq!(format!("{expr:?}"), "Secret([REDACTED])");
+        assert_eq!(
+            format!(
+                "{:?}",
+                ExprDisplay {
+                    expr: &expr,
+                    input_schema: &Schema::empty(),
+                }
+            ),
+            "Secret([REDACTED])"
+        );
+        assert!(!format!("{expr:#?}").contains("test_secret"));
     }
 }

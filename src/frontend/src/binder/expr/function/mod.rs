@@ -151,8 +151,18 @@ impl Binder {
             );
         }
 
-        // Bind function arguments. Secret references are bound as ExprImpl::SecretRef
-        // by bind_function_expr_arg, just like any other expression.
+        // Bind function arguments. Secret references are bound as ExprImpl::SecretRef first,
+        // and then restricted to UDF calls below.
+        let has_secret_ref_arg = arg_list.args.iter().any(|arg| {
+            matches!(
+                arg,
+                FunctionArg::Unnamed(FunctionArgExpr::SecretRef(_))
+                    | FunctionArg::Named {
+                        arg: FunctionArgExpr::SecretRef(_),
+                        ..
+                    }
+            )
+        });
         let mut args: Vec<ExprImpl> = arg_list
             .args
             .iter()
@@ -161,6 +171,7 @@ impl Binder {
             .try_collect()?;
 
         let mut referred_udfs = HashSet::new();
+        let mut is_udf_call = false;
 
         let wrapped_agg_type = if *scalar_as_agg {
             // Let's firstly try to apply the `AGGREGATE:` prefix.
@@ -179,6 +190,7 @@ impl Binder {
             ) {
                 // record the dependency upon the UDF
                 referred_udfs.insert(func.id);
+                is_udf_call = true;
                 self.check_privilege(
                     ObjectCheckItem::new(func.owner, AclMode::Execute, func.name.clone(), func.id),
                     self.database_id,
@@ -228,6 +240,7 @@ impl Binder {
             ) {
             // record the dependency upon the UDF
             referred_udfs.insert(func.id);
+            is_udf_call = true;
             self.check_privilege(
                 ObjectCheckItem::new(func.owner, AclMode::Execute, func.name.clone(), func.id),
                 self.database_id,
@@ -236,6 +249,13 @@ impl Binder {
         } else {
             None
         };
+
+        if has_secret_ref_arg && !is_udf_call {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "secret reference is only allowed in user-defined function arguments".to_owned(),
+            )
+            .into());
+        }
 
         self.included_udfs.extend(referred_udfs);
 
@@ -797,7 +817,7 @@ impl Binder {
                     crate::expr::SecretRef {
                         secret_id: secret_catalog.id,
                         ref_as,
-                        secret_name: secret_catalog.name.clone(),
+                        secret_name: "<redacted>".to_owned(),
                     }
                     .into(),
                 ])
