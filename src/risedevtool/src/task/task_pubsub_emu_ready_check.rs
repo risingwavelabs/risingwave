@@ -33,12 +33,7 @@ impl PubsubReadyTaskCheck {
 // #[async_tr]
 impl Task for PubsubReadyTaskCheck {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
-        if self.config.user_managed {
-            ctx.pb
-                .set_message("waiting for user-managed service online...");
-        } else {
-            ctx.pb.set_message("waiting for online...");
-        }
+        ctx.pb.set_message("waiting for online...");
 
         // environment variables to use the pubsub emulator
         // SAFETY: RiseDev is for development purposes only.
