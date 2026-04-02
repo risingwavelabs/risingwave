@@ -1107,6 +1107,71 @@ profile:
       - use: nats
       - use: mqtt
 
+  local-mongodb-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: mongodb
+
+  local-search-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: elasticsearch
+      - use: opensearch
+
+  local-elasticsearch-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: elasticsearch
+
+  local-opensearch-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: opensearch
+
+  local-deltalake-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
   local-doris-sink-test:
     config-path: src/config/ci.toml
     steps:
@@ -1708,6 +1773,37 @@ template:
     port: 1883
     image: "eclipse-mosquitto"
     persist-data: true
+    user-managed: false
+
+  # MongoDB service backed by docker.
+  mongodb:
+    id: mongodb-${port}
+    address: "127.0.0.1"
+    port: 27017
+    image: "mongo:8"
+    persist-data: true
+    user-managed: false
+
+  # Elasticsearch service backed by docker.
+  elasticsearch:
+    id: elasticsearch-${port}
+    address: "127.0.0.1"
+    port: 9200
+    user: elastic
+    password: "risingwave"
+    image: "docker.elastic.co/elasticsearch/elasticsearch:7.11.0"
+    persist-data: false
+    user-managed: false
+
+  # OpenSearch service backed by docker.
+  opensearch:
+    id: opensearch-${port}
+    address: "127.0.0.1"
+    port: 9201
+    user: admin
+    password: "Risingwave123!"
+    image: "opensearchproject/opensearch:2.19.1"
+    persist-data: false
     user-managed: false
 
   # Doris service backed by docker.

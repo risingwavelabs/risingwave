@@ -29,12 +29,13 @@ use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     ClickHouseService, CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask,
-    DorisService, DummyService, EnsureStopService, ExecuteContext, FrontendService, GrafanaService,
-    KafkaService, LakekeeperService, MetaNodeService, MinioService, MoatService, MqttService,
-    MySqlService, NatsService, PostgresService, PrometheusService, PubsubService, PulsarService,
-    RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig, SqlServerService,
-    SqliteConfig, StarrocksService, Task, TaskGroup, TempoService, generate_risedev_env,
-    preflight_check,
+    DorisService, DummyService, ElasticSearchService, EnsureStopService, ExecuteContext,
+    FrontendService, GrafanaService, KafkaService, LakekeeperService, MetaNodeService,
+    MinioService, MoatService, MongoDbService, MongoDbSetupTask, MqttService, MySqlService,
+    NatsService, OpenSearchService, PostgresService, PrometheusService, PubsubService,
+    PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
+    SqlServerService, SqliteConfig, StarrocksService, Task, TaskGroup, TempoService,
+    generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -377,6 +378,31 @@ fn task_main(
                         risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                     task.execute(&mut ctx)?;
                     ctx.pb.set_message(format!("mqtt {}:{}", c.address, c.port));
+                }
+                ServiceConfig::MongoDb(c) => {
+                    MongoDbService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    MongoDbSetupTask::new(c.clone()).execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("mongodb {}:{}", c.address, c.port));
+                }
+                ServiceConfig::ElasticSearch(c) => {
+                    ElasticSearchService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("elasticsearch http://{}:{}", c.address, c.port));
+                }
+                ServiceConfig::OpenSearch(c) => {
+                    OpenSearchService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("opensearch http://{}:{}", c.address, c.port));
                 }
                 ServiceConfig::Doris(c) => {
                     DorisService::new(c.clone()).execute(&mut ctx)?;

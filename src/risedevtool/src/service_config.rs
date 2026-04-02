@@ -475,6 +475,60 @@ pub struct MqttConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct MongoDbConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct ElasticSearchConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub user: String,
+    pub password: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct OpenSearchConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub user: String,
+    pub password: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct DorisConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -578,6 +632,9 @@ pub enum ServiceConfig {
     ClickHouse(ClickHouseConfig),
     Nats(NatsConfig),
     Mqtt(MqttConfig),
+    MongoDb(MongoDbConfig),
+    ElasticSearch(ElasticSearchConfig),
+    OpenSearch(OpenSearchConfig),
     Doris(DorisConfig),
     Starrocks(StarrocksConfig),
     Lakekeeper(LakekeeperConfig),
@@ -597,6 +654,9 @@ pub enum TaskGroup {
     ClickHouse,
     Nats,
     Mqtt,
+    MongoDb,
+    ElasticSearch,
+    OpenSearch,
     Doris,
     Starrocks,
     Redis,
@@ -628,6 +688,9 @@ impl ServiceConfig {
             Self::ClickHouse(c) => &c.id,
             Self::Nats(c) => &c.id,
             Self::Mqtt(c) => &c.id,
+            Self::MongoDb(c) => &c.id,
+            Self::ElasticSearch(c) => &c.id,
+            Self::OpenSearch(c) => &c.id,
             Self::Doris(c) => &c.id,
             Self::Starrocks(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
@@ -660,6 +723,9 @@ impl ServiceConfig {
             Self::ClickHouse(c) => Some(c.http_port),
             Self::Nats(c) => Some(c.port),
             Self::Mqtt(c) => Some(c.port),
+            Self::MongoDb(c) => Some(c.port),
+            Self::ElasticSearch(c) => Some(c.port),
+            Self::OpenSearch(c) => Some(c.port),
             Self::Doris(c) => Some(c.query_port),
             Self::Starrocks(c) => Some(c.query_port),
             Self::SchemaRegistry(c) => Some(c.port),
@@ -691,6 +757,9 @@ impl ServiceConfig {
             Self::ClickHouse(c) => c.user_managed,
             Self::Nats(c) => c.user_managed,
             Self::Mqtt(c) => c.user_managed,
+            Self::MongoDb(c) => c.user_managed,
+            Self::ElasticSearch(c) => c.user_managed,
+            Self::OpenSearch(c) => c.user_managed,
             Self::Doris(c) => c.user_managed,
             Self::Starrocks(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
@@ -734,6 +803,9 @@ impl ServiceConfig {
             ServiceConfig::ClickHouse(_) => ClickHouse,
             ServiceConfig::Nats(_) => Nats,
             ServiceConfig::Mqtt(_) => Mqtt,
+            ServiceConfig::MongoDb(_) => MongoDb,
+            ServiceConfig::ElasticSearch(_) => ElasticSearch,
+            ServiceConfig::OpenSearch(_) => OpenSearch,
             ServiceConfig::Doris(_) => Doris,
             ServiceConfig::Starrocks(_) => Starrocks,
             ServiceConfig::Lakekeeper(_) => Lakekeeper,

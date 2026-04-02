@@ -1,11 +1,11 @@
 control substitution on
 
 system ok retry 30 backoff 1s
-test "$(elasticsearch GET '/' | python3 -c "import json,sys; print(json.load(sys.stdin).get('cluster_name', '') != '')")" = "True"
+test "$(opensearch GET '/' | python3 -c "import json,sys; print(json.load(sys.stdin).get('version', {}).get('distribution', '') != '')")" = "True"
 
 system ok
 for index in test test1 test_route; do
-  elasticsearch DELETE "/${index}" >/dev/null 2>&1 || true
+  opensearch DELETE "/${index}" >/dev/null 2>&1 || true
 done
 
 statement ok
@@ -31,52 +31,25 @@ CREATE TABLE test_route (
   v3 varchar,
 );
 
-# Invalid field: foo, allowed fields: {"username", "url", "password"}
-statement error
-create connection es_conn_1 with (
-  type = 'elasticsearch',
-  foo = 'bar',
-  url = '${RISEDEV_ELASTICSEARCH_URL}',
-  username = '${ELASTICSEARCH_USER}',
-  password = '${ELASTICSEARCH_PASSWORD}'
-);
-
-# please set the password when the username is set.
-statement error
-create connection es_conn_1 with (
-  type = 'elasticsearch',
-  url = '${RISEDEV_ELASTICSEARCH_URL}',
-  username = '${ELASTICSEARCH_USER}'
-);
-
-statement ok
-create connection es_conn with (
-  type = 'elasticsearch',
-  url = '${RISEDEV_ELASTICSEARCH_URL}',
-  username = '${ELASTICSEARCH_USER}',
-  password = '${ELASTICSEARCH_PASSWORD}',
-);
-
 statement ok
 CREATE SINK test_route_sink from test_route WITH (
     type = 'upsert',
-    connector = 'elasticsearch',
+    ${RISEDEV_OPENSEARCH_WITH_OPTIONS_COMMON},
     index = 'test_route',
-    connection = es_conn,
     routing_column = 'v3'
 );
 
 statement ok
 CREATE SINK s7 from t7 WITH (
     type = 'upsert',
-    ${RISEDEV_ELASTICSEARCH_WITH_OPTIONS_COMMON},
+    ${RISEDEV_OPENSEARCH_WITH_OPTIONS_COMMON},
     index = 'test'
 );
 
 statement ok
 CREATE SINK s8 from t7 WITH (
     type = 'upsert',
-    ${RISEDEV_ELASTICSEARCH_WITH_OPTIONS_COMMON},
+    ${RISEDEV_OPENSEARCH_WITH_OPTIONS_COMMON},
     index = 'test1',
     primary_key = 'v1,v3',
     delimiter = '_'
@@ -110,19 +83,19 @@ statement ok
 FLUSH;
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "6"
+test "$(opensearch GET '/test/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "6"
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 55))")" = "1"
+test "$(opensearch GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 55))")" = "1"
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 50))")" = "1"
+test "$(opensearch GET '/test/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(sum(1 for d in docs if d['_source'].get('v2') == 50))")" = "1"
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test1/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "7"
+test "$(opensearch GET '/test1/_count' | python3 -c "import json,sys; print(json.load(sys.stdin)['count'])")" = "7"
 
 system ok retry 10 backoff 1s
-test "$(elasticsearch GET '/test_route/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(','.join(sorted(d.get('_routing', '') for d in docs)))")" = "test1,test2,test3"
+test "$(opensearch GET '/test_route/_search?size=20' | python3 -c "import json,sys; docs=json.load(sys.stdin)['hits']['hits']; print(','.join(sorted(d.get('_routing', '') for d in docs)))")" = "test1,test2,test3"
 
 statement ok
 DROP SINK s7;
@@ -141,5 +114,5 @@ DROP TABLE t7;
 
 system ok
 for index in test test1 test_route; do
-  elasticsearch DELETE "/${index}" >/dev/null 2>&1 || true
+  opensearch DELETE "/${index}" >/dev/null 2>&1 || true
 done
