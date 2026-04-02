@@ -1291,6 +1291,12 @@ pub(crate) mod tests {
         task: CompactTask,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
+        let mut task = task;
+        // The fast compaction path can only preserve blocked xor16 filters today.
+        task.sstable_filter_kind = risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16;
+        task.sstable_filter_layout = risingwave_pb::hummock::PbSstableFilterLayout::Auto;
+        task.blocked_xor_filter_kv_count_threshold = Some(0);
+
         let compaction_filter = DummyCompactionFilter {};
         let slow_compact_runner = CompactorRunner::new(
             0,
@@ -1394,6 +1400,11 @@ pub(crate) mod tests {
             base_level: 4,
             target_file_size: capacity,
             compression_algorithm: 1,
+            // Fast compaction runner currently expects blocked xor16 output.
+            sstable_filter_kind: risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
+            // Force blocked output regardless of input size (the fast compaction path only
+            // preserves blocked filters today).
+            blocked_xor_filter_kv_count_threshold: Some(0),
             gc_delete_keys: true,
             ..Default::default()
         };
@@ -2450,6 +2461,10 @@ pub(crate) mod tests {
             base_level: 4,
             target_file_size: capacity as u64,
             compression_algorithm: 1,
+            // Fast compaction runner currently expects blocked xor16 output.
+            sstable_filter_kind: risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
+            sstable_filter_layout: risingwave_pb::hummock::PbSstableFilterLayout::Auto,
+            blocked_xor_filter_kv_count_threshold: Some(0),
             gc_delete_keys: true,
             ..Default::default()
         };
