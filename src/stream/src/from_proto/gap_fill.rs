@@ -88,11 +88,6 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
                 .build()
                 .await;
 
-        let upstream_stream_key: Vec<usize> = node
-            .get_upstream_stream_key()
-            .iter()
-            .map(|&x| x as usize)
-            .collect();
         let pointer_key_indices: Vec<usize> = (!node.get_pointer_key_indices().is_empty())
             .then(|| {
                 node.get_pointer_key_indices()
@@ -112,7 +107,6 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             gap_interval: interval_expr,
             state_table,
             partition_by_indices,
-            upstream_stream_key,
             pointer_key_indices,
             watermark_epoch: params.watermark_epoch,
         });
