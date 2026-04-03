@@ -1,7 +1,4 @@
 statement ok
-set sink_decouple = false;
-
-statement ok
 CREATE TABLE t_jdbc_alter_src (
     id INT PRIMARY KEY,
     v1 INT
@@ -52,11 +49,29 @@ DROP SECRET s_jdbc_password_1;
 statement error
 DROP SECRET s_jdbc_password_2;
 
-statement ok
-DROP SINK s_jdbc_alter_props;
+statement ok retry 5 backoff 3s
+ALTER SINK s_jdbc_alter_props CONNECTOR WITH (
+    jdbc.url = 'jdbc:postgresql://db:5432/test',
+    user = 'test',
+    password = 'connector'
+);
+
+query I
+select count(*)
+from rw_sinks
+where name = 's_jdbc_alter_props'
+  and connector_props -> 'jdbc.url' ->> 'value' = 'jdbc:postgresql://db:5432/test'
+  and connector_props -> 'user' ->> 'value' = 'test'
+  and connector_props -> 'password' ->> 'type' = 'plaintext'
+  and connector_props -> 'password' ->> 'value' = 'connector';
+----
+1
 
 statement ok
 DROP SECRET s_jdbc_password_2;
+
+statement ok
+DROP SINK s_jdbc_alter_props;
 
 statement ok
 DROP TABLE t_jdbc_alter_src;
