@@ -991,6 +991,7 @@ mod tests {
                 config_override: "cfg".into(),
                 job_definition: "definition".to_owned(),
                 backfill_orders: None,
+                refresh_interval_sec: None,
             },
         )]);
 

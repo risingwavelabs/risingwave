@@ -2510,6 +2510,7 @@ pub struct StreamingJobExtraInfo {
     pub config_override: Arc<str>,
     pub job_definition: String,
     pub backfill_orders: Option<BackfillOrders>,
+    pub refresh_interval_sec: Option<u64>,
 }
 
 impl StreamingJobExtraInfo {
@@ -2521,12 +2522,13 @@ impl StreamingJobExtraInfo {
     }
 }
 
-/// Tuple of (`job_id`, `timezone`, `config_override`, `backfill_orders`)
+/// Tuple of (`job_id`, `timezone`, `config_override`, `backfill_orders`, `refresh_interval_sec`)
 type StreamingJobExtraInfoRow = (
     JobId,
     Option<String>,
     Option<String>,
     Option<BackfillOrders>,
+    Option<i64>,
 );
 
 pub async fn get_streaming_job_extra_info<C>(
@@ -2543,6 +2545,7 @@ where
             streaming_job::Column::Timezone,
             streaming_job::Column::ConfigOverride,
             streaming_job::Column::BackfillOrders,
+            streaming_job::Column::RefreshIntervalSec,
         ])
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
         .into_tuple()
@@ -2555,18 +2558,21 @@ where
 
     let result = pairs
         .into_iter()
-        .map(|(job_id, timezone, config_override, backfill_orders)| {
-            let job_definition = definitions.remove(&job_id).unwrap_or_default();
-            (
-                job_id,
-                StreamingJobExtraInfo {
-                    timezone,
-                    config_override: config_override.unwrap_or_default().into(),
-                    job_definition,
-                    backfill_orders,
-                },
-            )
-        })
+        .map(
+            |(job_id, timezone, config_override, backfill_orders, refresh_interval_sec)| {
+                let job_definition = definitions.remove(&job_id).unwrap_or_default();
+                (
+                    job_id,
+                    StreamingJobExtraInfo {
+                        timezone,
+                        config_override: config_override.unwrap_or_default().into(),
+                        job_definition,
+                        backfill_orders,
+                        refresh_interval_sec: refresh_interval_sec.map(|s| s as u64),
+                    },
+                )
+            },
+        )
         .collect();
 
     Ok(result)
