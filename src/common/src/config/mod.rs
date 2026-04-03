@@ -447,6 +447,10 @@ pub mod default {
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
         }
+
+        pub fn max_concurrent_kv_log_store_historical_read() -> usize {
+            0
+        }
     }
 }
 

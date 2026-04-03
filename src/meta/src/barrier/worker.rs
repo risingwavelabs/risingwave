@@ -558,7 +558,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 ) => {
                     match complete_result {
                         Ok(output) => {
-                            self.checkpoint_control.ack_completed(output);
+                            self.checkpoint_control.ack_completed(&mut self.partial_graph_manager, output);
                         }
                         Err(e) => {
                             self.failure_recovery(e).await;
@@ -807,11 +807,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         );
                     }
                     Ok(Ok(hummock_version_stats)) => {
-                        self.checkpoint_control
-                            .ack_completed(BarrierCompleteOutput {
+                        self.checkpoint_control.ack_completed(
+                            &mut self.partial_graph_manager,
+                            BarrierCompleteOutput {
                                 epochs_to_ack,
                                 hummock_version_stats,
-                            });
+                            },
+                        );
                     }
                 }
             }
