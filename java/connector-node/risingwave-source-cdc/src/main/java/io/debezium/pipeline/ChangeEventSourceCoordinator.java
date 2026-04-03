@@ -429,7 +429,34 @@ public class ChangeEventSourceCoordinator<P extends Partition, O extends OffsetC
 
         streamingSource = changeEventSourceFactory.getStreamingChangeEventSource();
         eventDispatcher.setEventListener(streamingMetrics);
-        streamingConnected(true);
+
+        boolean deferConnectedSignal = false;
+        if (streamingSource
+                instanceof io.debezium.connector.postgresql.PostgresStreamingChangeEventSource) {
+            io.debezium.connector.postgresql.PostgresStreamingChangeEventSource pgSource =
+                    (io.debezium.connector.postgresql.PostgresStreamingChangeEventSource)
+                            streamingSource;
+            pgSource.setOnConnectedCallback(() -> streamingConnected(true));
+            deferConnectedSignal = true;
+        } else if (streamingSource
+                instanceof io.debezium.connector.mysql.MySqlStreamingChangeEventSource) {
+            io.debezium.connector.mysql.MySqlStreamingChangeEventSource mysqlSource =
+                    (io.debezium.connector.mysql.MySqlStreamingChangeEventSource) streamingSource;
+            mysqlSource.setOnConnectedCallback(() -> streamingConnected(true));
+            deferConnectedSignal = true;
+        } else if (streamingSource
+                instanceof io.debezium.connector.sqlserver.SqlServerStreamingChangeEventSource) {
+            io.debezium.connector.sqlserver.SqlServerStreamingChangeEventSource sqlServerSource =
+                    (io.debezium.connector.sqlserver.SqlServerStreamingChangeEventSource)
+                            streamingSource;
+            sqlServerSource.setOnConnectedCallback(() -> streamingConnected(true));
+            deferConnectedSignal = true;
+        }
+
+        if (!deferConnectedSignal) {
+            streamingConnected(true);
+        }
+
         streamingSource.init(offsetContext);
 
         getSignalProcessor(previousOffsets)
