@@ -41,12 +41,22 @@ pub struct StreamGapFill {
 impl StreamGapFill {
     pub fn new(core: generic::GapFill<PlanRef<Stream>>) -> Self {
         let input = &core.input;
+        let partition_indices: Vec<usize> =
+            core.partition_by_cols.iter().map(|c| c.index()).collect();
+        let distinct_partition_key_count = partition_indices
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert_eq!(
+            partition_indices.len(),
+            distinct_partition_key_count,
+            "stream gap fill expects canonicalized partition_by columns",
+        );
 
         let dist = if core.partition_by_cols.is_empty() {
             Distribution::Single
         } else {
-            let partition_indices: Vec<usize> =
-                core.partition_by_cols.iter().map(|c| c.index()).collect();
             Distribution::HashShard(partition_indices)
         };
 
@@ -90,16 +100,8 @@ impl StreamGapFill {
         &self.core.fill_strategies
     }
 
-    fn infer_state_table(&self) -> crate::TableCatalog {
-        let mut tbl_builder = TableCatalogBuilder::default();
-
-        let out_schema = self.core.schema();
-        for field in out_schema.fields() {
-            tbl_builder.add_column(field);
-        }
-
+    fn pointer_key_indices(&self) -> Vec<usize> {
         let time_col_idx = self.time_col().index();
-        let input_schema = &out_schema;
         let partition_by_set: std::collections::HashSet<usize> = self
             .core
             .partition_by_cols
@@ -115,6 +117,20 @@ impl StreamGapFill {
                 pointer_key_indices.push(sk_idx);
             }
         }
+        pointer_key_indices
+    }
+
+    fn infer_state_table(&self) -> crate::TableCatalog {
+        let mut tbl_builder = TableCatalogBuilder::default();
+
+        let out_schema = self.core.schema();
+        for field in out_schema.fields() {
+            tbl_builder.add_column(field);
+        }
+
+        let time_col_idx = self.time_col().index();
+        let input_schema = &out_schema;
+        let pointer_key_indices = self.pointer_key_indices();
 
         // Add prev/next pointer columns for linked-list traversal.
         // Each pointer stores the intra-partition row identity:
@@ -202,6 +218,11 @@ impl TryToStreamPb for StreamGapFill {
                 .expect_stream_key()
                 .iter()
                 .map(|&idx| idx as u32)
+                .collect(),
+            pointer_key_indices: self
+                .pointer_key_indices()
+                .into_iter()
+                .map(|idx| idx as u32)
                 .collect(),
             time_column_index: self.time_col().index() as u32,
             interval: Some(self.interval().to_expr_proto_checked_pure(

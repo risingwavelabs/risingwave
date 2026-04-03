@@ -44,6 +44,7 @@ pub struct GapFillExecutorArgs<S: StateStore> {
     pub state_table: StateTable<S>,
     pub partition_by_indices: Vec<usize>,
     pub upstream_stream_key: Vec<usize>,
+    pub pointer_key_indices: Vec<usize>,
 }
 
 /// Serialized key for ordering rows within a partition: (time_col, stream_key_cols...).
@@ -78,10 +79,9 @@ pub struct ManagedGapFillState<S: StateStore> {
 impl<S: StateStore> ManagedGapFillState<S> {
     pub fn new(
         state_table: StateTable<S>,
-        time_column_index: usize,
         schema: &Schema,
         partition_by_indices: Vec<usize>,
-        upstream_stream_key: Vec<usize>,
+        pointer_key_indices: Vec<usize>,
     ) -> Self {
         use risingwave_common::util::sort_util::OrderType;
 
@@ -96,19 +96,7 @@ impl<S: StateStore> ManagedGapFillState<S> {
         let partition_key_serde = OrderedRowSerde::new(partition_types, partition_orders);
 
         // Build serde for intra-partition ordering key.
-        // This must match the PK columns AFTER the partition prefix (with dedup).
-        // PK = (partition..., time, remaining_sk...) → intra = (time, remaining_sk...).
-        let partition_set: std::collections::HashSet<usize> =
-            partition_by_indices.iter().copied().collect();
-        let mut pointer_key_indices = vec![time_column_index];
-        for &sk in &upstream_stream_key {
-            if sk != time_column_index
-                && !partition_set.contains(&sk)
-                && !pointer_key_indices.contains(&sk)
-            {
-                pointer_key_indices.push(sk);
-            }
-        }
+        // This must match the PK columns after the partition prefix.
         let intra_types: Vec<_> = pointer_key_indices
             .iter()
             .map(|&i| schema[i].data_type())
@@ -478,10 +466,9 @@ impl<S: StateStore> GapFillExecutor<S> {
     pub fn new(args: GapFillExecutorArgs<S>) -> Self {
         let managed_state = ManagedGapFillState::new(
             args.state_table,
-            args.time_column_index,
             &args.schema,
             args.partition_by_indices,
-            args.upstream_stream_key,
+            args.pointer_key_indices,
         );
         let cache_manager = GapFillCacheManager::new(
             GAPFILL_CACHE_MAX_PARTITIONS,
@@ -1101,6 +1088,7 @@ mod tests {
         // Stream key = [0] (time column). Since time is the only sk col,
         // prev/next pointers each have 1 datum (the time value).
         let upstream_stream_key: Vec<usize> = vec![0];
+        let pointer_key_indices = upstream_stream_key.clone();
 
         let mut table_columns: Vec<ColumnDesc> = schema
             .fields
@@ -1149,6 +1137,7 @@ mod tests {
             state_table: table,
             partition_by_indices,
             upstream_stream_key,
+            pointer_key_indices,
         });
 
         (tx, executor.boxed().execute())

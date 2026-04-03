@@ -94,7 +94,10 @@ impl_distill_by_unit!(LogicalGapFill, core, "LogicalGapFill");
 impl ColPrunable for LogicalGapFill {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_col_num = self.input().schema().len();
-        let mut input_required = FixedBitSet::from_iter(required_cols.iter().copied());
+        let mut input_required = FixedBitSet::with_capacity(input_col_num);
+        for &required_col in required_cols {
+            input_required.insert(required_col);
+        }
         input_required.insert(self.time_col().index());
         input_required.union_with(&self.interval().collect_input_refs(input_col_num));
         self.fill_strategies()
@@ -237,7 +240,7 @@ impl ToStream for LogicalGapFill {
         if col_index_mapping.is_identity() {
             return Ok((
                 Self {
-                    base: self.base.clone_with_new_plan_id(),
+                    base: PlanBase::new_logical_with_core(&new_core),
                     core: new_core,
                 }
                 .into(),

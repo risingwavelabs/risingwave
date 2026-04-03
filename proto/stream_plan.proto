@@ -1111,6 +1111,7 @@ message GapFillNode {
   catalog.Table state_table = 5;
   repeated uint32 partition_by_indices = 6;
   repeated uint32 upstream_stream_key = 7;
+  repeated uint32 pointer_key_indices = 8;
 }
 
 message StreamNode {

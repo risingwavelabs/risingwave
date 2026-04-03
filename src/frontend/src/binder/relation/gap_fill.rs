@@ -97,6 +97,7 @@ impl Binder {
 
         let mut fill_strategies = vec![];
         let mut partition_by_cols = vec![];
+        let mut seen_partition_by_cols = std::collections::HashSet::new();
         for arg in args_iter {
             if let FunctionArg::Unnamed(FunctionArgExpr::Expr(AstExpr::Function(func))) = arg {
                 let name = func.name.0[0].real_value().to_ascii_lowercase();
@@ -118,6 +119,11 @@ impl Binder {
                             )
                         })?;
                         if let ExprImpl::InputRef(input_ref) = arg_expr {
+                            // Canonicalize duplicate partition columns eagerly so downstream
+                            // planning always sees a unique partition key list.
+                            if !seen_partition_by_cols.insert(input_ref.index()) {
+                                continue;
+                            }
                             partition_by_cols.push(*input_ref);
                         } else {
                             return Err(ErrorCode::BindError(
