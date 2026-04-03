@@ -21,5 +21,8 @@ pub(super) use control::{
     CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl,
     DatabaseCheckpointControlMetrics,
 };
-pub(crate) use independent_job::{CreatingStreamingJobControl, IndependentCheckpointJobControl};
+pub(crate) use independent_job::{
+    BatchRefreshJobCheckpointControl, BatchRefreshJobInfo, CreatingStreamingJobControl,
+    IndependentCheckpointJobControl,
+};
 pub(super) use state::BarrierWorkerState;

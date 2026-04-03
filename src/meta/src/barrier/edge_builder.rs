@@ -219,7 +219,12 @@ impl FragmentEdgeBuilder {
                 return;
             }
         };
-        let downstream_fragment = &self.fragments[&downstream.downstream_fragment_id];
+        let Some(downstream_fragment) = &self.fragments.get(&downstream.downstream_fragment_id)
+        else {
+            // upstream is in the builder but downstream is not (e.g., edge to an independent job's fragment).
+            // Skip this edge.
+            return;
+        };
         let (dispatchers, no_shuffle_map) = compose_dispatchers(
             fragment.distribution_type,
             &fragment.actors,

@@ -20,8 +20,10 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 
+pub(crate) mod batch_refresh_job;
 pub(crate) mod creating_job;
 
+pub(crate) use batch_refresh_job::{BatchRefreshJobCheckpointControl, BatchRefreshJobInfo};
 pub(crate) use creating_job::CreatingStreamingJobControl;
 
 use crate::barrier::info::BarrierInfo;
@@ -31,6 +33,8 @@ use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress, Tr
 use crate::controller::fragment::InflightFragmentInfo;
 
 /// Build a fake `BarrierInfo` for independent partial-graph barriers.
+///
+/// Shared by both `CreatingStreamingJobControl` and `BatchRefreshJobCheckpointControl`.
 fn new_fake_barrier(
     prev_epoch_fake_physical_time: &mut u64,
     pending_non_checkpoint_barriers: &mut Vec<u64>,
@@ -67,12 +71,14 @@ fn new_fake_barrier(
 /// using its own partial graph.
 pub(crate) enum IndependentCheckpointJobControl {
     CreatingStreamingJob(CreatingStreamingJobControl),
+    BatchRefresh(BatchRefreshJobCheckpointControl),
 }
 
 impl IndependentCheckpointJobControl {
-    pub(crate) fn gen_backfill_progress(&self) -> BackfillProgress {
+    pub(crate) fn gen_backfill_progress(&self) -> Option<BackfillProgress> {
         match self {
-            Self::CreatingStreamingJob(j) => j.gen_backfill_progress(),
+            Self::CreatingStreamingJob(j) => Some(j.gen_backfill_progress()),
+            Self::BatchRefresh(j) => j.gen_backfill_progress(),
         }
     }
 
@@ -85,6 +91,7 @@ impl IndependentCheckpointJobControl {
     pub(crate) fn is_snapshot_backfilling(&self) -> bool {
         match self {
             Self::CreatingStreamingJob(_) => true,
+            Self::BatchRefresh(j) => j.is_snapshot_backfilling(),
         }
     }
 
@@ -92,24 +99,28 @@ impl IndependentCheckpointJobControl {
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
         match self {
             Self::CreatingStreamingJob(j) => j.collect(collected_barrier),
+            Self::BatchRefresh(j) => j.collect(collected_barrier),
         }
     }
 
     pub(crate) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
         match self {
             Self::CreatingStreamingJob(j) => j.gen_fragment_backfill_progress(),
+            Self::BatchRefresh(j) => j.gen_fragment_backfill_progress(),
         }
     }
 
     pub(crate) fn pinned_upstream_log_epoch(&self) -> (u64, HashSet<TableId>) {
         match self {
             Self::CreatingStreamingJob(j) => j.pinned_upstream_log_epoch(),
+            Self::BatchRefresh(j) => j.pinned_upstream_log_epoch(),
         }
     }
 
     pub(crate) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
         match self {
             Self::CreatingStreamingJob(j) => j.fragment_infos(),
+            Self::BatchRefresh(j) => j.fragment_infos(),
         }
     }
 
@@ -120,12 +131,14 @@ impl IndependentCheckpointJobControl {
     ) {
         match self {
             Self::CreatingStreamingJob(j) => j.ack_completed(partial_graph_manager, epoch),
+            Self::BatchRefresh(j) => j.ack_completed(partial_graph_manager, epoch),
         }
     }
 
     pub(crate) fn on_partial_graph_reset(self) {
         match self {
             Self::CreatingStreamingJob(j) => j.on_partial_graph_reset(),
+            Self::BatchRefresh(mut j) => j.on_partial_graph_reset(),
         }
     }
 
@@ -136,6 +149,7 @@ impl IndependentCheckpointJobControl {
     ) -> bool {
         match self {
             Self::CreatingStreamingJob(j) => j.drop(notifiers, partial_graph_manager),
+            Self::BatchRefresh(j) => j.drop(notifiers, partial_graph_manager),
         }
     }
 
@@ -146,6 +160,7 @@ impl IndependentCheckpointJobControl {
     pub(crate) fn reset(self) -> bool {
         match self {
             Self::CreatingStreamingJob(j) => j.reset(),
+            Self::BatchRefresh(j) => j.reset(),
         }
     }
 }

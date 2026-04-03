@@ -199,7 +199,9 @@ impl CreatingStreamingJobControl {
                 node_actors,
                 state_table_ids,
             }),
-        );
+        ) else {
+            unreachable!()
+        };
 
         let mut graph_adder = partial_graph_manager.add_partial_graph(
             partial_graph_id,

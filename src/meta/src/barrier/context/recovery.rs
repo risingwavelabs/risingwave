@@ -970,6 +970,7 @@ mod tests {
                 adaptive_parallelism_strategy: None,
                 job_definition: "definition".to_owned(),
                 backfill_orders: None,
+                refresh_interval_sec: None,
             },
         )]);
 
