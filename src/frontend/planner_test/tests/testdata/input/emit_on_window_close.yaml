@@ -78,6 +78,17 @@
   expected_outputs:
     - eowc_stream_dist_plan
     - eowc_stream_plan
+- id: numbering functions with constant partition key over eowc source
+  sql: |
+    create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
+    select
+      row_number() over (partition by 1::int order by tm),
+      rank() over (partition by 1::int order by tm),
+      dense_rank() over (partition by 1::int order by tm)
+    from t;
+  expected_outputs:
+    - eowc_stream_dist_plan
+    - eowc_stream_plan
 - id: non-numbering functions only over eowc source has no intermediate state table
   sql: |
     create source t (a int, b int, tm timestamp, watermark for tm as tm - interval '5 minutes') with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
