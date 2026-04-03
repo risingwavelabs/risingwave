@@ -1519,6 +1519,7 @@ set -euo pipefail
 WORKDIR="${CARGO_MAKE_WORKING_DIRECTORY:-$(pwd)}"
 
 UPDATE_EXPECT=1 \
+CARGO_WORKSPACE_DIR="${WORKDIR}" \
 CARGO_TARGET_DIR="${WORKDIR}/target" \
 cargo test --manifest-path "${WORKDIR}/Cargo.toml" --package risingwave_common --lib -- \
   config::tests::test_example_up_to_date
