@@ -1099,6 +1099,8 @@ message EowcGapFillNode {
   repeated string fill_strategies = 4;
   catalog.Table buffer_table = 5;
   catalog.Table prev_row_table = 6;
+  repeated uint32 partition_by_indices = 7;
+  repeated uint32 upstream_stream_key = 8;
 }
 
 message GapFillNode {
@@ -1107,6 +1109,8 @@ message GapFillNode {
   repeated uint32 fill_columns = 3;
   repeated string fill_strategies = 4;
   catalog.Table state_table = 5;
+  repeated uint32 partition_by_indices = 6;
+  repeated uint32 upstream_stream_key = 7;
 }
 
 message StreamNode {

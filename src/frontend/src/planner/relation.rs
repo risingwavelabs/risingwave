@@ -475,6 +475,7 @@ source: {:?}",
             gap_fill.time_col,
             gap_fill.interval,
             gap_fill.fill_strategies,
+            gap_fill.partition_by_cols,
         )
         .into())
     }
