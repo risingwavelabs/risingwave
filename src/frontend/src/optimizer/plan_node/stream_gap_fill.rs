@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::catalog::Field;
-use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -43,12 +42,17 @@ impl StreamGapFill {
     pub fn new(core: generic::GapFill<PlanRef<Stream>>) -> Self {
         let input = &core.input;
 
-        // Use singleton distribution for normal streaming GapFill.
-        // Similar to EOWC version, gap filling requires seeing all data
-        // to correctly identify and fill gaps across time series.
+        let dist = if core.partition_by_cols.is_empty() {
+            Distribution::Single
+        } else {
+            let partition_indices: Vec<usize> =
+                core.partition_by_cols.iter().map(|c| c.index()).collect();
+            Distribution::HashShard(partition_indices)
+        };
+
         let base = PlanBase::new_stream_with_core(
             &core,
-            Distribution::Single,
+            dist,
             input.stream_kind(),
             false, // does NOT provide EOWC semantics
             input.watermark_columns().clone(),
@@ -69,6 +73,7 @@ impl StreamGapFill {
             time_col,
             interval,
             fill_strategies,
+            partition_by_cols: vec![],
         };
         Self::new(core)
     }
@@ -93,14 +98,64 @@ impl StreamGapFill {
             tbl_builder.add_column(field);
         }
 
-        // For singleton distribution, use simplified primary key design:
-        // Just use time column as the primary key for ordering
         let time_col_idx = self.time_col().index();
-        tbl_builder.add_order_column(time_col_idx, OrderType::ascending());
+        let input_schema = &out_schema;
+        let partition_by_set: std::collections::HashSet<usize> = self
+            .core
+            .partition_by_cols
+            .iter()
+            .map(|c| c.index())
+            .collect();
+        let mut pointer_key_indices = vec![time_col_idx];
+        for &sk_idx in self.input().expect_stream_key() {
+            if sk_idx != time_col_idx
+                && !partition_by_set.contains(&sk_idx)
+                && !pointer_key_indices.contains(&sk_idx)
+            {
+                pointer_key_indices.push(sk_idx);
+            }
+        }
 
-        // Add is_filled flag column for gap fill state tracking
-        tbl_builder.add_column(&Field::with_name(DataType::Boolean, "is_filled"));
-        tbl_builder.build(vec![], 0)
+        // Add prev/next pointer columns for linked-list traversal.
+        // Each pointer stores the intra-partition row identity:
+        // (time column, upstream stream key columns excluding partition/time).
+        for (i, &sk_idx) in pointer_key_indices.iter().enumerate() {
+            tbl_builder.add_column(&Field::with_name(
+                input_schema[sk_idx].data_type(),
+                format!("prev_sk_{}", i),
+            ));
+        }
+        for (i, &sk_idx) in pointer_key_indices.iter().enumerate() {
+            tbl_builder.add_column(&Field::with_name(
+                input_schema[sk_idx].data_type(),
+                format!("next_sk_{}", i),
+            ));
+        }
+
+        // PK: (partition_cols..., time_col, stream_key_cols...)
+        // Dedup by column index since state table cannot have duplicate PK columns.
+        let mut added_to_pk = std::collections::HashSet::new();
+        for pc in &self.core.partition_by_cols {
+            if added_to_pk.insert(pc.index()) {
+                tbl_builder.add_order_column(pc.index(), OrderType::ascending());
+            }
+        }
+        if added_to_pk.insert(time_col_idx) {
+            tbl_builder.add_order_column(time_col_idx, OrderType::ascending());
+        }
+        for sk_idx in pointer_key_indices {
+            if added_to_pk.insert(sk_idx) {
+                tbl_builder.add_order_column(sk_idx, OrderType::ascending());
+            }
+        }
+
+        let dist_key_indices: Vec<usize> = self
+            .core
+            .partition_by_cols
+            .iter()
+            .map(|c| c.index())
+            .collect();
+        tbl_builder.build(dist_key_indices, 0)
     }
 }
 
@@ -142,6 +197,12 @@ impl TryToStreamPb for StreamGapFill {
             .to_internal_table_prost();
 
         Ok(NodeBody::GapFill(Box::new(GapFillNode {
+            upstream_stream_key: self
+                .input()
+                .expect_stream_key()
+                .iter()
+                .map(|&idx| idx as u32)
+                .collect(),
             time_column_index: self.time_col().index() as u32,
             interval: Some(self.interval().to_expr_proto_checked_pure(
                 self.stream_kind().is_retract(),
@@ -154,6 +215,12 @@ impl TryToStreamPb for StreamGapFill {
                 .collect(),
             fill_strategies,
             state_table: Some(state_table),
+            partition_by_indices: self
+                .core
+                .partition_by_cols
+                .iter()
+                .map(|c| c.index() as u32)
+                .collect(),
         })))
     }
 }

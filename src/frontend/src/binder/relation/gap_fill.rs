@@ -29,6 +29,7 @@ pub struct BoundGapFill {
     pub time_col: InputRef,
     pub interval: ExprImpl,
     pub fill_strategies: Vec<BoundFillStrategy>,
+    pub partition_by_cols: Vec<InputRef>,
 }
 
 impl Binder {
@@ -95,68 +96,96 @@ impl Binder {
         }
 
         let mut fill_strategies = vec![];
+        let mut partition_by_cols = vec![];
         for arg in args_iter {
-            let (strategy, target_col) =
-                if let FunctionArg::Unnamed(FunctionArgExpr::Expr(AstExpr::Function(func))) = arg {
-                    let name = func.name.0[0].real_value().to_ascii_lowercase();
+            if let FunctionArg::Unnamed(FunctionArgExpr::Expr(AstExpr::Function(func))) = arg {
+                let name = func.name.0[0].real_value().to_ascii_lowercase();
 
-                    let strategy = match name.as_str() {
-                        "interpolate" => FillStrategy::Interpolate,
-                        "locf" => FillStrategy::Locf,
-                        "keepnull" => FillStrategy::Null,
-                        _ => {
-                            return Err(ErrorCode::BindError(format!(
-                                "Unsupported fill strategy: {}",
-                                name
-                            ))
+                // Handle PARTITION_BY(col1, col2, ...) as a special directive
+                if name == "partition_by" {
+                    if func.arg_list.args.is_empty() {
+                        return Err(ErrorCode::BindError(
+                            "PARTITION_BY requires at least one column argument".to_owned(),
+                        )
+                        .into());
+                    }
+                    for partition_arg in &func.arg_list.args {
+                        let arg_exprs = self.bind_function_arg(partition_arg)?;
+                        let arg_expr = arg_exprs.into_iter().exactly_one().map_err(|_| {
+                            ErrorCode::BindError(
+                                "PARTITION_BY argument should be a single column reference"
+                                    .to_owned(),
+                            )
+                        })?;
+                        if let ExprImpl::InputRef(input_ref) = arg_expr {
+                            partition_by_cols.push(*input_ref);
+                        } else {
+                            return Err(ErrorCode::BindError(
+                                "PARTITION_BY argument must be a column reference".to_owned(),
+                            )
                             .into());
                         }
-                    };
+                    }
+                    continue;
+                }
 
-                    if func.arg_list.args.len() != 1 {
+                let strategy = match name.as_str() {
+                    "interpolate" => FillStrategy::Interpolate,
+                    "locf" => FillStrategy::Locf,
+                    "keepnull" => FillStrategy::Null,
+                    _ => {
                         return Err(ErrorCode::BindError(format!(
-                            "Fill strategy function {} expects exactly one argument",
+                            "Unsupported fill strategy: {}",
                             name
                         ))
                         .into());
                     }
+                };
 
-                    let arg_exprs = self.bind_function_arg(&func.arg_list.args[0])?;
-                    let arg_expr = arg_exprs.into_iter().exactly_one().map_err(|_| {
-                        ErrorCode::BindError(
-                            "Fill strategy argument should be a single expression".to_owned(),
-                        )
-                    })?;
+                if func.arg_list.args.len() != 1 {
+                    return Err(ErrorCode::BindError(format!(
+                        "Fill strategy function {} expects exactly one argument",
+                        name
+                    ))
+                    .into());
+                }
 
-                    if let ExprImpl::InputRef(input_ref) = arg_expr {
-                        // Check datatype for interpolate
-                        if matches!(strategy, FillStrategy::Interpolate) {
-                            let data_type = &input_ref.data_type;
-                            if !data_type.is_numeric() || matches!(data_type, DataType::Serial) {
-                                return Err(ErrorCode::BindError(format!(
-                                    "INTERPOLATE only supports numeric types, got {}",
-                                    data_type
-                                ))
-                                .into());
-                            }
+                let arg_exprs = self.bind_function_arg(&func.arg_list.args[0])?;
+                let arg_expr = arg_exprs.into_iter().exactly_one().map_err(|_| {
+                    ErrorCode::BindError(
+                        "Fill strategy argument should be a single expression".to_owned(),
+                    )
+                })?;
+
+                if let ExprImpl::InputRef(input_ref) = arg_expr {
+                    // Check datatype for interpolate
+                    if matches!(strategy, FillStrategy::Interpolate) {
+                        let data_type = &input_ref.data_type;
+                        if !data_type.is_numeric() || matches!(data_type, DataType::Serial) {
+                            return Err(ErrorCode::BindError(format!(
+                                "INTERPOLATE only supports numeric types, got {}",
+                                data_type
+                            ))
+                            .into());
                         }
-                        (strategy, *input_ref)
-                    } else {
-                        return Err(ErrorCode::BindError(
-                            "Fill strategy argument must be a column reference".to_owned(),
-                        )
-                        .into());
                     }
+                    fill_strategies.push(BoundFillStrategy {
+                        strategy,
+                        target_col: *input_ref,
+                    });
                 } else {
                     return Err(ErrorCode::BindError(
-                        "Fill strategy must be a function call like LOCF(col)".to_owned(),
+                        "Fill strategy argument must be a column reference".to_owned(),
                     )
                     .into());
-                };
-            fill_strategies.push(BoundFillStrategy {
-                strategy,
-                target_col,
-            });
+                }
+            } else {
+                return Err(ErrorCode::BindError(
+                    "Fill strategy must be a function call like LOCF(col) or PARTITION_BY(col)"
+                        .to_owned(),
+                )
+                .into());
+            }
         }
 
         let base_columns = std::mem::take(&mut self.context.columns);
@@ -177,6 +206,7 @@ impl Binder {
             time_col: *time_col,
             interval,
             fill_strategies,
+            partition_by_cols,
         })
     }
 }
