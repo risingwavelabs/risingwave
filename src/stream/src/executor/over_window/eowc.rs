@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::ops::Bound;
 
@@ -69,13 +70,9 @@ type PartitionCache = ManagedLruCache<MemcmpEncoded, Partition>; // TODO(rc): us
 fn encode_snapshot(snapshot: &WindowStateSnapshot, pk_ser: &OrderedRowSerde) -> Vec<u8> {
     use prost::Message;
     let pb = PbWindowStateSnapshot {
-        last_output_key: snapshot.last_output_key.as_ref().map(|key| {
-            let mut pk_bytes = Vec::new();
-            pk_ser.serialize(key.pk.as_inner(), &mut pk_bytes);
-            PbStateKey {
-                order_key: key.order_key.to_vec(),
-                pk: pk_bytes,
-            }
+        last_output_key: snapshot.last_output_key.as_ref().map(|key| PbStateKey {
+            order_key: key.order_key.to_vec(),
+            pk: key.pk.as_inner().memcmp_serialize(pk_ser),
         }),
         function_state: Some(snapshot.function_state.clone()),
     };
@@ -417,6 +414,9 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let mut builders = this.schema.create_array_builders(chunk.capacity()); // just an estimate
+        // Track partitions that produced output during this chunk, so we persist
+        // intermediate state only once per partition at the end.
+        let mut dirty_partitions: HashMap<MemcmpEncoded, OwnedRow> = HashMap::new();
 
         // We assume that the input is sorted by order key.
         for record in chunk.records() {
@@ -473,7 +473,9 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 .curr_row_buffer
                 .push_back(input_row.into_owned_row());
 
+            let mut has_output = false;
             while partition.states.are_ready() {
+                has_output = true;
                 // The partition is ready to output, so we can produce a row.
 
                 // Get all outputs.
@@ -514,10 +516,19 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         this.state_table.delete(state_row);
                     }
                 }
-
-                // Persist intermediate state snapshots if intermediate_state_table exists
-                Self::persist_intermediate_state(this, partition, &partition_key);
             }
+
+            if has_output && this.intermediate_state_table.is_some() {
+                dirty_partitions
+                    .entry(encoded_partition_key)
+                    .or_insert(partition_key);
+            }
+        }
+
+        // Persist intermediate state snapshots once per dirty partition at the end of the chunk.
+        for (encoded_partition_key, partition_key) in &dirty_partitions {
+            let partition = &mut *vars.partitions.get_mut(encoded_partition_key).unwrap();
+            Self::persist_intermediate_state(this, partition, partition_key);
         }
 
         let columns: Vec<ArrayRef> = builders.into_iter().map(|b| b.finish().into()).collect();
