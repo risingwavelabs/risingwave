@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::HashMap;
 use std::ops::Bound;
 
 use futures::{StreamExt, pin_mut};
@@ -25,11 +25,15 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{CheckedAdd, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
+use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 use tracing::warn;
 
+use crate::cache::ManagedLruCache;
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
 use crate::executor::prelude::*;
 
@@ -45,6 +49,7 @@ pub struct GapFillExecutorArgs<S: StateStore> {
     pub partition_by_indices: Vec<usize>,
     pub upstream_stream_key: Vec<usize>,
     pub pointer_key_indices: Vec<usize>,
+    pub watermark_epoch: AtomicU64Ref,
 }
 
 /// Serialized key for ordering rows within a partition: (time_col, stream_key_cols...).
@@ -54,7 +59,6 @@ pub type IntraPartitionKey = Vec<u8>;
 /// Serialized partition key for identifying which partition a row belongs to.
 pub type PartitionKey = Vec<u8>;
 
-const GAPFILL_CACHE_MAX_PARTITIONS: usize = 64;
 const GAPFILL_CACHE_PER_PARTITION_CAPACITY: usize = 512;
 
 /// State row layout:
@@ -311,13 +315,13 @@ impl<S: StateStore> ManagedGapFillState<S> {
 /// Per-partition cache: BTreeMap ordered by intra-partition key → output OwnedRow.
 /// Only stores original anchor rows (no filled rows).
 struct PartitionCache {
-    rows: BTreeMap<IntraPartitionKey, OwnedRow>,
+    rows: EstimatedBTreeMap<IntraPartitionKey, OwnedRow>,
 }
 
 impl PartitionCache {
     fn new() -> Self {
         Self {
-            rows: BTreeMap::new(),
+            rows: EstimatedBTreeMap::new(),
         }
     }
 
@@ -330,11 +334,15 @@ impl PartitionCache {
     }
 
     fn find_prev(&self, key: &IntraPartitionKey) -> Option<(&IntraPartitionKey, &OwnedRow)> {
-        self.rows.range::<IntraPartitionKey, _>(..key).next_back()
+        self.rows
+            .inner()
+            .range::<IntraPartitionKey, _>(..key)
+            .next_back()
     }
 
     fn find_next(&self, key: &IntraPartitionKey) -> Option<(&IntraPartitionKey, &OwnedRow)> {
         self.rows
+            .inner()
             .range::<IntraPartitionKey, _>((Bound::Excluded(key), Bound::Unbounded))
             .next()
     }
@@ -344,52 +352,44 @@ impl PartitionCache {
     }
 }
 
-/// Manages per-partition caches with LRU eviction at partition granularity.
+impl EstimateSize for PartitionCache {
+    fn estimated_heap_size(&self) -> usize {
+        self.rows.estimated_heap_size()
+    }
+}
+
+/// Manages per-partition caches with the shared streaming managed LRU.
 pub struct GapFillCacheManager {
-    caches: HashMap<PartitionKey, PartitionCache>,
-    lru_order: VecDeque<PartitionKey>,
-    max_partitions: usize,
+    caches: ManagedLruCache<PartitionKey, PartitionCache>,
     per_partition_capacity: usize,
 }
 
 impl GapFillCacheManager {
-    pub fn new(max_partitions: usize, per_partition_capacity: usize) -> Self {
+    pub fn new(
+        watermark_epoch: AtomicU64Ref,
+        metrics_info: MetricsInfo,
+        per_partition_capacity: usize,
+    ) -> Self {
         Self {
-            caches: HashMap::new(),
-            lru_order: VecDeque::new(),
-            max_partitions,
+            caches: ManagedLruCache::unbounded(watermark_epoch, metrics_info),
             per_partition_capacity,
         }
     }
 
-    /// Touch a partition to mark it as recently used.
-    fn touch_partition(&mut self, partition_key: &PartitionKey) {
-        if let Some(pos) = self.lru_order.iter().position(|k| k == partition_key) {
-            self.lru_order.remove(pos);
-        }
-        self.lru_order.push_back(partition_key.clone());
+    pub fn evict(&mut self) {
+        self.caches.evict();
     }
 
-    /// Evict least-recently-used partitions if over capacity.
-    fn evict_if_needed(&mut self) {
-        while self.caches.len() > self.max_partitions {
-            if let Some(oldest) = self.lru_order.pop_front() {
-                self.caches.remove(&oldest);
-            } else {
-                break;
-            }
-        }
+    pub fn clear(&mut self) {
+        self.caches.clear();
     }
 
     /// Get or create the cache for a partition.
-    fn get_or_create_partition(&mut self, partition_key: &PartitionKey) -> &mut PartitionCache {
-        self.touch_partition(partition_key);
-        if !self.caches.contains_key(partition_key) {
+    fn get_or_create_partition(&mut self, partition_key: &PartitionKey) {
+        if !self.caches.contains(partition_key) {
             self.caches
-                .insert(partition_key.clone(), PartitionCache::new());
-            self.evict_if_needed();
+                .put(partition_key.clone(), PartitionCache::new());
         }
-        self.caches.get_mut(partition_key).unwrap()
     }
 
     /// Insert a row into the partition cache.
@@ -400,7 +400,11 @@ impl GapFillCacheManager {
         row: OwnedRow,
     ) {
         let cap = self.per_partition_capacity;
-        let cache = self.get_or_create_partition(partition_key);
+        self.get_or_create_partition(partition_key);
+        let mut cache = self
+            .caches
+            .get_mut(partition_key)
+            .expect("GapFill partition cache should exist after insertion");
         cache.insert(intra_key, row);
         while cache.len() > cap {
             cache.rows.pop_first();
@@ -409,7 +413,7 @@ impl GapFillCacheManager {
 
     /// Remove a row from the partition cache.
     pub fn remove(&mut self, partition_key: &PartitionKey, intra_key: &IntraPartitionKey) {
-        if let Some(cache) = self.caches.get_mut(partition_key) {
+        if let Some(mut cache) = self.caches.get_mut(partition_key) {
             cache.remove(intra_key);
         }
     }
@@ -420,7 +424,6 @@ impl GapFillCacheManager {
         partition_key: &PartitionKey,
         intra_key: &IntraPartitionKey,
     ) -> Option<OwnedRow> {
-        self.touch_partition(partition_key);
         self.caches
             .get(partition_key)
             .and_then(|cache| cache.find_prev(intra_key))
@@ -433,7 +436,6 @@ impl GapFillCacheManager {
         partition_key: &PartitionKey,
         intra_key: &IntraPartitionKey,
     ) -> Option<OwnedRow> {
-        self.touch_partition(partition_key);
         self.caches
             .get(partition_key)
             .and_then(|cache| cache.find_next(intra_key))
@@ -464,6 +466,13 @@ pub struct GapFillMetrics {
 
 impl<S: StateStore> GapFillExecutor<S> {
     pub fn new(args: GapFillExecutorArgs<S>) -> Self {
+        let state_table_id = args.state_table.table_id();
+        let cache_metrics_info = MetricsInfo::new(
+            args.ctx.streaming_metrics.clone(),
+            state_table_id,
+            args.ctx.id,
+            "GapFill",
+        );
         let managed_state = ManagedGapFillState::new(
             args.state_table,
             &args.schema,
@@ -471,7 +480,8 @@ impl<S: StateStore> GapFillExecutor<S> {
             args.pointer_key_indices,
         );
         let cache_manager = GapFillCacheManager::new(
-            GAPFILL_CACHE_MAX_PARTITIONS,
+            args.watermark_epoch,
+            cache_metrics_info,
             GAPFILL_CACHE_PER_PARTITION_CAPACITY,
         );
 
@@ -1048,9 +1058,15 @@ impl<S: StateStore> GapFillExecutor<S> {
                 }
                 Message::Barrier(barrier) => {
                     let post_commit = managed_state.flush(barrier.epoch).await?;
+                    cache_manager.evict();
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
                     yield Message::Barrier(barrier);
-                    post_commit.post_yield_barrier(update_vnode_bitmap).await?;
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                        && cache_may_stale
+                    {
+                        cache_manager.clear();
+                    }
                 }
             }
         }
@@ -1059,6 +1075,9 @@ impl<S: StateStore> GapFillExecutor<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
+
     use itertools::Itertools;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -1138,6 +1157,7 @@ mod tests {
             partition_by_indices,
             upstream_stream_key,
             pointer_key_indices,
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
         });
 
         (tx, executor.boxed().execute())
