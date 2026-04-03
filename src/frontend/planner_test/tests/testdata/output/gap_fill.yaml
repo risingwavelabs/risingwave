@@ -520,6 +520,19 @@
 
     Table 4294967294 { columns: [ device_id, ts, val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
+- name: partition by duplicate columns
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id, device_id));
+  logical_plan: |-
+    LogicalProject { exprs: [t.device_id, t.ts, t.val] }
+    └─LogicalGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
+      └─LogicalScan { table: t, columns: [t.device_id, t.ts, t.val, t._rw_timestamp] }
+  stream_plan: |-
+    StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck }
+    └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
+      └─StreamExchange { dist: HashShard(t.device_id) }
+        └─StreamTableScan { table: t, columns: [t.device_id, t.ts, t.val], stream_scan_type: SnapshotBackfill, stream_key: [t.device_id, t.ts], pk: [device_id, ts], dist: UpstreamHashShard(t.device_id, t.ts) }
 - name: partition by multiple columns
   sql: |
     CREATE TABLE t (region VARCHAR, device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(region, device_id, ts));
@@ -576,6 +589,12 @@
     CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
     CREATE MATERIALIZED VIEW mv AS
     SELECT id, ts, v
+    FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+- name: partition by aggregate in materialized view
+  sql: |
+    CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
+    CREATE MATERIALIZED VIEW cnt AS
+    SELECT count(*)
     FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
 - name: partition by with projection
   sql: |

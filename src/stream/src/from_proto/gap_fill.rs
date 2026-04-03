@@ -95,6 +95,14 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             .iter()
             .map(|&x| x as usize)
             .collect();
+        let pointer_key_indices: Vec<usize> = (!node.get_pointer_key_indices().is_empty())
+            .then(|| {
+                node.get_pointer_key_indices()
+                    .iter()
+                    .map(|&x| x as usize)
+                    .collect()
+            })
+            .expect("GapFillNode should always carry pointer_key_indices");
 
         let exec = GapFillExecutor::new(GapFillExecutorArgs {
             ctx: params.actor_context,
@@ -107,6 +115,7 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             state_table,
             partition_by_indices,
             upstream_stream_key,
+            pointer_key_indices,
         });
 
         Ok((params.info, exec).into())
