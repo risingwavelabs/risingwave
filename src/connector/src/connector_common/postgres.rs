@@ -148,7 +148,9 @@ pub async fn discover_pgvector_dimensions(
     for row in rows {
         let col_name: String = row.get("column_name");
         let atttypmod: i32 = row.get("atttypmod");
-        if atttypmod > 0 && let Ok(dim) = usize::try_from(atttypmod) {
+        if atttypmod > 0
+            && let Ok(dim) = usize::try_from(atttypmod)
+        {
             dims.insert(col_name, dim);
         }
     }
