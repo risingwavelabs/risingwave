@@ -32,26 +32,13 @@ pub struct GapFill<PlanRef> {
     pub partition_by_cols: Vec<InputRef>,
 }
 
-impl<PlanRef: GenericPlanRef> GenericPlanNode for GapFill<PlanRef> {
-    fn schema(&self) -> Schema {
-        self.input.schema().clone()
+impl<PlanRef: GenericPlanRef> GapFill<PlanRef> {
+    pub fn partition_key_indices(&self) -> Vec<usize> {
+        self.partition_by_cols.iter().map(|c| c.index()).collect()
     }
 
-    fn functional_dependency(&self) -> FunctionalDependencySet {
-        match self.stream_key() {
-            Some(stream_key) => FunctionalDependencySet::with_key(self.schema().len(), &stream_key),
-            None => FunctionalDependencySet::new(self.schema().len()),
-        }
-    }
-
-    fn stream_key(&self) -> Option<Vec<usize>> {
-        let mut stream_key = Vec::new();
-
-        for partition_by_col in &self.partition_by_cols {
-            if !stream_key.contains(&partition_by_col.index()) {
-                stream_key.push(partition_by_col.index());
-            }
-        }
+    pub fn stream_key_indices(&self) -> Option<Vec<usize>> {
+        let mut stream_key = self.partition_key_indices();
 
         if !stream_key.contains(&self.time_col.index()) {
             stream_key.push(self.time_col.index());
@@ -64,6 +51,40 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for GapFill<PlanRef> {
         }
 
         Some(stream_key)
+    }
+
+    pub fn pointer_key_indices(&self) -> Option<Vec<usize>> {
+        let time_col_idx = self.time_col.index();
+        let partition_key_indices = self.partition_key_indices();
+        let mut pointer_key_indices = vec![time_col_idx];
+
+        for &key in self.input.stream_key()? {
+            if key != time_col_idx
+                && !partition_key_indices.contains(&key)
+                && !pointer_key_indices.contains(&key)
+            {
+                pointer_key_indices.push(key);
+            }
+        }
+
+        Some(pointer_key_indices)
+    }
+}
+
+impl<PlanRef: GenericPlanRef> GenericPlanNode for GapFill<PlanRef> {
+    fn schema(&self) -> Schema {
+        self.input.schema().clone()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        match self.stream_key_indices() {
+            Some(stream_key) => FunctionalDependencySet::with_key(self.schema().len(), &stream_key),
+            None => FunctionalDependencySet::new(self.schema().len()),
+        }
+    }
+
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        self.stream_key_indices()
     }
 
     fn ctx(&self) -> OptimizerContextRef {

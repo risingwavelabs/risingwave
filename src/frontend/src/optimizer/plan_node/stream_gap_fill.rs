@@ -41,8 +41,7 @@ pub struct StreamGapFill {
 impl StreamGapFill {
     pub fn new(core: generic::GapFill<PlanRef<Stream>>) -> Self {
         let input = &core.input;
-        let partition_indices: Vec<usize> =
-            core.partition_by_cols.iter().map(|c| c.index()).collect();
+        let partition_indices = core.partition_key_indices();
         let distinct_partition_key_count = partition_indices
             .iter()
             .copied()
@@ -52,6 +51,13 @@ impl StreamGapFill {
             partition_indices.len(),
             distinct_partition_key_count,
             "stream gap fill expects canonicalized partition_by columns",
+        );
+        assert!(
+            !core
+                .pointer_key_indices()
+                .expect("stream gap fill input should have stream key")
+                .is_empty(),
+            "stream gap fill pointer key should not be empty",
         );
 
         let dist = if core.partition_by_cols.is_empty() {
@@ -101,23 +107,9 @@ impl StreamGapFill {
     }
 
     fn pointer_key_indices(&self) -> Vec<usize> {
-        let time_col_idx = self.time_col().index();
-        let partition_by_set: std::collections::HashSet<usize> = self
-            .core
-            .partition_by_cols
-            .iter()
-            .map(|c| c.index())
-            .collect();
-        let mut pointer_key_indices = vec![time_col_idx];
-        for &sk_idx in self.input().expect_stream_key() {
-            if sk_idx != time_col_idx
-                && !partition_by_set.contains(&sk_idx)
-                && !pointer_key_indices.contains(&sk_idx)
-            {
-                pointer_key_indices.push(sk_idx);
-            }
-        }
-        pointer_key_indices
+        self.core
+            .pointer_key_indices()
+            .expect("stream gap fill input should have stream key")
     }
 
     fn infer_state_table(&self) -> crate::TableCatalog {
@@ -128,12 +120,15 @@ impl StreamGapFill {
             tbl_builder.add_column(field);
         }
 
-        let time_col_idx = self.time_col().index();
         let input_schema = &out_schema;
         let pointer_key_indices = self.pointer_key_indices();
+        let state_key_indices = self
+            .core
+            .stream_key_indices()
+            .expect("stream gap fill input should have stream key");
 
         // Add prev/next pointer columns for linked-list traversal.
-        // Each pointer stores the intra-partition row identity:
+        // Each pointer stores the explicit pointer key inside the partition:
         // (time column, upstream stream key columns excluding partition/time).
         for (i, &sk_idx) in pointer_key_indices.iter().enumerate() {
             tbl_builder.add_column(&Field::with_name(
@@ -148,29 +143,12 @@ impl StreamGapFill {
             ));
         }
 
-        // PK: (partition_cols..., time_col, stream_key_cols...)
-        // Dedup by column index since state table cannot have duplicate PK columns.
-        let mut added_to_pk = std::collections::HashSet::new();
-        for pc in &self.core.partition_by_cols {
-            if added_to_pk.insert(pc.index()) {
-                tbl_builder.add_order_column(pc.index(), OrderType::ascending());
-            }
-        }
-        if added_to_pk.insert(time_col_idx) {
-            tbl_builder.add_order_column(time_col_idx, OrderType::ascending());
-        }
-        for sk_idx in pointer_key_indices {
-            if added_to_pk.insert(sk_idx) {
-                tbl_builder.add_order_column(sk_idx, OrderType::ascending());
-            }
+        // PK: deduplicated (partition_cols..., time_col, upstream stream key...).
+        for key_idx in state_key_indices {
+            tbl_builder.add_order_column(key_idx, OrderType::ascending());
         }
 
-        let dist_key_indices: Vec<usize> = self
-            .core
-            .partition_by_cols
-            .iter()
-            .map(|c| c.index())
-            .collect();
+        let dist_key_indices = self.core.partition_key_indices();
         tbl_builder.build(dist_key_indices, 0)
     }
 }
