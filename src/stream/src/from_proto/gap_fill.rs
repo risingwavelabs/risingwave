@@ -114,6 +114,7 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             partition_by_indices,
             upstream_stream_key,
             pointer_key_indices,
+            watermark_epoch: params.watermark_epoch,
         });
 
         Ok((params.info, exec).into())
