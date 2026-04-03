@@ -1010,6 +1010,7 @@ mod tests {
 
     async fn create_executor<const T: AsOfJoinTypePrimitive>(
         asof_desc: AsOfDesc,
+        use_cache: bool,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![
@@ -1075,7 +1076,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
             asof_desc,
-            false,
+            use_cache,
             2048, // high_join_amplification_threshold
         );
         (tx_l, tx_r, executor.boxed().execute())
@@ -1083,6 +1084,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_asof_inner_join() -> StreamExecutorResult<()> {
+        test_asof_inner_join_impl(false).await
+    }
+
+    #[tokio::test]
+    async fn test_asof_inner_join_with_cache() -> StreamExecutorResult<()> {
+        test_asof_inner_join_impl(true).await
+    }
+
+    async fn test_asof_inner_join_impl(use_cache: bool) -> StreamExecutorResult<()> {
         let asof_desc = AsOfDesc {
             left_idx: 0,
             right_idx: 2,
@@ -1132,7 +1142,7 @@ mod tests {
         );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ AsOfJoinType::Inner }>(asof_desc).await;
+            create_executor::<{ AsOfJoinType::Inner }>(asof_desc, use_cache).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(test_epoch(1), false);
@@ -1231,6 +1241,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_asof_left_outer_join() -> StreamExecutorResult<()> {
+        test_asof_left_outer_join_impl(false).await
+    }
+
+    #[tokio::test]
+    async fn test_asof_left_outer_join_with_cache() -> StreamExecutorResult<()> {
+        test_asof_left_outer_join_impl(true).await
+    }
+
+    async fn test_asof_left_outer_join_impl(use_cache: bool) -> StreamExecutorResult<()> {
         let asof_desc = AsOfDesc {
             left_idx: 1,
             right_idx: 2,
@@ -1272,7 +1291,7 @@ mod tests {
         );
 
         let (mut tx_l, mut tx_r, mut hash_join) =
-            create_executor::<{ AsOfJoinType::LeftOuter }>(asof_desc).await;
+            create_executor::<{ AsOfJoinType::LeftOuter }>(asof_desc, use_cache).await;
 
         // push the init barrier for left and right
         tx_l.push_barrier(test_epoch(1), false);
