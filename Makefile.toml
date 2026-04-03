@@ -1511,7 +1511,19 @@ private = true
 category = "Misc"
 description = "Generate default config and write to src/config/example.toml"
 script = '''
-UPDATE_EXPECT=1 cargo test --package risingwave_common --lib -- config::tests::test_example_up_to_date
+#!/usr/bin/env bash
+set -euo pipefail
+
+# When running inside a git worktree, some developers set a shared `CARGO_TARGET_DIR` globally.
+# That can cause reusing build artifacts compiled from another checkout, which may write updated
+# expect files into the wrong directory. Pin both workspace root and target dir to the current
+# working directory of `cargo-make`.
+WORKDIR="${CARGO_MAKE_WORKING_DIRECTORY:-$(pwd)}"
+
+UPDATE_EXPECT=1 \
+CARGO_TARGET_DIR="${WORKDIR}/target" \
+cargo test --manifest-path "${WORKDIR}/Cargo.toml" --package risingwave_common --lib -- \
+  config::tests::test_example_up_to_date
 '''
 
 [tasks.generate-with-options]
