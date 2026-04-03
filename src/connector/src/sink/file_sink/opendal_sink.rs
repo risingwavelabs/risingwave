@@ -216,6 +216,7 @@ pub struct OpenDalSinkWriter {
     pub(crate) batching_strategy: BatchingStrategy,
     current_bached_row_num: usize,
     created_time: SystemTime,
+    file_seq: u64,
 }
 
 /// The `FileWriterEnum` enum represents different types of file writers used for various sink
@@ -251,17 +252,18 @@ impl OpenDalSinkWriter {
         if let Some(sink_writer) = self.sink_writer.take() {
             match sink_writer {
                 FileWriterEnum::ParquetFileWriter(w) => {
-                    if w.bytes_written() > 0 {
-                        let metadata = w.close().await?;
+                    let bytes_written = w.bytes_written();
+                    if bytes_written > 0 {
+                        w.close().await?;
                         tracing::info!(
-                            "writer {} (executor_id: {}, created_time: {}) finish write file, metadata: {:?}",
+                            "writer {} (executor_id: {}, created_time: {}) finish write file, bytes_written: {}",
                             self.unique_writer_id,
                             self.executor_id,
                             self.created_time
                                 .duration_since(UNIX_EPOCH)
                                 .expect("Time went backwards")
                                 .as_secs(),
-                            metadata
+                            bytes_written
                         );
                     }
                 }
@@ -390,6 +392,7 @@ impl OpenDalSinkWriter {
             batching_strategy,
             current_bached_row_num: 0,
             created_time: SystemTime::now(),
+            file_seq: 0,
         })
     }
 
@@ -419,13 +422,16 @@ impl OpenDalSinkWriter {
                 EngineType::Snowflake if self.write_path.is_empty() => "".to_owned(),
                 _ => format!("{}/", self.write_path),
             };
+            let current_file_seq = self.file_seq;
+            self.file_seq = self.file_seq.checked_add(1).expect("file seq overflow");
 
             format!(
-                "{}{}{}_{}.{}",
+                "{}{}{}_{}_{}.{}",
                 base_path,
                 self.path_partition_prefix(&create_time),
                 self.unique_writer_id,
                 create_time.as_secs(),
+                current_file_seq,
                 suffix,
             )
         };
