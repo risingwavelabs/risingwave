@@ -1514,10 +1514,8 @@ script = '''
 #!/usr/bin/env bash
 set -euo pipefail
 
-# When running inside a git worktree, some developers set a shared `CARGO_TARGET_DIR` globally.
-# That can cause reusing build artifacts compiled from another checkout, which may write updated
-# expect files into the wrong directory. Pin both workspace root and target dir to the current
-# working directory of `cargo-make`.
+# In git worktrees, a shared `CARGO_TARGET_DIR` can reuse binaries from another checkout and write
+# `UPDATE_EXPECT` outputs to the wrong directory. Pin paths to this checkout.
 WORKDIR="${CARGO_MAKE_WORKING_DIRECTORY:-$(pwd)}"
 
 UPDATE_EXPECT=1 \
