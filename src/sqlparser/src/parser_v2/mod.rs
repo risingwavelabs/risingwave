@@ -30,7 +30,6 @@ mod number;
 
 pub(crate) use data_type::*;
 pub(crate) use expr::*;
-pub(crate) use expr_core::*;
 pub(crate) use number::*;
 
 /// Bundle trait requirements from winnow, so that we don't need to write them everywhere.

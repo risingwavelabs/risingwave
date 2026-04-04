@@ -16,6 +16,9 @@
 //! fall back to v1 parser. It's designed as a foundation for gradually
 //! migrating expression parsing to combinator style.
 
+// TODO: Remove this once there are call sites outside of tests.
+#![allow(dead_code)]
+
 use winnow::combinator::{Infix, Postfix, Prefix, alt, cut_err, expression, fail, trace};
 use winnow::error::{ContextError, ErrMode};
 use winnow::{ModalResult, Parser};
