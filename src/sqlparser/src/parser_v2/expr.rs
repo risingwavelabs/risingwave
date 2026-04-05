@@ -13,8 +13,8 @@ use winnow::combinator::{alt, cut_err, opt, preceded, repeat, seq, trace};
 use winnow::error::ContextError;
 use winnow::{ModalParser, ModalResult, Parser};
 
-use super::{ParserExt, TokenStream, data_type, token};
 use super::expr_core::expr_core;
+use super::{ParserExt, TokenStream, data_type, token};
 use crate::ast::Expr;
 use crate::keywords::Keyword;
 use crate::parser::Precedence;

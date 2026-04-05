@@ -22,10 +22,9 @@ use winnow::combinator::{Infix, Postfix, alt, cut_err, expression, fail, trace};
 use winnow::error::{ContextError, ErrMode};
 use winnow::{ModalResult, Parser};
 
-use super::TokenStream;
 #[allow(unused_imports)] // Used implicitly via method dispatch on TokenStream
 use super::compact::ParseV1;
-use super::token;
+use super::{TokenStream, token};
 use crate::ast::{BinaryOperator, Expr};
 use crate::keywords::Keyword;
 use crate::parser::Precedence;
@@ -166,21 +165,18 @@ where
                     match token.parse_next(input) {
                         Ok(t2) => match &t2.token {
                             Token::Word(w2) => match w2.keyword {
-                                Keyword::BETWEEN => Ok(Postfix(
-                                    BETWEEN_POWER,
-                                    |input: &mut S, expr: Expr| {
+                                Keyword::BETWEEN => {
+                                    Ok(Postfix(BETWEEN_POWER, |input: &mut S, expr: Expr| {
                                         input.parse_v1(|p| p.parse_between(expr, true))
-                                    },
-                                )),
-                                Keyword::IN => Ok(Postfix(
-                                    BETWEEN_POWER,
-                                    |input: &mut S, expr: Expr| {
+                                    }))
+                                }
+                                Keyword::IN => {
+                                    Ok(Postfix(BETWEEN_POWER, |input: &mut S, expr: Expr| {
                                         input.parse_v1(|p| p.parse_in(expr, true))
-                                    },
-                                )),
-                                Keyword::LIKE => Ok(Postfix(
-                                    LIKE_POWER,
-                                    |input: &mut S, expr: Expr| {
+                                    }))
+                                }
+                                Keyword::LIKE => {
+                                    Ok(Postfix(LIKE_POWER, |input: &mut S, expr: Expr| {
                                         let pattern = input
                                             .parse_v1(|p| p.parse_subexpr(Precedence::Like))?;
                                         let escape = input.parse_v1(|p| p.parse_escape())?;
@@ -190,11 +186,10 @@ where
                                             pattern: Box::new(pattern),
                                             escape_char: escape,
                                         })
-                                    },
-                                )),
-                                Keyword::ILIKE => Ok(Postfix(
-                                    LIKE_POWER,
-                                    |input: &mut S, expr: Expr| {
+                                    }))
+                                }
+                                Keyword::ILIKE => {
+                                    Ok(Postfix(LIKE_POWER, |input: &mut S, expr: Expr| {
                                         let pattern = input
                                             .parse_v1(|p| p.parse_subexpr(Precedence::Like))?;
                                         let escape = input.parse_v1(|p| p.parse_escape())?;
@@ -204,27 +199,22 @@ where
                                             pattern: Box::new(pattern),
                                             escape_char: escape,
                                         })
-                                    },
-                                )),
+                                    }))
+                                }
                                 Keyword::SIMILAR => {
                                     // Consume TO after SIMILAR
                                     cut_err(Keyword::TO).parse_next(input)?;
-                                    Ok(Postfix(
-                                        LIKE_POWER,
-                                        |input: &mut S, expr: Expr| {
-                                            let pattern = input.parse_v1(|p| {
-                                                p.parse_subexpr(Precedence::Like)
-                                            })?;
-                                            let escape =
-                                                input.parse_v1(|p| p.parse_escape())?;
-                                            Ok(Expr::SimilarTo {
-                                                negated: true,
-                                                expr: Box::new(expr),
-                                                pattern: Box::new(pattern),
-                                                escape_char: escape,
-                                            })
-                                        },
-                                    ))
+                                    Ok(Postfix(LIKE_POWER, |input: &mut S, expr: Expr| {
+                                        let pattern = input
+                                            .parse_v1(|p| p.parse_subexpr(Precedence::Like))?;
+                                        let escape = input.parse_v1(|p| p.parse_escape())?;
+                                        Ok(Expr::SimilarTo {
+                                            negated: true,
+                                            expr: Box::new(expr),
+                                            pattern: Box::new(pattern),
+                                            escape_char: escape,
+                                        })
+                                    }))
                                 }
                                 _ => {
                                     input.reset(&checkpoint);
@@ -244,12 +234,9 @@ where
                 }
 
                 // ---- BETWEEN ... AND ... ----
-                Keyword::BETWEEN => Ok(Postfix(
-                    BETWEEN_POWER,
-                    |input: &mut S, expr: Expr| {
-                        input.parse_v1(|p| p.parse_between(expr, false))
-                    },
-                )),
+                Keyword::BETWEEN => Ok(Postfix(BETWEEN_POWER, |input: &mut S, expr: Expr| {
+                    input.parse_v1(|p| p.parse_between(expr, false))
+                })),
 
                 // ---- IN (...) ----
                 Keyword::IN => Ok(Postfix(BETWEEN_POWER, |input: &mut S, expr: Expr| {
@@ -263,8 +250,7 @@ where
                         && Keyword::ZONE.parse_next(input).is_ok()
                     {
                         Ok(Postfix(AT_POWER, |input: &mut S, expr: Expr| {
-                            let tz =
-                                input.parse_v1(|p| p.parse_subexpr(Precedence::At))?;
+                            let tz = input.parse_v1(|p| p.parse_subexpr(Precedence::At))?;
                             Ok(Expr::AtTimeZone {
                                 timestamp: Box::new(expr),
                                 time_zone: Box::new(tz),
@@ -327,18 +313,14 @@ where
             },
 
             // ---- :: (PostgreSQL cast) ----
-            Token::DoubleColon => {
-                Ok(Postfix(DOUBLE_COLON_POWER, |input: &mut S, expr: Expr| {
-                    input.parse_v1(|p| p.parse_pg_cast(expr))
-                }))
-            }
+            Token::DoubleColon => Ok(Postfix(DOUBLE_COLON_POWER, |input: &mut S, expr: Expr| {
+                input.parse_v1(|p| p.parse_pg_cast(expr))
+            })),
 
             // ---- [] (array subscript / slice) ----
-            Token::LBracket => {
-                Ok(Postfix(ARRAY_POWER, |input: &mut S, expr: Expr| {
-                    input.parse_v1(|p| p.parse_array_index(expr))
-                }))
-            }
+            Token::LBracket => Ok(Postfix(ARRAY_POWER, |input: &mut S, expr: Expr| {
+                input.parse_v1(|p| p.parse_array_index(expr))
+            })),
 
             // ---- Custom operator (e.g., ||, @@) - reset pattern ----
             Token::Op(_) => {
@@ -454,9 +436,7 @@ fn infix_similar_to<S>(input: &mut S) -> ModalResult<Infix<S, Expr, ErrMode<Cont
 where
     S: TokenStream,
 {
-    (Keyword::SIMILAR, Keyword::TO)
-        .void()
-        .parse_next(input)?;
+    (Keyword::SIMILAR, Keyword::TO).void().parse_next(input)?;
     Ok(Infix::Left(
         LIKE_POWER,
         |input: &mut S, a: Expr, b: Expr| {
@@ -552,34 +532,30 @@ where
             })),
 
             // ---- LIKE / ILIKE (with ESCAPE in fold fn) ----
-            Token::Word(w) if w.keyword == Keyword::LIKE => {
-                Some(Infix::Left(
-                    LIKE_POWER,
-                    |input: &mut S, a: Expr, b: Expr| {
-                        let escape = input.parse_v1(|p| p.parse_escape())?;
-                        Ok(Expr::Like {
-                            negated: false,
-                            expr: Box::new(a),
-                            pattern: Box::new(b),
-                            escape_char: escape,
-                        })
-                    },
-                ))
-            }
-            Token::Word(w) if w.keyword == Keyword::ILIKE => {
-                Some(Infix::Left(
-                    LIKE_POWER,
-                    |input: &mut S, a: Expr, b: Expr| {
-                        let escape = input.parse_v1(|p| p.parse_escape())?;
-                        Ok(Expr::ILike {
-                            negated: false,
-                            expr: Box::new(a),
-                            pattern: Box::new(b),
-                            escape_char: escape,
-                        })
-                    },
-                ))
-            }
+            Token::Word(w) if w.keyword == Keyword::LIKE => Some(Infix::Left(
+                LIKE_POWER,
+                |input: &mut S, a: Expr, b: Expr| {
+                    let escape = input.parse_v1(|p| p.parse_escape())?;
+                    Ok(Expr::Like {
+                        negated: false,
+                        expr: Box::new(a),
+                        pattern: Box::new(b),
+                        escape_char: escape,
+                    })
+                },
+            )),
+            Token::Word(w) if w.keyword == Keyword::ILIKE => Some(Infix::Left(
+                LIKE_POWER,
+                |input: &mut S, a: Expr, b: Expr| {
+                    let escape = input.parse_v1(|p| p.parse_escape())?;
+                    Ok(Expr::ILike {
+                        negated: false,
+                        expr: Box::new(a),
+                        pattern: Box::new(b),
+                        escape_char: escape,
+                    })
+                },
+            )),
 
             // ---- Arithmetic operators ----
             Token::Plus => Some(Infix::Left(ADD_POWER, |_, a: Expr, b: Expr| {
@@ -961,25 +937,13 @@ mod tests {
     #[test]
     fn test_similar_to() {
         let result = parse_expr_core("a SIMILAR TO 'x'").unwrap();
-        assert!(matches!(
-            result,
-            Expr::SimilarTo {
-                negated: false,
-                ..
-            }
-        ));
+        assert!(matches!(result, Expr::SimilarTo { negated: false, .. }));
     }
 
     #[test]
     fn test_not_similar_to() {
         let result = parse_expr_core("a NOT SIMILAR TO 'x'").unwrap();
-        assert!(matches!(
-            result,
-            Expr::SimilarTo {
-                negated: true,
-                ..
-            }
-        ));
+        assert!(matches!(result, Expr::SimilarTo { negated: true, .. }));
     }
 
     // ---- BETWEEN tests ----
@@ -987,25 +951,13 @@ mod tests {
     #[test]
     fn test_between() {
         let result = parse_expr_core("a BETWEEN 1 AND 10").unwrap();
-        assert!(matches!(
-            result,
-            Expr::Between {
-                negated: false,
-                ..
-            }
-        ));
+        assert!(matches!(result, Expr::Between { negated: false, .. }));
     }
 
     #[test]
     fn test_not_between() {
         let result = parse_expr_core("a NOT BETWEEN 1 AND 10").unwrap();
-        assert!(matches!(
-            result,
-            Expr::Between {
-                negated: true,
-                ..
-            }
-        ));
+        assert!(matches!(result, Expr::Between { negated: true, .. }));
     }
 
     // ---- IN tests ----
@@ -1013,25 +965,13 @@ mod tests {
     #[test]
     fn test_in_list() {
         let result = parse_expr_core("a IN (1, 2, 3)").unwrap();
-        assert!(matches!(
-            result,
-            Expr::InList {
-                negated: false,
-                ..
-            }
-        ));
+        assert!(matches!(result, Expr::InList { negated: false, .. }));
     }
 
     #[test]
     fn test_not_in_list() {
         let result = parse_expr_core("a NOT IN (1, 2, 3)").unwrap();
-        assert!(matches!(
-            result,
-            Expr::InList {
-                negated: true,
-                ..
-            }
-        ));
+        assert!(matches!(result, Expr::InList { negated: true, .. }));
     }
 
     // ---- IS tests ----
