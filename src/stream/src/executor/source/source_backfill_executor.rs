@@ -773,6 +773,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     // backfill
                     Either::Right(msg) => {
                         let chunk = msg?;
+                        if chunk.capacity() == 0 {
+                            // Empty chunk is a semantic bounded-completion marker from reader.
+                            // It's distinct from generic stream termination and is the only event
+                            // that can advance backfill completion without rows.
+                            apply_semantic_bounded_eof(&mut backfill_stage.states);
+                            continue;
+                        }
 
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                             // Pause to let barrier catch up via backpressure of snapshot stream.
@@ -1165,6 +1172,20 @@ fn compare_kafka_offset(a: &str, b: &str) -> Ordering {
     a.cmp(&b)
 }
 
+fn apply_semantic_bounded_eof(states: &mut BackfillStates) {
+    for state in states.values_mut() {
+        match &state.state {
+            BackfillState::Backfilling(Some(offset)) => {
+                state.state = BackfillState::SourceCachingUp(offset.clone());
+            }
+            BackfillState::Backfilling(None) => {
+                state.state = BackfillState::Finished;
+            }
+            BackfillState::SourceCachingUp(_) | BackfillState::Finished => {}
+        }
+    }
+}
+
 impl<S: StateStore> Execute for SourceBackfillExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.inner.execute(self.input).boxed()
@@ -1263,5 +1284,54 @@ impl PauseControl {
         }
         self.command_paused = false;
         !self.backfill_paused
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{
+        BackfillState, BackfillStateWithProgress, BackfillStates, apply_semantic_bounded_eof,
+    };
+
+    fn build_state(state: BackfillState) -> BackfillStateWithProgress {
+        BackfillStateWithProgress {
+            state,
+            num_consumed_rows: 0,
+            target_offset: None,
+        }
+    }
+
+    #[test]
+    fn semantic_bounded_eof_advances_backfilling_states_only() {
+        let mut states: BackfillStates = HashMap::from([
+            (
+                "split-1".into(),
+                build_state(BackfillState::Backfilling(Some("42".to_owned()))),
+            ),
+            (
+                "split-2".into(),
+                build_state(BackfillState::Backfilling(None)),
+            ),
+            (
+                "split-3".into(),
+                build_state(BackfillState::SourceCachingUp("100".to_owned())),
+            ),
+            ("split-4".into(), build_state(BackfillState::Finished)),
+        ]);
+
+        apply_semantic_bounded_eof(&mut states);
+
+        assert_eq!(
+            states["split-1"].state,
+            BackfillState::SourceCachingUp("42".to_owned())
+        );
+        assert_eq!(states["split-2"].state, BackfillState::Finished);
+        assert_eq!(
+            states["split-3"].state,
+            BackfillState::SourceCachingUp("100".to_owned())
+        );
+        assert_eq!(states["split-4"].state, BackfillState::Finished);
     }
 }

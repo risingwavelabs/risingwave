@@ -237,6 +237,11 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
     msg_stream: BoxSourceMessageStream,
     source_ctrl_opts: SourceCtrlOpts,
 ) {
+    let chunk_data_types = parser
+        .columns()
+        .iter()
+        .map(|column_desc| column_desc.data_type.clone())
+        .collect::<Vec<_>>();
     let mut chunk_builder =
         SourceStreamChunkBuilder::new(parser.columns().to_vec(), source_ctrl_opts);
 
@@ -252,6 +257,10 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
         let batch = batch?;
         let batch_len = batch.len();
         if batch_len == 0 {
+            // An empty source-message batch is a semantic marker from reader. Keep it as an
+            // empty typed chunk so downstream executors can distinguish semantic EOF from normal
+            // stream termination.
+            yield StreamChunk::empty(&chunk_data_types);
             continue;
         }
 

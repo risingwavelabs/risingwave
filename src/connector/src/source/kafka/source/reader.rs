@@ -214,6 +214,14 @@ impl SplitReader for KafkaSplitReader {
     }
 }
 
+fn should_emit_semantic_bounded_eof(
+    bounded_read: bool,
+    stop_offsets_empty: bool,
+    reached_max_num_messages: bool,
+) -> bool {
+    bounded_read && stop_offsets_empty && !reached_max_num_messages
+}
+
 impl KafkaSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
@@ -235,6 +243,7 @@ impl KafkaSplitReader {
                 stop_offset.map(|offset| (split_id.clone() as SplitId, offset))
             })
             .collect();
+        let bounded_read = !stop_offsets.is_empty();
 
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.tick().await;
@@ -309,6 +318,11 @@ impl KafkaSplitReader {
 
                         if stop_offsets.is_empty() {
                             yield res;
+                            if should_emit_semantic_bounded_eof(bounded_read, true, false) {
+                                // An empty batch is a semantic bounded-completion marker that can
+                                // be propagated to the backfill executor.
+                                yield Vec::new();
+                            }
                             break 'for_outer_loop;
                         }
 
@@ -338,5 +352,18 @@ impl KafkaSplitReader {
             // every `MAX_CHUNK_SIZE`.
         }
         tracing::info!("kafka reader finished");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_emit_semantic_bounded_eof;
+
+    #[test]
+    fn semantic_bounded_eof_only_for_bounded_completion() {
+        assert!(should_emit_semantic_bounded_eof(true, true, false));
+        assert!(!should_emit_semantic_bounded_eof(false, true, false));
+        assert!(!should_emit_semantic_bounded_eof(true, false, false));
+        assert!(!should_emit_semantic_bounded_eof(true, true, true));
     }
 }
