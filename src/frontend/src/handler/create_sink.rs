@@ -27,7 +27,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::DataType as ArrowData
 use risingwave_common::bail;
 use risingwave_common::catalog::{
     ColumnCatalog, ICEBERG_SINK_PREFIX, ObjectId, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
-    Schema,
+    Schema, SecretId,
 };
 use risingwave_common::license::Feature;
 use risingwave_common::secret::LocalSecretManager;
@@ -275,7 +275,13 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, dependent_udfs, bound, auto_refresh_schema_from_table) = {
+    let (
+        dependent_relations,
+        dependent_udfs,
+        dependent_secrets,
+        bound,
+        auto_refresh_schema_from_table,
+    ) = {
         let mut binder = Binder::new_for_stream(session);
         let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
         {
@@ -315,6 +321,7 @@ pub async fn gen_sink_plan(
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
+            binder.included_secrets().clone(),
             bound,
             auto_refresh_schema_from_table,
         )
@@ -450,6 +457,12 @@ pub async fn gen_sink_plan(
         RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
             .into_iter()
             .chain(dependent_udfs.iter().copied().map_into())
+            .chain(
+                dependent_secrets
+                    .iter()
+                    .copied()
+                    .map(|id: SecretId| id.as_object_id()),
+            )
             .collect();
 
     let sink_catalog = sink_desc.into_catalog(
