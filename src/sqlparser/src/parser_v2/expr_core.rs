@@ -12,70 +12,92 @@
 
 //! Core expression parser using winnow's Pratt parser combinator.
 //!
-//! This module provides a pure parser_v2 implementation that does NOT
-//! fall back to v1 parser. It's designed as a foundation for gradually
-//! migrating expression parsing to combinator style.
+//! This module provides a v2 expression parser that uses winnow's `expression`
+//! combinator for operator precedence parsing. Atoms (primary expressions
+//! including prefix operators like NOT and unary +/-) are parsed via the v1
+//! bridge, while all infix and postfix operators are handled natively by the
+//! Pratt parser.
 
 // TODO: Remove this once there are call sites outside of tests.
 #![allow(dead_code)]
 
-use winnow::combinator::{Infix, Postfix, Prefix, alt, cut_err, expression, fail, trace};
+use winnow::combinator::{Infix, Postfix, alt, cut_err, expression, fail, trace};
 use winnow::error::{ContextError, ErrMode};
 use winnow::{ModalResult, Parser};
 
-use super::{TokenStream, keyword, token};
-use crate::ast::{BinaryOperator, Expr, UnaryOperator, Value};
+use super::TokenStream;
+#[allow(unused_imports)] // Used implicitly via method dispatch on TokenStream
+use super::compact::ParseV1;
+use super::token;
+use crate::ast::{BinaryOperator, Expr};
 use crate::keywords::Keyword;
+use crate::parser::Precedence;
 use crate::tokenizer::{Token, TokenWithLocation};
 
-/// Binding power for prefix operators (unary +, -)
-const PREFIX_POWER: i64 = 25;
+// ============================================================
+// Binding power constants
+// ============================================================
+// These maintain the same relative ordering as v1's Precedence enum.
+// Higher value = tighter binding.
 
-/// Binding power for logical OR (lowest precedence)
+/// Logical OR
 const OR_POWER: i64 = 5;
 
-/// Binding power for logical AND
+/// Logical XOR
+const XOR_POWER: i64 = 6;
+
+/// Logical AND
 const AND_POWER: i64 = 7;
 
-/// Binding power for comparison operators (=, <>, <, >, <=, >=)
-const CMP_POWER: i64 = 11;
+/// IS NULL/TRUE/FALSE/UNKNOWN, IS DISTINCT FROM, IS JSON, ISNULL, NOTNULL
+const IS_POWER: i64 = 9;
 
-/// Binding power for addition/subtraction
+/// Comparison operators (=, <>, <, >, <=, >=)
+const CMP_POWER: i64 = 10;
+
+/// LIKE, ILIKE, SIMILAR TO (and their NOT variants)
+const LIKE_POWER: i64 = 11;
+
+/// BETWEEN, IN (and their NOT variants)
+const BETWEEN_POWER: i64 = 12;
+
+/// Custom operators (Op, Pipe, OPERATOR, ALL/ANY/SOME)
+const OTHER_POWER: i64 = 13;
+
+/// Addition, subtraction
 const ADD_POWER: i64 = 15;
 
-/// Binding power for multiplication/division/modulo
+/// Multiplication, division, modulo
 const MUL_POWER: i64 = 17;
 
-/// Binding power for exponentiation (^, right associative)
+/// Exponentiation (^)
 const EXP_POWER: i64 = 19;
 
-/// Binding power for LIKE/ILIKE (between comparisons and IS)
-const LIKE_POWER: i64 = 12;
+/// AT TIME ZONE
+const AT_POWER: i64 = 20;
 
-/// Binding power for IS NULL / IS NOT NULL (between LIKE and AND)
-const IS_NULL_POWER: i64 = 10;
+/// Array subscript (\[\])
+const ARRAY_POWER: i64 = 27;
 
-/// Parse a core expression.
+/// PostgreSQL cast (::)
+const DOUBLE_COLON_POWER: i64 = 30;
+
+// ============================================================
+// Main expression parser
+// ============================================================
+
+/// Parse an expression using the Pratt parser combinator.
 ///
-/// This is a pure parser_v2 implementation using winnow's `expression` combinator.
-/// It does NOT fall back to v1 parser.
-///
-/// Supported operators (in precedence order, high to low):
-/// - unary `+`, `-` (highest)
-/// - `^` (right associative)
-/// - `*`, `/`, `%`
-/// - `+`, `-`
-/// - `=`, `<>`, `<`, `>`, `<=`, `>=`
-/// - `LIKE`, `ILIKE`
-/// - `AND`
-/// - `OR` (lowest)
+/// Atoms (including prefix operators like NOT, unary +/-) are parsed via the
+/// v1 bridge. All infix and postfix operators are handled natively by the
+/// Pratt parser.
 pub fn expr_core<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
     trace("expr_core", |input: &mut S| {
         expression(atom_core)
-            .prefix(prefix_op_core)
+            .prefix(fail)
             .postfix(postfix_op_core)
             .infix(infix_op_core)
             .parse_next(input)
@@ -83,130 +105,383 @@ where
     .parse_next(input)
 }
 
-/// Parse a core atomic expression (operand).
+// ============================================================
+// Atom parser (via v1 bridge)
+// ============================================================
+
+/// Parse an atomic expression by delegating to v1's `parse_prefix`.
 ///
-/// This only handles "safe" atoms that don't require v1 fallback:
+/// This handles all primary expressions including:
 /// - Literals (numbers, strings, booleans, NULL)
-/// - Column references (simple identifiers)
-/// - Parenthesized expressions
+/// - Identifiers (simple, quoted, compound) with reserved keyword rejection
+/// - Parenthesized expressions, subqueries, and row constructors
+/// - Prefix operators (NOT, unary +/- with negative literal normalization, custom Op)
+/// - Function calls
+/// - Keyword expressions (CASE, CAST, EXISTS, ARRAY, etc.)
+/// - Typed strings (DATE '...', TIMESTAMP '...', etc.)
+/// - Parameters ($1), Lambda expressions (|args| body)
+/// - COLLATE suffix on atoms
 fn atom_core<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
-    trace(
-        "atom_core",
-        alt((expr_parenthesized_core, expr_literal, expr_identifier)),
-    )
+    trace("atom_core", |input: &mut S| {
+        input.parse_v1(|parser| parser.parse_prefix())
+    })
     .parse_next(input)
 }
 
-/// Parse a parenthesized expression.
-/// Uses `expr_core` recursively.
-fn expr_parenthesized_core<S>(input: &mut S) -> ModalResult<Expr>
-where
-    S: TokenStream,
-{
-    trace(
-        "expr_parenthesized_core",
-        (Token::LParen, cut_err(expr_core), cut_err(Token::RParen)).map(|(_, e, _)| e),
-    )
-    .parse_next(input)
-}
+// ============================================================
+// Postfix operators
+// ============================================================
 
-/// Parse prefix (unary) operators for core expressions.
-/// Only handles `+` and `-`.
-fn prefix_op_core<S>(input: &mut S) -> ModalResult<Prefix<S, Expr, ErrMode<ContextError>>>
-where
-    S: TokenStream,
-{
-    trace(
-        "prefix_op_core",
-        token.verify_map(|t: TokenWithLocation| match t.token {
-            Token::Minus => Some(Prefix(PREFIX_POWER, |_, e: Expr| {
-                Ok(Expr::UnaryOp {
-                    op: UnaryOperator::Minus,
-                    expr: Box::new(e),
-                })
-            })),
-            Token::Plus => Some(Prefix(PREFIX_POWER, |_, e: Expr| {
-                Ok(Expr::UnaryOp {
-                    op: UnaryOperator::Plus,
-                    expr: Box::new(e),
-                })
-            })),
-            _ => None,
-        }),
-    )
-    .parse_next(input)
-}
-
-/// Parse postfix operators for core expressions.
-/// Handles: IS \[NOT\] NULL, IS \[NOT\] TRUE, IS \[NOT\] FALSE, IS \[NOT\] UNKNOWN
+/// Parse postfix operators.
+///
+/// Handles: IS variants, NOT BETWEEN/IN/LIKE/ILIKE/SIMILAR TO, BETWEEN, IN,
+/// AT TIME ZONE, :: cast, \[\] subscript, ISNULL, NOTNULL,
+/// OPERATOR(...), custom Op, ALL/ANY/SOME (all via reset pattern where needed).
 fn postfix_op_core<S>(input: &mut S) -> ModalResult<Postfix<S, Expr, ErrMode<ContextError>>>
 where
     S: TokenStream,
 {
-    trace(
-        "postfix_op_core",
-        token.verify_map(|t: TokenWithLocation| match &t.token {
-            Token::Word(w) if w.keyword == Keyword::IS => {
-                Some(Postfix(IS_NULL_POWER, |input: &mut S, expr: Expr| {
-                    // Check for optional NOT
-                    let is_not = (Keyword::NOT).parse_next(input).is_ok();
+    trace("postfix_op_core", |input: &mut S| {
+        let checkpoint = input.checkpoint();
+        let t = token.parse_next(input)?;
 
-                    // Parse the target: NULL, TRUE, FALSE, or UNKNOWN
-                    let target = keyword.parse_next(input)?;
+        match &t.token {
+            Token::Word(w) => match w.keyword {
+                // ---- IS [NOT] { NULL | TRUE | FALSE | UNKNOWN | DISTINCT FROM | JSON } ----
+                Keyword::IS => Ok(Postfix(IS_POWER, parse_is_suffix)),
 
-                    match target {
-                        Keyword::NULL => {
-                            if is_not {
-                                Ok(Expr::IsNotNull(Box::new(expr)))
-                            } else {
-                                Ok(Expr::IsNull(Box::new(expr)))
+                // ---- ISNULL ----
+                Keyword::ISNULL => Ok(Postfix(IS_POWER, |_: &mut S, expr: Expr| {
+                    Ok(Expr::IsNull(Box::new(expr)))
+                })),
+
+                // ---- NOTNULL ----
+                Keyword::NOTNULL => Ok(Postfix(IS_POWER, |_: &mut S, expr: Expr| {
+                    Ok(Expr::IsNotNull(Box::new(expr)))
+                })),
+
+                // ---- NOT { BETWEEN | IN | LIKE | ILIKE | SIMILAR TO } ----
+                Keyword::NOT => {
+                    // Peek at the token after NOT to decide which compound operator.
+                    match token.parse_next(input) {
+                        Ok(t2) => match &t2.token {
+                            Token::Word(w2) => match w2.keyword {
+                                Keyword::BETWEEN => Ok(Postfix(
+                                    BETWEEN_POWER,
+                                    |input: &mut S, expr: Expr| {
+                                        input.parse_v1(|p| p.parse_between(expr, true))
+                                    },
+                                )),
+                                Keyword::IN => Ok(Postfix(
+                                    BETWEEN_POWER,
+                                    |input: &mut S, expr: Expr| {
+                                        input.parse_v1(|p| p.parse_in(expr, true))
+                                    },
+                                )),
+                                Keyword::LIKE => Ok(Postfix(
+                                    LIKE_POWER,
+                                    |input: &mut S, expr: Expr| {
+                                        let pattern = input
+                                            .parse_v1(|p| p.parse_subexpr(Precedence::Like))?;
+                                        let escape = input.parse_v1(|p| p.parse_escape())?;
+                                        Ok(Expr::Like {
+                                            negated: true,
+                                            expr: Box::new(expr),
+                                            pattern: Box::new(pattern),
+                                            escape_char: escape,
+                                        })
+                                    },
+                                )),
+                                Keyword::ILIKE => Ok(Postfix(
+                                    LIKE_POWER,
+                                    |input: &mut S, expr: Expr| {
+                                        let pattern = input
+                                            .parse_v1(|p| p.parse_subexpr(Precedence::Like))?;
+                                        let escape = input.parse_v1(|p| p.parse_escape())?;
+                                        Ok(Expr::ILike {
+                                            negated: true,
+                                            expr: Box::new(expr),
+                                            pattern: Box::new(pattern),
+                                            escape_char: escape,
+                                        })
+                                    },
+                                )),
+                                Keyword::SIMILAR => {
+                                    // Consume TO after SIMILAR
+                                    cut_err(Keyword::TO).parse_next(input)?;
+                                    Ok(Postfix(
+                                        LIKE_POWER,
+                                        |input: &mut S, expr: Expr| {
+                                            let pattern = input.parse_v1(|p| {
+                                                p.parse_subexpr(Precedence::Like)
+                                            })?;
+                                            let escape =
+                                                input.parse_v1(|p| p.parse_escape())?;
+                                            Ok(Expr::SimilarTo {
+                                                negated: true,
+                                                expr: Box::new(expr),
+                                                pattern: Box::new(pattern),
+                                                escape_char: escape,
+                                            })
+                                        },
+                                    ))
+                                }
+                                _ => {
+                                    input.reset(&checkpoint);
+                                    Err(ErrMode::Backtrack(ContextError::new()))
+                                }
+                            },
+                            _ => {
+                                input.reset(&checkpoint);
+                                Err(ErrMode::Backtrack(ContextError::new()))
                             }
+                        },
+                        Err(_) => {
+                            input.reset(&checkpoint);
+                            Err(ErrMode::Backtrack(ContextError::new()))
                         }
-                        Keyword::TRUE => {
-                            if is_not {
-                                Ok(Expr::IsNotTrue(Box::new(expr)))
-                            } else {
-                                Ok(Expr::IsTrue(Box::new(expr)))
-                            }
-                        }
-                        Keyword::FALSE => {
-                            if is_not {
-                                Ok(Expr::IsNotFalse(Box::new(expr)))
-                            } else {
-                                Ok(Expr::IsFalse(Box::new(expr)))
-                            }
-                        }
-                        Keyword::UNKNOWN => {
-                            if is_not {
-                                Ok(Expr::IsNotUnknown(Box::new(expr)))
-                            } else {
-                                Ok(Expr::IsUnknown(Box::new(expr)))
-                            }
-                        }
-                        _ => fail.parse_next(input),
                     }
+                }
+
+                // ---- BETWEEN ... AND ... ----
+                Keyword::BETWEEN => Ok(Postfix(
+                    BETWEEN_POWER,
+                    |input: &mut S, expr: Expr| {
+                        input.parse_v1(|p| p.parse_between(expr, false))
+                    },
+                )),
+
+                // ---- IN (...) ----
+                Keyword::IN => Ok(Postfix(BETWEEN_POWER, |input: &mut S, expr: Expr| {
+                    input.parse_v1(|p| p.parse_in(expr, false))
+                })),
+
+                // ---- AT TIME ZONE ----
+                Keyword::AT => {
+                    // Must match AT TIME ZONE; reset if not.
+                    if Keyword::TIME.parse_next(input).is_ok()
+                        && Keyword::ZONE.parse_next(input).is_ok()
+                    {
+                        Ok(Postfix(AT_POWER, |input: &mut S, expr: Expr| {
+                            let tz =
+                                input.parse_v1(|p| p.parse_subexpr(Precedence::At))?;
+                            Ok(Expr::AtTimeZone {
+                                timestamp: Box::new(expr),
+                                time_zone: Box::new(tz),
+                            })
+                        }))
+                    } else {
+                        input.reset(&checkpoint);
+                        Err(ErrMode::Backtrack(ContextError::new()))
+                    }
+                }
+
+                // ---- OPERATOR(...) binary (reset pattern) ----
+                Keyword::OPERATOR => {
+                    let has_lparen = Token::LParen.parse_next(input).is_ok();
+                    // Reset to before OPERATOR so the fold function can re-consume.
+                    input.reset(&checkpoint);
+                    if has_lparen {
+                        Ok(Postfix(OTHER_POWER, |input: &mut S, expr: Expr| {
+                            input.parse_v1(|p| {
+                                p.next_token(); // consume OPERATOR
+                                let op = p.parse_qualified_operator()?;
+                                let rhs = p.parse_subexpr(Precedence::Other)?;
+                                Ok(Expr::BinaryOp {
+                                    left: Box::new(expr),
+                                    op: BinaryOperator::PGQualified(Box::new(op)),
+                                    right: Box::new(rhs),
+                                })
+                            })
+                        }))
+                    } else {
+                        Err(ErrMode::Backtrack(ContextError::new()))
+                    }
+                }
+
+                // ---- ALL / ANY / SOME as postfix (reset pattern) ----
+                Keyword::ALL | Keyword::ANY | Keyword::SOME => {
+                    input.reset(&checkpoint);
+                    Ok(Postfix(OTHER_POWER, |input: &mut S, _expr: Expr| {
+                        input.parse_v1(|p| {
+                            let tok = p.next_token();
+                            let kw = match &tok.token {
+                                Token::Word(w) => w.keyword,
+                                _ => return fail.parse_next(p),
+                            };
+                            p.expect_token(&Token::LParen)?;
+                            let sub = p.parse_expr()?;
+                            p.expect_token(&Token::RParen)?;
+                            Ok(match kw {
+                                Keyword::ALL => Expr::AllOp(Box::new(sub)),
+                                _ => Expr::SomeOp(Box::new(sub)),
+                            })
+                        })
+                    }))
+                }
+
+                _ => {
+                    input.reset(&checkpoint);
+                    Err(ErrMode::Backtrack(ContextError::new()))
+                }
+            },
+
+            // ---- :: (PostgreSQL cast) ----
+            Token::DoubleColon => {
+                Ok(Postfix(DOUBLE_COLON_POWER, |input: &mut S, expr: Expr| {
+                    input.parse_v1(|p| p.parse_pg_cast(expr))
                 }))
             }
-            _ => None,
-        }),
-    )
+
+            // ---- [] (array subscript / slice) ----
+            Token::LBracket => {
+                Ok(Postfix(ARRAY_POWER, |input: &mut S, expr: Expr| {
+                    input.parse_v1(|p| p.parse_array_index(expr))
+                }))
+            }
+
+            // ---- Custom operator (e.g., ||, @@) - reset pattern ----
+            Token::Op(_) => {
+                input.reset(&checkpoint);
+                Ok(Postfix(OTHER_POWER, |input: &mut S, expr: Expr| {
+                    input.parse_v1(|p| {
+                        let tok = p.next_token();
+                        let name = match tok.token {
+                            Token::Op(name) => name,
+                            _ => return fail.parse_next(p),
+                        };
+                        let rhs = p.parse_subexpr(Precedence::Other)?;
+                        Ok(Expr::BinaryOp {
+                            left: Box::new(expr),
+                            op: BinaryOperator::Custom(name),
+                            right: Box::new(rhs),
+                        })
+                    })
+                }))
+            }
+
+            _ => {
+                input.reset(&checkpoint);
+                Err(ErrMode::Backtrack(ContextError::new()))
+            }
+        }
+    })
     .parse_next(input)
 }
 
-/// Parse infix (binary) operators for core expressions.
+/// Parse the suffix after IS keyword.
 ///
-/// Handles: OR, AND, comparisons, +, -, *, /, %, ^
+/// Handles: IS \[NOT\] { NULL | TRUE | FALSE | UNKNOWN | DISTINCT FROM | JSON }
+fn parse_is_suffix<S>(input: &mut S, expr: Expr) -> ModalResult<Expr>
+where
+    S: TokenStream,
+{
+    // Try non-negated forms first
+    if Keyword::TRUE.parse_next(input).is_ok() {
+        return Ok(Expr::IsTrue(Box::new(expr)));
+    }
+    if Keyword::FALSE.parse_next(input).is_ok() {
+        return Ok(Expr::IsFalse(Box::new(expr)));
+    }
+    if Keyword::UNKNOWN.parse_next(input).is_ok() {
+        return Ok(Expr::IsUnknown(Box::new(expr)));
+    }
+    if Keyword::NULL.parse_next(input).is_ok() {
+        return Ok(Expr::IsNull(Box::new(expr)));
+    }
+    if Keyword::DISTINCT.parse_next(input).is_ok() {
+        cut_err(Keyword::FROM).parse_next(input)?;
+        let expr2 = input.parse_v1(|p| p.parse_expr())?;
+        return Ok(Expr::IsDistinctFrom(Box::new(expr), Box::new(expr2)));
+    }
+    if Keyword::JSON.parse_next(input).is_ok() {
+        return input.parse_v1(|p| p.parse_is_json(expr, false));
+    }
+
+    // Try negated forms (IS NOT ...)
+    if Keyword::NOT.parse_next(input).is_ok() {
+        if Keyword::TRUE.parse_next(input).is_ok() {
+            return Ok(Expr::IsNotTrue(Box::new(expr)));
+        }
+        if Keyword::FALSE.parse_next(input).is_ok() {
+            return Ok(Expr::IsNotFalse(Box::new(expr)));
+        }
+        if Keyword::UNKNOWN.parse_next(input).is_ok() {
+            return Ok(Expr::IsNotUnknown(Box::new(expr)));
+        }
+        if Keyword::NULL.parse_next(input).is_ok() {
+            return Ok(Expr::IsNotNull(Box::new(expr)));
+        }
+        if Keyword::DISTINCT.parse_next(input).is_ok() {
+            cut_err(Keyword::FROM).parse_next(input)?;
+            let expr2 = input.parse_v1(|p| p.parse_expr())?;
+            return Ok(Expr::IsNotDistinctFrom(Box::new(expr), Box::new(expr2)));
+        }
+        if Keyword::JSON.parse_next(input).is_ok() {
+            return input.parse_v1(|p| p.parse_is_json(expr, true));
+        }
+    }
+
+    // Nothing matched after IS [NOT]
+    fail.parse_next(input)
+}
+
+// ============================================================
+// Infix operators
+// ============================================================
+
+/// Parse infix (binary) operators.
+///
+/// Handles: OR, XOR, AND, comparisons, arithmetic, LIKE, ILIKE, SIMILAR TO, Pipe.
 fn infix_op_core<S>(input: &mut S) -> ModalResult<Infix<S, Expr, ErrMode<ContextError>>>
 where
     S: TokenStream,
 {
     trace(
         "infix_op_core",
-        token.verify_map(|t: TokenWithLocation| match &t.token {
-            // Logical OR (lowest precedence, left associative)
+        alt((
+            // Multi-token infix: SIMILAR TO (must come before single-token)
+            infix_similar_to,
+            // Single-token infix operators
+            infix_single_token,
+        )),
+    )
+    .parse_next(input)
+}
+
+/// Parse SIMILAR TO as a multi-token infix operator.
+fn infix_similar_to<S>(input: &mut S) -> ModalResult<Infix<S, Expr, ErrMode<ContextError>>>
+where
+    S: TokenStream,
+{
+    (Keyword::SIMILAR, Keyword::TO)
+        .void()
+        .parse_next(input)?;
+    Ok(Infix::Left(
+        LIKE_POWER,
+        |input: &mut S, a: Expr, b: Expr| {
+            let escape = input.parse_v1(|p| p.parse_escape())?;
+            Ok(Expr::SimilarTo {
+                negated: false,
+                expr: Box::new(a),
+                pattern: Box::new(b),
+                escape_char: escape,
+            })
+        },
+    ))
+}
+
+/// Parse single-token infix operators.
+fn infix_single_token<S>(input: &mut S) -> ModalResult<Infix<S, Expr, ErrMode<ContextError>>>
+where
+    S: TokenStream,
+{
+    token
+        .verify_map(|t: TokenWithLocation| match &t.token {
+            // ---- Logical operators ----
             Token::Word(w) if w.keyword == Keyword::OR => {
                 Some(Infix::Left(OR_POWER, |_, a: Expr, b: Expr| {
                     Ok(Expr::BinaryOp {
@@ -216,7 +491,15 @@ where
                     })
                 }))
             }
-            // Logical AND (left associative)
+            Token::Word(w) if w.keyword == Keyword::XOR => {
+                Some(Infix::Left(XOR_POWER, |_, a: Expr, b: Expr| {
+                    Ok(Expr::BinaryOp {
+                        left: Box::new(a),
+                        op: BinaryOperator::Xor,
+                        right: Box::new(b),
+                    })
+                }))
+            }
             Token::Word(w) if w.keyword == Keyword::AND => {
                 Some(Infix::Left(AND_POWER, |_, a: Expr, b: Expr| {
                     Ok(Expr::BinaryOp {
@@ -226,7 +509,8 @@ where
                     })
                 }))
             }
-            // Comparison operators (neither associative - chains like a = b = c are invalid)
+
+            // ---- Comparison operators ----
             Token::Eq => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
@@ -269,29 +553,38 @@ where
                     right: Box::new(b),
                 })
             })),
-            // LIKE / ILIKE (left associative, lower precedence than comparisons)
-            // These construct Expr::Like / Expr::ILike, not BinaryOp
+
+            // ---- LIKE / ILIKE (with ESCAPE in fold fn) ----
             Token::Word(w) if w.keyword == Keyword::LIKE => {
-                Some(Infix::Left(LIKE_POWER, |_, a: Expr, b: Expr| {
-                    Ok(Expr::Like {
-                        negated: false,
-                        expr: Box::new(a),
-                        pattern: Box::new(b),
-                        escape_char: None,
-                    })
-                }))
+                Some(Infix::Left(
+                    LIKE_POWER,
+                    |input: &mut S, a: Expr, b: Expr| {
+                        let escape = input.parse_v1(|p| p.parse_escape())?;
+                        Ok(Expr::Like {
+                            negated: false,
+                            expr: Box::new(a),
+                            pattern: Box::new(b),
+                            escape_char: escape,
+                        })
+                    },
+                ))
             }
             Token::Word(w) if w.keyword == Keyword::ILIKE => {
-                Some(Infix::Left(LIKE_POWER, |_, a: Expr, b: Expr| {
-                    Ok(Expr::ILike {
-                        negated: false,
-                        expr: Box::new(a),
-                        pattern: Box::new(b),
-                        escape_char: None,
-                    })
-                }))
+                Some(Infix::Left(
+                    LIKE_POWER,
+                    |input: &mut S, a: Expr, b: Expr| {
+                        let escape = input.parse_v1(|p| p.parse_escape())?;
+                        Ok(Expr::ILike {
+                            negated: false,
+                            expr: Box::new(a),
+                            pattern: Box::new(b),
+                            escape_char: escape,
+                        })
+                    },
+                ))
             }
-            // Addition/subtraction (left associative)
+
+            // ---- Arithmetic operators ----
             Token::Plus => Some(Infix::Left(ADD_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
@@ -306,7 +599,6 @@ where
                     right: Box::new(b),
                 })
             })),
-            // Multiplication/division/modulo (left associative)
             Token::Mul => Some(Infix::Left(MUL_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
@@ -328,7 +620,6 @@ where
                     right: Box::new(b),
                 })
             })),
-            // Exponentiation (right associative)
             Token::Caret => Some(Infix::Right(EXP_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
@@ -336,89 +627,16 @@ where
                     right: Box::new(b),
                 })
             })),
-            _ => None,
-        }),
-    )
-    .parse_next(input)
-}
 
-/// Parse a literal value.
-fn expr_literal<S>(input: &mut S) -> ModalResult<Expr>
-where
-    S: TokenStream,
-{
-    trace(
-        "expr_literal",
-        token.verify_map(|t: TokenWithLocation| match t.token {
-            Token::Number(n) => Some(Expr::Value(Value::Number(n))),
-            Token::SingleQuotedString(s) => Some(Expr::Value(Value::SingleQuotedString(s))),
-            Token::NationalStringLiteral(s) => Some(Expr::Value(Value::NationalStringLiteral(s))),
-            Token::HexStringLiteral(s) => Some(Expr::Value(Value::HexStringLiteral(s))),
-            Token::DollarQuotedString(s) => Some(Expr::Value(Value::DollarQuotedString(s))),
-            Token::Word(w) => match w.keyword {
-                Keyword::TRUE => Some(Expr::Value(Value::Boolean(true))),
-                Keyword::FALSE => Some(Expr::Value(Value::Boolean(false))),
-                Keyword::NULL => Some(Expr::Value(Value::Null)),
-                _ => None,
-            },
-            _ => None,
-        }),
-    )
-    .parse_next(input)
-}
+            // ---- Pipe (|) as custom binary operator ----
+            Token::Pipe => Some(Infix::Left(OTHER_POWER, |_, a: Expr, b: Expr| {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(a),
+                    op: BinaryOperator::Custom("|".to_owned()),
+                    right: Box::new(b),
+                })
+            })),
 
-/// Parse an identifier expression.
-/// Handles:
-/// - Simple identifiers: `foo`
-/// - Quoted identifiers: `"CaseSensitive"`
-/// - Compound identifiers: `foo.bar`, `schema.table.col`
-fn expr_identifier<S>(input: &mut S) -> ModalResult<Expr>
-where
-    S: TokenStream,
-{
-    trace("expr_identifier", |input: &mut S| {
-        // Parse the first identifier part
-        let first = parse_single_ident(input)?;
-
-        // Check for compound identifier (dot-separated parts)
-        let mut parts = vec![first];
-
-        // Use `repeat` combinator for zero or more `.ident` sequences
-        use winnow::combinator::repeat;
-        let additional: Vec<_> = repeat(
-            0..,
-            (Token::Period, parse_single_ident).map(|(_, ident)| ident),
-        )
-        .parse_next(input)?;
-
-        parts.extend(additional);
-
-        if parts.len() == 1 {
-            Ok(Expr::Identifier(parts.into_iter().next().unwrap()))
-        } else {
-            Ok(Expr::CompoundIdentifier(parts))
-        }
-    })
-    .parse_next(input)
-}
-
-/// Parse a single identifier (simple or quoted).
-/// Accepts both keywords and non-keywords (like the v1 parser).
-fn parse_single_ident<S>(input: &mut S) -> ModalResult<crate::ast::Ident>
-where
-    S: TokenStream,
-{
-    token
-        .verify_map(|t: TokenWithLocation| match t.token {
-            // Any Word token can be an identifier (keyword or not)
-            Token::Word(w) => {
-                match w.quote_style {
-                    // Quoted identifier (e.g., "CaseSensitive")
-                    Some(quote) => Some(crate::ast::Ident::with_quote_unchecked(quote, w.value)),
-                    // Simple unquoted identifier (may be a keyword like TABLE)
-                    None => Some(crate::ast::Ident::new_unchecked(w.value)),
-                }
-            }
             _ => None,
         })
         .parse_next(input)
@@ -427,6 +645,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{UnaryOperator, Value};
     use crate::tokenizer::Tokenizer;
 
     fn parse_expr_core(sql: &str) -> Result<Expr, String> {
@@ -440,8 +659,6 @@ mod tests {
             .map_err(|e| e.to_string())?;
 
         // Ensure all tokens were consumed (except EOF)
-        // The parser should have consumed the entire expression
-        // We check by verifying the remaining tokens are just EOF
         match parser.0.first() {
             None
             | Some(crate::tokenizer::TokenWithLocation {
@@ -453,6 +670,8 @@ mod tests {
 
         Ok(result)
     }
+
+    // ---- Literal tests ----
 
     #[test]
     fn test_literal_number() {
@@ -472,6 +691,8 @@ mod tests {
         assert!(matches!(result, Expr::Value(Value::Boolean(true))));
     }
 
+    // ---- Identifier tests ----
+
     #[test]
     fn test_identifier() {
         let result = parse_expr_core("foo").unwrap();
@@ -479,8 +700,48 @@ mod tests {
     }
 
     #[test]
-    fn test_unary_minus() {
+    fn test_compound_identifier() {
+        let result = parse_expr_core("foo.bar").unwrap();
+        if let Expr::CompoundIdentifier(parts) = result {
+            assert_eq!(parts.len(), 2);
+        } else {
+            panic!("Expected CompoundIdentifier");
+        }
+    }
+
+    #[test]
+    fn test_compound_identifier_three_parts() {
+        let result = parse_expr_core("schema.table.col").unwrap();
+        if let Expr::CompoundIdentifier(parts) = result {
+            assert_eq!(parts.len(), 3);
+        } else {
+            panic!("Expected CompoundIdentifier with 3 parts");
+        }
+    }
+
+    #[test]
+    fn test_quoted_identifier() {
+        let result = parse_expr_core("\"CaseSensitive\"").unwrap();
+        if let Expr::Identifier(ident) = result {
+            assert_eq!(ident.quote_style(), Some('"'));
+            assert_eq!(ident.real_value(), "CaseSensitive");
+        } else {
+            panic!("Expected Identifier");
+        }
+    }
+
+    // ---- Unary operator tests ----
+
+    #[test]
+    fn test_unary_minus_literal() {
+        // v1 normalizes -42 to Value(Number("-42"))
         let result = parse_expr_core("-42").unwrap();
+        assert!(matches!(result, Expr::Value(Value::Number(n)) if n == "-42"));
+    }
+
+    #[test]
+    fn test_unary_minus_identifier() {
+        let result = parse_expr_core("-a").unwrap();
         assert!(matches!(
             result,
             Expr::UnaryOp {
@@ -489,6 +750,20 @@ mod tests {
             }
         ));
     }
+
+    #[test]
+    fn test_not_prefix() {
+        let result = parse_expr_core("NOT a").unwrap();
+        assert!(matches!(
+            result,
+            Expr::UnaryOp {
+                op: UnaryOperator::Not,
+                ..
+            }
+        ));
+    }
+
+    // ---- Binary operator tests ----
 
     #[test]
     fn test_binary_add() {
@@ -504,7 +779,6 @@ mod tests {
 
     #[test]
     fn test_precedence_mul_before_add() {
-        // Should parse as 1 + (2 * 3), not (1 + 2) * 3
         let result = parse_expr_core("1 + 2 * 3").unwrap();
         if let Expr::BinaryOp {
             left,
@@ -562,22 +836,28 @@ mod tests {
     }
 
     #[test]
+    fn test_logical_xor() {
+        let result = parse_expr_core("a XOR b").unwrap();
+        assert!(matches!(
+            result,
+            Expr::BinaryOp {
+                op: BinaryOperator::Xor,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn test_parenthesized() {
         let result = parse_expr_core("(1 + 2) * 3").unwrap();
-        // Should parse as (1 + 2) * 3, not 1 + (2 * 3)
         if let Expr::BinaryOp {
             left,
             op: BinaryOperator::Multiply,
             ..
         } = result
         {
-            assert!(matches!(
-                left.as_ref(),
-                Expr::BinaryOp {
-                    op: BinaryOperator::Plus,
-                    ..
-                }
-            ));
+            // v1 wraps parenthesized expressions in Expr::Nested
+            assert!(matches!(left.as_ref(), Expr::Nested(_)));
         } else {
             panic!("Expected Multiply at top level");
         }
@@ -585,9 +865,7 @@ mod tests {
 
     #[test]
     fn test_complex_expr() {
-        // Test a complex expression with multiple operators
         let result = parse_expr_core("a + b * c = d AND e > f").unwrap();
-        // Should be: ((a + (b * c)) = d) AND (e > f)
         assert!(matches!(
             result,
             Expr::BinaryOp {
@@ -596,6 +874,8 @@ mod tests {
             }
         ));
     }
+
+    // ---- LIKE / ILIKE tests ----
 
     #[test]
     fn test_like() {
@@ -610,9 +890,29 @@ mod tests {
     }
 
     #[test]
+    fn test_not_like() {
+        let result = parse_expr_core("a NOT LIKE 'x'").unwrap();
+        assert!(matches!(result, Expr::Like { negated: true, .. }));
+    }
+
+    #[test]
+    fn test_not_ilike() {
+        let result = parse_expr_core("a NOT ILIKE 'x'").unwrap();
+        assert!(matches!(result, Expr::ILike { negated: true, .. }));
+    }
+
+    #[test]
+    fn test_like_escape() {
+        let result = parse_expr_core("a LIKE 'x%' ESCAPE '\\'").unwrap();
+        if let Expr::Like { escape_char, .. } = result {
+            assert!(escape_char.is_some());
+        } else {
+            panic!("Expected Like");
+        }
+    }
+
+    #[test]
     fn test_like_precedence_with_and() {
-        // Should parse as: (a LIKE 'x') AND b
-        // LIKE has lower precedence than comparison, higher than AND
         let result = parse_expr_core("a LIKE 'x' AND b").unwrap();
         if let Expr::BinaryOp {
             left,
@@ -629,8 +929,6 @@ mod tests {
 
     #[test]
     fn test_like_with_arithmetic() {
-        // Should parse as: (a + 1) LIKE 'x'
-        // Arithmetic has higher precedence than LIKE
         let result = parse_expr_core("a + 1 LIKE 'x'").unwrap();
         if let Expr::Like { expr, .. } = result {
             assert!(matches!(
@@ -647,7 +945,6 @@ mod tests {
 
     #[test]
     fn test_like_parenthesized_with_or() {
-        // Should parse as: (a LIKE 'x') OR b
         let result = parse_expr_core("(a LIKE 'x') OR b").unwrap();
         if let Expr::BinaryOp {
             left,
@@ -655,71 +952,92 @@ mod tests {
             right,
         } = result
         {
-            assert!(matches!(left.as_ref(), Expr::Like { .. }));
+            assert!(matches!(left.as_ref(), Expr::Nested(_)));
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
             panic!("Expected Or at top level");
         }
     }
 
+    // ---- SIMILAR TO tests ----
+
     #[test]
-    fn test_compound_identifier() {
-        let result = parse_expr_core("foo.bar").unwrap();
-        if let Expr::CompoundIdentifier(parts) = result {
-            assert_eq!(parts.len(), 2);
-        } else {
-            panic!("Expected CompoundIdentifier");
-        }
+    fn test_similar_to() {
+        let result = parse_expr_core("a SIMILAR TO 'x'").unwrap();
+        assert!(matches!(
+            result,
+            Expr::SimilarTo {
+                negated: false,
+                ..
+            }
+        ));
     }
 
     #[test]
-    fn test_compound_identifier_three_parts() {
-        let result = parse_expr_core("schema.table.col").unwrap();
-        if let Expr::CompoundIdentifier(parts) = result {
-            assert_eq!(parts.len(), 3);
-        } else {
-            panic!("Expected CompoundIdentifier with 3 parts");
-        }
+    fn test_not_similar_to() {
+        let result = parse_expr_core("a NOT SIMILAR TO 'x'").unwrap();
+        assert!(matches!(
+            result,
+            Expr::SimilarTo {
+                negated: true,
+                ..
+            }
+        ));
+    }
+
+    // ---- BETWEEN tests ----
+
+    #[test]
+    fn test_between() {
+        let result = parse_expr_core("a BETWEEN 1 AND 10").unwrap();
+        assert!(matches!(
+            result,
+            Expr::Between {
+                negated: false,
+                ..
+            }
+        ));
     }
 
     #[test]
-    fn test_quoted_identifier() {
-        let result = parse_expr_core("\"CaseSensitive\"").unwrap();
-        if let Expr::Identifier(ident) = result {
-            // The identifier should have quote_style set
-            assert_eq!(ident.quote_style(), Some('"'));
-            assert_eq!(ident.real_value(), "CaseSensitive");
-        } else {
-            panic!("Expected Identifier");
-        }
+    fn test_not_between() {
+        let result = parse_expr_core("a NOT BETWEEN 1 AND 10").unwrap();
+        assert!(matches!(
+            result,
+            Expr::Between {
+                negated: true,
+                ..
+            }
+        ));
+    }
+
+    // ---- IN tests ----
+
+    #[test]
+    fn test_in_list() {
+        let result = parse_expr_core("a IN (1, 2, 3)").unwrap();
+        assert!(matches!(
+            result,
+            Expr::InList {
+                negated: false,
+                ..
+            }
+        ));
     }
 
     #[test]
-    fn test_compound_identifier_with_expression() {
-        // foo.bar + 1 should parse as (foo.bar) + 1
-        let result = parse_expr_core("foo.bar + 1").unwrap();
-        if let Expr::BinaryOp {
-            left,
-            op: BinaryOperator::Plus,
-            ..
-        } = result
-        {
-            assert!(matches!(left.as_ref(), Expr::CompoundIdentifier(_)));
-        } else {
-            panic!("Expected Plus at top level");
-        }
+    fn test_not_in_list() {
+        let result = parse_expr_core("a NOT IN (1, 2, 3)").unwrap();
+        assert!(matches!(
+            result,
+            Expr::InList {
+                negated: true,
+                ..
+            }
+        ));
     }
 
-    #[test]
-    fn test_compound_identifier_with_like() {
-        // schema.tbl.col ilike 'x'
-        let result = parse_expr_core("schema.tbl.col ilike 'x'").unwrap();
-        if let Expr::ILike { expr, .. } = result {
-            assert!(matches!(expr.as_ref(), Expr::CompoundIdentifier(_)));
-        } else {
-            panic!("Expected ILike at top level");
-        }
-    }
+    // ---- IS tests ----
 
     #[test]
     fn test_is_null() {
@@ -735,7 +1053,6 @@ mod tests {
 
     #[test]
     fn test_is_null_precedence_with_and() {
-        // a IS NULL AND b should parse as (a IS NULL) AND b
         let result = parse_expr_core("a IS NULL AND b").unwrap();
         if let Expr::BinaryOp {
             left,
@@ -752,7 +1069,6 @@ mod tests {
 
     #[test]
     fn test_is_null_with_arithmetic() {
-        // a + 1 IS NULL should parse as (a + 1) IS NULL
         let result = parse_expr_core("a + 1 IS NULL").unwrap();
         if let Expr::IsNull(expr) = result {
             assert!(matches!(
@@ -769,7 +1085,6 @@ mod tests {
 
     #[test]
     fn test_is_null_parenthesized_with_or() {
-        // (a IS NULL) OR b should parse correctly
         let result = parse_expr_core("(a IS NULL) OR b").unwrap();
         if let Expr::BinaryOp {
             left,
@@ -777,7 +1092,7 @@ mod tests {
             right,
         } = result
         {
-            assert!(matches!(left.as_ref(), Expr::IsNull(_)));
+            assert!(matches!(left.as_ref(), Expr::Nested(_)));
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
             panic!("Expected Or at top level");
@@ -822,7 +1137,6 @@ mod tests {
 
     #[test]
     fn test_is_true_precedence_with_and() {
-        // a IS TRUE AND b should parse as (a IS TRUE) AND b
         let result = parse_expr_core("a IS TRUE AND b").unwrap();
         if let Expr::BinaryOp {
             left,
@@ -839,7 +1153,6 @@ mod tests {
 
     #[test]
     fn test_is_false_precedence_with_or() {
-        // a IS FALSE OR b should parse as (a IS FALSE) OR b
         let result = parse_expr_core("a IS FALSE OR b").unwrap();
         if let Expr::BinaryOp {
             left,
@@ -851,6 +1164,126 @@ mod tests {
             assert!(matches!(right.as_ref(), Expr::Identifier(_)));
         } else {
             panic!("Expected Or at top level");
+        }
+    }
+
+    // ---- IS DISTINCT FROM tests ----
+
+    #[test]
+    fn test_is_distinct_from() {
+        let result = parse_expr_core("a IS DISTINCT FROM b").unwrap();
+        assert!(matches!(result, Expr::IsDistinctFrom(_, _)));
+    }
+
+    #[test]
+    fn test_is_not_distinct_from() {
+        let result = parse_expr_core("a IS NOT DISTINCT FROM b").unwrap();
+        assert!(matches!(result, Expr::IsNotDistinctFrom(_, _)));
+    }
+
+    // ---- AT TIME ZONE test ----
+
+    #[test]
+    fn test_at_time_zone() {
+        let result = parse_expr_core("a AT TIME ZONE 'UTC'").unwrap();
+        assert!(matches!(result, Expr::AtTimeZone { .. }));
+    }
+
+    // ---- :: cast test ----
+
+    #[test]
+    fn test_double_colon_cast() {
+        let result = parse_expr_core("a::int").unwrap();
+        assert!(matches!(result, Expr::Cast { .. }));
+    }
+
+    // ---- [] subscript test ----
+
+    #[test]
+    fn test_array_subscript() {
+        let result = parse_expr_core("a[1]").unwrap();
+        assert!(matches!(result, Expr::Index { .. }));
+    }
+
+    // ---- Compound expression tests ----
+
+    #[test]
+    fn test_compound_identifier_with_expression() {
+        let result = parse_expr_core("foo.bar + 1").unwrap();
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Plus,
+            ..
+        } = result
+        {
+            assert!(matches!(left.as_ref(), Expr::CompoundIdentifier(_)));
+        } else {
+            panic!("Expected Plus at top level");
+        }
+    }
+
+    #[test]
+    fn test_compound_identifier_with_like() {
+        let result = parse_expr_core("schema.tbl.col ilike 'x'").unwrap();
+        if let Expr::ILike { expr, .. } = result {
+            assert!(matches!(expr.as_ref(), Expr::CompoundIdentifier(_)));
+        } else {
+            panic!("Expected ILike at top level");
+        }
+    }
+
+    #[test]
+    fn test_not_binds_correctly() {
+        // NOT a = b should parse as NOT (a = b)
+        let result = parse_expr_core("NOT a = b").unwrap();
+        if let Expr::UnaryOp {
+            op: UnaryOperator::Not,
+            expr,
+        } = result
+        {
+            assert!(matches!(
+                expr.as_ref(),
+                Expr::BinaryOp {
+                    op: BinaryOperator::Eq,
+                    ..
+                }
+            ));
+        } else {
+            panic!("Expected UnaryOp(Not) at top level");
+        }
+    }
+
+    #[test]
+    fn test_between_with_arithmetic() {
+        // a + 1 BETWEEN 2 AND 3 should parse as (a + 1) BETWEEN 2 AND 3
+        let result = parse_expr_core("a + 1 BETWEEN 2 AND 3").unwrap();
+        if let Expr::Between { expr, .. } = result {
+            assert!(matches!(
+                expr.as_ref(),
+                Expr::BinaryOp {
+                    op: BinaryOperator::Plus,
+                    ..
+                }
+            ));
+        } else {
+            panic!("Expected Between at top level");
+        }
+    }
+
+    #[test]
+    fn test_complex_with_between_and_is() {
+        // a BETWEEN 1 AND 10 AND b IS NULL
+        let result = parse_expr_core("a BETWEEN 1 AND 10 AND b IS NULL").unwrap();
+        if let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::And,
+            right,
+        } = result
+        {
+            assert!(matches!(left.as_ref(), Expr::Between { .. }));
+            assert!(matches!(right.as_ref(), Expr::IsNull(_)));
+        } else {
+            panic!("Expected And at top level");
         }
     }
 }

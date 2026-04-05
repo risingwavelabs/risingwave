@@ -14,6 +14,7 @@ use winnow::error::ContextError;
 use winnow::{ModalParser, ModalResult, Parser};
 
 use super::{ParserExt, TokenStream, data_type, token};
+use super::expr_core::expr_core;
 use crate::ast::Expr;
 use crate::keywords::Keyword;
 use crate::parser::Precedence;
@@ -23,11 +24,7 @@ fn expr_parse<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
-    // TODO: implement this function using combinator style.
-    trace("expr", |input: &mut S| {
-        input.parse_v1(|parser| parser.parse_expr())
-    })
-    .parse_next(input)
+    trace("expr", expr_core).parse_next(input)
 }
 
 fn subexpr<S>(precedence: Precedence) -> impl ModalParser<S, Expr, ContextError>
