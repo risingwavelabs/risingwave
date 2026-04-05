@@ -2013,7 +2013,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             if compare(
                                 probe_inequality_scalar.default_cmp(&build_inequality_scalar),
                             ) && compare(
-                                probe_inequality_scalar.default_cmp(&result_inequality_scalar),
+                                build_inequality_scalar.default_cmp(&result_inequality_scalar),
                             ) {
                                 result_row_id = Some(build_row_id);
                             }
@@ -2520,11 +2520,12 @@ mod tests {
     use risingwave_expr::expr::{BoxedExpression, build_from_pretty};
 
     use super::{
-        ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
+        AsOfDesc, AsOfInequalityType, ChunkedData, HashJoinExecutor, JoinType,
+        LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
     };
     use crate::error::Result;
-    use crate::executor::BoxedExecutor;
     use crate::executor::test_utils::MockExecutor;
+    use crate::executor::{BoxedExecutor, Executor};
     use crate::monitor::BatchSpillMetrics;
     use crate::spill::spill_op::SpillBackend;
     use crate::task::ShutdownToken;
@@ -4018,6 +4019,139 @@ mod tests {
             }])
             .unwrap()
         );
+    }
+
+    #[test]
+    fn test_find_asof_matched_rows_prefers_closest_le_match() {
+        // Le: left <= right, so probe <= build.
+        // probe=5, builds=[10, 20]. Both satisfy 5<=10 and 5<=20.
+        // Closest (minimum build) = 10 at row 0.
+        let probe_chunk = DataChunk::from_pretty(
+            "i
+             5",
+        );
+        let build_chunk = DataChunk::from_pretty(
+            "i
+             10
+             20",
+        );
+        let build_side = vec![build_chunk];
+
+        let mut next_row_id = ChunkedData::with_chunk_sizes([2]).unwrap();
+        next_row_id[RowId::new(0, 0)] = Some(RowId::new(0, 1));
+        next_row_id[RowId::new(0, 1)] = None;
+
+        let asof_desc = AsOfDesc {
+            left_idx: 0,
+            right_idx: 0,
+            inequality_type: AsOfInequalityType::Le,
+        };
+
+        let matched = HashJoinExecutor::<Key32>::find_asof_matched_rows(
+            probe_chunk.row_at_unchecked_vis(0),
+            &build_side,
+            next_row_id.row_id_iter(Some(RowId::new(0, 0))),
+            &asof_desc,
+        );
+
+        assert_eq!(matched, Some(RowId::new(0, 0)));
+    }
+
+    #[test]
+    fn test_find_asof_matched_rows_prefers_closest_ge_match() {
+        // Ge: left >= right, so probe >= build.
+        // probe=12, builds=[5, 10]. Both satisfy 12>=5 and 12>=10.
+        // Closest (maximum build) = 10 at row 1.
+        let probe_chunk = DataChunk::from_pretty(
+            "i
+             12",
+        );
+        let build_chunk = DataChunk::from_pretty(
+            "i
+             5
+             10",
+        );
+        let build_side = vec![build_chunk];
+
+        let mut next_row_id = ChunkedData::with_chunk_sizes([2]).unwrap();
+        next_row_id[RowId::new(0, 0)] = Some(RowId::new(0, 1));
+        next_row_id[RowId::new(0, 1)] = None;
+
+        let asof_desc = AsOfDesc {
+            left_idx: 0,
+            right_idx: 0,
+            inequality_type: AsOfInequalityType::Ge,
+        };
+
+        let matched = HashJoinExecutor::<Key32>::find_asof_matched_rows(
+            probe_chunk.row_at_unchecked_vis(0),
+            &build_side,
+            next_row_id.row_id_iter(Some(RowId::new(0, 0))),
+            &asof_desc,
+        );
+
+        assert_eq!(matched, Some(RowId::new(0, 1)));
+    }
+
+    #[tokio::test]
+    async fn test_batch_hash_join_asof_ge_returns_closest_match() {
+        let left_schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+            ],
+        };
+        let right_schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Int32),
+            ],
+        };
+
+        let mut left_executor = MockExecutor::new(left_schema);
+        left_executor.add(DataChunk::from_pretty(
+            "i i
+             3 12",
+        ));
+
+        let mut right_executor = MockExecutor::new(right_schema);
+        right_executor.add(DataChunk::from_pretty(
+            "i i
+             3 5
+             3 10",
+        ));
+
+        let join_executor = Box::new(HashJoinExecutor::<Key32>::new(
+            JoinType::Inner,
+            vec![0, 1, 2, 3],
+            Box::new(left_executor),
+            Box::new(right_executor),
+            vec![0],
+            vec![0],
+            vec![false],
+            None,
+            "HashJoinExecutor".to_owned(),
+            CHUNK_SIZE,
+            Some(AsOfDesc {
+                left_idx: 1,
+                right_idx: 1,
+                inequality_type: AsOfInequalityType::Ge,
+            }),
+            None,
+            BatchSpillMetrics::for_test(),
+            ShutdownToken::empty(),
+            MemoryContext::new(None, LabelGuardedIntGauge::test_int_gauge::<4>()),
+        ));
+
+        let mut stream = join_executor.execute();
+        let chunk = stream.next().await.unwrap().unwrap().compact_vis();
+        let expected = DataChunk::from_pretty(
+            "i i i i
+             3 12 3 10",
+        );
+
+        assert!(compare_data_chunk_with_rowsort(&expected, &chunk));
+        assert!(stream.next().await.is_none());
     }
 
     #[tokio::test]
