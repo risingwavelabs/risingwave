@@ -773,6 +773,22 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     // backfill
                     Either::Right(msg) => {
                         let chunk = msg?;
+                        if chunk.capacity() == 0 {
+                            for state in backfill_stage.states.values_mut() {
+                                match &mut state.state {
+                                    BackfillState::Backfilling(Some(offset)) => {
+                                        state.state =
+                                            BackfillState::SourceCachingUp(offset.clone());
+                                    }
+                                    BackfillState::Backfilling(None) => {
+                                        state.state = BackfillState::Finished;
+                                    }
+                                    BackfillState::SourceCachingUp(_) | BackfillState::Finished => {
+                                    }
+                                }
+                            }
+                            continue;
+                        }
 
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                             // Pause to let barrier catch up via backpressure of snapshot stream.

@@ -252,6 +252,14 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
         let batch = batch?;
         let batch_len = batch.len();
         if batch_len == 0 {
+            let empty_chunk = StreamChunk::empty(
+                &parser
+                    .columns()
+                    .iter()
+                    .map(|column| column.data_type.clone())
+                    .collect::<Vec<_>>(),
+            );
+            yield empty_chunk;
             continue;
         }
 
