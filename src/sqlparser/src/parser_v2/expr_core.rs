@@ -141,7 +141,7 @@ where
 }
 
 /// Parse postfix operators for core expressions.
-/// Handles: IS [NOT] NULL, IS [NOT] TRUE, IS [NOT] FALSE, IS [NOT] UNKNOWN
+/// Handles: IS \[NOT\] NULL, IS \[NOT\] TRUE, IS \[NOT\] FALSE, IS \[NOT\] UNKNOWN
 fn postfix_op_core<S>(input: &mut S) -> ModalResult<Postfix<S, Expr, ErrMode<ContextError>>>
 where
     S: TokenStream,
@@ -152,10 +152,7 @@ where
             Token::Word(w) if w.keyword == Keyword::IS => {
                 Some(Postfix(IS_NULL_POWER, |input: &mut S, expr: Expr| {
                     // Check for optional NOT
-                    let is_not = match (Keyword::NOT).parse_next(input) {
-                        Ok(_) => true,
-                        Err(_) => false,
-                    };
+                    let is_not = (Keyword::NOT).parse_next(input).is_ok();
 
                     // Parse the target: NULL, TRUE, FALSE, or UNKNOWN
                     let target = keyword.parse_next(input)?;
