@@ -82,10 +82,24 @@ impl StateEvictHint {
                 // b = CannotEvict(3)
                 // a.merge(b) = CanEvict({1, 2})
                 keys.split_off(&still_required);
-                CanEvict(keys)
+                if keys.is_empty() {
+                    CannotEvict(still_required)
+                } else {
+                    CanEvict(keys)
+                }
             }
         }
     }
+}
+
+/// Snapshot of a window state for persistence and recovery.
+#[derive(Debug, Clone)]
+pub struct WindowStateSnapshot {
+    /// The key of the last output row.
+    pub last_output_key: Option<StateKey>,
+    /// Function-specific state. The variant must match the window function type;
+    /// a mismatch is detected at restore time and returned as an error.
+    pub function_state: risingwave_pb::window_function::window_state_snapshot::FunctionState,
 }
 
 pub trait WindowState: EstimateSize {
@@ -101,6 +115,21 @@ pub trait WindowState: EstimateSize {
 
     /// Slide the window frame forward and collect the evict hint. Don't calculate the output if possible.
     fn slide_no_output(&mut self) -> Result<StateEvictHint>;
+
+    /// Enable persistence for this window state. When enabled, the state may return
+    /// `CanEvict` hints and should support snapshot/restore.
+    fn enable_persistence(&mut self) {}
+
+    /// Create a snapshot of the current state for persistence.
+    /// Returns `None` if the state doesn't support persistence.
+    fn snapshot(&self) -> Option<WindowStateSnapshot> {
+        None
+    }
+
+    /// Restore the state from a snapshot. Called during recovery before replaying rows.
+    fn restore(&mut self, _snapshot: WindowStateSnapshot) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type BoxedWindowState = Box<dyn WindowState + Send + Sync>;
@@ -122,4 +151,45 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<BoxedWindowState> {
         },
         |f| f(call),
     )
+}
+
+/// Test that merging evict hints from mixed persistent-numbering and non-numbering window
+/// functions does not panic. This reproduces the scenario where e.g. `row_number()`, `lag()`,
+/// `rank()` are used together in an EOWC query:
+///
+///   1. `row_number` (persistent) -> `CanEvict({key})`
+///   2. `lag` (non-persistent)    -> `CannotEvict(key)`
+///      merge(1, 2) = `CanEvict({})` -- empty set, violates the "shouldn't be empty" invariant
+///   3. `rank` (persistent)       -> `CanEvict({key})`
+///      merge(empty, 3) panics on `.last().unwrap()`
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_state_key(order: i64, pk: i64) -> StateKey {
+        use risingwave_common::row::OwnedRow;
+        use risingwave_common::types::ScalarImpl;
+        StateKey {
+            order_key: MemcmpEncoded::from(order.to_be_bytes().to_vec()),
+            pk: OwnedRow::new(vec![Some(ScalarImpl::Int64(pk))]).into(),
+        }
+    }
+
+    /// Simulates `row_number()` -> `CanEvict({K})`, `lag()` -> `CannotEvict(K)`,
+    /// `rank()` -> `CanEvict({K})`.
+    /// The two-way merge must fall back to `CannotEvict` (not an empty `CanEvict`),
+    /// so the three-way merge doesn't panic on `.last().unwrap()`.
+    #[test]
+    fn test_merge_mixed_persistent_and_non_persistent() {
+        let key = make_state_key(1, 100);
+
+        // Two-way: CanEvict({K}) + CannotEvict(K) -> CannotEvict(K)
+        let merged = StateEvictHint::CanEvict(BTreeSet::from([key.clone()]))
+            .merge(StateEvictHint::CannotEvict(key.clone()));
+        assert!(matches!(&merged, StateEvictHint::CannotEvict(k) if k == &key));
+
+        // Three-way: CannotEvict(K) + CanEvict({K}) -> CannotEvict(K)
+        let merged = merged.merge(StateEvictHint::CanEvict(BTreeSet::from([key.clone()])));
+        assert!(matches!(&merged, StateEvictHint::CannotEvict(k) if k == &key));
+    }
 }
