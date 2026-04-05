@@ -18,9 +18,6 @@
 //! bridge, while all infix and postfix operators are handled natively by the
 //! Pratt parser.
 
-// TODO: Remove this once there are call sites outside of tests.
-#![allow(dead_code)]
-
 use winnow::combinator::{Infix, Postfix, alt, cut_err, expression, fail, trace};
 use winnow::error::{ContextError, ErrMode};
 use winnow::{ModalResult, Parser};
