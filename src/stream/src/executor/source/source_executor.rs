@@ -34,7 +34,7 @@ use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
     ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
+    WaitCheckpointTask, build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::common::ThrottleType;
@@ -50,7 +50,7 @@ use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additiona
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
-use crate::executor::source::reader_stream::StreamReaderBuilder;
+use crate::executor::source::reader_stream::{SourceReaderEventWithState, StreamReaderBuilder};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
 
@@ -239,7 +239,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         barrier_epoch: EpochPair,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, SourceReaderEventWithState>,
         apply_mutation: ApplyMutationAfterBarrier<'_>,
     ) -> StreamExecutorResult<()> {
         {
@@ -361,7 +361,7 @@ impl<S: StateStore> SourceExecutor<S> {
     fn rebuild_stream_reader_from_error<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, SourceReaderEventWithState>,
         e: StreamExecutorError,
     ) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
@@ -384,7 +384,7 @@ impl<S: StateStore> SourceExecutor<S> {
     fn rebuild_stream_reader<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, SourceReaderEventWithState>,
     ) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
         let target_state: Vec<SplitImpl> = core.latest_split_info.values().cloned().collect();
@@ -585,6 +585,17 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
+    fn apply_latest_split_state(&mut self, latest_state: HashMap<SplitId, SplitImpl>) {
+        for (split_id, new_split_impl) in &latest_state {
+            if let Some(split_impl) = self.stream_source_core.latest_split_info.get_mut(split_id) {
+                *split_impl = new_split_impl.clone();
+            }
+        }
+        self.stream_source_core
+            .updated_splits_in_epoch
+            .extend(latest_state);
+    }
+
     /// Report CDC source offset updated only the first time.
     fn maybe_report_cdc_source_offset(
         &self,
@@ -736,7 +747,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
+        let mut stream = StreamReaderWithPause::<true, SourceReaderEventWithState>::new(
             barrier_stream,
             reader_stream_builder
                 .into_retry_stream(recover_state, is_uninitialized && self.is_shared_non_cdc),
@@ -1062,73 +1073,71 @@ impl<S: StateStore> SourceExecutor<S> {
                     unreachable!();
                 }
 
-                Either::Right((chunk, latest_state)) => {
-                    if let Some(task_builder) = &mut wait_checkpoint_task_builder {
-                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
-                            let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
-                            task_builder.update_task_on_chunk(
-                                source_id,
-                                &latest_state,
-                                pulsar_message_id_col.clone(),
-                            );
-                        } else {
-                            let offset_col = chunk.column_at(offset_idx);
-                            task_builder.update_task_on_chunk(
-                                source_id,
-                                &latest_state,
-                                offset_col.clone(),
-                            );
-                        }
+                Either::Right(event) => match event {
+                    SourceReaderEventWithState::Progress(latest_state) => {
+                        self.apply_latest_split_state(latest_state);
                     }
-                    if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
-                        // Exceeds the max wait barrier time, the source will be paused.
-                        // Currently we can guarantee the
-                        // source is not paused since it received stream
-                        // chunks.
-                        self_paused = true;
-                        tracing::warn!(
-                            "source paused, wait barrier for {:?}",
-                            last_barrier_time.elapsed()
+                    SourceReaderEventWithState::Data((chunk, latest_state)) => {
+                        if let Some(task_builder) = &mut wait_checkpoint_task_builder {
+                            if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                                let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
+                                task_builder.update_task_on_chunk(
+                                    source_id,
+                                    &latest_state,
+                                    pulsar_message_id_col.clone(),
+                                );
+                            } else {
+                                let offset_col = chunk.column_at(offset_idx);
+                                task_builder.update_task_on_chunk(
+                                    source_id,
+                                    &latest_state,
+                                    offset_col.clone(),
+                                );
+                            }
+                        }
+                        if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
+                            // Exceeds the max wait barrier time, the source will be paused.
+                            // Currently we can guarantee the
+                            // source is not paused since it received stream
+                            // chunks.
+                            self_paused = true;
+                            tracing::warn!(
+                                "source paused, wait barrier for {:?}",
+                                last_barrier_time.elapsed()
+                            );
+                            stream.pause_stream();
+
+                            // Only update `max_wait_barrier_time_ms` to capture
+                            // `barrier_interval_ms`
+                            // changes here to avoid frequently accessing the shared
+                            // `system_params`.
+                            max_wait_barrier_time_ms =
+                                self.system_params.load().barrier_interval_ms() as u128
+                                    * WAIT_BARRIER_MULTIPLE_TIMES;
+                        }
+
+                        self.apply_latest_split_state(latest_state);
+
+                        let card = chunk.cardinality();
+                        if card == 0 {
+                            continue;
+                        }
+                        source_output_row_count.inc_by(card as u64);
+                        let to_remove_col_indices =
+                            if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                                vec![split_idx, offset_idx, pulsar_message_id_idx]
+                            } else {
+                                vec![split_idx, offset_idx]
+                            };
+                        let chunk = prune_additional_cols(
+                            &chunk,
+                            &to_remove_col_indices,
+                            &source_desc.columns,
                         );
-                        stream.pause_stream();
-
-                        // Only update `max_wait_barrier_time_ms` to capture
-                        // `barrier_interval_ms`
-                        // changes here to avoid frequently accessing the shared
-                        // `system_params`.
-                        max_wait_barrier_time_ms = self.system_params.load().barrier_interval_ms()
-                            as u128
-                            * WAIT_BARRIER_MULTIPLE_TIMES;
+                        yield Message::Chunk(chunk);
+                        self.try_flush_data().await?;
                     }
-
-                    latest_state.iter().for_each(|(split_id, new_split_impl)| {
-                        if let Some(split_impl) =
-                            self.stream_source_core.latest_split_info.get_mut(split_id)
-                        {
-                            *split_impl = new_split_impl.clone();
-                        }
-                    });
-
-                    self.stream_source_core
-                        .updated_splits_in_epoch
-                        .extend(latest_state);
-
-                    let card = chunk.cardinality();
-                    if card == 0 {
-                        continue;
-                    }
-                    source_output_row_count.inc_by(card as u64);
-                    let to_remove_col_indices =
-                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
-                            vec![split_idx, offset_idx, pulsar_message_id_idx]
-                        } else {
-                            vec![split_idx, offset_idx]
-                        };
-                    let chunk =
-                        prune_additional_cols(&chunk, &to_remove_col_indices, &source_desc.columns);
-                    yield Message::Chunk(chunk);
-                    self.try_flush_data().await?;
-                }
+                },
             }
         }
 

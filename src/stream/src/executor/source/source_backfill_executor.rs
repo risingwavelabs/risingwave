@@ -41,7 +41,7 @@ use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
-use super::{apply_rate_limit, get_split_offset_col_idx};
+use super::{apply_rate_limit, get_split_offset_col_idx, source_reader_event_to_chunk_stream};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
@@ -330,7 +330,11 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok((
-            apply_rate_limit(stream, self.rate_limit_rps).boxed(),
+            apply_rate_limit(
+                source_reader_event_to_chunk_stream(stream).boxed(),
+                self.rate_limit_rps,
+            )
+            .boxed(),
             res.backfill_info,
         ))
     }

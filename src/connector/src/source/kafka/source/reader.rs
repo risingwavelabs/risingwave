@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
@@ -35,8 +35,9 @@ use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaContextCommon, KafkaProperties, KafkaSplit, RwConsumerContext,
 };
 use crate::source::{
-    BackfillInfo, BoxSourceChunkStream, Column, SourceContextRef, SplitId, SplitImpl,
-    SplitMetaData, SplitReader, into_chunk_stream,
+    BackfillInfo, BoxSourceChunkStream, BoxSourceReaderEventStream, Column, SourceContextRef,
+    SourceMessageEvent, SplitId, SplitImpl, SplitMetaData, SplitReader, into_chunk_event_stream,
+    into_chunk_stream,
 };
 
 pub struct KafkaSplitReader {
@@ -68,8 +69,9 @@ impl SplitReader for KafkaSplitReader {
         let bootstrap_servers = &properties.connection.brokers;
         let broker_rewrite_map = properties.privatelink_common.broker_rewrite_map.clone();
 
-        // disable partition eof
-        config.set("enable.partition.eof", "false");
+        // Enable partition EOF to emit split progress updates when the fetched data ends with
+        // non-deliverable records, e.g. transactional control records in read-committed mode.
+        config.set("enable.partition.eof", "true");
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
@@ -184,7 +186,21 @@ impl SplitReader for KafkaSplitReader {
     fn into_stream(self) -> BoxSourceChunkStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_stream(self.into_data_stream(), parser_config, source_context)
+        let data_stream = self
+            .into_data_event_stream()
+            .try_filter_map(|event| async move {
+                Ok(match event {
+                    SourceMessageEvent::Data(batch) => Some(batch),
+                    SourceMessageEvent::SplitProgress(_) => None,
+                })
+            });
+        into_chunk_stream(data_stream, parser_config, source_context)
+    }
+
+    fn into_event_stream(self) -> BoxSourceReaderEventStream {
+        let parser_config = self.parser_config.clone();
+        let source_context = self.source_ctx.clone();
+        into_chunk_event_stream(self.into_data_event_stream(), parser_config, source_context)
     }
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
@@ -215,8 +231,43 @@ impl SplitReader for KafkaSplitReader {
 }
 
 impl KafkaSplitReader {
-    #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
-    async fn into_data_stream(self) {
+    fn snapshot_split_progress(
+        &self,
+        latest_progress_offsets: &mut HashMap<SplitId, i64>,
+    ) -> Result<Option<HashMap<SplitId, String>>> {
+        let positions = self.consumer.position()?;
+        let mut progress = HashMap::new();
+
+        for split in &self.splits {
+            let Some(position) = positions.find_partition(split.topic.as_str(), split.partition)
+            else {
+                continue;
+            };
+            let Offset::Offset(next_offset) = position.offset() else {
+                continue;
+            };
+            let Some(inclusive_offset) = next_offset.checked_sub(1) else {
+                continue;
+            };
+            if inclusive_offset < 0 {
+                continue;
+            }
+
+            let split_id = split.id();
+            let should_emit = latest_progress_offsets
+                .get(&split_id)
+                .is_none_or(|offset| *offset < inclusive_offset);
+            if should_emit {
+                latest_progress_offsets.insert(split_id.clone(), inclusive_offset);
+                progress.insert(split_id, inclusive_offset.to_string());
+            }
+        }
+
+        Ok((!progress.is_empty()).then_some(progress))
+    }
+
+    #[try_stream(ok = SourceMessageEvent, error = crate::error::ConnectorError)]
+    async fn into_data_event_stream(self) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {
             match (start_offset, stop_offset) {
                 (Some(start), Some(stop)) if (*start + 1) >= *stop => true,
@@ -224,7 +275,7 @@ impl KafkaSplitReader {
                 _ => false,
             }
         }) {
-            yield Vec::new();
+            yield SourceMessageEvent::Data(Vec::new());
             return Ok(());
         };
 
@@ -251,12 +302,34 @@ impl KafkaSplitReader {
         });
 
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
+        let mut latest_progress_offsets = self
+            .splits
+            .iter()
+            .filter_map(|split| split.start_offset.map(|offset| (split.id(), offset)))
+            .collect::<HashMap<_, _>>();
 
         #[for_await]
-        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
-            let msgs: Vec<_> = msgs
-                .into_iter()
-                .collect::<std::result::Result<_, KafkaError>>()?;
+        'for_outer_loop: for raw_msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
+            let mut saw_partition_eof = false;
+            let mut msgs = Vec::with_capacity(max_chunk_size);
+            for msg in raw_msgs {
+                match msg {
+                    Ok(msg) => msgs.push(msg),
+                    Err(KafkaError::PartitionEOF(_)) => saw_partition_eof = true,
+                    Err(err) => return Err(err.into()),
+                }
+            }
+
+            if saw_partition_eof
+                && let Some(progress) =
+                    self.snapshot_split_progress(&mut latest_progress_offsets)?
+            {
+                yield SourceMessageEvent::SplitProgress(progress);
+            }
+
+            if msgs.is_empty() {
+                continue;
+            }
 
             let mut split_msg_offsets = HashMap::new();
 
@@ -308,7 +381,7 @@ impl KafkaSplitReader {
                         o.remove();
 
                         if stop_offsets.is_empty() {
-                            yield res;
+                            yield SourceMessageEvent::Data(res);
                             break 'for_outer_loop;
                         }
 
@@ -320,19 +393,19 @@ impl KafkaSplitReader {
                     // swap to make compiler happy
                     let mut cur = Vec::with_capacity(res.capacity());
                     swap(&mut cur, &mut res);
-                    yield cur;
+                    yield SourceMessageEvent::Data(cur);
                     interval.tick().await;
                     bytes_current_second = 0;
                     res.clear();
                 }
                 if num_messages >= self.max_num_messages {
-                    yield res;
+                    yield SourceMessageEvent::Data(res);
                     break 'for_outer_loop;
                 }
             }
             let mut cur = Vec::with_capacity(res.capacity());
             swap(&mut cur, &mut res);
-            yield cur;
+            yield SourceMessageEvent::Data(cur);
             // don't clear `bytes_current_second` here as it is only related to `.tick()`.
             // yield in the outer loop so that we can always guarantee that some messages are read
             // every `MAX_CHUNK_SIZE`.

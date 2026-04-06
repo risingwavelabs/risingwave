@@ -23,7 +23,8 @@ use risingwave_common::row::Row;
 use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::{
-    BoxSourceChunkStream, BoxStreamingFileSourceChunkStream, SourceColumnDesc, SplitId,
+    BoxSourceChunkStream, BoxSourceReaderEventStream, BoxStreamingFileSourceChunkStream,
+    SourceColumnDesc, SourceReaderEvent, SplitId,
 };
 use risingwave_pb::plan_common::AdditionalColumn;
 use risingwave_pb::plan_common::additional_column::ColumnType;
@@ -147,6 +148,50 @@ pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Opti
     for chunk in stream {
         let chunk = chunk?;
         yield process_chunk(chunk, rate_limit_rps, &limiter).await;
+    }
+}
+
+#[try_stream(ok = SourceReaderEvent, error = ConnectorError)]
+pub async fn apply_rate_limit_to_source_reader_event(
+    stream: BoxSourceReaderEventStream,
+    rate_limit_rps: Option<u32>,
+) {
+    if rate_limit_rps == Some(0) {
+        // block the stream until the rate limit is reset
+        let future = futures::future::pending::<()>();
+        future.await;
+        unreachable!();
+    }
+
+    let limiter = RateLimiter::new(
+        rate_limit_rps
+            .inspect(|limit| tracing::info!(rate_limit = limit, "rate limit applied"))
+            .into(),
+    );
+
+    #[for_await]
+    for event in stream {
+        match event? {
+            SourceReaderEvent::DataChunk(chunk) => {
+                yield SourceReaderEvent::DataChunk(
+                    process_chunk(chunk, rate_limit_rps, &limiter).await,
+                )
+            }
+            SourceReaderEvent::SplitProgress(progress) => {
+                yield SourceReaderEvent::SplitProgress(progress)
+            }
+        }
+    }
+}
+
+#[try_stream(ok = StreamChunk, error = ConnectorError)]
+pub async fn source_reader_event_to_chunk_stream(stream: BoxSourceReaderEventStream) {
+    #[for_await]
+    for event in stream {
+        match event? {
+            SourceReaderEvent::DataChunk(chunk) => yield chunk,
+            SourceReaderEvent::SplitProgress(_) => {}
+        }
     }
 }
 

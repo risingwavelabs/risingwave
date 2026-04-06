@@ -22,12 +22,11 @@ pub use canal::*;
 pub use chunk_builder::{SourceStreamChunkBuilder, SourceStreamChunkRowWriter};
 use csv_parser::CsvParser;
 pub use debezium::*;
-use futures::{Future, TryFutureExt};
+use futures::{Future, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 pub use json_parser::*;
 pub use parquet_parser::ParquetParser;
 pub use protobuf::*;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{CDC_TABLE_NAME_COLUMN_NAME, KAFKA_TIMESTAMP_COLUMN_NAME};
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
@@ -50,8 +49,9 @@ use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceCtrlOpts, SourceMeta,
+    BoxSourceMessageEventStream, BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc,
+    SourceColumnType, SourceContext, SourceContextRef, SourceCtrlOpts, SourceMessageEvent,
+    SourceMeta, SourceReaderEvent,
 };
 
 mod access_builder;
@@ -217,6 +217,19 @@ impl<P: ByteStreamSourceParser> P {
     /// to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless there's a
     /// large transaction and `source_ctrl_opts.split_txn` is false.
     pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
+        self.parse_stream_with_events(msg_stream.map_ok(SourceMessageEvent::Data).boxed())
+            .try_filter_map(|event| async move {
+                Ok(match event {
+                    SourceReaderEvent::DataChunk(chunk) => Some(chunk),
+                    SourceReaderEvent::SplitProgress(_) => None,
+                })
+            })
+    }
+
+    pub fn parse_stream_with_events(
+        self,
+        msg_stream: BoxSourceMessageEventStream,
+    ) -> impl Stream<Item = ConnectorResult<SourceReaderEvent>> + Send {
         let actor_id = self.source_ctx().actor_id;
         let source_id = self.source_ctx().source_id.as_raw_id();
 
@@ -231,10 +244,10 @@ impl<P: ByteStreamSourceParser> P {
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
-#[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
+#[try_stream(ok = SourceReaderEvent, error = crate::error::ConnectorError)]
 async fn parse_message_stream<P: ByteStreamSourceParser>(
     mut parser: P,
-    msg_stream: BoxSourceMessageStream,
+    msg_stream: BoxSourceMessageEventStream,
     source_ctrl_opts: SourceCtrlOpts,
 ) {
     let mut chunk_builder =
@@ -243,13 +256,19 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
     let mut direct_cdc_event_lag_latency_metrics = HashMap::new();
 
     #[for_await]
-    for batch in msg_stream {
+    for event in msg_stream {
         // It's possible that the split is not active, which means the next batch may arrive
         // very lately, so we should prefer emitting all records in current batch before the end
         // of each iteration, instead of merging them with the next batch. An exception is when
         // a transaction is not committed yet, in which yield when the transaction is committed.
 
-        let batch = batch?;
+        let batch = match event? {
+            SourceMessageEvent::Data(batch) => batch,
+            SourceMessageEvent::SplitProgress(progress) => {
+                yield SourceReaderEvent::SplitProgress(progress);
+                continue;
+            }
+        };
         let batch_len = batch.len();
         if batch_len == 0 {
             continue;
@@ -268,7 +287,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                         offset: &msg.offset,
                     });
                     for chunk in chunk_builder.consume_ready_chunks() {
-                        yield chunk;
+                        yield SourceReaderEvent::DataChunk(chunk);
                     }
                     is_heartbeat_emitted = true;
                 }
@@ -334,7 +353,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                     }
 
                     for chunk in chunk_builder.consume_ready_chunks() {
-                        yield chunk;
+                        yield SourceReaderEvent::DataChunk(chunk);
                     }
                 }
 
@@ -354,7 +373,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                         }
 
                         for chunk in chunk_builder.consume_ready_chunks() {
-                            yield chunk;
+                            yield SourceReaderEvent::DataChunk(chunk);
                         }
                     }
                 },
@@ -388,7 +407,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
             chunk_builder.finish_current_chunk();
         }
         for chunk in chunk_builder.consume_ready_chunks() {
-            yield chunk;
+            yield SourceReaderEvent::DataChunk(chunk);
         }
     }
 }
@@ -414,19 +433,30 @@ pub enum ByteStreamSourceParserImpl {
 
 impl ByteStreamSourceParserImpl {
     /// Converts `SourceMessage` vec stream into [`StreamChunk`] stream.
-    pub fn parse_stream(
+    pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
+        self.parse_stream_with_events(msg_stream.map_ok(SourceMessageEvent::Data).boxed())
+            .try_filter_map(|event| async move {
+                Ok(match event {
+                    SourceReaderEvent::DataChunk(chunk) => Some(chunk),
+                    SourceReaderEvent::SplitProgress(_) => None,
+                })
+            })
+            .boxed()
+    }
+
+    pub fn parse_stream_with_events(
         self,
-        msg_stream: BoxSourceMessageStream,
-    ) -> impl SourceChunkStream + Unpin {
+        msg_stream: BoxSourceMessageEventStream,
+    ) -> impl Stream<Item = ConnectorResult<SourceReaderEvent>> + Send {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
-            Self::Csv(parser) => parser.parse_stream(msg_stream),
-            Self::Debezium(parser) => parser.parse_stream(msg_stream),
-            Self::DebeziumMongoJson(parser) => parser.parse_stream(msg_stream),
-            Self::Maxwell(parser) => parser.parse_stream(msg_stream),
-            Self::CanalJson(parser) => parser.parse_stream(msg_stream),
-            Self::Plain(parser) => parser.parse_stream(msg_stream),
-            Self::Upsert(parser) => parser.parse_stream(msg_stream),
+            Self::Csv(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::Debezium(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::DebeziumMongoJson(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::Maxwell(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::CanalJson(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::Plain(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::Upsert(parser) => parser.parse_stream_with_events(msg_stream),
         };
         Box::pin(stream)
     }

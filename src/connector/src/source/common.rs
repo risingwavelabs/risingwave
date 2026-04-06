@@ -20,13 +20,36 @@ use risingwave_common::array::StreamChunk;
 
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::ParserConfig;
-use crate::source::{SourceContextRef, SourceMessage};
+use crate::source::{
+    BoxSourceMessageEventStream, SourceContextRef, SourceMessage, SourceMessageEvent,
+    SourceReaderEvent,
+};
 
 /// Utility function to convert [`SourceMessage`] stream (got from specific connector's [`SplitReader`](super::SplitReader))
 /// into [`StreamChunk`] stream (by invoking [`ByteStreamSourceParserImpl`](crate::parser::ByteStreamSourceParserImpl)).
 #[try_stream(boxed, ok = StreamChunk, error = ConnectorError)]
 pub(crate) async fn into_chunk_stream(
     data_stream: impl Stream<Item = ConnectorResult<Vec<SourceMessage>>> + Send + 'static,
+    parser_config: ParserConfig,
+    source_ctx: SourceContextRef,
+) {
+    let event_stream = into_chunk_event_stream(
+        data_stream.map_ok(SourceMessageEvent::Data),
+        parser_config,
+        source_ctx,
+    );
+    #[for_await]
+    for event in event_stream {
+        match event? {
+            SourceReaderEvent::DataChunk(chunk) => yield chunk,
+            SourceReaderEvent::SplitProgress(_) => {}
+        }
+    }
+}
+
+#[try_stream(boxed, ok = SourceReaderEvent, error = ConnectorError)]
+pub(crate) async fn into_chunk_event_stream(
+    data_stream: impl Stream<Item = ConnectorResult<SourceMessageEvent>> + Send + 'static,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 ) {
@@ -40,7 +63,11 @@ pub(crate) async fn into_chunk_stream(
 
     // add metrics to the data stream
     let data_stream = data_stream
-        .inspect_ok(move |data_batch| {
+        .inspect_ok(move |event| {
+            let SourceMessageEvent::Data(data_batch) = event else {
+                return;
+            };
+
             let mut by_split_id = std::collections::HashMap::new();
 
             for msg in data_batch {
@@ -90,11 +117,12 @@ pub(crate) async fn into_chunk_stream(
             }
         })
         .boxed();
+    let data_stream: BoxSourceMessageEventStream = data_stream;
 
     let parser =
         crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx).await?;
     #[for_await]
-    for chunk in parser.parse_stream(data_stream) {
-        yield chunk?;
+    for event in parser.parse_stream_with_events(data_stream) {
+        yield event?;
     }
 }
