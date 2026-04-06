@@ -360,6 +360,15 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             split_handoff_stream,
             prefer_split_handoff,
         );
+        // Backfill timing for one split:
+        // 1. the bounded reader emits historical rows as `Chunk`;
+        // 2. when it catches up to the split's current Kafka head, it emits `SplitHandoff`;
+        // 3. `SourceBackfillExecutor` switches that split from `Backfilling` to
+        //    `SourceCachingUp` / `Finished` and only then acks the handoff;
+        // 4. after the ack, the reader is allowed to suppress that split locally.
+        //
+        // This ordering closes the gap where the reader could stop producing a split
+        // before the upstream side had taken over responsibility for new rows of that split.
         // Wrap the plain chunk stream with an in-band EOF sentinel.
         // When the bounded reader finishes (stream terminates), the chained
         // `BoundedEof` event is delivered in causal order after all data chunks,
@@ -534,7 +543,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 * WAIT_BARRIER_MULTIPLE_TIMES;
             let mut last_barrier_time = Instant::now();
 
-            // The main logic of the loop is in handle_upstream_row and handle_backfill_row.
+            // Backfill stage timing:
+            // - Left stream (`input`) is the live upstream source executor. Its rows are filtered by
+            //   the per-split backfill state in `handle_upstream_row`.
+            // - Right stream is the bounded backfill reader. It emits either historical chunks or
+            //   `SplitHandoff` events for individual splits.
+            // - A split is handed off as soon as the bounded reader catches up to the split's current
+            //   head; we do not wait for all splits to finish before switching that split.
+            // - `BoundedEof` only means the bounded reader as a whole has drained all unfinished splits.
+            //
+            // The main state transitions are implemented in `handle_upstream_row`,
+            // `handle_backfill_row`, and the `SplitHandoff` branch below.
             'backfill_loop: while let Some(either) = backfill_stream.next().await {
                 match either {
                     // Upstream
@@ -820,6 +839,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 backfill_offset,
                                 ack_tx,
                             } => {
+                                // This is the split-level ownership handoff point.
+                                //
+                                // Kafka `PartitionEOF` only means "caught up for now"; new rows for the
+                                // same split may still arrive later. Therefore the bounded reader must not
+                                // stop covering the split until the executor has switched that split's
+                                // state and the live upstream path can safely take over. The ack makes this
+                                // ordering explicit.
                                 tracing::info!(
                                     source_id = %self.source_id,
                                     split_id = %split_id,
