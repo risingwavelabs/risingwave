@@ -1073,71 +1073,73 @@ impl<S: StateStore> SourceExecutor<S> {
                     unreachable!();
                 }
 
-                Either::Right(event) => match event {
-                    SourceReaderEventWithState::Progress(latest_state) => {
-                        self.apply_latest_split_state(latest_state);
-                    }
-                    SourceReaderEventWithState::Data((chunk, latest_state)) => {
-                        if let Some(task_builder) = &mut wait_checkpoint_task_builder {
-                            if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
-                                let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
-                                task_builder.update_task_on_chunk(
-                                    source_id,
-                                    &latest_state,
-                                    pulsar_message_id_col.clone(),
-                                );
-                            } else {
-                                let offset_col = chunk.column_at(offset_idx);
-                                task_builder.update_task_on_chunk(
-                                    source_id,
-                                    &latest_state,
-                                    offset_col.clone(),
-                                );
-                            }
-                        }
-                        if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
-                            // Exceeds the max wait barrier time, the source will be paused.
-                            // Currently we can guarantee the
-                            // source is not paused since it received stream
-                            // chunks.
-                            self_paused = true;
-                            tracing::warn!(
-                                "source paused, wait barrier for {:?}",
-                                last_barrier_time.elapsed()
-                            );
-                            stream.pause_stream();
-
-                            // Only update `max_wait_barrier_time_ms` to capture
-                            // `barrier_interval_ms`
-                            // changes here to avoid frequently accessing the shared
-                            // `system_params`.
-                            max_wait_barrier_time_ms =
-                                self.system_params.load().barrier_interval_ms() as u128
-                                    * WAIT_BARRIER_MULTIPLE_TIMES;
-                        }
-
-                        self.apply_latest_split_state(latest_state);
-
-                        let card = chunk.cardinality();
-                        if card == 0 {
+                Either::Right(event) => {
+                    let (chunk, latest_state) = match event {
+                        SourceReaderEventWithState::Progress(latest_state) => {
+                            self.apply_latest_split_state(latest_state);
                             continue;
                         }
-                        source_output_row_count.inc_by(card as u64);
-                        let to_remove_col_indices =
-                            if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
-                                vec![split_idx, offset_idx, pulsar_message_id_idx]
-                            } else {
-                                vec![split_idx, offset_idx]
-                            };
-                        let chunk = prune_additional_cols(
-                            &chunk,
-                            &to_remove_col_indices,
-                            &source_desc.columns,
-                        );
-                        yield Message::Chunk(chunk);
-                        self.try_flush_data().await?;
+                        SourceReaderEventWithState::Data((chunk, latest_state)) => {
+                            (chunk, latest_state)
+                        }
+                    };
+
+                    if let Some(task_builder) = &mut wait_checkpoint_task_builder {
+                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                            let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
+                            task_builder.update_task_on_chunk(
+                                source_id,
+                                &latest_state,
+                                pulsar_message_id_col.clone(),
+                            );
+                        } else {
+                            let offset_col = chunk.column_at(offset_idx);
+                            task_builder.update_task_on_chunk(
+                                source_id,
+                                &latest_state,
+                                offset_col.clone(),
+                            );
+                        }
                     }
-                },
+                    if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
+                        // Exceeds the max wait barrier time, the source will be paused.
+                        // Currently we can guarantee the
+                        // source is not paused since it received stream
+                        // chunks.
+                        self_paused = true;
+                        tracing::warn!(
+                            "source paused, wait barrier for {:?}",
+                            last_barrier_time.elapsed()
+                        );
+                        stream.pause_stream();
+
+                        // Only update `max_wait_barrier_time_ms` to capture
+                        // `barrier_interval_ms`
+                        // changes here to avoid frequently accessing the shared
+                        // `system_params`.
+                        max_wait_barrier_time_ms = self.system_params.load().barrier_interval_ms()
+                            as u128
+                            * WAIT_BARRIER_MULTIPLE_TIMES;
+                    }
+
+                    self.apply_latest_split_state(latest_state);
+
+                    let card = chunk.cardinality();
+                    if card == 0 {
+                        continue;
+                    }
+                    source_output_row_count.inc_by(card as u64);
+                    let to_remove_col_indices =
+                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                            vec![split_idx, offset_idx, pulsar_message_id_idx]
+                        } else {
+                            vec![split_idx, offset_idx]
+                        };
+                    let chunk =
+                        prune_additional_cols(&chunk, &to_remove_col_indices, &source_desc.columns);
+                    yield Message::Chunk(chunk);
+                    self.try_flush_data().await?;
+                }
             }
         }
 

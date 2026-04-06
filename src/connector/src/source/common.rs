@@ -37,13 +37,11 @@ pub(crate) async fn into_chunk_stream(
         data_stream.map_ok(SourceMessageEvent::Data),
         parser_config,
         source_ctx,
-    );
+    )
+    .try_filter_map(|event| async move { Ok(event.into_data_chunk()) });
     #[for_await]
-    for event in event_stream {
-        match event? {
-            SourceReaderEvent::DataChunk(chunk) => yield chunk,
-            SourceReaderEvent::SplitProgress(_) => {}
-        }
+    for chunk in event_stream {
+        yield chunk?;
     }
 }
 

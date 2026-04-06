@@ -188,12 +188,7 @@ impl SplitReader for KafkaSplitReader {
         let source_context = self.source_ctx.clone();
         let data_stream = self
             .into_data_event_stream()
-            .try_filter_map(|event| async move {
-                Ok(match event {
-                    SourceMessageEvent::Data(batch) => Some(batch),
-                    SourceMessageEvent::SplitProgress(_) => None,
-                })
-            });
+            .try_filter_map(|event| async move { Ok(event.into_data()) });
         into_chunk_stream(data_stream, parser_config, source_context)
     }
 
@@ -231,6 +226,13 @@ impl SplitReader for KafkaSplitReader {
 }
 
 impl KafkaSplitReader {
+    fn init_progress_offsets(&self) -> HashMap<SplitId, i64> {
+        self.splits
+            .iter()
+            .filter_map(|split| split.start_offset.map(|offset| (split.id(), offset)))
+            .collect()
+    }
+
     fn snapshot_split_progress(
         &self,
         latest_progress_offsets: &mut HashMap<SplitId, i64>,
@@ -302,11 +304,7 @@ impl KafkaSplitReader {
         });
 
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
-        let mut latest_progress_offsets = self
-            .splits
-            .iter()
-            .filter_map(|split| split.start_offset.map(|offset| (split.id(), offset)))
-            .collect::<HashMap<_, _>>();
+        let mut latest_progress_offsets = self.init_progress_offsets();
 
         #[for_await]
         'for_outer_loop: for raw_msgs in self.consumer.stream().ready_chunks(max_chunk_size) {

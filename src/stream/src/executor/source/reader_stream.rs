@@ -59,6 +59,45 @@ pub(crate) struct StreamReaderBuilder {
 }
 
 impl StreamReaderBuilder {
+    fn update_offsets_from_chunk(
+        latest_splits_info: &mut HashMap<SplitId, SplitImpl>,
+        chunk: &StreamChunk,
+        split_idx: usize,
+        offset_idx: usize,
+    ) {
+        // All rows (including those visible or invisible) will be used to update the source offset.
+        for i in 0..chunk.capacity() {
+            let (_, row, _) = chunk.row_at(i);
+            let split = row.datum_at(split_idx).unwrap().into_utf8();
+            let offset = row.datum_at(offset_idx).unwrap().into_utf8();
+            latest_splits_info
+                .get_mut(&Arc::from(split.to_owned()))
+                .map(|split_impl| split_impl.update_in_place(offset.to_owned()));
+        }
+    }
+
+    fn apply_split_progress(
+        latest_splits_info: &mut HashMap<SplitId, SplitImpl>,
+        split_progress: HashMap<SplitId, String>,
+    ) {
+        for (split_id, offset) in split_progress {
+            if let Some(split_impl) = latest_splits_info.get_mut(&split_id) {
+                if let Err(e) = split_impl.update_in_place(offset) {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        split_id = %split_id,
+                        "failed to apply split progress update",
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    split_id = %split_id,
+                    "ignore progress for unknown split",
+                );
+            }
+        }
+    }
+
     fn setup_auto_schema_change(&self) -> AutoSchemaChangeSetup {
         if self.is_auto_schema_change_enable {
             let (schema_change_tx, mut schema_change_rx) =
@@ -261,51 +300,9 @@ impl StreamReaderBuilder {
             let stream = apply_rate_limit_to_source_reader_event(stream, self.rate_limit).boxed();
             let mut is_error = false;
             #[for_await]
-            'consume: for msg in stream {
-                match msg {
-                    Ok(msg) => {
-                        match msg {
-                            SourceReaderEvent::DataChunk(msg) => {
-                                // All rows (including those visible or invisible) will be used to update the source offset.
-                                for i in 0..msg.capacity() {
-                                    let (_, row, _) = msg.row_at(i);
-                                    let split = row.datum_at(split_idx).unwrap().into_utf8();
-                                    let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-                                    latest_splits_info
-                                        .get_mut(&Arc::from(split.to_owned()))
-                                        .map(|split_impl| {
-                                            split_impl.update_in_place(offset.to_owned())
-                                        });
-                                }
-                                yield SourceReaderEventWithState::Data((
-                                    msg,
-                                    latest_splits_info.clone(),
-                                ));
-                            }
-                            SourceReaderEvent::SplitProgress(split_progress) => {
-                                for (split_id, offset) in split_progress {
-                                    if let Some(split_impl) = latest_splits_info.get_mut(&split_id)
-                                    {
-                                        if let Err(e) = split_impl.update_in_place(offset.clone()) {
-                                            tracing::warn!(
-                                                error = %e.as_report(),
-                                                split_id = %split_id,
-                                                "failed to apply split progress update",
-                                            );
-                                        }
-                                    } else {
-                                        tracing::warn!(
-                                            split_id = %split_id,
-                                            "ignore progress for unknown split",
-                                        );
-                                    }
-                                }
-                                yield SourceReaderEventWithState::Progress(
-                                    latest_splits_info.clone(),
-                                );
-                            }
-                        }
-                    }
+            'consume: for event in stream {
+                let event = match event {
+                    Ok(event) => event,
                     Err(e) => {
                         tracing::error!(
                             error = %e.as_report(),
@@ -322,6 +319,22 @@ impl StreamReaderBuilder {
                         ]);
                         is_error = true;
                         break 'consume;
+                    }
+                };
+
+                match event {
+                    SourceReaderEvent::DataChunk(chunk) => {
+                        Self::update_offsets_from_chunk(
+                            &mut latest_splits_info,
+                            &chunk,
+                            split_idx,
+                            offset_idx,
+                        );
+                        yield SourceReaderEventWithState::Data((chunk, latest_splits_info.clone()));
+                    }
+                    SourceReaderEvent::SplitProgress(split_progress) => {
+                        Self::apply_split_progress(&mut latest_splits_info, split_progress);
+                        yield SourceReaderEventWithState::Progress(latest_splits_info.clone());
                     }
                 }
             }

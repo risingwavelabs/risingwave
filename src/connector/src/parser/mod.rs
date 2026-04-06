@@ -217,13 +217,9 @@ impl<P: ByteStreamSourceParser> P {
     /// to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless there's a
     /// large transaction and `source_ctrl_opts.split_txn` is false.
     pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
-        self.parse_stream_with_events(msg_stream.map_ok(SourceMessageEvent::Data).boxed())
-            .try_filter_map(|event| async move {
-                Ok(match event {
-                    SourceReaderEvent::DataChunk(chunk) => Some(chunk),
-                    SourceReaderEvent::SplitProgress(_) => None,
-                })
-            })
+        reader_events_to_chunk_stream(
+            self.parse_stream_with_events(msg_stream.map_ok(SourceMessageEvent::Data).boxed()),
+        )
     }
 
     pub fn parse_stream_with_events(
@@ -240,6 +236,14 @@ impl<P: ByteStreamSourceParser> P {
             move || tracing::info_span!("source_parse_chunk", %actor_id, source_id),
         )
     }
+}
+
+fn reader_events_to_chunk_stream(
+    stream: impl Stream<Item = ConnectorResult<SourceReaderEvent>> + Send + 'static,
+) -> impl SourceChunkStream {
+    stream
+        .try_filter_map(|event| async move { Ok(event.into_data_chunk()) })
+        .boxed()
 }
 
 // TODO: when upsert is disabled, how to filter those empty payload
@@ -434,14 +438,9 @@ pub enum ByteStreamSourceParserImpl {
 impl ByteStreamSourceParserImpl {
     /// Converts `SourceMessage` vec stream into [`StreamChunk`] stream.
     pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
-        self.parse_stream_with_events(msg_stream.map_ok(SourceMessageEvent::Data).boxed())
-            .try_filter_map(|event| async move {
-                Ok(match event {
-                    SourceReaderEvent::DataChunk(chunk) => Some(chunk),
-                    SourceReaderEvent::SplitProgress(_) => None,
-                })
-            })
-            .boxed()
+        reader_events_to_chunk_stream(
+            self.parse_stream_with_events(msg_stream.map_ok(SourceMessageEvent::Data).boxed()),
+        )
     }
 
     pub fn parse_stream_with_events(

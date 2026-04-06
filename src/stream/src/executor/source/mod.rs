@@ -188,9 +188,8 @@ pub async fn apply_rate_limit_to_source_reader_event(
 pub async fn source_reader_event_to_chunk_stream(stream: BoxSourceReaderEventStream) {
     #[for_await]
     for event in stream {
-        match event? {
-            SourceReaderEvent::DataChunk(chunk) => yield chunk,
-            SourceReaderEvent::SplitProgress(_) => {}
+        if let Some(chunk) = event?.into_data_chunk() {
+            yield chunk;
         }
     }
 }

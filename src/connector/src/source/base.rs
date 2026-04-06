@@ -567,10 +567,28 @@ pub enum SourceMessageEvent {
     SplitProgress(HashMap<SplitId, String>),
 }
 
+impl SourceMessageEvent {
+    pub fn into_data(self) -> Option<Vec<SourceMessage>> {
+        match self {
+            Self::Data(data) => Some(data),
+            Self::SplitProgress(_) => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum SourceReaderEvent {
     DataChunk(StreamChunk),
     SplitProgress(HashMap<SplitId, String>),
+}
+
+impl SourceReaderEvent {
+    pub fn into_data_chunk(self) -> Option<StreamChunk> {
+        match self {
+            Self::DataChunk(chunk) => Some(chunk),
+            Self::SplitProgress(_) => None,
+        }
+    }
 }
 
 /// Stream of [`Option<StreamChunk>`]s parsed from the messages from the external source.

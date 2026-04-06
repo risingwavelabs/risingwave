@@ -26,8 +26,7 @@ use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SourceReaderEvent,
-    SplitImpl, SplitMetaData,
+    ConnectorProperties, SourceColumnDesc, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -164,9 +163,8 @@ impl SourceExecutor {
 
         #[for_await]
         for event in stream {
-            let chunk = match event.map_err(BatchError::connector)? {
-                SourceReaderEvent::DataChunk(chunk) => chunk,
-                SourceReaderEvent::SplitProgress(_) => continue,
+            let Some(chunk) = event.map_err(BatchError::connector)?.into_data_chunk() else {
+                continue;
             };
             let data_chunk = convert_stream_chunk_to_batch_chunk(chunk)?;
             if data_chunk.capacity() > 0 {
