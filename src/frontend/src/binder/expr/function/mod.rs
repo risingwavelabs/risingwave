@@ -163,6 +163,27 @@ impl Binder {
                     }
             )
         });
+
+        // Return a clear usage error before secret lookup when there is no UDF candidate by name.
+        // This avoids leaking "not found" for secret refs used in clearly invalid contexts.
+        if has_secret_ref_arg {
+            let has_udf_candidate = self
+                .catalog
+                .get_functions_by_name(
+                    &self.db_name,
+                    self.bind_schema_path(schema_name.as_deref()),
+                    &func_name,
+                )
+                .map(|(funcs, _)| !funcs.is_empty())
+                .unwrap_or(false);
+            if !has_udf_candidate {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "secret reference is only allowed in user-defined function arguments"
+                        .to_owned(),
+                )
+                .into());
+            }
+        }
         let mut args: Vec<ExprImpl> = arg_list
             .args
             .iter()
@@ -831,7 +852,10 @@ impl Binder {
     ) -> Result<Vec<ExprImpl>> {
         match arg {
             FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),
-            FunctionArg::Named { .. } => todo!(),
+            FunctionArg::Named { .. } => Err(ErrorCode::InvalidInputSyntax(
+                "named function arguments are not supported yet".to_owned(),
+            )
+            .into()),
         }
     }
 }
