@@ -38,7 +38,12 @@ pub(crate) async fn into_chunk_stream(
         parser_config,
         source_ctx,
     )
-    .try_filter_map(|event| async move { Ok(event.into_data_chunk()) });
+    .try_filter_map(|event| async move {
+        Ok(match event {
+            SourceReaderEvent::DataChunk(chunk) => Some(chunk),
+            SourceReaderEvent::SplitProgress(_) => None,
+        })
+    });
     #[for_await]
     for chunk in event_stream {
         yield chunk?;

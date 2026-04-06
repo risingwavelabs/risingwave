@@ -30,8 +30,8 @@ use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BackfillInfo, BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
-    SplitMetaData,
+    BackfillInfo, BoxSourceReaderEventStream, SourceContext, SourceCtrlOpts, SourceReaderEvent,
+    SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::common::ThrottleType;
@@ -41,7 +41,9 @@ use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
-use super::{apply_rate_limit, get_split_offset_col_idx, source_reader_event_to_chunk_stream};
+use super::{
+    SourceStateTableHandler, apply_rate_limit_to_source_reader_event, get_split_offset_col_idx,
+};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
@@ -97,6 +99,7 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     column_ids: Vec<ColumnId>,
     source_desc_builder: Option<SourceDescBuilder>,
     backfill_state_store: BackfillStateTableHandler<S>,
+    source_state_store: SourceStateTableHandler<S>,
 
     /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
@@ -255,6 +258,31 @@ impl BackfillStage {
             }
         }
     }
+
+    /// Updates backfill state with split progress emitted by the reader without corresponding rows.
+    fn handle_backfill_progress(&mut self, split_id: &str, offset: &str) {
+        let Some(state) = self.states.get_mut(split_id) else {
+            return;
+        };
+        let state_inner = &mut state.state;
+        match state_inner {
+            BackfillState::Backfilling(_old_offset) => {
+                if let Some(target_offset) = &state.target_offset
+                    && compare_kafka_offset(offset, target_offset).is_ge()
+                {
+                    *state_inner = BackfillState::SourceCachingUp(offset.to_owned());
+                } else {
+                    *state_inner = BackfillState::Backfilling(Some(offset.to_owned()));
+                }
+            }
+            BackfillState::SourceCachingUp(backfill_offset) => {
+                if compare_kafka_offset(backfill_offset, offset).is_lt() {
+                    *backfill_offset = offset.to_owned();
+                }
+            }
+            BackfillState::Finished => {}
+        }
+    }
 }
 
 impl<S: StateStore> SourceBackfillExecutorInner<S> {
@@ -269,11 +297,19 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         rate_limit_rps: Option<u32>,
         progress: CreateMviewProgressReporter,
     ) -> Self {
+        let StreamSourceCore {
+            source_id,
+            source_name,
+            column_ids,
+            source_desc_builder,
+            split_state_store,
+            ..
+        } = stream_source_core;
         let source_split_change_count = metrics
             .source_split_change_count
             .with_guarded_label_values(&[
-                &stream_source_core.source_id.to_string(),
-                &stream_source_core.source_name,
+                &source_id.to_string(),
+                &source_name,
                 &actor_ctx.id.to_string(),
                 &actor_ctx.fragment_id.to_string(),
             ]);
@@ -281,11 +317,12 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         Self {
             actor_ctx,
             info,
-            source_id: stream_source_core.source_id,
-            source_name: stream_source_core.source_name,
-            column_ids: stream_source_core.column_ids,
-            source_desc_builder: stream_source_core.source_desc_builder,
+            source_id,
+            source_name,
+            column_ids,
+            source_desc_builder,
             backfill_state_store,
+            source_state_store: split_state_store,
             metrics,
             source_split_change_count,
             system_params,
@@ -294,11 +331,37 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
     }
 
+    fn extract_kafka_offset(split: SplitImpl) -> Option<String> {
+        let kafka_split = split.into_kafka().ok()?;
+        kafka_split.start_offset().map(|offset| offset.to_string())
+    }
+
+    async fn sync_states_with_upstream_progress(
+        &self,
+        backfill_stage: &mut BackfillStage,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<()> {
+        let committed_reader = self.source_state_store.new_committed_reader(epoch).await?;
+        for split in backfill_stage.splits.clone() {
+            let Some(recovered_split) = committed_reader
+                .try_recover_from_state_store(&split)
+                .await?
+            else {
+                continue;
+            };
+            let Some(offset) = Self::extract_kafka_offset(recovered_split) else {
+                continue;
+            };
+            let _ = backfill_stage.handle_upstream_row(split.id().as_ref(), &offset);
+        }
+        Ok(())
+    }
+
     async fn build_stream_source_reader(
         &self,
         source_desc: &SourceDesc,
         splits: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<(BoxSourceChunkStream, HashMap<SplitId, BackfillInfo>)> {
+    ) -> StreamExecutorResult<(BoxSourceReaderEventStream, HashMap<SplitId, BackfillInfo>)> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -330,11 +393,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok((
-            apply_rate_limit(
-                source_reader_event_to_chunk_stream(stream).boxed(),
-                self.rate_limit_rps,
-            )
-            .boxed(),
+            apply_rate_limit_to_source_reader_event(stream, self.rate_limit_rps).boxed(),
             res.backfill_info,
         ))
     }
@@ -634,7 +693,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     this: &SourceBackfillExecutorInner<impl StateStore>,
                                     backfill_stage: &BackfillStage,
                                     source_desc: &SourceDesc,
-                                ) -> StreamExecutorResult<BoxSourceChunkStream>
+                                ) -> StreamExecutorResult<BoxSourceReaderEventStream>
                                 {
                                     // rebuild backfill_stream
                                     // Note: we don't put this part in a method, due to some complex lifetime issues.
@@ -657,6 +716,12 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
                                     Ok(reader)
                                 }
+
+                                self.sync_states_with_upstream_progress(
+                                    &mut backfill_stage,
+                                    barrier.epoch,
+                                )
+                                .await?;
 
                                 self.backfill_state_store
                                     .set_states(backfill_stage.states.clone())
@@ -776,7 +841,16 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     }
                     // backfill
                     Either::Right(msg) => {
-                        let chunk = msg?;
+                        let chunk = match msg? {
+                            SourceReaderEvent::DataChunk(chunk) => chunk,
+                            SourceReaderEvent::SplitProgress(split_progress) => {
+                                for (split_id, offset) in split_progress {
+                                    backfill_stage
+                                        .handle_backfill_progress(split_id.as_ref(), &offset);
+                                }
+                                continue;
+                            }
+                        };
 
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
                             // Pause to let barrier catch up via backpressure of snapshot stream.

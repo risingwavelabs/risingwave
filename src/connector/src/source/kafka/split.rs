@@ -72,4 +72,8 @@ impl KafkaSplit {
     pub fn get_topic_and_partition(&self) -> (String, i32) {
         (self.topic.clone(), self.partition)
     }
+
+    pub fn start_offset(&self) -> Option<i64> {
+        self.start_offset
+    }
 }
