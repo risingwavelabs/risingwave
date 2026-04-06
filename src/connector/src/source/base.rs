@@ -34,7 +34,7 @@ use risingwave_pb::source::ConnectorSplit;
 use rw_futures_util::select_all;
 use serde::de::DeserializeOwned;
 use serde_json::json;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
@@ -343,6 +343,8 @@ pub struct SourceContext {
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
     // callback function to report CDC auto schema change fail events
     pub on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
+    // source reader can report split-level handoff events to source backfill executor
+    pub source_event_tx: Option<mpsc::UnboundedSender<SourceChunkEvent>>,
 }
 
 impl SourceContext {
@@ -394,7 +396,16 @@ impl SourceContext {
             connector_props,
             schema_change_tx: schema_change_channel,
             on_cdc_auto_schema_change_failure,
+            source_event_tx: None,
         }
+    }
+
+    pub fn with_source_event_tx(
+        mut self,
+        source_event_tx: mpsc::UnboundedSender<SourceChunkEvent>,
+    ) -> Self {
+        self.source_event_tx = Some(source_event_tx);
+        self
     }
 
     /// Create a dummy `SourceContext` for testing purpose, or for the situation
@@ -569,6 +580,14 @@ pub type BoxStreamingFileSourceChunkStream =
 pub enum SourceChunkEvent {
     /// A normal data chunk.
     Chunk(StreamChunk),
+    /// Split-level handoff from backfill reader to upstream source.
+    SplitHandoff {
+        split_id: SplitId,
+        /// Last emitted backfill offset for the split (inclusive), if any.
+        backfill_offset: Option<String>,
+        /// Ack channel used to guarantee handoff before reader suppresses this split.
+        ack_tx: oneshot::Sender<()>,
+    },
     /// Bounded source reader has consumed all partitions to their stop offsets.
     BoundedEof,
 }

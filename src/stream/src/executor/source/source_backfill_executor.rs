@@ -18,8 +18,8 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::TryStreamExt;
 use futures::stream::{PollNext, select_with_strategy};
+use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::ColumnId;
@@ -39,6 +39,8 @@ use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
@@ -256,6 +258,20 @@ impl BackfillStage {
             }
         }
     }
+
+    fn finalize_idle_caught_up_splits(&mut self) {
+        for state in self.states.values_mut() {
+            let should_finish = match (&state.state, state.target_offset.as_ref()) {
+                (BackfillState::SourceCachingUp(backfill_offset), Some(target_offset)) => {
+                    compare_kafka_offset(backfill_offset, target_offset).is_ge()
+                }
+                _ => false,
+            };
+            if should_finish {
+                state.state = BackfillState::Finished;
+            }
+        }
+    }
 }
 
 impl<S: StateStore> SourceBackfillExecutorInner<S> {
@@ -305,6 +321,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
+        let (source_event_tx, source_event_rx) = mpsc::unbounded_channel();
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
             self.source_id,
@@ -318,7 +335,8 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             },
             source_desc.source.config.clone(),
             None,
-        );
+        )
+        .with_source_event_tx(source_event_tx);
 
         // We will check watermark to decide whether we need to backfill.
         // e.g., when there's a Kafka topic-partition without any data,
@@ -332,12 +350,21 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .await
             .map_err(StreamExecutorError::connector_error)?;
         let rate_limited = apply_rate_limit(stream, self.rate_limit_rps).boxed();
+        fn prefer_split_handoff(_: &mut ()) -> PollNext {
+            PollNext::Right
+        }
+        let split_handoff_stream = UnboundedReceiverStream::new(source_event_rx)
+            .map(Ok::<_, risingwave_connector::error::ConnectorError>);
+        let merged = select_with_strategy(
+            rate_limited.map_ok(SourceChunkEvent::Chunk),
+            split_handoff_stream,
+            prefer_split_handoff,
+        );
         // Wrap the plain chunk stream with an in-band EOF sentinel.
         // When the bounded reader finishes (stream terminates), the chained
         // `BoundedEof` event is delivered in causal order after all data chunks,
         // eliminating the race condition of the previous out-of-band AtomicBool approach.
-        let wrapped = rate_limited
-            .map_ok(SourceChunkEvent::Chunk)
+        let wrapped = merged
             .chain(futures::stream::once(async {
                 Ok(SourceChunkEvent::BoundedEof)
             }))
@@ -425,15 +452,19 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
         tracing::debug!(?backfill_stage, "source backfill started");
 
-        fn select_strategy(_: &mut ()) -> PollNext {
-            futures::stream::PollNext::Left
+        fn select_strategy(prefer_right: &mut bool) -> PollNext {
+            let next = if *prefer_right {
+                futures::stream::PollNext::Right
+            } else {
+                futures::stream::PollNext::Left
+            };
+            *prefer_right = !*prefer_right;
+            next
         }
 
-        // We choose "preferring upstream" strategy here, because:
-        // - When the upstream source's workload is high (i.e., Kafka has new incoming data), it just makes backfilling slower.
-        //   For chunks from upstream, they are simply dropped, so there's no much overhead.
-        //   So possibly this can also affect other running jobs less.
-        // - When the upstream Source's becomes less busy, SourceBackfill can begin to catch up.
+        // Use fair alternation between upstream and backfill streams.
+        // This avoids starving split-level handoff events on the right stream when
+        // upstream traffic is continuously available, while still not letting backfill dominate.
         let mut backfill_stream = select_with_strategy(
             input.by_ref().map(Either::Left),
             source_chunk_reader.map(Either::Right),
@@ -664,6 +695,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     Ok((reader, reader_result))
                                 }
 
+                                backfill_stage.finalize_idle_caught_up_splits();
                                 self.backfill_state_store
                                     .set_states(backfill_stage.states.clone())
                                     .await?;
@@ -783,24 +815,46 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     // backfill
                     Either::Right(msg) => {
                         match msg? {
-                            SourceChunkEvent::BoundedEof => {
+                            SourceChunkEvent::SplitHandoff {
+                                split_id,
+                                backfill_offset,
+                                ack_tx,
+                            } => {
                                 tracing::info!(
                                     source_id = %self.source_id,
-                                    "bounded reader EOF, transitioning backfill splits"
+                                    split_id = %split_id,
+                                    backfill_offset = ?backfill_offset,
+                                    "split-level handoff received from bounded reader"
                                 );
-                                for state in backfill_stage.states.values_mut() {
+                                if let Some(state) =
+                                    backfill_stage.states.get_mut(split_id.as_ref())
+                                {
                                     match &state.state {
                                         BackfillState::Backfilling(Some(offset)) => {
+                                            let handoff_offset =
+                                                backfill_offset.unwrap_or_else(|| offset.clone());
                                             state.state =
-                                                BackfillState::SourceCachingUp(offset.clone());
+                                                BackfillState::SourceCachingUp(handoff_offset);
                                         }
                                         BackfillState::Backfilling(None) => {
-                                            state.state = BackfillState::Finished;
+                                            if let Some(offset) = backfill_offset {
+                                                state.state =
+                                                    BackfillState::SourceCachingUp(offset);
+                                            } else {
+                                                state.state = BackfillState::Finished;
+                                            }
                                         }
                                         BackfillState::SourceCachingUp(_)
                                         | BackfillState::Finished => {}
                                     }
                                 }
+                                let _ = ack_tx.send(());
+                            }
+                            SourceChunkEvent::BoundedEof => {
+                                tracing::info!(
+                                    source_id = %self.source_id,
+                                    "bounded reader EOF"
+                                );
                                 // Replace reader with pending stream. This structurally
                                 // prevents a duplicate BoundedEof from ever arriving.
                                 backfill_stream = select_with_strategy(
