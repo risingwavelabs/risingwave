@@ -32,11 +32,6 @@ echo "--- e2e, generic source test"
 RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
 risedev ci-start ci-1cn-1fe-with-recovery
 
-if [ "$profile" == "ci-dev" ]; then
-    echo "--- Run debug mode only tests"
-    risedev slt './e2e_test/debug_mode_only/debug_splits.slt'
-fi
-
 echo "--- Run generic source tests"
 risedev slt './e2e_test/source_inline/fs/posix_fs.slt'
 risedev slt './e2e_test/source_inline/refresh/refresh_table.slt'

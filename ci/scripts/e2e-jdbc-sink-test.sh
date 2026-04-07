@@ -49,6 +49,9 @@ SLT_PASSWORD=$PGPASSWORD sqllogictest -h db -p 5432 -d test './e2e_test/sink/rem
 sleep 1
 risedev ci-kill
 
+echo "--- reset postgresql sink fixtures"
+prepare_pg
+
 echo "--- starting risingwave cluster: ci-sink-jdbc-test"
 RUST_LOG="await_tree::future=error" risedev ci-start ci-sink-jdbc-test
 risedev slt './e2e_test/sink/create_sink_as.slt'

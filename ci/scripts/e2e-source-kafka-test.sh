@@ -27,6 +27,11 @@ export VAULT_ADDR="http://vault-server:8200"
 export VAULT_TOKEN="root-token"
 ./ci/scripts/setup-vault.sh
 
+if [ "$profile" == "ci-dev" ]; then
+    echo "--- Run debug mode only tests"
+    risedev slt './e2e_test/debug_mode_only/debug_splits.slt'
+fi
+
 echo "--- Run Kafka source tests"
 risedev slt './e2e_test/kafka-sasl/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/connection/*.slt'
