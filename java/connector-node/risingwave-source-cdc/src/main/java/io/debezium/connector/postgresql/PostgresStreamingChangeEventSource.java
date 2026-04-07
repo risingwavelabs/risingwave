@@ -264,11 +264,6 @@ public class PostgresStreamingChangeEventSource
                         null, replicationConnection.startStreaming(walPosition));
             }
 
-            // Replication connection is now truly established. Signal connected.
-            if (onConnectedCallback != null) {
-                onConnectedCallback.run();
-            }
-
             // Start keep alive thread to prevent connection timeout during time-consuming
             // operations the DB side.
             ReplicationStream stream = this.replicationStream.get();
@@ -309,6 +304,11 @@ public class PostgresStreamingChangeEventSource
                                 PostgresConnector.class,
                                 connectorConfig.getLogicalName(),
                                 KEEP_ALIVE_THREAD_NAME));
+            }
+
+            // Signal connected only when the final streaming session is ready.
+            if (onConnectedCallback != null) {
+                onConnectedCallback.run();
             }
             processMessages(context, partition, this.effectiveOffset, stream);
         } catch (Throwable e) {
