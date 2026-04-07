@@ -27,7 +27,9 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
-use risingwave_connector::source::cdc::split::extract_postgres_lsn_from_offset_str;
+use risingwave_connector::source::cdc::split::{
+    extract_postgres_lsn_from_offset_str, extract_sql_server_commit_lsn_from_offset_str,
+};
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
@@ -55,6 +57,10 @@ use crate::task::LocalBarrierManager;
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
 pub const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+
+fn lsn_u128_to_i64(lsn: u128) -> i64 {
+    lsn.min(i64::MAX as u128) as i64
+}
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -129,12 +135,13 @@ impl<S: StateStore> SourceExecutor<S> {
             wait_checkpoint_rx,
             state_store: core.split_state_store.state_table().state_store().clone(),
             table_id: core.split_state_store.state_table().table_id(),
+            source_id: core.source_id,
+            source_name: core.source_name.clone(),
             metrics,
         };
         tokio::spawn(wait_checkpoint_worker.run());
         Ok(Some(WaitCheckpointTaskBuilder {
             wait_checkpoint_tx,
-            source_reader,
             building_task: initial_task,
         }))
     }
@@ -537,6 +544,20 @@ impl<S: StateStore> SourceExecutor<S> {
                                 .mysql_cdc_state_binlog_position
                                 .with_guarded_label_values(&[&source_id])
                                 .set(position as i64);
+                        }
+                    }
+                    SplitImpl::SqlServerCdc(sqlserver_split) => {
+                        if let Some(lsn) = sqlserver_split.sql_server_change_lsn() {
+                            self.metrics
+                                .sqlserver_cdc_state_change_lsn
+                                .with_guarded_label_values(&[&source_id])
+                                .set(lsn_u128_to_i64(lsn));
+                        }
+                        if let Some(lsn) = sqlserver_split.sql_server_commit_lsn() {
+                            self.metrics
+                                .sqlserver_cdc_state_commit_lsn
+                                .with_guarded_label_values(&[&source_id])
+                                .set(lsn_u128_to_i64(lsn));
                         }
                     }
                     _ => {}
@@ -1019,7 +1040,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         task_builder.update_task_on_checkpoint(updated_splits);
 
                         tracing::debug!("epoch to wait {:?}", epoch);
-                        task_builder.send(Epoch(epoch.prev)).await?
+                        task_builder.send(Epoch(epoch.prev));
                     }
 
                     let barrier_epoch = barrier.epoch;
@@ -1146,7 +1167,6 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 
 struct WaitCheckpointTaskBuilder {
     wait_checkpoint_tx: UnboundedSender<(Epoch, WaitCheckpointTask)>,
-    source_reader: SourceReader,
     building_task: WaitCheckpointTask,
 }
 
@@ -1194,17 +1214,14 @@ impl WaitCheckpointTaskBuilder {
         }
     }
 
-    /// Send and reset the building task to a new one.
-    async fn send(&mut self, epoch: Epoch) -> Result<(), anyhow::Error> {
-        let new_task = self
-            .source_reader
-            .create_wait_checkpoint_task()
-            .await?
-            .expect("wait checkpoint task should be created");
+    /// Send the current task and reset to an empty one for the next epoch.
+    /// Uses `reset_for_next_epoch()` to clone the client handle (e.g. `PubSub` `Subscription`)
+    /// from the current task, avoiding network I/O on the checkpoint hot path.
+    fn send(&mut self, epoch: Epoch) {
+        let new_task = self.building_task.reset_for_next_epoch();
         self.wait_checkpoint_tx
             .send((epoch, std::mem::replace(&mut self.building_task, new_task)))
             .expect("wait_checkpoint_tx send should succeed");
-        Ok(())
     }
 }
 
@@ -1237,6 +1254,8 @@ struct WaitCheckpointWorker<S: StateStore> {
     wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
     state_store: S,
     table_id: TableId,
+    source_id: SourceId,
+    source_name: String,
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -1257,22 +1276,40 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                             },
                         )
                         .await;
-
+                    if self.wait_checkpoint_rx.is_closed() {
+                        // The task must not be committed since the associated epoch may not succeed.
+                        // The wait_checkpoint_rx lifetime is tied to the lifecycle of the source executor actor.
+                        // The old actor must be dropped before any subsequent recovery can succeed; see PartialGraphState::abort_and_wait_actors
+                        tracing::debug!(epoch = epoch.0, "Drop stale wait checkpoint task.");
+                        break;
+                    }
                     match ret {
                         Ok(()) => {
                             tracing::debug!(epoch = epoch.0, "wait epoch success");
 
                             // Run task with callback to record LSN after successful commit
-                            task.run_with_on_commit_success(|source_id: u64, offset| {
-                                if let Some(lsn_value) =
-                                    extract_postgres_lsn_from_offset_str(offset)
-                                {
-                                    self.metrics
-                                        .pg_cdc_jni_commit_offset_lsn
-                                        .with_guarded_label_values(&[&source_id.to_string()])
-                                        .set(lsn_value as i64);
-                                }
-                            })
+                            task.run_with_on_commit_success(
+                                self.source_id,
+                                &self.source_name,
+                                |source_id: u64, offset| {
+                                    if let Some(lsn_value) =
+                                        extract_postgres_lsn_from_offset_str(offset)
+                                    {
+                                        self.metrics
+                                            .pg_cdc_jni_commit_offset_lsn
+                                            .with_guarded_label_values(&[&source_id.to_string()])
+                                            .set(lsn_value as i64);
+                                    }
+                                    if let Some(lsn_value) =
+                                        extract_sql_server_commit_lsn_from_offset_str(offset)
+                                    {
+                                        self.metrics
+                                            .sqlserver_cdc_jni_commit_offset_lsn
+                                            .with_guarded_label_values(&[&source_id.to_string()])
+                                            .set(lsn_u128_to_i64(lsn_value));
+                                    }
+                                },
+                            )
                             .await;
                         }
                         Err(e) => {

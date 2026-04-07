@@ -94,6 +94,10 @@ pub struct Configuration {
 
     /// Resource groups for compute nodes.
     pub compute_resource_groups: HashMap<usize, String>,
+
+    /// Roles for compute nodes (1-indexed). If not set, defaults to "both".
+    /// Values: "serving", "streaming", "both".
+    pub compute_node_roles: HashMap<usize, String>,
 }
 
 impl Default for Configuration {
@@ -122,6 +126,7 @@ metrics_level = "Disabled"
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
             compute_resource_groups: Default::default(),
+            compute_node_roles: Default::default(),
         }
     }
 }
@@ -146,12 +151,7 @@ impl Configuration {
             meta_nodes: 1,
             compactor_nodes: 2,
             compute_node_cores: 2,
-            per_session_queries: vec![
-                "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
-                "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
-                "alter system set adaptive_parallelism_strategy to AUTO".into(),
-            ]
-            .into(),
+            per_session_queries: vec![].into(),
             ..Default::default()
         }
     }
@@ -161,9 +161,6 @@ impl Configuration {
     pub fn for_scale_no_shuffle() -> Self {
         let mut conf = Self::for_scale();
         conf.per_session_queries = vec![
-            "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
-            "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
-            "alter system set adaptive_parallelism_strategy to AUTO".into(),
             "SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into(),
             "SET STREAMING_USE_SNAPSHOT_BACKFILL = false;".into(),
         ]
@@ -173,13 +170,7 @@ impl Configuration {
 
     pub fn for_scale_shared_source() -> Self {
         let mut conf = Self::for_scale();
-        conf.per_session_queries = vec![
-            "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
-            "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
-            "alter system set adaptive_parallelism_strategy to AUTO".into(),
-            "SET STREAMING_USE_SHARED_SOURCE = true;".into(),
-        ]
-        .into();
+        conf.per_session_queries = vec!["SET STREAMING_USE_SHARED_SOURCE = true;".into()].into();
         conf
     }
 
@@ -223,9 +214,6 @@ metrics_level = "Disabled"
             compactor_nodes: 1,
             compute_node_cores: 2,
             per_session_queries: vec![
-                "set streaming_parallelism_strategy_for_table = 'DEFAULT'".into(),
-                "set streaming_parallelism_strategy_for_source = 'DEFAULT'".into(),
-                "alter system set adaptive_parallelism_strategy to AUTO".into(),
                 "create view if not exists table_parallelism as select t.name, tf.parallelism from rw_tables t, rw_table_fragments tf where t.id = tf.table_id;".into(),
                 "create view if not exists mview_parallelism as select m.name, tf.parallelism from rw_materialized_views m, rw_table_fragments tf where m.id = tf.table_id;".into(),
             ]
@@ -262,6 +250,7 @@ default_parallelism = {default_parallelism}
             compute_node_cores: default_parallelism * 2,
             per_session_queries: vec![].into(),
             compute_resource_groups: Default::default(),
+            compute_node_roles: Default::default(),
         }
     }
 
@@ -555,6 +544,12 @@ impl Cluster {
                     .get(&i)
                     .cloned()
                     .unwrap_or(DEFAULT_RESOURCE_GROUP.to_string()),
+                "--role",
+                &conf
+                    .compute_node_roles
+                    .get(&i)
+                    .cloned()
+                    .unwrap_or("both".to_string()),
             ]);
             handle
                 .create_node()

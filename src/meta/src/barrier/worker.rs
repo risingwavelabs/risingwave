@@ -558,7 +558,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 ) => {
                     match complete_result {
                         Ok(output) => {
-                            self.checkpoint_control.ack_completed(output);
+                            self.checkpoint_control.ack_completed(&mut self.partial_graph_manager, output);
                         }
                         Err(e) => {
                             self.failure_recovery(e).await;
@@ -780,7 +780,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                 }
             }
-            self.checkpoint_control.update_barrier_nums_metrics();
         }
     }
 }
@@ -789,8 +788,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// We need to make sure there are no changes when doing recovery
     pub async fn clear_on_err(&mut self, err: &MetaError) {
         // join spawned completing command to finish no matter it succeeds or not.
-        let is_err = match replace(&mut self.completing_task, CompletingTask::None) {
-            CompletingTask::None => false,
+        match replace(&mut self.completing_task, CompletingTask::None) {
+            CompletingTask::None | CompletingTask::Err(_) => {}
             CompletingTask::Completing {
                 epochs_to_ack,
                 join_handle,
@@ -800,53 +799,26 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 match join_handle.await {
                     Err(e) => {
                         warn!(err = %e.as_report(), "failed to join completing task");
-                        true
                     }
                     Ok(Err(e)) => {
                         warn!(
                             err = %e.as_report(),
                             "failed to complete barrier during clear"
                         );
-                        true
                     }
                     Ok(Ok(hummock_version_stats)) => {
-                        self.checkpoint_control
-                            .ack_completed(BarrierCompleteOutput {
+                        self.checkpoint_control.ack_completed(
+                            &mut self.partial_graph_manager,
+                            BarrierCompleteOutput {
                                 epochs_to_ack,
                                 hummock_version_stats,
-                            });
-                        false
-                    }
-                }
-            }
-            CompletingTask::Err(_) => true,
-        };
-        if !is_err {
-            // continue to finish the pending collected barrier.
-            while let Some(task) = self.checkpoint_control.next_complete_barrier_task(None) {
-                let epochs_to_ack = task.epochs_to_ack();
-                match task
-                    .complete_barrier(&*self.context, self.env.clone())
-                    .await
-                {
-                    Ok(hummock_version_stats) => {
-                        self.checkpoint_control
-                            .ack_completed(BarrierCompleteOutput {
-                                epochs_to_ack,
-                                hummock_version_stats,
-                            });
-                    }
-                    Err(e) => {
-                        error!(
-                            err = %e.as_report(),
-                            "failed to complete barrier during recovery"
+                            },
                         );
-                        break;
                     }
                 }
             }
-        }
-        self.checkpoint_control.clear_on_err(err);
+        };
+        self.partial_graph_manager.notify_all_err(err);
     }
 }
 
@@ -1173,7 +1145,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else if let Some(database) = collected_databases.remove(&database_id) {
                                         warn!(%database_id, %worker_id, "database initialized but later reset during global recovery");
-                                        let resetting_partial_graphs: HashSet<_> = database_partial_graphs(database_id, database.creating_streaming_job_controls.keys().copied()).collect();
+                                        let resetting_partial_graphs: HashSet<_> = database_partial_graphs(database_id, database.independent_checkpoint_job_controls.keys().copied()).collect();
                                         partial_graph_manager.reset_partial_graphs(resetting_partial_graphs.iter().copied());
                                         assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else {

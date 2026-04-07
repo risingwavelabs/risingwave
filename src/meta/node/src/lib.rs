@@ -465,6 +465,8 @@ pub fn start(
                 periodic_scheduling_compaction_group_split_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_split_interval_sec,
+                enable_compaction_group_normalize: config.meta.enable_compaction_group_normalize,
+                max_normalize_splits_per_round: config.meta.max_normalize_splits_per_round,
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
@@ -491,6 +493,7 @@ pub fn start(
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_task_max_progress_interval_secs,
+                compaction_task_id_refill_capacity: config.meta.compaction_task_id_refill_capacity,
                 compaction_config: Some(config.meta.compaction_config),
                 hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
@@ -540,6 +543,14 @@ pub fn start(
                     .meta
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
+                table_change_log_insert_batch_size: config
+                    .meta
+                    .developer
+                    .table_change_log_insert_batch_size,
+                table_change_log_delete_batch_size: config
+                    .meta
+                    .developer
+                    .table_change_log_delete_batch_size,
                 license_key_path: opts.license_key_path,
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
@@ -594,6 +605,12 @@ fn validate_config(config: &RwConfig) {
 
     if config.meta.checkpoint_read_max_in_flight_chunks == 0 {
         let error_msg = "checkpoint read max in flight chunks should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.compaction_task_id_refill_capacity == 0 {
+        let error_msg = "compaction task id refill capacity should be larger than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

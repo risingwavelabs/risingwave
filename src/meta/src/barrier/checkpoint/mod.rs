@@ -13,10 +13,13 @@
 // limitations under the License.
 
 mod control;
-mod creating_job;
+pub(crate) mod independent_job;
 mod recovery;
 mod state;
 
-pub(super) use control::{CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl};
-pub(super) use creating_job::CreatingStreamingJobControl;
+pub(super) use control::{
+    CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl,
+    DatabaseCheckpointControlMetrics,
+};
+pub(crate) use independent_job::{CreatingStreamingJobControl, IndependentCheckpointJobControl};
 pub(super) use state::BarrierWorkerState;

@@ -817,6 +817,9 @@ profile:
       - use: frontend
       - use: compactor
       - use: pubsub
+        user-managed: true
+        address: pubsub-emulator
+        port: 8900
         persist-data: true
       - use: kafka
         user-managed: true
@@ -1481,6 +1484,8 @@ template:
   # Google pubsub emulator service
   pubsub:
     id: pubsub-${port}
+
+    user-managed: false
 
     address: "127.0.0.1"
 
