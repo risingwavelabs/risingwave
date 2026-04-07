@@ -1,0 +1,4 @@
+interface:
+  display_name: "RisingWave Rust Analyzer"
+  short_description: "Use rust-analyzer CLI in RisingWave"
+  default_prompt: "Use $risingwave-rust-analyzer to inspect RisingWave Rust code with rust-analyzer CLI, choose the right crate/features, and suggest focused diagnostics or refactors."
