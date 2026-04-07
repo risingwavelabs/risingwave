@@ -60,8 +60,11 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         String cachedLatestFile = null;
         List<HistoryRecord> cachedLatestFileRecords = null;
         long sequenceNumber = 0;
-        /** Monotonically increasing version; the instance whose {@code myVersion} matches is the
-         *  only one allowed to write. */
+
+        /**
+         * Monotonically increasing version; the instance whose {@code myVersion} matches is the
+         * only one allowed to write.
+         */
         long activeVersion = 0;
     }
 
@@ -76,6 +79,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             Pattern.compile("schema_history_(\\d+)\\.dat");
 
     private SharedState sharedState;
+
     /** Version assigned to this instance in {@link #doStart()}. */
     private long myVersion;
 
