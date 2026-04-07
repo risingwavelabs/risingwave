@@ -847,6 +847,77 @@ profile:
         password: post\tgres
         user-managed: true
 
+  ci-source-kafka-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: kafka
+        user-managed: true
+        address: message_queue
+        port: 29092
+      - use: schema-registry
+        user-managed: true
+        address: schemaregistry
+        port: 8082
+
+  ci-source-cdc-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: mysql
+        port: 3306
+        address: mysql
+        user: root
+        password: 123456
+        user-managed: true
+      - use: postgres
+        port: 5432
+        address: db
+        user: postgres
+        password: post\tgres
+        user-managed: true
+
+  ci-source-pulsar-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: pulsar
+        address: pulsar-server
+        broker-port: 6650
+        http-port: 8080
+        user-managed: true
+
+  ci-source-pubsub-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: pubsub
+        persist-data: true
+
   # Minimal configuration for cron_only source tests (Kafka + direct CDC)
   ci-inline-source-cron-only-test:
     config-path: src/config/ci-recovery.toml

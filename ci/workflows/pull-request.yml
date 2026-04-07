@@ -213,7 +213,26 @@ steps:
     timeout_in_minutes: 14
     retry: *auto-retry
 
-  - label: "end-to-end source test"
+  - label: "end-to-end kafka source test"
+    command: "ci/scripts/e2e-source-kafka-test.sh -p ci-dev"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-source-tests"
+      || build.pull_request.labels includes "ci/run-e2e-kafka-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-kafka-source-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: source-kafka-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
+  - label: "end-to-end source common test"
     command: "ci/scripts/e2e-source-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -225,13 +244,103 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: source-test-env
+          run: source-generic-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    parallelism: 2
+    timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "end-to-end sink test"
+  - label: "end-to-end cdc source test"
+    command: "ci/scripts/e2e-source-cdc-test.sh -p ci-dev"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-source-tests"
+      || build.pull_request.labels includes "ci/run-e2e-cdc-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-cdc-source-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: source-cdc-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 30
+    retry: *auto-retry
+
+  - label: "end-to-end pulsar source test"
+    command: "ci/scripts/e2e-source-pulsar-test.sh -p ci-dev"
+    if: |
+      build.pull_request.labels includes "ci/run-e2e-source-tests"
+      || build.pull_request.labels includes "ci/run-e2e-pulsar-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-pulsar-source-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: source-pulsar-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 12
+    retry: *auto-retry
+
+  - label: "end-to-end mqtt source test"
+    command: "ci/scripts/e2e-source-mqtt-test.sh -p ci-dev"
+    if: |
+      build.pull_request.labels includes "ci/run-e2e-source-tests"
+      || build.pull_request.labels includes "ci/run-e2e-mqtt-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-mqtt-source-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: source-mqtt-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end nats source test"
+    command: "ci/scripts/e2e-source-nats-test.sh -p ci-dev"
+    if: |
+      build.pull_request.labels includes "ci/run-e2e-source-tests"
+      || build.pull_request.labels includes "ci/run-e2e-nats-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-nats-source-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: source-nats-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end pubsub source test"
+    command: "ci/scripts/e2e-source-pubsub-test.sh -p ci-dev"
+    if: |
+      build.pull_request.labels includes "ci/run-e2e-source-tests"
+      || build.pull_request.labels includes "ci/run-e2e-pubsub-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-pubsub-source-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: source-pubsub-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 12
+    retry: *auto-retry
+
+  - label: "end-to-end sink common test"
     command: "ci/scripts/e2e-sink-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
@@ -243,10 +352,64 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-common-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 25
-    parallelism: 2
+    timeout_in_minutes: 20
+    retry: *auto-retry
+
+  - label: "end-to-end kafka sink test"
+    command: "ci/scripts/e2e-kafka-sink-ci-test.sh -p ci-dev"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-sink-tests"
+      || build.pull_request.labels includes "ci/run-e2e-kafka-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-kafka-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: sink-kafka-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
+  - label: "end-to-end postgres sink test"
+    command: "ci/scripts/e2e-postgres-sink-test.sh -p ci-dev"
+    if: |
+      build.pull_request.labels includes "ci/run-e2e-sink-tests"
+      || build.pull_request.labels includes "ci/run-e2e-postgres-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-postgres-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: sink-postgres-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
+  - label: "end-to-end jdbc sink test"
+    command: "ci/scripts/e2e-jdbc-sink-test.sh -p ci-dev"
+    if: |
+      build.pull_request.labels includes "ci/run-e2e-sink-tests"
+      || build.pull_request.labels includes "ci/run-e2e-jdbc-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-jdbc-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: sink-remote-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 18
     retry: *auto-retry
 
   - label: "connector node integration test Java {{matrix.java_version}}"
@@ -282,7 +445,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end pulsar sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-pulsar-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-pulsar-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-pulsar-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-pulsar-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-pulsar-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -290,13 +453,27 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-pulsar-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "end-to-end elasticsearch sink test"
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-elasticsearch-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-elasticsearch-sink-tests?(,|$$)/
+    command: "ci/scripts/e2e-elasticsearch-sink-ci-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: sink-elasticsearch-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end mqtt sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-mqtt-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-mqtt-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-mqtt-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-mqtt-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-mqtt-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -304,13 +481,13 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-mqtt-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end clickhouse sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-clickhouse-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-clickhouse-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -318,7 +495,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-clickhouse-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -338,7 +515,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end sqlserver sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-sqlserver-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sqlserver-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-sqlserver-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-sqlserver-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-sqlserver-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -346,7 +523,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-sqlserver-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -366,7 +543,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end redis sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-redis-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-redis-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-redis-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-redis-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-redis-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -374,13 +551,13 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-redis-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end doris sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-doris-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-doris-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-doris-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-doris-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -388,13 +565,13 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-doris-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end starrocks sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-starrocks-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-starrocks-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-starrocks-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-starrocks-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-starrocks-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -402,13 +579,13 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-starrocks-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end cassandra sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-cassandra-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-cassandra-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-cassandra-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -416,13 +593,13 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-cassandra-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end mongodb sink test"
-    if: build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-mongodb-sink-tests?(,|$$)/
+    if: build.pull_request.labels includes "ci/run-e2e-sink-tests" || build.pull_request.labels includes "ci/run-e2e-mongodb-sink-tests" || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/ || build.env("CI_STEPS") =~ /(^|,)e2e-mongodb-sink-tests?(,|$$)/
     command: "ci/scripts/e2e-mongodb-sink-test.sh -p ci-dev"
     depends_on:
       - "build"
@@ -430,7 +607,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-mongodb-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry

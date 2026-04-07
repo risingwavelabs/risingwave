@@ -159,6 +159,49 @@ function download_and_prepare_rw() {
   risedev link-all-in-one-binaries
 }
 
+download_connector_node_artifact() {
+  echo "--- Download connector node package"
+  export CONNECTOR_LIBS_PATH="./connector-node/libs"
+  buildkite-agent artifact download risingwave-connector.tar.gz ./
+  mkdir -p ./connector-node
+  tar xf ./risingwave-connector.tar.gz -C ./connector-node
+}
+
+install_e2e_test_requirements() {
+  echo "--- Install Python test dependencies"
+  python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
+}
+
+install_sqlserver_client() {
+  echo "--- Install sqlserver client"
+  curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+  curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+  apt-get update -y
+  ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev
+  export PATH="/opt/mssql-tools/bin/:$PATH"
+}
+
+source_test_env_setup() {
+    local profile="$1"
+    local risedev_profile="$2"
+    local need_connector="${3:-false}"
+    local need_python="${4:-false}"
+
+    download_and_prepare_rw "$profile" source
+
+    if [[ "$need_connector" == "true" ]]; then
+        download_connector_node_artifact
+    fi
+
+    if [[ "$need_python" == "true" ]]; then
+        install_e2e_test_requirements
+    fi
+
+    echo "--- starting risingwave cluster: ${risedev_profile}"
+    RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
+    risedev ci-start "$risedev_profile"
+}
+
 function filter_stack_trace() {
   # Only keep first 3 lines of backtrace: 0-2.
   echo "filtering stack trace for $1"
