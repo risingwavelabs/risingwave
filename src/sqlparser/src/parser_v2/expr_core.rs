@@ -488,42 +488,42 @@ where
             }
 
             // ---- Comparison operators ----
-            Token::Eq => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+            Token::Eq => Some(Infix::Left(CMP_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
                     op: BinaryOperator::Eq,
                     right: Box::new(b),
                 })
             })),
-            Token::Neq => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+            Token::Neq => Some(Infix::Left(CMP_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
                     op: BinaryOperator::NotEq,
                     right: Box::new(b),
                 })
             })),
-            Token::Lt => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+            Token::Lt => Some(Infix::Left(CMP_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
                     op: BinaryOperator::Lt,
                     right: Box::new(b),
                 })
             })),
-            Token::Gt => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+            Token::Gt => Some(Infix::Left(CMP_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
                     op: BinaryOperator::Gt,
                     right: Box::new(b),
                 })
             })),
-            Token::LtEq => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+            Token::LtEq => Some(Infix::Left(CMP_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
                     op: BinaryOperator::LtEq,
                     right: Box::new(b),
                 })
             })),
-            Token::GtEq => Some(Infix::Neither(CMP_POWER, |_, a: Expr, b: Expr| {
+            Token::GtEq => Some(Infix::Left(CMP_POWER, |_, a: Expr, b: Expr| {
                 Ok(Expr::BinaryOp {
                     left: Box::new(a),
                     op: BinaryOperator::GtEq,
