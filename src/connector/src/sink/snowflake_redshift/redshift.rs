@@ -834,7 +834,8 @@ fn convert_redshift_data_type(data_type: &DataType) -> Result<String> {
         DataType::Timestamptz => "TIMESTAMPTZ".to_owned(),
         DataType::Jsonb => "VARCHAR(MAX)".to_owned(),
         // Redshift's DECIMAL without explicit precision defaults to (38,0), which drops all
-        // fractional digits. Use (38, 10) consistent with the Iceberg/Snowflake sink convention.
+        // fractional digits. We use DECIMAL(38, 10) consistent with the Iceberg/Snowflake sink
+        // convention, though values with more than 10 fractional digits may still lose precision.
         DataType::Decimal => "DECIMAL(38, 10)".to_owned(),
         DataType::Time => "TIME".to_owned(),
         _ => {

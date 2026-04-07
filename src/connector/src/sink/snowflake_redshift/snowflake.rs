@@ -955,10 +955,10 @@ fn convert_snowflake_data_type(data_type: &DataType) -> Result<String> {
         DataType::Timestamp => "TIMESTAMP".to_owned(),
         DataType::Timestamptz => "TIMESTAMP_TZ".to_owned(),
         DataType::Jsonb => "STRING".to_owned(),
-        // RisingWave uses rust_decimal with MAX_PRECISION=28, so we need at most 28 significant
-        // digits. Snowflake's DECIMAL without explicit precision defaults to (38,0) which drops
-        // all fractional digits. We use (38, 10) to match the Iceberg sink convention:
-        // 28 integer digits + 10 fractional digits = 38 total, covering all RisingWave values.
+        // RisingWave uses rust_decimal with MAX_PRECISION=28. Snowflake's DECIMAL without
+        // explicit precision defaults to (38,0), which drops all fractional digits. We use
+        // DECIMAL(38, 10) to preserve up to 10 fractional digits, matching the Iceberg sink
+        // convention, though values with more than 10 fractional digits may still lose precision.
         DataType::Decimal => "DECIMAL(38, 10)".to_owned(),
         DataType::Bytea => "BINARY".to_owned(),
         DataType::Time => "TIME".to_owned(),
