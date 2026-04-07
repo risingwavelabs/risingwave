@@ -203,7 +203,7 @@ prost-derive = { version = "=0.14.3" }
 prost-reflect = { version = "0.16.3", features = ["serde"] }
 prost-types = { version = "=0.14.3" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { package = "madsim-rdkafka", version = "0.4.4", features = [
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/tabVersion/madsim.git", rev = "e572bf3", features = [
     "cmake-build",
 ] }
 redis = { version = "1.0" }
