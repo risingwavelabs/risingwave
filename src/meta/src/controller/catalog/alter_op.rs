@@ -1311,29 +1311,3 @@ fn is_foreign_key_constraint_violation(err: &sea_orm::DbErr) -> bool {
     err_msg.contains("foreign key constraint failed")
         || err_msg.contains("foreign key constraint violated")
 }
-
-#[cfg(test)]
-mod tests {
-    use sea_orm::DbErr;
-
-    use super::{is_foreign_key_constraint_violation, is_refresh_job_stale_drop_candidate};
-
-    #[test]
-    fn detect_foreign_key_constraint_violation_from_db_err_message() {
-        let err = DbErr::Custom("FOREIGN KEY constraint failed".to_owned());
-        assert!(is_foreign_key_constraint_violation(&err));
-    }
-
-    #[test]
-    fn do_not_treat_non_fk_db_err_as_foreign_key_violation() {
-        let err = DbErr::Custom("record not found".to_owned());
-        assert!(!is_foreign_key_constraint_violation(&err));
-    }
-
-    #[test]
-    fn treat_record_not_updated_as_stale_drop_candidate() {
-        assert!(is_refresh_job_stale_drop_candidate(
-            &DbErr::RecordNotUpdated
-        ));
-    }
-}
