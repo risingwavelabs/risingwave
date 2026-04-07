@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Context, anyhow};
+use base64::Engine;
 use firestore::{FirestoreDb, FirestoreDbOptions};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -152,9 +153,11 @@ impl Sink for FirestoreSink {
     const SINK_NAME: &'static str = FIRESTORE_SINK;
 
     async fn validate(&self) -> Result<()> {
-        risingwave_common::license::Feature::FirestoreSink
-            .check_available()
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        if self.config.max_batch_size == 0 {
+            return Err(SinkError::Config(anyhow!(
+                "firestore.max_batch_size must be greater than 0"
+            )));
+        }
 
         // Validate connection by creating a client
         let _client: FirestoreDb = self
@@ -268,8 +271,8 @@ impl FirestoreSinkWriter {
         }
     }
 
-    fn format_row(&self, row: RowRef<'_>) -> Result<serde_json::Map<String, JsonValue>> {
-        let mut map = serde_json::Map::new();
+    fn format_row(&self, row: RowRef<'_>) -> Result<HashMap<String, JsonValue>> {
+        let mut map = HashMap::new();
         for (datum, field) in row.iter().zip_eq_debug(self.schema.fields()) {
             let value = format_datum(datum, &field.data_type)?;
             map.insert(field.name.clone(), value);
@@ -278,7 +281,7 @@ impl FirestoreSinkWriter {
     }
 
     fn write_chunk_inner(&mut self, chunk: StreamChunk) -> Result<WriteChunkFuture> {
-        let mut operations = Vec::new();
+        let mut operations = BTreeMap::new();
 
         for (op, row) in chunk.rows() {
             let doc_id = self.get_document_id(row)?;
@@ -286,10 +289,10 @@ impl FirestoreSinkWriter {
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let data = self.format_row(row)?;
-                    operations.push(FirestoreOperation::Upsert { doc_id, data });
+                    operations.insert(doc_id.clone(), FirestoreOperation::Upsert { doc_id, data });
                 }
                 Op::Delete => {
-                    operations.push(FirestoreOperation::Delete { doc_id });
+                    operations.insert(doc_id.clone(), FirestoreOperation::Delete { doc_id });
                 }
                 Op::UpdateDelete => {
                     // Skip UpdateDelete as it will be followed by UpdateInsert
@@ -297,65 +300,71 @@ impl FirestoreSinkWriter {
             }
         }
 
-        Ok(self.write_operations(operations))
+        Ok(self.write_operations(operations.into_values().collect()))
     }
 
     fn write_operations(&self, operations: Vec<FirestoreOperation>) -> WriteChunkFuture {
         let client = self.client.clone();
         let collection = self.config.collection.clone();
+        let futures = operations
+            .chunks(self.config.max_batch_size)
+            .map(|chunk| chunk.to_vec())
+            .map(move |chunk| {
+                let client = client.clone();
+                let collection = collection.clone();
 
-        let futures = operations.into_iter().map(move |op| {
-            let client = client.clone();
-            let collection = collection.clone();
+                async move {
+                    let batch_writer = client.create_simple_batch_writer().await.map_err(|e| {
+                        SinkError::Firestore(
+                            anyhow!("{}", e).context("failed to create Firestore batch writer"),
+                        )
+                    })?;
+                    let mut batch = batch_writer.new_batch();
 
-            async move {
-                match op {
-                    FirestoreOperation::Upsert { doc_id, data } => {
-                        // Convert the data to a HashMap for serialization
-                        let fields: std::collections::HashMap<String, serde_json::Value> =
-                            data.into_iter().collect();
-
-                        client
-                            .fluent()
-                            .update()
-                            .in_col(&collection)
-                            .document_id(&doc_id)
-                            .object(&fields)
-                            .execute::<()>()
-                            .await
-                            .map_err(|e| {
-                                SinkError::Firestore(
-                                    anyhow!("{}", e).context("failed to upsert document"),
-                                )
-                            })?;
+                    for op in chunk {
+                        match op {
+                            FirestoreOperation::Upsert { doc_id, data } => {
+                                batch
+                                    .update_object(&collection, &doc_id, &data, None, None, vec![])
+                                    .map_err(|e| {
+                                        SinkError::Firestore(
+                                            anyhow!("{}", e)
+                                                .context("failed to add upsert document to batch"),
+                                        )
+                                    })?;
+                            }
+                            FirestoreOperation::Delete { doc_id } => {
+                                batch
+                                    .delete_by_id(&collection, &doc_id, None)
+                                    .map_err(|e| {
+                                        SinkError::Firestore(
+                                            anyhow!("{}", e)
+                                                .context("failed to add delete document to batch"),
+                                        )
+                                    })?;
+                            }
+                        }
                     }
-                    FirestoreOperation::Delete { doc_id } => {
-                        client
-                            .fluent()
-                            .delete()
-                            .from(&collection)
-                            .document_id(&doc_id)
-                            .execute()
-                            .await
-                            .map_err(|e| {
-                                SinkError::Firestore(
-                                    anyhow!("{}", e).context("failed to delete document"),
-                                )
-                            })?;
-                    }
+
+                    batch.write().await.map_err(|e| {
+                        SinkError::Firestore(
+                            anyhow!("{}", e).context("failed to execute Firestore batch write"),
+                        )
+                    })?;
+
+                    Ok::<(), SinkError>(())
                 }
-                Ok::<(), SinkError>(())
-            }
-        });
+            });
 
         Box::pin(futures::future::try_join_all(futures))
     }
 }
 
+#[derive(Clone)]
 enum FirestoreOperation {
     Upsert {
         doc_id: String,
-        data: serde_json::Map<String, JsonValue>,
+        data: HashMap<String, JsonValue>,
     },
     Delete {
         doc_id: String,
@@ -407,7 +416,7 @@ fn format_datum(datum: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resul
         DataType::Varchar => JsonValue::String(scalar.into_utf8().to_string()),
         DataType::Bytea => {
             let bytes = scalar.into_bytea();
-            JsonValue::String(String::from_utf8_lossy(bytes).to_string())
+            JsonValue::String(base64::engine::general_purpose::STANDARD.encode(bytes))
         }
         DataType::Jsonb => {
             let jsonb = scalar.into_jsonb();
