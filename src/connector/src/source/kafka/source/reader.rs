@@ -357,15 +357,11 @@ impl KafkaSplitReader {
                 }
             }
 
-            if saw_partition_eof
-                && let Some(progress) =
-                    self.snapshot_split_progress(&mut latest_progress_offsets)?
-            {
-                if is_bounded {
-                    Self::drain_stop_offsets_with_progress(&mut stop_offsets, &progress);
-                }
-                yield SourceMessageEvent::SplitProgress(progress);
-            }
+            let split_progress = if saw_partition_eof {
+                self.snapshot_split_progress(&mut latest_progress_offsets)?
+            } else {
+                None
+            };
 
             if msgs.is_empty() {
                 if is_bounded && stop_offsets.is_empty() {
@@ -452,6 +448,12 @@ impl KafkaSplitReader {
             let mut cur = Vec::with_capacity(res.capacity());
             swap(&mut cur, &mut res);
             yield SourceMessageEvent::Data(cur);
+            if let Some(progress) = split_progress {
+                if is_bounded {
+                    Self::drain_stop_offsets_with_progress(&mut stop_offsets, &progress);
+                }
+                yield SourceMessageEvent::SplitProgress(progress);
+            }
             if is_bounded && stop_offsets.is_empty() {
                 break 'for_outer_loop;
             }

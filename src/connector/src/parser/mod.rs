@@ -49,9 +49,9 @@ use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    BoxSourceMessageEventStream, BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc,
-    SourceColumnType, SourceContext, SourceContextRef, SourceCtrlOpts, SourceMessageEvent,
-    SourceMeta, SourceReaderEvent,
+    BoxSourceMessageEventStream, SourceChunkStream, SourceColumnDesc, SourceColumnType,
+    SourceContext, SourceContextRef, SourceCtrlOpts, SourceMessageEvent, SourceMeta,
+    SourceReaderEvent,
 };
 
 mod access_builder;
@@ -78,6 +78,19 @@ mod utils;
 
 use access_builder::{AccessBuilder, AccessBuilderImpl};
 pub use config::*;
+
+pub(crate) fn into_data_chunk_stream(
+    stream: impl Stream<Item = ConnectorResult<SourceReaderEvent>> + Send + 'static,
+) -> impl SourceChunkStream {
+    stream
+        .try_filter_map(|event| async move {
+            Ok(match event {
+                SourceReaderEvent::DataChunk(chunk) => Some(chunk),
+                SourceReaderEvent::SplitProgress(_) => None,
+            })
+        })
+        .boxed()
+}
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use debezium::schema_change::SchemaChangeEnvelope;
 pub use unified::{AccessError, AccessResult};
@@ -205,28 +218,6 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 
 #[easy_ext::ext(SourceParserIntoStreamExt)]
 impl<P: ByteStreamSourceParser> P {
-    /// Parse a `SourceMessage` stream into a [`StreamChunk`] stream.
-    ///
-    /// # Arguments
-    ///
-    /// - `msg_stream`: A stream of batches of `SourceMessage`.
-    ///
-    /// # Returns
-    ///
-    /// A [`SourceChunkStream`] of parsed chunks. Each of the parsed chunks are guaranteed
-    /// to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless there's a
-    /// large transaction and `source_ctrl_opts.split_txn` is false.
-    pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
-        self.parse_stream_with_events(msg_stream.map_ok(SourceMessageEvent::Data).boxed())
-            .try_filter_map(|event| async move {
-                Ok(match event {
-                    SourceReaderEvent::DataChunk(chunk) => Some(chunk),
-                    SourceReaderEvent::SplitProgress(_) => None,
-                })
-            })
-            .boxed()
-    }
-
     pub fn parse_stream_with_events(
         self,
         msg_stream: BoxSourceMessageEventStream,
@@ -433,18 +424,6 @@ pub enum ByteStreamSourceParserImpl {
 }
 
 impl ByteStreamSourceParserImpl {
-    /// Converts `SourceMessage` vec stream into [`StreamChunk`] stream.
-    pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
-        self.parse_stream_with_events(msg_stream.map_ok(SourceMessageEvent::Data).boxed())
-            .try_filter_map(|event| async move {
-                Ok(match event {
-                    SourceReaderEvent::DataChunk(chunk) => Some(chunk),
-                    SourceReaderEvent::SplitProgress(_) => None,
-                })
-            })
-            .boxed()
-    }
-
     pub fn parse_stream_with_events(
         self,
         msg_stream: BoxSourceMessageEventStream,
@@ -535,11 +514,16 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
-                .next()
-                .await
-                .unwrap()
-                .unwrap()
+            into_data_chunk_stream(
+                self.parse_stream_with_events(
+                    futures::stream::once(async { Ok(SourceMessageEvent::Data(source_messages)) })
+                        .boxed(),
+                ),
+            )
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
         }
 
         /// Parse the given key-value pairs into a [`StreamChunk`].
@@ -553,11 +537,16 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
-                .next()
-                .await
-                .unwrap()
-                .unwrap()
+            into_data_chunk_stream(
+                self.parse_stream_with_events(
+                    futures::stream::once(async { Ok(SourceMessageEvent::Data(source_messages)) })
+                        .boxed(),
+                ),
+            )
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
         }
     }
 }
