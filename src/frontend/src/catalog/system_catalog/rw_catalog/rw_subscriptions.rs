@@ -55,7 +55,7 @@ fn read_rw_subscriptions_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSub
                     id: subscription.id,
                     name: subscription.name.clone(),
                     schema_id: schema.id(),
-                    schema_name: schema.name().to_owned(),
+                    schema_name: schema.name(),
                     owner: subscription.owner,
                     definition: subscription.definition.clone(),
                     retention_seconds: subscription.retention_seconds as i64,

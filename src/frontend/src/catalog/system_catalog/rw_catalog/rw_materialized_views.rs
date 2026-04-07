@@ -58,7 +58,7 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
                     id: table.id,
                     name: table.name().into(),
                     schema_id: schema.id(),
-                    schema_name: schema.name().to_owned(),
+                    schema_name: schema.name(),
                     owner: table.owner,
                     definition: table.create_sql(),
                     append_only: table.append_only,
