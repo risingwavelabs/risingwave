@@ -231,6 +231,42 @@ impl SplitReader for KafkaSplitReader {
 }
 
 impl KafkaSplitReader {
+    fn drain_stop_offsets_with_progress(
+        stop_offsets: &mut HashMap<SplitId, i64>,
+        progress: &HashMap<SplitId, String>,
+    ) {
+        let mut finished_splits = Vec::new();
+
+        for (split_id, progress_offset) in progress {
+            let Some(stop_offset) = stop_offsets.get(split_id).copied() else {
+                continue;
+            };
+            let Ok(progress_offset) = progress_offset.parse::<i64>() else {
+                tracing::warn!(
+                    split_id = split_id.as_ref(),
+                    progress_offset = progress_offset.as_str(),
+                    "invalid split progress offset from kafka reader"
+                );
+                continue;
+            };
+
+            // `stop_offset` is exclusive while progress is inclusive.
+            if progress_offset >= stop_offset - 1 {
+                tracing::debug!(
+                    split_id = split_id.as_ref(),
+                    stop_offset,
+                    progress_offset,
+                    "stop offset reached by split progress"
+                );
+                finished_splits.push(split_id.clone());
+            }
+        }
+
+        for split_id in finished_splits {
+            stop_offsets.remove(&split_id);
+        }
+    }
+
     fn snapshot_split_progress(
         &self,
         latest_progress_offsets: &mut HashMap<SplitId, i64>,
@@ -286,6 +322,7 @@ impl KafkaSplitReader {
                 stop_offset.map(|offset| (split_id.clone() as SplitId, offset))
             })
             .collect();
+        let is_bounded = !stop_offsets.is_empty();
 
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.tick().await;
@@ -324,10 +361,19 @@ impl KafkaSplitReader {
                 && let Some(progress) =
                     self.snapshot_split_progress(&mut latest_progress_offsets)?
             {
+                if is_bounded {
+                    Self::drain_stop_offsets_with_progress(&mut stop_offsets, &progress);
+                }
                 yield SourceMessageEvent::SplitProgress(progress);
             }
 
             if msgs.is_empty() {
+                if is_bounded && stop_offsets.is_empty() {
+                    if !res.is_empty() {
+                        yield SourceMessageEvent::Data(res);
+                    }
+                    break 'for_outer_loop;
+                }
                 continue;
             }
 
@@ -406,10 +452,51 @@ impl KafkaSplitReader {
             let mut cur = Vec::with_capacity(res.capacity());
             swap(&mut cur, &mut res);
             yield SourceMessageEvent::Data(cur);
+            if is_bounded && stop_offsets.is_empty() {
+                break 'for_outer_loop;
+            }
             // don't clear `bytes_current_second` here as it is only related to `.tick()`.
             // yield in the outer loop so that we can always guarantee that some messages are read
             // every `MAX_CHUNK_SIZE`.
         }
         tracing::info!("kafka reader finished");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::KafkaSplitReader;
+    use crate::source::SplitId;
+
+    #[test]
+    fn test_drain_stop_offsets_with_progress() {
+        let mut stop_offsets = HashMap::from([
+            (SplitId::from("0"), 10_i64),
+            (SplitId::from("1"), 15_i64),
+            (SplitId::from("2"), 20_i64),
+        ]);
+        let progress = HashMap::from([
+            (SplitId::from("0"), "9".to_owned()),
+            (SplitId::from("1"), "13".to_owned()),
+            (SplitId::from("2"), "invalid".to_owned()),
+        ]);
+
+        KafkaSplitReader::drain_stop_offsets_with_progress(&mut stop_offsets, &progress);
+
+        assert!(!stop_offsets.contains_key("0"));
+        assert_eq!(stop_offsets.get("1"), Some(&15));
+        assert_eq!(stop_offsets.get("2"), Some(&20));
+    }
+
+    #[test]
+    fn test_drain_stop_offsets_with_progress_for_zero_stop_offset() {
+        let mut stop_offsets = HashMap::from([(SplitId::from("0"), 0_i64)]);
+        let progress = HashMap::from([(SplitId::from("0"), "0".to_owned())]);
+
+        KafkaSplitReader::drain_stop_offsets_with_progress(&mut stop_offsets, &progress);
+
+        assert!(stop_offsets.is_empty());
     }
 }

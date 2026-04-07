@@ -518,6 +518,7 @@ impl ByteStreamSourceParserImpl {
 pub mod test_utils {
     use futures::StreamExt;
     use itertools::Itertools;
+    use risingwave_common::array::StreamChunk;
 
     use super::*;
     use crate::source::SourceMessage;
