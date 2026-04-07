@@ -39,7 +39,6 @@ use crate::barrier::{
     CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
     Scheduled,
 };
-use crate::error::MetaErrorInner;
 use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
@@ -258,7 +257,7 @@ impl GlobalBarrierWorkerContextImpl {
             .await
         {
             Ok(database_id) => Ok(Some(database_id)),
-            Err(err) if should_skip_refresh_finish_for_missing_object(&err) => {
+            Err(err) if err.is_catalog_id_not_found("object") => {
                 tracing::warn!(
                     %table_id,
                     %associated_source_id,
@@ -267,17 +266,20 @@ impl GlobalBarrierWorkerContextImpl {
                 );
                 Ok(None)
             }
-            Err(err) => Err(err),
+            Err(err) => Err(err)
+                .with_context(|| {
+                    format!(
+                        "failed to get database id for refresh stage: table_id={}, associated_source_id={}, stage={stage}",
+                        table_id, associated_source_id
+                    )
+                })
+                .map_err(Into::into),
         }
     }
 
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
     }
-}
-
-fn should_skip_refresh_finish_for_missing_object(err: &MetaError) -> bool {
-    matches!(err.inner(), MetaErrorInner::CatalogIdNotFound("object", _))
 }
 
 impl PostCollectCommand {

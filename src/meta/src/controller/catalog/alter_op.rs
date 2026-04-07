@@ -23,7 +23,7 @@ use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveModelTrait, DatabaseTransaction};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseTransaction, SqlErr};
 use thiserror_ext::AsReport;
 
 use super::*;
@@ -1201,7 +1201,7 @@ impl CatalogController {
                 Ok(())
             }
             Err(e) => {
-                if self.should_skip_refresh_job_db_err(table_id, &e).await? {
+                if should_skip_refresh_job_db_err(&inner.db, table_id, &e).await? {
                     tracing::warn!(
                         %table_id,
                         error = %e.as_report(),
@@ -1245,7 +1245,7 @@ impl CatalogController {
         match RefreshJob::update(active).exec(&inner.db).await {
             Ok(_) => Ok(()),
             Err(e) => {
-                if self.should_skip_refresh_job_db_err(table_id, &e).await? {
+                if should_skip_refresh_job_db_err(&inner.db, table_id, &e).await? {
                     tracing::warn!(
                         %table_id,
                         error = %e.as_report(),
@@ -1286,28 +1286,27 @@ impl CatalogController {
         RefreshJob::update(active).exec(&inner.db).await?;
         Ok(())
     }
+}
 
-    async fn should_skip_refresh_job_db_err(
-        &self,
-        table_id: TableId,
-        err: &sea_orm::DbErr,
-    ) -> MetaResult<bool> {
-        if !is_refresh_job_stale_drop_candidate(err) {
-            return Ok(false);
-        }
-
-        let inner = self.inner.read().await;
-        let table_exists = Table::find_by_id(table_id).one(&inner.db).await?.is_some();
-        Ok(!table_exists)
+async fn should_skip_refresh_job_db_err<C>(
+    db: &C,
+    table_id: TableId,
+    err: &sea_orm::DbErr,
+) -> MetaResult<bool>
+where
+    C: ConnectionTrait,
+{
+    if matches!(err, sea_orm::DbErr::RecordNotUpdated) {
+        return Ok(true);
     }
-}
 
-fn is_refresh_job_stale_drop_candidate(err: &sea_orm::DbErr) -> bool {
-    is_foreign_key_constraint_violation(err) || matches!(err, sea_orm::DbErr::RecordNotUpdated)
-}
+    if !matches!(
+        err.sql_err(),
+        Some(SqlErr::ForeignKeyConstraintViolation(_))
+    ) {
+        return Ok(false);
+    }
 
-fn is_foreign_key_constraint_violation(err: &sea_orm::DbErr) -> bool {
-    let err_msg = err.to_report_string().to_ascii_lowercase();
-    err_msg.contains("foreign key constraint failed")
-        || err_msg.contains("foreign key constraint violated")
+    let table_exists = Table::find_by_id(table_id).one(db).await?.is_some();
+    Ok(!table_exists)
 }
