@@ -23,7 +23,7 @@
 
 ## RisingWave Defaults
 
-- Open `/home/k11/risingwave` to inherit `rust-toolchain` and `.cargo/config.toml`.
+- Open the RisingWave repo root to inherit `rust-toolchain` and `.cargo/config.toml`.
 - Keep `rust-analyzer.cargo.buildScripts.enable = true`.
 - Keep `rust-analyzer.procMacro.enable = true`.
 - Expect macro-heavy modules and generated code.
