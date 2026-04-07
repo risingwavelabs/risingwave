@@ -60,7 +60,9 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         String cachedLatestFile = null;
         List<HistoryRecord> cachedLatestFileRecords = null;
         long sequenceNumber = 0;
-        boolean initialized = false;
+        /** Monotonically increasing version; the instance whose {@code myVersion} matches is the
+         *  only one allowed to write. */
+        long activeVersion = 0;
     }
 
     private String sourceId = "";
@@ -74,6 +76,8 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             Pattern.compile("schema_history_(\\d+)\\.dat");
 
     private SharedState sharedState;
+    /** Version assigned to this instance in {@link #doStart()}. */
+    private long myVersion;
 
     // Override ALL_FIELDS to include our custom configuration fields
     // This ensures that our custom fields are properly validated by Debezium
@@ -138,6 +142,9 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     protected void doStart() {
         synchronized (sharedState) {
             try {
+                // Claim active status — all older instances are now stale.
+                myVersion = ++sharedState.activeVersion;
+
                 // 1. List and sort history files by sequence number
                 List<String> historyFiles = listAndSortHistoryFiles();
 
@@ -148,13 +155,13 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 // loadAllHistoryRecords will also initialize the cache for the latest file
                 this.records = loadAllHistoryRecords(historyFiles);
 
-                sharedState.initialized = true;
-
                 LOGGER.info(
-                        "Loaded schema history with {} total records from {} files. Current sequence number: {}",
+                        "Loaded schema history with {} total records from {} files. "
+                                + "Current sequence number: {}, version: {}",
                         this.records.size(),
                         historyFiles.size(),
-                        sharedState.sequenceNumber);
+                        sharedState.sequenceNumber,
+                        myVersion);
 
             } catch (Exception e) {
                 throw new SchemaHistoryException("Failed to initialize schema history", e);
@@ -170,8 +177,29 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     protected void doStoreRecord(HistoryRecord record) {
+        // Fast path: reject stale instances without acquiring the lock.
+        if (myVersion != sharedState.activeVersion) {
+            LOGGER.warn(
+                    "Stale schema history instance for source {} (version {} vs active {}), "
+                            + "skipping write",
+                    sourceId,
+                    myVersion,
+                    sharedState.activeVersion);
+            return;
+        }
         LOGGER.info("Storing new schema history record.");
         synchronized (sharedState) {
+            // Re-check under lock — a new instance may have started between the fast
+            // check and acquiring the lock.
+            if (myVersion != sharedState.activeVersion) {
+                LOGGER.warn(
+                        "Stale schema history instance for source {} (version {} vs active {}), "
+                                + "skipping write",
+                        sourceId,
+                        myVersion,
+                        sharedState.activeVersion);
+                return;
+            }
             try {
                 // Use cached information to avoid expensive list operations and getObject() calls
                 if (sharedState.cachedLatestFile != null
