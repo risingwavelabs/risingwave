@@ -78,7 +78,7 @@ For the `lints` crate, remember that `lints/Cargo.toml` sets `package.metadata.r
 
 ## RisingWave-Specific Heuristics
 
-- Start from `/home/k11/risingwave` unless the request is explicitly crate-local.
+- Start from the repository root unless the request is explicitly crate-local.
 - If diagnostics look wrong, compare rust-analyzer output with `cargo check -p <package>` using the same features.
 - For crates with many optional integrations, such as `risingwave_connector`, resolve features before trusting diagnostics.
 - For macro-heavy paths, pair rust-analyzer with `cargo expand` when the user asks how generated code really looks.
