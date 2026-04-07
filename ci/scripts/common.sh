@@ -263,25 +263,46 @@ check_link_info() {
 # Set up the environment for E2E sink tests.
 # Arguments:
 #   $1: cargo build profile
-#   $2: "true" to download connector node, any other value to skip (default: "false")
-#   $3: seconds to sleep after cluster start (default: 1)
+#   --risedev-profile <profile>: risedev profile to start (default: "ci-sink-test")
+#   --need-connector: download connector node package
+#   --sleep-duration <seconds>: seconds to sleep after cluster start (default: 1)
 sink_test_env_setup() {
     local profile="$1"
-    local need_connector="${2:-false}"
-    local sleep_duration="${3:-1}"
+    local risedev_profile="ci-sink-test"
+    local need_connector="false"
+    local sleep_duration="1"
+
+    shift
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --risedev-profile)
+                risedev_profile="$2"
+                shift 2
+                ;;
+            --need-connector)
+                need_connector="true"
+                shift
+                ;;
+            --sleep-duration)
+                sleep_duration="$2"
+                shift 2
+                ;;
+            *)
+                echo "sink_test_env_setup: unknown argument $1" 1>&2
+                exit 1
+                ;;
+        esac
+    done
 
     download_and_prepare_rw "$profile" source
 
     if [[ "$need_connector" == "true" ]]; then
-        echo "--- Download connector node package"
-        export CONNECTOR_LIBS_PATH="./connector-node/libs"
-        buildkite-agent artifact download risingwave-connector.tar.gz ./
-        mkdir -p ./connector-node
-        tar xf ./risingwave-connector.tar.gz -C ./connector-node
+        download_connector_node_artifact
     fi
 
-    echo "--- starting risingwave cluster"
-    risedev ci-start ci-sink-test
+    echo "--- starting risingwave cluster: ${risedev_profile}"
+    risedev ci-start "${risedev_profile}"
     sleep "$sleep_duration"
 }
 

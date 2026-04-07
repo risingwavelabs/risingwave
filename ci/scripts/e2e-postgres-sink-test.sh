@@ -20,7 +20,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sink_test_env_setup "$profile"
+sink_test_env_setup "$profile" --risedev-profile ci-sink-postgres-test --need-connector
 
 export PGPASSWORD='post\tgres'
 psql -h db -U postgres -c "DROP DATABASE IF EXISTS sink_test WITH (FORCE)" || true

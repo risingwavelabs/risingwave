@@ -20,7 +20,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sink_test_env_setup "$profile"
+sink_test_env_setup "$profile" --risedev-profile ci-sink-kafka-test
 ./ci/scripts/e2e-kafka-sink-test.sh
 risedev slt './e2e_test/sink/bug_fixes/issue_24367.slt'
 

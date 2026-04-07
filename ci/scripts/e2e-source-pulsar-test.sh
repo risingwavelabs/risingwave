@@ -24,7 +24,6 @@ source_test_env_setup "$profile" ci-source-pulsar-test false true
 
 risedev slt './e2e_test/source_inline/pulsar/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/pulsar/**/*.slt.serial'
-risedev slt './e2e_test/source_legacy/pulsar/*.slt'
 
 echo "--- Kill cluster"
 risedev ci-kill

@@ -20,7 +20,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-source_test_env_setup "$profile" ci-source-cdc-test false true
+source_test_env_setup "$profile" ci-source-cdc-test true true
 
 install_sqlserver_client
 export SQLCMDSERVER=sqlserver-server SQLCMDUSER=SA SQLCMDPASSWORD="SomeTestOnly@SA" SQLCMDDBNAME=mydb SQLCMDPORT=1433
