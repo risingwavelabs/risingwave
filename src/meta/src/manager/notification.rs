@@ -48,8 +48,8 @@ pub enum LocalNotification {
     WorkerNodeActivated(WorkerNode),
     SystemParamsChange(SystemParamsReader),
     BatchParallelismChange,
-    FragmentMappingsUpsert(Vec<FragmentId>),
-    FragmentMappingsDelete(Vec<FragmentId>),
+    ServingFragmentMappingsUpsert(Vec<FragmentId>),
+    ServingFragmentMappingsDelete(Vec<FragmentId>),
     SourceDropped(ObjectId),
     StreamingJobBackfillFinished(JobId),
 }
