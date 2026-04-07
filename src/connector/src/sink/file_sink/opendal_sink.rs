@@ -254,7 +254,7 @@ impl OpenDalSinkWriter {
                     let bytes_written = w.bytes_written();
                     if bytes_written > 0 {
                         w.close().await?;
-                        tracing::info!(
+                        tracing::debug!(
                             "writer {} (executor_id: {}, created_time: {}) finish write file, bytes_written: {}",
                             self.unique_writer_id,
                             self.executor_id,
