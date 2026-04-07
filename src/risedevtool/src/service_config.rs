@@ -309,6 +309,8 @@ pub struct PubsubConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+    #[serde(default)]
+    pub user_managed: bool,
     #[serde(with = "string")]
     pub port: u16,
     pub address: String,
@@ -560,7 +562,7 @@ impl ServiceConfig {
             Self::Tempo(_c) => false,
             Self::AwsS3(_c) => false,
             Self::Kafka(c) => c.user_managed,
-            Self::Pubsub(_c) => false,
+            Self::Pubsub(c) => c.user_managed,
             Self::Pulsar(c) => c.user_managed,
             Self::Redis(_c) => false,
             Self::Opendal(_c) => false,

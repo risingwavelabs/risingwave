@@ -1,0 +1,139 @@
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism = 1;
+
+# Test EOWC numbering functions without a real partition key.
+# Empty PARTITION BY is not supported, so we use the PARTITION BY 1::int workaround
+# which creates a single global partition.
+
+statement ok
+CREATE TABLE nopart_input (
+    tm TIMESTAMPTZ,
+    foo INT,
+    WATERMARK FOR tm AS tm - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW nopart_mv AS
+SELECT
+    tm,
+    foo,
+    row_number() OVER (PARTITION BY 1::int ORDER BY tm) AS rn,
+    rank() OVER (PARTITION BY 1::int ORDER BY tm) AS rk,
+    dense_rank() OVER (PARTITION BY 1::int ORDER BY tm) AS dr
+FROM nopart_input
+EMIT ON WINDOW CLOSE;
+
+let state_table_id, state_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'nopart_mv'
+  AND name LIKE '%eowcoverwindow%'
+  AND name NOT LIKE '%intermediatestate%'
+ORDER BY id
+LIMIT 1
+
+let intermediate_state_table_id, intermediate_state_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'nopart_mv'
+  AND name LIKE '%eowcoverwindowintermediatestate%'
+ORDER BY id
+LIMIT 1
+
+# Insert first batch at t=0s
+statement ok
+INSERT INTO nopart_input VALUES ('2024-01-01 00:00:00+00', 10);
+
+statement ok
+INSERT INTO nopart_input VALUES ('2024-01-01 00:00:00+00', 20);
+
+query I
+SELECT count(*) FROM nopart_mv;
+----
+0
+
+# Insert at t=20s to close the window at t=0s
+statement ok
+INSERT INTO nopart_input VALUES ('2024-01-01 00:00:20+00', 30);
+
+# Two rows from t=0s should appear with correct ranks.
+# Since both rows share the same timestamp (order key), they are peers:
+# row_number: 1,2 (arbitrary within tie); rank: 1,1; dense_rank: 1,1
+query TIIIII rowsort retry 11 backoff 1s
+SELECT * FROM nopart_mv ORDER BY tm, foo;
+----
+2024-01-01 00:00:00+00:00 10 1 1 1
+2024-01-01 00:00:00+00:00 20 2 1 1
+
+# Verify state table is empty (rows evicted after output)
+query I retry 11 backoff 1s
+SELECT count(*) FROM ${state_table};
+----
+0
+
+# Verify exactly one row in intermediate state table (single global partition)
+query I retry 11 backoff 1s
+SELECT count(*) FROM ${intermediate_state_table};
+----
+1
+
+query BBB retry 11 backoff 1s
+SELECT
+    state_0 IS NOT NULL,
+    state_1 IS NOT NULL,
+    state_2 IS NOT NULL
+FROM ${intermediate_state_table};
+----
+t t t
+
+# Insert second batch at t=20s (already inserted one row at t=20s above)
+statement ok
+INSERT INTO nopart_input VALUES ('2024-01-01 00:00:20+00', 40);
+
+query I
+SELECT count(*) FROM nopart_mv;
+----
+2
+
+# Insert at t=40s to close the window at t=20s
+statement ok
+INSERT INTO nopart_input VALUES ('2024-01-01 00:00:40+00', 50);
+
+# Now rows from t=20s should also appear with correct continuing ranks
+query TIIIII rowsort retry 11 backoff 1s
+SELECT * FROM nopart_mv ORDER BY tm, foo;
+----
+2024-01-01 00:00:00+00:00 10 1 1 1
+2024-01-01 00:00:00+00:00 20 2 1 1
+2024-01-01 00:00:20+00:00 30 3 3 2
+2024-01-01 00:00:20+00:00 40 4 3 2
+
+# row_number continues: 3,4
+# rank: 3,3 (both at t=20s, but rank = 3 because 2 rows preceded them)
+# dense_rank: 2,2 (second distinct order key group)
+
+# Verify state table is still empty
+query I retry 11 backoff 1s
+SELECT count(*) FROM ${state_table};
+----
+0
+
+# Still exactly one row in intermediate state table
+query I retry 11 backoff 1s
+SELECT count(*) FROM ${intermediate_state_table};
+----
+1
+
+statement ok
+DROP MATERIALIZED VIEW nopart_mv;
+
+statement ok
+DROP TABLE nopart_input;
+
+statement ok
+SET streaming_parallelism = 0;
