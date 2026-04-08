@@ -52,6 +52,14 @@ DROP SINK nexmark_auction;
 statement ok
 DROP SINK nexmark_bid;
 
+system ok
+echo "[nexmark-debug] nexmark-bid total messages:" && \
+rpk topic consume nexmark-bid -o start:end -f '%v\n' 2>/dev/null | wc -l
+
+system ok
+echo "[nexmark-debug] nexmark-bid duplicate payload samples:" && \
+rpk topic consume nexmark-bid -o start:end -f '%v\n' 2>/dev/null | sort | uniq -c | sort -nr | head
+
 statement ok
 DROP SINK nexmark_person;
 
