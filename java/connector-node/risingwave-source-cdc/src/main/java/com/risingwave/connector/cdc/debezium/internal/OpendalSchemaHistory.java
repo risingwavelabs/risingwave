@@ -81,6 +81,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private long sequenceNumber = 0;
 
     private SharedState sharedState;
+
     /** Version assigned to this instance in {@link #doStart()}. */
     private long myVersion;
 
