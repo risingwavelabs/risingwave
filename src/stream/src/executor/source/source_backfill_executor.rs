@@ -41,9 +41,7 @@ use thiserror_ext::AsReport;
 
 use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
-use super::{
-    SourceStateTableHandler, apply_rate_limit_to_source_reader_event, get_split_offset_col_idx,
-};
+use super::{apply_rate_limit_to_source_reader_event, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
@@ -99,7 +97,6 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     column_ids: Vec<ColumnId>,
     source_desc_builder: Option<SourceDescBuilder>,
     backfill_state_store: BackfillStateTableHandler<S>,
-    source_state_store: SourceStateTableHandler<S>,
 
     /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
@@ -171,7 +168,13 @@ impl BackfillStage {
         Ok(unfinished_splits)
     }
 
-    /// Updates backfill states and `target_offsets` and returns whether the row from upstream `SourceExecutor` is visible.
+    /// Updates backfill states and `target_offsets` from upstream `SourceExecutor` chunks, and
+    /// returns whether the row is visible.
+    ///
+    /// Note that the online catch-up logic intentionally relies on the upstream chunk stream
+    /// carrying split/offset columns. We do not reconcile live upstream progress from source state
+    /// tables here, because source backfill is designed to advance according to the upstream data
+    /// stream instead of a side channel.
     fn handle_upstream_row(&mut self, split_id: &str, offset: &str) -> bool {
         let mut vis = false;
         let state = self.states.get_mut(split_id).unwrap();
@@ -259,7 +262,13 @@ impl BackfillStage {
         }
     }
 
-    /// Updates backfill state with split progress emitted by the reader without corresponding rows.
+    /// Updates backfill state with split progress emitted by the backfill reader when there are no
+    /// corresponding visible rows.
+    ///
+    /// This is needed for connectors such as Kafka under `read_committed`, where the reader can
+    /// reach a later offset because of EOF/control records without yielding a data chunk. This
+    /// supplements `handle_backfill_row`, but does not replace the upstream-chunk-based progress
+    /// tracking in `handle_upstream_row`.
     fn handle_backfill_progress(&mut self, split_id: &str, offset: &str) {
         let Some(state) = self.states.get_mut(split_id) else {
             return;
@@ -302,7 +311,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             source_name,
             column_ids,
             source_desc_builder,
-            split_state_store,
             ..
         } = stream_source_core;
         let source_split_change_count = metrics
@@ -322,39 +330,12 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             column_ids,
             source_desc_builder,
             backfill_state_store,
-            source_state_store: split_state_store,
             metrics,
             source_split_change_count,
             system_params,
             rate_limit_rps,
             progress,
         }
-    }
-
-    fn extract_kafka_offset(split: SplitImpl) -> Option<String> {
-        let kafka_split = split.into_kafka().ok()?;
-        kafka_split.start_offset().map(|offset| offset.to_string())
-    }
-
-    async fn sync_states_with_upstream_progress(
-        &self,
-        backfill_stage: &mut BackfillStage,
-        epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
-        let committed_reader = self.source_state_store.new_committed_reader(epoch).await?;
-        for split in backfill_stage.splits.clone() {
-            let Some(recovered_split) = committed_reader
-                .try_recover_from_state_store(&split)
-                .await?
-            else {
-                continue;
-            };
-            let Some(offset) = Self::extract_kafka_offset(recovered_split) else {
-                continue;
-            };
-            let _ = backfill_stage.handle_upstream_row(split.id().as_ref(), &offset);
-        }
-        Ok(())
     }
 
     async fn build_stream_source_reader(
@@ -717,12 +698,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     Ok(reader)
                                 }
 
-                                self.sync_states_with_upstream_progress(
-                                    &mut backfill_stage,
-                                    barrier.epoch,
-                                )
-                                .await?;
-
                                 self.backfill_state_store
                                     .set_states(backfill_stage.states.clone())
                                     .await?;
@@ -844,6 +819,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         let chunk = match msg? {
                             SourceReaderEvent::DataChunk(chunk) => chunk,
                             SourceReaderEvent::SplitProgress(split_progress) => {
+                                // `SplitProgress` is consumed only from the backfill reader side.
+                                // The upstream side of source backfill still advances based on
+                                // normal chunks with split/offset columns.
                                 for (split_id, offset) in split_progress {
                                     backfill_stage
                                         .handle_backfill_progress(split_id.as_ref(), &offset);

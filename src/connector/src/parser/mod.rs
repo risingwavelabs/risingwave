@@ -410,7 +410,7 @@ pub enum EncodingType {
     Value,
 }
 
-/// The entrypoint of parsing. It parses `SourceMessage` stream (byte stream) into [`StreamChunk`] stream.
+/// The entrypoint of parsing. It parses `SourceMessage` stream (byte stream) into [`risingwave_common::array::StreamChunk`] stream.
 /// Used by [`crate::source::into_chunk_stream`].
 #[derive(Debug)]
 pub enum ByteStreamSourceParserImpl {
