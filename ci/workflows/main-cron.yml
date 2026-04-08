@@ -180,7 +180,7 @@ steps:
       plugins:
         - docker-compose#v5.5.0:
             <<: *docker-compose
-            run: source-generic-test-env
+            run: source-test-env
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 40
       retry: *auto-retry
@@ -203,16 +203,13 @@ steps:
       timeout_in_minutes: 20
       retry: *auto-retry
 
-    - label: "end-to-end kafka source test ({{matrix.backend}} backend)"
+    - label: "end-to-end kafka source test"
       key: "e2e-test-release-source-kafka"
-      <<: *sql-backend
       command: "ci/scripts/e2e-source-kafka-test.sh -p ci-release"
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-kafka-source-tests"
-        || build.pull_request.labels includes "ci/run-e2e-source-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-kafka-source-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
@@ -224,16 +221,13 @@ steps:
       timeout_in_minutes: 40
       retry: *auto-retry
 
-    - label: "end-to-end cdc source test ({{matrix.backend}} backend)"
+    - label: "end-to-end cdc source test"
       key: "e2e-test-release-source-cdc"
-      <<: *sql-backend
       command: "ci/scripts/e2e-source-cdc-test.sh -p ci-release"
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-cdc-source-tests"
-        || build.pull_request.labels includes "ci/run-e2e-source-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-cdc-source-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
@@ -251,9 +245,7 @@ steps:
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-pulsar-source-tests"
-        || build.pull_request.labels includes "ci/run-e2e-source-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-pulsar-source-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
@@ -271,9 +263,7 @@ steps:
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-mqtt-source-tests"
-        || build.pull_request.labels includes "ci/run-e2e-source-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-mqtt-source-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
@@ -291,9 +281,7 @@ steps:
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-nats-source-tests"
-        || build.pull_request.labels includes "ci/run-e2e-source-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-nats-source-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
@@ -311,9 +299,7 @@ steps:
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-pubsub-source-tests"
-        || build.pull_request.labels includes "ci/run-e2e-source-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-pubsub-source-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
@@ -339,21 +325,18 @@ steps:
       plugins:
         - docker-compose#v5.5.0:
             <<: *docker-compose-standard
-            run: sink-common-test-env
+            run: sink-test-env
         - ./ci/plugins/upload-failure-logs
       timeout_in_minutes: 35
       retry: *auto-retry
 
-    - label: "end-to-end kafka sink test ({{matrix.backend}} backend)"
+    - label: "end-to-end kafka sink test"
       key: "e2e-test-release-sink-kafka"
-      <<: *sql-backend
       command: "ci/scripts/e2e-kafka-sink-ci-test.sh -p ci-release"
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-kafka-sink-tests"
-        || build.pull_request.labels includes "ci/run-e2e-sink-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-kafka-sink-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
@@ -365,16 +348,13 @@ steps:
       timeout_in_minutes: 20
       retry: *auto-retry
 
-    - label: "end-to-end postgres sink test ({{matrix.backend}} backend)"
+    - label: "end-to-end postgres sink test"
       key: "e2e-test-release-sink-postgres"
-      <<: *sql-backend
       command: "ci/scripts/e2e-postgres-sink-test.sh -p ci-release"
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-postgres-sink-tests"
-        || build.pull_request.labels includes "ci/run-e2e-sink-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-postgres-sink-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
@@ -386,16 +366,13 @@ steps:
       timeout_in_minutes: 20
       retry: *auto-retry
 
-    - label: "end-to-end jdbc sink test ({{matrix.backend}} backend)"
+    - label: "end-to-end jdbc sink test"
       key: "e2e-test-release-sink-jdbc"
-      <<: *sql-backend
       command: "ci/scripts/e2e-jdbc-sink-test.sh -p ci-release"
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-jdbc-sink-tests"
-        || build.pull_request.labels includes "ci/run-e2e-sink-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-jdbc-sink-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
@@ -407,16 +384,13 @@ steps:
       timeout_in_minutes: 25
       retry: *auto-retry
 
-    - label: "end-to-end elasticsearch sink test ({{matrix.backend}} backend)"
+    - label: "end-to-end elasticsearch sink test"
       key: "e2e-test-release-sink-elasticsearch"
-      <<: *sql-backend
       command: "ci/scripts/e2e-elasticsearch-sink-ci-test.sh -p ci-release"
       if: |
         !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
         || build.pull_request.labels includes "ci/run-e2e-elasticsearch-sink-tests"
-        || build.pull_request.labels includes "ci/run-e2e-sink-tests"
         || build.env("CI_STEPS") =~ /(^|,)e2e-elasticsearch-sink-tests?(,|$$)/
-        || build.env("CI_STEPS") =~ /(^|,)e2e-sink-tests?(,|$$)/
       depends_on:
         - "build"
         - "build-other"
