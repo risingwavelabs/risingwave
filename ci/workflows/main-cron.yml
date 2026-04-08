@@ -926,7 +926,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-redis-test-env
+          run: sink-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -944,7 +944,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-doris-test-env
+          run: sink-redis-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -962,7 +962,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-starrocks-test-env
+          run: sink-doris-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -997,7 +997,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-cassandra-test-env
+          run: sink-starrocks-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -1015,7 +1015,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-clickhouse-test-env
+          run: sink-cassandra-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -1033,7 +1033,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-sqlserver-test-env
+          run: sink-clickhouse-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -1068,7 +1068,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-pulsar-test-env
+          run: sink-sqlserver-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -1086,7 +1086,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-mqtt-test-env
+          run: sink-pulsar-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -1104,7 +1104,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-mongodb-test-env
+          run: sink-mqtt-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -1122,7 +1122,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: sink-test-env
+          run: sink-mongodb-test-env
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
