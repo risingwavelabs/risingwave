@@ -31,7 +31,7 @@ use risingwave_pb::hummock::subscribe_compaction_event_response::{
 use risingwave_pb::hummock::{CompactTaskProgress, SubscribeCompactionEventRequest};
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::{
-    Event as IcebergRequestEvent, PullTask as IcebergPullTask,
+    Event as IcebergRequestEvent, PullTask as IcebergPullTask, ReportTask as IcebergReportTask,
 };
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::{
     Event as IcebergResponseEvent, PullTaskAck as IcebergPullTaskAck,
@@ -433,12 +433,14 @@ impl<D: CompactionEventDispatcher<EventType = E::EventType>, E: CompactorStreamE
         let shutdown_rx_shared = shutdown_rx.shared();
 
         let join_handle = tokio::spawn(async move {
+            let mut stream_generations = HashMap::<HummockContextId, u64>::new();
             let push_stream =
                 |context_id: HummockContextId,
+                 stream_generation: u64,
                  stream: Streaming<E>,
                  compactor_request_streams: &mut FuturesUnordered<_>| {
                     let future = StreamExt::into_future(stream)
-                        .map(move |stream_future| (context_id, stream_future));
+                        .map(move |stream_future| (context_id, stream_generation, stream_future));
 
                     compactor_request_streams.push(future);
                 };
@@ -458,12 +460,27 @@ impl<D: CompactionEventDispatcher<EventType = E::EventType>, E: CompactorStreamE
                     compactor_stream = self.compactor_streams_change_rx.recv() => {
                         if let Some((context_id, stream)) = compactor_stream {
                             tracing::info!("compactor {} enters the cluster", context_id);
-                            push_stream(context_id, stream, &mut compactor_request_streams);
+                            let stream_generation = stream_generations
+                                .entry(context_id)
+                                .and_modify(|generation| *generation += 1)
+                                .or_insert(1);
+                            push_stream(
+                                context_id,
+                                *stream_generation,
+                                stream,
+                                &mut compactor_request_streams,
+                            );
                         }
                     },
 
                     result = pending_on_none(compactor_request_streams.next()) => {
-                        let (context_id, compactor_stream_req): (_, (std::option::Option<std::result::Result<E, _>>, _)) = result;
+                        let (context_id, stream_generation, compactor_stream_req): (_, _, (std::option::Option<std::result::Result<E, _>>, _)) = result;
+                        let Some(current_generation) = stream_generations.get(&context_id).copied() else {
+                            continue;
+                        };
+                        if current_generation != stream_generation {
+                            continue;
+                        }
                         let (event, create_at, stream) = match compactor_stream_req {
                             (Some(Ok(req)), stream) => {
                                 let create_at = req.create_at();
@@ -473,6 +490,7 @@ impl<D: CompactionEventDispatcher<EventType = E::EventType>, E: CompactorStreamE
 
                             (Some(Err(err)), _stream) => {
                                 tracing::warn!(error = %err.as_report(), %context_id, "compactor stream poll with err, recv stream may be destroyed");
+                                self.hummock_compactor_dispatcher.remove_compactor(context_id);
                                 continue
                             }
 
@@ -516,7 +534,12 @@ impl<D: CompactionEventDispatcher<EventType = E::EventType>, E: CompactorStreamE
                         }
 
                         if compactor_alive {
-                            push_stream(context_id, stream, &mut compactor_request_streams);
+                            push_stream(
+                                context_id,
+                                stream_generation,
+                                stream,
+                                &mut compactor_request_streams,
+                            );
                         } else {
                             tracing::warn!(%context_id, "compactor stream error, send stream may be destroyed");
                             self
@@ -699,6 +722,11 @@ impl IcebergCompactionEventHandler {
 
         false
     }
+
+    async fn handle_report_task_event(&self, report: IcebergReportTask) -> bool {
+        self.compaction_manager.handle_report_task(report).await;
+        true
+    }
 }
 
 pub struct IcebergCompactionEventDispatcher {
@@ -715,6 +743,12 @@ impl CompactionEventDispatcher for IcebergCompactionEventDispatcher {
                 return self
                     .compaction_event_handler
                     .handle_pull_task_event(context_id, pull_task_count as usize)
+                    .await;
+            }
+            IcebergRequestEvent::ReportTask(report) => {
+                return self
+                    .compaction_event_handler
+                    .handle_report_task_event(report)
                     .await;
             }
             _ => unreachable!(),

@@ -21,5 +21,8 @@ pub struct IcebergSinkCompactionUpdate {
     // configuration
     pub compaction_interval: u64,
 
+    /// Number of newly committed sink epochs since the last update.
+    pub commit_count_delta: usize,
+
     pub force_compaction: bool,
 }

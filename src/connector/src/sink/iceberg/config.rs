@@ -17,9 +17,10 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use iceberg::spec::{FormatVersion, MAIN_BRANCH};
+use iceberg::spec::{FormatVersion, MAIN_BRANCH, Operation};
 use iceberg::table::Table;
 use iceberg::{Catalog, TableIdent};
+use itertools::Itertools;
 use parquet::basic::Compression;
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
@@ -735,6 +736,59 @@ pub fn commit_branch(sink_type: &str, write_mode: IcebergWriteMode) -> String {
 
 pub fn should_enable_iceberg_cow(sink_type: &str, write_mode: IcebergWriteMode) -> bool {
     sink_type == SINK_TYPE_UPSERT && write_mode == IcebergWriteMode::CopyOnWrite
+}
+
+pub fn get_pending_snapshot_count_from_table(
+    iceberg_config: &IcebergConfig,
+    table: &Table,
+) -> Option<usize> {
+    let metadata = table.metadata();
+    let is_cow_mode =
+        should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
+
+    if is_cow_mode {
+        let last_compaction_timestamp = metadata
+            .current_snapshot()
+            .map(|s| s.timestamp_ms())
+            .unwrap_or(0);
+        let branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
+        let current_snapshot = metadata.snapshot_for_ref(&branch)?;
+
+        let mut count = 0;
+        let mut snapshot_id = Some(current_snapshot.snapshot_id());
+
+        while let Some(id) = snapshot_id {
+            let snapshot = metadata.snapshot_by_id(id)?;
+            if snapshot.timestamp_ms() > last_compaction_timestamp {
+                count += 1;
+                snapshot_id = snapshot.parent_snapshot_id();
+            } else {
+                break;
+            }
+        }
+
+        Some(count)
+    } else {
+        let mut snapshots = metadata.snapshots().collect_vec();
+        if snapshots.is_empty() {
+            return Some(0);
+        }
+
+        snapshots.sort_by_key(|s| s.timestamp_ms());
+
+        let last_replace_index = snapshots
+            .iter()
+            .rposition(|s| matches!(s.summary().operation, Operation::Replace));
+
+        Some(match last_replace_index {
+            Some(index) => snapshots.len() - index - 1,
+            None => snapshots.len(),
+        })
+    }
+}
+
+pub fn get_current_snapshot_id(table: &Table) -> Option<i64> {
+    table.metadata().current_snapshot().map(|s| s.snapshot_id())
 }
 
 impl crate::with_options::WithOptions for IcebergWriteMode {}

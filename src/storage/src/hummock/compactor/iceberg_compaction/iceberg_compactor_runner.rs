@@ -36,7 +36,8 @@ use risingwave_common::config::storage::default::storage::{
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::sink::iceberg::{
-    IcebergConfig, IcebergWriteMode, commit_branch, should_enable_iceberg_cow,
+    IcebergConfig, IcebergWriteMode, commit_branch, get_current_snapshot_id,
+    get_pending_snapshot_count_from_table, should_enable_iceberg_cow,
 };
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
@@ -46,6 +47,34 @@ use tokio::sync::oneshot::Receiver;
 use super::IcebergTaskMeta;
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
+
+#[derive(Clone)]
+pub struct IcebergTaskReportContext {
+    pub sink_id: u32,
+    pub catalog: Arc<dyn Catalog>,
+    pub table_ident: TableIdent,
+    pub iceberg_config: IcebergConfig,
+}
+
+impl IcebergTaskReportContext {
+    pub async fn load_pending_snapshot_state(&self) -> HummockResult<(usize, Option<i64>)> {
+        let table = self
+            .catalog
+            .load_table(&self.table_ident)
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+        let pending_snapshot_count =
+            get_pending_snapshot_count_from_table(&self.iceberg_config, &table).ok_or_else(
+                || HummockError::compaction_executor("Failed to compute pending snapshot count"),
+            )?;
+        Ok((pending_snapshot_count, get_current_snapshot_id(&table)))
+    }
+}
+
+pub struct IcebergTaskExecution {
+    pub report_context: IcebergTaskReportContext,
+    pub plan_runners: Vec<IcebergCompactionPlanRunner>,
+}
 
 static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
     LazyLock::new(|| {
@@ -406,14 +435,15 @@ fn analyze_task_statistics(plan: &CompactionPlan) -> IcebergCompactionTaskStatis
     }
 }
 
-/// Creates plan runners from an iceberg compaction task.
-pub async fn create_plan_runners(
+/// Creates a task execution context from an iceberg compaction task.
+pub async fn create_task_execution(
     iceberg_compaction_task: IcebergCompactionTask,
     config: IcebergCompactorRunnerConfig,
     metrics: Arc<CompactorMetrics>,
-) -> HummockResult<Vec<IcebergCompactionPlanRunner>> {
+) -> HummockResult<IcebergTaskExecution> {
     let IcebergCompactionTask {
         task_id,
+        sink_id,
         props,
         task_type,
     } = iceberg_compaction_task;
@@ -540,7 +570,15 @@ pub async fn create_plan_runners(
             table = %table_ident,
             "No files to compact, skip the task"
         );
-        return Ok(vec![]);
+        return Ok(IcebergTaskExecution {
+            report_context: IcebergTaskReportContext {
+                sink_id,
+                catalog,
+                table_ident,
+                iceberg_config,
+            },
+            plan_runners: vec![],
+        });
     }
 
     let mut runners = Vec::with_capacity(compaction_plans.len());
@@ -567,5 +605,13 @@ pub async fn create_plan_runners(
         "Created plan runners for iceberg compaction task"
     );
 
-    Ok(runners)
+    Ok(IcebergTaskExecution {
+        report_context: IcebergTaskReportContext {
+            sink_id,
+            catalog,
+            table_ident,
+            iceberg_config,
+        },
+        plan_runners: runners,
+    })
 }
