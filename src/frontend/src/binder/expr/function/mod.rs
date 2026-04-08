@@ -784,6 +784,7 @@ impl Binder {
     fn bind_jsonb_agg_arg(&mut self, arg: &FunctionArg) -> Result<Vec<ExprImpl>> {
         match arg {
             FunctionArg::Unnamed(FunctionArgExpr::QualifiedWildcard(prefix, except)) => {
+                let relation_name = prefix.to_string();
                 let (schema_name, table_name) =
                     Binder::resolve_schema_qualified_name(&self.db_name, prefix)?;
                 let except_indices = self.generate_except_indices(except.as_deref())?;
@@ -792,7 +793,7 @@ impl Binder {
                     .range_of
                     .get(&(schema_name, table_name.clone()))
                     .ok_or_else(|| {
-                        ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
+                        ErrorCode::ItemNotFound(format!("relation \"{}\"", relation_name))
                     })?;
                 let (exprs, names) = Self::iter_bound_columns(
                     self.context.columns[*begin..*end]
