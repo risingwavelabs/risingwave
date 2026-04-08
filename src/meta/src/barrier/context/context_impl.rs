@@ -558,12 +558,12 @@ mod tests {
     #[test]
     fn test_skip_refresh_finish_when_associated_source_missing() {
         let err = MetaError::catalog_id_not_found("object", 42);
-        assert!(should_skip_refresh_finish_for_missing_object(&err));
+        assert!(err.is_catalog_id_not_found("object"));
     }
 
     #[test]
     fn test_do_not_skip_refresh_finish_for_other_not_found_types() {
         let err = MetaError::catalog_id_not_found("table", 42);
-        assert!(!should_skip_refresh_finish_for_missing_object(&err));
+        assert!(!err.is_catalog_id_not_found("object"));
     }
 }
