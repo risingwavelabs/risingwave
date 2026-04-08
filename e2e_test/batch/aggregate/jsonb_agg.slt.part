@@ -86,6 +86,11 @@ select jsonb_agg(v6 order by v6) from t;
 ----
 ["1 day", "2 days", "3 days", null]
 
+query T
+select jsonb_agg(t.* order by v2) from t;
+----
+[{"v1": false, "v2": 1, "v3": "ccc", "v4": null, "v5": "2019-01-01T01:00:00", "v6": "1 day"}, {"v1": true, "v2": 2, "v3": "bbb", "v4": false, "v5": "2020-01-01T02:00:00", "v6": "2 days"}, {"v1": true, "v2": 3, "v3": "aaa", "v4": {}, "v5": "2021-01-01T03:00:00", "v6": "3 days"}, {"v1": null, "v2": null, "v3": null, "v4": null, "v5": null, "v6": null}]
+
 # query T
 # select jsonb_agg(distinct v1) from t;
 # ----

@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
-use risingwave_common::types::{DataType, MapType};
+use risingwave_common::types::{DataType, MapType, StructType};
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_sqlparser::ast::{
@@ -35,8 +35,8 @@ use crate::binder::bind_context::Clause;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, TableFunction, TableFunctionType,
-    UserDefinedFunction,
+    Expr, ExprImpl, ExprType, FunctionCall, FunctionCallWithLambda, InputRef, TableFunction,
+    TableFunctionType, UserDefinedFunction,
 };
 use crate::handler::privilege::ObjectCheckItem;
 
@@ -150,10 +150,15 @@ impl Binder {
             );
         }
 
+        let bind_arg = if func_name.eq_ignore_ascii_case("jsonb_agg") {
+            Self::bind_jsonb_agg_arg
+        } else {
+            Self::bind_function_arg
+        };
         let mut args: Vec<_> = arg_list
             .args
             .iter()
-            .map(|arg| self.bind_function_arg(arg))
+            .map(|arg| bind_arg(self, arg))
             .flatten_ok()
             .try_collect()?;
 
@@ -774,5 +779,55 @@ impl Binder {
             FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),
             FunctionArg::Named { .. } => todo!(),
         }
+    }
+
+    fn bind_jsonb_agg_arg(&mut self, arg: &FunctionArg) -> Result<Vec<ExprImpl>> {
+        match arg {
+            FunctionArg::Unnamed(FunctionArgExpr::QualifiedWildcard(prefix, except)) => {
+                let (schema_name, table_name) =
+                    Binder::resolve_schema_qualified_name(&self.db_name, prefix)?;
+                let except_indices = self.generate_except_indices(except.as_deref())?;
+                let (begin, end) = self
+                    .context
+                    .range_of
+                    .get(&(schema_name, table_name.clone()))
+                    .ok_or_else(|| {
+                        ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
+                    })?;
+                let (exprs, names) = Self::iter_bound_columns(
+                    self.context.columns[*begin..*end]
+                        .iter()
+                        .filter(|c| !c.is_hidden && !except_indices.contains(&c.index)),
+                );
+                self.wrap_wildcard_exprs_as_named_row(exprs, names)
+            }
+            FunctionArg::Unnamed(FunctionArgExpr::ExprQualifiedWildcard(expr, prefix)) => {
+                let (exprs, names) = self.bind_wildcard_field_column(expr, prefix)?;
+                self.wrap_wildcard_exprs_as_named_row(exprs, names)
+            }
+            _ => self.bind_function_arg(arg),
+        }
+    }
+
+    fn wrap_wildcard_exprs_as_named_row(
+        &self,
+        exprs: Vec<ExprImpl>,
+        names: Vec<Option<String>>,
+    ) -> Result<Vec<ExprImpl>> {
+        let return_type = DataType::Struct(StructType::new(
+            names
+                .into_iter()
+                .zip(exprs.iter())
+                .enumerate()
+                .map(|(idx, (name, expr))| {
+                    (
+                        name.unwrap_or_else(|| format!("f{}", idx + 1)),
+                        expr.return_type(),
+                    )
+                }),
+        ));
+        Ok(vec![
+            FunctionCall::new_unchecked(ExprType::Row, exprs, return_type).into(),
+        ])
     }
 }
