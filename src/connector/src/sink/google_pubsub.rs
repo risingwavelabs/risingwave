@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use anyhow::anyhow;
 use google_cloud_gax::conn::Environment;
+use google_cloud_gax::grpc::Status;
 use google_cloud_googleapis::pubsub::v1::PubsubMessage;
 use google_cloud_pubsub::apiv1;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
@@ -27,7 +28,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::serde_as;
-use google_cloud_gax::grpc::Status;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
@@ -96,6 +96,7 @@ pub struct GooglePubSubConfig {
     /// The provided account credential must have the
     /// `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
     #[serde(rename = "pubsub.credentials")]
+    #[with_option(allow_alter_on_fly)]
     pub credentials: Option<String>,
 }
 
