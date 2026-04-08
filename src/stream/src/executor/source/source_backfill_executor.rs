@@ -273,6 +273,7 @@ fn state_backfill_offset(state: &BackfillState) -> Option<&str> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn log_backfill_stage_transition(
     actor_id: &str,
     split_id: &str,
