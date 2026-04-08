@@ -927,12 +927,15 @@ pub fn start_compactor(
                                     }
                                 });
                             }
+                            #[expect(deprecated)]
                             ResponseEvent::VacuumTask(_) => {
                                 unreachable!("unexpected vacuum task");
                             }
+                            #[expect(deprecated)]
                             ResponseEvent::FullScanTask(_) => {
                                 unreachable!("unexpected scan task");
                             }
+                            #[expect(deprecated)]
                             ResponseEvent::ValidationTask(validation_task) => {
                                 let validation_task = ValidationTask::from(validation_task);
                                 executor.spawn(async move {
@@ -1210,7 +1213,7 @@ fn schedule_queued_tasks(
                 },
             );
 
-            if let Err(e) = runner.compact(rx).await {
+            if let Err(e) = Box::pin(runner.compact(rx)).await {
                 tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
             }
         });

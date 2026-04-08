@@ -79,6 +79,11 @@ impl DisplayAs for IcebergScan {
 
         write!(f, "IcebergScan: ")?;
         write!(f, "table={}", self.inner.table.identifier())?;
+        write!(f, ", columns=")?;
+        pretty_write_vector(f, &self.inner.column_names())?;
+        if let Some(predicate) = self.inner.predicate() {
+            write!(f, ", predicate={}", predicate)?;
+        }
         if format_type == DisplayFormatType::Verbose {
             write!(f, ", scan_column_names={:?}", self.inner.scan_column_names)?;
             write!(f, ", need_seq_num={}", self.inner.need_seq_num)?;
@@ -239,7 +244,6 @@ impl IcebergScanInner {
             .reader_builder()
             .with_batch_size(chunk_size)
             .with_row_group_filtering_enabled(true)
-            .with_row_selection_enabled(true)
             .build();
 
         for task in &self.tasks[partition] {
@@ -269,6 +273,20 @@ impl IcebergScanInner {
                 yield batch;
             }
         }
+    }
+
+    fn column_names(&self) -> Vec<String> {
+        self.arrow_schema
+            .fields()
+            .iter()
+            .map(|f| f.name().clone())
+            .collect()
+    }
+
+    fn predicate(&self) -> Option<String> {
+        let task = self.tasks.iter().flatten().next()?;
+        let predicate = task.predicate()?;
+        Some(predicate.to_string())
     }
 }
 
@@ -368,4 +386,15 @@ fn calculate_statistics<'a>(
         total_byte_size: Precision::Exact(total_bytes),
         column_statistics: Statistics::unknown_column(schema),
     }
+}
+
+fn pretty_write_vector(f: &mut std::fmt::Formatter<'_>, vec: &[String]) -> std::fmt::Result {
+    write!(f, "[")?;
+    for (i, item) in vec.iter().enumerate() {
+        if i > 0 {
+            write!(f, ", ")?;
+        }
+        write!(f, "{}", item)?;
+    }
+    write!(f, "]")
 }

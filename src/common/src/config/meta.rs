@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common_proc_macro::serde_prefix_all;
+use serde::de::Error as _;
 
 use super::*;
 
@@ -24,6 +25,45 @@ pub enum MetaBackend {
     Sqlite,
     Postgres,
     Mysql,
+}
+
+/// Compression algorithm for hummock version checkpoint serialization.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+#[repr(i32)]
+pub enum CheckpointCompression {
+    /// No compression.
+    ///
+    /// NOTE: The numeric values are aligned with protobuf `CheckpointCompressionAlgorithm`.
+    None = 0,
+    /// Zstd compression (default, good balance between ratio and speed).
+    #[default]
+    Zstd = 1,
+    /// Lz4 compression (faster but lower ratio).
+    Lz4 = 2,
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::CheckpointCompressionAlgorithm;
+
+    use super::CheckpointCompression;
+
+    #[test]
+    fn checkpoint_compression_numeric_values_align_with_pb() {
+        assert_eq!(
+            CheckpointCompression::None as i32,
+            CheckpointCompressionAlgorithm::CheckpointCompressionUnspecified as i32
+        );
+        assert_eq!(
+            CheckpointCompression::Zstd as i32,
+            CheckpointCompressionAlgorithm::CheckpointCompressionZstd as i32
+        );
+        assert_eq!(
+            CheckpointCompression::Lz4 as i32,
+            CheckpointCompressionAlgorithm::CheckpointCompressionLz4 as i32
+        );
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default)]
@@ -134,6 +174,23 @@ pub struct MetaConfig {
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
+
+    /// Compression algorithm for hummock version checkpoint.
+    #[serde(default)]
+    pub checkpoint_compression_algorithm: CheckpointCompression,
+
+    /// Chunk size in bytes for reading large checkpoints.
+    /// Large checkpoints are read in parallel chunks to avoid single-request timeout issues.
+    /// Default: 128MB
+    #[serde(default = "default::meta::checkpoint_read_chunk_size")]
+    pub checkpoint_read_chunk_size: usize,
+
+    /// Maximum number of concurrent chunk reads when reading large checkpoints.
+    /// Higher values may improve read throughput but increase memory usage.
+    /// Memory usage = `checkpoint_read_chunk_size` * `checkpoint_read_max_in_flight_chunks`
+    /// Default: 4
+    #[serde(default = "default::meta::checkpoint_read_max_in_flight_chunks")]
+    pub checkpoint_read_max_in_flight_chunks: usize,
 
     /// If enabled, `SSTable` object file and version delta will be retained.
     ///
@@ -282,6 +339,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compaction_task_max_progress_interval_secs")]
     pub compaction_task_max_progress_interval_secs: u64,
 
+    /// The number of compaction task ids to prefetch from the meta store in one batch.
+    #[serde(default = "default::meta::compaction_task_id_refill_capacity")]
+    pub compaction_task_id_refill_capacity: u32,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub compaction_config: CompactionConfig,
@@ -343,12 +404,25 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
     pub compact_task_table_size_partition_threshold_high: u64,
 
-    /// The interval of the periodic scheduling compaction group split job.
+    /// The interval of the regular periodic compaction group split job.
+    /// This does not disable normalize-triggered splits when
+    /// `enable_compaction_group_normalize` is enabled.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
         alias = "periodic_split_compact_group_interval_sec"
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
+
+    /// Whether to normalize overlapping compaction groups before the regular split/merge scheduling.
+    #[serde(default = "default::meta::enable_compaction_group_normalize")]
+    pub enable_compaction_group_normalize: bool,
+
+    /// The maximum number of normalize splits in one scheduler round. Must be greater than 0.
+    #[serde(
+        default = "default::meta::max_normalize_splits_per_round",
+        deserialize_with = "deserialize_max_normalize_splits_per_round"
+    )]
+    pub max_normalize_splits_per_round: u64,
 
     /// The interval of the periodic scheduling compaction group merge job.
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
@@ -398,6 +472,19 @@ pub struct MetaStoreConfig {
     /// Acquire timeout in seconds for a meta store connection.
     #[serde(default = "default::meta_store_config::acquire_timeout_sec")]
     pub acquire_timeout_sec: u64,
+}
+
+fn deserialize_max_normalize_splits_per_round<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "meta.max_normalize_splits_per_round must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 /// The subsections `[meta.developer]`.
@@ -483,6 +570,12 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default)]
     pub frontend_client_config: RpcClientConfig,
+
+    #[serde(default = "default::developer::table_change_log_insert_batch_size")]
+    pub table_change_log_insert_batch_size: u64,
+
+    #[serde(default = "default::developer::table_change_log_delete_batch_size")]
+    pub table_change_log_delete_batch_size: u64,
 }
 
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
@@ -542,10 +635,10 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
-    #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
-    pub vnode_aligned_level_size_threshold: Option<u64>,
     #[serde(default = "default::compaction_config::max_kv_count_for_xor16")]
     pub max_kv_count_for_xor16: Option<u64>,
+    #[serde(default = "default::compaction_config::max_vnode_key_range_bytes")]
+    pub max_vnode_key_range_bytes: Option<u64>,
 }
 
 pub mod default {
@@ -592,6 +685,14 @@ pub mod default {
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
+        }
+
+        pub fn checkpoint_read_chunk_size() -> usize {
+            128 * 1024 * 1024 // 128MB
+        }
+
+        pub fn checkpoint_read_max_in_flight_chunks() -> usize {
+            4
         }
 
         pub fn enable_hummock_data_archive() -> bool {
@@ -680,6 +781,10 @@ pub mod default {
             60 * 10 // 10min
         }
 
+        pub fn compaction_task_id_refill_capacity() -> u32 {
+            64
+        }
+
         pub fn cut_table_size_limit() -> u64 {
             1024 * 1024 * 1024 // 1GB
         }
@@ -742,6 +847,14 @@ pub mod default {
 
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
+        }
+
+        pub fn enable_compaction_group_normalize() -> bool {
+            false
+        }
+
+        pub fn max_normalize_splits_per_round() -> u64 {
+            4
         }
 
         pub fn compaction_group_merge_dimension_threshold() -> f64 {
@@ -822,8 +935,8 @@ pub mod default {
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 5000;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
         const DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION: bool = true;
-        const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
         pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
+        const DEFAULT_MAX_VNODE_KEY_RANGE_BYTES: Option<u64> = None;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -931,12 +1044,12 @@ pub mod default {
             DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION
         }
 
-        pub fn vnode_aligned_level_size_threshold() -> Option<u64> {
-            DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD
-        }
-
         pub fn max_kv_count_for_xor16() -> Option<u64> {
             Some(DEFAULT_MAX_KV_COUNT_FOR_XOR16)
+        }
+
+        pub fn max_vnode_key_range_bytes() -> Option<u64> {
+            DEFAULT_MAX_VNODE_KEY_RANGE_BYTES
         }
     }
 }

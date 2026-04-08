@@ -200,6 +200,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
     pub hash_join_entry_state_max_rows: usize,
 
+    /// Number of processed rows between periodic join cache evictions.
+    /// Values smaller than 1 will be clamped to 1 by the executor.
+    #[serde(default = "default::developer::streaming_join_hash_map_evict_interval_rows")]
+    pub join_hash_map_evict_interval_rows: u32,
+
     #[serde(default = "default::developer::streaming_now_progress_ratio")]
     pub now_progress_ratio: Option<f32>,
 
@@ -285,6 +290,13 @@ pub struct StreamingDeveloperConfig {
     /// validating the correctness of vnode stats pruning before enabling it in production.
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
+
+    /// The maximum number of kv log store readers that can concurrently read historical data
+    /// (i.e., from the state store) during initialization. A reader is considered "initializing"
+    /// until it has read at least one row from the historical stream or the stream returns empty.
+    /// Set to 0 to disable the limit (unlimited concurrency).
+    #[serde(default = "default::developer::max_concurrent_kv_log_store_historical_read")]
+    pub max_concurrent_kv_log_store_historical_read: usize,
 
     #[serde(default, flatten)]
     #[serde_prefix_all(skip)]

@@ -43,7 +43,7 @@ datafusion = ["risingwave_frontend/datafusion"]
 [dependencies]
 clap = { workspace = true }
 console = "0.16"
-const-str = "1.0"
+const-str = "1.1"
 home = "0.5"
 risingwave_batch_executors = { workspace = true }
 risingwave_cmd = { workspace = true }
@@ -59,8 +59,8 @@ risingwave_jni_core = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_rt = { workspace = true }
 shell-words = "1.1.0"
-strum = "0.27"
-strum_macros = "0.27"
+strum = "0.28"
+strum_macros = "0.28"
 tikv-jemallocator = { workspace = true, features = [
     "unprefixed_malloc_on_supported_platforms",
 ] }

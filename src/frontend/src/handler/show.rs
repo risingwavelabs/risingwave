@@ -385,7 +385,6 @@ struct ShowClusterRow {
     parallelism: Option<i32>,
     is_streaming: Option<bool>,
     is_serving: Option<bool>,
-    is_unschedulable: Option<bool>,
     started_at: Option<Timestamptz>,
 }
 
@@ -646,6 +645,7 @@ pub async fn handle_show_object(
                 .map(|c| {
                     let name = c.name.clone();
                     let r#type = match &c.info {
+                        #[expect(deprecated)]
                         connection::Info::PrivateLinkService(_) => {
                             PRIVATELINK_CONNECTION.to_owned()
                         },
@@ -666,6 +666,7 @@ pub async fn handle_show_object(
                         .filter_map(|sid| schema.get_sink_by_id(sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let properties = match &c.info {
+                        #[expect(deprecated)]
                         connection::Info::PrivateLinkService(i) => {
                             format!(
                                 "provider: {}\nservice_name: {}\nendpoint_id: {}\navailability_zones: {}\nsources: {}\nsinks: {}",
@@ -724,7 +725,6 @@ pub async fn handle_show_object(
                     parallelism: worker.parallelism().map(|parallelism| parallelism as i32),
                     is_streaming: property.map(|p| p.is_streaming),
                     is_serving: property.map(|p| p.is_serving),
-                    is_unschedulable: property.map(|p| p.is_unschedulable),
                     started_at: worker
                         .started_at
                         .map(|ts| Timestamptz::from_secs(ts as i64).unwrap()),

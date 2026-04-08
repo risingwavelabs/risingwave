@@ -35,8 +35,8 @@ use risingwave_pb::iceberg_compaction::{
 use tonic::{Request, Response, Status, Streaming};
 
 use crate::RwReceiverStream;
-use crate::hummock::HummockManagerRef;
 use crate::hummock::compaction::selector::ManualCompactionOption;
+use crate::hummock::{HummockManagerRef, ManualCompactionTriggerResult};
 
 pub struct HummockServiceImpl {
     hummock_manager: HummockManagerRef,
@@ -186,6 +186,7 @@ impl HummockManagerService for HummockServiceImpl {
         let mut option = ManualCompactionOption {
             level: request.level as usize,
             sst_ids: request.sst_ids,
+            exclusive: request.exclusive.unwrap_or(false),
             ..Default::default()
         };
 
@@ -227,12 +228,18 @@ impl HummockManagerService for HummockServiceImpl {
             &option
         );
 
-        self.hummock_manager
+        let should_retry = match self
+            .hummock_manager
             .trigger_manual_compaction(compaction_group_id, option)
-            .await?;
+            .await?
+        {
+            ManualCompactionTriggerResult::Submitted => false,
+            ManualCompactionTriggerResult::Retry => true,
+        };
 
         Ok(Response::new(TriggerManualCompactionResponse {
             status: None,
+            should_retry: Some(should_retry),
         }))
     }
 
@@ -557,6 +564,8 @@ impl HummockManagerService for HummockServiceImpl {
             periodic_ttl_reclaim_compaction_interval_sec,
             periodic_tombstone_reclaim_compaction_interval_sec,
             periodic_scheduling_compaction_group_split_interval_sec,
+            enable_compaction_group_normalize,
+            max_normalize_splits_per_round,
             do_not_config_object_storage_lifecycle,
             partition_vnode_count,
             table_high_write_throughput_threshold,
@@ -660,6 +669,39 @@ impl HummockManagerService for HummockServiceImpl {
             .merge_compaction_group(req.left_group_id, req.right_group_id)
             .await?;
         Ok(Response::new(MergeCompactionGroupResponse {}))
+    }
+
+    async fn get_table_change_logs(
+        &self,
+        request: Request<GetTableChangeLogsRequest>,
+    ) -> Result<Response<GetTableChangeLogsResponse>, Status> {
+        let GetTableChangeLogsRequest {
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids,
+            exclude_empty,
+            limit,
+        } = request.into_inner();
+        let table_change_logs = self
+            .hummock_manager
+            .get_table_change_logs(
+                epoch_only,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids
+                    .map(|t| t.table_ids.into_iter().collect::<HashSet<_>>())
+                    .clone(),
+                exclude_empty,
+                limit,
+            )
+            .await
+            .into_iter()
+            .map(|(i, l)| (i.as_raw_id(), l.to_protobuf()))
+            .collect();
+        Ok(Response::new(GetTableChangeLogsResponse {
+            table_change_logs,
+        }))
     }
 }
 

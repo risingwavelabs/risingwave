@@ -514,6 +514,7 @@ enum CoordinatorWorkerEvent {
 }
 
 impl CoordinatorWorker {
+    #[allow(clippy::large_stack_frames)]
     pub async fn run(
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
@@ -534,20 +535,18 @@ impl CoordinatorWorker {
         };
 
         dispatch_sink!(sink, sink, {
-            let coordinator = match sink
-                .new_coordinator(Some(iceberg_compact_stat_sender))
-                .await
-            {
-                Ok(coordinator) => coordinator,
-                Err(e) => {
-                    error!(
-                        error = %e.as_report(),
-                        "unable to build coordinator with param {:?}",
-                        param
-                    );
-                    return;
-                }
-            };
+            let coordinator =
+                match Box::pin(sink.new_coordinator(Some(iceberg_compact_stat_sender))).await {
+                    Ok(coordinator) => coordinator,
+                    Err(e) => {
+                        error!(
+                            error = %e.as_report(),
+                            "unable to build coordinator with param {:?}",
+                            param
+                        );
+                        return;
+                    }
+                };
             Self::execute_coordinator(db, param, request_rx, coordinator, subscriber).await
         });
     }

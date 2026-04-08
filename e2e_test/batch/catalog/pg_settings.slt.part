@@ -51,6 +51,7 @@ user extra_float_digits
 user force_split_distinct_agg
 user force_two_phase_agg
 user iceberg_engine_connection
+user iceberg_query_storage_mode
 user idle_in_transaction_session_timeout
 user implicit_flush
 user intervalstyle
@@ -84,12 +85,6 @@ user streaming_parallelism_for_materialized_view
 user streaming_parallelism_for_sink
 user streaming_parallelism_for_source
 user streaming_parallelism_for_table
-user streaming_parallelism_strategy
-user streaming_parallelism_strategy_for_index
-user streaming_parallelism_strategy_for_materialized_view
-user streaming_parallelism_strategy_for_sink
-user streaming_parallelism_strategy_for_source
-user streaming_parallelism_strategy_for_table
 user streaming_separate_consecutive_join
 user streaming_separate_sink
 user streaming_sync_log_store_buffer_size

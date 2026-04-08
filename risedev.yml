@@ -817,6 +817,9 @@ profile:
       - use: frontend
       - use: compactor
       - use: pubsub
+        user-managed: true
+        address: pubsub-emulator
+        port: 8900
         persist-data: true
       - use: kafka
         user-managed: true
@@ -844,7 +847,7 @@ profile:
         password: post\tgres
         user-managed: true
 
-  # Minimal configuration for cron_only source tests (only Kafka)
+  # Minimal configuration for cron_only source tests (Kafka + direct CDC)
   ci-inline-source-cron-only-test:
     config-path: src/config/ci-recovery.toml
     steps:
@@ -859,6 +862,12 @@ profile:
         user-managed: true
         address: message_queue
         port: 29092
+      - use: mysql
+        port: 3306
+        address: mysql
+        user: root
+        password: 123456
+        user-managed: true
       - use: postgres
         port: 5432
         address: db
@@ -1475,6 +1484,8 @@ template:
   # Google pubsub emulator service
   pubsub:
     id: pubsub-${port}
+
+    user-managed: false
 
     address: "127.0.0.1"
 

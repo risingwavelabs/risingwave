@@ -60,6 +60,7 @@ use risingwave_meta_service::telemetry_service::TelemetryInfoServiceImpl;
 use risingwave_meta_service::user_service::UserServiceImpl;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -159,7 +160,7 @@ pub async fn rpc_serve(
         }
     };
 
-    rpc_serve_with_store(
+    Box::pin(rpc_serve_with_store(
         meta_store_impl,
         election_client,
         address_info,
@@ -170,7 +171,7 @@ pub async fn rpc_serve(
         init_system_params,
         init_session_config,
         shutdown,
-    )
+    ))
     .await
 }
 
@@ -400,47 +401,12 @@ pub async fn start_service_as_election_leader(
         prometheus_http_query::Client::from_str(x).unwrap()
     });
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
-    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
-        metadata_manager.clone(),
-        env.await_tree_reg().clone(),
-        hummock_manager.clone(),
-        env.event_log_manager_ref(),
-        prometheus_client.clone(),
-        prometheus_selector.clone(),
-        opts.redact_sql_option_keywords.clone(),
-        env.system_params_manager_impl_ref(),
-    ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
         max_length: opts.cached_traces_num,
         max_memory_usage: opts.cached_traces_memory_limit_bytes,
     });
     let trace_srv = otlp_embedded::TraceServiceImpl::new(trace_state.clone());
-
-    #[cfg(not(madsim))]
-    let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
-        use risingwave_common::config::RpcClientConfig;
-        use risingwave_rpc_client::MonitorClientPool;
-
-        let dashboard_service = crate::dashboard::DashboardService {
-            await_tree_reg: env.await_tree_reg().clone(),
-            dashboard_addr: *dashboard_addr,
-            prometheus_client,
-            prometheus_selector,
-            metadata_manager: metadata_manager.clone(),
-            hummock_manager: hummock_manager.clone(),
-            monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
-            diagnose_command,
-            profile_service: risingwave_common_heap_profiling::ProfileServiceImpl::new(
-                server_config.clone(),
-            ),
-            trace_state,
-        };
-        let task = tokio::spawn(dashboard_service.serve());
-        Some(task)
-    } else {
-        None
-    };
 
     let (barrier_scheduler, scheduled_barriers) =
         BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
@@ -606,6 +572,7 @@ pub async fn start_service_as_election_leader(
         stream_manager.clone(),
         metadata_manager.clone(),
         refresh_manager.clone(),
+        iceberg_compaction_mgr.clone(),
     );
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
@@ -632,8 +599,44 @@ pub async fn start_service_as_election_leader(
     let monitor_srv = MonitorServiceImpl::new(
         metadata_manager.clone(),
         env.await_tree_reg().clone(),
-        server_config,
+        server_config.clone(),
     );
+    let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
+        metadata_manager.clone(),
+        env.await_tree_reg().clone(),
+        hummock_manager.clone(),
+        iceberg_compaction_mgr.clone(),
+        env.event_log_manager_ref(),
+        prometheus_client.clone(),
+        prometheus_selector.clone(),
+        opts.redact_sql_option_keywords.clone(),
+        env.system_params_manager_impl_ref(),
+    ));
+
+    #[cfg(not(madsim))]
+    let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
+        use risingwave_common::config::RpcClientConfig;
+        use risingwave_rpc_client::MonitorClientPool;
+
+        let dashboard_service = crate::dashboard::DashboardService {
+            await_tree_reg: env.await_tree_reg().clone(),
+            dashboard_addr: *dashboard_addr,
+            prometheus_client,
+            prometheus_selector,
+            metadata_manager: metadata_manager.clone(),
+            hummock_manager: hummock_manager.clone(),
+            monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
+            diagnose_command,
+            profile_service: risingwave_common_heap_profiling::ProfileServiceImpl::new(
+                server_config.clone(),
+            ),
+            trace_state,
+        };
+        let task = tokio::spawn(dashboard_service.serve());
+        Some(task)
+    } else {
+        None
+    };
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -788,7 +791,9 @@ pub async fn start_service_as_election_leader(
         .add_service(HostedIcebergCatalogServiceServer::new(
             hosted_iceberg_catalog_srv,
         ))
-        .add_service(MonitorServiceServer::new(monitor_srv));
+        .add_service(configured_monitor_service_server(
+            MonitorServiceServer::new(monitor_srv),
+        ));
 
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));

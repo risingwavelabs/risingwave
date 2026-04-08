@@ -359,11 +359,16 @@ impl Binder {
                     aliases.push(Some(alias.real_value()));
                 }
                 SelectItem::QualifiedWildcard(obj_name, except) => {
-                    let table_name = &obj_name.0.last().unwrap().real_value();
+                    let (schema_name, table_name) =
+                        Binder::resolve_schema_qualified_name(&self.db_name, obj_name)?;
                     let except_indices = self.generate_except_indices(except.as_deref())?;
-                    let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
-                        ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
-                    })?;
+                    let (begin, end) = self
+                        .context
+                        .range_of
+                        .get(&(schema_name, table_name.clone()))
+                        .ok_or_else(|| {
+                            ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
+                        })?;
                     let (exprs, names) = Self::iter_bound_columns(
                         self.context.columns[*begin..*end]
                             .iter()

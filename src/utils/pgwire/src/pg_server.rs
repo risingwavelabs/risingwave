@@ -139,6 +139,8 @@ pub trait Session: Send + Sync {
     fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
 
     fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()>;
+
+    fn user(&self) -> String;
 }
 
 /// Each session could run different SQLs multiple times.
@@ -547,6 +549,10 @@ mod tests {
 
         fn check_idle_in_transaction_timeout(&self) -> PsqlResult<()> {
             Ok(())
+        }
+
+        fn user(&self) -> String {
+            "mock".to_owned()
         }
     }
 
