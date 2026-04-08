@@ -61,7 +61,11 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             new ConcurrentHashMap<>();
 
     static final class SharedState {
+        /** Which instance is the active writer. */
         long activeVersion = 0;
+
+        /** Global sequence number so that no two instances ever write the same file name. */
+        long sequenceNumber = 0;
     }
 
     private String sourceId = "";
@@ -78,7 +82,6 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     private String cachedLatestFile = null;
     // Cache the actual records from the latest file to avoid redundant getObject() calls
     private List<HistoryRecord> cachedLatestFileRecords = null;
-    private long sequenceNumber = 0;
 
     private SharedState sharedState;
 
@@ -166,7 +169,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                                 + "Current sequence number: {}, version: {}",
                         this.records.size(),
                         historyFiles.size(),
-                        sequenceNumber,
+                        sharedState.sequenceNumber,
                         myVersion);
 
             } catch (Exception e) {
@@ -221,7 +224,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 } else {
                     // 2. Create new file with next sequence number when current file is full or
                     // doesn't exist
-                    long nextSequence = ++sequenceNumber;
+                    long nextSequence = ++sharedState.sequenceNumber;
                     String newFile =
                             String.format("%s/schema_history_%d.dat", objectDir, nextSequence);
                     List<HistoryRecord> newRecords = new ArrayList<>();
@@ -333,14 +336,14 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
      */
     private void initializeSequenceNumber(List<String> historyFiles) {
         if (historyFiles.isEmpty()) {
-            sequenceNumber = 0;
+            sharedState.sequenceNumber = 0;
             LOGGER.info("No existing files, initialized sequence number to 0");
         } else {
             // historyFiles is already sorted by sequence number in listAndSortHistoryFiles(),
             // so the last file has the maximum sequence number
             long maxSequence =
                     extractSequenceFromFileName(historyFiles.get(historyFiles.size() - 1));
-            sequenceNumber = maxSequence;
+            sharedState.sequenceNumber = maxSequence;
             LOGGER.info("Initialized sequence number to {} from existing files", maxSequence);
         }
     }
