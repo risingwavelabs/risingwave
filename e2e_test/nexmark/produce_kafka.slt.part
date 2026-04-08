@@ -52,12 +52,14 @@ DROP SINK nexmark_auction;
 statement ok
 DROP SINK nexmark_bid;
 
+# Diagnostic: verify Kafka message count matches the 50-row INSERT.
+# If count > 50, the sink produced duplicates (at-least-once delivery).
 system ok
-echo "[nexmark-debug] nexmark-bid total messages:" && \
+echo "[nexmark-diag] nexmark-bid messages (expected 50):" && \
 rpk topic consume nexmark-bid -o start:end -f '%v\n' 2>/dev/null | wc -l
 
 system ok
-echo "[nexmark-debug] nexmark-bid duplicate payload samples:" && \
+echo "[nexmark-diag] nexmark-bid duplicate payload samples:" && \
 rpk topic consume nexmark-bid -o start:end -f '%v\n' 2>/dev/null | sort | uniq -c | sort -nr | head
 
 statement ok
