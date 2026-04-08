@@ -53,7 +53,9 @@ impl LogSinker for BatchingLogSinker {
             let (epoch, item): (u64, LogStoreReadItem) = log_reader.next_item().await?;
             // begin_epoch when not previously began
             state = match state {
-                LogConsumerState::Uninitialized => LogConsumerState::EpochBegun { curr_epoch: epoch },
+                LogConsumerState::Uninitialized => {
+                    LogConsumerState::EpochBegun { curr_epoch: epoch }
+                }
                 LogConsumerState::EpochBegun { curr_epoch } => {
                     assert!(
                         epoch >= curr_epoch,
