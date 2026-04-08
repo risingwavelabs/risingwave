@@ -725,14 +725,15 @@ pub fn start_iceberg_compactor(
                                     ),
                                 );
 
-                                if enqueued_count == 0 {
-                                    if let Some(task_tracker) = task_trackers.remove(&task_id)
+                                if enqueued_count == 0
+                                    && let Some(task_tracker) = task_trackers.remove(&task_id)
+                                {
+                                    let report = build_iceberg_task_result(task_tracker).await;
+                                    if send_iceberg_task_report(&request_sender, report.clone())
+                                        .is_err()
                                     {
-                                        let report = build_iceberg_task_result(task_tracker).await;
-                                        if send_iceberg_task_report(&request_sender, report.clone()).is_err() {
-                                            pending_task_reports.push_back(report);
-                                            continue 'start_stream;
-                                        }
+                                        pending_task_reports.push_back(report);
+                                        continue 'start_stream;
                                     }
                                 }
 

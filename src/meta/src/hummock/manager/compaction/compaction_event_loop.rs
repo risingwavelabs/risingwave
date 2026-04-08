@@ -723,8 +723,8 @@ impl IcebergCompactionEventHandler {
         false
     }
 
-    async fn handle_report_task_event(&self, report: IcebergReportTask) -> bool {
-        self.compaction_manager.handle_report_task(report).await;
+    fn handle_report_task_event(&self, report: IcebergReportTask) -> bool {
+        self.compaction_manager.handle_report_task(report);
         true
     }
 }
@@ -748,8 +748,7 @@ impl CompactionEventDispatcher for IcebergCompactionEventDispatcher {
             IcebergRequestEvent::ReportTask(report) => {
                 return self
                     .compaction_event_handler
-                    .handle_report_task_event(report)
-                    .await;
+                    .handle_report_task_event(report);
             }
             _ => unreachable!(),
         }

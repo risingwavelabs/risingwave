@@ -22,6 +22,7 @@ use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::id::WorkerId;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{
@@ -429,12 +430,10 @@ impl Drop for IcebergCompactionHandle {
         let mut guard = self.inner.write();
         if let Some(track) = guard.sink_schedules.get_mut(&self.sink_id) {
             // Only restore/complete if this handle's task_type matches the track's task_type
-            if track.task_type == self.task_type {
-                if !self.handle_success {
-                    // If the handle is not successful, we need to restore the track from snapshot.
-                    // This is to avoid the case where the handle is dropped before the compaction task is sent.
-                    track.restore_from_snapshot(self.track_snapshot.clone());
-                }
+            if track.task_type == self.task_type && !self.handle_success {
+                // If the handle is not successful, we need to restore the track from snapshot.
+                // This is to avoid the case where the handle is dropped before the compaction task is sent.
+                track.restore_from_snapshot(self.track_snapshot.clone());
             }
         }
     }
@@ -729,7 +728,10 @@ impl IcebergCompactionManager {
 
         let mut guard = self.inner.write();
 
-        for (sink_id, snapshot_state) in sinks_to_reconcile.into_iter().zip(reconciled_states) {
+        for (sink_id, snapshot_state) in sinks_to_reconcile
+            .into_iter()
+            .zip_eq_fast(reconciled_states)
+        {
             if let Some(track) = guard.sink_schedules.get_mut(&sink_id)
                 && let Some(snapshot_state) = snapshot_state
             {
@@ -850,7 +852,7 @@ impl IcebergCompactionManager {
         Ok(iceberg_config)
     }
 
-    pub async fn handle_report_task(&self, report: IcebergReportTask) {
+    pub fn handle_report_task(&self, report: IcebergReportTask) {
         let sink_id = SinkId::from(report.sink_id);
         let task_id = report.task_id;
         let status = IcebergReportTaskStatus::try_from(report.status)
