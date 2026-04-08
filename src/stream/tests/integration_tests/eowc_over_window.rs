@@ -12,8 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::aggregate::{AggArgs, PbAggKind};
-use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
+use risingwave_expr::window_function::{
+    Frame, FrameBound, FrameBounds, FrameExclusion, SessionFrameBounds, SessionFrameGap,
+    WindowFuncCall, WindowFuncKind,
+};
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::executor::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 
@@ -734,6 +739,96 @@ async fn test_over_window_legacy_without_intermediate_state_table() {
             - input: !barrier 3
               output:
               - !barrier 3
+        "#]],
+        SnapshotOptions::default(),
+    )
+    .await;
+}
+
+/// Test that session windows are closed by watermark even when no new session starts.
+/// This is the fix for the bug where the last session in a partition was never emitted.
+#[tokio::test]
+async fn test_over_window_session_watermark_close() {
+    let store = MemoryStateStore::new();
+
+    let order_data_type = DataType::Int64;
+    let gap_data_type = DataType::Int64;
+
+    let calls = vec![
+        // count(*) over session window with gap=5
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::Count.into()),
+            return_type: DataType::Int64,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame {
+                bounds: FrameBounds::Session(SessionFrameBounds {
+                    order_data_type: order_data_type.clone(),
+                    order_type: OrderType::ascending(),
+                    gap_data_type: gap_data_type.clone(),
+                    gap: SessionFrameGap::new_for_test(
+                        ScalarImpl::Int64(5),
+                        &order_data_type,
+                        &gap_data_type,
+                    ),
+                }),
+                exclusion: FrameExclusion::NoOthers,
+            },
+        },
+    ];
+
+    check_with_script(
+        || create_executor(calls.clone(), store.clone()),
+        r###"
+- !barrier 1
+- !chunk |2
+      I T  I   i
+    + 1 p1 100 10
+    + 3 p1 101 20
+    + 4 p2 200 30
+# No new session starts for p1 or p2, so without watermark they would never emit.
+# Send watermark at 8 — this should close p1's session (last key=3, 3+5=8 <= 8).
+# p2's session (last key=4, 4+5=9) is NOT closed yet (8 < 9).
+- !watermark
+  col_idx: 0
+  val: '8'
+# Send watermark at 10 — this should close p2's session (last key=4, 4+5=9 <= 10).
+- !watermark
+  col_idx: 0
+  val: '10'
+- !barrier 2
+"###,
+        expect![[r#"
+            - input: !barrier 1
+              output:
+              - !barrier 1
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 3 | p1 | 101 | 20 |
+                | + | 4 | p2 | 200 | 30 |
+                +---+---+----+-----+----+
+              output: []
+            - input: !watermark
+                col_idx: 0
+                val: '8'
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 1 | p1 | 100 | 10 | 2 |
+                | + | 3 | p1 | 101 | 20 | 2 |
+                +---+---+----+-----+----+---+
+            - input: !watermark
+                col_idx: 0
+                val: '10'
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 4 | p2 | 200 | 30 | 1 |
+                +---+---+----+-----+----+---+
+            - input: !barrier 2
+              output:
+              - !barrier 2
         "#]],
         SnapshotOptions::default(),
     )

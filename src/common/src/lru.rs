@@ -367,6 +367,18 @@ where
         }
     }
 
+    /// Iterate over all entries in the cache, from least recently used to most recently used.
+    /// Does not update LRU ordering (like `peek_mut`).
+    pub fn iter_mut(&mut self) -> LruCacheIterMut<'_, K, V> {
+        let dummy_ptr = unsafe { NonNull::new_unchecked(self.dummy.as_mut() as *mut _) };
+        let current = self.dummy.next.unwrap();
+        LruCacheIterMut {
+            current,
+            dummy: dummy_ptr,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
     fn attach(&mut self, mut ptr: NonNull<LruEntry<K, V>>) {
         unsafe {
             let entry = ptr.as_mut();
@@ -392,6 +404,29 @@ where
 {
     fn drop(&mut self) {
         self.clear()
+    }
+}
+
+pub struct LruCacheIterMut<'a, K: Hash + Eq, V> {
+    current: NonNull<LruEntry<K, V>>,
+    dummy: NonNull<LruEntry<K, V>>,
+    _marker: std::marker::PhantomData<&'a mut LruCache<K, V>>,
+}
+
+impl<'a, K: Hash + Eq, V> Iterator for LruCacheIterMut<'a, K, V> {
+    type Item = (&'a K, &'a mut V);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current == self.dummy {
+            return None;
+        }
+        unsafe {
+            let entry_ptr = self.current.as_ptr();
+            self.current = (*entry_ptr).next.unwrap();
+            let key = (*entry_ptr).key.assume_init_ref();
+            let value = (*entry_ptr).value.assume_init_mut();
+            Some((key, value))
+        }
     }
 }
 

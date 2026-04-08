@@ -19,7 +19,7 @@ use std::ops::Bound;
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{ArrayRef, Op};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, Op};
 use risingwave_common::row::RowExt;
 use risingwave_common::types::{ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
@@ -30,7 +30,7 @@ use risingwave_common::{must_match, row};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVecDeque;
 use risingwave_expr::window_function::{
-    StateEvictHint, StateKey, WindowFuncCall, WindowStateSnapshot, WindowStates,
+    FrameBounds, StateEvictHint, StateKey, WindowFuncCall, WindowStateSnapshot, WindowStates,
     create_window_state,
 };
 use risingwave_pb::window_function::{
@@ -162,10 +162,16 @@ struct ExecutorInner<S: StateStore> {
     /// Serde for input stream key (pk), used for encoding/decoding `StateKey` in snapshots.
     /// Only initialized when `intermediate_state_table` is present.
     pk_serde: Option<OrderedRowSerde>,
+    /// Whether any window function call uses a session frame.
+    has_session_windows: bool,
 }
 
 struct ExecutionVars<S: StateStore> {
     partitions: PartitionCache,
+    /// Tracks partitions with unclosed session windows.
+    /// Maps encoded partition key → partition key `OwnedRow`.
+    /// Only populated when `has_session_windows` is true.
+    active_session_partitions: HashMap<MemcmpEncoded, OwnedRow>,
     _phantom: PhantomData<S>,
 }
 
@@ -194,6 +200,11 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
 impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
         let input_info = args.input.info().clone();
+
+        let has_session_windows = args
+            .calls
+            .iter()
+            .any(|c| matches!(&c.frame.bounds, FrameBounds::Session(_)));
 
         // Build pk_serde if intermediate_state_table is present
         let pk_serde = args.intermediate_state_table.as_ref().map(|_| {
@@ -224,6 +235,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 watermark_sequence: args.watermark_epoch,
                 intermediate_state_table: args.intermediate_state_table,
                 pk_serde,
+                has_session_windows,
             },
         }
     }
@@ -408,14 +420,61 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         Ok(())
     }
 
+    /// Drain all ready windows from a partition, appending output rows to `builders`.
+    /// Returns `true` if any output was produced.
+    fn drain_ready_windows(
+        this: &mut ExecutorInner<S>,
+        partition: &mut Partition,
+        partition_key: &OwnedRow,
+        builders: &mut [ArrayBuilderImpl],
+    ) -> StreamExecutorResult<bool> {
+        let mut has_output = false;
+        while partition.states.are_ready() {
+            has_output = true;
+
+            let (ret_values, evict_hint) = partition.states.slide()?;
+            let curr_row = partition
+                .curr_row_buffer
+                .pop_front()
+                .expect("ready window must have corresponding current row");
+
+            for (builder, datum) in builders.iter_mut().zip_eq_debug(
+                curr_row
+                    .iter()
+                    .chain(ret_values.iter().map(|v| v.to_datum_ref())),
+            ) {
+                builder.append(datum);
+            }
+
+            if let StateEvictHint::CanEvict(keys_to_evict) = evict_hint {
+                for key in keys_to_evict {
+                    let order_key = memcmp_encoding::decode_row(
+                        &key.order_key,
+                        &[this.schema[this.order_key_index].data_type()],
+                        &[OrderType::ascending()],
+                    )?;
+                    let state_row_pk = partition_key.chain(order_key).chain(key.pk);
+                    let state_row = {
+                        // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
+                        let mut state_row = vec![None; this.state_table_schema_len];
+                        for (i_in_pk, &i) in this.state_table.pk_indices().iter().enumerate() {
+                            state_row[i] = state_row_pk.datum_at(i_in_pk).to_owned_datum();
+                        }
+                        OwnedRow::new(state_row)
+                    };
+                    this.state_table.delete(state_row);
+                }
+            }
+        }
+        Ok(has_output)
+    }
+
     async fn apply_chunk(
         this: &mut ExecutorInner<S>,
         vars: &mut ExecutionVars<S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let mut builders = this.schema.create_array_builders(chunk.capacity()); // just an estimate
-        // Track partitions that produced output during this chunk, so we persist
-        // intermediate state only once per partition at the end.
         let mut dirty_partitions: HashMap<MemcmpEncoded, OwnedRow> = HashMap::new();
 
         // We assume that the input is sorted by order key.
@@ -473,49 +532,94 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 .curr_row_buffer
                 .push_back(input_row.into_owned_row());
 
-            let mut has_output = false;
-            while partition.states.are_ready() {
-                has_output = true;
-                // The partition is ready to output, so we can produce a row.
+            let has_output =
+                Self::drain_ready_windows(this, partition, &partition_key, &mut builders)?;
+            let has_unclosed = !partition.curr_row_buffer.is_empty();
 
-                // Get all outputs.
-                let (ret_values, evict_hint) = partition.states.slide()?;
-                let curr_row = partition
-                    .curr_row_buffer
-                    .pop_front()
-                    .expect("ready window must have corresponding current row");
+            if has_output && this.intermediate_state_table.is_some() {
+                dirty_partitions
+                    .entry(encoded_partition_key.clone())
+                    .or_insert(partition_key.clone());
+            }
 
-                // Append to output builders.
-                for (builder, datum) in builders.iter_mut().zip_eq_debug(
-                    curr_row
-                        .iter()
-                        .chain(ret_values.iter().map(|v| v.to_datum_ref())),
-                ) {
-                    builder.append(datum);
+            // Track partitions with unclosed sessions for watermark-based closure.
+            if this.has_session_windows {
+                if has_unclosed {
+                    vars.active_session_partitions
+                        .entry(encoded_partition_key)
+                        .or_insert(partition_key);
+                } else {
+                    vars.active_session_partitions
+                        .remove(&encoded_partition_key);
                 }
+            }
+        }
 
-                // Evict unneeded rows from state table.
-                if let StateEvictHint::CanEvict(keys_to_evict) = evict_hint {
-                    for key in keys_to_evict {
-                        let order_key = memcmp_encoding::decode_row(
-                            &key.order_key,
-                            &[this.schema[this.order_key_index].data_type()],
-                            &[OrderType::ascending()],
-                        )?;
-                        let state_row_pk = (&partition_key).chain(order_key).chain(key.pk);
-                        let state_row = {
-                            // FIXME(rc): quite hacky here, we may need `state_table.delete_by_pk`
-                            let mut state_row = vec![None; this.state_table_schema_len];
-                            for (i_in_pk, &i) in this.state_table.pk_indices().iter().enumerate() {
-                                state_row[i] = state_row_pk.datum_at(i_in_pk).to_owned_datum();
-                            }
-                            OwnedRow::new(state_row)
-                        };
-                        // NOTE: We don't know the value of the row here, so the table must allow
-                        // inconsistent ops.
-                        this.state_table.delete(state_row);
-                    }
-                }
+        // Persist intermediate state snapshots once per dirty partition at the end of the chunk.
+        for (encoded_partition_key, partition_key) in &dirty_partitions {
+            let partition = &mut *vars.partitions.get_mut(encoded_partition_key).unwrap();
+            Self::persist_intermediate_state(this, partition, partition_key);
+        }
+
+        let columns: Vec<ArrayRef> = builders.into_iter().map(|b| b.finish().into()).collect();
+        let chunk_size = columns[0].len();
+        Ok(if chunk_size > 0 {
+            Some(StreamChunk::new(vec![Op::Insert; chunk_size], columns))
+        } else {
+            None
+        })
+    }
+
+    async fn apply_watermark(
+        this: &mut ExecutorInner<S>,
+        vars: &mut ExecutionVars<S>,
+        watermark: &Watermark,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        if watermark.col_idx != this.order_key_index
+            || !this.has_session_windows
+            || vars.active_session_partitions.is_empty()
+        {
+            return Ok(None);
+        }
+
+        let watermark_encoded = memcmp_encoding::encode_row(
+            row::once(Some(watermark.val.clone())),
+            &[OrderType::ascending()],
+        )?;
+
+        let mut builders = this.schema.create_array_builders(0);
+        let mut dirty_partitions: HashMap<MemcmpEncoded, OwnedRow> = HashMap::new();
+        let mut closed_partitions: Vec<MemcmpEncoded> = Vec::new();
+
+        // Snapshot active session partition keys to avoid borrow conflict.
+        let active_partitions: Vec<_> = vars
+            .active_session_partitions
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        for (encoded_partition_key, partition_key) in active_partitions {
+            // Ensure partition is in cache (reload from state table if evicted).
+            Self::ensure_key_in_cache(
+                this,
+                &mut vars.partitions,
+                &partition_key,
+                &encoded_partition_key,
+            )
+            .await?;
+
+            let mut partition = vars.partitions.get_mut(&encoded_partition_key).unwrap();
+            partition.states.on_watermark(&watermark_encoded);
+
+            if !partition.states.are_ready() {
+                continue;
+            }
+
+            let has_output =
+                Self::drain_ready_windows(this, &mut partition, &partition_key, &mut builders)?;
+
+            if partition.curr_row_buffer.is_empty() {
+                closed_partitions.push(encoded_partition_key.clone());
             }
 
             if has_output && this.intermediate_state_table.is_some() {
@@ -525,7 +629,10 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             }
         }
 
-        // Persist intermediate state snapshots once per dirty partition at the end of the chunk.
+        for key in closed_partitions {
+            vars.active_session_partitions.remove(&key);
+        }
+
         for (encoded_partition_key, partition_key) in &dirty_partitions {
             let partition = &mut *vars.partitions.get_mut(encoded_partition_key).unwrap();
             Self::persist_intermediate_state(this, partition, partition_key);
@@ -556,6 +663,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
 
         let mut vars = ExecutionVars {
             partitions: ManagedLruCache::unbounded(this.watermark_sequence.clone(), metrics_info),
+            active_session_partitions: HashMap::new(),
             _phantom: PhantomData::<S>,
         };
 
@@ -572,8 +680,16 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    continue;
+                Message::Watermark(watermark) => {
+                    let output_chunk =
+                        Self::apply_watermark(&mut this, &mut vars, &watermark).await?;
+                    if let Some(chunk) = output_chunk {
+                        yield Message::Chunk(chunk);
+                    }
+                    this.state_table.try_flush().await?;
+                    if let Some(intermediate_state_table) = &mut this.intermediate_state_table {
+                        intermediate_state_table.try_flush().await?;
+                    }
                 }
                 Message::Chunk(chunk) => {
                     let output_chunk = Self::apply_chunk(&mut this, &mut vars, chunk).await?;
@@ -616,6 +732,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     }
                     if cache_may_stale {
                         vars.partitions.clear();
+                        vars.active_session_partitions.clear();
                     }
                 }
             }

@@ -130,6 +130,11 @@ pub trait WindowState: EstimateSize {
     fn restore(&mut self, _snapshot: WindowStateSnapshot) -> Result<()> {
         Ok(())
     }
+
+    /// Notify the state that the watermark has advanced to the given encoded order key value.
+    /// Used by session windows to close the latest session when the watermark guarantees
+    /// no more rows can extend it.
+    fn on_watermark(&mut self, _watermark_encoded: &MemcmpEncoded) {}
 }
 
 pub type BoxedWindowState = Box<dyn WindowState + Send + Sync>;
