@@ -67,6 +67,7 @@ fn encode_type_to_encode(from: EncodeType) -> Option<Encode> {
         EncodeType::Parquet => Encode::Parquet,
         EncodeType::None => Encode::None,
         EncodeType::Text => Encode::Text,
+        EncodeType::Xml => Encode::Xml,
     })
 }
 

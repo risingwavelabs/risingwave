@@ -795,7 +795,9 @@ fn bind_sink_format_desc(
         E::Template => SinkEncode::Template,
         E::Parquet => SinkEncode::Parquet,
         E::Bytes => SinkEncode::Bytes,
-        e @ (E::Native | E::Csv | E::None | E::Text) => {
+        E::Csv => SinkEncode::Csv,
+        E::Xml => SinkEncode::Xml,
+        e @ (E::Native | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -866,22 +868,22 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                 ),
                 FileSink::<S3Sink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet, Encode::Json],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json, Encode::Csv, Encode::Xml],
                 ),
                 FileSink::<SnowflakeSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet, Encode::Json],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json, Encode::Csv, Encode::Xml],
                 ),
                 FileSink::<GcsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet, Encode::Json],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json, Encode::Csv, Encode::Xml],
                 ),
                 FileSink::<AzblobSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet, Encode::Json],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json, Encode::Csv, Encode::Xml],
                 ),
                 FileSink::<WebhdfsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet, Encode::Json],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json, Encode::Csv, Encode::Xml],
                 ),
                 FileSink::<FsSink>::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Parquet, Encode::Json],
+                    Format::Plain => vec![Encode::Parquet, Encode::Json, Encode::Csv, Encode::Xml],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json],
