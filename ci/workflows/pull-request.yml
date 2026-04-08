@@ -214,7 +214,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end source test"
-    command: "ci/scripts/e2e-source-test.sh -p ci-dev"
+    command: "SKIP_KAFKA_NEXMARK=true ci/scripts/e2e-source-test.sh -p ci-dev"
     if: |
       !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-source-tests"
@@ -229,6 +229,24 @@ steps:
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     parallelism: 2
+    retry: *auto-retry
+
+  - label: "end-to-end source test (kafka nexmark)"
+    command: "ci/scripts/e2e-source-kafka-nexmark-test.sh -p ci-dev"
+    if: |
+      !(build.pull_request.labels includes "ci/pr/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-source-tests"
+      || build.pull_request.labels includes "ci/run-e2e-source-kafka-nexmark-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-tests?(,|$$)/
+      || build.env("CI_STEPS") =~ /(^|,)e2e-source-kafka-nexmark-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: source-kafka-nexmark-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "end-to-end sink test"
