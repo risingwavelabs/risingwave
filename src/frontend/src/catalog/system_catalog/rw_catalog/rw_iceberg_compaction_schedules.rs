@@ -33,7 +33,7 @@ struct RwIcebergCompactionSchedules {
     trigger_snapshot_count: i64,
     schedule_state: String,
     next_compaction_after_sec: Option<i64>,
-    pending_commit_count: Option<i64>,
+    pending_snapshot_count: Option<i64>,
     is_triggerable: bool,
 }
 
@@ -69,7 +69,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergCompactionSc
                 trigger_snapshot_count: status.trigger_snapshot_count as i64,
                 schedule_state: status.schedule_state,
                 next_compaction_after_sec: status.next_compaction_after_sec.map(|v| v as i64),
-                pending_commit_count: status.pending_commit_count.map(|v| v as i64),
+                pending_snapshot_count: status.pending_snapshot_count.map(|v| v as i64),
                 is_triggerable: status.is_triggerable,
             }
         })

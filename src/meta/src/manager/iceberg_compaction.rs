@@ -356,7 +356,8 @@ pub struct IcebergCompactionScheduleStatus {
     pub trigger_snapshot_count: usize,
     pub schedule_state: String,
     pub next_compaction_after_sec: Option<u64>,
-    pub pending_commit_count: Option<usize>,
+    /// V1 approximates pending snapshot backlog with in-memory sink commit backlog.
+    pub pending_snapshot_count: Option<usize>,
     pub is_triggerable: bool,
 }
 
@@ -620,7 +621,7 @@ impl IcebergCompactionManager {
                         CompactionTrackState::Processing { .. } => "processing".to_owned(),
                     },
                     next_compaction_after_sec,
-                    pending_commit_count: Some(track.pending_commit_count),
+                    pending_snapshot_count: Some(track.pending_commit_count),
                     is_triggerable,
                 }
             })

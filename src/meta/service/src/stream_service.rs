@@ -137,7 +137,7 @@ impl StreamManagerService for StreamServiceImpl {
                     trigger_snapshot_count: status.trigger_snapshot_count as u64,
                     schedule_state: status.schedule_state,
                     next_compaction_after_sec: status.next_compaction_after_sec,
-                    pending_commit_count: status.pending_commit_count.map(|count| count as u64),
+                    pending_snapshot_count: status.pending_snapshot_count.map(|count| count as u64),
                     is_triggerable: status.is_triggerable,
                 },
             )
