@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::mem::swap;
 use std::time::Duration;
 
@@ -44,6 +44,9 @@ pub struct KafkaSplitReader {
     consumer: StreamConsumer<RwConsumerContext>,
     offsets: HashMap<SplitId, (Option<i64>, Option<i64>)>,
     backfill_info: HashMap<SplitId, BackfillInfo>,
+    /// The furthest inclusive offset that is known to exist when the reader observes EOF for a
+    /// split, even if that offset does not correspond to a visible data record.
+    known_eof_offsets: HashMap<SplitId, i64>,
     splits: Vec<KafkaSplit>,
     sync_call_timeout: Duration,
     bytes_per_second: usize,
@@ -109,6 +112,7 @@ impl SplitReader for KafkaSplitReader {
 
         let mut offsets = HashMap::new();
         let mut backfill_info = HashMap::new();
+        let mut known_eof_offsets = HashMap::new();
         for split in splits.clone() {
             offsets.insert(split.id(), (split.start_offset, split.stop_offset));
 
@@ -131,16 +135,28 @@ impl SplitReader for KafkaSplitReader {
                 .await?;
             tracing::info!("fetch kafka watermarks: low: {low}, high: {high}, split: {split:?}");
             // note: low is inclusive, high is exclusive, start_offset is exclusive
-            if low == high || split.start_offset.is_some_and(|offset| offset + 1 >= high) {
+            let has_data_to_backfill =
+                low != high && split.start_offset.is_none_or(|offset| offset + 1 < high);
+            let watermark_offset = if has_data_to_backfill {
+                debug_assert!(high > 0);
+                Some(high - 1)
+            } else {
+                None
+            };
+            if !has_data_to_backfill {
                 backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
             } else {
-                debug_assert!(high > 0);
                 backfill_info.insert(
                     split.id(),
                     BackfillInfo::HasDataToBackfill {
                         latest_offset: (high - 1).to_string(),
                     },
                 );
+            }
+
+            let stop_offset = split.stop_offset.and_then(Self::offset_before);
+            if let Some(known_eof_offset) = Self::max_known_offset(watermark_offset, stop_offset) {
+                known_eof_offsets.insert(split.id(), known_eof_offset);
             }
         }
         tracing::info!(
@@ -175,6 +191,7 @@ impl SplitReader for KafkaSplitReader {
             offsets,
             splits,
             backfill_info,
+            known_eof_offsets,
             bytes_per_second,
             sync_call_timeout: properties.common.sync_call_timeout,
             max_num_messages,
@@ -231,6 +248,36 @@ impl SplitReader for KafkaSplitReader {
 }
 
 impl KafkaSplitReader {
+    fn offset_before(next_offset: i64) -> Option<i64> {
+        next_offset.checked_sub(1).filter(|offset| *offset >= 0)
+    }
+
+    fn max_known_offset(current_offset: Option<i64>, candidate_offset: Option<i64>) -> Option<i64> {
+        match (current_offset, candidate_offset) {
+            (Some(current_offset), Some(candidate_offset)) => {
+                Some(current_offset.max(candidate_offset))
+            }
+            (Some(current_offset), None) => Some(current_offset),
+            (None, Some(candidate_offset)) => Some(candidate_offset),
+            (None, None) => None,
+        }
+    }
+
+    fn record_split_progress(
+        progress: &mut HashMap<SplitId, String>,
+        latest_progress_offsets: &mut HashMap<SplitId, i64>,
+        split_id: &SplitId,
+        inclusive_offset: i64,
+    ) {
+        let should_emit = latest_progress_offsets
+            .get(split_id)
+            .is_none_or(|offset| *offset < inclusive_offset);
+        if should_emit {
+            latest_progress_offsets.insert(split_id.clone(), inclusive_offset);
+            progress.insert(split_id.clone(), inclusive_offset.to_string());
+        }
+    }
+
     fn drain_stop_offsets_with_progress(
         stop_offsets: &mut HashMap<SplitId, i64>,
         progress: &HashMap<SplitId, String>,
@@ -269,37 +316,51 @@ impl KafkaSplitReader {
 
     fn snapshot_split_progress(
         &self,
+        eof_partitions: &HashSet<i32>,
         latest_progress_offsets: &mut HashMap<SplitId, i64>,
     ) -> Result<Option<HashMap<SplitId, String>>> {
         let positions = self.consumer.position()?;
         let mut progress = HashMap::new();
 
         for split in &self.splits {
-            let Some(position) = positions.find_partition(split.topic.as_str(), split.partition)
-            else {
-                continue;
-            };
-            let Offset::Offset(next_offset) = position.offset() else {
-                continue;
-            };
-            let Some(inclusive_offset) = next_offset.checked_sub(1) else {
-                continue;
-            };
-            if inclusive_offset < 0 {
+            if !eof_partitions.contains(&split.partition) {
                 continue;
             }
 
             let split_id = split.id();
-            let should_emit = latest_progress_offsets
-                .get(&split_id)
-                .is_none_or(|offset| *offset < inclusive_offset);
-            if should_emit {
-                latest_progress_offsets.insert(split_id.clone(), inclusive_offset);
-                progress.insert(split_id, inclusive_offset.to_string());
-            }
+            let position_offset = positions
+                .find_partition(split.topic.as_str(), split.partition)
+                .and_then(|position| match position.offset() {
+                    Offset::Offset(next_offset) => Self::offset_before(next_offset),
+                    _ => None,
+                });
+            let Some(inclusive_offset) = Self::max_known_offset(
+                position_offset,
+                self.known_eof_offsets.get(&split_id).copied(),
+            ) else {
+                continue;
+            };
+            Self::record_split_progress(
+                &mut progress,
+                latest_progress_offsets,
+                &split_id,
+                inclusive_offset,
+            );
         }
 
         Ok((!progress.is_empty()).then_some(progress))
+    }
+
+    fn apply_split_progress(
+        stop_offsets: &mut HashMap<SplitId, i64>,
+        split_progress: Option<HashMap<SplitId, String>>,
+        is_bounded: bool,
+    ) -> Option<HashMap<SplitId, String>> {
+        let progress = split_progress?;
+        if is_bounded {
+            Self::drain_stop_offsets_with_progress(stop_offsets, &progress);
+        }
+        Some(progress)
     }
 
     #[try_stream(ok = SourceMessageEvent, error = crate::error::ConnectorError)]
@@ -347,23 +408,30 @@ impl KafkaSplitReader {
 
         #[for_await]
         'for_outer_loop: for raw_msgs in self.consumer.stream().ready_chunks(max_chunk_size) {
-            let mut saw_partition_eof = false;
+            let mut eof_partitions = HashSet::new();
             let mut msgs = Vec::with_capacity(max_chunk_size);
             for msg in raw_msgs {
                 match msg {
                     Ok(msg) => msgs.push(msg),
-                    Err(KafkaError::PartitionEOF(_)) => saw_partition_eof = true,
+                    Err(KafkaError::PartitionEOF(partition)) => {
+                        eof_partitions.insert(partition);
+                    }
                     Err(err) => return Err(err.into()),
                 }
             }
 
-            let split_progress = if saw_partition_eof {
-                self.snapshot_split_progress(&mut latest_progress_offsets)?
-            } else {
+            let split_progress = if eof_partitions.is_empty() {
                 None
+            } else {
+                self.snapshot_split_progress(&eof_partitions, &mut latest_progress_offsets)?
             };
+            let split_progress =
+                Self::apply_split_progress(&mut stop_offsets, split_progress, is_bounded);
 
             if msgs.is_empty() {
+                if let Some(progress) = split_progress {
+                    yield SourceMessageEvent::SplitProgress(progress);
+                }
                 if is_bounded && stop_offsets.is_empty() {
                     if !res.is_empty() {
                         yield SourceMessageEvent::Data(res);
@@ -449,9 +517,6 @@ impl KafkaSplitReader {
             swap(&mut cur, &mut res);
             yield SourceMessageEvent::Data(cur);
             if let Some(progress) = split_progress {
-                if is_bounded {
-                    Self::drain_stop_offsets_with_progress(&mut stop_offsets, &progress);
-                }
                 yield SourceMessageEvent::SplitProgress(progress);
             }
             if is_bounded && stop_offsets.is_empty() {
@@ -499,6 +564,35 @@ mod tests {
 
         KafkaSplitReader::drain_stop_offsets_with_progress(&mut stop_offsets, &progress);
 
+        assert!(stop_offsets.is_empty());
+    }
+
+    #[test]
+    fn test_max_known_offset_prefers_larger_offset() {
+        assert_eq!(
+            KafkaSplitReader::max_known_offset(Some(3), Some(4)),
+            Some(4)
+        );
+        assert_eq!(
+            KafkaSplitReader::max_known_offset(Some(7), Some(4)),
+            Some(7)
+        );
+        assert_eq!(KafkaSplitReader::max_known_offset(None, Some(4)), Some(4));
+        assert_eq!(KafkaSplitReader::max_known_offset(Some(4), None), Some(4));
+    }
+
+    #[test]
+    fn test_apply_split_progress_for_empty_message_batch() {
+        let mut stop_offsets = HashMap::from([(SplitId::from("0"), 5_i64)]);
+        let split_progress = Some(HashMap::from([(SplitId::from("0"), "4".to_owned())]));
+
+        let applied =
+            KafkaSplitReader::apply_split_progress(&mut stop_offsets, split_progress, true);
+
+        assert_eq!(
+            applied,
+            Some(HashMap::from([(SplitId::from("0"), "4".to_owned())]))
+        );
         assert!(stop_offsets.is_empty());
     }
 }
