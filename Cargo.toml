@@ -179,7 +179,8 @@ jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
-madsim = "0.2.34"
+# madsim = "0.2.34"
+madsim = { git = "https://github.com/tabVersion/madsim.git", rev = "498afcee77a0856b86af66cad61598ac968afcf1" }
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = [
     "native-tls-tls",
