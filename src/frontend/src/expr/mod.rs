@@ -1180,7 +1180,7 @@ mod tests {
                 "{:?}",
                 ExprDisplay {
                     expr: &expr,
-                    input_schema: &Schema::empty(),
+                    input_schema: Schema::empty(),
                 }
             ),
             "Secret(test_secret)"
