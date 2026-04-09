@@ -56,11 +56,11 @@ DROP SINK nexmark_bid;
 # If count > 50, the sink produced duplicates (at-least-once delivery).
 system ok
 echo "[nexmark-diag] nexmark-bid messages (expected 50):" && \
-rpk topic consume nexmark-bid -o start:end -f '%v\n' 2>/dev/null | wc -l
+rpk topic consume nexmark-bid --offset start --num 100 -f '%v\n' 2>/dev/null | wc -l
 
 system ok
 echo "[nexmark-diag] nexmark-bid duplicate payload samples:" && \
-rpk topic consume nexmark-bid -o start:end -f '%v\n' 2>/dev/null | sort | uniq -c | sort -nr | head
+rpk topic consume nexmark-bid --offset start --num 100 -f '%v\n' 2>/dev/null | sort | uniq -c | sort -nr | head
 
 statement ok
 DROP SINK nexmark_person;
