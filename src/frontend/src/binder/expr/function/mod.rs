@@ -26,12 +26,13 @@ use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
-    OrderByExpr, Statement, Window,
+    OrderByExpr, SecretRefAsType, Statement, Window,
 };
 use risingwave_sqlparser::parser::Parser;
 
 use crate::binder::Binder;
 use crate::binder::bind_context::Clause;
+use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -150,7 +151,40 @@ impl Binder {
             );
         }
 
-        let mut args: Vec<_> = arg_list
+        // Bind function arguments. Secret references are bound as ExprImpl::SecretRef first,
+        // and then restricted to UDF calls below.
+        let has_secret_ref_arg = arg_list.args.iter().any(|arg| {
+            matches!(
+                arg,
+                FunctionArg::Unnamed(FunctionArgExpr::SecretRef(_))
+                    | FunctionArg::Named {
+                        arg: FunctionArgExpr::SecretRef(_),
+                        ..
+                    }
+            )
+        });
+
+        // Return a clear usage error before secret lookup when there is no UDF candidate by name.
+        // This avoids leaking "not found" for secret refs used in clearly invalid contexts.
+        if has_secret_ref_arg {
+            let has_udf_candidate = self
+                .catalog
+                .get_functions_by_name(
+                    &self.db_name,
+                    self.bind_schema_path(schema_name.as_deref()),
+                    &func_name,
+                )
+                .map(|(funcs, _)| !funcs.is_empty())
+                .unwrap_or(false);
+            if !has_udf_candidate {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "secret reference is only allowed in user-defined function arguments"
+                        .to_owned(),
+                )
+                .into());
+            }
+        }
+        let mut args: Vec<ExprImpl> = arg_list
             .args
             .iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -158,6 +192,7 @@ impl Binder {
             .try_collect()?;
 
         let mut referred_udfs = HashSet::new();
+        let mut is_udf_call = false;
 
         let wrapped_agg_type = if *scalar_as_agg {
             // Let's firstly try to apply the `AGGREGATE:` prefix.
@@ -176,6 +211,7 @@ impl Binder {
             ) {
                 // record the dependency upon the UDF
                 referred_udfs.insert(func.id);
+                is_udf_call = true;
                 self.check_privilege(
                     ObjectCheckItem::new(func.owner, AclMode::Execute, func.name.clone(), func.id),
                     self.database_id,
@@ -225,6 +261,7 @@ impl Binder {
             ) {
             // record the dependency upon the UDF
             referred_udfs.insert(func.id);
+            is_udf_call = true;
             self.check_privilege(
                 ObjectCheckItem::new(func.owner, AclMode::Execute, func.name.clone(), func.id),
                 self.database_id,
@@ -233,6 +270,13 @@ impl Binder {
         } else {
             None
         };
+
+        if has_secret_ref_arg && !is_udf_call {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "secret reference is only allowed in user-defined function arguments".to_owned(),
+            )
+            .into());
+        }
 
         self.included_udfs.extend(referred_udfs);
 
@@ -763,6 +807,42 @@ impl Binder {
             .into()),
             FunctionArgExpr::Wildcard(None) => Ok(vec![]),
             FunctionArgExpr::Wildcard(Some(_)) => unreachable!(),
+            FunctionArgExpr::SecretRef(secret_ref_value) => {
+                let (schema_name, secret_name) = Binder::resolve_schema_qualified_name(
+                    &self.db_name,
+                    &secret_ref_value.secret_name,
+                )?;
+                let schema_path = self.bind_schema_path(schema_name.as_deref());
+                let (secret_catalog, _) =
+                    self.catalog
+                        .get_secret_by_name(&self.db_name, schema_path, &secret_name)?;
+
+                self.check_privilege(
+                    ObjectCheckItem::new(
+                        secret_catalog.owner(),
+                        AclMode::Usage,
+                        secret_catalog.name.clone(),
+                        secret_catalog.id,
+                    ),
+                    self.database_id,
+                )?;
+
+                self.included_secrets.insert(secret_catalog.id);
+
+                let ref_as = match secret_ref_value.ref_as {
+                    SecretRefAsType::Text => risingwave_pb::secret::secret_ref::RefAsType::Text,
+                    SecretRefAsType::File => risingwave_pb::secret::secret_ref::RefAsType::File,
+                };
+
+                Ok(vec![
+                    crate::expr::SecretRef {
+                        secret_id: secret_catalog.id,
+                        ref_as,
+                        secret_name: secret_catalog.name.clone(),
+                    }
+                    .into(),
+                ])
+            }
         }
     }
 
@@ -772,7 +852,10 @@ impl Binder {
     ) -> Result<Vec<ExprImpl>> {
         match arg {
             FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),
-            FunctionArg::Named { .. } => todo!(),
+            FunctionArg::Named { .. } => Err(ErrorCode::InvalidInputSyntax(
+                "named function arguments are not supported yet".to_owned(),
+            )
+            .into()),
         }
     }
 }
