@@ -55,7 +55,7 @@ public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, Rel
             return null;
         }
         var epochDay = Date.toEpochDay(input, null);
-        LocalDate date = LocalDate.ofEpochDay(epochDay);
+        LocalDate date = LocalDate.ofEpochDay(epochDay + 1);
         return dateFormatter.format(date);
     }
 
