@@ -186,20 +186,8 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     @Override
     protected void doStoreRecord(HistoryRecord record) {
-        // Fast path: reject stale instances without acquiring the lock.
-        if (myVersion != sharedState.activeVersion) {
-            LOGGER.warn(
-                    "Stale schema history instance for source {} (version {} vs active {}), "
-                            + "skipping write",
-                    sourceId,
-                    myVersion,
-                    sharedState.activeVersion);
-            return;
-        }
         LOGGER.info("Storing new schema history record.");
         synchronized (sharedState) {
-            // Re-check under lock — a new instance may have started between the fast
-            // check and acquiring the lock.
             if (myVersion != sharedState.activeVersion) {
                 LOGGER.warn(
                         "Stale schema history instance for source {} (version {} vs active {}), "
@@ -336,15 +324,23 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
      */
     private void initializeSequenceNumber(List<String> historyFiles) {
         if (historyFiles.isEmpty()) {
-            sharedState.sequenceNumber = 0;
-            LOGGER.info("No existing files, initialized sequence number to 0");
+            // Don't reset to 0 — a previous instance may have incremented sequenceNumber
+            // beyond what is visible on disk (e.g., putObject timed out client-side but
+            // succeeded server-side).
+            LOGGER.info(
+                    "No existing files, keeping current sequence number: {}",
+                    sharedState.sequenceNumber);
         } else {
             // historyFiles is already sorted by sequence number in listAndSortHistoryFiles(),
-            // so the last file has the maximum sequence number
+            // so the last file has the maximum sequence number.
+            // Use Math.max to avoid regressing the sequence number: a previous instance may
+            // have incremented it past what is visible on disk.
             long maxSequence =
                     extractSequenceFromFileName(historyFiles.get(historyFiles.size() - 1));
-            sharedState.sequenceNumber = maxSequence;
-            LOGGER.info("Initialized sequence number to {} from existing files", maxSequence);
+            sharedState.sequenceNumber = Math.max(sharedState.sequenceNumber, maxSequence);
+            LOGGER.info(
+                    "Initialized sequence number to {} from existing files",
+                    sharedState.sequenceNumber);
         }
     }
 
