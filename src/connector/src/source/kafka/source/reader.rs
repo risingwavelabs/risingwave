@@ -24,7 +24,7 @@ use futures_async_stream::try_stream;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
-use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use crate::connector_common::read_kafka_log_level;
@@ -315,12 +315,26 @@ impl KafkaSplitReader {
     }
 
     fn snapshot_split_progress(
-        &self,
-        eof_partitions: &HashSet<i32>,
+        eof_offsets: &HashMap<SplitId, i64>,
         latest_progress_offsets: &mut HashMap<SplitId, i64>,
-    ) -> Result<Option<HashMap<SplitId, String>>> {
-        let positions = self.consumer.position()?;
+    ) -> Option<HashMap<SplitId, String>> {
         let mut progress = HashMap::new();
+
+        for (split_id, inclusive_offset) in eof_offsets {
+            Self::record_split_progress(
+                &mut progress,
+                latest_progress_offsets,
+                split_id,
+                *inclusive_offset,
+            );
+        }
+
+        (!progress.is_empty()).then_some(progress)
+    }
+
+    fn resolve_eof_offsets(&self, eof_partitions: &HashSet<i32>) -> Result<HashMap<SplitId, i64>> {
+        let positions = self.consumer.position()?;
+        let mut eof_offsets = HashMap::new();
 
         for split in &self.splits {
             if !eof_partitions.contains(&split.partition) {
@@ -340,15 +354,10 @@ impl KafkaSplitReader {
             ) else {
                 continue;
             };
-            Self::record_split_progress(
-                &mut progress,
-                latest_progress_offsets,
-                &split_id,
-                inclusive_offset,
-            );
+            eof_offsets.insert(split_id, inclusive_offset);
         }
 
-        Ok((!progress.is_empty()).then_some(progress))
+        Ok(eof_offsets)
     }
 
     fn apply_split_progress(
@@ -400,6 +409,10 @@ impl KafkaSplitReader {
         });
 
         let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
+        let mut partition_eof_count_metrics: HashMap<String, LabelGuardedIntCounter> =
+            HashMap::new();
+        let mut partition_eof_offset_metrics: HashMap<String, LabelGuardedIntGauge> =
+            HashMap::new();
         let mut latest_progress_offsets = self
             .splits
             .iter()
@@ -414,17 +427,60 @@ impl KafkaSplitReader {
                 match msg {
                     Ok(msg) => msgs.push(msg),
                     Err(KafkaError::PartitionEOF(partition)) => {
+                        let split_id = partition.to_string();
+                        partition_eof_count_metrics
+                            .entry(split_id.clone())
+                            .or_insert_with(|| {
+                                self.source_ctx
+                                    .metrics
+                                    .partition_eof_count
+                                    .with_guarded_label_values(&[
+                                        &self.source_ctx.source_id.to_string(),
+                                        &split_id,
+                                        &self.source_ctx.source_name,
+                                        &self.source_ctx.fragment_id.to_string(),
+                                    ])
+                            })
+                            .inc();
                         eof_partitions.insert(partition);
                     }
                     Err(err) => return Err(err.into()),
                 }
             }
 
-            let split_progress = if eof_partitions.is_empty() {
-                None
+            let eof_offsets = if eof_partitions.is_empty() {
+                HashMap::new()
             } else {
-                self.snapshot_split_progress(&eof_partitions, &mut latest_progress_offsets)?
+                self.resolve_eof_offsets(&eof_partitions)?
             };
+            for (split_id, eof_offset) in &eof_offsets {
+                let split_id_label = split_id.as_ref().to_owned();
+                partition_eof_offset_metrics
+                    .entry(split_id_label.clone())
+                    .or_insert_with(|| {
+                        self.source_ctx
+                            .metrics
+                            .partition_eof_offset
+                            .with_guarded_label_values(&[
+                                &self.source_ctx.source_id.to_string(),
+                                &split_id_label,
+                                &self.source_ctx.source_name,
+                                &self.source_ctx.fragment_id.to_string(),
+                            ])
+                    })
+                    .set(*eof_offset);
+                tracing::info!(
+                    actor_id = %self.source_ctx.actor_id,
+                    source_id = %self.source_ctx.source_id,
+                    source_name = self.source_ctx.source_name,
+                    fragment_id = %self.source_ctx.fragment_id,
+                    split_id = %split_id,
+                    eof_offset,
+                    "received kafka partition EOF"
+                );
+            }
+            let split_progress =
+                Self::snapshot_split_progress(&eof_offsets, &mut latest_progress_offsets);
             let split_progress =
                 Self::apply_split_progress(&mut stop_offsets, split_progress, is_bounded);
 

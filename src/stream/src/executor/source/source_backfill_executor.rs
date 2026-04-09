@@ -823,8 +823,25 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 // The upstream side of source backfill still advances based on
                                 // normal chunks with split/offset columns.
                                 for (split_id, offset) in split_progress {
+                                    let previous_state =
+                                        backfill_stage.states.get(&split_id).cloned();
                                     backfill_stage
                                         .handle_backfill_progress(split_id.as_ref(), &offset);
+                                    let updated_state =
+                                        backfill_stage.states.get(&split_id).cloned();
+                                    if previous_state != updated_state {
+                                        tracing::info!(
+                                            actor_id = %self.actor_ctx.id,
+                                            fragment_id = %self.actor_ctx.fragment_id,
+                                            source_id = %self.source_id,
+                                            source_name = self.source_name,
+                                            split_id = %split_id,
+                                            applied_offset = %offset,
+                                            previous_state = ?previous_state,
+                                            updated_state = ?updated_state,
+                                            "source backfill executor applied split progress offset"
+                                        );
+                                    }
                                 }
                                 continue;
                             }
