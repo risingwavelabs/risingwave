@@ -389,6 +389,9 @@ pub fn start(
                     .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
+                iceberg_compaction_report_timeout_sec: config
+                    .meta
+                    .iceberg_compaction_report_timeout_sec,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -615,6 +618,12 @@ fn validate_config(config: &RwConfig) {
 
     if config.meta.compaction_task_id_refill_capacity == 0 {
         let error_msg = "compaction task id refill capacity should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.iceberg_compaction_report_timeout_sec == 0 {
+        let error_msg = "iceberg compaction report timeout sec should be larger than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

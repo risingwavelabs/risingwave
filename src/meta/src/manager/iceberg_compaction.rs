@@ -57,8 +57,6 @@ type CompactorChangeTx =
 type CompactorChangeRx =
     UnboundedReceiver<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
-const ICEBERG_COMPACTION_REPORT_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-
 /// Compaction track states using type-safe state machine pattern
 #[derive(Debug, Clone)]
 enum CompactionTrackState {
@@ -81,6 +79,7 @@ struct CompactionTrack {
     /// Minimum pending commit threshold to trigger compaction early.
     /// Compaction triggers when `pending_commit_count` >= this threshold, even before interval expires.
     trigger_snapshot_count: usize,
+    report_timeout: Duration,
     pending_commit_count: usize,
     state: CompactionTrackState,
 }
@@ -139,7 +138,7 @@ impl CompactionTrack {
                     task_id: None,
                     next_compaction_time_on_failure: *next_compaction_time,
                     pending_commit_count_at_dispatch: self.pending_commit_count,
-                    report_deadline: Instant::now() + ICEBERG_COMPACTION_REPORT_TIMEOUT,
+                    report_deadline: Instant::now() + self.report_timeout,
                 };
             }
             CompactionTrackState::Processing { .. } => {
@@ -157,7 +156,7 @@ impl CompactionTrack {
                 report_deadline,
             } => {
                 *current_task_id = Some(task_id);
-                *report_deadline = now + ICEBERG_COMPACTION_REPORT_TIMEOUT;
+                *report_deadline = now + self.report_timeout;
             }
             CompactionTrackState::Idle { .. } => unreachable!("Cannot mark dispatched when idle"),
         }
@@ -441,6 +440,9 @@ impl IcebergCompactionManager {
                             task_type: TaskType::Full,
                             trigger_interval_sec: compaction_interval,
                             trigger_snapshot_count: 10,
+                            report_timeout: Duration::from_secs(
+                                self.env.opts.iceberg_compaction_report_timeout_sec,
+                            ),
                             pending_commit_count: 0,
                             state: CompactionTrackState::Idle {
                                 next_compaction_time: Instant::now()
@@ -459,6 +461,9 @@ impl IcebergCompactionManager {
                         task_type: TaskType::Full,
                         trigger_interval_sec: compaction_interval,
                         trigger_snapshot_count: 10,
+                        report_timeout: Duration::from_secs(
+                            self.env.opts.iceberg_compaction_report_timeout_sec,
+                        ),
                         pending_commit_count: 0,
                         state: CompactionTrackState::Idle {
                             next_compaction_time: Instant::now()
@@ -514,6 +519,9 @@ impl IcebergCompactionManager {
             task_type,
             trigger_interval_sec,
             trigger_snapshot_count,
+            report_timeout: Duration::from_secs(
+                self.env.opts.iceberg_compaction_report_timeout_sec,
+            ),
             pending_commit_count: 0,
             state: CompactionTrackState::Idle {
                 next_compaction_time: Instant::now()
@@ -997,6 +1005,7 @@ mod tests {
             task_type: TaskType::Full,
             trigger_interval_sec,
             trigger_snapshot_count,
+            report_timeout: Duration::from_secs(30 * 60),
             pending_commit_count,
             state: CompactionTrackState::Idle {
                 next_compaction_time: now + Duration::from_secs(trigger_interval_sec),
@@ -1079,6 +1088,7 @@ mod tests {
     fn test_report_timeout_is_based_on_processing_deadline() {
         let now = Instant::now();
         let mut track = new_track(now, 120, 10, 5);
+        track.report_timeout = Duration::from_secs(17);
         track.start_processing();
         track.mark_dispatched(1, now);
 
@@ -1086,12 +1096,8 @@ mod tests {
             CompactionTrackState::Processing { .. } => {}
             CompactionTrackState::Idle { .. } => panic!("track should remain pending"),
         }
-        assert!(
-            !track.is_report_timed_out(
-                now + ICEBERG_COMPACTION_REPORT_TIMEOUT - Duration::from_secs(1)
-            )
-        );
-        assert!(track.is_report_timed_out(now + ICEBERG_COMPACTION_REPORT_TIMEOUT));
+        assert!(!track.is_report_timed_out(now + track.report_timeout - Duration::from_secs(1)));
+        assert!(track.is_report_timed_out(now + track.report_timeout));
     }
 
     #[test]

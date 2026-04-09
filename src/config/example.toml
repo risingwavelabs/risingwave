@@ -23,6 +23,7 @@ periodic_compaction_interval_sec = 300
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
 iceberg_gc_interval_sec = 3600
+iceberg_compaction_report_timeout_sec = 1800
 hummock_version_checkpoint_interval_sec = 30
 checkpoint_compression_algorithm = "zstd"
 checkpoint_read_chunk_size = 134217728

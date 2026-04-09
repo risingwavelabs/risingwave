@@ -171,6 +171,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::iceberg_gc_interval_sec")]
     pub iceberg_gc_interval_sec: u64,
 
+    /// Maximum time to wait for an iceberg compaction task report before the lease expires.
+    #[serde(default = "default::meta::iceberg_compaction_report_timeout_sec")]
+    pub iceberg_compaction_report_timeout_sec: u64,
+
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
@@ -685,6 +689,10 @@ pub mod default {
 
         pub fn iceberg_gc_interval_sec() -> u64 {
             3600
+        }
+
+        pub fn iceberg_compaction_report_timeout_sec() -> u64 {
+            30 * 60
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
