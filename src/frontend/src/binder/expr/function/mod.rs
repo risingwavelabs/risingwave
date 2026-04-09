@@ -22,6 +22,7 @@ use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::INFORMATION_SCHEMA_SCHEMA_NAME;
 use risingwave_common::types::{DataType, MapType, StructType};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_sqlparser::ast::{
@@ -791,7 +792,7 @@ impl Binder {
                 let (begin, end) = self
                     .context
                     .range_of
-                    .get(&(schema_name, table_name.clone()))
+                    .get(&(schema_name, table_name))
                     .ok_or_else(|| {
                         ErrorCode::ItemNotFound(format!("relation \"{}\"", relation_name))
                     })?;
@@ -818,7 +819,7 @@ impl Binder {
         let return_type = DataType::Struct(StructType::new(
             names
                 .into_iter()
-                .zip(exprs.iter())
+                .zip_eq_fast(exprs.iter())
                 .enumerate()
                 .map(|(idx, (name, expr))| {
                     (
