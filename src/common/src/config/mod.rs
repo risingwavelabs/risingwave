@@ -380,6 +380,10 @@ pub mod default {
             30000
         }
 
+        pub fn streaming_join_hash_map_evict_interval_rows() -> u32 {
+            16
+        }
+
         pub fn streaming_now_progress_ratio() -> Option<f32> {
             None
         }
@@ -442,6 +446,10 @@ pub mod default {
 
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
+        }
+
+        pub fn max_concurrent_kv_log_store_historical_read() -> usize {
+            0
         }
     }
 }

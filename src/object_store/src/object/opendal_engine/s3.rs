@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use opendal::raw::HttpClient;
 use opendal::services::S3;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{MediaType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore, new_operator};
 use crate::object::ObjectResult;
 use crate::object::object_metrics::ObjectStoreMetrics;
 
@@ -45,10 +45,12 @@ impl OpendalObjectStore {
 
         let http_client = Self::new_http_client(&config)?;
 
-        let op: Operator = Operator::new(builder)?
-            .layer(HttpClientLayer::new(http_client))
-            .layer(LoggingLayer::default())
-            .finish();
+        let op = new_operator(
+            &config,
+            Operator::new(builder)?
+                .layer(HttpClientLayer::new(http_client))
+                .layer(LoggingLayer::default()),
+        );
 
         Ok(Self {
             op,

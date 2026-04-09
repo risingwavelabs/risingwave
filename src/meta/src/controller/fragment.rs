@@ -133,7 +133,6 @@ pub struct InflightFragmentInfo {
 #[derive(Clone, Debug)]
 pub struct FragmentParallelismInfo {
     pub distribution_type: FragmentDistributionType,
-    pub actor_count: usize,
     pub vnode_count: usize,
 }
 
@@ -174,16 +173,17 @@ pub struct StreamingJobInfo {
 }
 
 impl NotificationManager {
-    pub(crate) fn notify_fragment_mapping(
+    /// Notify frontend about streaming worker slot mapping changes.
+    ///
+    /// This only sends streaming mapping updates to frontends. Serving mapping
+    /// notifications are decoupled and driven by fragment model changes (insert/delete)
+    /// instead of barrier-driven actor set changes.
+    pub(crate) fn notify_streaming_fragment_mapping(
         &self,
         operation: NotificationOperation,
         fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
     ) {
-        let fragment_ids = fragment_mappings
-            .iter()
-            .map(|mapping| mapping.fragment_id)
-            .collect_vec();
-        if fragment_ids.is_empty() {
+        if fragment_mappings.is_empty() {
             return;
         }
         // notify all fragment mappings to frontend.
@@ -193,23 +193,38 @@ impl NotificationManager {
                 NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
             );
         }
+    }
 
-        // update serving vnode mappings.
-        match operation {
-            NotificationOperation::Add | NotificationOperation::Update => {
-                self.notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
-                    fragment_ids,
-                ));
-            }
-            NotificationOperation::Delete => {
-                self.notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
-                    fragment_ids,
-                ));
-            }
-            op => {
-                tracing::warn!("unexpected fragment mapping op: {}", op.as_str_name());
-            }
+    /// Notify the serving module about fragment mapping changes.
+    ///
+    /// This should be called when fragments are inserted into or deleted from the meta store,
+    /// so that serving vnode mappings are kept in sync with the fragment model.
+    pub(crate) fn notify_serving_fragment_mapping_update(
+        &self,
+        fragment_ids: Vec<crate::model::FragmentId>,
+    ) {
+        if fragment_ids.is_empty() {
+            return;
         }
+        self.notify_local_subscribers(LocalNotification::ServingFragmentMappingsUpsert(
+            fragment_ids,
+        ));
+    }
+
+    /// Notify the serving module about fragment mapping deletions.
+    ///
+    /// This should be called when fragments are deleted from the meta store,
+    /// so that serving vnode mappings are cleaned up.
+    pub(crate) fn notify_serving_fragment_mapping_delete(
+        &self,
+        fragment_ids: Vec<crate::model::FragmentId>,
+    ) {
+        if fragment_ids.is_empty() {
+            return;
+        }
+        self.notify_local_subscribers(LocalNotification::ServingFragmentMappingsDelete(
+            fragment_ids,
+        ));
     }
 }
 
@@ -412,31 +427,36 @@ impl CatalogController {
         Ok((pb_fragment, pb_actors, pb_actor_status, pb_actor_splits))
     }
 
-    pub fn running_fragment_parallelisms(
+    /// Returns distribution type and vnode count for all (or filtered) fragments.
+    ///
+    /// Reads directly from the persistent catalog (fragment table) rather than
+    /// from the in-memory `shared_actor_infos`.  This is critical because the
+    /// serving vnode mapping must be available even before the barrier manager's
+    /// recovery has completed and populated `shared_actor_infos`.
+    pub async fn fragment_parallelisms(
         &self,
-        id_filter: Option<HashSet<FragmentId>>,
     ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
-        let info = self.env.shared_actor_infos().read_guard();
+        let inner = self.inner.read().await;
+        let query = FragmentModel::find().select_only().columns([
+            fragment::Column::FragmentId,
+            fragment::Column::DistributionType,
+            fragment::Column::VnodeCount,
+        ]);
+        let fragments: Vec<(FragmentId, DistributionType, i32)> =
+            query.into_tuple().all(&inner.db).await?;
 
-        let mut result = HashMap::new();
-        for (fragment_id, fragment) in info.iter_over_fragments() {
-            if let Some(id_filter) = &id_filter
-                && !id_filter.contains(fragment_id)
-            {
-                continue; // Skip fragments not in the filter
-            }
-
-            result.insert(
-                *fragment_id as _,
-                FragmentParallelismInfo {
-                    distribution_type: fragment.distribution_type.into(),
-                    actor_count: fragment.actors.len() as _,
-                    vnode_count: fragment.vnode_count,
-                },
-            );
-        }
-
-        Ok(result)
+        Ok(fragments
+            .into_iter()
+            .map(|(fragment_id, distribution_type, vnode_count)| {
+                (
+                    fragment_id,
+                    FragmentParallelismInfo {
+                        distribution_type: PbFragmentDistributionType::from(distribution_type),
+                        vnode_count: vnode_count as usize,
+                    },
+                )
+            })
+            .collect())
     }
 
     pub async fn fragment_job_mapping(&self) -> MetaResult<HashMap<FragmentId, JobId>> {

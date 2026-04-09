@@ -150,13 +150,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 continue;
             }
 
-            // Find the database ID for this table
-            let database_id = self
-                .metadata_manager
-                .catalog_controller
-                .get_object_database_id(associated_source_id)
-                .await
-                .context("Failed to get database id for table")?;
+            let Some(database_id) = self
+                .get_source_database_id_for_refresh_stage(table_id, associated_source_id, "list")
+                .await?
+            else {
+                continue;
+            };
 
             // Create ListFinish command
             let list_finish_command = Command::ListFinish {
@@ -202,13 +201,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 continue;
             }
 
-            // Find the database ID for this table
-            let database_id = self
-                .metadata_manager
-                .catalog_controller
-                .get_object_database_id(associated_source_id)
-                .await
-                .context("Failed to get database id for table")?;
+            let Some(database_id) = self
+                .get_source_database_id_for_refresh_stage(table_id, associated_source_id, "load")
+                .await?
+            else {
+                continue;
+            };
 
             // Create LoadFinish command
             let load_finish_command = Command::LoadFinish {
@@ -246,6 +244,39 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    async fn get_source_database_id_for_refresh_stage(
+        &self,
+        table_id: TableId,
+        associated_source_id: SourceId,
+        stage: &'static str,
+    ) -> MetaResult<Option<DatabaseId>> {
+        match self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(associated_source_id)
+            .await
+        {
+            Ok(database_id) => Ok(Some(database_id)),
+            Err(err) if err.is_catalog_id_not_found("object") => {
+                tracing::warn!(
+                    %table_id,
+                    %associated_source_id,
+                    stage,
+                    "skip refresh finish command because associated source is already dropped"
+                );
+                Ok(None)
+            }
+            Err(err) => Err(err)
+                .with_context(|| {
+                    format!(
+                        "failed to get database id for refresh stage: table_id={}, associated_source_id={}, stage={stage}",
+                        table_id, associated_source_id
+                    )
+                })
+                .map_err(Into::into),
+        }
+    }
+
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
     }
@@ -517,5 +548,22 @@ impl PostCollectCommand {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skip_refresh_finish_when_associated_source_missing() {
+        let err = MetaError::catalog_id_not_found("object", 42);
+        assert!(err.is_catalog_id_not_found("object"));
+    }
+
+    #[test]
+    fn test_do_not_skip_refresh_finish_for_other_not_found_types() {
+        let err = MetaError::catalog_id_not_found("table", 42);
+        assert!(!err.is_catalog_id_not_found("object"));
     }
 }

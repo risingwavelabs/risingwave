@@ -147,10 +147,10 @@ async fn fetch_serving_infos(
     Vec<WorkerNode>,
     HashMap<FragmentId, FragmentParallelismInfo>,
 ) {
-    // TODO: need another mechanism to refresh serving info instead of panic.
     let parallelisms = metadata_manager
         .catalog_controller
-        .running_fragment_parallelisms(None)
+        .fragment_parallelisms()
+        .await
         .expect("fail to fetch running parallelisms");
     let serving_compute_nodes = metadata_manager
         .cluster_controller
@@ -220,7 +220,7 @@ pub fn start_serving_vnode_mapping_worker(
                                 LocalNotification::BatchParallelismChange => {
                                     reset().await;
                                 }
-                                LocalNotification::FragmentMappingsUpsert(fragment_ids) => {
+                                LocalNotification::ServingFragmentMappingsUpsert(fragment_ids) => {
                                     if fragment_ids.is_empty() {
                                         continue;
                                     }
@@ -249,7 +249,7 @@ pub fn start_serving_vnode_mapping_worker(
                                         notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&failed)}));
                                     }
                                 }
-                                LocalNotification::FragmentMappingsDelete(fragment_ids) => {
+                                LocalNotification::ServingFragmentMappingsDelete(fragment_ids) => {
                                     if fragment_ids.is_empty() {
                                         continue;
                                     }
