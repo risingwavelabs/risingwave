@@ -39,13 +39,24 @@ jobs:
           PR_BODY: ${{ steps.PR.outputs.pr_body }}
           PR_LABEL: ${{ steps.PR.outputs.pr_labels }}
 
+      - name: Generate GitHub App token
+        if: steps.check_merged.outputs.merged == 'true' && steps.check_documentation_update.outputs.documentation_update == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.DOC_BOT_APP_ID }}
+          private-key: ${{ secrets.DOC_BOT_APP_PRIVATE_KEY }}
+          owner: risingwavelabs
+          repositories: risingwave-docs
+
       - name: Create issue in other repository
         if: steps.check_merged.outputs.merged == 'true' && steps.check_documentation_update.outputs.documentation_update == 'true'
         run: |
           ISSUE_CONTENT="This issue tracks the documentation update needed for the merged PR #$PR_ID.\n\nSource PR URL: $PR_URL\nSource PR Merged At: $PR_MERGED_AT\n\nIf it is a major improvement that deserves a new page or a new section in the documentation, please check if we should label it as an experiment feature."
 
           curl -X POST \
-            -H "Authorization: Bearer ${{ secrets.DOC_GITHUB_ACCESS_TOKEN }}" \
+            -H "Authorization: Bearer ${{ steps.app-token.outputs.token }}" \
+            -H "Accept: application/vnd.github+json" \
             -d "{\"title\": \"Document: $PR_TITLE\",\"body\": \"$ISSUE_CONTENT\"}" \
             "https://api.github.com/repos/risingwavelabs/risingwave-docs/issues"
         env:
