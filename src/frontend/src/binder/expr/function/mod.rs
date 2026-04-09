@@ -816,18 +816,17 @@ impl Binder {
         exprs: Vec<ExprImpl>,
         names: Vec<Option<String>>,
     ) -> Result<Vec<ExprImpl>> {
-        let return_type = DataType::Struct(StructType::new(
-            names
-                .into_iter()
-                .zip_eq_fast(exprs.iter())
-                .enumerate()
-                .map(|(idx, (name, expr))| {
-                    (
-                        name.unwrap_or_else(|| format!("f{}", idx + 1)),
-                        expr.return_type(),
-                    )
-                }),
-        ));
+        let return_type =
+            DataType::Struct(StructType::new(
+                names.into_iter().zip_eq_fast(exprs.iter()).enumerate().map(
+                    |(idx, (name, expr))| {
+                        (
+                            name.unwrap_or_else(|| format!("f{}", idx + 1)),
+                            expr.return_type(),
+                        )
+                    },
+                ),
+            ));
         Ok(vec![
             FunctionCall::new_unchecked(ExprType::Row, exprs, return_type).into(),
         ])
