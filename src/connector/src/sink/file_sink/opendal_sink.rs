@@ -40,8 +40,8 @@ use with_options::WithOptions;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::catalog::SinkEncode;
 use crate::sink::encoder::{
-    JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
-    TimestamptzHandlingMode,
+    CsvEncoder, JsonEncoder, JsonbHandlingMode, RowEncoder, SerTo, TimeHandlingMode,
+    TimestampHandlingMode, TimestamptzHandlingMode, XmlEncoder,
 };
 use crate::sink::file_sink::batching_log_sink::BatchingLogSinker;
 use crate::sink::{Result, Sink, SinkError, SinkFormatDesc, SinkParam};
@@ -138,11 +138,12 @@ impl<S: OpendalSinkBackend> Sink for FileSink<S> {
             )));
         }
 
-        if self.format_desc.encode != SinkEncode::Parquet
-            && self.format_desc.encode != SinkEncode::Json
-        {
+        if !matches!(
+            self.format_desc.encode,
+            SinkEncode::Parquet | SinkEncode::Json | SinkEncode::Csv | SinkEncode::Xml
+        ) {
             return Err(SinkError::Config(anyhow!(
-                "File sink only supports `PARQUET` and `JSON` encode at present."
+                "File sink only supports `PARQUET`, `JSON`, `CSV` and `XML` encode at present."
             )));
         }
 
@@ -202,6 +203,13 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
     }
 }
 
+/// The row encoder used for text-based file formats (JSON, CSV, XML).
+enum TextRowEncoder {
+    Json(JsonEncoder),
+    Csv(CsvEncoder),
+    Xml(XmlEncoder),
+}
+
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
     operator: Operator,
@@ -210,7 +218,7 @@ pub struct OpenDalSinkWriter {
     executor_id: u64,
     unique_writer_id: Uuid,
     encode_type: SinkEncode,
-    row_encoder: JsonEncoder,
+    row_encoder: TextRowEncoder,
     engine_type: EngineType,
     pub(crate) batching_strategy: BatchingStrategy,
     current_bached_row_num: usize,
@@ -265,6 +273,10 @@ impl OpenDalSinkWriter {
                     }
                 }
                 FileWriterEnum::FileWriter(mut w) => {
+                    // Write closing XML root element before closing the file.
+                    if self.encode_type == SinkEncode::Xml {
+                        w.write("</rows>\n").await?;
+                    }
                     w.close().await?;
                 }
             };
@@ -334,17 +346,21 @@ impl OpenDalSinkWriter {
             FileWriterEnum::FileWriter(w) => {
                 let mut chunk_buf = BytesMut::new();
                 let batch_row_nums = chunk.data_chunk().capacity();
-                // write the json representations of the row(s) in current chunk to `chunk_buf`
                 for (op, row) in chunk.rows() {
                     assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
-                    // to prevent temporary string allocation,
-                    // so we directly write to `chunk_buf` implicitly via `write_fmt`.
-                    writeln!(
-                        chunk_buf,
-                        "{}",
-                        Value::Object(self.row_encoder.encode(row)?)
-                    )
-                    .unwrap(); // write to a `BytesMut` should never fail
+                    match &self.row_encoder {
+                        TextRowEncoder::Json(encoder) => {
+                            writeln!(chunk_buf, "{}", Value::Object(encoder.encode(row)?)).unwrap();
+                        }
+                        TextRowEncoder::Csv(encoder) => {
+                            let line: String = encoder.encode(row)?.ser_to()?;
+                            writeln!(chunk_buf, "{}", line).unwrap();
+                        }
+                        TextRowEncoder::Xml(encoder) => {
+                            let line: String = encoder.encode(row)?.ser_to()?;
+                            writeln!(chunk_buf, "{}", line).unwrap();
+                        }
+                    }
                 }
                 w.write(chunk_buf.freeze()).await?;
                 self.current_bached_row_num += batch_row_nums;
@@ -366,16 +382,35 @@ impl OpenDalSinkWriter {
         batching_strategy: BatchingStrategy,
     ) -> Result<Self> {
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema.clone())?;
-        let jsonb_handling_mode = JsonbHandlingMode::from_options(&format_desc.options)?;
-        let row_encoder = JsonEncoder::new(
-            rw_schema,
-            None,
-            crate::sink::encoder::DateHandlingMode::String,
-            TimestampHandlingMode::String,
-            TimestamptzHandlingMode::UtcString,
-            TimeHandlingMode::String,
-            jsonb_handling_mode,
-        );
+        let row_encoder = match &format_desc.encode {
+            SinkEncode::Json => {
+                let jsonb_handling_mode = JsonbHandlingMode::from_options(&format_desc.options)?;
+                TextRowEncoder::Json(JsonEncoder::new(
+                    rw_schema,
+                    None,
+                    crate::sink::encoder::DateHandlingMode::String,
+                    TimestampHandlingMode::String,
+                    TimestamptzHandlingMode::UtcString,
+                    TimeHandlingMode::String,
+                    jsonb_handling_mode,
+                ))
+            }
+            SinkEncode::Csv => TextRowEncoder::Csv(CsvEncoder::new(rw_schema, None)),
+            SinkEncode::Xml => TextRowEncoder::Xml(XmlEncoder::new(rw_schema, None)),
+            _ => {
+                // Parquet does not use a row encoder; use a dummy JSON encoder.
+                let jsonb_handling_mode = JsonbHandlingMode::from_options(&format_desc.options)?;
+                TextRowEncoder::Json(JsonEncoder::new(
+                    rw_schema,
+                    None,
+                    crate::sink::encoder::DateHandlingMode::String,
+                    TimestampHandlingMode::String,
+                    TimestamptzHandlingMode::UtcString,
+                    TimeHandlingMode::String,
+                    jsonb_handling_mode,
+                ))
+            }
+        };
         Ok(Self {
             schema: Arc::new(arrow_schema),
             write_path: write_path.to_owned(),
@@ -393,10 +428,11 @@ impl OpenDalSinkWriter {
     }
 
     async fn create_object_writer(&mut self) -> Result<OpendalWriter> {
-        // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Parquet => "parquet",
             SinkEncode::Json => "json",
+            SinkEncode::Csv => "csv",
+            SinkEncode::Xml => "xml",
             _ => unimplemented!(),
         };
 
@@ -452,6 +488,27 @@ impl OpenDalSinkWriter {
                         Some(props.build()),
                     )?,
                 ));
+            }
+            SinkEncode::Csv => {
+                let mut writer = object_writer;
+                // Write CSV header line
+                if let TextRowEncoder::Csv(encoder) = &self.row_encoder {
+                    let header = crate::sink::encoder::csv::csv_header_line(
+                        encoder.schema(),
+                        encoder.col_indices(),
+                    );
+                    let header_bytes = format!("{}\n", header);
+                    writer.write(header_bytes).await?;
+                }
+                self.sink_writer = Some(FileWriterEnum::FileWriter(writer));
+            }
+            SinkEncode::Xml => {
+                let mut writer = object_writer;
+                // Write XML prolog and opening root element
+                writer
+                    .write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rows>\n")
+                    .await?;
+                self.sink_writer = Some(FileWriterEnum::FileWriter(writer));
             }
             _ => {
                 self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
