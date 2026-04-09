@@ -389,7 +389,9 @@ impl KafkaSplitReader {
             .offsets
             .iter()
             .flat_map(|(split_id, (_, stop_offset))| {
-                stop_offset.map(|offset| (split_id.clone() as SplitId, offset))
+                stop_offset
+                    .filter(|offset| *offset > 0)
+                    .map(|offset| (split_id.clone() as SplitId, offset))
             })
             .collect();
         let is_bounded = !stop_offsets.is_empty();
