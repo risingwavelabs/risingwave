@@ -519,6 +519,10 @@ pub struct KvLogStoreFactory<S: StateStore> {
     identity: String,
 
     pk_info: &'static KvLogStorePkInfo,
+
+    /// Semaphore to limit the number of concurrent historical reads.
+    /// `None` means unlimited.
+    historical_read_semaphore: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
@@ -531,6 +535,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         chunk_size: usize,
         metrics: KvLogStoreMetrics,
         identity: impl Into<String>,
+        historical_read_semaphore: Option<Arc<tokio::sync::Semaphore>>,
         pk_info: &'static KvLogStorePkInfo,
     ) -> Self {
         Self {
@@ -542,6 +547,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             metrics,
             identity: identity.into(),
             pk_info,
+            historical_read_semaphore,
         }
     }
 }
@@ -592,6 +598,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
+            self.historical_read_semaphore,
         );
 
         let writer = KvLogStoreWriter::new(
@@ -678,6 +685,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -800,6 +808,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -896,6 +905,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -992,6 +1002,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1114,6 +1125,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1213,6 +1225,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let factory2 = KvLogStoreFactory::new(
@@ -1223,6 +1236,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader1, mut writer1) = factory1.build().await;
@@ -1361,6 +1375,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1433,6 +1448,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1582,6 +1598,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1701,6 +1718,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1771,6 +1789,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1944,6 +1963,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -2034,6 +2054,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -2109,6 +2130,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -2167,6 +2189,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;

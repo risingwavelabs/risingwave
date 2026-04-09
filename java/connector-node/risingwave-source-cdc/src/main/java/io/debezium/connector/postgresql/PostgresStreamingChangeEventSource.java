@@ -92,6 +92,7 @@ public class PostgresStreamingChangeEventSource
     private final SnapshotterService snapshotterService;
     private final DelayStrategy pauseNoMessage;
     private final ElapsedTimeStrategy connectionProbeTimer;
+    private Runnable onConnectedCallback;
 
     // Offset committing is an asynchronous operation.
     // When connector is restarted we cannot be sure about timing of recovery, offset committing
@@ -137,6 +138,14 @@ public class PostgresStreamingChangeEventSource
         this.connectionProbeTimer =
                 ElapsedTimeStrategy.constant(
                         Clock.system(), connectorConfig.statusUpdateInterval());
+    }
+
+    /**
+     * Set a callback to be invoked once the replication connection is truly established. This
+     * replaces the premature JMX Connected=true that was set before the actual connection.
+     */
+    public void setOnConnectedCallback(Runnable callback) {
+        this.onConnectedCallback = callback;
     }
 
     @Override
@@ -246,6 +255,11 @@ public class PostgresStreamingChangeEventSource
                                 PostgresConnector.class,
                                 connectorConfig.getLogicalName(),
                                 KEEP_ALIVE_THREAD_NAME));
+            }
+
+            // Signal connected only when the final streaming session is ready.
+            if (onConnectedCallback != null) {
+                onConnectedCallback.run();
             }
             processMessages(context, partition, this.effectiveOffset, stream);
         } catch (Throwable e) {

@@ -68,3 +68,8 @@ When sandboxing is enabled, these commands need `require_escalated` because they
 ## Connector Development
 
 See `docs/dev/src/connector/intro.md`.
+
+## Repo Skills
+
+- Use `$risingwave-rust-analyzer` for RisingWave-specific `rust-analyzer` CLI and LSP workflows, especially when a task needs fast semantic inspection, structural search/replace, or crate-specific feature guidance. Skill path: `.agents/skills/risingwave-rust-analyzer/SKILL.md`.
+- Use `$fix-buildkite-ci` for Buildkite triage and focused CI fixes. Skill path: `.agents/skills/fix-buildkite-ci/SKILL.md`.

@@ -5,9 +5,6 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-# prepare environment
-export CONNECTOR_LIBS_PATH="./connector-node/libs"
-
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -24,17 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
-
-echo "--- Download connector node package"
-buildkite-agent artifact download risingwave-connector.tar.gz ./
-mkdir ./connector-node
-tar xf ./risingwave-connector.tar.gz -C ./connector-node
-
-echo "--- starting risingwave cluster"
-risedev ci-start ci-sink-test
-# Wait cassandra server to start
-sleep 40
+sink_test_env_setup "$profile" true 40
 
 echo "--- install cassandra"
 wget --no-verbose $(get_latest_cassandra_download_url) -O cassandra_latest.tar.gz
@@ -60,5 +47,4 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/cassandra_sink.slt'
 deactivate
 
 echo "--- Kill cluster"
-cd ../../
 risedev ci-kill

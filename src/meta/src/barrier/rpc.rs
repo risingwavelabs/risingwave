@@ -66,7 +66,7 @@ use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
-    DatabaseCheckpointControlMetrics,
+    DatabaseCheckpointControlMetrics, IndependentCheckpointJobControl,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -591,7 +591,7 @@ impl DatabaseInitialBarrierCollector {
         database_partial_graphs(
             self.database_id,
             self.database
-                .creating_streaming_job_controls
+                .independent_checkpoint_job_controls
                 .keys()
                 .copied(),
         )
@@ -1003,8 +1003,10 @@ impl PartialGraphRecoverer<'_> {
             );
         };
 
-        let mut creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl> =
-            HashMap::new();
+        let mut independent_checkpoint_job_controls: HashMap<
+            JobId,
+            IndependentCheckpointJobControl,
+        > = HashMap::new();
         for (job_id, (info, upstream_table_ids, committed_epoch, snapshot_epoch)) in
             ongoing_snapshot_backfill_jobs
         {
@@ -1065,7 +1067,10 @@ impl PartialGraphRecoverer<'_> {
                 mutation.clone(),
                 self,
             )?;
-            creating_streaming_job_controls.insert(job_id, job);
+            independent_checkpoint_job_controls.insert(
+                job_id,
+                IndependentCheckpointJobControl::CreatingStreamingJob(job),
+            );
         }
 
         self.control_stream_manager()
@@ -1080,9 +1085,14 @@ impl PartialGraphRecoverer<'_> {
                             .map(move |fragment| (fragment, info.job_id))
                     })
                     .chain(
-                        creating_streaming_job_controls
-                            .values()
-                            .flat_map(|job| job.fragment_infos_with_job_id()),
+                        independent_checkpoint_job_controls
+                            .iter()
+                            .flat_map(|(job_id, job)| {
+                                let job_id = *job_id;
+                                job.fragment_infos()
+                                    .into_iter()
+                                    .flat_map(move |infos| infos.values().map(move |f| (f, job_id)))
+                            }),
                     ),
             );
 
@@ -1102,7 +1112,7 @@ impl PartialGraphRecoverer<'_> {
             database_state,
             committed_epoch,
             database_info,
-            creating_streaming_job_controls,
+            independent_checkpoint_job_controls,
         ))
     }
 }
