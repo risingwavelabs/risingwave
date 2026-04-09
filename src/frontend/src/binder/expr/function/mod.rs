@@ -822,7 +822,7 @@ impl Binder {
                 .enumerate()
                 .map(|(idx, (name, expr))| {
                     (
-                        name.unwrap_or_else(|| format!("f{}", idx)),
+                        name.unwrap_or_else(|| format!("f{}", idx + 1)),
                         expr.return_type(),
                     )
                 }),
