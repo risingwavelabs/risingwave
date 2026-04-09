@@ -353,8 +353,7 @@ impl OpenDalSinkWriter {
                     assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
                     match &self.row_encoder {
                         TextRowEncoder::Json(encoder) => {
-                            writeln!(chunk_buf, "{}", Value::Object(encoder.encode(row)?))
-                                .unwrap();
+                            writeln!(chunk_buf, "{}", Value::Object(encoder.encode(row)?)).unwrap();
                         }
                         TextRowEncoder::Csv(encoder) => {
                             let line: String = encoder.encode(row)?.ser_to()?;
@@ -388,8 +387,7 @@ impl OpenDalSinkWriter {
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema.clone())?;
         let row_encoder = match &format_desc.encode {
             SinkEncode::Json => {
-                let jsonb_handling_mode =
-                    JsonbHandlingMode::from_options(&format_desc.options)?;
+                let jsonb_handling_mode = JsonbHandlingMode::from_options(&format_desc.options)?;
                 TextRowEncoder::Json(JsonEncoder::new(
                     rw_schema,
                     None,
@@ -404,8 +402,7 @@ impl OpenDalSinkWriter {
             SinkEncode::Xml => TextRowEncoder::Xml(XmlEncoder::new(rw_schema, None)),
             _ => {
                 // Parquet does not use a row encoder; use a dummy JSON encoder.
-                let jsonb_handling_mode =
-                    JsonbHandlingMode::from_options(&format_desc.options)?;
+                let jsonb_handling_mode = JsonbHandlingMode::from_options(&format_desc.options)?;
                 TextRowEncoder::Json(JsonEncoder::new(
                     rw_schema,
                     None,
@@ -503,8 +500,10 @@ impl OpenDalSinkWriter {
                 let mut writer = object_writer;
                 // Write CSV header line
                 if let TextRowEncoder::Csv(encoder) = &self.row_encoder {
-                    let header =
-                        crate::sink::encoder::csv::csv_header_line(encoder.schema(), encoder.col_indices());
+                    let header = crate::sink::encoder::csv::csv_header_line(
+                        encoder.schema(),
+                        encoder.col_indices(),
+                    );
                     let header_bytes = format!("{}\n", header);
                     writer.write(header_bytes).await?;
                 }
