@@ -4,6 +4,12 @@ include ../../nexmark/create_sources_kafka.slt.part
 control substitution off
 
 include ../../streaming/nexmark/create_views.slt.part
+
+# Diagnostic point C: check topic watermarks before q0 assertion.
+# Compare with point A to detect unexpected writes during source/MV processing.
+system ok
+echo "[nexmark-diag-C] topic watermarks before q0 assertion:" && rpk topic describe nexmark-bid -p
+
 include ../../streaming/nexmark/test_mv_result.slt.part
 
 include ../../nexmark/drop_sources_kafka.slt.part
