@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use self::iceberg_compactor_runner::{IcebergTaskReportContext, create_task_execution};
+pub use self::iceberg_compactor_runner::create_task_execution;
 use crate::hummock::compactor::iceberg_compaction::iceberg_compactor_runner::IcebergCompactionPlanRunner;
 
 pub(crate) mod iceberg_compactor_runner;

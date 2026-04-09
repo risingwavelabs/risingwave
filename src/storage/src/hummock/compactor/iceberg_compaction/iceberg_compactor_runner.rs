@@ -36,8 +36,7 @@ use risingwave_common::config::storage::default::storage::{
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::sink::iceberg::{
-    IcebergConfig, IcebergWriteMode, commit_branch, get_current_snapshot_id,
-    get_pending_snapshot_count_from_table, should_enable_iceberg_cow,
+    IcebergConfig, IcebergWriteMode, commit_branch, should_enable_iceberg_cow,
 };
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
@@ -48,31 +47,8 @@ use super::IcebergTaskMeta;
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
 
-#[derive(Clone)]
-pub struct IcebergTaskReportContext {
-    pub sink_id: u32,
-    pub catalog: Arc<dyn Catalog>,
-    pub table_ident: TableIdent,
-    pub iceberg_config: IcebergConfig,
-}
-
-impl IcebergTaskReportContext {
-    pub async fn load_pending_snapshot_state(&self) -> HummockResult<(usize, Option<i64>)> {
-        let table = self
-            .catalog
-            .load_table(&self.table_ident)
-            .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-        let pending_snapshot_count =
-            get_pending_snapshot_count_from_table(&self.iceberg_config, &table).ok_or_else(
-                || HummockError::compaction_executor("Failed to compute pending snapshot count"),
-            )?;
-        Ok((pending_snapshot_count, get_current_snapshot_id(&table)))
-    }
-}
-
 pub struct IcebergTaskExecution {
-    pub report_context: IcebergTaskReportContext,
+    pub sink_id: u32,
     pub plan_runners: Vec<IcebergCompactionPlanRunner>,
 }
 
@@ -571,12 +547,7 @@ pub async fn create_task_execution(
             "No files to compact, skip the task"
         );
         return Ok(IcebergTaskExecution {
-            report_context: IcebergTaskReportContext {
-                sink_id,
-                catalog,
-                table_ident,
-                iceberg_config,
-            },
+            sink_id,
             plan_runners: vec![],
         });
     }
@@ -606,12 +577,7 @@ pub async fn create_task_execution(
     );
 
     Ok(IcebergTaskExecution {
-        report_context: IcebergTaskReportContext {
-            sink_id,
-            catalog,
-            table_ident,
-            iceberg_config,
-        },
+        sink_id,
         plan_runners: runners,
     })
 }

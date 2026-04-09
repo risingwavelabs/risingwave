@@ -25,8 +25,7 @@ message SubscribeIcebergCompactionEventRequest {
     uint64 task_id = 1;
     uint32 sink_id = 2;
     Status status = 3;
-    optional uint64 post_commit_snapshot_count = 4;
-    optional int64 post_commit_snapshot_id = 5;
+    reserved 4, 5;
     optional string error_message = 6;
   }
 

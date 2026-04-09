@@ -57,9 +57,7 @@ pub use context::{
 use futures::{StreamExt, pin_mut};
 // Import iceberg compactor runner types from the local `iceberg_compaction` module.
 use iceberg_compaction::iceberg_compactor_runner::IcebergCompactorRunnerConfigBuilder;
-use iceberg_compaction::{
-    IcebergTaskQueue, IcebergTaskReportContext, PushResult, create_task_execution,
-};
+use iceberg_compaction::{IcebergTaskQueue, PushResult, create_task_execution};
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
 use risingwave_hummock_sdk::table_stats::{TableStatsMap, to_prost_table_stats_map};
@@ -141,17 +139,10 @@ struct IcebergTaskTracker {
     completed_plans: usize,
     has_failure: bool,
     first_error: Option<String>,
-    report_context: IcebergTaskReportContext,
 }
 
 impl IcebergTaskTracker {
-    fn new(
-        task_id: u64,
-        sink_id: u32,
-        total_plans: usize,
-        enqueued_plans: usize,
-        report_context: IcebergTaskReportContext,
-    ) -> Self {
+    fn new(task_id: u64, sink_id: u32, total_plans: usize, enqueued_plans: usize) -> Self {
         Self {
             task_id,
             sink_id,
@@ -160,7 +151,6 @@ impl IcebergTaskTracker {
             has_failure: enqueued_plans < total_plans,
             first_error: (enqueued_plans < total_plans)
                 .then_some("Failed to enqueue all iceberg compaction plans".to_owned()),
-            report_context,
         }
     }
 
@@ -520,7 +510,7 @@ pub fn start_iceberg_compactor(
                         }
 
                         if let Some(task_tracker) = finished_tracker {
-                            let report = build_iceberg_task_result(task_tracker).await;
+                            let report = build_iceberg_task_result(task_tracker);
                             if send_iceberg_task_report(&request_sender, report.clone()).is_err() {
                                 pending_task_reports.push_back(report);
                                 continue 'start_stream;
@@ -637,8 +627,7 @@ pub fn start_iceberg_compactor(
                                     }
                                 };
 
-                                let report_context = task_execution.report_context.clone();
-                                let sink_id = report_context.sink_id;
+                                let sink_id = task_execution.sink_id;
                                 let plan_runners = task_execution.plan_runners;
 
                                 if plan_runners.is_empty() {
@@ -648,9 +637,8 @@ pub fn start_iceberg_compactor(
                                         sink_id,
                                         0,
                                         0,
-                                        report_context,
                                     );
-                                    let report = build_iceberg_task_result(task_tracker).await;
+                                    let report = build_iceberg_task_result(task_tracker);
                                     if send_iceberg_task_report(&request_sender, report.clone()).is_err() {
                                         pending_task_reports.push_back(report);
                                         continue 'start_stream;
@@ -721,14 +709,13 @@ pub fn start_iceberg_compactor(
                                         sink_id,
                                         total_plans,
                                         enqueued_count,
-                                        report_context,
                                     ),
                                 );
 
                                 if enqueued_count == 0
                                     && let Some(task_tracker) = task_trackers.remove(&task_id)
                                 {
-                                    let report = build_iceberg_task_result(task_tracker).await;
+                                    let report = build_iceberg_task_result(task_tracker);
                                     if send_iceberg_task_report(&request_sender, report.clone())
                                         .is_err()
                                     {
@@ -769,45 +756,23 @@ pub fn start_iceberg_compactor(
     (join_handle, shutdown_tx)
 }
 
-async fn build_iceberg_task_result(task_tracker: IcebergTaskTracker) -> IcebergTaskReport {
-    let (status, post_commit_snapshot_count, post_commit_snapshot_id, error_message) =
-        if task_tracker.has_failure {
-            (
-                subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32,
-                None,
-                None,
-                task_tracker.first_error,
-            )
-        } else {
-            match task_tracker
-                .report_context
-                .load_pending_snapshot_state()
-                .await
-            {
-                Ok((pending_snapshot_count, current_snapshot_id)) => (
-                    subscribe_iceberg_compaction_event_request::report_task::Status::Success as i32,
-                    Some(pending_snapshot_count as u64),
-                    current_snapshot_id,
-                    None,
-                ),
-                Err(e) => (
-                    subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32,
-                    None,
-                    None,
-                    Some(format!(
-                        "Failed to load post-commit iceberg snapshot state: {}",
-                        e.as_report()
-                    )),
-                ),
-            }
-        };
+fn build_iceberg_task_result(task_tracker: IcebergTaskTracker) -> IcebergTaskReport {
+    let (status, error_message) = if task_tracker.has_failure {
+        (
+            subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32,
+            task_tracker.first_error,
+        )
+    } else {
+        (
+            subscribe_iceberg_compaction_event_request::report_task::Status::Success as i32,
+            None,
+        )
+    };
 
     subscribe_iceberg_compaction_event_request::ReportTask {
         task_id: task_tracker.task_id,
         sink_id: task_tracker.sink_id,
         status,
-        post_commit_snapshot_count,
-        post_commit_snapshot_id,
         error_message,
     }
 }
@@ -821,8 +786,6 @@ fn build_failed_iceberg_task_report(
         task_id,
         sink_id,
         status: subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32,
-        post_commit_snapshot_count: None,
-        post_commit_snapshot_id: None,
         error_message: Some(error_message),
     }
 }

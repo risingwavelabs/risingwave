@@ -634,10 +634,7 @@ impl DiagnoseCommand {
             }
         };
 
-        let statuses = self
-            .iceberg_compaction_manager
-            .list_compaction_statuses()
-            .await;
+        let statuses = self.iceberg_compaction_manager.list_compaction_statuses();
 
         let _ = writeln!(s, "ICEBERG COMPACTION SCHEDULE");
 
@@ -650,7 +647,7 @@ impl DiagnoseCommand {
             row.add_cell("schedule_state".into());
             row.add_cell("trigger_interval_sec".into());
             row.add_cell("trigger_snapshot_count".into());
-            row.add_cell("pending_snapshot_count".into());
+            row.add_cell("pending_commit_count".into());
             row.add_cell("next_compaction_after_sec".into());
             row.add_cell("is_triggerable".into());
             row
@@ -669,7 +666,7 @@ impl DiagnoseCommand {
             row.add_cell((status.trigger_snapshot_count as u64).into());
             try_add_cell(
                 &mut row,
-                status.pending_snapshot_count.map(|count| count as u64),
+                status.pending_commit_count.map(|count| count as u64),
             );
             try_add_cell(&mut row, status.next_compaction_after_sec);
             row.add_cell(status.is_triggerable.into());
