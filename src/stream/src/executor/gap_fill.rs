@@ -49,8 +49,8 @@ pub struct GapFillExecutorArgs<S: StateStore> {
 }
 
 /// State row layout:
-///   [output_cols..., prev_sk_0..N, next_sk_0..N]
-///   where prev_sk/next_sk store the neighbor pointer key inside the partition:
+///   `[output_cols..., prev_sk_0..N, next_sk_0..N]`
+///   where `prev_sk`/`next_sk` store the neighbor pointer key inside the partition:
 ///   (time column, upstream stream key columns excluding partition/time).
 ///
 /// Only original (anchor) rows are persisted. Filled rows are computed on the fly.
@@ -114,7 +114,7 @@ impl<S: StateStore> ManagedGapFillState<S> {
     }
 
     /// Build the state row from an upstream row with prev/next pointer datums.
-    /// State row = [output_cols..., prev_sk_0..N, next_sk_0..N]
+    /// State row = `[output_cols..., prev_sk_0..N, next_sk_0..N]`
     fn build_state_row(
         &self,
         row: impl Row,
@@ -695,36 +695,34 @@ impl<S: StateStore> GapFillExecutor<S> {
                                 //    We need to get the state row from the state table for pointer update.
                                 if let Some(prev_ptr) = &prev_pointer {
                                     let pk = managed_state.build_pk_row(partition_key, prev_ptr);
-                                    if let Some(pk) = pk {
-                                        if let Some(prev_sr) = Self::get_state_row_by_pk(
+                                    if let Some(pk) = pk
+                                        && let Some(prev_sr) = Self::get_state_row_by_pk(
                                             &managed_state,
                                             &mut state_cache,
                                             &pk,
                                         )
                                         .await?
-                                        {
-                                            let new_prev_sr = managed_state
-                                                .update_next_pointer(&prev_sr, &new_row_pointer);
-                                            state_cache.insert(pk, new_prev_sr);
-                                        }
+                                    {
+                                        let new_prev_sr = managed_state
+                                            .update_next_pointer(&prev_sr, &new_row_pointer);
+                                        state_cache.insert(pk, new_prev_sr);
                                     }
                                 }
 
                                 // 5. Update next's prev pointer to point to new row.
                                 if let Some(next_ptr) = &next_pointer {
                                     let pk = managed_state.build_pk_row(partition_key, next_ptr);
-                                    if let Some(pk) = pk {
-                                        if let Some(next_sr) = Self::get_state_row_by_pk(
+                                    if let Some(pk) = pk
+                                        && let Some(next_sr) = Self::get_state_row_by_pk(
                                             &managed_state,
                                             &mut state_cache,
                                             &pk,
                                         )
                                         .await?
-                                        {
-                                            let new_next_sr = managed_state
-                                                .update_prev_pointer(&next_sr, &new_row_pointer);
-                                            state_cache.insert(pk, new_next_sr);
-                                        }
+                                    {
+                                        let new_next_sr = managed_state
+                                            .update_prev_pointer(&next_sr, &new_row_pointer);
+                                        state_cache.insert(pk, new_next_sr);
                                     }
                                 }
 
@@ -875,40 +873,38 @@ impl<S: StateStore> GapFillExecutor<S> {
 
                                 if let Some(prev_ptr) = &prev_pointer {
                                     let pk = managed_state.build_pk_row(partition_key, prev_ptr);
-                                    if let Some(pk) = pk {
-                                        if let Some(prev_sr) = Self::get_state_row_by_pk(
+                                    if let Some(pk) = pk
+                                        && let Some(prev_sr) = Self::get_state_row_by_pk(
                                             &managed_state,
                                             &mut state_cache,
                                             &pk,
                                         )
                                         .await?
-                                        {
-                                            let new_prev_sr = managed_state.update_next_pointer(
-                                                &prev_sr,
-                                                next_pointer.as_ref().unwrap_or(&null_ptr),
-                                            );
-                                            state_cache.insert(pk, new_prev_sr);
-                                        }
+                                    {
+                                        let new_prev_sr = managed_state.update_next_pointer(
+                                            &prev_sr,
+                                            next_pointer.as_ref().unwrap_or(&null_ptr),
+                                        );
+                                        state_cache.insert(pk, new_prev_sr);
                                     }
                                 }
 
                                 // 7. Update next's prev pointer to point to prev.
                                 if let Some(next_ptr) = &next_pointer {
                                     let pk = managed_state.build_pk_row(partition_key, next_ptr);
-                                    if let Some(pk) = pk {
-                                        if let Some(next_sr) = Self::get_state_row_by_pk(
+                                    if let Some(pk) = pk
+                                        && let Some(next_sr) = Self::get_state_row_by_pk(
                                             &managed_state,
                                             &mut state_cache,
                                             &pk,
                                         )
                                         .await?
-                                        {
-                                            let new_next_sr = managed_state.update_prev_pointer(
-                                                &next_sr,
-                                                prev_pointer.as_ref().unwrap_or(&null_ptr),
-                                            );
-                                            state_cache.insert(pk, new_next_sr);
-                                        }
+                                    {
+                                        let new_next_sr = managed_state.update_prev_pointer(
+                                            &next_sr,
+                                            prev_pointer.as_ref().unwrap_or(&null_ptr),
+                                        );
+                                        state_cache.insert(pk, new_next_sr);
                                     }
                                 }
 
