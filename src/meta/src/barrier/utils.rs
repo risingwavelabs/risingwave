@@ -127,7 +127,7 @@ pub(super) fn collect_new_vector_index_info(
     }
 }
 
-pub(super) fn collect_creating_job_commit_epoch_info(
+pub(super) fn collect_independent_job_commit_epoch_info(
     commit_info: &mut CommitEpochInfo,
     epoch: u64,
     resps: Vec<BarrierCompleteResponse>,

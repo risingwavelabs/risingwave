@@ -252,7 +252,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
     ) {
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
         if let Some(output) = barrier_complete_output {
-            self.control.ack_completed(output);
+            self.control.ack_completed(partial_graph_manager, output);
         }
         let database_status = self
             .control
@@ -263,7 +263,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
             DatabaseCheckpointControlStatus::Running(database) => {
                 let mut resetting_partial_graphs = HashSet::new();
                 let new_reset_partial_graphs: HashSet<_> = database
-                    .creating_streaming_job_controls
+                    .independent_checkpoint_job_controls
                     .drain()
                     .filter_map(|(job_id, job)| {
                         let partial_graph_id = to_partial_graph_id(self.database_id, Some(job_id));
