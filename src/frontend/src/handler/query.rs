@@ -306,6 +306,7 @@ pub struct RwBatchQueryPlanResult {
     // subset of the final one. i.e. the final one may contain more implicit dependencies on
     // indices.
     pub(crate) dependent_relations: Vec<ObjectId>,
+    pub(crate) dependent_secrets: Vec<SecretId>,
 }
 
 fn gen_batch_query_plan(
@@ -318,6 +319,7 @@ fn gen_batch_query_plan(
         must_dist,
         bound,
         dependent_relations,
+        dependent_secrets,
         ..
     } = bind_result;
 
@@ -392,6 +394,7 @@ fn gen_batch_query_plan(
         schema,
         stmt_type,
         dependent_relations: dependent_relations.into_iter().collect_vec(),
+        dependent_secrets: dependent_secrets.into_iter().collect_vec(),
     };
     Ok(BatchPlanChoice::Rw(result))
 }
