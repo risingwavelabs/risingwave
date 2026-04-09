@@ -30,12 +30,12 @@ use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitId, SplitImpl,
-    SplitMetaData, fill_adaptive_split,
+    SplitMetaData,
 };
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-pub use split_assignment::{SplitDiffOptions, SplitState, reassign_splits};
+pub use split_assignment::{SplitDiffOptions, SplitState, align_splits, reassign_splits};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, MutexGuard, oneshot};
@@ -45,15 +45,54 @@ use tokio::{select, time};
 pub use worker::create_source_worker;
 use worker::{ConnectorSourceWorkerHandle, create_source_worker_async};
 
-use crate::MetaResult;
-use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan, SharedActorInfos};
+use crate::barrier::{BarrierScheduler, Command, ReplaceStreamJobPlan};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ActorId, FragmentId, StreamJobFragments};
 use crate::rpc::metrics::MetaMetrics;
+use crate::{MetaError, MetaResult};
 
 pub type SourceManagerRef = Arc<SourceManager>;
+/// Actor-level split assignment, used inside the barrier worker after actor rendering.
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
-pub type DiscoveredSourceSplits = HashMap<SourceId, Vec<SplitImpl>>;
+
+/// Source-level split assignment: maps source ID to the discovered splits enum.
+/// Unlike [`SplitAssignment`], this does not include fragment- or actor-level assignment.
+/// The [`DiscoveredSplits`] enum is preserved all the way through to the barrier
+/// command, and only resolved to concrete per-fragment, per-actor splits when the
+/// barrier worker performs the actual split assignment.
+pub type SourceSplitAssignment = HashMap<SourceId, DiscoveredSplits>;
+
+/// Discovered splits from the source enumerator.
+///
+/// For adaptive splits, the single template split is returned and must be expanded
+/// to per-actor splits after actor rendering inside the barrier worker.
+#[derive(Debug, Clone)]
+pub enum DiscoveredSplits {
+    /// Fixed splits discovered from the external source.
+    Fixed(BTreeMap<Arc<str>, SplitImpl>),
+    /// A single adaptive split template that needs to be expanded per actor.
+    /// The `fill_adaptive_split` function should be called after actor rendering.
+    Adaptive(SplitImpl),
+}
+
+/// Describes how splits should be resolved for a replace stream job.
+///
+/// This is determined during Phase 1 (before the barrier command) and stored in
+/// [`ReplaceStreamJobPlan`](crate::barrier::ReplaceStreamJobPlan).
+/// The barrier worker uses this to decide the split resolution strategy in Phase 2.
+#[derive(Debug, Clone)]
+pub enum ReplaceJobSplitPlan {
+    /// Fresh discovered splits. Used when the replace job has no existing downstream
+    /// consumers (i.e., `replace_upstream` is empty), or the job is not a source.
+    /// Resolved via [`SourceManager::resolve_fragment_to_actor_splits`] in Phase 2.
+    Discovered(SourceSplitAssignment),
+    /// Splits need to be aligned with the previous source fragment in Phase 2.
+    /// This happens when replacing a source that has existing downstream consumers.
+    /// Resolved via [`SourceManager::resolve_replace_source_splits`] in Phase 2.
+    ///
+    /// Contains the no-shuffle mapping needed for split alignment.
+    AlignFromPrevious,
+}
 
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<ObjectId, HashMap<String, String>>;
@@ -222,7 +261,7 @@ impl SourceManagerCore {
         }
 
         for (source_id, new_props) in recreate_source_id_map_new_props {
-            if let Some(handle) = self.managed_sources.get_mut(&(source_id as _)) {
+            if let Some(handle) = self.managed_sources.get_mut(&source_id) {
                 // the update here should not involve fragments change and split change
                 // Or we need to drop and recreate the source worker instead of updating inplace
                 let props_wrapper =
@@ -496,21 +535,146 @@ impl SourceManager {
         let core = self.core.lock().await;
         for source_id in updated_source_ids {
             if let Some(handle) = core.managed_sources.get(&source_id) {
-                tracing::info!("forcing tick for updated source {}", source_id.as_raw_id());
+                tracing::info!("forcing tick for updated source {}", source_id);
                 if let Err(e) = handle.force_tick().await {
                     tracing::warn!(
                         error = %e.as_report(),
                         "failed to force tick for source {} after properties update",
-                        source_id.as_raw_id()
+                        source_id
                     );
                 }
             } else {
                 tracing::warn!(
                     "source {} not found when trying to force tick after update",
-                    source_id.as_raw_id()
+                    source_id
                 );
             }
         }
+    }
+
+    /// Reset source split assignments by clearing the cached split state
+    /// and triggering re-discovery. This is an UNSAFE operation that may
+    /// cause data duplication or loss depending on the connector.
+    pub async fn reset_source_splits(&self, source_id: SourceId) -> MetaResult<()> {
+        tracing::warn!(
+            %source_id,
+            "UNSAFE: Resetting source splits - clearing cached state and triggering re-discovery"
+        );
+
+        let core = self.core.lock().await;
+        if let Some(handle) = core.managed_sources.get(&source_id) {
+            // Clear the cached splits to force re-discovery
+            {
+                let mut splits_guard = handle.splits.lock().await;
+                tracing::info!(
+                    %source_id,
+                    prev_splits = ?splits_guard.splits.as_ref().map(|s| s.len()),
+                    "Clearing cached splits"
+                );
+                splits_guard.splits = None;
+            }
+
+            // Force a tick to re-discover splits
+            tracing::info!(
+                %source_id,
+                "Triggering split re-discovery via force_tick"
+            );
+            handle.force_tick().await.with_context(|| {
+                format!(
+                    "failed to force tick for source {} after split reset",
+                    source_id
+                )
+            })?;
+
+            tracing::info!(
+                %source_id,
+                "Split reset completed - new splits will be assigned on next tick"
+            );
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("source {} not found in source manager", source_id).into())
+        }
+    }
+
+    /// Validate split offsets before injecting them.
+    /// Returns `Ok(applied_split_ids)` if all validations pass, otherwise returns an error.
+    ///
+    /// Validations performed:
+    /// 1. Source exists in source manager
+    /// 2. All requested split IDs exist in the source's current splits (runtime assignment)
+    pub async fn validate_inject_source_offsets(
+        &self,
+        source_id: SourceId,
+        split_offsets: &HashMap<String, String>,
+    ) -> MetaResult<Vec<String>> {
+        let (fragment_ids, env) = {
+            let core = self.core.lock().await;
+
+            // Check if source exists
+            let _ = core.managed_sources.get(&source_id).ok_or_else(|| {
+                MetaError::invalid_parameter(format!(
+                    "source {} not found in source manager",
+                    source_id
+                ))
+            })?;
+
+            let mut ids = Vec::new();
+            if let Some(src_frags) = core.source_fragments.get(&source_id) {
+                ids.extend(src_frags.iter().copied());
+            }
+            if let Some(backfill_frags) = core.backfill_fragments.get(&source_id) {
+                ids.extend(
+                    backfill_frags
+                        .iter()
+                        .flat_map(|(id, upstream)| [*id, *upstream]),
+                );
+            }
+            (ids, core.env.clone())
+        };
+
+        if fragment_ids.is_empty() {
+            return Err(MetaError::invalid_parameter(format!(
+                "source {} has no running fragments",
+                source_id
+            )));
+        }
+
+        let guard = env.shared_actor_infos().read_guard();
+        let mut assigned_split_ids = HashSet::new();
+        for fragment_id in fragment_ids {
+            if let Some(fragment) = guard.get_fragment(fragment_id) {
+                for actor in fragment.actors.values() {
+                    for split in &actor.splits {
+                        assigned_split_ids.insert(split.id().to_string());
+                    }
+                }
+            }
+        }
+
+        // Validate all requested split IDs exist
+        let mut invalid_splits = Vec::new();
+        for split_id in split_offsets.keys() {
+            if !assigned_split_ids.contains(split_id) {
+                invalid_splits.push(split_id.clone());
+            }
+        }
+
+        if !invalid_splits.is_empty() {
+            return Err(MetaError::invalid_parameter(format!(
+                "invalid split IDs for source {}: {:?}. Valid splits are: {:?}",
+                source_id,
+                invalid_splits,
+                assigned_split_ids.iter().collect::<Vec<_>>()
+            )));
+        }
+
+        tracing::info!(
+            source_id = %source_id,
+            num_splits = split_offsets.len(),
+            "Validated inject source offsets request"
+        );
+
+        Ok(split_offsets.keys().cloned().collect())
     }
 }
 

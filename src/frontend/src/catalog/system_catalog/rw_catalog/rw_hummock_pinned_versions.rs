@@ -15,6 +15,7 @@
 use risingwave_common::id::WorkerId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::HummockVersionId;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
@@ -23,7 +24,7 @@ use crate::error::Result;
 struct RwHummockPinnedVersion {
     #[primary_key]
     worker_node_id: WorkerId,
-    min_pinned_version_id: i64,
+    min_pinned_version_id: HummockVersionId,
 }
 
 #[system_catalog(table, "rw_catalog.rw_hummock_pinned_versions")]
@@ -35,7 +36,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockPinnedVersio
         .into_iter()
         .map(|s| RwHummockPinnedVersion {
             worker_node_id: s.0,
-            min_pinned_version_id: s.1 as _,
+            min_pinned_version_id: s.1,
         })
         .collect();
     Ok(pinned_versions)

@@ -279,10 +279,10 @@ impl<'a> AvroParseOptionsInner<'a> {
             .into(),
             // ---- List -----
             (DataType::List(list_type), Value::Array(array)) => ListValue::new({
-                let Schema::Array(element_schema) = self.lookup_ref(unresolved_schema) else {
+                let Schema::Array(array_schema) = self.lookup_ref(unresolved_schema) else {
                     return Err(create_error());
                 };
-                let schema = element_schema;
+                let schema = &array_schema.items;
                 let elem_type = list_type.elem();
                 let mut builder = elem_type.create_array_builder(array.len());
                 for v in array {
@@ -306,10 +306,10 @@ impl<'a> AvroParseOptionsInner<'a> {
                 uuid.as_hyphenated().to_string().into_boxed_str().into()
             }
             (DataType::Map(map_type), Value::Map(map)) => {
-                let Schema::Map(value_schema) = self.lookup_ref(unresolved_schema) else {
+                let Schema::Map(map_schema) = self.lookup_ref(unresolved_schema) else {
                     return Err(create_error());
                 };
-                let schema = value_schema;
+                let schema = &map_schema.types;
                 let mut builder = map_type
                     .clone()
                     .into_struct()
@@ -522,12 +522,15 @@ pub(crate) fn avro_to_jsonb(avro: &Value, builder: &mut jsonbb::Builder) -> Acce
         | Value::Fixed(_, _)
         | Value::Date(_)
         | Value::Decimal(_)
+        | Value::BigDecimal(_)
         | Value::TimeMillis(_)
         | Value::TimeMicros(_)
         | Value::TimestampMillis(_)
         | Value::TimestampMicros(_)
+        | Value::TimestampNanos(_)
         | Value::LocalTimestampMillis(_)
         | Value::LocalTimestampMicros(_)
+        | Value::LocalTimestampNanos(_)
         | Value::Duration(_)
         | Value::Uuid(_)
         | Value::Union(_, _)) => {
@@ -557,14 +560,18 @@ mod tests {
         let s = Schema::parse_str(r#"["null", "null"]"#);
         expect![[r#"
             Err(
-                Unions cannot contain duplicate types,
+                Error {
+                    details: Unions cannot contain duplicate types,
+                },
             )
         "#]]
         .assert_debug_eq(&s);
         let s = Schema::parse_str(r#"["int", "int"]"#);
         expect![[r#"
             Err(
-                Unions cannot contain duplicate types,
+                Error {
+                    details: Unions cannot contain duplicate types,
+                },
             )
         "#]]
         .assert_debug_eq(&s);
@@ -587,7 +594,9 @@ mod tests {
         );
         expect![[r#"
             Err(
-                Unions cannot contain duplicate types,
+                Error {
+                    details: Unions cannot contain duplicate types,
+                },
             )
         "#]]
         .assert_debug_eq(&s);
@@ -608,10 +617,12 @@ mod tests {
 "#,
         );
         expect![[r#"
-        Err(
-            Unions cannot contain duplicate types,
-        )
-    "#]]
+            Err(
+                Error {
+                    details: Unions cannot contain duplicate types,
+                },
+            )
+        "#]]
         .assert_debug_eq(&s);
         // multiple named types
         let s = Schema::parse_str(
@@ -637,6 +648,7 @@ mod tests {
                                     aliases: None,
                                     doc: None,
                                     size: 16,
+                                    default: None,
                                     attributes: {},
                                 },
                             ),
@@ -649,6 +661,7 @@ mod tests {
                                     aliases: None,
                                     doc: None,
                                     size: 32,
+                                    default: None,
                                     attributes: {},
                                 },
                             ),
@@ -666,7 +679,9 @@ mod tests {
         let s = Schema::parse_str(r#"["int", ["null", "int"]]"#);
         expect![[r#"
             Err(
-                Unions may not directly contain a union,
+                Error {
+                    details: Unions may not directly contain a union,
+                },
             )
         "#]]
         .assert_debug_eq(&s);
@@ -731,7 +746,9 @@ mod tests {
         );
         expect![[r#"
             Err(
-                Unions cannot contain duplicate types,
+                Error {
+                    details: Unions cannot contain duplicate types,
+                },
             )
         "#]]
         .assert_debug_eq(&s);

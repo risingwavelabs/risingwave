@@ -61,6 +61,36 @@ pub struct PostgresConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+    #[serde(default, rename = "tcp.keepalive.enable")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_enable: bool,
+
+    #[serde(flatten)]
+    pub tcp_keepalive: Option<TcpKeepaliveConfig>,
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Deserialize)]
+pub struct TcpKeepaliveConfig {
+    #[serde(rename = "tcp.keepalive.idle")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_idle: u32,
+    #[serde(rename = "tcp.keepalive.interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_interval: u32,
+    #[serde(rename = "tcp.keepalive.count")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_count: u32,
+}
+
+impl Default for TcpKeepaliveConfig {
+    fn default() -> Self {
+        Self {
+            tcp_keepalive_idle: 10 * 60, // 10 minutes,
+            tcp_keepalive_interval: 10,
+            tcp_keepalive_count: 3,
+        }
+    }
 }
 
 impl EnforceSecret for PostgresConfig {
@@ -274,6 +304,14 @@ impl PostgresSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
+        let tcp_keepalive = if config.tcp_keepalive_enable {
+            config
+                .tcp_keepalive
+                .or_else(|| Some(TcpKeepaliveConfig::default()))
+        } else {
+            None
+        };
+
         let client = create_pg_client(
             &config.user,
             &config.password,
@@ -282,6 +320,7 @@ impl PostgresSinkWriter {
             &config.database,
             &config.ssl_mode,
             &config.ssl_root_cert,
+            tcp_keepalive,
         )
         .await?;
 
@@ -565,7 +604,11 @@ fn create_upsert_sql(
         })
         .collect_vec()
         .join(", ");
-    format!("{insert_sql} on conflict ({pk_columns}) do update set {update_parameters}")
+    if update_parameters.is_empty() {
+        format!("{insert_sql} on conflict ({pk_columns}) do nothing")
+    } else {
+        format!("{insert_sql} on conflict ({pk_columns}) do update set {update_parameters}")
+    }
 }
 
 /// Quote an identifier for PostgreSQL.
@@ -676,6 +719,36 @@ mod tests {
             sql,
             expect![[
                 r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2) on conflict ("b") do update set "a" = EXCLUDED."a""#
+            ]],
+        );
+    }
+
+    #[test]
+    fn test_create_upsert_sql_all_columns_are_primary_keys() {
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "user_id".to_owned(),
+            },
+            Field {
+                data_type: DataType::Int32,
+                name: "client_id".to_owned(),
+            },
+        ]);
+        let schema_name = "test_schema";
+        let table_name = "test_table";
+        let pk_indices_lookup = HashSet::from_iter([0, 1]);
+        let sql = create_upsert_sql(
+            &schema,
+            schema_name,
+            table_name,
+            &[0, 1],
+            &pk_indices_lookup,
+        );
+        check(
+            sql,
+            expect![[
+                r#"INSERT INTO "test_schema"."test_table" ("user_id", "client_id") VALUES ($1, $2) on conflict ("user_id", "client_id") do nothing"#
             ]],
         );
     }

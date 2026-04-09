@@ -41,7 +41,7 @@ pub struct TableStats(pub HashMap<TableId, PbTableStats>);
 impl From<Model> for HummockVersionStats {
     fn from(value: Model) -> Self {
         Self {
-            hummock_version_id: value.id as _,
+            hummock_version_id: value.id,
             table_stats: value.stats.0,
         }
     }

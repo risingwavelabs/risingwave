@@ -1246,6 +1246,15 @@ pub enum CopyTarget {
     Stdout,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum WaitTarget {
+    All,
+    Table(ObjectName),
+    MaterializedView(ObjectName),
+    Sink(ObjectName),
+    Index(ObjectName),
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1298,6 +1307,10 @@ pub enum Statement {
         selection: Option<Expr>,
         /// RETURNING
         returning: Vec<SelectItem>,
+    },
+    /// DELETE META SNAPSHOT(S)
+    DeleteMetaSnapshots {
+        snapshot_ids: Vec<u64>,
     },
     /// DISCARD
     Discard(DiscardType),
@@ -1681,9 +1694,11 @@ pub enum Statement {
     ///
     /// Note: RisingWave specific statement.
     Flush,
-    /// WAIT for ALL running stream jobs to finish.
-    /// It will block the current session the condition is met.
-    Wait,
+    /// WAIT for background stream jobs to finish.
+    /// It will block the current session until the condition is met.
+    Wait(WaitTarget),
+    /// Trigger meta backup.
+    Backup,
     /// Trigger stream job recover
     Recover,
     /// `USE <db_name>`
@@ -1920,6 +1935,14 @@ impl Statement {
                 if !returning.is_empty() {
                     write!(f, " RETURNING {}", display_comma_separated(returning))?;
                 }
+                Ok(())
+            }
+            Statement::DeleteMetaSnapshots { snapshot_ids } => {
+                write!(
+                    f,
+                    "DELETE META SNAPSHOTS {}",
+                    display_comma_separated(snapshot_ids)
+                )?;
                 Ok(())
             }
             Statement::CreateDatabase {
@@ -2440,8 +2463,18 @@ impl Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
-            Statement::Wait => {
-                write!(f, "WAIT")
+            Statement::Wait(target) => match target {
+                WaitTarget::All => write!(f, "WAIT"),
+                WaitTarget::Table(name) => write!(f, "WAIT TABLE {name}"),
+                WaitTarget::MaterializedView(name) => {
+                    write!(f, "WAIT MATERIALIZED VIEW {name}")
+                }
+                WaitTarget::Sink(name) => write!(f, "WAIT SINK {name}"),
+                WaitTarget::Index(name) => write!(f, "WAIT INDEX {name}"),
+            },
+            Statement::Backup => {
+                write!(f, "BACKUP")?;
+                Ok(())
             }
             Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
@@ -3257,7 +3290,11 @@ impl TryFrom<(&String, &String)> for SqlOption {
         let name_parts: Vec<&str> = name.split('.').collect();
         let object_name = ObjectName(name_parts.into_iter().map(Ident::from_real_value).collect());
 
-        let query = format!("{} = {}", object_name, value);
+        // Wrap the value in single quotes so it is always parsed as a string literal.
+        // This prevents values containing special characters (e.g., "jdbc:postgresql://...")
+        // from being incorrectly tokenized. Escape any embedded single quotes.
+        let escaped_value = value.replace('\'', "''");
+        let query = format!("{} = '{}'", object_name, escaped_value);
         let mut tokenizer = Tokenizer::new(query.as_str());
         let tokens = tokenizer.tokenize_with_location()?;
         let mut parser = Parser(&tokens);
@@ -3795,13 +3832,15 @@ impl fmt::Display for SetVariableValue {
 pub enum SetVariableValueSingle {
     Ident(Ident),
     Literal(Value),
+    Raw(String),
 }
 
 impl SetVariableValueSingle {
     pub fn to_string_unquoted(&self) -> String {
         match self {
             Self::Literal(Value::SingleQuotedString(s))
-            | Self::Literal(Value::DoubleQuotedString(s)) => s.clone(),
+            | Self::Literal(Value::DoubleQuotedString(s))
+            | Self::Raw(s) => s.clone(),
             _ => self.to_string(),
         }
     }
@@ -3813,6 +3852,7 @@ impl fmt::Display for SetVariableValueSingle {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            Raw(raw) => write!(f, "{}", raw),
         }
     }
 }

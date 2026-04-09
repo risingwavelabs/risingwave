@@ -1,0 +1,20 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query TIIIIIIII rowsort retry 11 backoff 1s
+SELECT
+    tm,
+    bar,
+    count(*),
+    min(rn),
+    max(rn),
+    min(rk),
+    max(rk),
+    min(dr),
+    max(dr)
+FROM eowc_rank_mv
+GROUP BY tm, bar
+ORDER BY tm, bar;
+----
+2024-01-01 00:00:00+00:00 1 1 1 1 1 1 1 1
+2024-01-01 00:00:00+00:00 2 1 1 1 1 1 1 1

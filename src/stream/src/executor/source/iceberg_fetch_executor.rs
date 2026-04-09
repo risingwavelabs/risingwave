@@ -28,6 +28,7 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SourceId;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
+use risingwave_connector::source::iceberg::metrics::GLOBAL_ICEBERG_SCAN_METRICS;
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
@@ -90,6 +91,10 @@ mod state {
     use serde::{Deserialize, Serialize};
 
     use crate::executor::StreamExecutorResult;
+
+    fn default_case_sensitive() -> bool {
+        true
+    }
     /// This corresponds to the actually persisted `FileScanTask` in the state table.
     ///
     /// We introduce this in case the definition of [`FileScanTask`] changes in the iceberg-rs crate.
@@ -134,6 +139,9 @@ mod state {
         pub equality_ids: Option<Vec<i32>>,
 
         pub file_size_in_bytes: u64,
+
+        #[serde(default = "default_case_sensitive")]
+        pub case_sensitive: bool,
     }
 
     impl PersistedFileScanTask {
@@ -167,6 +175,7 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                case_sensitive,
             }: Self,
         ) -> FileScanTask {
             FileScanTask {
@@ -189,6 +198,7 @@ mod state {
                 partition: None,
                 partition_spec: None,
                 name_mapping: None,
+                case_sensitive,
             }
         }
 
@@ -208,6 +218,7 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                case_sensitive,
                 ..
             }: FileScanTask,
         ) -> Self {
@@ -228,6 +239,7 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                case_sensitive,
             }
         }
 
@@ -251,6 +263,7 @@ mod state {
                 sequence_number: task.sequence_number,
                 equality_ids: task.equality_ids.clone(),
                 file_size_in_bytes: task.file_size_in_bytes,
+                case_sensitive: task.case_sensitive,
             }
         }
     }
@@ -358,6 +371,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             _ => unreachable!(),
         };
         let table = properties.load_table().await?;
+        let metrics = Arc::new(GLOBAL_ICEBERG_SCAN_METRICS.clone());
 
         for task in batch {
             let mut chunks = vec![];
@@ -372,7 +386,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     handle_delete_files: table.metadata().format_version()
                         >= iceberg::spec::FormatVersion::V3,
                 },
-                None,
+                Some(metrics.clone()),
             ) {
                 let chunk = chunk?;
                 chunks.push(StreamChunk::from_parts(
@@ -462,6 +476,24 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         // Initialize state table.
         state_store_handler.init_epoch(first_epoch).await?;
 
+        // Extract table name from iceberg properties for metrics labeling.
+        let iceberg_metrics = &GLOBAL_ICEBERG_SCAN_METRICS;
+        let iceberg_table_name = {
+            match &source_desc.source.config {
+                risingwave_connector::source::ConnectorProperties::Iceberg(props) => {
+                    props.table.table_name().to_owned()
+                }
+                _ => unreachable!("IcebergFetchExecutor must be built with Iceberg properties"),
+            }
+        };
+        let source_id_str = core.source_id.to_string();
+        let source_name_str = core.source_name.clone();
+        let metrics_labels = [
+            source_id_str.as_str(),
+            source_name_str.as_str(),
+            iceberg_table_name.as_str(),
+        ];
+
         let mut splits_on_fetch: usize = 0;
         let mut stream = StreamReaderWithPause::<true, ChunksWithState>::new(
             upstream,
@@ -486,12 +518,29 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
             self.streaming_config.clone(),
         )
         .await?;
+        iceberg_metrics
+            .iceberg_source_inflight_file_count
+            .with_guarded_label_values(&metrics_labels)
+            .set(splits_on_fetch as i64);
 
         while let Some(msg) = stream.next().await {
             match msg {
                 Err(e) => {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
+                    iceberg_metrics
+                        .iceberg_source_scan_errors_total
+                        .with_guarded_label_values(&[
+                            metrics_labels[0],
+                            metrics_labels[1],
+                            metrics_labels[2],
+                            "fetch_error",
+                        ])
+                        .inc();
                     splits_on_fetch = 0;
+                    iceberg_metrics
+                        .iceberg_source_inflight_file_count
+                        .with_guarded_label_values(&metrics_labels)
+                        .set(0);
                 }
                 Ok(msg) => {
                     match msg {
@@ -560,6 +609,10 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                             self.streaming_config.clone(),
                                         )
                                         .await?;
+                                        iceberg_metrics
+                                            .iceberg_source_inflight_file_count
+                                            .with_guarded_label_values(&metrics_labels)
+                                            .set(splits_on_fetch as i64);
                                     }
                                 }
                                 // Receiving file assignments from upstream list executor,
@@ -588,8 +641,12 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                         }) => {
                             // TODO: support persist progress after supporting reading part of a file.
                             if true {
-                                splits_on_fetch -= 1;
+                                splits_on_fetch = splits_on_fetch.saturating_sub(1);
                                 state_store_handler.delete(&data_file_path).await?;
+                                iceberg_metrics
+                                    .iceberg_source_inflight_file_count
+                                    .with_guarded_label_values(&metrics_labels)
+                                    .set(splits_on_fetch as i64);
                             }
 
                             for chunk in &chunks {

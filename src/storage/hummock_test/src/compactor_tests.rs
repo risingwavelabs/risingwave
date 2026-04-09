@@ -273,8 +273,9 @@ pub(crate) mod tests {
         // 2. get compact task
         let compaction_group_id =
             get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), table_id).await;
+        let mut selector = default_compaction_selector();
         while let Some(compact_task) = hummock_manager_ref
-            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+            .get_compact_task(compaction_group_id, selector.as_mut())
             .await
             .unwrap()
         {
@@ -520,7 +521,7 @@ pub(crate) mod tests {
         register_table_ids_to_compaction_group(
             &hummock_manager_ref,
             &[drop_table_id, existing_table_id],
-            StaticCompactionGroupId::StateDefault.into(),
+            StaticCompactionGroupId::StateDefault,
         )
         .await;
 
@@ -636,8 +637,9 @@ pub(crate) mod tests {
         assert_eq!((kv_count / 2) as u32, key_count);
 
         // 6. get compact task and there should be none
+        let mut selector = default_compaction_selector();
         let compact_task = hummock_manager_ref
-            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+            .get_compact_task(compaction_group_id, selector.as_mut())
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -838,8 +840,9 @@ pub(crate) mod tests {
         assert_eq!(expect_count, key_count); // retention_seconds will clean the key (which epoch < epoch - retention_seconds)
 
         // 5. get compact task and there should be none
+        let mut selector = default_compaction_selector();
         let compact_task = hummock_manager_ref
-            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+            .get_compact_task(compaction_group_id, selector.as_mut())
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -1044,8 +1047,9 @@ pub(crate) mod tests {
         assert_eq!(expect_count, key_count); // ttl will clean the key (which epoch < epoch - ttl)
 
         // 5. get compact task and there should be none
+        let mut selector = default_compaction_selector();
         let compact_task = hummock_manager_ref
-            .get_compact_task(compaction_group_id, &mut default_compaction_selector())
+            .get_compact_task(compaction_group_id, selector.as_mut())
             .await
             .unwrap();
         assert!(compact_task.is_none());
@@ -1860,6 +1864,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::large_stack_frames)]
     async fn test_split_and_merge() {
         let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
@@ -2002,7 +2007,7 @@ pub(crate) mod tests {
         .await;
         epoch += millisec_interval_epoch;
 
-        let parent_group_id = 2;
+        let parent_group_id = 2.into();
         let split_table_ids = vec![table_id_2];
 
         async fn compact_once(

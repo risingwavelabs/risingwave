@@ -37,9 +37,7 @@ use risingwave_pb::common::{
     ClusterResource, HostAddress, PbHostAddress, PbWorkerNode, PbWorkerType, WorkerNode,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use sea_orm::ActiveValue::Set;
-use sea_orm::prelude::Expr;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
     TransactionTrait,
@@ -84,7 +82,6 @@ impl From<WorkerInfo> for PbWorkerNode {
             property: info.1.as_ref().map(|p| PbProperty {
                 is_streaming: p.is_streaming,
                 is_serving: p.is_serving,
-                is_unschedulable: p.is_unschedulable,
                 internal_rpc_host_addr: p.internal_rpc_host_addr.clone().unwrap_or_default(),
                 resource_group: p.resource_group.clone(),
                 parallelism: info.1.as_ref().map(|p| p.parallelism).unwrap_or_default() as u32,
@@ -216,25 +213,17 @@ impl ClusterController {
         Ok(worker)
     }
 
-    pub async fn update_schedulability(
-        &self,
-        worker_ids: Vec<WorkerId>,
-        schedulability: Schedulability,
-    ) -> MetaResult<()> {
-        self.inner
-            .write()
-            .await
-            .update_schedulability(worker_ids, schedulability)
-            .await
-    }
-
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
+    pub async fn heartbeat(
+        &self,
+        worker_id: WorkerId,
+        resource: Option<PbResource>,
+    ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
         self.inner
             .write()
             .await
-            .heartbeat(worker_id, self.max_heartbeat_interval)
+            .heartbeat(worker_id, self.max_heartbeat_interval, resource)
     }
 
     pub fn start_heartbeat_checker(
@@ -385,8 +374,7 @@ impl ClusterController {
         self.inner.read().await.list_active_worker_slots().await
     }
 
-    /// Get the cluster info used for scheduling a streaming job, containing all nodes that are
-    /// running and schedulable
+    /// Get the cluster info used for scheduling a streaming job, containing all active serving nodes.
     pub async fn list_active_serving_workers(&self) -> MetaResult<Vec<PbWorkerNode>> {
         self.inner.read().await.list_active_serving_workers().await
     }
@@ -421,12 +409,6 @@ impl ClusterController {
 pub struct StreamingClusterInfo {
     /// All **active** compute nodes in the cluster.
     pub worker_nodes: HashMap<WorkerId, WorkerNode>,
-
-    /// All schedulable compute nodes in the cluster. Normally for resource group based scheduling.
-    pub schedulable_workers: HashSet<WorkerId>,
-
-    /// All unschedulable compute nodes in the cluster.
-    pub unschedulable_workers: HashSet<WorkerId>,
 }
 
 // Encapsulating the use of parallelism
@@ -442,7 +424,7 @@ impl StreamingClusterInfo {
             .sum()
     }
 
-    pub fn filter_schedulable_workers_by_resource_group(
+    pub fn filter_workers_by_resource_group(
         &self,
         resource_group: &str,
     ) -> HashMap<WorkerId, WorkerNode> {
@@ -711,7 +693,6 @@ impl ClusterControllerInner {
                 }
                 let mut property: worker_property::ActiveModel = property.into();
 
-                // keep `is_unschedulable` unchanged.
                 property.is_streaming = Set(add_property.is_streaming);
                 property.is_serving = Set(add_property.is_serving);
                 property.parallelism = Set(current_parallelism as _);
@@ -738,7 +719,7 @@ impl ClusterControllerInner {
                         .expect("invalid parallelism")),
                     is_streaming: Set(add_property.is_streaming),
                     is_serving: Set(add_property.is_serving),
-                    is_unschedulable: Set(add_property.is_unschedulable),
+                    is_unschedulable: Set(false),
                     internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
                     resource_group: Set(None),
                     is_iceberg_compactor: Set(false),
@@ -800,27 +781,22 @@ impl ClusterControllerInner {
             || r#type == PbWorkerType::Frontend
             || r#type == PbWorkerType::Compactor
         {
-            let (is_serving, is_streaming, is_unschedulable, is_iceberg_compactor, resource_group) =
-                match r#type {
-                    PbWorkerType::ComputeNode => (
-                        add_property.is_serving,
-                        add_property.is_streaming,
-                        add_property.is_unschedulable,
-                        false,
-                        add_property.resource_group.clone(),
-                    ),
-                    PbWorkerType::Frontend => (
-                        add_property.is_serving,
-                        add_property.is_streaming,
-                        add_property.is_unschedulable,
-                        false,
-                        None,
-                    ),
-                    PbWorkerType::Compactor => {
-                        (false, false, false, add_property.is_iceberg_compactor, None)
-                    }
-                    _ => unreachable!(),
-                };
+            let (is_serving, is_streaming, is_iceberg_compactor, resource_group) = match r#type {
+                PbWorkerType::ComputeNode => (
+                    add_property.is_serving,
+                    add_property.is_streaming,
+                    false,
+                    add_property.resource_group.clone(),
+                ),
+                PbWorkerType::Frontend => (
+                    add_property.is_serving,
+                    add_property.is_streaming,
+                    false,
+                    None,
+                ),
+                PbWorkerType::Compactor => (false, false, add_property.is_iceberg_compactor, None),
+                _ => unreachable!(),
+            };
 
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
@@ -830,7 +806,7 @@ impl ClusterControllerInner {
                     .expect("invalid parallelism")),
                 is_streaming: Set(is_streaming),
                 is_serving: Set(is_serving),
-                is_unschedulable: Set(is_unschedulable),
+                is_unschedulable: Set(false),
                 internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
                 resource_group: Set(resource_group),
                 is_iceberg_compactor: Set(is_iceberg_compactor),
@@ -867,24 +843,6 @@ impl ClusterControllerInner {
         Ok(WorkerInfo(worker, worker_property, extra_info).into())
     }
 
-    pub async fn update_schedulability(
-        &self,
-        worker_ids: Vec<WorkerId>,
-        schedulability: Schedulability,
-    ) -> MetaResult<()> {
-        let is_unschedulable = schedulability == Schedulability::Unschedulable;
-        WorkerProperty::update_many()
-            .col_expr(
-                worker_property::Column::IsUnschedulable,
-                Expr::value(is_unschedulable),
-            )
-            .filter(worker_property::Column::WorkerId.is_in(worker_ids))
-            .exec(&self.db)
-            .await?;
-
-        Ok(())
-    }
-
     pub async fn delete_worker(&mut self, host_addr: HostAddress) -> MetaResult<PbWorkerNode> {
         let worker = Worker::find()
             .filter(
@@ -915,9 +873,17 @@ impl ClusterControllerInner {
         Ok(worker)
     }
 
-    pub fn heartbeat(&mut self, worker_id: WorkerId, ttl: Duration) -> MetaResult<()> {
+    pub fn heartbeat(
+        &mut self,
+        worker_id: WorkerId,
+        ttl: Duration,
+        resource: Option<PbResource>,
+    ) -> MetaResult<()> {
         if let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) {
             worker_info.update_ttl(ttl);
+            if let Some(resource) = resource {
+                worker_info.resource = resource;
+            }
             Ok(())
         } else {
             Err(MetaError::invalid_worker(worker_id, "worker not found"))
@@ -1009,28 +975,13 @@ impl ClusterControllerInner {
     }
 
     pub async fn get_streaming_cluster_info(&self) -> MetaResult<StreamingClusterInfo> {
-        let mut streaming_workers = self.list_active_streaming_workers().await?;
-
-        let unschedulable_workers: HashSet<_> = streaming_workers
-            .extract_if(.., |worker| {
-                worker.property.as_ref().is_some_and(|p| p.is_unschedulable)
-            })
-            .map(|w| w.id)
-            .collect();
-
-        let schedulable_workers = streaming_workers
-            .iter()
-            .map(|worker| worker.id)
-            .filter(|id| !unschedulable_workers.contains(id))
-            .collect();
+        let streaming_workers = self.list_active_streaming_workers().await?;
 
         let active_workers: HashMap<_, _> =
             streaming_workers.into_iter().map(|w| (w.id, w)).collect();
 
         Ok(StreamingClusterInfo {
             worker_nodes: active_workers,
-            schedulable_workers,
-            unschedulable_workers,
         })
     }
 
@@ -1075,7 +1026,6 @@ mod tests {
             parallelism: parallelism_num as _,
             is_streaming: true,
             is_serving: true,
-            is_unschedulable: false,
             ..Default::default()
         };
         let hosts = mock_worker_hosts_for_test(worker_count);
@@ -1154,62 +1104,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_schedulability() -> MetaResult<()> {
-        let env = MetaSrvEnv::for_test().await;
-        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
-
-        let host = HostAddress {
-            host: "localhost".to_owned(),
-            port: 5001,
-        };
-        let mut property = AddNodeProperty {
-            is_streaming: true,
-            is_serving: true,
-            is_unschedulable: false,
-            parallelism: 4,
-            ..Default::default()
-        };
-        let worker_id = cluster_ctl
-            .add_worker(
-                PbWorkerType::ComputeNode,
-                host.clone(),
-                property.clone(),
-                PbResource::default(),
-            )
-            .await?;
-
-        cluster_ctl.activate_worker(worker_id).await?;
-        cluster_ctl
-            .update_schedulability(vec![worker_id], Schedulability::Unschedulable)
-            .await?;
-
-        let workers = cluster_ctl.list_active_streaming_workers().await?;
-        assert_eq!(workers.len(), 1);
-        assert!(workers[0].property.as_ref().unwrap().is_unschedulable);
-
-        // re-register existing worker node and change its serving mode, the schedulable state should not be changed.
-        property.is_unschedulable = false;
-        property.is_serving = false;
-        let new_worker_id = cluster_ctl
-            .add_worker(
-                PbWorkerType::ComputeNode,
-                host.clone(),
-                property,
-                PbResource::default(),
-            )
-            .await?;
-        assert_eq!(worker_id, new_worker_id);
-
-        let workers = cluster_ctl.list_active_streaming_workers().await?;
-        assert_eq!(workers.len(), 1);
-        assert!(workers[0].property.as_ref().unwrap().is_unschedulable);
-
-        cluster_ctl.delete_worker(host).await?;
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_list_workers_include_meta_node() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
@@ -1231,6 +1125,119 @@ mod tests {
             .await?;
         assert!(workers.is_empty());
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_updates_resource() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+
+        let host = HostAddress {
+            host: "localhost".to_owned(),
+            port: 5010,
+        };
+        let property = AddNodeProperty {
+            is_streaming: true,
+            is_serving: true,
+            parallelism: 4,
+            ..Default::default()
+        };
+
+        let resource_v1 = PbResource {
+            rw_version: "rw-v1".to_owned(),
+            total_memory_bytes: 1024,
+            total_cpu_cores: 4,
+            hostname: "host-v1".to_owned(),
+        };
+        let worker_id = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                property,
+                resource_v1,
+            )
+            .await?;
+
+        let resource_v2 = PbResource {
+            rw_version: "rw-v2".to_owned(),
+            total_memory_bytes: 2048,
+            total_cpu_cores: 8,
+            hostname: "host-v2".to_owned(),
+        };
+        cluster_ctl
+            .heartbeat(worker_id, Some(resource_v2.clone()))
+            .await?;
+
+        let worker = cluster_ctl
+            .get_worker_by_id(worker_id)
+            .await?
+            .expect("worker should exist");
+        assert_eq!(
+            worker.resource.expect("worker resource should exist"),
+            resource_v2
+        );
+
+        cluster_ctl.delete_worker(host).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_reregister_compute_node_updates_resource() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+
+        let host = HostAddress {
+            host: "localhost".to_owned(),
+            port: 5011,
+        };
+        let property = AddNodeProperty {
+            is_streaming: true,
+            is_serving: true,
+            parallelism: 4,
+            ..Default::default()
+        };
+
+        let resource_v1 = PbResource {
+            rw_version: "rw-v1".to_owned(),
+            total_memory_bytes: 1024,
+            total_cpu_cores: 4,
+            hostname: "host-v1".to_owned(),
+        };
+        let worker_id = cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                property.clone(),
+                resource_v1,
+            )
+            .await?;
+
+        let resource_v2 = PbResource {
+            rw_version: "rw-v2".to_owned(),
+            total_memory_bytes: 2048,
+            total_cpu_cores: 8,
+            hostname: "host-v2".to_owned(),
+        };
+        cluster_ctl
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                property,
+                resource_v2.clone(),
+            )
+            .await?;
+
+        let worker = cluster_ctl
+            .get_worker_by_id(worker_id)
+            .await?
+            .expect("worker should exist");
+        assert_eq!(
+            worker.resource.expect("worker resource should exist"),
+            resource_v2
+        );
+
+        cluster_ctl.delete_worker(host).await?;
         Ok(())
     }
 }

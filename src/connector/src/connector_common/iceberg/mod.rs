@@ -246,6 +246,18 @@ impl IcebergTableIdentifier {
 
         Ok(ret.context("Failed to create table identifier")?)
     }
+
+    pub fn validate(&self) -> ConnectorResult<()> {
+        if let Some(database_name) = &self.database_name
+            && database_name.contains('.')
+        {
+            bail!(
+                "Invalid database.name '{}': dots are not allowed in database names",
+                database_name
+            );
+        }
+        Ok(())
+    }
 }
 
 impl IcebergCommon {
@@ -917,4 +929,58 @@ pub async fn rebuild_table_with_shared_cache(table: Table) -> Table {
     let init_object_cache = table.object_cache();
     let object_cache = shared_object_cache(init_object_cache, table_uuid).await;
     table.with_object_cache(object_cache)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_iceberg_table_identifier_validation() {
+        // Test valid database names
+        let valid_identifier = IcebergTableIdentifier {
+            database_name: Some("valid_db".to_owned()),
+            table_name: "test_table".to_owned(),
+        };
+        assert!(valid_identifier.validate().is_ok());
+
+        let valid_underscore = IcebergTableIdentifier {
+            database_name: Some("valid_db_name".to_owned()),
+            table_name: "test_table".to_owned(),
+        };
+        assert!(valid_underscore.validate().is_ok());
+
+        let no_database = IcebergTableIdentifier {
+            database_name: None,
+            table_name: "test_table".to_owned(),
+        };
+        assert!(no_database.validate().is_ok());
+
+        // Test invalid database names with dots
+        let single_dot = IcebergTableIdentifier {
+            database_name: Some("a.b".to_owned()),
+            table_name: "test_table".to_owned(),
+        };
+        let result = single_dot.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("dots are not allowed")
+        );
+
+        let multiple_dots = IcebergTableIdentifier {
+            database_name: Some("a.b.c".to_owned()),
+            table_name: "test_table".to_owned(),
+        };
+        let result = multiple_dots.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("dots are not allowed")
+        );
+    }
 }

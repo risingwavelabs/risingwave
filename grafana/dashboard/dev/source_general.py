@@ -88,6 +88,36 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
+                    "File Source Dirty Split Count",
+                    "Current number of dirty file splits by source.",
+                    [
+                        panels.target(
+                            f"{metric('file_source_dirty_split_count')}",
+                            "{{source_name}} source_id {{source_id}} (fragment {{fragment_id}})",
+                        )
+                    ],
+                ),
+                panels.timeseries_count(
+                    "File Source Failed Split Count",
+                    "Total number of file splits marked dirty by source.",
+                    [
+                        panels.target(
+                            f"{metric('file_source_failed_split_count')}",
+                            "{{source_name}} source_id {{source_id}} (fragment {{fragment_id}})",
+                        )
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Source Connector Ack Failures",
+                    "Rate of ack failures (RPC errors and timeouts) during checkpoint by source and connector type.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('source_connector_ack_failure_count')}[$__rate_interval])) by (source_name, connector_type, error_type)",
+                            "{{source_name}} {{connector_type}} {{error_type}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
                     "Kafka Consumer Lag Size",
                     "Kafka Consumer Lag Size by source_id, partition and actor_id",
                     [

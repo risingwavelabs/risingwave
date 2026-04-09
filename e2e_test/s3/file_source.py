@@ -225,6 +225,76 @@ CREATE TABLE {table_name}(
         pass
 
 
+def _test_parquet_case_insensitive(minio_client: Minio):
+    """Generate a Parquet file with mixed-case column names and read with case-insensitive match."""
+    run_id = str(random.randint(1000, 9999))
+    local_path = f"parquet_case_insensitive_{run_id}.parquet"
+    s3_key = f"test_parquet_case_insensitive/{run_id}.parquet"
+
+    table = pa.Table.from_pydict(
+        {
+            "ID": pa.array([1, 2], type=pa.int32()),
+            "Age": pa.array([21, 22], type=pa.int32()),
+        }
+    )
+    pq.write_table(table, local_path, compression="snappy", version="2.6")
+
+    minio_client.fput_object(
+        bucket_name="hummock001",
+        object_name=s3_key,
+        file_path=local_path,
+    )
+
+    conn = psycopg2.connect(host="localhost", port="4566", user="root", database="dev")
+    cur = conn.cursor()
+    table_name = "s3_test_parquet_case_insensitive"
+    cur.execute(f"drop table if exists {table_name};")
+    cur.execute(
+        f"""
+CREATE TABLE {table_name}(
+  id int,
+  age int
+) WITH (
+  connector = 's3',
+  match_pattern = '{s3_key}',
+  s3.region_name = 'custom',
+  s3.bucket_name = 'hummock001',
+  s3.credentials.access = 'hummockadmin',
+  s3.credentials.secret = 'hummockadmin',
+  s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+  refresh.interval.sec = 1,
+  parquet.case_insensitive = 'true'
+) FORMAT PLAIN ENCODE PARQUET;
+"""
+    )
+
+    MAX_RETRIES = 40
+    for retry_no in range(MAX_RETRIES):
+        cur.execute(f"select count(*) from {table_name}")
+        result = cur.fetchone()
+        if result[0] == 2:
+            break
+        print(
+            f"[retry {retry_no}] Now got {result[0]} rows in table, 2 expected, wait 5s"
+        )
+        sleep(5)
+
+    cur.execute(f"select id, age from {table_name} order by id")
+    rows = cur.fetchall()
+    assert rows == [(1, 21), (2, 22)], f"unexpected rows: {rows}"
+    print("Test parquet case-insensitive read pass")
+
+    cur.execute(f"drop table {table_name};")
+    cur.close()
+    conn.close()
+
+    minio_client.remove_object(bucket_name="hummock001", object_name=s3_key)
+    try:
+        os.remove(local_path)
+    except OSError:
+        pass
+
+
 def gen_data(file_num, item_num_per_file):
     assert item_num_per_file % 2 == 0, \
         f'item_num_per_file should be even to ensure sum(mark) == 0: {item_num_per_file}'
@@ -601,3 +671,7 @@ if __name__ == "__main__":
     # Parquet struct missing-field read test.
     print("Test parquet struct missing field read...\n")
     _test_parquet_struct_missing_field_in_file(client)
+
+    # Parquet case-insensitive read test.
+    print("Test parquet case-insensitive read...\n")
+    _test_parquet_case_insensitive(client)

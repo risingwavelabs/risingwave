@@ -224,7 +224,6 @@ pub enum LicenseError {
 struct Inner {
     license: Result<License, LicenseError>,
     cached_cluster_resource: ClusterResource,
-    ignore_resource_limit: bool,
 }
 
 /// The singleton license manager.
@@ -247,7 +246,6 @@ impl LicenseManager {
                     total_cpu_cores: 0,
                     total_memory_bytes: 0,
                 },
-                ignore_resource_limit: false,
             }),
         }
     }
@@ -296,12 +294,6 @@ impl LicenseManager {
         inner.cached_cluster_resource = resource;
     }
 
-    /// Set whether to ignore cluster resource limits when validating the license.
-    pub fn set_ignore_resource_limit(&self, ignore: bool) {
-        let mut inner = self.inner.write().unwrap();
-        inner.ignore_resource_limit = ignore;
-    }
-
     /// Get the current license if it is valid.
     ///
     /// Since the license can expire, the returned license should not be cached by the caller.
@@ -310,7 +302,7 @@ impl LicenseManager {
     /// other than directly calling this method and checking the content of the license.
     pub fn license(&self) -> Result<License, LicenseError> {
         let inner = self.inner.read().unwrap();
-        let mut license = inner.license.clone()?;
+        let license = inner.license.clone()?;
 
         // Check the expiration time additionally.
         if license.exp < jsonwebtoken::get_current_timestamp() {
@@ -320,12 +312,7 @@ impl LicenseManager {
         }
 
         // Check the resource limit.
-        if !inner.ignore_resource_limit {
-            license.check_cluster_resource(inner.cached_cluster_resource)?;
-        } else {
-            // For ignored resource limits, pretend the license is unlimited for consistency.
-            license.rwu_limit = None;
-        }
+        license.check_cluster_resource(inner.cached_cluster_resource)?;
 
         Ok(license)
     }
