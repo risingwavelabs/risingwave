@@ -35,13 +35,15 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::file_sink::s3::SnowflakeSink;
-use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
+use risingwave_connector::sink::iceberg::{
+    ICEBERG_SINK, IcebergConfig, IcebergSink, sync_iceberg_table_comments,
+};
 use risingwave_connector::sink::kafka::KAFKA_SINK;
 use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    SINK_USER_IGNORE_DELETE_OPTION, Sink, enforce_secret_sink,
+    SINK_USER_IGNORE_DELETE_OPTION, Sink, SinkParam, enforce_secret_sink,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
@@ -108,6 +110,7 @@ pub struct SinkPlanContext {
     pub sink_plan: PlanRef,
     pub sink_catalog: SinkCatalog,
     pub target_table_catalog: Option<Arc<TableCatalog>>,
+    pub source_table_for_comment: Option<Arc<TableCatalog>>,
     pub dependencies: HashSet<ObjectId>,
 }
 
@@ -275,8 +278,21 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, dependent_udfs, bound, auto_refresh_schema_from_table) = {
+    let (
+        dependent_relations,
+        dependent_udfs,
+        bound,
+        auto_refresh_schema_from_table,
+        source_table_for_comment,
+    ) = {
         let mut binder = Binder::new_for_stream(session);
+        let source_table_for_comment = if let Some((from_name, _)) = &direct_sink_from_name {
+            get_table_catalog_by_table_name(session, from_name)
+                .ok()
+                .map(|(table, _)| table)
+        } else {
+            None
+        };
         let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
         {
             let from_relation = binder.bind_relation_by_name(from_name, None, None, true)?;
@@ -317,6 +333,7 @@ pub async fn gen_sink_plan(
             binder.included_udfs().clone(),
             bound,
             auto_refresh_schema_from_table,
+            source_table_for_comment,
         )
     };
 
@@ -495,6 +512,7 @@ pub async fn gen_sink_plan(
         sink_plan,
         sink_catalog,
         target_table_catalog,
+        source_table_for_comment,
         dependencies,
     })
 }
@@ -613,7 +631,7 @@ pub async fn handle_create_sink(
         ))));
     }
 
-    let (mut sink, graph, target_table_catalog, dependencies) = {
+    let (mut sink, graph, target_table_catalog, source_table_for_comment, dependencies) = {
         let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
 
         let SinkPlanContext {
@@ -621,6 +639,7 @@ pub async fn handle_create_sink(
             sink_plan: plan,
             sink_catalog: sink,
             target_table_catalog,
+            source_table_for_comment,
             dependencies,
         } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
 
@@ -638,7 +657,13 @@ pub async fn handle_create_sink(
         let graph =
             build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
-        (sink, graph, target_table_catalog, dependencies)
+        (
+            sink,
+            graph,
+            target_table_catalog,
+            source_table_for_comment,
+            dependencies,
+        )
     };
 
     if let Some(table_catalog) = target_table_catalog {
@@ -664,6 +689,32 @@ pub async fn handle_create_sink(
         LongRunningNotificationAction::MonitorBackfillJob,
     )
     .await?;
+
+    if sink
+        .properties
+        .get(CONNECTOR_TYPE_KEY)
+        .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
+        && let Some(source_table) = source_table_for_comment
+        && (source_table.description.is_some()
+            || source_table
+                .columns()
+                .iter()
+                .any(|column| column.column_desc.description.is_some()))
+    {
+        let sink_param = SinkParam::try_from_sink_catalog(sink.clone())?;
+        let iceberg_sink = IcebergSink::try_from(sink_param)?;
+        let columns = source_table
+            .columns_without_rw_timestamp()
+            .into_iter()
+            .map(|column| column.column_desc)
+            .collect_vec();
+        sync_iceberg_table_comments(
+            &iceberg_sink.config,
+            source_table.description.as_deref(),
+            &columns,
+        )
+        .await?;
+    }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }

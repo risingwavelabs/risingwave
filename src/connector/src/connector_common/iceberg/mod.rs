@@ -23,8 +23,10 @@ use std::sync::{Arc, LazyLock};
 use ::iceberg::io::{
     S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
+use ::iceberg::spec::Schema;
 use ::iceberg::table::Table;
-use ::iceberg::{Catalog, CatalogBuilder, TableIdent};
+use ::iceberg::transaction::{ApplyTransactionAction, Transaction};
+use ::iceberg::{Catalog, CatalogBuilder, TableIdent, TableRequirement, TableUpdate};
 use anyhow::{Context, anyhow};
 use iceberg::io::object_cache::ObjectCache;
 use iceberg::io::{
@@ -201,6 +203,7 @@ const DEFAULT_OBJECT_CACHE_SIZE_BYTES: u64 = 32 * 1024 * 1024;
 const SHARED_OBJECT_CACHE_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
 const SHARED_OBJECT_CACHE_MAX_TABLES: u64 =
     SHARED_OBJECT_CACHE_BUDGET_BYTES / DEFAULT_OBJECT_CACHE_SIZE_BYTES;
+const ICEBERG_TABLE_COMMENT_PROPERTY: &str = "comment";
 
 impl EnforceSecret for IcebergCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
@@ -689,6 +692,152 @@ impl IcebergCommon {
 }
 
 impl IcebergCommon {
+    pub async fn sync_table_comments(
+        &self,
+        table: &IcebergTableIdentifier,
+        java_catalog_props: &HashMap<String, String>,
+        table_comment: Option<&str>,
+        column_comments: &HashMap<String, Option<String>>,
+    ) -> ConnectorResult<()> {
+        let table_ident = table
+            .to_table_ident()
+            .context("Unable to parse table name")?;
+
+        match self.catalog_type() {
+            "storage" => {
+                let warehouse = self
+                    .warehouse_path
+                    .clone()
+                    .ok_or_else(|| anyhow!("`warehouse.path` must be set in storage catalog"))?;
+                let url = Url::parse(warehouse.as_ref())
+                    .map_err(|_| anyhow!("Invalid warehouse path: {}", warehouse))?;
+
+                let config = match url.scheme() {
+                    "s3" | "s3a" => StorageCatalogConfig::S3(
+                        storage_catalog::StorageCatalogS3Config::builder()
+                            .warehouse(warehouse)
+                            .access_key(self.s3_access_key.clone())
+                            .secret_key(self.s3_secret_key.clone())
+                            .region(self.s3_region.clone())
+                            .endpoint(self.s3_endpoint.clone())
+                            .path_style_access(self.s3_path_style_access)
+                            .enable_config_load(Some(self.enable_config_load()))
+                            .build(),
+                    ),
+                    "gs" | "gcs" => StorageCatalogConfig::Gcs(
+                        storage_catalog::StorageCatalogGcsConfig::builder()
+                            .warehouse(warehouse)
+                            .credential(self.gcs_credential.clone())
+                            .enable_config_load(Some(self.enable_config_load()))
+                            .build(),
+                    ),
+                    "azblob" => StorageCatalogConfig::Azblob(
+                        storage_catalog::StorageCatalogAzblobConfig::builder()
+                            .warehouse(warehouse)
+                            .account_name(self.azblob_account_name.clone())
+                            .account_key(self.azblob_account_key.clone())
+                            .endpoint(self.azblob_endpoint_url.clone())
+                            .build(),
+                    ),
+                    scheme => bail!("Unsupported warehouse scheme: {}", scheme),
+                };
+
+                let catalog = storage_catalog::StorageCatalog::new(config)?;
+                let current_table = catalog.load_table(&table_ident).await?;
+                let (updates, requirements) =
+                    build_comment_updates(&current_table, table_comment, column_comments)?;
+                if updates.is_empty() && requirements.is_empty() {
+                    return Ok(());
+                }
+                catalog
+                    .apply_metadata_updates(&table_ident, requirements, updates)
+                    .await?;
+                Ok(())
+            }
+            catalog_type
+                if catalog_type == "hive"
+                    || catalog_type == "snowflake"
+                    || catalog_type == "jdbc"
+                    || catalog_type == "rest"
+                    || catalog_type == "glue" =>
+            {
+                let (file_io_props, java_catalog_props) =
+                    self.build_jni_catalog_configs(java_catalog_props)?;
+                let catalog_impl = match catalog_type {
+                    "hive" => "org.apache.iceberg.hive.HiveCatalog",
+                    "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+                    "snowflake" => "org.apache.iceberg.snowflake.SnowflakeCatalog",
+                    "rest" => "org.apache.iceberg.rest.RESTCatalog",
+                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
+                    _ => unreachable!(),
+                };
+                let catalog = jni_catalog::JniCatalog::build(
+                    file_io_props,
+                    self.catalog_name(),
+                    catalog_impl,
+                    java_catalog_props,
+                )?;
+                let current_table = catalog.load_table(&table_ident).await?;
+                let (updates, requirements) =
+                    build_comment_updates(&current_table, table_comment, column_comments)?;
+                if updates.is_empty() && requirements.is_empty() {
+                    return Ok(());
+                }
+                catalog
+                    .apply_metadata_updates(&table_ident, requirements, updates)
+                    .await?;
+                Ok(())
+            }
+            "rest_rust" | "glue_rust" => {
+                let catalog = self
+                    .create_catalog(java_catalog_props)
+                    .await
+                    .context("Unable to load iceberg catalog")?;
+                let current_table = catalog.load_table(&table_ident).await?;
+                let (updates, requirements) =
+                    build_comment_updates(&current_table, table_comment, column_comments)?;
+                if updates.is_empty() && requirements.is_empty() {
+                    return Ok(());
+                }
+                if requirements.iter().any(|requirement| {
+                    matches!(requirement, TableRequirement::CurrentSchemaIdMatch { .. })
+                }) {
+                    bail!(
+                        "column comment synchronization is not supported for catalog type {}",
+                        self.catalog_type()
+                    );
+                }
+
+                let desired_comment = table_comment.map(str::to_owned);
+                let current_comment = current_table
+                    .metadata()
+                    .properties()
+                    .get(ICEBERG_TABLE_COMMENT_PROPERTY)
+                    .cloned();
+                if desired_comment == current_comment {
+                    return Ok(());
+                }
+
+                let mut tx = Transaction::new(&current_table);
+                let action = match desired_comment {
+                    Some(comment) => tx
+                        .update_table_properties()
+                        .set(ICEBERG_TABLE_COMMENT_PROPERTY.to_owned(), comment),
+                    None => tx
+                        .update_table_properties()
+                        .remove(ICEBERG_TABLE_COMMENT_PROPERTY.to_owned()),
+                };
+                tx = action.apply(tx)?;
+                tx.commit(catalog.as_ref()).await?;
+                Ok(())
+            }
+            _ => bail!(
+                "Unsupported catalog type for Iceberg comment synchronization: {}",
+                self.catalog_type()
+            ),
+        }
+    }
+
     /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
     pub async fn create_catalog(
         &self,
@@ -906,6 +1055,71 @@ impl IcebergCommon {
         let table = catalog.load_table(&table_id).await?;
         Ok(rebuild_table_with_shared_cache(table).await)
     }
+}
+
+fn build_comment_updates(
+    table: &Table,
+    table_comment: Option<&str>,
+    column_comments: &HashMap<String, Option<String>>,
+) -> ConnectorResult<(Vec<TableUpdate>, Vec<TableRequirement>)> {
+    let metadata = table.metadata();
+    let current_schema = metadata.current_schema();
+    let mut fields = Vec::with_capacity(current_schema.as_struct().fields().len());
+    let mut schema_changed = false;
+
+    for field in current_schema.as_struct().fields() {
+        let mut updated_field = field.as_ref().clone();
+        if let Some(desired_doc) = column_comments.get(updated_field.name.as_str())
+            && updated_field.doc != *desired_doc
+        {
+            updated_field.doc = desired_doc.clone();
+            schema_changed = true;
+        }
+        fields.push(Arc::new(updated_field));
+    }
+
+    let mut updates = Vec::new();
+    let mut requirements = Vec::new();
+
+    if schema_changed {
+        let next_schema_id = metadata
+            .schemas_iter()
+            .map(|schema| schema.schema_id())
+            .max()
+            .unwrap_or(0)
+            + 1;
+        let new_schema = Schema::builder()
+            .with_schema_id(next_schema_id)
+            .with_fields(fields)
+            .with_identifier_field_ids(current_schema.identifier_field_ids())
+            .build()?;
+        updates.push(TableUpdate::AddSchema { schema: new_schema });
+        updates.push(TableUpdate::SetCurrentSchema { schema_id: -1 });
+        requirements.push(TableRequirement::LastAssignedFieldIdMatch {
+            last_assigned_field_id: metadata.last_column_id(),
+        });
+        requirements.push(TableRequirement::CurrentSchemaIdMatch {
+            current_schema_id: current_schema.schema_id(),
+        });
+    }
+
+    let desired_table_comment = table_comment.map(str::to_owned);
+    let current_table_comment = metadata
+        .properties()
+        .get(ICEBERG_TABLE_COMMENT_PROPERTY)
+        .cloned();
+    if desired_table_comment != current_table_comment {
+        match desired_table_comment {
+            Some(comment) => updates.push(TableUpdate::SetProperties {
+                updates: HashMap::from([(ICEBERG_TABLE_COMMENT_PROPERTY.to_owned(), comment)]),
+            }),
+            None => updates.push(TableUpdate::RemoveProperties {
+                removals: vec![ICEBERG_TABLE_COMMENT_PROPERTY.to_owned()],
+            }),
+        }
+    }
+
+    Ok((updates, requirements))
 }
 
 /// Get a globally shared object cache keyed by table UUID to avoid reuse after drop & recreate.

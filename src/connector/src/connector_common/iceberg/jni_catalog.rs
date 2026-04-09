@@ -116,6 +116,60 @@ pub struct JniCatalog {
     file_io_props: HashMap<String, String>,
 }
 
+impl JniCatalog {
+    pub async fn apply_metadata_updates(
+        &self,
+        table: &TableIdent,
+        requirements: Vec<TableRequirement>,
+        updates: Vec<TableUpdate>,
+    ) -> iceberg::Result<Table> {
+        execute_with_jni_env(self.jvm, |env| {
+            let request = CommitTableRequest {
+                identifier: table.clone(),
+                requirements,
+                updates,
+            };
+            let request_str = serde_json::to_string(&request)?;
+
+            let request_jni_str = env.new_string(&request_str).with_context(|| {
+                format!("Failed to create jni string from request json: {request_str}.")
+            })?;
+
+            let result_json =
+                call_method!(env, self.java_catalog.as_obj(), {String updateTable(String)},
+                &request_jni_str)
+                .with_context(|| format!("Failed to update iceberg table: {table}"))?;
+
+            let rust_json_str = jobj_to_str(env, result_json)?;
+
+            let response: CommitTableResponse = serde_json::from_str(&rust_json_str)?;
+
+            tracing::info!(
+                "Table metadata location of {} is {}",
+                table,
+                response.metadata_location
+            );
+
+            let file_io = FileIO::from_path(&response.metadata_location)?
+                .with_props(self.file_io_props.iter())
+                .build()?;
+
+            Ok(Table::builder()
+                .file_io(file_io)
+                .identifier(table.clone())
+                .metadata(response.metadata)
+                .build()?)
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to update iceberg table.",
+            )
+            .with_source(e)
+        })
+    }
+}
+
 #[async_trait]
 impl Catalog for JniCatalog {
     /// List namespaces from the catalog.
@@ -515,7 +569,7 @@ impl Drop for JniCatalog {
 }
 
 impl JniCatalog {
-    fn build(
+    pub(crate) fn build(
         file_io_props: HashMap<String, String>,
         name: impl ToString,
         catalog_impl: impl ToString,

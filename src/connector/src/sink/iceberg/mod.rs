@@ -67,7 +67,7 @@ use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArr
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::IcebergError;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
@@ -926,6 +926,27 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
             .context("failed to create iceberg table")?;
     }
     Ok(())
+}
+
+pub async fn sync_iceberg_table_comments(
+    config: &IcebergConfig,
+    table_comment: Option<&str>,
+    columns: &[ColumnDesc],
+) -> Result<()> {
+    let column_comments = columns
+        .iter()
+        .map(|column| (column.name.clone(), column.description.clone()))
+        .collect();
+    config
+        .common
+        .sync_table_comments(
+            &config.table,
+            &config.java_catalog_props,
+            table_comment,
+            &column_comments,
+        )
+        .await
+        .map_err(|err| SinkError::Iceberg(anyhow!(err)))
 }
 
 impl IcebergSink {

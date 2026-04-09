@@ -28,24 +28,27 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, SYSTEM_SCHEMAS, TableOption,
+    ColumnCatalog, DEFAULT_SCHEMA_NAME, FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX,
+    SYSTEM_SCHEMAS, TableOption,
 };
 use risingwave_common::current_cluster_version;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
+use risingwave_connector::sink::catalog::SinkCatalog;
+use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergSink, sync_iceberg_table_comments};
+use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkParam};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array, IndexId,
-    JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
-    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, TableIdArray,
-    UserId, ViewId, connection, database, fragment, function, index, object, object_dependency,
-    pending_sink_state, schema, secret, sink, source, streaming_job, subscription, table,
-    user_privilege, view,
+    ConnectionId, CreateType, DatabaseId, FragmentId, I32Array, IndexId, JobStatus, ObjectId,
+    Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId, StreamNode, StreamSourceInfo,
+    StreamingParallelism, SubscriptionId, TableId, TableIdArray, UserId, ViewId, connection,
+    database, fragment, function, index, object, object_dependency, pending_sink_state, schema,
+    secret, sink, source, streaming_job, subscription, table, user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -624,16 +627,14 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("object", comment.table_id))?;
 
-        let table = if let Some(col_idx) = comment.column_index {
-            let columns: ColumnCatalogArray = Table::find_by_id(comment.table_id)
-                .select_only()
-                .column(table::Column::Columns)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
-            let mut pb_columns = columns.to_protobuf();
+        let table_row = Table::find_by_id(comment.table_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
+        let mut pb_columns = table_row.columns.to_protobuf();
+        let mut table_description = table_row.description.clone();
 
+        let table = if let Some(col_idx) = comment.column_index {
             let column = pb_columns
                 .get_mut(col_idx as usize)
                 .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
@@ -644,23 +645,33 @@ impl CatalogController {
                     comment.table_id
                 )
             })?;
-            column_desc.description = comment.description;
+            column_desc.description = comment.description.clone();
             table::ActiveModel {
                 table_id: Set(comment.table_id),
-                columns: Set(pb_columns.into()),
+                columns: Set(pb_columns.clone().into()),
                 ..Default::default()
             }
             .update(&txn)
             .await?
         } else {
+            table_description = comment.description.clone();
             table::ActiveModel {
                 table_id: Set(comment.table_id),
-                description: Set(comment.description),
+                description: Set(comment.description.clone()),
                 ..Default::default()
             }
             .update(&txn)
             .await?
         };
+
+        self.sync_iceberg_comments_for_table(
+            &txn,
+            &table_row,
+            &table_obj,
+            table_description.as_deref(),
+            &pb_columns,
+        )
+        .await?;
         txn.commit().await?;
 
         let version = self
@@ -671,6 +682,105 @@ impl CatalogController {
             .await;
 
         Ok(version)
+    }
+
+    async fn sync_iceberg_comments_for_table(
+        &self,
+        txn: &DatabaseTransaction,
+        table: &table::Model,
+        table_obj: &object::Model,
+        table_comment: Option<&str>,
+        pb_columns: &[risingwave_pb::plan_common::PbColumnCatalog],
+    ) -> MetaResult<()> {
+        let columns = pb_columns
+            .iter()
+            .cloned()
+            .map(ColumnCatalog::from)
+            .map(|column| column.column_desc)
+            .collect_vec();
+        let sinks = self
+            .find_iceberg_comment_sinks(txn, table, table_obj)
+            .await?;
+        for sink in sinks {
+            let sink_param = SinkParam::try_from_sink_catalog(SinkCatalog::from(sink))
+                .map_err(MetaError::from)?;
+            let iceberg_sink = IcebergSink::try_from(sink_param).map_err(MetaError::from)?;
+            sync_iceberg_table_comments(&iceberg_sink.config, table_comment, &columns)
+                .await
+                .map_err(MetaError::from)?;
+        }
+        Ok(())
+    }
+
+    async fn find_iceberg_comment_sinks(
+        &self,
+        txn: &DatabaseTransaction,
+        table: &table::Model,
+        table_obj: &object::Model,
+    ) -> MetaResult<Vec<PbSink>> {
+        let mut sink_ids: BTreeSet<SinkId> = ObjectDependency::find()
+            .select_only()
+            .column(object_dependency::Column::UsedBy)
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object2.def(),
+            )
+            .filter(
+                object_dependency::Column::Oid
+                    .eq(table.table_id)
+                    .and(object::Column::ObjType.eq(ObjectType::Sink)),
+            )
+            .into_tuple()
+            .all(txn)
+            .await?
+            .into_iter()
+            .collect();
+
+        if matches!(table.engine, Some(table::Engine::Iceberg))
+            && let Some(sink_id) = Sink::find()
+                .inner_join(Object)
+                .select_only()
+                .column(sink::Column::SinkId)
+                .filter(
+                    object::Column::DatabaseId
+                        .eq(table_obj.database_id)
+                        .and(object::Column::SchemaId.eq(table_obj.schema_id))
+                        .and(sink::Column::Name.eq(format!(
+                            "{}{}",
+                            ICEBERG_SINK_PREFIX, table.name
+                        ))),
+                )
+                .into_tuple::<SinkId>()
+                .one(txn)
+                .await?
+        {
+            sink_ids.insert(sink_id);
+        }
+
+        let mut sinks = Vec::new();
+        for sink_id in sink_ids {
+            let Some((sink, sink_obj)) = Sink::find_by_id(sink_id)
+                .find_also_related(Object)
+                .one(txn)
+                .await?
+            else {
+                continue;
+            };
+            if !sink
+                .properties
+                .0
+                .get(CONNECTOR_TYPE_KEY)
+                .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
+            {
+                continue;
+            }
+            sinks.push(PbSink::from(ObjectModel(
+                sink,
+                sink_obj.ok_or_else(|| MetaError::catalog_id_not_found("object", sink_id))?,
+                None,
+            )));
+        }
+        Ok(sinks)
     }
 
     async fn notify_hummock_dropped_tables(&self, tables: Vec<PbTable>) {
