@@ -20,7 +20,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-source_test_env_setup "$profile" ci-source-pubsub-test
+source_test_env_setup "$profile" --risedev-profile ci-source-pubsub-test
 risedev slt './e2e_test/source_inline/pubsub/**/*.slt.serial'
 
 echo "--- Kill cluster"

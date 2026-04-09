@@ -332,7 +332,7 @@ steps:
 
   - label: "end-to-end kafka sink test"
     key: "e2e-test-release-sink-kafka"
-    command: "ci/scripts/e2e-kafka-sink-ci-test.sh -p ci-release"
+    command: "ci/scripts/e2e-kafka-sink-test.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-e2e-kafka-sink-tests"

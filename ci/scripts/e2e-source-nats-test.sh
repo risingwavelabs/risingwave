@@ -20,7 +20,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-source_test_env_setup "$profile" ci-1cn-1fe-with-recovery false true
+source_test_env_setup "$profile" --risedev-profile ci-1cn-1fe-with-recovery --need-python
 risedev slt './e2e_test/source_inline/nats/**/*.slt.serial'
 
 echo "--- Kill cluster"

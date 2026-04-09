@@ -183,9 +183,37 @@ install_sqlserver_client() {
 
 source_test_env_setup() {
     local profile="$1"
-    local risedev_profile="$2"
-    local need_connector="${3:-false}"
-    local need_python="${4:-false}"
+    local risedev_profile=""
+    local need_connector="false"
+    local need_python="false"
+
+    shift
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --risedev-profile)
+                risedev_profile="$2"
+                shift 2
+                ;;
+            --need-connector)
+                need_connector="true"
+                shift
+                ;;
+            --need-python)
+                need_python="true"
+                shift
+                ;;
+            *)
+                echo "source_test_env_setup: unknown argument $1" 1>&2
+                exit 1
+                ;;
+        esac
+    done
+
+    if [[ -z "$risedev_profile" ]]; then
+        echo "source_test_env_setup: --risedev-profile is required" 1>&2
+        exit 1
+    fi
 
     download_and_prepare_rw "$profile" source
 

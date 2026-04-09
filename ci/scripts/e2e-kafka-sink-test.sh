@@ -3,6 +3,32 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+source ci/scripts/common.sh
+
+profile=""
+
+while getopts 'p:' opt; do
+    case ${opt} in
+        p )
+            profile=$OPTARG
+            ;;
+        \? )
+            echo "Invalid Option: -$OPTARG" 1>&2
+            exit 1
+            ;;
+        : )
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
+            exit 1
+            ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+if [[ -n "$profile" ]]; then
+    sink_test_env_setup "$profile" --risedev-profile ci-sink-kafka-test
+    trap 'echo "--- Kill cluster"; risedev ci-kill' EXIT
+fi
+
 export RPK_BROKERS="message_queue:29092"
 
 rpk topic create test-rw-sink-append-only
@@ -164,3 +190,5 @@ risedev slt 'e2e_test/sink/kafka/avro-enum.slt'
 
 echo "testing bytes format"
 risedev slt 'e2e_test/sink/kafka/test_bytes_format.slt'
+
+risedev slt './e2e_test/sink/bug_fixes/issue_24367.slt'

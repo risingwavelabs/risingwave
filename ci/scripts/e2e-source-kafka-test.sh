@@ -20,7 +20,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-source_test_env_setup "$profile" ci-source-kafka-test true true
+source_test_env_setup "$profile" --risedev-profile ci-source-kafka-test --need-connector --need-python
 
 echo "--- Setup HashiCorp Vault for Kafka source testing"
 export VAULT_ADDR="http://vault-server:8200"

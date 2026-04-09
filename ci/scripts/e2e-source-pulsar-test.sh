@@ -20,7 +20,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-source_test_env_setup "$profile" ci-source-pulsar-test false true
+source_test_env_setup "$profile" --risedev-profile ci-source-pulsar-test --need-python
 
 risedev slt './e2e_test/source_inline/pulsar/**/*.slt' -j4
 risedev slt './e2e_test/source_inline/pulsar/**/*.slt.serial'
