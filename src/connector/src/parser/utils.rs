@@ -65,6 +65,28 @@ pub(super) fn get_kafka_topic(props: &BTreeMap<String, String>) -> ConnectorResu
     )
 }
 
+pub(super) fn get_kafka_topic_or_regex(
+    props: &BTreeMap<String, String>,
+) -> ConnectorResult<&String> {
+    get_kafka_topic(props).or_else(|_| {
+        const KAFKA_TOPIC_REGEX_KEY1: &str = "kafka.topic.regex";
+        const KAFKA_TOPIC_REGEX_KEY2: &str = "topic.regex";
+        const KAFKA_TOPIC_REGEX_KEY3: &str = "kafka.topic_regex";
+        const KAFKA_TOPIC_REGEX_KEY4: &str = "topic_regex";
+
+        props.get(KAFKA_TOPIC_REGEX_KEY1)
+            .or_else(|| props.get(KAFKA_TOPIC_REGEX_KEY2))
+            .or_else(|| props.get(KAFKA_TOPIC_REGEX_KEY3))
+            .or_else(|| props.get(KAFKA_TOPIC_REGEX_KEY4))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Must specify one of 'kafka.topic', 'topic', 'kafka.topic.regex', 'topic.regex', 'kafka.topic_regex', or 'topic_regex'"
+                )
+                .into()
+            })
+    })
+}
+
 /// download bytes from http(s) url
 pub(super) async fn download_from_http(location: &Url) -> ConnectorResult<Bytes> {
     let res = reqwest::get(location.clone())
@@ -146,6 +168,13 @@ pub fn extract_cdc_meta_column<'a>(
 pub fn extract_headers_from_meta(meta: &SourceMeta) -> Option<Datum> {
     match meta {
         SourceMeta::Kafka(kafka_meta) => kafka_meta.extract_headers(), /* expect output of type `array[struct<varchar, bytea>]` */
+        _ => None,
+    }
+}
+
+pub fn extract_topic_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
+    match meta {
+        SourceMeta::Kafka(kafka_meta) => Some(kafka_meta.extract_topic()),
         _ => None,
     }
 }

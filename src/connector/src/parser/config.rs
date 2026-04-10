@@ -20,7 +20,7 @@ use risingwave_connector_codec::decoder::avro::MapHandling;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo};
 
 use super::unified::json::BigintUnsignedHandlingMode;
-use super::utils::get_kafka_topic;
+use super::utils::{get_kafka_topic, get_kafka_topic_or_regex};
 use super::{DebeziumProps, TimeHandling, TimestampHandling, TimestamptzHandling};
 use crate::WithOptionsSecResolved;
 use crate::connector_common::AwsAuthProps;
@@ -195,14 +195,22 @@ impl SpecificParserConfig {
                             .cloned(),
                     }
                 } else if info.use_schema_registry {
+                    let name_strategy =
+                        PbSchemaRegistryNameStrategy::try_from(info.name_strategy).unwrap();
+                    if get_kafka_topic(&options_with_secret).is_err()
+                        && name_strategy != PbSchemaRegistryNameStrategy::RecordNameStrategy
+                    {
+                        bail!(
+                            "Kafka topic regex with schema registry requires `schema.registry.name.strategy = 'record_name_strategy'`"
+                        );
+                    }
                     SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
                         client_config: SchemaRegistryConfig::from(
                             &format_encode_options_with_secret,
                         ),
-                        name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                            .unwrap(),
-                        topic: get_kafka_topic(&options_with_secret)?.clone(),
+                        name_strategy,
+                        topic: get_kafka_topic_or_regex(&options_with_secret)?.clone(),
                     }
                 } else {
                     SchemaLocation::File {
@@ -238,14 +246,22 @@ impl SpecificParserConfig {
                     ..Default::default()
                 };
                 config.schema_location = if info.use_schema_registry {
+                    let name_strategy =
+                        PbSchemaRegistryNameStrategy::try_from(info.name_strategy).unwrap();
+                    if get_kafka_topic(&options_with_secret).is_err()
+                        && name_strategy != PbSchemaRegistryNameStrategy::RecordNameStrategy
+                    {
+                        bail!(
+                            "Kafka topic regex with schema registry requires `schema.registry.name.strategy = 'record_name_strategy'`"
+                        );
+                    }
                     SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
                         client_config: SchemaRegistryConfig::from(
                             &format_encode_options_with_secret,
                         ),
-                        name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                            .unwrap(),
-                        topic: get_kafka_topic(&options_with_secret)?.clone(),
+                        name_strategy,
+                        topic: get_kafka_topic_or_regex(&options_with_secret)?.clone(),
                     }
                 } else {
                     SchemaLocation::File {
@@ -261,6 +277,15 @@ impl SpecificParserConfig {
                 EncodingProperties::Protobuf(config)
             }
             (SourceFormat::Debezium, SourceEncode::Avro) => {
+                let name_strategy =
+                    PbSchemaRegistryNameStrategy::try_from(info.name_strategy).unwrap();
+                if get_kafka_topic(&options_with_secret).is_err()
+                    && name_strategy != PbSchemaRegistryNameStrategy::RecordNameStrategy
+                {
+                    bail!(
+                        "Kafka topic regex with schema registry requires `schema.registry.name.strategy = 'record_name_strategy'`"
+                    );
+                }
                 EncodingProperties::Avro(AvroProperties {
                     record_name: if info.proto_message_name.is_empty() {
                         None
@@ -273,9 +298,10 @@ impl SpecificParserConfig {
                         client_config: SchemaRegistryConfig::from(
                             &format_encode_options_with_secret,
                         ),
-                        name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
-                            .unwrap(),
-                        topic: get_kafka_topic(&options_with_secret).unwrap().clone(),
+                        name_strategy,
+                        topic: get_kafka_topic_or_regex(&options_with_secret)
+                            .unwrap()
+                            .clone(),
                     },
                     ..Default::default()
                 })

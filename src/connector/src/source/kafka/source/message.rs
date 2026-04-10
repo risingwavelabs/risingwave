@@ -29,11 +29,17 @@ use crate::source::base::SourceMessage;
 
 #[derive(Debug, Clone)]
 pub struct KafkaMeta {
+    pub topic: String,
+    pub partition: String,
     pub timestamp: Timestamp,
     pub headers: Option<OwnedHeaders>,
 }
 
 impl KafkaMeta {
+    pub fn extract_topic(&self) -> DatumRef<'_> {
+        Some(ScalarRefImpl::Utf8(self.topic.as_str()))
+    }
+
     pub fn extract_timestamp(&self) -> DatumRef<'_> {
         Some(
             risingwave_common::types::Timestamptz::from_millis(self.timestamp.to_millis()?)?.into(),
@@ -96,8 +102,10 @@ impl SourceMessage {
             key: message.key().map(|p| p.to_vec()),
             payload: message.payload().map(|p| p.to_vec()),
             offset: message.offset().to_string(),
-            split_id: message.partition().to_string().into(),
+            split_id: format!("{}-{}", message.topic(), message.partition()).into(),
             meta: SourceMeta::Kafka(KafkaMeta {
+                topic: message.topic().to_owned(),
+                partition: message.partition().to_string(),
                 timestamp: message.timestamp(),
                 headers: if require_header {
                     message.headers().map(|headers| headers.detach())

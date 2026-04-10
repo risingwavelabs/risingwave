@@ -275,8 +275,25 @@ impl KafkaConfig {
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        config.validate_topic_selector()?;
 
         Ok(config)
+    }
+
+    fn validate_topic_selector(&self) -> Result<()> {
+        if self.common.topic_regex.is_some() {
+            return Err(SinkError::Config(anyhow!(
+                "Kafka sink does not support property `topic.regex`; use `topic` instead"
+            )));
+        }
+
+        if self.common.topic.is_none() {
+            return Err(SinkError::Config(anyhow!(
+                "Kafka sink requires property `topic`"
+            )));
+        }
+
+        Ok(())
     }
 
     pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
@@ -352,13 +369,19 @@ impl Sink for KafkaSink {
     const SINK_NAME: &'static str = KAFKA_SINK;
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        let topic = self
+            .config
+            .common
+            .topic
+            .as_deref()
+            .expect("kafka sink topic must be set");
         let formatter = SinkFormatterImpl::new(
             &self.format_desc,
             self.schema.clone(),
             self.pk_indices.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
-            &self.config.common.topic,
+            topic,
         )
         .await?;
         let max_delivery_buffer_size = (self
@@ -390,7 +413,11 @@ impl Sink for KafkaSink {
             self.pk_indices.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
-            &self.config.common.topic,
+            self.config
+                .common
+                .topic
+                .as_deref()
+                .expect("kafka sink topic must be set"),
         )
         .await?;
 
@@ -581,7 +608,12 @@ impl KafkaPayloadWriter<'_> {
         event_key_object: Option<Vec<u8>>,
         event_object: Option<Vec<u8>>,
     ) -> Result<()> {
-        let topic = self.config.common.topic.clone();
+        let topic = self
+            .config
+            .common
+            .topic
+            .clone()
+            .expect("kafka sink topic must be set");
         let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str());
         if let Some(key_str) = &event_key_object {
             record = record.key(key_str);
@@ -736,7 +768,7 @@ mod test {
         };
         let config = KafkaConfig::from_btreemap(properties).unwrap();
         assert_eq!(config.connection.brokers, "localhost:9092");
-        assert_eq!(config.common.topic, "test");
+        assert_eq!(config.common.topic.as_deref(), Some("test"));
         assert_eq!(config.max_retry_num, 20);
         assert_eq!(config.retry_interval, Duration::from_millis(500));
 
@@ -776,6 +808,31 @@ mod test {
             "properties.retry.interval".to_owned() => "500miiinutes".to_owned(),  // invalid duration
         };
         assert!(KafkaConfig::from_btreemap(properties).is_err());
+
+        let properties: BTreeMap<String, String> = btreemap! {
+            "connector".to_owned() => "kafka".to_owned(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "topic.regex".to_owned() => "^test.*$".to_owned(),
+            "type".to_owned() => "upsert".to_owned(),
+        };
+        assert!(
+            KafkaConfig::from_btreemap(properties)
+                .unwrap_err()
+                .to_string()
+                .contains("Kafka sink does not support property `topic.regex`")
+        );
+
+        let properties: BTreeMap<String, String> = btreemap! {
+            "connector".to_owned() => "kafka".to_owned(),
+            "properties.bootstrap.server".to_owned() => "localhost:9092".to_owned(),
+            "type".to_owned() => "upsert".to_owned(),
+        };
+        assert!(
+            KafkaConfig::from_btreemap(properties)
+                .unwrap_err()
+                .to_string()
+                .contains("Kafka sink requires property `topic`")
+        );
     }
 
     /// Note: Please enable the kafka by running `./risedev configure` before commenting #[ignore]
@@ -840,9 +897,15 @@ mod test {
                 };
                 match writer
                     .send_result(
-                        FutureRecord::to(kafka_config.common.topic.as_str())
-                            .payload(format!("value-{}", j).as_bytes())
-                            .key(format!("dummy_key_for_epoch-{}", i).as_bytes()),
+                        FutureRecord::to(
+                            kafka_config
+                                .common
+                                .topic
+                                .as_deref()
+                                .expect("kafka sink topic must be set"),
+                        )
+                        .payload(format!("value-{}", j).as_bytes())
+                        .key(format!("dummy_key_for_epoch-{}", i).as_bytes()),
                     )
                     .await
                 {

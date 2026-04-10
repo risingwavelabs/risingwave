@@ -22,6 +22,8 @@ use crate::source::{SplitId, SplitMetaData};
 pub struct KafkaSplit {
     pub(crate) topic: String,
     pub(crate) partition: i32,
+    #[serde(default)]
+    pub(crate) id: Option<SplitId>,
     /// Note: currently the start offset is **exclusive**. We need to `+1` to create the reader.
     /// Possible values are:
     /// - `Earliest`: `low_watermark` - 1
@@ -36,8 +38,9 @@ pub struct KafkaSplit {
 
 impl SplitMetaData for KafkaSplit {
     fn id(&self) -> SplitId {
-        // TODO: should avoid constructing a string every time
-        format!("{}", self.partition).into()
+        self.id
+            .clone()
+            .unwrap_or_else(|| self.partition.to_string().into())
     }
 
     fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
@@ -55,6 +58,10 @@ impl SplitMetaData for KafkaSplit {
 }
 
 impl KafkaSplit {
+    pub fn regex_split_id(&self) -> SplitId {
+        format!("{}-{}", self.topic, self.partition).into()
+    }
+
     pub fn new(
         partition: i32,
         start_offset: Option<i64>,
@@ -62,11 +69,22 @@ impl KafkaSplit {
         topic: String,
     ) -> KafkaSplit {
         KafkaSplit {
+            id: None,
             topic,
             partition,
             start_offset,
             stop_offset,
         }
+    }
+
+    pub fn with_legacy_id(mut self) -> Self {
+        self.id = None;
+        self
+    }
+
+    pub fn with_split_id(mut self, split_id: SplitId) -> Self {
+        self.id = Some(split_id);
+        self
     }
 
     pub fn get_topic_and_partition(&self) -> (String, i32) {

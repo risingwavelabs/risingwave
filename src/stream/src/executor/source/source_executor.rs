@@ -46,7 +46,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
+use super::{barrier_to_message_stream, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
@@ -690,7 +690,7 @@ impl<S: StateStore> SourceExecutor<S> {
         )
         .await?;
 
-        let (Some(split_idx), Some(offset_idx), pulsar_message_id_idx) =
+        let (Some(_split_idx), Some(offset_idx), pulsar_message_id_idx) =
             get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
@@ -1129,14 +1129,6 @@ impl<S: StateStore> SourceExecutor<S> {
                         continue;
                     }
                     source_output_row_count.inc_by(card as u64);
-                    let to_remove_col_indices =
-                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
-                            vec![split_idx, offset_idx, pulsar_message_id_idx]
-                        } else {
-                            vec![split_idx, offset_idx]
-                        };
-                    let chunk =
-                        prune_additional_cols(&chunk, &to_remove_col_indices, &source_desc.columns);
                     yield Message::Chunk(chunk);
                     self.try_flush_data().await?;
                 }
