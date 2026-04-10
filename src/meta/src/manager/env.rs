@@ -199,8 +199,12 @@ pub struct MetaOpts {
     /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
-    /// Schedule `periodic_scheduling_compaction_group_split_interval_sec` for all compaction groups with this interval.
+    /// Schedule the regular compaction-group split job for all compaction groups with this interval.
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
+    /// Whether to enable overlap normalization before the regular split and merge schedulers.
+    pub enable_compaction_group_normalize: bool,
+    /// Maximum normalize splits in one scheduler round. Must be greater than 0.
+    pub max_normalize_splits_per_round: u64,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
@@ -214,6 +218,7 @@ pub struct MetaOpts {
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_task_max_progress_interval_secs: u64,
+    pub compaction_task_id_refill_capacity: u32,
     pub compaction_config: Option<CompactionConfig>,
 
     /// hybrid compaction group config
@@ -356,6 +361,8 @@ impl MetaOpts {
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
             periodic_scheduling_compaction_group_split_interval_sec: 60,
+            enable_compaction_group_normalize: false,
+            max_normalize_splits_per_round: 4,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
             compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,
             table_high_write_throughput_threshold: 128 * 1024 * 1024,
@@ -364,6 +371,7 @@ impl MetaOpts {
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_task_max_progress_interval_secs: 1,
+            compaction_task_id_refill_capacity: 64,
             compaction_config: None,
             hybrid_partition_node_count: 4,
             event_log_enabled: false,

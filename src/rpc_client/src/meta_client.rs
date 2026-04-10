@@ -62,6 +62,7 @@ use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerNode, WorkerType};
+use risingwave_pb::configured_monitor_service_client;
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
@@ -662,6 +663,7 @@ impl MetaClient {
             table_id: job_id,
             parallelism: Some(parallelism),
             deferred,
+            adaptive_parallelism_strategy: None,
         };
 
         self.inner.alter_parallelism(request).await?;
@@ -678,6 +680,7 @@ impl MetaClient {
             table_id: job_id,
             parallelism,
             deferred,
+            adaptive_parallelism_strategy: None,
         };
 
         self.inner.alter_backfill_parallelism(request).await?;
@@ -1146,8 +1149,8 @@ impl MetaClient {
         Ok(resp.hummock_version_id)
     }
 
-    pub async fn wait(&self) -> Result<WaitVersion> {
-        let request = WaitRequest {};
+    pub async fn wait(&self, job_id: Option<JobId>) -> Result<WaitVersion> {
+        let request = WaitRequest { job_id };
         let resp = self.inner.wait(request).await?;
         Ok(resp
             .version
@@ -2273,7 +2276,7 @@ impl GrpcMetaClientCore {
         let cluster_limit_client = ClusterLimitServiceClient::new(channel.clone());
         let hosted_iceberg_catalog_service_client =
             HostedIcebergCatalogServiceClient::new(channel.clone());
-        let monitor_client = MonitorServiceClient::new(channel);
+        let monitor_client = configured_monitor_service_client(MonitorServiceClient::new(channel));
 
         GrpcMetaClientCore {
             cluster_client,

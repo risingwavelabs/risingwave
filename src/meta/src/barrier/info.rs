@@ -214,7 +214,7 @@ impl SharedActorInfos {
                 .collect_vec();
             if !mapping.is_empty() {
                 self.notification_manager
-                    .notify_fragment_mapping(Operation::Delete, mapping);
+                    .notify_streaming_fragment_mapping(Operation::Delete, mapping);
             }
         }
     }
@@ -234,7 +234,7 @@ impl SharedActorInfos {
         }
         if !mapping.is_empty() {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+                .notify_streaming_fragment_mapping(Operation::Delete, mapping);
         }
     }
 
@@ -348,15 +348,15 @@ impl SharedActorInfoWriter<'_> {
     pub(super) fn finish(self) {
         if let Some(mapping) = self.added_fragment_mapping {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Add, mapping);
+                .notify_streaming_fragment_mapping(Operation::Add, mapping);
         }
         if let Some(mapping) = self.updated_fragment_mapping {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Update, mapping);
+                .notify_streaming_fragment_mapping(Operation::Update, mapping);
         }
         if let Some(mapping) = self.deleted_fragment_mapping {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+                .notify_streaming_fragment_mapping(Operation::Delete, mapping);
         }
     }
 }
@@ -601,7 +601,7 @@ impl InflightDatabaseInfo {
     pub(super) fn apply_collected_command(
         &mut self,
         command: &PostCollectCommand,
-        resps: &[BarrierCompleteResponse],
+        resps: &HashMap<WorkerId, BarrierCompleteResponse>,
         version_stats: &HummockVersionStats,
     ) {
         if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } = command {
@@ -653,7 +653,7 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        for progress in resps.iter().flat_map(|resp| &resp.create_mview_progress) {
+        for progress in resps.values().flat_map(|resp| &resp.create_mview_progress) {
             let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
                 warn!(
                     "update the progress of an non-existent creating streaming job: {progress:?}, which could be cancelled"
@@ -675,7 +675,7 @@ impl InflightDatabaseInfo {
             tracker.apply_progress(progress, version_stats);
         }
         for progress in resps
-            .iter()
+            .values()
             .flat_map(|resp| &resp.cdc_table_backfill_progress)
         {
             let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
@@ -697,7 +697,7 @@ impl InflightDatabaseInfo {
         }
         // Handle CDC source offset updated events
         for cdc_offset_updated in resps
-            .iter()
+            .values()
             .flat_map(|resp| &resp.cdc_source_offset_updated)
         {
             use risingwave_common::id::SourceId;
@@ -789,20 +789,17 @@ impl InflightDatabaseInfo {
         self.jobs[&job_id].subscribers.keys().copied()
     }
 
-    pub fn max_subscription_retention(&self) -> HashMap<TableId, u64> {
-        self.jobs
-            .iter()
-            .filter_map(|(job_id, info)| {
-                info.subscribers
-                    .values()
-                    .filter_map(|subscriber| match subscriber {
-                        SubscriberType::Subscription(retention) => Some(*retention),
-                        SubscriberType::SnapshotBackfill => None,
-                    })
-                    .max()
-                    .map(|max_subscription| (job_id.as_mv_table_id(), max_subscription))
-            })
-            .collect()
+    pub fn max_subscription_retention(&self) -> impl Iterator<Item = (TableId, u64)> + '_ {
+        self.jobs.iter().filter_map(|(job_id, info)| {
+            info.subscribers
+                .values()
+                .filter_map(|subscriber| match subscriber {
+                    SubscriberType::Subscription(retention) => Some(*retention),
+                    SubscriberType::SnapshotBackfill => None,
+                })
+                .max()
+                .map(|max_subscription| (job_id.as_mv_table_id(), max_subscription))
+        })
     }
 
     pub fn register_subscriber(

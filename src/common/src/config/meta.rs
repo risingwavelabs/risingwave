@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common_proc_macro::serde_prefix_all;
+use serde::de::Error as _;
 
 use super::*;
 
@@ -338,6 +339,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compaction_task_max_progress_interval_secs")]
     pub compaction_task_max_progress_interval_secs: u64,
 
+    /// The number of compaction task ids to prefetch from the meta store in one batch.
+    #[serde(default = "default::meta::compaction_task_id_refill_capacity")]
+    pub compaction_task_id_refill_capacity: u32,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub compaction_config: CompactionConfig,
@@ -399,12 +404,25 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
     pub compact_task_table_size_partition_threshold_high: u64,
 
-    /// The interval of the periodic scheduling compaction group split job.
+    /// The interval of the regular periodic compaction group split job.
+    /// This does not disable normalize-triggered splits when
+    /// `enable_compaction_group_normalize` is enabled.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
         alias = "periodic_split_compact_group_interval_sec"
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
+
+    /// Whether to normalize overlapping compaction groups before the regular split/merge scheduling.
+    #[serde(default = "default::meta::enable_compaction_group_normalize")]
+    pub enable_compaction_group_normalize: bool,
+
+    /// The maximum number of normalize splits in one scheduler round. Must be greater than 0.
+    #[serde(
+        default = "default::meta::max_normalize_splits_per_round",
+        deserialize_with = "deserialize_max_normalize_splits_per_round"
+    )]
+    pub max_normalize_splits_per_round: u64,
 
     /// The interval of the periodic scheduling compaction group merge job.
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
@@ -454,6 +472,19 @@ pub struct MetaStoreConfig {
     /// Acquire timeout in seconds for a meta store connection.
     #[serde(default = "default::meta_store_config::acquire_timeout_sec")]
     pub acquire_timeout_sec: u64,
+}
+
+fn deserialize_max_normalize_splits_per_round<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "meta.max_normalize_splits_per_round must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 /// The subsections `[meta.developer]`.
@@ -750,6 +781,10 @@ pub mod default {
             60 * 10 // 10min
         }
 
+        pub fn compaction_task_id_refill_capacity() -> u32 {
+            64
+        }
+
         pub fn cut_table_size_limit() -> u64 {
             1024 * 1024 * 1024 // 1GB
         }
@@ -812,6 +847,14 @@ pub mod default {
 
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
+        }
+
+        pub fn enable_compaction_group_normalize() -> bool {
+            false
+        }
+
+        pub fn max_normalize_splits_per_round() -> u64 {
+            4
         }
 
         pub fn compaction_group_merge_dimension_threshold() -> f64 {

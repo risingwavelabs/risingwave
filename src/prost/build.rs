@@ -334,6 +334,9 @@ for_all_wrapped_id_fields! (
             job_id: JobId,
             fragment_id: FragmentId,
         }
+        WaitRequest {
+            job_id: JobId,
+        }
         WaitVersion {
             hummock_version_id: HummockVersionId,
         }
@@ -1060,6 +1063,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "serverless_backfill_controller",
         "secret",
         "frontend_service",
+        "window_function",
     ];
     let protos: Vec<String> = proto_files
         .iter()

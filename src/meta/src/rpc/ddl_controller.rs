@@ -1302,6 +1302,15 @@ impl DdlController {
             removed_iceberg_table_sinks,
         } = release_ctx;
 
+        // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
+        // This is driven by the fragment model deletion (cascade from Object::delete_many),
+        // decoupled from the barrier-driven streaming mapping notifications.
+        self.env
+            .notification_manager_ref()
+            .notify_serving_fragment_mapping_delete(
+                removed_fragments.iter().map(|id| *id as _).collect(),
+            );
+
         self.stream_manager
             .drop_streaming_jobs(
                 database_id,
@@ -2344,16 +2353,33 @@ impl DdlController {
             .await
     }
 
-    pub async fn wait(&self) -> MetaResult<WaitVersion> {
-        let timeout_ms = 30 * 60 * 1000;
-        for _ in 0..timeout_ms {
-            if self
+    pub async fn wait(&self, job_id: Option<JobId>) -> MetaResult<WaitVersion> {
+        if let Some(job_id) = job_id {
+            let database_id = self
+                .metadata_manager
+                .catalog_controller
+                .get_object_database_id(job_id)
+                .await?;
+            let catalog_version = self
+                .metadata_manager
+                .wait_streaming_job_finished(database_id, job_id)
+                .await?;
+            let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
+            return Ok(WaitVersion {
+                catalog_version,
+                hummock_version_id,
+            });
+        }
+
+        let timeout_ms = 2 * 60 * 60 * 1000;
+        let poll_interval = Duration::from_millis(100);
+        for _ in 0..(timeout_ms / poll_interval.as_millis() as usize) {
+            let background_jobs = self
                 .metadata_manager
                 .catalog_controller
                 .list_background_creating_jobs(true, None)
-                .await?
-                .is_empty()
-            {
+                .await?;
+            if background_jobs.is_empty() {
                 let catalog_version = self
                     .metadata_manager
                     .catalog_controller
@@ -2366,7 +2392,7 @@ impl DdlController {
                 });
             }
 
-            sleep(Duration::from_millis(1)).await;
+            sleep(poll_interval).await;
         }
         Err(MetaError::cancelled(format!(
             "timeout after {timeout_ms}ms"

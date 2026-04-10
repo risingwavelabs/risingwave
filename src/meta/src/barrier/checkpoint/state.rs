@@ -41,7 +41,9 @@ use tracing::warn;
 
 use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
-use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
+use crate::barrier::checkpoint::{
+    CreatingStreamingJobControl, DatabaseCheckpointControl, IndependentCheckpointJobControl,
+};
 use crate::barrier::command::{CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -50,7 +52,7 @@ use crate::barrier::info::{
     SubscriberType,
 };
 use crate::barrier::notifier::Notifier;
-use crate::barrier::partial_graph::PartialGraphManager;
+use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -150,10 +152,7 @@ impl BarrierWorkerState {
 }
 
 pub(super) struct ApplyCommandInfo {
-    pub mv_subscription_max_retention: HashMap<TableId, u64>,
-    pub table_ids_to_commit: HashSet<TableId>,
     pub jobs_to_wait: HashSet<JobId>,
-    pub command: PostCollectCommand,
 }
 
 /// Result tuple of `apply_command`: mutation, table IDs to commit, actors to create,
@@ -167,7 +166,7 @@ type ApplyCommandResult = (
 );
 
 /// Result of actor rendering for a create/replace streaming job.
-pub(super) struct RenderResult {
+pub(crate) struct RenderResult {
     /// Rendered actors grouped by fragment.
     pub stream_actors: HashMap<FragmentId, Vec<StreamActor>>,
     /// Worker placement for each actor.
@@ -411,7 +410,7 @@ impl DatabaseCheckpointControl {
         &mut self,
         command: Option<Command>,
         notifiers: &mut Vec<Notifier>,
-        barrier_info: &BarrierInfo,
+        barrier_info: BarrierInfo,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
         adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
@@ -562,7 +561,8 @@ impl DatabaseCheckpointControl {
                         &self.database_info,
                     )?;
 
-                    let Entry::Vacant(entry) = self.creating_streaming_job_controls.entry(job_id)
+                    let Entry::Vacant(entry) =
+                        self.independent_checkpoint_job_controls.entry(job_id)
                     else {
                         panic!("duplicated creating snapshot backfill job {job_id}");
                     };
@@ -585,9 +585,12 @@ impl DatabaseCheckpointControl {
                         &actors,
                     )?;
 
-                    self.database_info
-                        .shared_actor_infos
-                        .upsert(self.database_id, job.fragment_infos_with_job_id());
+                    if let Some(fragment_infos) = job.fragment_infos() {
+                        self.database_info.shared_actor_infos.upsert(
+                            self.database_id,
+                            fragment_infos.values().map(|f| (f, job_id)),
+                        );
+                    }
 
                     for upstream_mv_table_id in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
@@ -1274,10 +1277,12 @@ impl DatabaseCheckpointControl {
             None => {
                 let mut finished_snapshot_backfill_job_info = HashMap::new();
                 if barrier_info.kind.is_checkpoint() {
-                    for (&job_id, creating_job) in &mut self.creating_streaming_job_controls {
+                    for (&job_id, job) in &mut self.independent_checkpoint_job_controls {
+                        let IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) =
+                            job;
                         if creating_job.should_merge_to_upstream() {
                             let info = creating_job
-                                .start_consume_upstream(partial_graph_manager, barrier_info)?;
+                                .start_consume_upstream(partial_graph_manager, &barrier_info)?;
                             finished_snapshot_backfill_job_info
                                 .try_insert(job_id, info)
                                 .expect("non-duplicated");
@@ -1502,8 +1507,9 @@ impl DatabaseCheckpointControl {
             }
         };
 
-        // Forward barrier to creating streaming job controls
-        for (job_id, creating_job) in &mut self.creating_streaming_job_controls {
+        // Forward barrier to independent checkpoint job controls
+        for (job_id, job) in &mut self.independent_checkpoint_job_controls {
+            let IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) = job;
             if !finished_snapshot_backfill_jobs.contains(job_id) {
                 let throttle_mutation = if let Some((ref jobs, ref config)) =
                     throttle_for_creating_jobs
@@ -1528,7 +1534,7 @@ impl DatabaseCheckpointControl {
                 };
                 creating_job.on_new_upstream_barrier(
                     partial_graph_manager,
-                    barrier_info,
+                    &barrier_info,
                     throttle_mutation,
                 )?;
             }
@@ -1537,18 +1543,20 @@ impl DatabaseCheckpointControl {
         partial_graph_manager.inject_barrier(
             to_partial_graph_id(self.database_id, None),
             mutation,
-            barrier_info,
             &node_actors,
             InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()),
             InflightFragmentInfo::workers(self.database_info.fragment_infos()),
             actors_to_create,
+            PartialGraphBarrierInfo::new(
+                post_collect_command,
+                barrier_info,
+                take(notifiers),
+                table_ids_to_commit,
+            ),
         )?;
 
         Ok(ApplyCommandInfo {
-            mv_subscription_max_retention: self.database_info.max_subscription_retention(),
-            table_ids_to_commit,
             jobs_to_wait: finished_snapshot_backfill_jobs,
-            command: post_collect_command,
         })
     }
 }
