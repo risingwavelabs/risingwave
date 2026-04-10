@@ -132,6 +132,23 @@ where
             },
 
             RexNode::Now(_) => unreachable!("now should not be built at backend"),
+
+            RexNode::SecretRef(sr) => {
+                use risingwave_common::secret::LocalSecretManager;
+                use risingwave_pb::secret::SecretRef as PbSecretRef;
+
+                let pb_ref = PbSecretRef {
+                    secret_id: sr.secret_id.into(),
+                    ref_as: sr.ref_as,
+                };
+                let value = LocalSecretManager::global()
+                    .fill_secret(pb_ref)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+                Ok(
+                    LiteralExpression::new(DataType::Varchar, Some(ScalarImpl::Utf8(value.into())))
+                        .boxed(),
+                )
+            }
         }
     }
 }
