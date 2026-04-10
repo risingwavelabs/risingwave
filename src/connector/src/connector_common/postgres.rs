@@ -30,6 +30,7 @@ use sqlx::{PgPool, Row};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Kind as PgKind;
 use tokio_postgres::{Client as PgClient, NoTls};
+use url::Url;
 
 #[cfg(not(madsim))]
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
@@ -65,6 +66,51 @@ pub enum SslMode {
     /// matches the name stored in the server certificate.
     #[serde(alias = "verify-full")]
     VerifyFull,
+}
+
+/// Build `PgConnectOptions` without triggering a spurious `.pgpass` file warning.
+///
+/// `PgConnectOptions::new()` eagerly reads `~/.pgpass` and logs a `tracing::warn!`
+/// when the file does not exist, which is noisy for environments where passwords are
+/// always supplied explicitly. By constructing from a URL with the password already
+/// embedded, `apply_pgpass()` sees the password is set and skips the file lookup.
+fn build_pg_connect_options(
+    username: &str,
+    password: &str,
+    host: &str,
+    port: u16,
+    database: &str,
+    ssl_mode: &SslMode,
+    ssl_root_cert: &Option<String>,
+) -> ConnectorResult<PgConnectOptions> {
+    let mut url = Url::parse("postgres://localhost").expect("valid base URL");
+    let _ = url.set_username(username);
+    let _ = url.set_password(Some(password));
+    url.set_host(Some(host))
+        .context("invalid postgres host")?;
+    let _ = url.set_port(Some(port));
+    url.set_path(&format!("/{}", database));
+
+    let mut options: PgConnectOptions = url
+        .as_str()
+        .parse()
+        .context("Failed to build PostgreSQL connection options")?;
+
+    options = options.ssl_mode(match ssl_mode {
+        SslMode::Disabled => PgSslMode::Disable,
+        SslMode::Preferred => PgSslMode::Prefer,
+        SslMode::Required => PgSslMode::Require,
+        SslMode::VerifyCa => PgSslMode::VerifyCa,
+        SslMode::VerifyFull => PgSslMode::VerifyFull,
+    });
+
+    if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
+        && let Some(root_cert) = ssl_root_cert
+    {
+        options = options.ssl_root_cert(root_cert.as_str());
+    }
+
+    Ok(options)
 }
 
 pub struct PostgresExternalTable {
@@ -109,25 +155,8 @@ impl PostgresExternalTable {
         ssl_mode: &SslMode,
         ssl_root_cert: &Option<String>,
     ) -> ConnectorResult<(Vec<sea_schema::postgres::def::ColumnInfo>, Vec<String>)> {
-        let mut options = PgConnectOptions::new()
-            .username(username)
-            .password(password)
-            .host(host)
-            .port(port)
-            .database(database)
-            .ssl_mode(match ssl_mode {
-                SslMode::Disabled => PgSslMode::Disable,
-                SslMode::Preferred => PgSslMode::Prefer,
-                SslMode::Required => PgSslMode::Require,
-                SslMode::VerifyCa => PgSslMode::VerifyCa,
-                SslMode::VerifyFull => PgSslMode::VerifyFull,
-            });
-
-        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
-            && let Some(root_cert) = ssl_root_cert
-        {
-            options = options.ssl_root_cert(root_cert.as_str());
-        }
+        let options =
+            build_pg_connect_options(username, password, host, port, database, ssl_mode, ssl_root_cert)?;
 
         let connection = PgPool::connect_with(options).await?;
 
@@ -159,25 +188,8 @@ impl PostgresExternalTable {
         ssl_mode: &SslMode,
         ssl_root_cert: &Option<String>,
     ) -> ConnectorResult<TableDef> {
-        let mut options = PgConnectOptions::new()
-            .username(username)
-            .password(password)
-            .host(host)
-            .port(port)
-            .database(database)
-            .ssl_mode(match ssl_mode {
-                SslMode::Disabled => PgSslMode::Disable,
-                SslMode::Preferred => PgSslMode::Prefer,
-                SslMode::Required => PgSslMode::Require,
-                SslMode::VerifyCa => PgSslMode::VerifyCa,
-                SslMode::VerifyFull => PgSslMode::VerifyFull,
-            });
-
-        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
-            && let Some(root_cert) = ssl_root_cert
-        {
-            options = options.ssl_root_cert(root_cert.as_str());
-        }
+        let options =
+            build_pg_connect_options(username, password, host, port, database, ssl_mode, ssl_root_cert)?;
 
         let connection = PgPool::connect_with(options).await?;
         let schema_discovery = SchemaDiscovery::new(connection, schema);
