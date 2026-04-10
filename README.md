@@ -118,7 +118,7 @@ The row store and Iceberg layer serve different purposes: the row store is for l
 
 ## Design decisions
 
-### S3 as primary storage
+### Object store as primary storage
 
 Internal state, tables, and materialized views are stored in S3 or equivalent object storage. This enables elastic scaling without data rebalancing and fast failure recovery in seconds. For latency-sensitive workloads, [elastic disk cache](https://docs.risingwave.com/get-started/disk-cache) uses local disks or EBS to reduce S3 access overhead.
 
