@@ -12454,6 +12454,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_records_demo_cli"
+version = "2.8.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "reqwest 0.12.25",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "risingwave_regress_test"
 version = "2.8.1"
 dependencies = [

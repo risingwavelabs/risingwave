@@ -40,6 +40,7 @@ members = [
     "src/object_store",
     "src/prost",
     "src/prost/helpers",
+    "src/records_demo_cli",
     "src/risedevtool",
     "src/risedevtool/config",
     "src/rpc_client",

@@ -24,19 +24,61 @@ Run everything from the demo worktree:
 
 ```sh
 cd /Users/li0k/Documents/github/risingwave-records-demo
-source ci/scripts/standalone-utils.sh
-mkdir -p "$PREFIX_LOG"
 ./risedev clean-data
 ./risedev pre-start-dev
-./risedev dev standalone-minio-sqlite &
-start_standalone "$PREFIX_LOG"/standalone-demo.log &
-wait_standalone
+./risedev dev meta-1cn-1fe-sqlite
 ```
 
 Default ports:
 
 - SQL: `localhost:4566`
 - frontend HTTP: `localhost:4560`
+
+## CLI
+
+The branch also includes a small standalone CLI binary that talks to the demo HTTP endpoints directly:
+
+```sh
+cargo run -p risingwave_records_demo_cli -- append 'hello'
+cargo run -p risingwave_records_demo_cli -- append-repl
+cargo run -p risingwave_records_demo_cli -- tail
+cargo run -p risingwave_records_demo_cli -- latest
+cargo run -p risingwave_records_demo_cli -- watch
+cargo run -p risingwave_records_demo_cli -- read --seq-num 0 --limit 10
+```
+
+By default it connects to `http://127.0.0.1:4560/demo`.
+
+To point it at a different frontend address:
+
+```sh
+cargo run -p risingwave_records_demo_cli -- --url http://127.0.0.1:4561/demo tail
+```
+
+You can also use the `RW_RECORDS_DEMO_URL` environment variable.
+
+`latest` is a one-shot command. `watch` is the terminal-friendly version of a playground live view:
+
+- it prints a small banner
+- it prints the current latest visible record once
+- then it polls for new records and prints each one in a human-readable single-line format
+- stop it with `Ctrl-C`
+
+`append-repl` is the matching write-side terminal:
+
+- it prints a prompt
+- each non-empty line is appended as one record
+- it prints `OK: seq=..., timestamp=...` after each append
+- stop it with `Ctrl-D` or `Ctrl-C`
+
+Examples:
+
+```sh
+cargo run -p risingwave_records_demo_cli -- append-repl
+cargo run -p risingwave_records_demo_cli -- watch
+cargo run -p risingwave_records_demo_cli -- watch --interval-ms 200
+cargo run -p risingwave_records_demo_cli -- watch --seq-num 0 --limit 50
+```
 
 Stop the cluster with:
 
@@ -176,7 +218,31 @@ These are the useful checks for the demo:
    - reading from the second append's `seq_num` returns only the second row
 4. Restart without `clean-data`:
    - stop with `./risedev k`
-   - start again with the same standalone commands
+   - start again with `./risedev dev meta-1cn-1fe-sqlite`
    - `tail` and `GET /demo/records` still see the previous rows
 
 Concurrent append requests are also worth trying, but the expected order is request serialization order inside the frontend process, not caller submit order.
+
+## Playground-Like Flow
+
+One terminal watches, another appends:
+
+Terminal A:
+
+```sh
+cd /Users/li0k/Documents/github/risingwave-records-demo
+cargo run -p risingwave_records_demo_cli -- watch
+```
+
+Terminal B:
+
+```sh
+cd /Users/li0k/Documents/github/risingwave-records-demo
+cargo run -p risingwave_records_demo_cli -- append-repl
+```
+
+If you want to replay from the beginning and then keep following:
+
+```sh
+cargo run -p risingwave_records_demo_cli -- watch --seq-num 0
+```
