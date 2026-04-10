@@ -9,11 +9,11 @@
 
 <div align="center">
 
-### 🌊 Ride the wave of event streaming
+### 🌊 Event Streaming for Agentic AI
 
 </div>
 <p align="center">
-  <a href="https://docs.risingwave.com/">Docs</a> | <a href="https://docs.risingwave.com/get-started/rw-benchmarks-stream-processing">Benchmarks</a> | <a href="https://docs.risingwave.com/demos/overview">Demos</a>
+  <a href="https://docs.risingwave.com/">Docs</a> | <a href="https://docs.risingwave.com/get-started/rw-benchmarks-stream-processing">Benchmarks</a> | <a href="https://docs.risingwave.com/demos/overview">Demos</a> | <a href="https://risingwave.com/customers/">Case Studies</a>
 </p>
 
 <p align="center">
@@ -45,89 +45,121 @@
   </a>
 </div>
 
-RisingWave is an enterprise-grade event streaming platform designed to offer the <i><b>simplest</b></i> and <i><b>most cost-effective</b></i> way to <b>ingest</b>, <b>process</b>, and <b>manage</b> real-time event data — with built-in support for the [Apache Iceberg™](https://iceberg.apache.org/) open table format. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
-
-RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live streams with historical data, <b>serve</b> ad-hoc queries at low latency, and <b>manage</b> data reliably in Apache Iceberg™ tables.
+RisingWave is an event streaming platform for agentic AI. It continuously ingests data from databases, event streams, and webhooks, processes it incrementally, and serves fresh results at low latency, replacing the traditional event streaming stack (e.g., Debezium + Kafka + Flink + serving DB) with a single system.
 
 ![RisingWave](./docs/dev/src/images/architecture_20250609.jpg)
 
+---
+
 ## Try it out in 60 seconds
 
-Install RisingWave standalone mode:
 ```shell
 curl -L https://risingwave.com/sh | sh
 ```
 
-To learn about other installation options, such as using a Docker image, see the [quick start guide](https://docs.risingwave.com/get-started/quickstart).
+For Docker, Kubernetes, and other options, see the [quick start guide](https://docs.risingwave.com/get-started/quickstart).
 
-## Unified platform for streaming data
+---
 
-RisingWave delivers a unified streaming data platform that combines **ultra-low-latency stream processing** and **Iceberg-native data management**.
+## The problem
 
-### Low-latency streaming ingestion and processing
-RisingWave integrates real-time streaming ingestion, stream processing and low-latency serving in a single system. It continuously ingests data from streaming and batch sources, performs incremental computations across streams and tables with end-to-end freshness under 100 ms. Materialized views can be served directly within RisingWave with 10–20 ms p99 query latency, or delivered to downstream systems.
+Agents and real-time applications need data that is always fresh and queryable at low latency. The standard approach chains together Debezium for CDC, Kafka for transport, Flink for processing, and a database for serving. Each hop adds latency and each system adds operational overhead.
 
-### Iceberg lakehouse ingestion, transformation, and management
-RisingWave treats Apache Iceberg™ as a first-class citizen. It directly hosts and manages the Iceberg REST catalog, allowing users to create and operate Iceberg tables through a PostgreSQL-compatible interface. RisingWave supports two write modes: Merge-on-Read (MoR) and Copy-on-Write (CoW), to suit different ingestion and query patterns. It also provides built-in table maintenance capabilities, including compaction, small-file optimization, vacuum, and snapshot cleanup, ensuring efficient and consistent data management without external tools or pipelines.
+RisingWave replaces the whole stack: ingest, process, serve, store.
 
-_Plug: [Nimtable](https://github.com/nimtable/nimtable) is an observability tool developed by RisingWave for easily exploring and managing Iceberg tables._
+---
 
+## How it works
 
+### Ingest from any source
 
-## Key design decisions
+RisingWave ingests across the full data spectrum:
 
-RisingWave is designed to be easier to use and more cost-efficient:
+- **Webhooks**: HTTP-based event ingestion from SaaS applications and external systems
+- **Database changes**: native CDC from PostgreSQL, MySQL, and others via transaction log reading
+- **Event streams**: Kafka, Pulsar, Kinesis, and other message brokers
+- **Historical data**: batch ingestion from S3, data warehouses, and other storage systems
 
-### PostgreSQL compatibility
+All sources are unified under the same SQL interface. Streams and tables can be joined freely.
 
-* **Seamless integration:** Connects via the PostgreSQL wire protocol, working with psql, JDBC, and any Postgres tool.
-* **Expressive SQL:** Supports structured, semi-structured, and unstructured data with a familiar SQL dialect.
-* **No manual state tuning:** Eliminates complex state management configurations.
+### Process continuously
+
+RisingWave performs incremental computation over ingested data. When upstream data changes, only the affected results are recomputed. End-to-end freshness is under 100 ms.
+
+This is the core mechanism behind everything RisingWave does: materialized views that are always up to date, without full recomputation on every query.
+
+### Serve at low latency
+
+Query results are maintained in RisingWave's internal row store and served at 10-20 ms p99 latency. Agents and applications query this layer directly using standard SQL. No polling, no cache warming, no TTL management.
+
+### Store in Apache Iceberg™
+
+For long-term retention and analytical access, RisingWave writes to Apache Iceberg™ tables. It hosts the Iceberg REST catalog directly and handles table maintenance — compaction, small-file optimization, snapshot cleanup — without external tooling. Iceberg queries are executed via [Apache DataFusion](https://datafusion.apache.org/), a vectorized query engine. Because Iceberg is an open format, data is also readable by Spark, Trino, DuckDB, and other engines.
+
+The row store and Iceberg layer serve different purposes: the row store is for low-latency serving, Iceberg is for durable, open-format storage and analytical queries. RisingWave manages both.
+
+---
+
+## Use cases
+
+**Agentic AI**
+- Agent memory: continuously maintained, low-latency queryable state across sessions, signals, and entity profiles
+- Tool backends: pre-computed results for agent tool calls such as fraud scores, anomaly detection, and inventory checks
+- Event-driven triggers: react to live events and inject fresh context into LLM calls
+- ML feature stores: unified batch and streaming feature computation over a single codebase
+
+**Real-time data infrastructure**
+- Live dashboards with sub-second freshness
+- Continuous monitoring and alerting
+- Stream enrichment: join live events with historical data before delivering downstream
+- Iceberg lakehouses: continuous ingestion into open-format tables for analytics and long-term retention
+
+---
+
+## Design decisions
 
 ### S3 as primary storage
 
-RisingWave stores tables, materialized views, and internal states of stream processing jobs in S3 (or equivalent object storage), providing:
-- **High performance:** Optimized for complex queries, including joins and time windowing.
-- **Fast recovery:** Restores from system failures within seconds.
-- **[Dynamic scaling](https://docs.risingwave.com/deploy/k8s-cluster-scaling):** Instantly adjusts resources to handle workload spikes.
+Internal state, tables, and materialized views are stored in S3 or equivalent object storage. This enables elastic scaling without data rebalancing and fast failure recovery in seconds. For latency-sensitive workloads, [elastic disk cache](https://docs.risingwave.com/get-started/disk-cache) uses local disks or EBS to reduce S3 access overhead.
 
-Beyond caching hot data in memory, RisingWave supports [**elastic disk cache**](https://docs.risingwave.com/get-started/disk-cache), a powerful performance optimization that uses local disks or EBS for efficient data caching. This minimizes access to S3, lowering processing latency and cutting S3 access costs.
+### Postgres compatibility
 
-### Apache Iceberg™ native support
-RisingWave [**natively integrates with Apache Iceberg™**](https://docs.risingwave.com/iceberg/overview), enabling continuous ingestion of streaming data into Iceberg tables. It can also read directly from Iceberg, perform automatic compaction, and maintain table health over time. Since Iceberg is an open table format, results are accessible by other query engines — making storage not only cost-efficient, but interoperable by design.
+RisingWave connects via the PostgreSQL wire protocol and works with psql, JDBC, and any Postgres-compatible tooling. No custom query language, no proprietary APIs.
 
-## In what use cases does RisingWave excel?
-RisingWave is particularly effective for the following use cases:
 
-* **Live dashboards**: Achieve sub-second data freshness in live dashboards, ideal for high-stakes scenarios like stock trading, sports betting, and IoT monitoring.
-* **Monitoring and alerting**: Develop sophisticated monitoring and alerting systems for critical applications such as fraud and anomaly detection.
-* **Real-time data enrichment**: Continuously ingest data from diverse sources, conduct real-time data enrichment, and efficiently deliver the results to downstream systems.
-* **Feature engineering**: Transform batch and streaming data into features in your machine learning models using a unified codebase, ensuring seamless integration and consistency.
-* **Iceberg-based lakehouses**: Power real-time lakehouse architectures where streaming data is continuously written to Apache Iceberg™ tables for unified analytics, governance, and long-term retention in open formats.
+### Apache Iceberg™ native
 
-## Production deployments
+RisingWave [natively integrates with Apache Iceberg™](https://docs.risingwave.com/iceberg/overview) for continuous stream ingestion, direct reads via DataFusion, and automated table maintenance. Data in Iceberg is in an open format and accessible to any compatible query engine.
 
-[**RisingWave Cloud**](https://cloud.risingwave.com) offers the easiest way to run RisingWave in production.
+---
 
-For **Docker deployment**, please refer to [Docker Compose](https://docs.risingwave.com/deploy/risingwave-docker-compose/).
+## Deployment
 
-For **Kubernetes deployment**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/deploy/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/deploy/risingwave-kubernetes/).
+[**RisingWave Cloud**](https://cloud.risingwave.com) is the managed option.
+
+For self-hosted:
+- [Docker Compose](https://docs.risingwave.com/deploy/risingwave-docker-compose/)
+- [Kubernetes with Helm](https://docs.risingwave.com/deploy/risingwave-k8s-helm/)
+- [Kubernetes with Operator](https://docs.risingwave.com/deploy/risingwave-kubernetes/)
+
+---
 
 ## Community
 
-Looking for help, discussions, collaboration opportunities, or a casual afternoon chat with our fellow engineers and community members? Join our [Slack workspace](https://risingwave.com/slack)!
+Join us on [Slack](https://go.risingwave.com/slack) for questions, discussions, and contributions.
 
-## Notes on telemetry
+---
 
+## Telemetry
 
-RisingWave uses [Scarf](https://scarf.sh/) to collect anonymized installation analytics. These analytics help support us understand and improve the distribution of our package. The privacy policy of Scarf is available at [https://about.scarf.sh/privacy-policy](https://about.scarf.sh/privacy-policy).
+RisingWave uses [Scarf](https://scarf.sh/) for anonymized installation analytics and collects anonymous usage statistics to improve the product. Both can be opted out. See the [telemetry documentation](https://docs.risingwave.com/operate/telemetry/) for details.
 
-RisingWave also collects anonymous usage statistics to better understand how the community is using RisingWave. The sole intention of this exercise is to help improve the product. Users may opt out easily at any time. Please refer to the [user documentation](https://docs.risingwave.com/operate/telemetry/) for more details.
+---
 
 ## License
 
-RisingWave is distributed under the Apache License (Version 2.0). Please refer to [LICENSE](LICENSE) for more information.
+Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Contributing
 
-Thanks for your interest in contributing to the project! Please refer to [RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/) for more information.
+See the [RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/).
