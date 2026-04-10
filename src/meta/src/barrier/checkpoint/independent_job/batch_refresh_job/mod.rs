@@ -22,33 +22,31 @@
 
 use std::collections::{HashMap, HashSet};
 use std::mem::{replace, take};
-use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_meta_model::WorkerId;
+use risingwave_meta_model::{DispatcherType, WorkerId, streaming_job};
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId, PartialGraphId};
-use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{AddMutation, StartFragmentBackfillMutation, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, info};
 
-use super::super::state::RenderResult;
-use super::creating_job::CreatingJobInfo;
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
-use crate::barrier::edge_builder::{
-    EdgeBuilderFragmentInfo, FragmentEdgeBuildResult, FragmentEdgeBuilder,
-};
+use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::partial_graph::{
@@ -57,27 +55,51 @@ use crate::barrier::partial_graph::{
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{
-    BackfillOrderState, BackfillProgress, BarrierKind, Command, FragmentBackfillProgress,
-    TracedEpoch,
+    BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
 };
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
+use crate::controller::scale::{
+    ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
+    build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs,
+};
+use crate::model::{
+    FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate, StreamingJobModelContextExt,
+};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::ExtendedFragmentBackfillOrder;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-/// Information about a batch refresh job stored at creation time.
-#[derive(Debug, Clone)]
-pub(crate) struct BatchRefreshJobInfo {
-    /// The upstream MV table IDs that this job subscribes to.
-    pub upstream_table_ids: HashSet<TableId>,
-    /// Definition string for constructing `StreamActor` during recovery.
-    pub job_definition: String,
-    /// Expression context for constructing `StreamActor` during recovery.
-    pub expr_context: PbExprContext,
-    /// Config override for constructing `StreamActor` during recovery.
-    pub config_override: Arc<str>,
+/// Logical fragment metadata for a batch refresh job.
+///
+/// Contains only catalog-level information: fragment structure, stream plan nodes,
+/// distribution, and downstream relations. No actor IDs, no worker placement.
+///
+/// Used as the uniform input for `render_actors_and_build_job_info()`, which performs
+/// actor rendering (ID allocation, worker placement, vnode assignment) internally.
+/// No-shuffle ensembles are derived from `downstreams` internally.
+#[derive(Debug)]
+pub(crate) struct BatchRefreshLogicalFragments {
+    /// Logical fragments of this job. Keyed by `fragment_id`.
+    pub fragments: HashMap<FragmentId, LoadedFragment>,
+    /// Internal downstream relations (intra-job only; no upstream edges).
+    pub downstreams: FragmentDownstreamRelation,
+}
+
+/// Result of the unified actor rendering for a batch refresh job.
+///
+/// Produced by `render_actors_and_build_job_info()` and consumed by both
+/// `new()` (create) and `recover()`.
+#[derive(Debug)]
+pub(crate) struct BatchRefreshRenderResult {
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+    pub node_actors: HashMap<WorkerId, HashSet<ActorId>>,
+    pub state_table_ids: HashSet<TableId>,
+    pub actors_to_create: StreamJobActorsToCreate,
+    /// The rendered stream actors (needed by create path for mutation construction).
+    pub stream_actors: HashMap<FragmentId, Vec<StreamActor>>,
+    /// Actor-to-worker mapping (needed by create path for mutation construction).
+    pub actor_location: HashMap<ActorId, WorkerId>,
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -93,7 +115,7 @@ enum BatchRefreshJobStatus {
         version_stats: HummockVersionStats,
         create_mview_tracker: CreateMviewProgressTracker,
         snapshot_epoch: u64,
-        info: CreatingJobInfo,
+        fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
         pending_non_checkpoint_barriers: Vec<u64>,
         node_actors: HashMap<WorkerId, HashSet<ActorId>>,
         state_table_ids: HashSet<TableId>,
@@ -106,7 +128,7 @@ enum BatchRefreshJobStatus {
     /// consumption finishes.
     FinishingSnapshot {
         tracking_job: Option<TrackingJob>,
-        info: CreatingJobInfo,
+        fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     },
     /// The job is idle, waiting for the next trigger. No partial graph is held.
     Idle,
@@ -135,60 +157,278 @@ pub(crate) struct BatchRefreshJobCheckpointControl {
     status: BatchRefreshJobStatus,
 }
 
+// ── Unified actor rendering ───────────────────────────────────────────────────
+
+impl BatchRefreshJobCheckpointControl {
+    /// Render actors for a batch refresh job from logical metadata only.
+    ///
+    /// Performs the full pipeline:
+    /// 1. Derive no-shuffle ensembles from `downstreams`
+    /// 2. Render actor assignments (ID allocation, worker placement, vnode bitmap)
+    /// 3. Build `StreamActor` structs
+    /// 4. Build internal-only edges (no upstream dispatcher edges)
+    /// 5. Produce `fragment_infos`, `node_actors`, `state_table_ids`, `actors_to_create`
+    ///
+    /// Shared by both the DDL create path and the recovery path.
+    pub(crate) fn render_actors_and_build_job_info(
+        fragments: &HashMap<FragmentId, LoadedFragment>,
+        downstreams: &FragmentDownstreamRelation,
+        definition: &str,
+        // Actor rendering context:
+        actor_id_generator: &AtomicU32,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+        database_resource_group: &str,
+        streaming_job_model: &streaming_job::Model,
+        // Edge building context:
+        partial_graph_id: PartialGraphId,
+    ) -> MetaResult<BatchRefreshRenderResult> {
+        // Step 1: Derive no-shuffle ensembles from downstreams.
+        let ensembles = Self::resolve_ensembles(fragments, downstreams)?;
+
+        // Step 2: Render actor assignments for each ensemble.
+        let mut actor_assignments: HashMap<
+            FragmentId,
+            HashMap<ActorId, (WorkerId, Option<risingwave_common::bitmap::Bitmap>)>,
+        > = HashMap::new();
+
+        for ensemble in &ensembles {
+            // All fragments are new (batch refresh has no existing upstream fragments).
+            let first_component = ensemble
+                .component_fragments()
+                .next()
+                .expect("ensemble must have at least one component");
+            let fragment = &fragments[&first_component];
+            let distribution_type = fragment.distribution_type;
+            let vnode_count = fragment.vnode_count;
+
+            // Assert all component fragments share the same vnode count.
+            for fid in ensemble.component_fragments() {
+                let f = &fragments[&fid];
+                assert_eq!(
+                    vnode_count, f.vnode_count,
+                    "fragments {} and {} in same ensemble have different vnode counts",
+                    first_component, fid,
+                );
+            }
+
+            let entry_fragment_parallelism = ensemble
+                .entry_fragments()
+                .map(|fid| fragments[&fid].parallelism.clone())
+                .dedup()
+                .exactly_one()
+                .map_err(|_| {
+                    anyhow!(
+                        "entry fragments have inconsistent parallelism settings in batch refresh job"
+                    )
+                })?;
+
+            let actor_template = EnsembleActorTemplate::render_new(
+                streaming_job_model,
+                worker_nodes,
+                adaptive_parallelism_strategy,
+                entry_fragment_parallelism,
+                database_resource_group.to_owned(),
+                distribution_type,
+                vnode_count,
+            )?;
+
+            for fid in ensemble.component_fragments() {
+                let f = &fragments[&fid];
+                let aligner =
+                    ComponentFragmentAligner::new_persistent(&actor_template, actor_id_generator);
+                let assignments = aligner.align_component_actor(f.distribution_type);
+                actor_assignments.insert(fid, assignments);
+            }
+        }
+
+        // Step 3: Expand assignments into StreamActor + actor_location + InflightFragmentInfo.
+        let mut stream_actors: HashMap<FragmentId, Vec<StreamActor>> = HashMap::new();
+        let mut actor_location: HashMap<ActorId, WorkerId> = HashMap::new();
+
+        for (fragment_id, assignments) in &actor_assignments {
+            let mut actors = Vec::with_capacity(assignments.len());
+            for (&actor_id, (worker_id, vnode_bitmap)) in assignments {
+                actor_location.insert(actor_id, *worker_id);
+                let stream_context = streaming_job_model.stream_context();
+                actors.push(StreamActor {
+                    actor_id,
+                    fragment_id: *fragment_id,
+                    vnode_bitmap: vnode_bitmap.clone(),
+                    mview_definition: definition.to_owned(),
+                    expr_context: Some(stream_context.to_expr_context()),
+                    config_override: stream_context.config_override.clone(),
+                });
+            }
+            stream_actors.insert(*fragment_id, actors);
+        }
+
+        // Build InflightFragmentInfo from logical fragments + rendered actors.
+        let fragment_infos: HashMap<FragmentId, InflightFragmentInfo> = fragments
+            .iter()
+            .map(|(fragment_id, loaded)| {
+                let actors = stream_actors
+                    .get(fragment_id)
+                    .into_iter()
+                    .flatten()
+                    .map(|actor| {
+                        (
+                            actor.actor_id,
+                            crate::controller::fragment::InflightActorInfo {
+                                worker_id: actor_location[&actor.actor_id],
+                                vnode_bitmap: actor.vnode_bitmap.clone(),
+                                splits: vec![], // batch refresh has no source splits
+                            },
+                        )
+                    })
+                    .collect();
+                (
+                    *fragment_id,
+                    InflightFragmentInfo {
+                        fragment_id: *fragment_id,
+                        distribution_type: loaded.distribution_type,
+                        fragment_type_mask: loaded.fragment_type_mask,
+                        vnode_count: loaded.vnode_count,
+                        nodes: loaded.nodes.clone(),
+                        actors,
+                        state_table_ids: loaded.state_table_ids.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        // Step 4: Build edges (internal-only, no upstream).
+        let mut builder = FragmentEdgeBuilder::new(fragment_infos.values().map(|f| {
+            (
+                f.fragment_id,
+                EdgeBuilderFragmentInfo::from_inflight_with_worker_nodes(
+                    f,
+                    partial_graph_id,
+                    worker_nodes,
+                ),
+            )
+        }));
+        builder.add_relations(downstreams);
+        let mut edges = builder.build();
+
+        let actors_to_create = edges.collect_actors_to_create(fragment_infos.values().map(|f| {
+            (
+                f.fragment_id,
+                &f.nodes,
+                f.actors.iter().map(|(actor_id, actor)| {
+                    let sa = stream_actors[&f.fragment_id]
+                        .iter()
+                        .find(|a| a.actor_id == *actor_id)
+                        .expect("should exist");
+                    (sa, actor.worker_id)
+                }),
+                vec![], // no subscribers for batch refresh jobs
+            )
+        }));
+
+        // Step 5: Build node_actors, state_table_ids.
+        let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
+        let state_table_ids =
+            InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
+
+        Ok(BatchRefreshRenderResult {
+            fragment_infos,
+            node_actors,
+            state_table_ids,
+            actors_to_create,
+            stream_actors,
+            actor_location,
+        })
+    }
+
+    /// Derive no-shuffle ensembles from fragment downstreams.
+    fn resolve_ensembles(
+        fragments: &HashMap<FragmentId, LoadedFragment>,
+        downstreams: &FragmentDownstreamRelation,
+    ) -> MetaResult<Vec<NoShuffleEnsemble>> {
+        let mut new_no_shuffle: HashMap<_, HashSet<_>> = HashMap::new();
+        for (upstream_fid, relations) in downstreams {
+            for rel in relations {
+                if rel.dispatcher_type == DispatcherType::NoShuffle {
+                    new_no_shuffle
+                        .entry(*upstream_fid)
+                        .or_default()
+                        .insert(rel.downstream_fragment_id);
+                }
+            }
+        }
+
+        let mut ensembles = if new_no_shuffle.is_empty() {
+            Vec::new()
+        } else {
+            let no_shuffle_edges: Vec<(FragmentId, FragmentId)> = new_no_shuffle
+                .iter()
+                .flat_map(|(u, ds)| ds.iter().map(move |d| (*u, *d)))
+                .collect();
+            let all_fragment_ids: Vec<FragmentId> = no_shuffle_edges
+                .iter()
+                .flat_map(|(u, d)| [*u, *d])
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect();
+            let (fwd, bwd) = build_no_shuffle_fragment_graph_edges(no_shuffle_edges);
+            find_no_shuffle_graphs(&all_fragment_ids, &fwd, &bwd)?
+        };
+
+        // Add standalone fragments as single-fragment ensembles.
+        let covered: HashSet<FragmentId> = ensembles
+            .iter()
+            .flat_map(|e| e.component_fragments())
+            .collect();
+        for fragment_id in fragments.keys() {
+            if !covered.contains(fragment_id) {
+                ensembles.push(NoShuffleEnsemble::singleton(*fragment_id));
+            }
+        }
+
+        Ok(ensembles)
+    }
+}
+
 // ── Construction ──────────────────────────────────────────────────────────────
 
 impl BatchRefreshJobCheckpointControl {
     /// Create from DDL command. Starts in `ConsumingSnapshot`.
+    ///
+    /// Takes a pre-rendered `BatchRefreshRenderResult` (produced by
+    /// `render_actors_and_build_job_info()`).
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
+        database_id: DatabaseId,
+        job_id: JobId,
         create_info: CreateSnapshotBackfillJobCommandInfo,
         notifiers: Vec<Notifier>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
         version_stat: &HummockVersionStats,
         partial_graph_manager: &mut PartialGraphManager,
-        edges: &mut FragmentEdgeBuildResult,
-        actors: &RenderResult,
+        render_result: BatchRefreshRenderResult,
+        backfill_ordering: &ExtendedFragmentBackfillOrder,
+        locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     ) -> MetaResult<Self> {
-        let info = create_info.info.clone();
-        let job_id = info.stream_job_fragments.stream_job_id();
-        let database_id = info.streaming_job.database_id();
-
         debug!(
             %job_id,
-            definition = info.definition,
             "new batch refresh job"
         );
 
-        let empty_split_assignment = Default::default();
-        let fragment_infos: HashMap<FragmentId, InflightFragmentInfo> = info
-            .stream_job_fragments
-            .new_fragment_info(
-                &actors.stream_actors,
-                &actors.actor_location,
-                &empty_split_assignment,
-            )
+        let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(backfill_ordering)
+            .into_iter()
             .collect();
-        let backfill_nodes_to_pause =
-            get_nodes_with_backfill_dependencies(&info.fragment_backfill_ordering)
-                .into_iter()
-                .collect();
         let backfill_order_state = BackfillOrderState::new(
-            &info.fragment_backfill_ordering,
-            &fragment_infos,
-            info.locality_fragment_state_table_mapping.clone(),
+            backfill_ordering,
+            &render_result.fragment_infos,
+            locality_fragment_state_table_mapping,
         );
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
-            &fragment_infos,
+            &render_result.fragment_infos,
             backfill_order_state,
             version_stat,
-        );
-
-        let actors_to_create = Command::create_streaming_job_actors_to_create(
-            &info,
-            edges,
-            &actors.stream_actors,
-            &actors.actor_location,
         );
 
         let mut prev_epoch_fake_physical_time = 0;
@@ -200,7 +440,7 @@ impl BatchRefreshJobCheckpointControl {
             PbBarrierKind::Checkpoint,
         );
 
-        let added_actors: Vec<ActorId> = actors
+        let added_actors: Vec<ActorId> = render_result
             .stream_actors
             .values()
             .flatten()
@@ -218,24 +458,7 @@ impl BatchRefreshJobCheckpointControl {
             new_upstream_sinks: Default::default(),
         });
 
-        let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
-        let state_table_ids =
-            InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
-
         let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
-
-        let job_info = CreatingJobInfo {
-            fragment_infos,
-            upstream_fragment_downstreams: Default::default(),
-            downstreams: info.stream_job_fragments.downstreams,
-            snapshot_backfill_upstream_tables: snapshot_backfill_upstream_tables.clone(),
-            stream_actors: actors
-                .stream_actors
-                .values()
-                .flatten()
-                .map(|actor| (actor.actor_id, actor.clone()))
-                .collect(),
-        };
 
         let mut graph_adder = partial_graph_manager.add_partial_graph(
             partial_graph_id,
@@ -245,10 +468,10 @@ impl BatchRefreshJobCheckpointControl {
         if let Err(e) = Self::inject_barrier(
             partial_graph_id,
             graph_adder.manager(),
-            &node_actors,
-            &state_table_ids,
+            &render_result.node_actors,
+            &render_result.state_table_ids,
             initial_barrier_info,
-            Some(actors_to_create),
+            Some(render_result.actors_to_create),
             Some(initial_mutation),
             notifiers,
             Some(create_info),
@@ -271,10 +494,10 @@ impl BatchRefreshJobCheckpointControl {
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
                 snapshot_epoch,
-                info: job_info,
+                fragment_infos: render_result.fragment_infos,
                 pending_non_checkpoint_barriers,
-                node_actors,
-                state_table_ids,
+                node_actors: render_result.node_actors,
+                state_table_ids: render_result.state_table_ids,
             },
         })
     }
@@ -282,27 +505,23 @@ impl BatchRefreshJobCheckpointControl {
     /// Recover from a persistent state during recovery.
     ///
     /// - If `committed_epoch >= snapshot_epoch` → Idle (snapshot completed before crash).
-    /// - If `committed_epoch < snapshot_epoch` → `ConsumingSnapshot` (lazily renders actors).
-    #[expect(clippy::too_many_arguments)]
+    /// - If `committed_epoch < snapshot_epoch` → `ConsumingSnapshot` using pre-rendered actors.
     pub(crate) fn recover(
         database_id: DatabaseId,
         job_id: JobId,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
         committed_epoch: u64,
-        fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
         backfill_order: ExtendedFragmentBackfillOrder,
-        fragment_relations: &FragmentDownstreamRelation,
         version_stat: &HummockVersionStats,
         initial_mutation: Mutation,
-        batch_refresh_info: BatchRefreshJobInfo,
+        render_result: BatchRefreshRenderResult,
         partial_graph_recoverer: &mut crate::barrier::partial_graph::PartialGraphRecoverer<'_>,
     ) -> MetaResult<Self> {
         let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
 
         if committed_epoch >= snapshot_epoch {
-            // Snapshot completed; recover to Idle. No partial graph is needed
-            // for idle jobs — they don't participate in barriers.
+            // Snapshot completed; recover to Idle.
             info!(
                 %job_id,
                 committed_epoch,
@@ -312,7 +531,7 @@ impl BatchRefreshJobCheckpointControl {
             return Ok(Self {
                 job_id,
                 partial_graph_id,
-                snapshot_backfill_upstream_tables: batch_refresh_info.upstream_table_ids,
+                snapshot_backfill_upstream_tables,
                 snapshot_epoch,
                 max_committed_epoch: Some(committed_epoch),
                 status: BatchRefreshJobStatus::Idle,
@@ -327,108 +546,22 @@ impl BatchRefreshJobCheckpointControl {
             "recovered batch refresh job to consuming snapshot"
         );
 
-        let barrier_control_committed_epoch = Some(committed_epoch);
-
-        let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
-        let state_table_ids: HashSet<_> =
-            InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
-
-        let downstreams = fragment_infos
-            .keys()
-            .filter_map(|fragment_id| {
-                fragment_relations
-                    .get(fragment_id)
-                    .map(|relation| (*fragment_id, relation.clone()))
-            })
-            .collect();
-
-        // Build StreamActor structs from InflightFragmentInfo + job info fields.
-        let job_definition = &batch_refresh_info.job_definition;
-        let expr_context = &batch_refresh_info.expr_context;
-        let config_override = &batch_refresh_info.config_override;
-        let rendered_stream_actors: HashMap<ActorId, StreamActor> = fragment_infos
-            .iter()
-            .flat_map(|(fragment_id, f)| {
-                f.actors.iter().map(move |(actor_id, actor_info)| {
-                    (
-                        *actor_id,
-                        StreamActor {
-                            actor_id: *actor_id,
-                            fragment_id: *fragment_id,
-                            vnode_bitmap: actor_info.vnode_bitmap.clone(),
-                            mview_definition: job_definition.clone(),
-                            expr_context: Some(expr_context.clone()),
-                            config_override: config_override.clone(),
-                        },
-                    )
-                })
-            })
-            .collect();
-
-        // Build edges and collect actors to create.
-        let control_stream_manager = partial_graph_recoverer.control_stream_manager();
-        let mut builder = FragmentEdgeBuilder::new(fragment_infos.values().map(|f| {
-            (
-                f.fragment_id,
-                EdgeBuilderFragmentInfo::from_inflight(f, partial_graph_id, control_stream_manager),
-            )
-        }));
-        builder.add_relations(
-            &fragment_infos
-                .keys()
-                .filter_map(|fragment_id| {
-                    fragment_relations
-                        .get(fragment_id)
-                        .map(|relations| (*fragment_id, relations.clone()))
-                })
-                .collect(),
-        );
-        let mut edges = builder.build();
-        let new_actors = edges.collect_actors_to_create(fragment_infos.values().map(|f| {
-            (
-                f.fragment_id,
-                &f.nodes,
-                f.actors.iter().map(|(actor_id, actor)| {
-                    (
-                        rendered_stream_actors.get(actor_id).expect("should exist"),
-                        actor.worker_id,
-                    )
-                }),
-                vec![], // no subscribers for backfilling jobs
-            )
-        }));
-
-        let info = CreatingJobInfo {
-            fragment_infos,
-            upstream_fragment_downstreams: Default::default(),
-            downstreams,
-            snapshot_backfill_upstream_tables,
-            stream_actors: new_actors
-                .values()
-                .flat_map(|fragments| {
-                    fragments.values().flat_map(|(_, actors, _)| {
-                        actors
-                            .iter()
-                            .map(|(actor, _, _)| (actor.actor_id, actor.clone()))
-                    })
-                })
-                .collect(),
-        };
-
         let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
         let mut pending_non_checkpoint_barriers = vec![];
 
         let locality_fragment_state_table_mapping =
-            crate::barrier::rpc::build_locality_fragment_state_table_mapping(&info.fragment_infos);
+            crate::barrier::rpc::build_locality_fragment_state_table_mapping(
+                &render_result.fragment_infos,
+            );
         let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
             &backfill_order,
-            &info.fragment_infos,
+            &render_result.fragment_infos,
             locality_fragment_state_table_mapping,
         );
 
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
-            &info.fragment_infos,
+            &render_result.fragment_infos,
             backfill_order_state,
             version_stat,
         );
@@ -443,27 +576,27 @@ impl BatchRefreshJobCheckpointControl {
             partial_graph_id,
             initial_mutation,
             &first_barrier_info,
-            &node_actors,
-            state_table_ids.iter().copied(),
-            new_actors,
+            &render_result.node_actors,
+            render_result.state_table_ids.iter().copied(),
+            render_result.actors_to_create,
             BatchRefreshBarrierStats::new(job_id, snapshot_epoch),
         )?;
 
         Ok(Self {
             job_id,
             partial_graph_id,
-            snapshot_backfill_upstream_tables: batch_refresh_info.upstream_table_ids,
+            snapshot_backfill_upstream_tables,
             snapshot_epoch,
-            max_committed_epoch: barrier_control_committed_epoch,
+            max_committed_epoch: Some(committed_epoch),
             status: BatchRefreshJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
-                info,
+                fragment_infos: render_result.fragment_infos,
                 snapshot_epoch,
                 pending_non_checkpoint_barriers,
-                node_actors,
-                state_table_ids,
+                node_actors: render_result.node_actors,
+                state_table_ids: render_result.state_table_ids,
             },
         })
     }
@@ -550,7 +683,7 @@ impl BatchRefreshJobCheckpointControl {
                 prev_epoch_fake_physical_time,
                 mut pending_non_checkpoint_barriers,
                 snapshot_epoch,
-                info,
+                fragment_infos,
                 create_mview_tracker,
                 node_actors,
                 state_table_ids,
@@ -578,8 +711,7 @@ impl BatchRefreshJobCheckpointControl {
                 kind: BarrierKind::Checkpoint(vec![snapshot_epoch]),
             };
 
-            let stop_actors: Vec<ActorId> = info
-                .fragment_infos
+            let stop_actors: Vec<ActorId> = fragment_infos
                 .values()
                 .flat_map(|f| f.actors.keys().copied())
                 .collect();
@@ -614,7 +746,7 @@ impl BatchRefreshJobCheckpointControl {
 
             self.status = BatchRefreshJobStatus::FinishingSnapshot {
                 tracking_job: Some(tracking_job),
-                info,
+                fragment_infos,
             };
         } else {
             // Normal barrier — still consuming snapshot.
@@ -832,11 +964,11 @@ impl BatchRefreshJobCheckpointControl {
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot {
                 create_mview_tracker,
-                info,
+                fragment_infos,
                 ..
-            } => create_mview_tracker.collect_fragment_progress(&info.fragment_infos, true),
-            BatchRefreshJobStatus::FinishingSnapshot { info, .. } => {
-                collect_done_fragments(self.job_id, &info.fragment_infos)
+            } => create_mview_tracker.collect_fragment_progress(fragment_infos, true),
+            BatchRefreshJobStatus::FinishingSnapshot { fragment_infos, .. } => {
+                collect_done_fragments(self.job_id, fragment_infos)
             }
             _ => vec![],
         }
@@ -852,7 +984,7 @@ impl BatchRefreshJobCheckpointControl {
 
     pub(crate) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
         match &self.status {
-            BatchRefreshJobStatus::ConsumingSnapshot { info, .. } => Some(&info.fragment_infos),
+            BatchRefreshJobStatus::ConsumingSnapshot { fragment_infos, .. } => Some(fragment_infos),
             BatchRefreshJobStatus::FinishingSnapshot { .. }
             | BatchRefreshJobStatus::Idle
             | BatchRefreshJobStatus::Resetting { .. } => None,

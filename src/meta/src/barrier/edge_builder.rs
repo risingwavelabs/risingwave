@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_pb::common::{ActorInfo, HostAddress};
+use risingwave_pb::common::{ActorInfo, HostAddress, WorkerNode};
 use risingwave_pb::id::{PartialGraphId, SubscriberId};
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
@@ -57,6 +57,37 @@ impl EdgeBuilderFragmentInfo {
                 (
                     (actor_id, actor.vnode_bitmap.clone()),
                     (actor_id, control_stream_manager.host_addr(actor.worker_id)),
+                )
+            })
+            .unzip();
+        Self {
+            distribution_type: info.distribution_type,
+            actors,
+            actor_location,
+            partial_graph_id,
+        }
+    }
+
+    /// Build from an already-inflight fragment using worker node map for host resolution.
+    ///
+    /// Unlike [`from_inflight`](Self::from_inflight), this does not require a
+    /// `ControlStreamManager` and can be used when only worker node metadata is available
+    /// (e.g., during `render_runtime_info` before the control streams are fully set up).
+    pub fn from_inflight_with_worker_nodes(
+        info: &InflightFragmentInfo,
+        partial_graph_id: PartialGraphId,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+    ) -> Self {
+        let (actors, actor_location) = info
+            .actors
+            .iter()
+            .map(|(&actor_id, actor)| {
+                (
+                    (actor_id, actor.vnode_bitmap.clone()),
+                    (
+                        actor_id,
+                        worker_nodes[&actor.worker_id].host.clone().unwrap(),
+                    ),
                 )
             })
             .unzip();

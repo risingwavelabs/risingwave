@@ -42,8 +42,8 @@ use tracing::warn;
 use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
-    BatchRefreshJobCheckpointControl, CreatingStreamingJobControl, DatabaseCheckpointControl,
-    IndependentCheckpointJobControl,
+    BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
+    DatabaseCheckpointControl, IndependentCheckpointJobControl,
 };
 use crate::barrier::command::{CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
@@ -58,7 +58,7 @@ use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
-    ComponentFragmentAligner, EnsembleActorTemplate, NoShuffleEnsemble,
+    ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
     build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs,
 };
 use crate::model::{
@@ -632,30 +632,14 @@ impl DatabaseCheckpointControl {
                 job_type: CreateStreamingJobType::BatchRefresh(mut batch_refresh_info),
                 cross_db_snapshot_backfill_info,
             }) => {
-                let ensembles = resolve_no_shuffle_ensembles(
-                    &info.stream_job_fragments,
-                    &info.upstream_fragment_downstreams,
-                )?;
-                let actors = render_actors(
-                    &info.stream_job_fragments,
-                    &self.database_info,
-                    &info.definition,
-                    &info.stream_job_fragments.inner.ctx,
-                    &info.streaming_job_model,
-                    partial_graph_manager
-                        .control_stream_manager()
-                        .env
-                        .actor_id_generator(),
-                    worker_nodes,
-                    adaptive_parallelism_strategy,
-                    &ensembles,
-                    &info.database_resource_group,
-                )?;
                 {
                     assert!(!self.state.is_paused());
                     let snapshot_epoch = barrier_info.prev_epoch();
+                    let job_id = info.stream_job_fragments.stream_job_id();
+                    let database_id = info.streaming_job.database_id();
+
+                    // 1. Fill snapshot backfill epochs.
                     let snapshot_backfill_info = &mut batch_refresh_info.snapshot_backfill_info;
-                    // set snapshot epoch of upstream table for snapshot backfill
                     for snapshot_backfill_epoch in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
                         .values_mut()
@@ -673,26 +657,81 @@ impl DatabaseCheckpointControl {
                             &cross_db_snapshot_backfill_info,
                         )?;
                     }
-                    let job_id = info.stream_job_fragments.stream_job_id();
-                    let snapshot_backfill_upstream_tables = snapshot_backfill_info
-                        .upstream_mv_table_id_to_backfill_epoch
-                        .keys()
-                        .cloned()
-                        .collect();
+                    let snapshot_backfill_upstream_tables: HashSet<TableId> =
+                        snapshot_backfill_info
+                            .upstream_mv_table_id_to_backfill_epoch
+                            .keys()
+                            .cloned()
+                            .collect();
 
-                    // Batch refresh runs in its own partial graph and does not connect to
-                    // upstream actors with dispatcher edges.
-                    let mut edges = self.database_info.build_edge_for_batch_refresh_rerun(
-                        &info.stream_job_fragments.downstreams,
-                        to_partial_graph_id(self.database_id, Some(job_id)),
-                        info.stream_job_fragments.inner.fragments.values(),
+                    // 2. Build BatchRefreshLogicalFragments (after epoch filling).
+                    let logical = BatchRefreshLogicalFragments {
+                        fragments: info
+                            .stream_job_fragments
+                            .inner
+                            .fragments
+                            .iter()
+                            .map(|(&fid, fragment)| {
+                                (
+                                    fid,
+                                    LoadedFragment {
+                                        fragment_id: fid,
+                                        job_id,
+                                        fragment_type_mask: fragment.fragment_type_mask,
+                                        distribution_type: fragment.distribution_type.into(),
+                                        vnode_count: fragment.vnode_count(),
+                                        nodes: fragment.nodes.clone(),
+                                        state_table_ids: fragment
+                                            .state_table_ids
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
+                                        parallelism: None,
+                                    },
+                                )
+                            })
+                            .collect(),
+                        downstreams: info.stream_job_fragments.downstreams.clone(),
+                    };
+
+                    // 3. Render actors via unified method.
+                    let partial_graph_id = to_partial_graph_id(self.database_id, Some(job_id));
+                    let render_result =
+                        BatchRefreshJobCheckpointControl::render_actors_and_build_job_info(
+                            &logical.fragments,
+                            &logical.downstreams,
+                            &info.definition,
+                            partial_graph_manager
+                                .control_stream_manager()
+                                .env
+                                .actor_id_generator(),
+                            worker_nodes,
+                            adaptive_parallelism_strategy,
+                            &info.database_resource_group,
+                            &info.streaming_job_model,
+                            partial_graph_id,
+                        )?;
+
+                    // 4. Build database graph mutation (before consuming render_result).
+                    // For batch refresh, no upstream dispatchers are extracted from edges.
+                    let snapshot_backfill_info_clone =
+                        batch_refresh_info.snapshot_backfill_info.clone();
+                    let refresh_interval_sec = batch_refresh_info.refresh_interval_sec;
+                    let empty_split_assignment = Default::default();
+                    let mut empty_edges = FragmentEdgeBuilder::new(std::iter::empty()).build();
+                    let mutation = Command::create_streaming_job_to_mutation(
+                        &info,
+                        &CreateStreamingJobType::BatchRefresh(batch_refresh_info),
+                        self.state.is_paused(),
+                        &mut empty_edges,
                         partial_graph_manager.control_stream_manager(),
-                        &actors.stream_actors,
-                        &actors.actor_location,
-                    );
+                        None,
+                        &empty_split_assignment,
+                        &render_result.stream_actors,
+                        &render_result.actor_location,
+                    )?;
 
-                    // Create a BatchRefreshJobCheckpointControl directly.
-                    // It handles its own partial graph and barrier control.
+                    // 5. Create BatchRefreshJobCheckpointControl.
                     assert!(
                         !self
                             .independent_checkpoint_job_controls
@@ -700,15 +739,9 @@ impl DatabaseCheckpointControl {
                         "duplicated creating batch refresh job {job_id}"
                     );
 
-                    let snapshot_backfill_info_clone =
-                        batch_refresh_info.snapshot_backfill_info.clone();
-                    let refresh_interval_sec = batch_refresh_info.refresh_interval_sec;
-
-                    // Batch refresh jobs must not contain source/source-backfill nodes,
-                    // so resolved_split_assignment is always empty.
-                    let empty_split_assignment = Default::default();
-
                     let job = BatchRefreshJobCheckpointControl::new(
+                        database_id,
+                        job_id,
                         CreateSnapshotBackfillJobCommandInfo {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info_clone.clone(),
@@ -721,8 +754,9 @@ impl DatabaseCheckpointControl {
                         snapshot_epoch,
                         hummock_version_stats,
                         partial_graph_manager,
-                        &mut edges,
-                        &actors,
+                        render_result,
+                        &info.fragment_backfill_ordering,
+                        info.locality_fragment_state_table_mapping.clone(),
                     )?;
 
                     if let Some(fragment_infos) = job.fragment_infos() {
@@ -746,18 +780,6 @@ impl DatabaseCheckpointControl {
                             SubscriberType::SnapshotBackfill,
                         );
                     }
-
-                    let mutation = Command::create_streaming_job_to_mutation(
-                        &info,
-                        &CreateStreamingJobType::BatchRefresh(batch_refresh_info),
-                        self.state.is_paused(),
-                        &mut edges,
-                        partial_graph_manager.control_stream_manager(),
-                        None,
-                        &empty_split_assignment,
-                        &actors.stream_actors,
-                        &actors.actor_location,
-                    )?;
 
                     let (table_ids, node_actors) = self.collect_base_info();
                     (

@@ -22,7 +22,7 @@ pub(super) use control::{
     DatabaseCheckpointControlMetrics,
 };
 pub(crate) use independent_job::{
-    BatchRefreshJobCheckpointControl, BatchRefreshJobInfo, CreatingStreamingJobControl,
-    IndependentCheckpointJobControl,
+    BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
+    CreatingStreamingJobControl, IndependentCheckpointJobControl,
 };
 pub(super) use state::BarrierWorkerState;

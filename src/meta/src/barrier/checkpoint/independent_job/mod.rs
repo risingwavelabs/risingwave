@@ -23,7 +23,9 @@ use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 pub(crate) mod batch_refresh_job;
 pub(crate) mod creating_job;
 
-pub(crate) use batch_refresh_job::{BatchRefreshJobCheckpointControl, BatchRefreshJobInfo};
+pub(crate) use batch_refresh_job::{
+    BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
+};
 pub(crate) use creating_job::CreatingStreamingJobControl;
 
 use crate::barrier::info::BarrierInfo;

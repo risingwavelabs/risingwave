@@ -36,7 +36,11 @@ use tracing::{info, warn};
 use super::BarrierWorkerRuntimeInfoSnapshot;
 use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
+use crate::barrier::checkpoint::{
+    BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
+};
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
+use crate::barrier::rpc::to_partial_graph_id;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragment, LoadedFragmentContext, RenderedGraph,
@@ -78,6 +82,8 @@ pub struct RenderedDatabaseRuntimeInfo {
     pub job_infos: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
     pub stream_actors: HashMap<ActorId, StreamActor>,
     pub source_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    /// Batch refresh jobs rendered during `render_runtime_info`.
+    pub batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
 }
 
 pub fn render_runtime_info(
@@ -87,12 +93,103 @@ pub fn render_runtime_info(
     recovery_context: &LoadedRecoveryContext,
     database_id: DatabaseId,
 ) -> MetaResult<Option<RenderedDatabaseRuntimeInfo>> {
-    let Some(per_database_context) = recovery_context.fragment_context.for_database(database_id)
+    let Some(mut per_database_context) =
+        recovery_context.fragment_context.for_database(database_id)
     else {
         return Ok(None);
     };
 
     assert!(!per_database_context.is_empty());
+
+    // Extract batch refresh jobs before rendering via `render_actor_assignments`.
+    // They will be rendered independently using the unified `render_actors_and_build_job_info`.
+    let batch_refresh_job_ids: HashSet<JobId> = per_database_context
+        .job_map
+        .iter()
+        .filter(|(_, model)| model.refresh_interval_sec.is_some())
+        .map(|(job_id, _)| *job_id)
+        .collect();
+
+    let mut batch_refresh_logical = HashMap::new();
+    if !batch_refresh_job_ids.is_empty() {
+        let batch_refresh_fragment_ids: HashSet<FragmentId> = batch_refresh_job_ids
+            .iter()
+            .flat_map(|job_id| {
+                per_database_context
+                    .job_fragments
+                    .get(job_id)
+                    .unwrap()
+                    .keys()
+                    .copied()
+            })
+            .collect();
+
+        for &job_id in &batch_refresh_job_ids {
+            let fragments = per_database_context.job_fragments.remove(&job_id).unwrap();
+            let downstreams = fragments
+                .keys()
+                .filter_map(|fid| {
+                    recovery_context
+                        .fragment_relations
+                        .get(fid)
+                        .map(|r| (*fid, r.clone()))
+                })
+                .collect();
+            batch_refresh_logical.insert(
+                job_id,
+                BatchRefreshLogicalFragments {
+                    fragments,
+                    downstreams,
+                },
+            );
+        }
+
+        // Remove ensembles that only contain batch refresh fragments.
+        per_database_context.ensembles.retain(|ensemble| {
+            !ensemble
+                .component_fragments()
+                .all(|fid| batch_refresh_fragment_ids.contains(&fid))
+        });
+    }
+
+    // Render actors for each batch refresh job.
+    let mut batch_refresh = HashMap::new();
+    for (job_id, logical) in batch_refresh_logical {
+        let extra = recovery_context
+            .job_extra_info
+            .get(&job_id)
+            .expect("should have extra info");
+        let streaming_job_model = per_database_context
+            .job_map
+            .get(&job_id)
+            .expect("should have streaming job model");
+        let database_model = &per_database_context.database_map[&database_id];
+        let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+
+        let render_result = BatchRefreshJobCheckpointControl::render_actors_and_build_job_info(
+            &logical.fragments,
+            &logical.downstreams,
+            &extra.job_definition,
+            actor_id_generator,
+            worker_nodes.current(),
+            adaptive_parallelism_strategy,
+            &database_model.resource_group,
+            streaming_job_model,
+            partial_graph_id,
+        )?;
+
+        batch_refresh.insert(job_id, render_result);
+    }
+
+    // If all fragments were batch refresh, no normal rendering needed.
+    if per_database_context.ensembles.is_empty() {
+        return Ok(Some(RenderedDatabaseRuntimeInfo {
+            job_infos: HashMap::new(),
+            stream_actors: HashMap::new(),
+            source_splits: HashMap::new(),
+            batch_refresh,
+        }));
+    }
 
     let RenderedGraph { mut fragments, .. } = render_actor_assignments(
         actor_id_generator,
@@ -130,6 +227,7 @@ pub fn render_runtime_info(
         job_infos,
         stream_actors,
         source_splits,
+        batch_refresh,
     }))
 }
 
