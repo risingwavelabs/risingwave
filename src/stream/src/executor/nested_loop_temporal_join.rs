@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -20,29 +21,35 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::StateStore;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::BatchTable;
 
 use super::join::{JoinType, JoinTypePrimitive};
 use super::temporal_join::{InternalMessage, align_input, apply_indices_map, phase1};
 use super::{Execute, ExecutorInfo, Message, StreamExecutorError};
 use crate::common::metrics::MetricsInfo;
+use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, Executor};
 
-pub struct NestedLoopTemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
+pub struct NestedLoopTemporalJoinExecutor<
+    S: StateStore,
+    SD: ValueRowSerde,
+    const T: JoinTypePrimitive,
+> {
     ctx: ActorContextRef,
     #[allow(dead_code)]
     info: ExecutorInfo,
     left: Executor,
     right: Executor,
-    right_table: TemporalSide<S>,
+    right_table: TemporalSide<S, SD>,
     condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
     chunk_size: usize,
@@ -51,40 +58,41 @@ pub struct NestedLoopTemporalJoinExecutor<S: StateStore, const T: JoinTypePrimit
     metrics: Arc<StreamingMetrics>,
 }
 
-struct TemporalSide<S: StateStore> {
-    source: BatchTable<S>,
+struct TemporalSide<S: StateStore, SD: ValueRowSerde> {
+    source: ReplicatedStateTable<S, SD>,
 }
 
-impl<S: StateStore> TemporalSide<S> {}
+impl<S: StateStore, SD: ValueRowSerde> TemporalSide<S, SD> {}
 
 #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
 #[allow(clippy::too_many_arguments)]
-async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
+async fn phase1_handle_chunk<S: StateStore, SD: ValueRowSerde, E: phase1::Phase1Evaluation>(
     chunk_size: usize,
     right_size: usize,
     full_schema: Vec<DataType>,
-    epoch: HummockEpoch,
-    right_table: &mut TemporalSide<S>,
+    right_table: &mut TemporalSide<S, SD>,
     chunk: StreamChunk,
 ) {
     let mut builder = StreamChunkBuilder::new(chunk_size, full_schema);
 
     for (op, left_row) in chunk.rows() {
         let mut matched = false;
-        #[for_await]
-        for right_row in right_table
-            .source
-            .batch_iter(
-                HummockReadEpoch::NoWait(epoch),
-                false,
-                PrefetchOptions::prefetch_for_large_range_scan(),
-            )
-            .await?
-        {
-            let right_row = right_row?;
-            matched = true;
-            if let Some(chunk) = E::append_matched_row(op, &mut builder, left_row, right_row) {
-                yield chunk;
+        for vnode in right_table.source.vnodes().iter_vnodes() {
+            let iter = right_table
+                .source
+                .iter_with_vnode_and_output_indices(
+                    vnode,
+                    &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                    PrefetchOptions::prefetch_for_large_range_scan(),
+                )
+                .await?;
+            #[for_await]
+            for right_row in iter {
+                let right_row = right_row?;
+                matched = true;
+                if let Some(chunk) = E::append_matched_row(op, &mut builder, left_row, right_row) {
+                    yield chunk;
+                }
             }
         }
         if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
@@ -96,14 +104,16 @@ async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
     }
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S, T> {
+impl<S: StateStore, SD: ValueRowSerde, const T: JoinTypePrimitive>
+    NestedLoopTemporalJoinExecutor<S, SD, T>
+{
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,
         left: Executor,
         right: Executor,
-        table: BatchTable<S>,
+        table: ReplicatedStateTable<S, SD>,
         condition: Option<NonStrictExpression>,
         output_indices: Vec<usize>,
         metrics: Arc<StreamingMetrics>,
@@ -141,8 +151,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
 
         let left_to_output: HashMap<usize, usize> = HashMap::from_iter(left_map.iter().cloned());
 
-        let mut prev_epoch = None;
-
         let full_schema: Vec<_> = self
             .left
             .schema()
@@ -151,24 +159,23 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
             .chain(self.right.schema().data_types().into_iter())
             .collect();
 
+        let mut wait_first_barrier = true;
+
         #[for_await]
-        for msg in align_input::<false>(self.left, self.right) {
+        for msg in align_input::<true>(self.left, self.right) {
             match msg? {
                 InternalMessage::WaterMark(watermark) => {
                     let output_watermark_col_idx = *left_to_output.get(&watermark.col_idx).unwrap();
                     yield Message::Watermark(watermark.with_idx(output_watermark_col_idx));
                 }
                 InternalMessage::Chunk(chunk) => {
-                    let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
-
                     let full_schema = full_schema.clone();
 
                     if T == JoinType::Inner {
-                        let st1 = phase1_handle_chunk::<S, phase1::Inner>(
+                        let st1 = phase1_handle_chunk::<S, SD, phase1::Inner>(
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
                             &mut self.right_table,
                             chunk,
                         );
@@ -191,11 +198,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                         }
                     } else if let Some(ref cond) = self.condition {
                         // Joined result without evaluating non-lookup conditions.
-                        let st1 = phase1_handle_chunk::<S, phase1::LeftOuterWithCond>(
+                        let st1 = phase1_handle_chunk::<S, SD, phase1::LeftOuterWithCond>(
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
                             &mut self.right_table,
                             chunk,
                         );
@@ -238,11 +244,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                         // The last row should always be marker row,
                         assert_eq!(matched_count, 0);
                     } else {
-                        let st1 = phase1_handle_chunk::<S, phase1::LeftOuter>(
+                        let st1 = phase1_handle_chunk::<S, SD, phase1::LeftOuter>(
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
                             &mut self.right_table,
                             chunk,
                         );
@@ -254,20 +259,38 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                         }
                     }
                 }
-                InternalMessage::Barrier(chunk, barrier) => {
-                    assert!(chunk.is_empty());
-                    if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let _vnodes = self.right_table.source.update_vnode_bitmap(vnodes);
+                InternalMessage::Barrier(updates, barrier) => {
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
+                    let barrier_epoch = barrier.epoch;
+
+                    // Write right-side chunks to the replicated state table
+                    for chunk in &updates {
+                        self.right_table.source.write_chunk(chunk.clone());
                     }
-                    prev_epoch = Some(barrier.epoch.curr);
-                    yield Message::Barrier(barrier)
+
+                    if wait_first_barrier {
+                        wait_first_barrier = false;
+                        yield Message::Barrier(barrier);
+                        self.right_table.source.init_epoch(barrier_epoch).await?;
+                    } else {
+                        let right_post_commit =
+                            self.right_table.source.commit(barrier.epoch).await?;
+
+                        yield Message::Barrier(barrier);
+
+                        right_post_commit
+                            .post_yield_barrier(update_vnode_bitmap)
+                            .await?;
+                    }
                 }
             }
         }
     }
 }
 
-impl<S: StateStore, const T: JoinTypePrimitive> Execute for NestedLoopTemporalJoinExecutor<S, T> {
+impl<S: StateStore, SD: ValueRowSerde, const T: JoinTypePrimitive> Execute
+    for NestedLoopTemporalJoinExecutor<S, SD, T>
+{
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.into_stream().boxed()
     }

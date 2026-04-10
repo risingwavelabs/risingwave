@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::ops::Bound;
 
 use either::Either;
 use futures::TryStreamExt;
@@ -26,21 +27,21 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_expr::expr::NonStrictExpression;
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::TableIter;
-use risingwave_storage::table::batch_table::BatchTable;
 
 use super::join::{JoinType, JoinTypePrimitive};
 use super::monitor::TemporalJoinMetrics;
-use crate::cache::{ManagedLruCache, keyed_cache_may_stale};
+use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
+use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::prelude::*;
 
 pub struct TemporalJoinExecutor<
     K: HashKey,
     S: StateStore,
+    SD: ValueRowSerde,
     const T: JoinTypePrimitive,
     const APPEND_ONLY: bool,
 > {
@@ -49,7 +50,7 @@ pub struct TemporalJoinExecutor<
     info: ExecutorInfo,
     left: Executor,
     right: Executor,
-    right_table: TemporalSide<K, S>,
+    right_table: TemporalSide<K, S, SD>,
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
@@ -102,21 +103,20 @@ impl JoinEntry {
     }
 }
 
-struct TemporalSide<K: HashKey, S: StateStore> {
-    source: BatchTable<S>,
+struct TemporalSide<K: HashKey, S: StateStore, SD: ValueRowSerde> {
+    source: ReplicatedStateTable<S, SD>,
     table_stream_key_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
     cache: ManagedLruCache<K, JoinEntry>,
     join_key_data_types: Vec<DataType>,
 }
 
-impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
+impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
     /// Fetch records from temporal side table and ensure the entry in the cache.
     /// If already exists, the entry will be promoted.
     async fn fetch_or_promote_keys(
         &mut self,
         keys: impl Iterator<Item = &K>,
-        epoch: HummockEpoch,
         metrics: &TemporalJoinMetrics,
     ) -> StreamExecutorResult<()> {
         let mut futs = Vec::with_capacity(keys.size_hint().1.unwrap_or(0));
@@ -131,11 +131,9 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
 
                     let iter = self
                         .source
-                        .batch_iter_with_pk_bounds(
-                            HummockReadEpoch::NoWait(epoch),
+                        .iter_with_prefix(
                             &pk_prefix,
-                            ..,
-                            false,
+                            &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
                             PrefetchOptions::default(),
                         )
                         .await?;
@@ -143,7 +141,8 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
                     let mut entry = JoinEntry::default();
 
                     pin_mut!(iter);
-                    while let Some(row) = iter.next_row().await? {
+                    while let Some(row) = iter.next().await {
+                        let row: OwnedRow = row?;
                         entry.insert(
                             row.as_ref()
                                 .project(&self.table_stream_key_indices)
@@ -319,8 +318,8 @@ pub(super) mod phase1 {
     use risingwave_common::row::{self, OwnedRow, Row, RowExt};
     use risingwave_common::types::{DataType, DatumRef};
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_hummock_sdk::HummockEpoch;
     use risingwave_storage::StateStore;
+    use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 
     use super::{StreamExecutorError, TemporalSide};
     use crate::common::table::state_table::StateTable;
@@ -433,15 +432,15 @@ pub(super) mod phase1 {
         'a,
         K: HashKey,
         S: StateStore,
+        SD: ValueRowSerde,
         E: Phase1Evaluation,
         const APPEND_ONLY: bool,
     >(
         chunk_size: usize,
         right_size: usize,
         full_schema: Vec<DataType>,
-        epoch: HummockEpoch,
         left_join_keys: &'a [usize],
-        right_table: &'a mut TemporalSide<K, S>,
+        right_table: &'a mut TemporalSide<K, S, SD>,
         memo_table_lookup_prefix: &'a [usize],
         memo_table: &'a mut Option<StateTable<S>>,
         null_matched: &'a K::Bitmap,
@@ -471,7 +470,7 @@ pub(super) mod phase1 {
                 }
             });
         right_table
-            .fetch_or_promote_keys(to_fetch_keys, epoch, metrics)
+            .fetch_or_promote_keys(to_fetch_keys, metrics)
             .await?;
 
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
@@ -587,8 +586,13 @@ pub(super) mod phase1 {
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: bool>
-    TemporalJoinExecutor<K, S, T, APPEND_ONLY>
+impl<
+    K: HashKey,
+    S: StateStore,
+    SD: ValueRowSerde,
+    const T: JoinTypePrimitive,
+    const APPEND_ONLY: bool,
+> TemporalJoinExecutor<K, S, SD, T, APPEND_ONLY>
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -596,7 +600,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
         info: ExecutorInfo,
         left: Executor,
         right: Executor,
-        table: BatchTable<S>,
+        table: ReplicatedStateTable<S, SD>,
         left_join_keys: Vec<usize>,
         right_join_keys: Vec<usize>,
         null_safe: Vec<bool>,
@@ -663,8 +667,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
 
         let null_matched = K::Bitmap::from_bool_vec(self.null_safe);
 
-        let mut prev_epoch = None;
-
         let full_schema: Vec<_> = self
             .left
             .schema()
@@ -687,16 +689,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                     yield Message::Watermark(watermark.with_idx(output_watermark_col_idx));
                 }
                 InternalMessage::Chunk(chunk) => {
-                    let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
-
                     let full_schema = full_schema.clone();
 
                     if T == JoinType::Inner {
-                        let st1 = phase1::handle_chunk::<K, S, phase1::Inner, APPEND_ONLY>(
+                        let st1 = phase1::handle_chunk::<K, S, SD, phase1::Inner, APPEND_ONLY>(
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
                             &self.left_join_keys,
                             &mut self.right_table,
                             &memo_table_lookup_prefix,
@@ -724,20 +723,24 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                         }
                     } else if let Some(ref cond) = self.condition {
                         // Joined result without evaluating non-lookup conditions.
-                        let st1 =
-                            phase1::handle_chunk::<K, S, phase1::LeftOuterWithCond, APPEND_ONLY>(
-                                self.chunk_size,
-                                right_size,
-                                full_schema,
-                                epoch,
-                                &self.left_join_keys,
-                                &mut self.right_table,
-                                &memo_table_lookup_prefix,
-                                &mut self.memo_table,
-                                &null_matched,
-                                chunk,
-                                &self.metrics,
-                            );
+                        let st1 = phase1::handle_chunk::<
+                            K,
+                            S,
+                            SD,
+                            phase1::LeftOuterWithCond,
+                            APPEND_ONLY,
+                        >(
+                            self.chunk_size,
+                            right_size,
+                            full_schema,
+                            &self.left_join_keys,
+                            &mut self.right_table,
+                            &memo_table_lookup_prefix,
+                            &mut self.memo_table,
+                            &null_matched,
+                            chunk,
+                            &self.metrics,
+                        );
                         let mut matched_count = 0usize;
                         #[for_await]
                         for chunk in st1 {
@@ -777,11 +780,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                         // The last row should always be marker row,
                         assert_eq!(matched_count, 0);
                     } else {
-                        let st1 = phase1::handle_chunk::<K, S, phase1::LeftOuter, APPEND_ONLY>(
+                        let st1 = phase1::handle_chunk::<K, S, SD, phase1::LeftOuter, APPEND_ONLY>(
                             self.chunk_size,
                             right_size,
                             full_schema,
-                            epoch,
                             &self.left_join_keys,
                             &mut self.right_table,
                             &memo_table_lookup_prefix,
@@ -801,51 +803,72 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                 InternalMessage::Barrier(updates, barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
                     let barrier_epoch = barrier.epoch;
-                    if !APPEND_ONLY {
-                        if wait_first_barrier {
-                            wait_first_barrier = false;
-                            yield Message::Barrier(barrier);
+
+                    // Write right-side chunks to the replicated state table
+                    for chunk in &updates {
+                        self.right_table.source.write_chunk(chunk.clone());
+                    }
+
+                    if wait_first_barrier {
+                        wait_first_barrier = false;
+                        yield Message::Barrier(barrier);
+                        self.right_table.source.init_epoch(barrier_epoch).await?;
+                        if !APPEND_ONLY {
                             self.memo_table
                                 .as_mut()
                                 .unwrap()
                                 .init_epoch(barrier_epoch)
                                 .await?;
+                        }
+                    } else {
+                        let right_post_commit =
+                            self.right_table.source.commit(barrier.epoch).await?;
+                        let memo_post_commit = if !APPEND_ONLY {
+                            Some(
+                                self.memo_table
+                                    .as_mut()
+                                    .unwrap()
+                                    .commit(barrier.epoch)
+                                    .await?,
+                            )
                         } else {
-                            let post_commit = self
-                                .memo_table
-                                .as_mut()
-                                .unwrap()
-                                .commit(barrier.epoch)
-                                .await?;
-                            yield Message::Barrier(barrier);
-                            post_commit
+                            None
+                        };
+
+                        yield Message::Barrier(barrier);
+
+                        if let Some(((_new_vnodes, _prev_vnodes, _), true)) = right_post_commit
+                            .post_yield_barrier(update_vnode_bitmap.clone())
+                            .await?
+                        {
+                            self.right_table.cache.clear();
+                        }
+                        if let Some(memo_post_commit) = memo_post_commit {
+                            memo_post_commit
                                 .post_yield_barrier(update_vnode_bitmap.clone())
                                 .await?;
                         }
-                    } else {
-                        yield Message::Barrier(barrier);
                     }
-                    if let Some(vnodes) = update_vnode_bitmap {
-                        let prev_vnodes =
-                            self.right_table.source.update_vnode_bitmap(vnodes.clone());
-                        if keyed_cache_may_stale(&prev_vnodes, &vnodes) {
-                            self.right_table.cache.clear();
-                        }
-                    }
+
+                    // Update the LRU cache with right-side chunks
                     self.right_table.update(
                         updates,
                         &self.right_join_keys,
                         &right_stream_key_indices,
                     )?;
-                    prev_epoch = Some(barrier_epoch.prev);
                 }
             }
         }
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: bool> Execute
-    for TemporalJoinExecutor<K, S, T, APPEND_ONLY>
+impl<
+    K: HashKey,
+    S: StateStore,
+    SD: ValueRowSerde,
+    const T: JoinTypePrimitive,
+    const APPEND_ONLY: bool,
+> Execute for TemporalJoinExecutor<K, S, SD, T, APPEND_ONLY>
 {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.into_stream().boxed()
