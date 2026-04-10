@@ -23,9 +23,6 @@ rpk topic delete test_txn_24829_s1 || true
 system ok
 rpk topic create test_txn_24829_s1 -p 1
 
-system ok
-python3 e2e_test/source_inline/kafka/kafka_txn_produce.py --topic test_txn_24829_s1 --partitions 0 --messages-per-partition 3
-
 statement ok
 create source txn_src_s1 (k varchar, v int)
 with (
@@ -33,6 +30,21 @@ with (
     topic = 'test_txn_24829_s1',
     scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON;
+
+
+# check for empty topic (backfill & batch)
+statement ok
+create materialized view txn_mv_s1_empty as select * from txn_src_s1;
+
+
+query I
+select count(*) from txn_src_s1;
+----
+0
+
+system ok
+python3 e2e_test/source_inline/kafka/kafka_txn_produce.py --topic test_txn_24829_s1 --partitions 0 --messages-per-partition 3
+
 
 # Backfill: MV creation is blocking DDL. Without the fix, this hangs forever.
 statement ok
@@ -55,6 +67,9 @@ select k, v from txn_src_s1;
 0-0-0 0
 0-0-1 1
 0-0-2 2
+
+statement ok
+drop materialized view txn_mv_s1_empty;
 
 statement ok
 drop materialized view txn_mv_s1;
