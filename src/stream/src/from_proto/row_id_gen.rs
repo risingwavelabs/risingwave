@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::stream_plan::RowIdGenNode;
 use risingwave_storage::StateStore;
 
@@ -33,9 +34,13 @@ impl ExecutorBuilder for RowIdGenExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
         tracing::debug!("row id gen executor: {:?}", params.vnode_bitmap);
-        let vnodes = params
-            .vnode_bitmap
-            .expect("vnodes not set for row id gen executor");
+        let vnodes = params.vnode_bitmap.unwrap_or_else(|| {
+            assert_eq!(
+                params.actor_context.vnode_count, 1,
+                "vnodes not set for row id gen executor"
+            );
+            Bitmap::ones(1)
+        });
         let exec = RowIdGenExecutor::new(
             params.actor_context,
             upstream,

@@ -754,6 +754,7 @@ impl LogicalPlanRoot {
             row_id_index,
             watermark_descs,
             source_catalog,
+            singleton_row_id_demo,
             version,
         }: CreateTableInfo,
         CreateTableProps {
@@ -955,18 +956,26 @@ impl LogicalPlanRoot {
         }
 
         // Add RowIDGen node if needed.
+        if singleton_row_id_demo {
+            stream_plan = StreamExchange::new(stream_plan, Distribution::Single).into();
+        }
+
         if let Some(row_id_index) = row_id_index {
             match kind {
                 PrimaryKeyKind::UserDefinedPrimaryKey => {
                     unreachable!()
                 }
                 PrimaryKeyKind::NonAppendOnlyRowIdPk | PrimaryKeyKind::AppendOnlyRowIdPk => {
-                    stream_plan = StreamRowIdGen::new_with_dist(
-                        stream_plan,
-                        row_id_index,
-                        Distribution::HashShard(vec![row_id_index]),
-                    )
-                    .into();
+                    stream_plan = if singleton_row_id_demo {
+                        StreamRowIdGen::new(stream_plan, row_id_index).into()
+                    } else {
+                        StreamRowIdGen::new_with_dist(
+                            stream_plan,
+                            row_id_index,
+                            Distribution::HashShard(vec![row_id_index]),
+                        )
+                        .into()
+                    };
                 }
             }
         }
@@ -983,7 +992,9 @@ impl LogicalPlanRoot {
 
         let retention_seconds = context.with_options().retention_seconds();
 
-        let table_required_dist = {
+        let table_required_dist = if singleton_row_id_demo {
+            RequiredDist::single()
+        } else {
             let mut bitset = FixedBitSet::with_capacity(columns.len());
             for idx in &pk_column_indices {
                 bitset.insert(*idx);
@@ -1042,6 +1053,7 @@ impl LogicalPlanRoot {
             webhook_info,
             engine,
             refreshable,
+            singleton_row_id_demo,
         )
     }
 

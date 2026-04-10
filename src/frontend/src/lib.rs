@@ -56,6 +56,7 @@ pub use optimizer::{Explain, OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 use pgwire::net::TcpKeepalive;
 pub use planner::Planner;
+mod records_demo;
 mod scheduler;
 pub mod session;
 mod stream_fragmenter;

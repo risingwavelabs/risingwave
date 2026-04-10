@@ -168,6 +168,7 @@ impl StreamMaterialize {
             None,
             Engine::Hummock,
             false,
+            false,
         )?;
 
         Self::new(input, table)
@@ -198,6 +199,7 @@ impl StreamMaterialize {
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
         refreshable: bool,
+        singleton_row_id_demo: bool,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by.clone(), TableType::Table)?;
 
@@ -223,6 +225,7 @@ impl StreamMaterialize {
             webhook_info,
             engine,
             refreshable,
+            singleton_row_id_demo,
         )?;
 
         // For refreshable tables, create staging table and progress table
@@ -325,6 +328,7 @@ impl StreamMaterialize {
         webhook_info: Option<PbWebhookSourceInfo>,
         engine: Engine,
         refreshable: bool,
+        singleton_row_id_demo: bool,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -392,7 +396,11 @@ impl StreamMaterialize {
             created_at_cluster_version: None,
             retention_seconds: retention_seconds.map(|i| i.into()),
             cdc_table_id: None,
-            vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
+            vnode_count: if singleton_row_id_demo {
+                VnodeCount::Singleton
+            } else {
+                VnodeCount::Placeholder // will be filled in by the meta service later
+            },
             webhook_info,
             job_id: None,
             engine: match table_type {

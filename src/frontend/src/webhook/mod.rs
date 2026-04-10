@@ -13,21 +13,29 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::ops::Index;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 
 use anyhow::{Context, anyhow};
-use axum::Router;
 use axum::body::Bytes;
-use axum::extract::{Extension, Path};
+use axum::extract::{Extension, Path, Query};
 use axum::http::{HeaderMap, Method, StatusCode};
-use axum::routing::post;
+use axum::routing::{get, post};
+use axum::{Json, Router};
+use futures::StreamExt;
+use pgwire::pg_server::SessionManager;
+use pgwire::types::Row;
 use risingwave_common::array::{Array, ArrayBuilder, DataChunk};
+use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, JsonbVal, Scalar};
 use risingwave_pb::catalog::WebhookSourceInfo;
 use risingwave_pb::task_service::{FastInsertRequest, FastInsertResponse};
+use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
+use tokio::sync::{Mutex, OnceCell};
+use tokio::time::{Duration, sleep};
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
@@ -36,6 +44,11 @@ use tower_http::cors::{self, CorsLayer};
 use crate::webhook::utils::{Result, err};
 mod utils;
 use risingwave_rpc_client::ComputeClient;
+use scopeguard::guard;
+
+use crate::handler::RwPgResponse;
+use crate::records_demo::{DEMO_SCHEMA_NAME, DEMO_TABLE_NAME};
+use crate::session::{SESSION_MANAGER, SessionImpl};
 
 pub type Service = Arc<WebhookService>;
 
@@ -52,6 +65,8 @@ pub struct FastInsertContext {
 pub struct WebhookService {
     webhook_addr: SocketAddr,
     counter: AtomicU32,
+    demo_bootstrap: OnceCell<()>,
+    demo_append_lock: Mutex<()>,
 }
 
 pub(super) mod handlers {
@@ -65,7 +80,6 @@ pub(super) mod handlers {
     use super::*;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::scheduler::choose_fast_insert_client;
-    use crate::session::SESSION_MANAGER;
 
     pub async fn handle_post_request(
         Extension(srv): Extension<Service>,
@@ -135,6 +149,164 @@ pub(super) mod handlers {
                 StatusCode::INTERNAL_SERVER_ERROR,
             ))
         }
+    }
+
+    #[derive(Deserialize)]
+    pub struct DemoAppendRequest {
+        body: String,
+    }
+
+    #[derive(Deserialize)]
+    pub struct DemoReadQuery {
+        seq_num: Option<String>,
+        limit: Option<u32>,
+    }
+
+    #[derive(Serialize)]
+    pub struct DemoAppendResponse {
+        seq_num: String,
+        ts_ms: i64,
+        body: String,
+    }
+
+    #[derive(Serialize)]
+    pub struct DemoRecord {
+        seq_num: String,
+        ts_ms: i64,
+        body: String,
+    }
+
+    #[derive(Serialize)]
+    pub struct DemoReadResponse {
+        records: Vec<DemoRecord>,
+    }
+
+    #[derive(Serialize)]
+    pub struct DemoTailResponse {
+        seq_num: String,
+        ts_ms: i64,
+    }
+
+    pub async fn handle_demo_append(
+        Extension(srv): Extension<Service>,
+        Json(req): Json<DemoAppendRequest>,
+    ) -> Result<Json<DemoAppendResponse>> {
+        srv.ensure_demo_table().await?;
+        let _guard = srv.demo_append_lock.lock().await;
+        let session = create_demo_session()?;
+
+        let session_mgr = SESSION_MANAGER
+            .get()
+            .expect("session manager has been initialized");
+        let _session_guard = guard(session.clone(), |session| {
+            session_mgr.end_session(&session);
+        });
+
+        let prev_seq_num = load_demo_tail_row(session.clone())
+            .await?
+            .map(|row| row_i64(&row, 0))
+            .transpose()?
+            .unwrap_or(0);
+
+        let insert_sql = format!(
+            "INSERT INTO {DEMO_SCHEMA_NAME}.{DEMO_TABLE_NAME} (body, ts_ms) VALUES ({body}, (extract(epoch from now()) * 1000)::bigint)",
+            body = quote_sql_literal(&req.body),
+        );
+        run_sql(session.clone(), &insert_sql).await?;
+        run_sql(session.clone(), "FLUSH").await?;
+
+        let row = wait_for_demo_row(session, prev_seq_num).await?;
+
+        Ok(Json(DemoAppendResponse {
+            seq_num: row_text(&row, 0)?,
+            ts_ms: row_i64(&row, 1)?,
+            body: row_text(&row, 2)?,
+        }))
+    }
+
+    pub async fn handle_demo_read(
+        Extension(srv): Extension<Service>,
+        Query(query): Query<DemoReadQuery>,
+    ) -> Result<Json<DemoReadResponse>> {
+        srv.ensure_demo_table().await?;
+        let session = create_demo_session()?;
+
+        let session_mgr = SESSION_MANAGER
+            .get()
+            .expect("session manager has been initialized");
+        let _session_guard = guard(session.clone(), |session| {
+            session_mgr.end_session(&session);
+        });
+
+        let seq_num = query
+            .seq_num
+            .as_deref()
+            .unwrap_or("0")
+            .parse::<i64>()
+            .map_err(|e| {
+                err(
+                    anyhow!(e).context("invalid seq_num"),
+                    StatusCode::BAD_REQUEST,
+                )
+            })?;
+        let limit = query.limit.unwrap_or(100).clamp(1, 1000);
+        let rows = run_sql_rows(
+            session,
+            &format!(
+                "SELECT CAST(_row_id AS bigint), ts_ms, body FROM {DEMO_SCHEMA_NAME}.{DEMO_TABLE_NAME} \
+                 WHERE CAST(_row_id AS bigint) >= {seq_num} ORDER BY _row_id LIMIT {limit}"
+            ),
+        )
+        .await?;
+
+        let records = rows
+            .into_iter()
+            .map(|row| {
+                Ok(DemoRecord {
+                    seq_num: row_text(&row, 0)?,
+                    ts_ms: row_i64(&row, 1)?,
+                    body: row_text(&row, 2)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Json(DemoReadResponse { records }))
+    }
+
+    pub async fn handle_demo_tail(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<DemoTailResponse>> {
+        srv.ensure_demo_table().await?;
+        let session = create_demo_session()?;
+
+        let session_mgr = SESSION_MANAGER
+            .get()
+            .expect("session manager has been initialized");
+        let _session_guard = guard(session.clone(), |session| {
+            session_mgr.end_session(&session);
+        });
+
+        let rows = run_sql_rows(
+            session,
+            &format!(
+                "SELECT CAST(_row_id AS bigint), ts_ms FROM {DEMO_SCHEMA_NAME}.{DEMO_TABLE_NAME} ORDER BY _row_id DESC LIMIT 1"
+            ),
+        )
+        .await?;
+
+        let response = if let Some(row) = rows.into_iter().next() {
+            DemoTailResponse {
+                seq_num: row_text(&row, 0)?,
+                ts_ms: row_i64(&row, 1)?,
+            }
+        } else {
+            DemoTailResponse {
+                seq_num: "0".to_owned(),
+                ts_ms: 0,
+            }
+        };
+
+        Ok(Json(response))
     }
 
     fn generate_data_chunk(is_batched: bool, body: &Bytes) -> Result<DataChunk> {
@@ -248,6 +420,98 @@ pub(super) mod handlers {
         })?;
         Ok(response)
     }
+
+    pub(super) fn create_demo_session() -> Result<Arc<SessionImpl>> {
+        let session_mgr = SESSION_MANAGER
+            .get()
+            .expect("session manager has been initialized");
+        let database_id = {
+            let reader = session_mgr.env().catalog_reader().read_guard();
+            reader
+                .get_database_by_name(DEFAULT_DATABASE_NAME)
+                .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?
+                .id()
+        };
+        session_mgr
+            .create_dummy_session(database_id)
+            .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))
+    }
+
+    pub(super) async fn run_sql(session: Arc<SessionImpl>, sql: &str) -> Result<RwPgResponse> {
+        session
+            .run_statement(sql.into(), vec![])
+            .await
+            .map_err(|e| err(anyhow!(e), StatusCode::INTERNAL_SERVER_ERROR))
+    }
+
+    async fn run_sql_rows(session: Arc<SessionImpl>, sql: &str) -> Result<Vec<Row>> {
+        let mut rsp = run_sql(session, sql).await?;
+        collect_rows(&mut rsp).await
+    }
+
+    async fn load_demo_tail_row(session: Arc<SessionImpl>) -> Result<Option<Row>> {
+        let rows = run_sql_rows(
+            session,
+            &format!(
+                "SELECT CAST(_row_id AS bigint), ts_ms, body FROM {DEMO_SCHEMA_NAME}.{DEMO_TABLE_NAME} \
+                 ORDER BY _row_id DESC LIMIT 1"
+            ),
+        )
+        .await?;
+        Ok(rows.into_iter().next())
+    }
+
+    async fn wait_for_demo_row(session: Arc<SessionImpl>, prev_seq_num: i64) -> Result<Row> {
+        for _ in 0..50 {
+            let rows = run_sql_rows(
+                session.clone(),
+                &format!(
+                    "SELECT CAST(_row_id AS bigint), ts_ms, body FROM {DEMO_SCHEMA_NAME}.{DEMO_TABLE_NAME} \
+                     WHERE CAST(_row_id AS bigint) > {prev_seq_num} ORDER BY _row_id DESC LIMIT 1"
+                ),
+            )
+            .await?;
+            if let Some(row) = rows.into_iter().next() {
+                return Ok(row);
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+
+        Err(err(
+            anyhow!("demo append did not produce a visible row"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ))
+    }
+
+    async fn collect_rows(rsp: &mut RwPgResponse) -> Result<Vec<Row>> {
+        let mut rows = Vec::new();
+        while let Some(row_set) = rsp.values_stream().next().await {
+            rows.extend(row_set.map_err(|e| err(anyhow!(e), StatusCode::INTERNAL_SERVER_ERROR))?);
+        }
+        Ok(rows)
+    }
+
+    fn row_text(row: &Row, idx: usize) -> Result<String> {
+        let bytes = row.index(idx).as_ref().ok_or_else(|| {
+            err(
+                anyhow!("missing column {idx} in demo SQL response"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|e| err(anyhow!(e), StatusCode::INTERNAL_SERVER_ERROR))
+    }
+
+    fn row_i64(row: &Row, idx: usize) -> Result<i64> {
+        row_text(row, idx)?
+            .parse::<i64>()
+            .map_err(|e| err(anyhow!(e), StatusCode::INTERNAL_SERVER_ERROR))
+    }
+
+    pub(super) fn quote_sql_literal(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "''"))
+    }
 }
 
 impl WebhookService {
@@ -255,28 +519,73 @@ impl WebhookService {
         Self {
             webhook_addr,
             counter: AtomicU32::new(0),
+            demo_bootstrap: OnceCell::const_new(),
+            demo_append_lock: Mutex::new(()),
         }
+    }
+
+    async fn ensure_demo_table(&self) -> Result<()> {
+        self.demo_bootstrap
+            .get_or_try_init(|| async {
+                let session = handlers::create_demo_session()?;
+                let session_mgr = SESSION_MANAGER
+                    .get()
+                    .expect("session manager has been initialized");
+                let _session_guard = guard(session.clone(), |session| {
+                    session_mgr.end_session(&session);
+                });
+
+                handlers::run_sql(
+                    session.clone(),
+                    &format!("CREATE SCHEMA IF NOT EXISTS {DEMO_SCHEMA_NAME}"),
+                )
+                .await?;
+                handlers::run_sql(
+                    session,
+                    &format!(
+                        "CREATE TABLE IF NOT EXISTS {DEMO_SCHEMA_NAME}.{DEMO_TABLE_NAME} (body varchar, ts_ms bigint) APPEND ONLY"
+                    ),
+                )
+                .await?;
+                Ok::<(), utils::WebhookError>(())
+            })
+            .await?;
+        Ok(())
     }
 
     pub async fn serve(self) -> anyhow::Result<()> {
         use handlers::*;
         let srv = Arc::new(self);
 
-        let cors_layer = CorsLayer::new()
+        let webhook_cors_layer = CorsLayer::new()
             .allow_origin(cors::Any)
             .allow_methods(vec![Method::POST]);
+        let demo_cors_layer = CorsLayer::new()
+            .allow_origin(cors::Any)
+            .allow_methods(vec![Method::GET, Method::POST]);
 
-        let api_router: Router = Router::new()
+        let webhook_router: Router = Router::new()
             .route("/:database/:schema/:table", post(handle_post_request))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))
                     .into_inner(),
             )
-            .layer(cors_layer);
+            .layer(webhook_cors_layer);
+
+        let demo_router: Router = Router::new()
+            .route("/records", post(handle_demo_append).get(handle_demo_read))
+            .route("/records/tail", get(handle_demo_tail))
+            .layer(
+                ServiceBuilder::new()
+                    .layer(AddExtensionLayer::new(srv.clone()))
+                    .into_inner(),
+            )
+            .layer(demo_cors_layer);
 
         let app: Router = Router::new()
-            .nest("/webhook", api_router)
+            .nest("/webhook", webhook_router)
+            .nest("/demo", demo_router)
             .layer(CompressionLayer::new());
 
         let listener = TcpListener::bind(&srv.webhook_addr)
@@ -295,6 +604,42 @@ impl WebhookService {
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
+
+    use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
+    use risingwave_common::hash::VnodeCountCompat;
+
+    use super::handlers::quote_sql_literal;
+    use crate::test_utils::LocalFrontend;
+
+    #[test]
+    fn test_quote_sql_literal() {
+        assert_eq!(quote_sql_literal("demo'value"), "'demo''value'");
+    }
+
+    #[tokio::test]
+    async fn test_demo_table_uses_singleton_distribution() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("CREATE SCHEMA rw_records_demo")
+            .await
+            .unwrap();
+        frontend
+            .run_sql(
+                "CREATE TABLE rw_records_demo.records (body varchar, ts_ms bigint) APPEND ONLY",
+            )
+            .await
+            .unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = crate::catalog::root_catalog::SchemaPath::Name("rw_records_demo");
+        let (table, _) = catalog_reader
+            .get_created_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "records")
+            .unwrap();
+
+        assert!(table.distribution_key().is_empty());
+        assert_eq!(table.to_prost().vnode_count(), 1);
+    }
 
     #[tokio::test]
     #[ignore]

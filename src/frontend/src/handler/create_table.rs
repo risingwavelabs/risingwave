@@ -85,6 +85,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
+use crate::records_demo::is_records_demo_table;
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::stream_fragmenter::{GraphJobType, build_graph};
@@ -623,6 +624,9 @@ pub(crate) fn gen_create_table_plan_without_source(
         row_id_index,
         watermark_descs,
         source_catalog: None,
+        singleton_row_id_demo: schema_name
+            .as_deref()
+            .is_some_and(|schema_name| is_records_demo_table(schema_name, &table_name)),
         version,
     };
 
@@ -644,6 +648,7 @@ fn gen_table_plan_with_source(
         row_id_index: source_catalog.row_id_index,
         watermark_descs: source_catalog.watermark_descs.clone(),
         source_catalog: Some(source_catalog),
+        singleton_row_id_demo: false,
         version,
     };
 
@@ -718,6 +723,7 @@ pub struct CreateTableInfo {
     pub row_id_index: Option<usize>,
     pub watermark_descs: Vec<WatermarkDesc>,
     pub source_catalog: Option<SourceCatalog>,
+    pub singleton_row_id_demo: bool,
     pub version: TableVersion,
 }
 
@@ -948,6 +954,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             row_id_index: None,
             watermark_descs,
             source_catalog: Some((*source).clone()),
+            singleton_row_id_demo: false,
             version: col_id_gen.into_version(),
         },
         CreateTableProps {

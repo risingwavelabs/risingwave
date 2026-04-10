@@ -29,6 +29,7 @@
 - [Develop Connectors](./connector/intro.md)
     - [Source](./connector/source.md)
 - [Continuous Integration](./ci.md)
+- [Records HTTP Demo](./records-http-demo.md)
 
 ---
 
