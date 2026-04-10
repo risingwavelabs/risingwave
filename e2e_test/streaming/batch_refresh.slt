@@ -1,0 +1,116 @@
+# Test batch refresh materialized view: creation, snapshot, idle, and drop.
+#
+# A batch refresh MV captures an initial snapshot from the upstream MV, then
+# idles until the next refresh interval. This test uses a long interval (600s)
+# so no periodic refresh is triggered — we only exercise the snapshot phase.
+#
+# NOTE: Periodic refresh cycle tests are in the simulation test suite
+# (test_batch_refresh_periodic_lifecycle).
+
+# ── Setup ──────────────────────────────────────────────────────────────────────
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS mv_refresh;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS mv_upstream;
+
+statement ok
+DROP TABLE IF EXISTS t_refresh;
+
+statement ok
+CREATE TABLE t_refresh (k int, v varchar);
+
+statement ok
+INSERT INTO t_refresh VALUES (1, 'a'), (2, 'b'), (3, 'c');
+
+statement ok
+FLUSH;
+
+# Create upstream MV (batch refresh requires MV as upstream).
+statement ok
+CREATE MATERIALIZED VIEW mv_upstream AS SELECT * FROM t_refresh;
+
+# Wait for upstream MV to be queryable.
+query I retry 5 backoff 1s
+SELECT COUNT(*) FROM mv_upstream;
+----
+3
+
+# ── Create batch refresh MV (long interval, no periodic refresh) ──────────────
+
+statement ok
+CREATE MATERIALIZED VIEW mv_refresh WITH (refresh.interval.sec = 600) AS
+SELECT * FROM mv_upstream;
+
+# The initial snapshot should be available after creation.
+query IT rowsort retry 5 backoff 2s
+SELECT k, v FROM mv_refresh;
+----
+1 a
+2 b
+3 c
+
+# ── Verify snapshot isolation ─────────────────────────────────────────────────
+
+# Insert more data into the base table.
+statement ok
+INSERT INTO t_refresh VALUES (4, 'd'), (5, 'e');
+
+statement ok
+FLUSH;
+
+# Upstream MV gets the new rows.
+query I retry 5 backoff 1s
+SELECT COUNT(*) FROM mv_upstream;
+----
+5
+
+# The batch refresh MV should still show only the snapshot data because
+# it is idling (refresh interval is 600s, won't trigger yet).
+sleep 3s
+
+query I
+SELECT COUNT(*) FROM mv_refresh;
+----
+3
+
+# ── Drop while idle ──────────────────────────────────────────────────────────
+
+statement ok
+DROP MATERIALIZED VIEW mv_refresh;
+
+# Verify it's gone.
+statement error
+SELECT COUNT(*) FROM mv_refresh;
+
+# ── Re-create and verify a fresh snapshot includes all data ──────────────────
+
+statement ok
+CREATE MATERIALIZED VIEW mv_refresh WITH (refresh.interval.sec = 600) AS
+SELECT * FROM mv_upstream;
+
+query I retry 5 backoff 2s
+SELECT COUNT(*) FROM mv_refresh;
+----
+5
+
+query IT rowsort
+SELECT k, v FROM mv_refresh;
+----
+1 a
+2 b
+3 c
+4 d
+5 e
+
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+
+statement ok
+DROP MATERIALIZED VIEW mv_refresh;
+
+statement ok
+DROP MATERIALIZED VIEW mv_upstream;
+
+statement ok
+DROP TABLE t_refresh;
