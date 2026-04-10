@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::Index;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Instant;
 
 use anyhow::{Context, anyhow};
 use axum::body::Bytes;
@@ -47,13 +49,17 @@ use risingwave_rpc_client::ComputeClient;
 use scopeguard::guard;
 
 use crate::handler::RwPgResponse;
-use crate::records_demo::{DEMO_SCHEMA_NAME, DEMO_TABLE_NAME};
+use crate::records_demo::{
+    DEMO_CURSOR_MV_NAME, DEMO_SCHEMA_NAME, DEMO_SUBSCRIPTION_NAME, DEMO_TABLE_NAME,
+};
 use crate::session::{SESSION_MANAGER, SessionImpl};
 
 pub type Service = Arc<WebhookService>;
 
 // We always use the `root` user to connect to the database to allow the webhook service to access all tables.
 const USER: &str = "root";
+const DEMO_CURSOR_IDLE_TTL_SECS: u64 = 300;
+const DEMO_CURSOR_FETCH_TIMEOUT_MS: u64 = 30_000;
 
 #[derive(Clone)]
 pub struct FastInsertContext {
@@ -67,6 +73,41 @@ pub struct WebhookService {
     counter: AtomicU32,
     demo_bootstrap: OnceCell<()>,
     demo_append_lock: Mutex<()>,
+    demo_cursors: Mutex<HashMap<String, Arc<DemoCursorHandle>>>,
+    demo_cursor_counter: AtomicU32,
+}
+
+struct DemoCursorHandle {
+    session: Arc<SessionImpl>,
+    cursor_name: String,
+    exec_lock: Mutex<()>,
+    last_access: StdMutex<Instant>,
+}
+
+impl DemoCursorHandle {
+    fn new(session: Arc<SessionImpl>, cursor_name: String) -> Self {
+        Self {
+            session,
+            cursor_name,
+            exec_lock: Mutex::new(()),
+            last_access: StdMutex::new(Instant::now()),
+        }
+    }
+
+    fn touch(&self) {
+        *self
+            .last_access
+            .lock()
+            .expect("demo cursor last_access lock poisoned") = Instant::now();
+    }
+
+    fn is_idle_expired(&self) -> bool {
+        self.last_access
+            .lock()
+            .expect("demo cursor last_access lock poisoned")
+            .elapsed()
+            >= Duration::from_secs(DEMO_CURSOR_IDLE_TTL_SECS)
+    }
 }
 
 pub(super) mod handlers {
@@ -162,6 +203,17 @@ pub(super) mod handlers {
         limit: Option<u32>,
     }
 
+    #[derive(Deserialize)]
+    pub struct DemoOpenCursorRequest {
+        seq_num: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    pub struct DemoCursorFetchQuery {
+        limit: Option<u32>,
+        timeout_ms: Option<u64>,
+    }
+
     #[derive(Serialize)]
     pub struct DemoAppendResponse {
         seq_num: String,
@@ -169,7 +221,7 @@ pub(super) mod handlers {
         body: String,
     }
 
-    #[derive(Serialize)]
+    #[derive(Clone, Serialize)]
     pub struct DemoRecord {
         seq_num: String,
         ts_ms: i64,
@@ -187,11 +239,17 @@ pub(super) mod handlers {
         ts_ms: i64,
     }
 
+    #[derive(Serialize)]
+    pub struct DemoOpenCursorResponse {
+        cursor_id: String,
+        records: Vec<DemoRecord>,
+    }
+
     pub async fn handle_demo_append(
         Extension(srv): Extension<Service>,
         Json(req): Json<DemoAppendRequest>,
     ) -> Result<Json<DemoAppendResponse>> {
-        srv.ensure_demo_table().await?;
+        srv.ensure_demo_objects().await?;
         let _guard = srv.demo_append_lock.lock().await;
         let session = create_demo_session()?;
 
@@ -228,7 +286,7 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
         Query(query): Query<DemoReadQuery>,
     ) -> Result<Json<DemoReadResponse>> {
-        srv.ensure_demo_table().await?;
+        srv.ensure_demo_objects().await?;
         let session = create_demo_session()?;
 
         let session_mgr = SESSION_MANAGER
@@ -238,17 +296,7 @@ pub(super) mod handlers {
             session_mgr.end_session(&session);
         });
 
-        let seq_num = query
-            .seq_num
-            .as_deref()
-            .unwrap_or("0")
-            .parse::<i64>()
-            .map_err(|e| {
-                err(
-                    anyhow!(e).context("invalid seq_num"),
-                    StatusCode::BAD_REQUEST,
-                )
-            })?;
+        let seq_num = parse_demo_seq_num(query.seq_num.as_deref().unwrap_or("0"))?;
         let limit = query.limit.unwrap_or(100).clamp(1, 1000);
         let rows = run_sql_rows(
             session,
@@ -258,17 +306,7 @@ pub(super) mod handlers {
             ),
         )
         .await?;
-
-        let records = rows
-            .into_iter()
-            .map(|row| {
-                Ok(DemoRecord {
-                    seq_num: row_text(&row, 0)?,
-                    ts_ms: row_i64(&row, 1)?,
-                    body: row_text(&row, 2)?,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let records = demo_records_from_rows(rows)?;
 
         Ok(Json(DemoReadResponse { records }))
     }
@@ -276,7 +314,7 @@ pub(super) mod handlers {
     pub async fn handle_demo_tail(
         Extension(srv): Extension<Service>,
     ) -> Result<Json<DemoTailResponse>> {
-        srv.ensure_demo_table().await?;
+        srv.ensure_demo_objects().await?;
         let session = create_demo_session()?;
 
         let session_mgr = SESSION_MANAGER
@@ -307,6 +345,105 @@ pub(super) mod handlers {
         };
 
         Ok(Json(response))
+    }
+
+    pub async fn handle_demo_open_cursor(
+        Extension(srv): Extension<Service>,
+        Json(req): Json<DemoOpenCursorRequest>,
+    ) -> Result<Json<DemoOpenCursorResponse>> {
+        srv.ensure_demo_objects().await?;
+        srv.prune_demo_cursors().await;
+
+        let seq_num = req.seq_num.as_deref().map(parse_demo_seq_num).transpose()?;
+
+        let _append_guard = srv.demo_append_lock.lock().await;
+        let session = create_demo_session()?;
+        let session_mgr = SESSION_MANAGER
+            .get()
+            .expect("session manager has been initialized");
+        let mut session_guard = guard(Some(session.clone()), |session| {
+            if let Some(session) = session {
+                session_mgr.end_session(&session);
+            }
+        });
+
+        let records = if let Some(seq_num) = seq_num {
+            load_demo_records_from_seq(session.clone(), seq_num).await?
+        } else {
+            load_demo_latest_record(session.clone())
+                .await?
+                .into_iter()
+                .collect()
+        };
+
+        let (cursor_id, cursor_name) = srv.next_demo_cursor_identity();
+        run_sql(
+            session.clone(),
+            &format!(
+                "DECLARE {cursor_name} SUBSCRIPTION CURSOR FOR {DEMO_SCHEMA_NAME}.{DEMO_SUBSCRIPTION_NAME} SINCE PROCTIME()"
+            ),
+        )
+        .await?;
+
+        let handle = Arc::new(DemoCursorHandle::new(session, cursor_name));
+        handle.touch();
+        srv.store_demo_cursor(cursor_id.clone(), handle).await;
+        *session_guard = None;
+
+        Ok(Json(DemoOpenCursorResponse { cursor_id, records }))
+    }
+
+    pub async fn handle_demo_fetch_cursor(
+        Extension(srv): Extension<Service>,
+        Path(cursor_id): Path<String>,
+        Query(query): Query<DemoCursorFetchQuery>,
+    ) -> Result<Json<DemoReadResponse>> {
+        srv.ensure_demo_objects().await?;
+        srv.prune_demo_cursors().await;
+
+        let handle = srv
+            .get_demo_cursor(&cursor_id)
+            .await
+            .ok_or_else(|| demo_cursor_not_found(&cursor_id))?;
+        let _exec_guard = handle.exec_lock.lock().await;
+        handle.touch();
+
+        let limit = query.limit.unwrap_or(100).clamp(1, 1000);
+        let timeout_secs = query
+            .timeout_ms
+            .unwrap_or(DEMO_CURSOR_FETCH_TIMEOUT_MS)
+            .div_ceil(1000);
+        let fetch_sql = format!(
+            "FETCH {limit} FROM {} WITH (timeout = '{} seconds')",
+            handle.cursor_name, timeout_secs
+        );
+
+        let rows = match run_sql_rows(handle.session.clone(), &fetch_sql).await {
+            Ok(rows) => rows,
+            Err(_) => {
+                drop(_exec_guard);
+                srv.remove_demo_cursor(&cursor_id).await;
+                finish_demo_cursor(handle);
+                return Err(err(anyhow!("demo cursor fetch failed"), StatusCode::GONE));
+            }
+        };
+
+        let records = demo_records_from_cursor_rows(rows)?;
+        handle.touch();
+        Ok(Json(DemoReadResponse { records }))
+    }
+
+    pub async fn handle_demo_close_cursor(
+        Extension(srv): Extension<Service>,
+        Path(cursor_id): Path<String>,
+    ) -> Result<StatusCode> {
+        srv.prune_demo_cursors().await;
+        let handle = srv
+            .remove_demo_cursor(&cursor_id)
+            .await
+            .ok_or_else(|| demo_cursor_not_found(&cursor_id))?;
+        finish_demo_cursor(handle);
+        Ok(StatusCode::NO_CONTENT)
     }
 
     fn generate_data_chunk(is_batched: bool, body: &Bytes) -> Result<DataChunk> {
@@ -449,6 +586,33 @@ pub(super) mod handlers {
         collect_rows(&mut rsp).await
     }
 
+    fn parse_demo_seq_num(seq_num: &str) -> Result<i64> {
+        seq_num.parse::<i64>().map_err(|e| {
+            err(
+                anyhow!(e).context("invalid seq_num"),
+                StatusCode::BAD_REQUEST,
+            )
+        })
+    }
+
+    fn demo_record_from_row(row: &Row) -> Result<DemoRecord> {
+        Ok(DemoRecord {
+            seq_num: row_text(row, 0)?,
+            ts_ms: row_i64(row, 1)?,
+            body: row_text(row, 2)?,
+        })
+    }
+
+    fn demo_records_from_rows(rows: Vec<Row>) -> Result<Vec<DemoRecord>> {
+        rows.into_iter()
+            .map(|row| demo_record_from_row(&row))
+            .collect()
+    }
+
+    fn demo_records_from_cursor_rows(rows: Vec<Row>) -> Result<Vec<DemoRecord>> {
+        demo_records_from_rows(rows)
+    }
+
     async fn load_demo_tail_row(session: Arc<SessionImpl>) -> Result<Option<Row>> {
         let rows = run_sql_rows(
             session,
@@ -459,6 +623,28 @@ pub(super) mod handlers {
         )
         .await?;
         Ok(rows.into_iter().next())
+    }
+
+    async fn load_demo_records_from_seq(
+        session: Arc<SessionImpl>,
+        seq_num: i64,
+    ) -> Result<Vec<DemoRecord>> {
+        let rows = run_sql_rows(
+            session,
+            &format!(
+                "SELECT CAST(_row_id AS bigint), ts_ms, body FROM {DEMO_SCHEMA_NAME}.{DEMO_TABLE_NAME} \
+                 WHERE CAST(_row_id AS bigint) >= {seq_num} ORDER BY _row_id"
+            ),
+        )
+        .await?;
+        demo_records_from_rows(rows)
+    }
+
+    async fn load_demo_latest_record(session: Arc<SessionImpl>) -> Result<Option<DemoRecord>> {
+        load_demo_tail_row(session)
+            .await?
+            .map(|row| demo_record_from_row(&row))
+            .transpose()
     }
 
     async fn wait_for_demo_row(session: Arc<SessionImpl>, prev_seq_num: i64) -> Result<Row> {
@@ -512,6 +698,20 @@ pub(super) mod handlers {
     pub(super) fn quote_sql_literal(value: &str) -> String {
         format!("'{}'", value.replace('\'', "''"))
     }
+
+    fn demo_cursor_not_found(cursor_id: &str) -> utils::WebhookError {
+        err(
+            anyhow!("demo cursor `{cursor_id}` not found"),
+            StatusCode::NOT_FOUND,
+        )
+    }
+
+    pub(super) fn finish_demo_cursor(handle: Arc<DemoCursorHandle>) {
+        let session_mgr = SESSION_MANAGER
+            .get()
+            .expect("session manager has been initialized");
+        session_mgr.end_session(&handle.session);
+    }
 }
 
 impl WebhookService {
@@ -521,10 +721,12 @@ impl WebhookService {
             counter: AtomicU32::new(0),
             demo_bootstrap: OnceCell::const_new(),
             demo_append_lock: Mutex::new(()),
+            demo_cursors: Mutex::new(HashMap::new()),
+            demo_cursor_counter: AtomicU32::new(0),
         }
     }
 
-    async fn ensure_demo_table(&self) -> Result<()> {
+    async fn ensure_demo_objects(&self) -> Result<()> {
         self.demo_bootstrap
             .get_or_try_init(|| async {
                 let session = handlers::create_demo_session()?;
@@ -541,9 +743,26 @@ impl WebhookService {
                 )
                 .await?;
                 handlers::run_sql(
-                    session,
+                    session.clone(),
                     &format!(
                         "CREATE TABLE IF NOT EXISTS {DEMO_SCHEMA_NAME}.{DEMO_TABLE_NAME} (body varchar, ts_ms bigint) APPEND ONLY"
+                    ),
+                )
+                .await?;
+                handlers::run_sql(
+                    session.clone(),
+                    &format!(
+                        "CREATE MATERIALIZED VIEW IF NOT EXISTS {DEMO_SCHEMA_NAME}.{DEMO_CURSOR_MV_NAME} \
+                         AS SELECT CAST(_row_id AS bigint) AS seq_num, ts_ms, body \
+                         FROM {DEMO_SCHEMA_NAME}.{DEMO_TABLE_NAME}"
+                    ),
+                )
+                .await?;
+                handlers::run_sql(
+                    session,
+                    &format!(
+                        "CREATE SUBSCRIPTION IF NOT EXISTS {DEMO_SCHEMA_NAME}.{DEMO_SUBSCRIPTION_NAME} \
+                         FROM {DEMO_SCHEMA_NAME}.{DEMO_CURSOR_MV_NAME} WITH (retention = '1 hour')"
                     ),
                 )
                 .await?;
@@ -551,6 +770,43 @@ impl WebhookService {
             })
             .await?;
         Ok(())
+    }
+
+    fn next_demo_cursor_identity(&self) -> (String, String) {
+        let next_id = self.demo_cursor_counter.fetch_add(1, Ordering::Relaxed) + 1;
+        let cursor_id = format!("demo-cursor-{next_id}");
+        let cursor_name = format!("demo_cursor_{next_id}");
+        (cursor_id, cursor_name)
+    }
+
+    async fn store_demo_cursor(&self, cursor_id: String, handle: Arc<DemoCursorHandle>) {
+        self.demo_cursors.lock().await.insert(cursor_id, handle);
+    }
+
+    async fn get_demo_cursor(&self, cursor_id: &str) -> Option<Arc<DemoCursorHandle>> {
+        self.demo_cursors.lock().await.get(cursor_id).cloned()
+    }
+
+    async fn remove_demo_cursor(&self, cursor_id: &str) -> Option<Arc<DemoCursorHandle>> {
+        self.demo_cursors.lock().await.remove(cursor_id)
+    }
+
+    async fn prune_demo_cursors(&self) {
+        let expired_ids = {
+            let cursors = self.demo_cursors.lock().await;
+            cursors
+                .iter()
+                .filter_map(|(cursor_id, handle)| {
+                    handle.is_idle_expired().then_some(cursor_id.clone())
+                })
+                .collect::<Vec<_>>()
+        };
+
+        for cursor_id in expired_ids {
+            if let Some(handle) = self.remove_demo_cursor(&cursor_id).await {
+                handlers::finish_demo_cursor(handle);
+            }
+        }
     }
 
     pub async fn serve(self) -> anyhow::Result<()> {
@@ -576,6 +832,11 @@ impl WebhookService {
         let demo_router: Router = Router::new()
             .route("/records", post(handle_demo_append).get(handle_demo_read))
             .route("/records/tail", get(handle_demo_tail))
+            .route("/cursors", post(handle_demo_open_cursor))
+            .route(
+                "/cursors/:cursor_id",
+                get(handle_demo_fetch_cursor).delete(handle_demo_close_cursor),
+            )
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

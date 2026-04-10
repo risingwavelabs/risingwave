@@ -13,7 +13,7 @@ It is intentionally narrower than the S2 records API:
 - single frontend process only
 - no batch append
 - no `match_seq_num`
-- no fencing, trim, or long-poll
+- no fencing or trim
 - `body` is stored as `varchar`
 
 `seq_num` in this demo is only a demo token. It is not presented as the final records sequencing design.
@@ -61,7 +61,8 @@ You can also use the `RW_RECORDS_DEMO_URL` environment variable.
 
 - it prints a small banner
 - it prints the current latest visible record once
-- then it polls for new records and prints each one in a human-readable single-line format
+- then it opens a demo cursor and blocks on cursor fetches instead of polling `tail/read`
+- when the cursor is dropped, it reopens from `last_seq_num + 1`
 - stop it with `Ctrl-C`
 
 `append-repl` is the matching write-side terminal:
@@ -76,7 +77,6 @@ Examples:
 ```sh
 cargo run -p risingwave_records_demo_cli -- append-repl
 cargo run -p risingwave_records_demo_cli -- watch
-cargo run -p risingwave_records_demo_cli -- watch --interval-ms 200
 cargo run -p risingwave_records_demo_cli -- watch --seq-num 0 --limit 50
 ```
 
@@ -98,9 +98,17 @@ CREATE TABLE IF NOT EXISTS rw_records_demo.records (
     body varchar,
     ts_ms bigint
 ) APPEND ONLY;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS rw_records_demo.records_cursor AS
+SELECT CAST(_row_id AS bigint) AS seq_num, ts_ms, body
+FROM rw_records_demo.records;
+
+CREATE SUBSCRIPTION IF NOT EXISTS rw_records_demo.records_sub
+FROM rw_records_demo.records_cursor
+WITH (retention = '1 hour');
 ```
 
-The planner contains a demo-only special case for this exact table name so the row-id generator runs as a singleton. That is what allows `_row_id` to act as a monotonic token in this demo.
+The planner contains a demo-only special case for `rw_records_demo.records` so the row-id generator runs as a singleton. That is what allows `_row_id` to act as a monotonic token in this demo. The hidden materialized view exposes that token as a visible `seq_num`, and the hidden subscription lets the demo reuse RisingWave's existing subscription cursor implementation for watch-style reads.
 
 ## HTTP API
 
@@ -176,6 +184,66 @@ Response:
 {"seq_num":"665241081658474496","ts_ms":1775841031873}
 ```
 
+### `POST /demo/cursors`
+
+Open a demo cursor for watch-style reads.
+
+Request:
+
+- empty body: start from the current latest visible record
+- `{"seq_num":"0"}`: replay all visible rows from `seq_num=0`, then continue with live cursor fetches
+
+Behavior:
+
+1. Bootstrap the demo schema, table, cursor MV, and subscription if needed.
+2. Acquire the same frontend-local append mutex used by `POST /demo/records`.
+3. Read the initial visible rows to return immediately.
+4. Declare a hidden subscription cursor with `SINCE PROCTIME()`.
+5. Return a `cursor_id` plus the initial rows.
+
+Response:
+
+```json
+{
+  "cursor_id": "demo-cursor-3",
+  "records": [
+    {"seq_num":"665262090960764928","ts_ms":1775846040398,"body":"hello"}
+  ]
+}
+```
+
+### `GET /demo/cursors/{cursor_id}`
+
+Fetch from an existing demo cursor.
+
+Query parameters:
+
+- `limit`: max rows to fetch, default `100`, clamped to `1..1000`
+- `timeout_ms`: optional blocking wait, default `30000`
+
+Behavior:
+
+- Executes `FETCH ... WITH (timeout = '... seconds')` on the hidden subscription cursor.
+- Returns only the visible `seq_num`, `ts_ms`, and `body` columns from the hidden cursor MV.
+
+Response:
+
+```json
+{
+  "records": [
+    {"seq_num":"665262186439901184","ts_ms":1775846063565,"body":"hello3"}
+  ]
+}
+```
+
+### `DELETE /demo/cursors/{cursor_id}`
+
+Close and forget a demo cursor.
+
+Response:
+
+- `204 No Content`
+
 ## Example Commands
 
 Append two rows:
@@ -202,6 +270,16 @@ Read from the beginning:
 curl -sS 'localhost:4560/demo/records?seq_num=0&limit=10'
 ```
 
+Open a cursor and fetch from it:
+
+```sh
+curl -sS -X POST localhost:4560/demo/cursors \
+  -H 'content-type: application/json' \
+  -d '{"seq_num":"0"}'
+
+curl -sS 'localhost:4560/demo/cursors/demo-cursor-1?limit=10'
+```
+
 ## What To Validate
 
 These are the useful checks for the demo:
@@ -220,6 +298,10 @@ These are the useful checks for the demo:
    - stop with `./risedev k`
    - start again with `./risedev dev meta-1cn-1fe-sqlite`
    - `tail` and `GET /demo/records` still see the previous rows
+5. Cursor watch:
+   - `POST /demo/cursors` returns `cursor_id`
+   - appending a new row makes the next `GET /demo/cursors/{id}` return that row
+   - deleting the cursor makes the next watch fetch fail and the CLI reopen from `last_seq_num + 1`
 
 Concurrent append requests are also worth trying, but the expected order is request serialization order inside the frontend process, not caller submit order.
 

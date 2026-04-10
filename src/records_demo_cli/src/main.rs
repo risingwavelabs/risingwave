@@ -71,13 +71,9 @@ enum Commands {
         #[arg(long)]
         seq_num: Option<String>,
 
-        /// Maximum number of records to print per poll.
+        /// Maximum number of records to print per fetch.
         #[arg(long, default_value_t = 100)]
         limit: u32,
-
-        /// Poll interval in milliseconds.
-        #[arg(long, default_value_t = 500)]
-        interval_ms: u64,
     },
     /// Read the current tail token.
     Tail,
@@ -86,6 +82,12 @@ enum Commands {
 #[derive(Serialize)]
 struct AppendRequest<'a> {
     body: &'a str,
+}
+
+#[derive(Serialize)]
+struct OpenCursorRequest<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seq_num: Option<&'a str>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -103,6 +105,12 @@ struct DemoRecord {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct ReadResponse {
+    records: Vec<DemoRecord>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct OpenCursorResponse {
+    cursor_id: String,
     records: Vec<DemoRecord>,
 }
 
@@ -126,12 +134,8 @@ fn main() -> Result<()> {
                 json!({ "records": [] })
             }
         }
-        Commands::Watch {
-            seq_num,
-            limit,
-            interval_ms,
-        } => {
-            watch(&client, &cli.url, seq_num.clone(), *limit, *interval_ms)?;
+        Commands::Watch { seq_num, limit } => {
+            watch(&client, &cli.url, seq_num.clone(), *limit)?;
             return Ok(());
         }
         Commands::Tail => json!(fetch_tail(&client, &cli.url)?),
@@ -209,6 +213,58 @@ fn fetch_read(client: &Client, base_url: &str, seq_num: &str, limit: u32) -> Res
     )
 }
 
+fn open_cursor(
+    client: &Client,
+    base_url: &str,
+    seq_num: Option<&str>,
+) -> Result<OpenCursorResponse> {
+    read_typed(
+        client
+            .post(endpoint(base_url, "/cursors"))
+            .json(&OpenCursorRequest { seq_num })
+            .send()
+            .context("open cursor request failed")?,
+    )
+}
+
+fn fetch_cursor(
+    client: &Client,
+    base_url: &str,
+    cursor_id: &str,
+    limit: u32,
+) -> Result<ReadResponse> {
+    let query = [("limit", limit.to_string())];
+    read_typed(
+        client
+            .get(endpoint(base_url, &format!("/cursors/{cursor_id}")))
+            .query(&query)
+            .send()
+            .context("cursor fetch request failed")?,
+    )
+}
+
+fn close_cursor(client: &Client, base_url: &str, cursor_id: &str) -> Result<()> {
+    let response = client
+        .delete(endpoint(base_url, &format!("/cursors/{cursor_id}")))
+        .send()
+        .context("close cursor request failed")?;
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(());
+    }
+    if !status.is_success() {
+        let body = response
+            .text()
+            .context("failed to read close cursor response body")?;
+        bail!(
+            "close cursor request failed with status {}: {}",
+            status,
+            body
+        );
+    }
+    Ok(())
+}
+
 fn fetch_latest(client: &Client, base_url: &str) -> Result<Option<DemoRecord>> {
     let tail = fetch_tail(client, base_url)?;
     if is_empty_tail(&tail) {
@@ -221,96 +277,75 @@ fn fetch_latest(client: &Client, base_url: &str) -> Result<Option<DemoRecord>> {
         .next())
 }
 
-fn watch(
-    client: &Client,
-    base_url: &str,
-    seq_num: Option<String>,
-    limit: u32,
-    interval_ms: u64,
-) -> Result<()> {
+fn watch(client: &Client, base_url: &str, seq_num: Option<String>, limit: u32) -> Result<()> {
     if limit == 0 {
         bail!("--limit must be greater than 0");
     }
 
     print_watch_banner(base_url, seq_num.as_deref());
 
-    let mut last_printed_seq = None;
+    let mut resume_seq = seq_num;
+    let mut cursor_id = None;
     let mut reconnect_attempt = 0u32;
 
-    match seq_num {
-        Some(start_seq) => {
-            let read = fetch_read(client, base_url, &start_seq, limit)?;
-            print_records(&read.records)?;
-            last_printed_seq = read.records.last().map(|record| record.seq_num.clone());
-        }
-        None => {
-            if let Some(record) = fetch_latest(client, base_url)? {
-                print_record(&record)?;
-                last_printed_seq = Some(record.seq_num);
+    loop {
+        if cursor_id.is_none() {
+            match open_cursor(client, base_url, resume_seq.as_deref()) {
+                Ok(opened) => {
+                    if reconnect_attempt > 0 {
+                        let resume_from = resume_seq.as_deref().unwrap_or("latest");
+                        println!("Reconnected (resuming from {})", resume_from);
+                        reconnect_attempt = 0;
+                    }
+                    update_resume_seq(&mut resume_seq, &opened.records)?;
+                    print_records(&opened.records)?;
+                    cursor_id = Some(opened.cursor_id);
+                }
+                Err(error) => {
+                    reconnect_attempt = reconnect_attempt.saturating_add(1);
+                    eprintln!("Stream error: {error:#}");
+                    eprintln!("Reconnecting in 1000ms... (attempt {})", reconnect_attempt);
+                    thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
             }
         }
-    }
 
-    loop {
-        match poll_once(client, base_url, last_printed_seq.clone(), limit) {
-            Ok(records) => {
-                if reconnect_attempt > 0 {
-                    let resume_from = last_printed_seq.as_deref().unwrap_or("0");
-                    println!("Reconnected (resuming from seq {})", resume_from);
-                    reconnect_attempt = 0;
-                }
-                if let Some(record) = records.last() {
-                    last_printed_seq = Some(record.seq_num.clone());
-                }
-                print_records(&records)?;
+        let active_cursor_id = cursor_id
+            .clone()
+            .expect("watch loop should have an active cursor before fetch");
+        match fetch_cursor(client, base_url, &active_cursor_id, limit) {
+            Ok(read) => {
+                update_resume_seq(&mut resume_seq, &read.records)?;
+                print_records(&read.records)?;
             }
             Err(error) => {
+                let _ = close_cursor(client, base_url, &active_cursor_id);
+                cursor_id = None;
                 reconnect_attempt = reconnect_attempt.saturating_add(1);
                 eprintln!("Stream error: {error:#}");
-                eprintln!(
-                    "Reconnecting in {}ms... (attempt {})",
-                    interval_ms, reconnect_attempt
-                );
+                eprintln!("Reconnecting in 1000ms... (attempt {})", reconnect_attempt);
+                thread::sleep(Duration::from_secs(1));
             }
         }
-
-        thread::sleep(Duration::from_millis(interval_ms));
     }
 }
 
-fn poll_once(
-    client: &Client,
-    base_url: &str,
-    last_printed_seq: Option<String>,
-    limit: u32,
-) -> Result<Vec<DemoRecord>> {
-    let tail = fetch_tail(client, base_url)?;
-    if is_empty_tail(&tail) {
-        return Ok(Vec::new());
+fn update_resume_seq(resume_seq: &mut Option<String>, records: &[DemoRecord]) -> Result<()> {
+    if let Some(record) = records.last() {
+        *resume_seq = Some(next_seq_num(&record.seq_num)?);
     }
-
-    if last_printed_seq.as_deref() == Some(tail.seq_num.as_str()) {
-        return Ok(Vec::new());
-    }
-
-    let start_seq = last_printed_seq.clone().unwrap_or_else(|| "0".to_owned());
-    let request_limit = if last_printed_seq.is_some() {
-        limit.saturating_add(1)
-    } else {
-        limit
-    };
-
-    let mut records = fetch_read(client, base_url, &start_seq, request_limit)?.records;
-    drop_duplicate_boundary(&mut records, last_printed_seq.as_deref());
-    Ok(records)
+    Ok(())
 }
 
-fn drop_duplicate_boundary(records: &mut Vec<DemoRecord>, last_printed_seq: Option<&str>) {
-    if let Some(last_seq) = last_printed_seq
-        && records.first().map(|record| record.seq_num.as_str()) == Some(last_seq)
-    {
-        records.remove(0);
-    }
+fn next_seq_num(seq_num: &str) -> Result<String> {
+    let seq_num = seq_num
+        .parse::<i64>()
+        .with_context(|| format!("invalid seq_num `{seq_num}`"))?;
+    let next_seq_num = seq_num
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("seq_num `{seq_num}` overflowed"))?;
+    Ok(next_seq_num.to_string())
 }
 
 fn print_watch_banner(base_url: &str, start_seq: Option<&str>) {
@@ -410,8 +445,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        DemoRecord, compact_body, drop_duplicate_boundary, endpoint, render_append_ok,
-        render_watch_record_at,
+        DemoRecord, compact_body, endpoint, next_seq_num, render_append_ok, render_watch_record_at,
     };
 
     #[test]
@@ -431,24 +465,8 @@ mod tests {
     }
 
     #[test]
-    fn test_drop_duplicate_boundary() {
-        let mut records = vec![
-            DemoRecord {
-                seq_num: "10".to_owned(),
-                ts_ms: 1,
-                body: "old".to_owned(),
-            },
-            DemoRecord {
-                seq_num: "20".to_owned(),
-                ts_ms: 2,
-                body: "new".to_owned(),
-            },
-        ];
-
-        drop_duplicate_boundary(&mut records, Some("10"));
-
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].seq_num, "20");
+    fn test_next_seq_num() {
+        assert_eq!(next_seq_num("10").unwrap(), "11");
     }
 
     #[test]
