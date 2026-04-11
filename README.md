@@ -102,17 +102,11 @@ The row store and Iceberg layer serve different purposes: the row store is for l
 
 ## Use cases
 
-**Agent backends**
-- Agent memory: per-session and cross-session state maintained continuously, queryable at 10-20 ms p99 without polling or cache invalidation
-- Tool call results: fraud scores, anomaly signals, inventory checks, and recommendation outputs pre-computed and always fresh for agent tool use
-- Context injection: event-driven triggers that push updated context into LLM calls as upstream data changes
-- Feature stores: batch and streaming features computed over the same pipeline, served from the same system
- 
-**Real-time data stack**
-- Live dashboards: materialized views updated incrementally, no scheduled refreshes
-- Monitoring and alerting: continuous evaluation of streaming metrics against thresholds
-- Real-time enrichment: live events joined with historical reference data in-flight, before delivery downstream
-- Streaming lakehouses: continuous, exactly-once ingestion into open-format tables with automated compaction and snapshot management
+- **Monitoring and alerting**: continuous evaluation of streaming metrics against thresholds
+- **Feature store**s: batch and streaming features computed over the same pipeline, served from the same system
+- **Live dashboards**: materialized views updated incrementally, no scheduled refreshes
+- **Real-time enrichment**: live events joined with historical reference data in-flight, before delivery downstream
+- **Streaming lakehouses**: continuous, exactly-once ingestion into open-format tables with automated compaction and snapshot management
 
 ---
 
