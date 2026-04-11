@@ -275,8 +275,11 @@ impl WebhookService {
             )
             .layer(cors_layer);
 
+        let rstream_router = crate::rstream::rstream_router(Arc::new(AtomicU32::new(0)));
+
         let app: Router = Router::new()
             .nest("/webhook", api_router)
+            .nest("/v1", rstream_router)
             .layer(CompressionLayer::new());
 
         let listener = TcpListener::bind(&srv.webhook_addr)

@@ -79,6 +79,8 @@ pub mod test_utils;
 mod user;
 pub mod webhook;
 
+pub mod rstream;
+
 pub mod health_service;
 mod monitor;
 
