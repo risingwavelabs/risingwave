@@ -22,7 +22,7 @@ use axum::http::StatusCode;
 use pgwire::pg_server::SessionManager;
 use pgwire::types::Format;
 use risingwave_common::array::{Array, ArrayBuilder, DataChunk, JsonbArrayBuilder};
-use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
+use risingwave_common::catalog::{AlterDatabaseParam, DEFAULT_DATABASE_NAME};
 use risingwave_common::types::{DataType, JsonbVal, Scalar};
 use risingwave_pb::task_service::fast_insert_response;
 
@@ -34,6 +34,7 @@ use crate::session::{SESSION_MANAGER, SessionManagerImpl};
 const RSTREAM_DB_PREFIX: &str = "rstream_";
 const RSTREAM_TABLE_NAME: &str = "_records";
 const RSTREAM_SCHEMA_NAME: &str = "public";
+const RSTREAM_DEFAULT_BARRIER_INTERVAL_MS: u32 = 100;
 
 fn stream_db_name(stream_name: &str) -> String {
     format!("{}{}", RSTREAM_DB_PREFIX, stream_name)
@@ -125,7 +126,7 @@ pub async fn handle_create_stream(
 
     run_sql(&dev_session, &format!("CREATE DATABASE {}", db_name)).await?;
 
-    // Step 2: Create table in the new database
+    // Step 2: Set barrier interval for low-latency writes
     let new_db_id = {
         let catalog_reader = session_mgr.env().catalog_reader();
         let reader = catalog_reader.read_guard();
@@ -135,6 +136,22 @@ pub async fn handle_create_stream(
             .id()
     };
 
+    dev_session
+        .catalog_writer()
+        .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?
+        .alter_database_param(
+            new_db_id,
+            AlterDatabaseParam::BarrierIntervalMs(Some(RSTREAM_DEFAULT_BARRIER_INTERVAL_MS)),
+        )
+        .await
+        .map_err(|e| {
+            err(
+                anyhow!(e).context("failed to set barrier interval"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
+
+    // Step 3: Create table in the new database
     let stream_session = session_mgr
         .create_dummy_session(new_db_id)
         .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?;
@@ -266,7 +283,7 @@ pub async fn handle_append_records(
 
     // Build FastInsertRequest
     let fast_insert_request = risingwave_pb::task_service::FastInsertRequest {
-        table_id: table_id.into(),
+        table_id,
         table_version_id,
         column_indices: vec![0],
         data_chunk: Some(data_chunk.to_protobuf()),

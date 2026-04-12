@@ -11,7 +11,7 @@ durable log accessible over plain HTTP.
 | Stream `foo` | Database `rstream_foo` with table `public._records` |
 | Record body | `body JSONB` column |
 | Ordering | Single vnode (`streaming_max_parallelism=1`) guarantees total order |
-| Write batching | Controlled by the cluster's `barrier_interval` |
+| Write batching | Per-database `barrier_interval_ms` (default 100 ms) |
 | Write path | Reuses the webhook/fast_insert path (bypasses SQL optimizer) |
 
 Because each stream lives in its own database, checkpoints are isolated per
@@ -159,6 +159,6 @@ SourceExecutor -> RowIdGenExecutor -> MaterializeExecutor -> Storage
 - **Single frontend.** The request counter used for CN routing is per-frontend
   process. Multi-frontend HA deployments work but don't coordinate counters.
 - **No authentication.** All requests run as the `root` super user.
-- **No per-stream barrier interval.** All streams use the cluster-wide
-  `barrier_interval`. Per-database barrier config requires the
-  `DatabaseFailureIsolation` license feature.
+- **Fixed barrier interval.** Each stream database is created with
+  `barrier_interval_ms = 100`. This is not yet user-configurable via the
+  HTTP API.
