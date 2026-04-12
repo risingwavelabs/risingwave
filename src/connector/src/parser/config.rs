@@ -205,7 +205,7 @@ impl SpecificParserConfig {
                         );
                     }
                     SchemaLocation::Confluent {
-                        urls: info.row_schema_location.clone(),
+                        urls: info.row_schema_location,
                         client_config: SchemaRegistryConfig::from(
                             &format_encode_options_with_secret,
                         ),
@@ -256,7 +256,7 @@ impl SpecificParserConfig {
                         );
                     }
                     SchemaLocation::Confluent {
-                        urls: info.row_schema_location.clone(),
+                        urls: info.row_schema_location,
                         client_config: SchemaRegistryConfig::from(
                             &format_encode_options_with_secret,
                         ),
@@ -294,7 +294,7 @@ impl SpecificParserConfig {
                     },
                     key_record_name: info.key_message_name.clone(),
                     schema_location: SchemaLocation::Confluent {
-                        urls: info.row_schema_location.clone(),
+                        urls: info.row_schema_location,
                         client_config: SchemaRegistryConfig::from(
                             &format_encode_options_with_secret,
                         ),

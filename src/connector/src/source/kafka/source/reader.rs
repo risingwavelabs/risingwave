@@ -468,7 +468,7 @@ impl KafkaSplitReader {
                         let split_id = split.id();
                         let source_id = self.source_ctx.source_id.to_string();
                         let split_id_label = split_id.to_string();
-                        let source_name = self.source_ctx.source_name.to_string();
+                        let source_name = self.source_ctx.source_name.clone();
                         let fragment_id = self.source_ctx.fragment_id.to_string();
                         partition_eof_count_metrics
                             .entry(split_id_label.clone())
@@ -498,7 +498,7 @@ impl KafkaSplitReader {
             for (split_id, eof_offset) in &eof_offsets {
                 let source_id = self.source_ctx.source_id.to_string();
                 let split_id_label = split_id.as_ref().to_owned();
-                let source_name = self.source_ctx.source_name.to_string();
+                let source_name = self.source_ctx.source_name.clone();
                 let fragment_id = self.source_ctx.fragment_id.to_string();
                 partition_eof_offset_metrics
                     .entry(split_id_label.clone())

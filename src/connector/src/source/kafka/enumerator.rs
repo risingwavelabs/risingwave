@@ -540,7 +540,7 @@ impl KafkaSplitEnumerator {
             .topics()
             .iter()
             .filter(|topic_meta| !topic_meta.name().starts_with("__"))
-            .filter(|topic_meta| topic_meta.error().is_none())
+            .filter(|topic_meta| Self::topic_meta_has_no_error(topic_meta))
             .filter(|topic_meta| !topic_meta.partitions().is_empty())
             .filter(|topic_meta| {
                 self.topic
@@ -556,6 +556,16 @@ impl KafkaSplitEnumerator {
             .collect::<Vec<_>>();
         topics.sort();
         Ok(topics)
+    }
+
+    #[cfg(madsim)]
+    fn topic_meta_has_no_error(_: &rdkafka::metadata::MetadataTopic) -> bool {
+        true
+    }
+
+    #[cfg(not(madsim))]
+    fn topic_meta_has_no_error(topic_meta: &rdkafka::metadata::MetadataTopic) -> bool {
+        topic_meta.error().is_none()
     }
 
     fn split_id_for_topic_partition(&self, topic: &str, partition: i32) -> Arc<str> {

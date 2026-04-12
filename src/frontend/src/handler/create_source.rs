@@ -1429,8 +1429,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_source_addition_columns() {
         // test derive include column for format plain
-        let sql =
-            "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format plain encode json".to_owned();
+        let sql = "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 't') format plain encode json".to_owned();
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
         let session = frontend.session_ref();
