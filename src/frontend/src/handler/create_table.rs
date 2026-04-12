@@ -75,8 +75,8 @@ use crate::error::{ErrorCode, Result, RwError, bail_bind_error};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::create_source::{
-    UPSTREAM_SOURCE_KEY, bind_connector_props, bind_create_source_or_table_with_connector,
-    bind_source_watermark, handle_addition_columns,
+    UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, bind_connector_props,
+    bind_create_source_or_table_with_connector, bind_source_watermark, handle_addition_columns,
 };
 use crate::handler::util::{
     LongRunningNotificationAction, SourceSchemaCompatExt, execute_with_long_running_notification,
@@ -1123,7 +1123,7 @@ pub(super) async fn handle_create_table_plan(
     TableJobType,
     Option<SourceId>,
 )> {
-    let col_id_gen = ColumnIdGenerator::new_initial();
+    let mut col_id_gen = ColumnIdGenerator::new_initial();
     let format_encode = check_create_table_with_source(
         &handler_args.with_options,
         format_encode,
@@ -1168,18 +1168,57 @@ pub(super) async fn handle_create_table_plan(
         ),
         (None, None) => {
             let context = OptimizerContext::new(handler_args, explain_options);
-            let (plan, table) = gen_create_table_plan(
-                context,
-                table_name.clone(),
-                column_defs,
-                constraints,
-                col_id_gen,
-                source_watermarks,
-                props,
-                false,
-            )?;
 
-            ((plan, None, table), TableJobType::General, None)
+            if !include_column_options.is_empty() && props.webhook_info.is_some() {
+                // Webhook table with INCLUDE header columns: process them before
+                // generating the plan so they appear in the table catalog.
+                let mut columns = bind_sql_columns(&column_defs, false)?;
+                for c in &mut columns {
+                    col_id_gen.generate(c)?;
+                }
+
+                let mut with_properties = BTreeMap::new();
+                with_properties
+                    .insert(UPSTREAM_SOURCE_KEY.to_owned(), WEBHOOK_CONNECTOR.to_owned());
+                handle_addition_columns(
+                    None,
+                    &with_properties,
+                    include_column_options,
+                    &mut columns,
+                    false,
+                )?;
+
+                // Assign column IDs to newly added INCLUDE columns
+                for c in &mut columns {
+                    if c.column_id() == ColumnId::placeholder() {
+                        col_id_gen.generate(c)?;
+                    }
+                }
+
+                let (plan, table) = gen_create_table_plan_without_source(
+                    context,
+                    table_name.clone(),
+                    columns,
+                    column_defs,
+                    constraints,
+                    source_watermarks,
+                    col_id_gen.into_version(),
+                    props,
+                )?;
+                ((plan, None, table), TableJobType::General, None)
+            } else {
+                let (plan, table) = gen_create_table_plan(
+                    context,
+                    table_name.clone(),
+                    column_defs,
+                    constraints,
+                    col_id_gen,
+                    source_watermarks,
+                    props,
+                    false,
+                )?;
+                ((plan, None, table), TableJobType::General, None)
+            }
         }
 
         (None, Some(cdc_table)) => {
@@ -2424,7 +2463,8 @@ pub fn check_create_table_with_source(
     }
     let defined_source = with_options.is_source_connector();
 
-    if !include_column_options.is_empty() && !defined_source {
+    if !include_column_options.is_empty() && !defined_source && !with_options.is_webhook_connector()
+    {
         return Err(ErrorCode::InvalidInputSyntax(
             "INCLUDE should be used with a connector".to_owned(),
         )

@@ -94,3 +94,47 @@ create table batched (
   headers->>'x-hub-signature',
   'sha1=' || encode(hmac('TEST_WEBHOOK', data, 'sha1'), 'hex')
 );
+
+statement ok
+create table with_include_header (
+  data JSONB
+)
+INCLUDE header 'x-event-type' AS event_type VARCHAR
+INCLUDE header 'x-event-timestamp' AS event_timestamp VARCHAR
+WITH (
+  connector = 'webhook'
+);
+
+# Negative test: INCLUDE header with unsupported data type should fail
+statement error invalid additional column data type
+create table bad_include_type (
+  data JSONB
+)
+INCLUDE header 'x-event-type' AS event_type INT
+WITH (
+  connector = 'webhook'
+);
+
+# INCLUDE header combined with VALIDATE SECRET
+statement ok
+create table include_with_validate (
+  data JSONB
+)
+INCLUDE header 'x-source-id' AS source_id VARCHAR
+WITH (
+  connector = 'webhook',
+) VALIDATE SECRET test_secret AS secure_compare(
+  headers->>'x-hub-signature',
+  'sha1=' || encode(hmac(test_secret, data, 'sha1'), 'hex')
+);
+
+# Batched webhook with INCLUDE header columns
+statement ok
+create table batched_include (
+  data JSONB
+)
+INCLUDE header 'x-batch-id' AS batch_id VARCHAR
+WITH (
+  connector = 'webhook',
+  is_batched = true,
+);
