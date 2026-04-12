@@ -20,6 +20,7 @@ use anyhow::{Context, anyhow};
 use either::Either;
 use external_schema::debezium::extract_debezium_avro_table_pk_columns;
 use external_schema::nexmark::check_nexmark_schema;
+use fancy_regex::Regex;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -59,7 +60,6 @@ use risingwave_connector::source::cdc::{
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
-use risingwave_connector::source::kafka::KafkaProperties;
 use risingwave_connector::source::nexmark::source::{EventType, get_event_data_types_with_names};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 pub use risingwave_connector::source::{
@@ -809,17 +809,33 @@ pub fn bind_connector_props(
     Ok((with_properties, refresh_mode))
 }
 
-fn validate_kafka_topic_selector(with_properties: &WithOptions) -> Result<()> {
+fn validate_kafka_topic_selector(with_properties: &impl WithPropertiesExt) -> Result<()> {
     if with_properties.get_connector().as_deref() != Some(KAFKA_CONNECTOR) {
         return Ok(());
     }
 
-    let props = serde_json::to_value(&**with_properties)
-        .map_err(|err| RwError::from(ProtocolError(err.to_string())))?;
-    let props: KafkaProperties = serde_json::from_value(props)
-        .map_err(|err| RwError::from(ProtocolError(err.to_string())))?;
+    let topic = with_properties.get("topic");
+    let topic_regex = with_properties
+        .get("topic.regex")
+        .or_else(|| with_properties.get("topic_regex"));
 
-    props.validate_topic_selector().map_err(Into::into)
+    match (topic, topic_regex) {
+        (Some(_), Some(_)) => Err(RwError::from(ProtocolError(
+            "properties `topic` and `topic.regex` are mutually exclusive".to_owned(),
+        ))),
+        (None, None) => Err(RwError::from(ProtocolError(
+            "must specify either properties `topic` or `topic.regex`".to_owned(),
+        ))),
+        (_, Some(pattern)) => {
+            Regex::new(pattern).map_err(|err| {
+                RwError::from(ProtocolError(format!(
+                    "invalid kafka topic regex `{pattern}`: {err}"
+                )))
+            })?;
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// When the schema can be inferred from external system (like schema registry),
@@ -958,8 +974,6 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         )));
     }
 
-    validate_kafka_topic_selector(&with_properties)?;
-
     // compatible with the behavior that add a hidden column `_rw_kafka_timestamp` to each message from Kafka source
     if is_create_source {
         // must behind `handle_addition_columns`
@@ -1004,6 +1018,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
             session,
             Some(TelemetryDatabaseObject::Source),
         )?;
+    validate_kafka_topic_selector(&with_properties)?;
     ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
