@@ -30,6 +30,14 @@ pub struct AppendRecordsRequest {
     pub records: Vec<serde_json::Value>,
 }
 
+// --- Read request types ---
+
+#[derive(Deserialize)]
+pub struct ReadRecordsParams {
+    pub after: Option<String>,
+    pub limit: Option<u32>,
+}
+
 // --- Response types ---
 
 #[derive(Serialize)]
@@ -50,6 +58,19 @@ pub struct ListStreamsResponse {
 #[derive(Serialize)]
 pub struct GetStreamResponse {
     pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct RecordEntry {
+    pub seq_no: String,
+    pub body: serde_json::Value,
+}
+
+#[derive(Serialize)]
+pub struct ReadRecordsResponse {
+    pub records: Vec<RecordEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Serialize)]

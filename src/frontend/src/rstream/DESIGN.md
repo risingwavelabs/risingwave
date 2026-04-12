@@ -138,25 +138,27 @@ Each element of `records` is stored as-is into the `body JSONB` column.
 
 ## Implementation Status
 
-### Done (Write Path)
+### Done (Write + Read Path)
 
 | File | What |
 |------|------|
-| `src/frontend/src/rstream/mod.rs` | Router: 5 routes on `/v1/streams` |
-| `src/frontend/src/rstream/handlers.rs` | All 5 handlers (create, delete, append, list, get) |
-| `src/frontend/src/rstream/types.rs` | Request/response structs, error type |
+| `src/frontend/src/rstream/mod.rs` | Router: 6 routes on `/v1/streams` (GET records added) |
+| `src/frontend/src/rstream/handlers.rs` | 6 handlers: create, delete, append, read (unary + SSE), list, get |
+| `src/frontend/src/rstream/types.rs` | Request/response structs incl. ReadRecordsParams, RecordEntry |
 | `src/frontend/src/rstream/README.md` | User-facing docs |
 | `src/frontend/src/webhook/mod.rs` | Mount rstream router via `.nest("/v1", ...)` |
 | `src/frontend/src/lib.rs` | `pub mod rstream;` |
 | `src/common/src/session_config/mod.rs` | Allow `streaming_max_parallelism = 1` |
 
-### TODO (Read Path)
+### Read Path Details
 
-Two modes borrowing from S2:
-- **Unary**: `GET /v1/streams/{name}/records?after={row_id}&limit=100` → batch
-  query `SELECT _row_id, body FROM _records WHERE _row_id > ? ORDER BY _row_id LIMIT ?`
-- **SSE tailing**: same endpoint with `Accept: text/event-stream` → internal
-  cursor session tailing the stream, emitting records as SSE events
+Single endpoint `GET /v1/streams/{name}/records` serves two modes:
+
+- **Unary** (default): `run_statement(SELECT _row_id, body ...)` → JSON response with
+  `records` array and `next_cursor`
+- **SSE** (`Accept: text/event-stream`): spawned tokio task polls with SELECT in
+  a loop, sends records as SSE events via `mpsc::channel` + `ReceiverStream`,
+  keepalive every 15s. Backoff: 100ms base × consecutive_empty (cap 5×)
 
 ### TODO (Future)
 

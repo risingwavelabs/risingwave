@@ -34,7 +34,7 @@ pub fn rstream_router(counter: Arc<AtomicU32>) -> Router {
         .route("/streams/{name}", delete(handlers::handle_delete_stream))
         .route(
             "/streams/{name}/records",
-            post(handlers::handle_append_records),
+            post(handlers::handle_append_records).get(handlers::handle_read_records),
         )
         .layer(
             ServiceBuilder::new()

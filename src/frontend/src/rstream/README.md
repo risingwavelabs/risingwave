@@ -46,20 +46,50 @@ curl -X POST http://localhost:4560/v1/streams/events/records \
 # {"count":2}  (200 OK)
 ```
 
-### Read data back via SQL
-
-Since every stream is just a regular RisingWave table, you can query it with
-SQL, create materialized views over it, or join it with other streams:
+### Read records (unary fetch)
 
 ```bash
-# simple select
+# read all records
+curl http://localhost:4560/v1/streams/events/records
+# {"records":[{"seq_no":"665562464464666624","body":{"action":"click","ts":1000}}, ...],"next_cursor":"665562464464666625"}
+
+# paginate: read 1 record after cursor
+curl "http://localhost:4560/v1/streams/events/records?after=665562464464666624&limit=1"
+# {"records":[{"seq_no":"665562464464666625","body":{"action":"view","ts":1001}}],"next_cursor":"665562464464666625"}
+```
+
+`seq_no` is a monotonically increasing i64 (as string) that serves as an opaque
+cursor. Within the same millisecond values are contiguous; across milliseconds
+there may be gaps, but ordering is always preserved.
+
+### Tail records (SSE)
+
+Add `Accept: text/event-stream` to receive a continuous stream of records:
+
+```bash
+curl -N -H 'Accept: text/event-stream' http://localhost:4560/v1/streams/events/records
+
+# data: {"seq_no":"665562464464666624","body":{"action":"click","ts":1000}}
+#
+# data: {"seq_no":"665562464464666625","body":{"action":"view","ts":1001}}
+# (connection stays open, new records appear as they are appended)
+```
+
+Use `after` to start tailing from a position:
+
+```bash
+curl -N -H 'Accept: text/event-stream' \
+  "http://localhost:4560/v1/streams/events/records?after=665562464464666624"
+```
+
+### Read data via SQL
+
+Since every stream is just a regular RisingWave table, you can also query it
+with SQL, create materialized views over it, or join it with other streams:
+
+```bash
 psql -h localhost -p 4566 -d rstream_events -U root \
   -c "SELECT _row_id, body FROM _records ORDER BY _row_id;"
-
-#       _row_id       |                body
-# --------------------+------------------------------------
-#  665562464464666624 | {"action": "click", "ts": 1000}
-#  665562464464666625 | {"action": "view", "ts": 1001}
 
 # create a materialized view to count actions
 psql -h localhost -p 4566 -d rstream_events -U root \
@@ -67,10 +97,6 @@ psql -h localhost -p 4566 -d rstream_events -U root \
       SELECT body->>'action' AS action, COUNT(*) AS cnt
       FROM _records GROUP BY body->>'action';"
 ```
-
-`_row_id` is a monotonically increasing i64 that serves as an opaque cursor.
-Within the same millisecond values are contiguous; across milliseconds there
-may be gaps, but ordering is always preserved.
 
 ### List streams
 
@@ -109,6 +135,7 @@ All endpoints are served on the webhook HTTP port (default `4560`).
 | `GET` | `/v1/streams/{name}` | Get stream info | 200 | 404 |
 | `DELETE` | `/v1/streams/{name}` | Delete a stream | 200 | 404 |
 | `POST` | `/v1/streams/{name}/records` | Append records | 200 | 400, 404 |
+| `GET` | `/v1/streams/{name}/records` | Read records (unary or SSE) | 200 | 400, 404 |
 
 ### Create stream request
 
@@ -126,6 +153,34 @@ digit.
 ```
 
 Each element can be any valid JSON value (object, array, string, number, etc.).
+
+### Read records query parameters
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `after` | string | (none) | `seq_no` cursor — return records after this position |
+| `limit` | integer | 100 | Max records to return (1–1000) |
+
+**Unary response** (default or `Accept: application/json`):
+
+```json
+{
+  "records": [{"seq_no": "665562464464666624", "body": {...}}, ...],
+  "next_cursor": "665562464464666625"
+}
+```
+
+`next_cursor` is absent when `records` is empty.
+
+**SSE response** (`Accept: text/event-stream`):
+
+```
+data: {"seq_no":"665562464464666624","body":{...}}
+
+data: {"seq_no":"665562464464666625","body":{...}}
+```
+
+Connection stays open. A `: keepalive` comment is sent every 15 seconds.
 
 ### Error response format
 
@@ -154,8 +209,9 @@ SourceExecutor -> RowIdGenExecutor -> MaterializeExecutor -> Storage
 
 ## Limitations
 
-- **Write-only for now.** The read API (unary fetch + SSE tailing) is planned
-  but not yet implemented. Use SQL to read data.
+- **SSE polling.** The SSE tailing mode polls with `SELECT` queries rather than
+  using RisingWave's subscription cursor system. Latency floor is ~100 ms
+  (matching `barrier_interval_ms`).
 - **Single frontend.** The request counter used for CN routing is per-frontend
   process. Multi-frontend HA deployments work but don't coordinate counters.
 - **No authentication.** All requests run as the `root` super user.

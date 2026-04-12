@@ -12,22 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
+use std::time::Duration;
 
 use anyhow::anyhow;
 use axum::Json;
-use axum::extract::{Extension, Path};
-use axum::http::StatusCode;
+use axum::extract::{Extension, Path, Query};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Response};
+use futures_async_stream::for_await;
 use pgwire::pg_server::SessionManager;
 use pgwire::types::Format;
 use risingwave_common::array::{Array, ArrayBuilder, DataChunk, JsonbArrayBuilder};
 use risingwave_common::catalog::{AlterDatabaseParam, DEFAULT_DATABASE_NAME};
 use risingwave_common::types::{DataType, JsonbVal, Scalar};
 use risingwave_pb::task_service::fast_insert_response;
+use tokio_stream::wrappers::ReceiverStream;
 
 use super::types::*;
 use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::DatabaseId;
 use crate::scheduler::choose_fast_insert_client;
 use crate::session::{SESSION_MANAGER, SessionManagerImpl};
 
@@ -136,20 +143,23 @@ pub async fn handle_create_stream(
             .id()
     };
 
-    dev_session
-        .catalog_writer()
-        .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?
-        .alter_database_param(
-            new_db_id,
-            AlterDatabaseParam::BarrierIntervalMs(Some(RSTREAM_DEFAULT_BARRIER_INTERVAL_MS)),
-        )
-        .await
-        .map_err(|e| {
-            err(
-                anyhow!(e).context("failed to set barrier interval"),
-                StatusCode::INTERNAL_SERVER_ERROR,
+    {
+        let _txn_guard = dev_session.txn_begin_implicit();
+        dev_session
+            .catalog_writer()
+            .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?
+            .alter_database_param(
+                new_db_id,
+                AlterDatabaseParam::BarrierIntervalMs(Some(RSTREAM_DEFAULT_BARRIER_INTERVAL_MS)),
             )
-        })?;
+            .await
+            .map_err(|e| {
+                err(
+                    anyhow!(e).context("failed to set barrier interval"),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                )
+            })?;
+    }
 
     // Step 3: Create table in the new database
     let stream_session = session_mgr
@@ -350,4 +360,196 @@ pub async fn handle_get_stream(Path(name): Path<String>) -> Result<Json<GetStrea
         .map_err(|_| err(anyhow!("stream '{}' not found", name), StatusCode::NOT_FOUND))?;
 
     Ok(Json(GetStreamResponse { name }))
+}
+
+// ---------------------------------------------------------------------------
+// Read path
+// ---------------------------------------------------------------------------
+
+const DEFAULT_READ_LIMIT: u32 = 100;
+const MAX_READ_LIMIT: u32 = 1000;
+
+fn get_stream_db_id(name: &str) -> Result<DatabaseId> {
+    let db_name = stream_db_name(name);
+    let session_mgr = get_session_mgr();
+    let catalog_reader = session_mgr.env().catalog_reader();
+    let reader = catalog_reader.read_guard();
+    Ok(reader
+        .get_database_by_name(&db_name)
+        .map_err(|_| err(anyhow!("stream '{}' not found", name), StatusCode::NOT_FOUND))?
+        .id())
+}
+
+fn parse_read_params(params: &ReadRecordsParams) -> Result<(Option<i64>, u32)> {
+    let after = params
+        .after
+        .as_deref()
+        .map(|s| {
+            s.parse::<i64>().map_err(|_| {
+                err(
+                    anyhow!("invalid 'after' cursor: must be a numeric string"),
+                    StatusCode::BAD_REQUEST,
+                )
+            })
+        })
+        .transpose()?;
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_READ_LIMIT)
+        .clamp(1, MAX_READ_LIMIT);
+    Ok((after, limit))
+}
+
+fn build_select_sql(after: Option<i64>, limit: u32) -> String {
+    match after {
+        Some(cursor) => format!(
+            "SELECT _row_id, body FROM {} WHERE _row_id > '{}' ORDER BY _row_id LIMIT {}",
+            RSTREAM_TABLE_NAME, cursor, limit
+        ),
+        None => format!(
+            "SELECT _row_id, body FROM {} ORDER BY _row_id LIMIT {}",
+            RSTREAM_TABLE_NAME, limit
+        ),
+    }
+}
+
+async fn run_sql_query(
+    session: &Arc<crate::session::SessionImpl>,
+    sql: &str,
+) -> Result<Vec<RecordEntry>> {
+    let mut rsp = session
+        .clone()
+        .run_statement(sql.into(), vec![Format::Text; 2])
+        .await
+        .map_err(|e| {
+            err(
+                anyhow!("{}: {}", sql, e),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
+
+    let mut records = Vec::new();
+    #[for_await]
+    for row_set in rsp.values_stream() {
+        let row_set = row_set.map_err(|e| {
+            err(
+                anyhow!(e).context("failed to read query results"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })?;
+        for row in row_set {
+            let seq_no = row.values()[0]
+                .as_ref()
+                .map(|b| String::from_utf8_lossy(b).into_owned())
+                .unwrap_or_default();
+            let body = row.values()[1]
+                .as_ref()
+                .map(|b| serde_json::from_slice(b).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            records.push(RecordEntry { seq_no, body });
+        }
+    }
+    Ok(records)
+}
+
+pub async fn handle_read_records(
+    Path(name): Path<String>,
+    Query(params): Query<ReadRecordsParams>,
+    headers: HeaderMap,
+) -> Result<Response> {
+    let wants_sse = headers
+        .get(axum::http::header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.contains("text/event-stream"))
+        .unwrap_or(false);
+
+    if wants_sse {
+        handle_sse_tailing(name, params)
+    } else {
+        handle_unary_fetch(name, params).await
+    }
+}
+
+async fn handle_unary_fetch(name: String, params: ReadRecordsParams) -> Result<Response> {
+    let (after, limit) = parse_read_params(&params)?;
+    let db_id = get_stream_db_id(&name)?;
+
+    let session_mgr = get_session_mgr();
+    let session = session_mgr
+        .create_dummy_session(db_id)
+        .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?;
+
+    let sql = build_select_sql(after, limit);
+    let records = run_sql_query(&session, &sql).await?;
+
+    let next_cursor = records.last().map(|r| r.seq_no.clone());
+    Ok(Json(ReadRecordsResponse {
+        records,
+        next_cursor,
+    })
+    .into_response())
+}
+
+fn handle_sse_tailing(name: String, params: ReadRecordsParams) -> Result<Response> {
+    let (initial_after, limit) = parse_read_params(&params)?;
+    // Validate stream exists before starting SSE
+    let _ = get_stream_db_id(&name)?;
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<std::result::Result<Event, Infallible>>(64);
+
+    tokio::spawn(async move {
+        let mut cursor = initial_after;
+        let base_poll_ms: u64 = 100;
+        let mut consecutive_empty: u32 = 0;
+
+        loop {
+            let db_id = match get_stream_db_id(&name) {
+                Ok(id) => id,
+                Err(_) => break, // stream deleted
+            };
+
+            let session_mgr = get_session_mgr();
+            let session = match session_mgr.create_dummy_session(db_id) {
+                Ok(s) => s,
+                Err(_) => break,
+            };
+
+            let sql = build_select_sql(cursor, limit);
+            let records = match run_sql_query(&session, &sql).await {
+                Ok(r) => r,
+                Err(_) => break,
+            };
+
+            if records.is_empty() {
+                consecutive_empty = consecutive_empty.saturating_add(1);
+                let sleep_ms = base_poll_ms * consecutive_empty.min(5) as u64;
+                tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+                continue;
+            }
+
+            consecutive_empty = 0;
+            for record in &records {
+                if let Ok(seq) = record.seq_no.parse::<i64>() {
+                    cursor = Some(seq);
+                }
+                let json = serde_json::to_string(record).unwrap_or_default();
+                let event = Event::default().data(json);
+                if tx.send(Ok(event)).await.is_err() {
+                    return; // client disconnected
+                }
+            }
+
+            // Brief yield between polls when data is flowing
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+
+    let stream = ReceiverStream::new(rx);
+    let sse = Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keepalive"),
+    );
+
+    Ok(sse.into_response())
 }
