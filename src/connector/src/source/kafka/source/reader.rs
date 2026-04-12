@@ -48,6 +48,7 @@ pub struct KafkaSplitReader {
     /// split, even if that offset does not correspond to a visible data record.
     known_eof_offsets: HashMap<SplitId, i64>,
     splits: Vec<KafkaSplit>,
+    split_ids_by_topic_partition: HashMap<(String, i32), SplitId>,
     sync_call_timeout: Duration,
     bytes_per_second: usize,
     max_num_messages: usize,
@@ -113,8 +114,12 @@ impl SplitReader for KafkaSplitReader {
         let mut offsets = HashMap::new();
         let mut backfill_info = HashMap::new();
         let mut known_eof_offsets = HashMap::new();
+        let mut split_ids_by_topic_partition = HashMap::new();
         for split in splits.clone() {
-            offsets.insert(split.id(), (split.start_offset, split.stop_offset));
+            let split_id = split.id();
+            offsets.insert(split_id.clone(), (split.start_offset, split.stop_offset));
+            split_ids_by_topic_partition
+                .insert((split.topic.clone(), split.partition), split_id.clone());
 
             if let Some(offset) = split.start_offset {
                 tpl.add_partition_offset(
@@ -144,10 +149,10 @@ impl SplitReader for KafkaSplitReader {
                 None
             };
             if !has_data_to_backfill {
-                backfill_info.insert(split.id(), BackfillInfo::NoDataToBackfill);
+                backfill_info.insert(split_id.clone(), BackfillInfo::NoDataToBackfill);
             } else {
                 backfill_info.insert(
-                    split.id(),
+                    split_id.clone(),
                     BackfillInfo::HasDataToBackfill {
                         latest_offset: (high - 1).to_string(),
                     },
@@ -156,11 +161,12 @@ impl SplitReader for KafkaSplitReader {
 
             let stop_offset = split.stop_offset.and_then(Self::offset_before);
             if let Some(known_eof_offset) = Self::max_known_offset(watermark_offset, stop_offset) {
-                known_eof_offsets.insert(split.id(), known_eof_offset);
+                known_eof_offsets.insert(split_id, known_eof_offset);
             }
         }
         tracing::info!(
-            topic = properties.common.topic,
+            topic = ?properties.common.topic,
+            topic_regex = ?properties.common.topic_regex,
             source_name = source_ctx.source_name,
             fragment_id = %source_ctx.fragment_id,
             source_id = %source_ctx.source_id,
@@ -190,6 +196,7 @@ impl SplitReader for KafkaSplitReader {
             consumer,
             offsets,
             splits,
+            split_ids_by_topic_partition,
             backfill_info,
             known_eof_offsets,
             bytes_per_second,
@@ -263,6 +270,16 @@ impl KafkaSplitReader {
         }
     }
 
+    fn split_id_for(&self, topic: &str, partition: i32) -> Result<SplitId> {
+        self.split_ids_by_topic_partition
+            .get(&(topic.to_owned(), partition))
+            .cloned()
+            .ok_or_else(|| {
+                anyhow::anyhow!("split id not found for kafka topic-partition {topic}:{partition}")
+                    .into()
+            })
+    }
+
     fn record_split_progress(
         progress: &mut HashMap<SplitId, String>,
         latest_progress_offsets: &mut HashMap<SplitId, i64>,
@@ -332,12 +349,15 @@ impl KafkaSplitReader {
         (!progress.is_empty()).then_some(progress)
     }
 
-    fn resolve_eof_offsets(&self, eof_partitions: &HashSet<i32>) -> Result<HashMap<SplitId, i64>> {
+    fn resolve_eof_offsets(
+        &self,
+        eof_partitions: &HashSet<(String, i32)>,
+    ) -> Result<HashMap<SplitId, i64>> {
         let positions = self.consumer.position()?;
         let mut eof_offsets = HashMap::new();
 
         for split in &self.splits {
-            if !eof_partitions.contains(&split.partition) {
+            if !eof_partitions.contains(&(split.topic.clone(), split.partition)) {
                 continue;
             }
 
@@ -429,22 +449,42 @@ impl KafkaSplitReader {
                 match msg {
                     Ok(msg) => msgs.push(msg),
                     Err(KafkaError::PartitionEOF(partition)) => {
-                        let split_id = partition.to_string();
+                        let splits_with_partition = self
+                            .splits
+                            .iter()
+                            .filter(|split| split.partition == partition)
+                            .collect::<Vec<_>>();
+                        if splits_with_partition.len() != 1 {
+                            tracing::debug!(
+                                actor_id = %self.source_ctx.actor_id,
+                                source_id = %self.source_ctx.source_id,
+                                partition,
+                                matches = splits_with_partition.len(),
+                                "skip kafka partition EOF without unique topic match"
+                            );
+                            continue;
+                        }
+                        let split = splits_with_partition[0];
+                        let split_id = split.id();
+                        let source_id = self.source_ctx.source_id.to_string();
+                        let split_id_label = split_id.to_string();
+                        let source_name = self.source_ctx.source_name.clone();
+                        let fragment_id = self.source_ctx.fragment_id.to_string();
                         partition_eof_count_metrics
-                            .entry(split_id.clone())
+                            .entry(split_id_label.clone())
                             .or_insert_with(|| {
                                 self.source_ctx
                                     .metrics
                                     .partition_eof_count
                                     .with_guarded_label_values(&[
-                                        &self.source_ctx.source_id.to_string(),
-                                        &split_id,
-                                        &self.source_ctx.source_name,
-                                        &self.source_ctx.fragment_id.to_string(),
+                                        &source_id,
+                                        &split_id_label,
+                                        &source_name,
+                                        &fragment_id,
                                     ])
                             })
                             .inc();
-                        eof_partitions.insert(partition);
+                        eof_partitions.insert((split.topic.clone(), partition));
                     }
                     Err(err) => return Err(err.into()),
                 }
@@ -456,7 +496,10 @@ impl KafkaSplitReader {
                 self.resolve_eof_offsets(&eof_partitions)?
             };
             for (split_id, eof_offset) in &eof_offsets {
+                let source_id = self.source_ctx.source_id.to_string();
                 let split_id_label = split_id.as_ref().to_owned();
+                let source_name = self.source_ctx.source_name.clone();
+                let fragment_id = self.source_ctx.fragment_id.to_string();
                 partition_eof_offset_metrics
                     .entry(split_id_label.clone())
                     .or_insert_with(|| {
@@ -464,10 +507,10 @@ impl KafkaSplitReader {
                             .metrics
                             .partition_eof_offset
                             .with_guarded_label_values(&[
-                                &self.source_ctx.source_id.to_string(),
+                                &source_id,
                                 &split_id_label,
-                                &self.source_ctx.source_name,
-                                &self.source_ctx.fragment_id.to_string(),
+                                &source_name,
+                                &fragment_id,
                             ])
                     })
                     .set(*eof_offset);
@@ -502,22 +545,25 @@ impl KafkaSplitReader {
             let mut split_msg_offsets = HashMap::new();
 
             for msg in &msgs {
-                split_msg_offsets.insert(msg.partition(), msg.offset());
+                split_msg_offsets.insert((msg.topic().to_owned(), msg.partition()), msg.offset());
             }
 
-            for (partition, offset) in split_msg_offsets {
-                let split_id = partition.to_string();
+            for ((topic, partition), offset) in split_msg_offsets {
+                let split_id = self.split_id_for(&topic, partition)?;
+                let source_id = self.source_ctx.source_id.to_string();
+                let actor_id = self.source_ctx.actor_id.to_string();
+                let split_id_label = split_id.to_string();
                 latest_message_id_metrics
-                    .entry(split_id.clone())
+                    .entry(split_id_label.clone())
                     .or_insert_with(|| {
                         self.source_ctx
                             .metrics
                             .latest_message_id
                             .with_guarded_label_values(&[
                                 // source name is not available here
-                                &self.source_ctx.source_id.to_string(),
-                                &self.source_ctx.actor_id.to_string(),
-                                &split_id,
+                                &source_id,
+                                &actor_id,
+                                &split_id_label,
                             ])
                     })
                     .set(offset);
@@ -530,8 +576,9 @@ impl KafkaSplitReader {
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
-                let source_message =
+                let mut source_message =
                     SourceMessage::from_kafka_message(&msg, require_message_header);
+                source_message.split_id = self.split_id_for(msg.topic(), msg.partition())?;
                 let split_id = source_message.split_id.clone();
                 res.push(source_message);
 

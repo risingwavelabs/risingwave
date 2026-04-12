@@ -132,7 +132,11 @@ impl SourceDescBuilder {
         let mut columns: Vec<_> = self
             .columns
             .iter()
-            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .map(|c| {
+                let mut desc = SourceColumnDesc::from(&c.column_desc);
+                desc.is_hidden_addition_col = c.is_hidden;
+                desc
+            })
             .collect();
 
         // currently iceberg uses other columns. See `extract_iceberg_columns`
@@ -217,6 +221,92 @@ impl SourceDescBuilder {
 
     pub fn with_properties(&self) -> WithOptionsSecResolved {
         self.with_properties.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+    use risingwave_common::types::DataType;
+    use risingwave_pb::plan_common::additional_column::ColumnType;
+
+    use super::*;
+    use crate::parser::additional_columns::build_additional_column_desc;
+
+    #[test]
+    fn preserves_hidden_additional_columns_from_catalog() {
+        let user_column =
+            ColumnCatalog::visible(ColumnDesc::named("v1", ColumnId::new(1), DataType::Int32));
+        let hidden_partition = ColumnCatalog::hidden(
+            build_additional_column_desc(
+                ColumnId::new(2),
+                "kafka",
+                "partition",
+                None,
+                None,
+                None,
+                false,
+                false,
+            )
+            .unwrap(),
+        );
+        let hidden_offset = ColumnCatalog::hidden(
+            build_additional_column_desc(
+                ColumnId::new(3),
+                "kafka",
+                "offset",
+                None,
+                None,
+                None,
+                false,
+                false,
+            )
+            .unwrap(),
+        );
+
+        let builder = SourceDescBuilder::new(
+            vec![
+                user_column.to_protobuf(),
+                hidden_partition.to_protobuf(),
+                hidden_offset.to_protobuf(),
+            ],
+            Arc::new(SourceMetrics::default()),
+            None,
+            WithOptionsSecResolved::without_secrets(BTreeMap::from([(
+                UPSTREAM_SOURCE_KEY.to_owned(),
+                "kafka".to_owned(),
+            )])),
+            PbStreamSourceInfo::default(),
+            DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
+            vec![],
+        );
+
+        let columns = builder.column_catalogs_to_source_column_descs();
+        let hidden_partition = columns
+            .iter()
+            .find(|desc| {
+                matches!(
+                    desc.additional_column.column_type,
+                    Some(ColumnType::Partition(_))
+                )
+            })
+            .unwrap();
+        let hidden_offset = columns
+            .iter()
+            .find(|desc| {
+                matches!(
+                    desc.additional_column.column_type,
+                    Some(ColumnType::Offset(_))
+                )
+            })
+            .unwrap();
+
+        assert!(hidden_partition.is_hidden_addition_col);
+        assert!(!hidden_partition.is_visible());
+        assert!(hidden_offset.is_hidden_addition_col);
+        assert!(!hidden_offset.is_visible());
     }
 }
 

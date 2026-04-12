@@ -80,3 +80,25 @@
         │ └─StreamDml { columns: [v1, v2, _row_id] }
         │   └─StreamSource
         └─StreamUpstreamSinkUnion
+- id: kafka_topic_and_regex_are_mutually_exclusive
+  sql: |
+    create source s (
+      v1 int
+    ) with (
+      connector = 'kafka',
+      properties.bootstrap.server = 'message_queue:29092',
+      topic = 'kafka_1_json_topic',
+      topic.regex = '^kafka_1_.*$',
+      scan.startup.mode = 'earliest'
+    ) FORMAT PLAIN ENCODE JSON;
+  planner_error: 'connector error: properties `topic` and `topic.regex` are mutually exclusive'
+- id: kafka_requires_topic_or_regex
+  sql: |
+    create source s (
+      v1 int
+    ) with (
+      connector = 'kafka',
+      properties.bootstrap.server = 'message_queue:29092',
+      scan.startup.mode = 'earliest'
+    ) FORMAT PLAIN ENCODE JSON;
+  planner_error: 'connector error: must specify either properties `topic` or `topic.regex`'

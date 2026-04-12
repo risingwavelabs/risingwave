@@ -31,7 +31,7 @@ use super::MessageMeta;
 use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
     extract_pulsar_message_id_data_from_meta, extract_subject_from_meta,
-    extract_timestamp_from_meta,
+    extract_timestamp_from_meta, extract_topic_from_meta,
 };
 use crate::source::{SourceColumnDesc, SourceColumnType, SourceCtrlOpts, SourceMeta};
 
@@ -382,14 +382,20 @@ impl SourceStreamChunkRowWriter<'_> {
                         .and_then(|ele| extract_subject_from_meta(ele.source_meta))
                         .unwrap_or(None),
                 )),
-                (_, &Some(AdditionalColumnType::Partition(_))) => {
-                    // the meta info does not involve spec connector
-                    Ok(A::output_for(
-                        self.row_meta
-                            .as_ref()
-                            .map(|ele| ScalarRefImpl::Utf8(ele.split_id)),
-                    ))
-                }
+                (_, &Some(AdditionalColumnType::Partition(_))) => Ok(A::output_for(
+                    self.row_meta.as_ref().map(|ele| match ele.source_meta {
+                        SourceMeta::Kafka(kafka_meta) if desc.is_visible() => {
+                            ScalarRefImpl::Utf8(&kafka_meta.partition)
+                        }
+                        _ => ScalarRefImpl::Utf8(ele.split_id),
+                    }),
+                )),
+                (_, &Some(AdditionalColumnType::Topic(_))) => Ok(A::output_for(
+                    self.row_meta
+                        .as_ref()
+                        .and_then(|ele| extract_topic_from_meta(ele.source_meta))
+                        .unwrap_or(None),
+                )),
                 (_, &Some(AdditionalColumnType::Offset(_))) => {
                     // the meta info does not involve spec connector
                     Ok(A::output_for(

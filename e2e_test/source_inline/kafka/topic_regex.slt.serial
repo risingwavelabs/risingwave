@@ -1,0 +1,112 @@
+control substitution on
+
+statement ok
+SET streaming_use_shared_source TO true;
+
+system ok
+rpk topic delete test_regex_match_a || true;
+rpk topic delete test_regex_match_b || true;
+rpk topic delete test_regex_skip || true;
+rpk topic delete test_regex_match_late || true;
+rpk topic delete test_regex_skip_late || true;
+
+system ok
+rpk topic create test_regex_match_a -p 1
+
+system ok
+rpk topic create test_regex_match_b -p 1
+
+system ok
+rpk topic create test_regex_skip -p 1
+
+system ok
+cat <<EOF | rpk topic produce test_regex_match_a -f "%v\n"
+{"v1": 1}
+EOF
+
+system ok
+cat <<EOF | rpk topic produce test_regex_match_b -f "%v\n"
+{"v1": 2}
+EOF
+
+system ok
+cat <<EOF | rpk topic produce test_regex_skip -f "%v\n"
+{"v1": 999}
+EOF
+
+statement ok
+create source topic_regex_source (
+  v1 int
+)
+include topic as topic_name
+with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic.regex = '^test_regex_match_[a-z]+',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'topic_regex_source';
+----
+CREATE SOURCE topic_regex_source (v1 INT) INCLUDE topic AS topic_name
+
+query TI rowsort retry 4 backoff 1s
+select topic_name, v1 from topic_regex_source;
+----
+test_regex_match_a	1
+test_regex_match_b	2
+
+statement ok
+create materialized view topic_regex_mv as
+select topic_name, v1 from topic_regex_source;
+
+query TI rowsort retry 6 backoff 1s
+select topic_name, v1 from topic_regex_mv;
+----
+test_regex_match_a	1
+test_regex_match_b	2
+
+system ok
+rpk topic create test_regex_match_late -p 1
+
+system ok
+rpk topic create test_regex_skip_late -p 1
+
+system ok
+cat <<EOF | rpk topic produce test_regex_match_late -f "%v\n"
+{"v1": 3}
+EOF
+
+system ok
+cat <<EOF | rpk topic produce test_regex_skip_late -f "%v\n"
+{"v1": 1000}
+EOF
+
+# Source split discovery runs periodically in meta, and the matching topic must be discovered,
+# assigned, and consumed before the merged source reflects the new row.
+query TI rowsort retry 12 backoff 5s
+select topic_name, v1 from topic_regex_source;
+----
+test_regex_match_a	1
+test_regex_match_b	2
+test_regex_match_late	3
+
+query TI rowsort retry 12 backoff 5s
+select topic_name, v1 from topic_regex_mv;
+----
+test_regex_match_a	1
+test_regex_match_b	2
+test_regex_match_late	3
+
+statement ok
+drop source topic_regex_source cascade;
+
+system ok
+rpk topic delete test_regex_match_a
+rpk topic delete test_regex_match_b
+rpk topic delete test_regex_skip
+rpk topic delete test_regex_match_late
+rpk topic delete test_regex_skip_late
+
+statement ok
+SET streaming_use_shared_source TO DEFAULT;

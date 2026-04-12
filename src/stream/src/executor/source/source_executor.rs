@@ -1129,14 +1129,17 @@ impl<S: StateStore> SourceExecutor<S> {
                         continue;
                     }
                     source_output_row_count.inc_by(card as u64);
-                    let to_remove_col_indices =
-                        if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
-                            vec![split_idx, offset_idx, pulsar_message_id_idx]
-                        } else {
-                            vec![split_idx, offset_idx]
-                        };
-                    let chunk =
-                        prune_additional_cols(&chunk, &to_remove_col_indices, &source_desc.columns);
+                    let chunk = if self.is_shared_non_cdc {
+                        chunk
+                    } else {
+                        let to_remove_col_indices =
+                            if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
+                                vec![split_idx, offset_idx, pulsar_message_id_idx]
+                            } else {
+                                vec![split_idx, offset_idx]
+                            };
+                        prune_additional_cols(&chunk, &to_remove_col_indices, &source_desc.columns)
+                    };
                     yield Message::Chunk(chunk);
                     self.try_flush_data().await?;
                 }

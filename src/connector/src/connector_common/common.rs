@@ -292,7 +292,15 @@ impl EnforceSecret for KafkaConnectionProps {
 pub struct KafkaCommon {
     // connection related props are moved to `KafkaConnection`
     #[serde(rename = "topic", alias = "kafka.topic")]
-    pub topic: String,
+    pub topic: Option<String>,
+
+    #[serde(
+        rename = "topic.regex",
+        alias = "kafka.topic.regex",
+        alias = "topic_regex",
+        alias = "kafka.topic_regex"
+    )]
+    pub topic_regex: Option<String>,
 
     #[serde(
         rename = "properties.sync.call.timeout",

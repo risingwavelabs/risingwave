@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
+use regex::Regex;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 
@@ -207,6 +209,33 @@ impl crate::source::UnknownFields for KafkaProperties {
 }
 
 impl KafkaProperties {
+    pub fn topic(&self) -> Option<&str> {
+        self.common.topic.as_deref()
+    }
+
+    pub fn topic_regex(&self) -> Option<&str> {
+        self.common.topic_regex.as_deref()
+    }
+
+    pub fn validate_topic_selector(&self) -> ConnectorResult<()> {
+        match (self.topic(), self.topic_regex()) {
+            (Some(_), Some(_)) => Err(anyhow::anyhow!(
+                "properties `topic` and `topic.regex` are mutually exclusive"
+            )
+            .into()),
+            (None, None) => Err(anyhow::anyhow!(
+                "must specify either properties `topic` or `topic.regex`"
+            )
+            .into()),
+            (_, Some(pattern)) => {
+                Regex::new(pattern)
+                    .with_context(|| format!("invalid kafka topic regex: {pattern}"))?;
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.rdkafka_properties_common.set_client(c);
         self.rdkafka_properties_consumer.set_client(c);
@@ -257,6 +286,7 @@ mod test {
     use std::collections::BTreeMap;
 
     use maplit::btreemap;
+    use serde_json::json;
 
     use super::*;
 
@@ -322,5 +352,64 @@ mod test {
             "broker1".to_owned() => "10.0.0.1:8001".to_owned()
         };
         assert_eq!(props.privatelink_common.broker_rewrite_map, Some(hashmap));
+    }
+
+    #[test]
+    fn test_parse_config_topic_regex() {
+        let config = json!({
+            "properties.bootstrap.server": "127.0.0.1:9092",
+            "topic.regex": "^test_topic_[ab]$",
+        });
+
+        let props: KafkaProperties = serde_json::from_value(config).unwrap();
+
+        assert_eq!(props.topic(), None);
+        assert_eq!(props.topic_regex(), Some("^test_topic_[ab]$"));
+        props.validate_topic_selector().unwrap();
+    }
+
+    #[test]
+    fn test_validate_topic_selector_requires_topic_or_regex() {
+        let props: KafkaProperties = serde_json::from_value(json!({
+            "properties.bootstrap.server": "127.0.0.1:9092",
+        }))
+        .unwrap();
+
+        assert_eq!(
+            props.validate_topic_selector().unwrap_err().to_string(),
+            "must specify either properties `topic` or `topic.regex`"
+        );
+    }
+
+    #[test]
+    fn test_validate_topic_selector_rejects_both_topic_and_regex() {
+        let props: KafkaProperties = serde_json::from_value(json!({
+            "properties.bootstrap.server": "127.0.0.1:9092",
+            "topic": "test_topic_a",
+            "topic.regex": "^test_topic_.*$",
+        }))
+        .unwrap();
+
+        assert_eq!(
+            props.validate_topic_selector().unwrap_err().to_string(),
+            "properties `topic` and `topic.regex` are mutually exclusive"
+        );
+    }
+
+    #[test]
+    fn test_validate_topic_selector_rejects_invalid_regex() {
+        let props: KafkaProperties = serde_json::from_value(json!({
+            "properties.bootstrap.server": "127.0.0.1:9092",
+            "topic.regex": "[invalid",
+        }))
+        .unwrap();
+
+        assert!(
+            props
+                .validate_topic_selector()
+                .unwrap_err()
+                .to_string()
+                .contains("invalid kafka topic regex")
+        );
     }
 }

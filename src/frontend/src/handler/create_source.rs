@@ -20,6 +20,7 @@ use anyhow::{Context, anyhow};
 use either::Either;
 use external_schema::debezium::extract_debezium_avro_table_pk_columns;
 use external_schema::nexmark::check_nexmark_schema;
+use fancy_regex::Regex;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap, hashset};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -804,7 +805,37 @@ pub fn bind_connector_props(
             .entry("server.id".to_owned())
             .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
+
     Ok((with_properties, refresh_mode))
+}
+
+fn validate_kafka_topic_selector(with_properties: &impl WithPropertiesExt) -> Result<()> {
+    if with_properties.get_connector().as_deref() != Some(KAFKA_CONNECTOR) {
+        return Ok(());
+    }
+
+    let topic = with_properties.get("topic");
+    let topic_regex = with_properties
+        .get("topic.regex")
+        .or_else(|| with_properties.get("topic_regex"));
+
+    match (topic, topic_regex) {
+        (Some(_), Some(_)) => Err(RwError::from(ProtocolError(
+            "properties `topic` and `topic.regex` are mutually exclusive".to_owned(),
+        ))),
+        (None, None) => Err(RwError::from(ProtocolError(
+            "must specify either properties `topic` or `topic.regex`".to_owned(),
+        ))),
+        (_, Some(pattern)) => {
+            Regex::new(pattern).map_err(|err| {
+                RwError::from(ProtocolError(format!(
+                    "invalid kafka topic regex `{pattern}`: {err}"
+                )))
+            })?;
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// When the schema can be inferred from external system (like schema registry),
@@ -987,6 +1018,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
             session,
             Some(TelemetryDatabaseObject::Source),
         )?;
+    validate_kafka_topic_selector(&with_properties)?;
     ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_CONNECTOR)?;
 
     // if not using connection, we don't need to check connector match connection type
@@ -1412,8 +1444,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_source_addition_columns() {
         // test derive include column for format plain
-        let sql =
-            "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka') format plain encode json".to_owned();
+        let sql = "CREATE SOURCE s (v1 int) include key as _rw_kafka_key with (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:9092', topic = 't') format plain encode json".to_owned();
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
         let session = frontend.session_ref();

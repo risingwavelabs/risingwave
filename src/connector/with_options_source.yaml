@@ -417,9 +417,16 @@ KafkaProperties:
     required: false
   - name: topic
     field_type: String
-    required: true
+    required: false
     alias:
     - kafka.topic
+  - name: topic.regex
+    field_type: String
+    required: false
+    alias:
+    - kafka.topic.regex
+    - topic_regex
+    - kafka.topic_regex
   - name: properties.sync.call.timeout
     field_type: Duration
     required: false
