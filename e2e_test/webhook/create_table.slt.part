@@ -105,12 +105,32 @@ WITH (
   connector = 'webhook'
 );
 
-# Negative test: INCLUDE header with unsupported data type should fail
+# Negative test: INCLUDE header with unsupported data type (INT) should fail
 statement error invalid additional column data type
 create table bad_include_type (
   data JSONB
 )
 INCLUDE header 'x-event-type' AS event_type INT
+WITH (
+  connector = 'webhook'
+);
+
+# Negative test: INCLUDE header with BYTEA should fail for webhook
+statement error Webhook INCLUDE header columns must be VARCHAR
+create table bad_include_bytea (
+  data JSONB
+)
+INCLUDE header 'x-event-type' AS event_type BYTEA
+WITH (
+  connector = 'webhook'
+);
+
+# Negative test: INCLUDE header (all-headers form) should fail for webhook
+statement error all-headers column.*not supported for webhook
+create table bad_include_all_headers (
+  data JSONB
+)
+INCLUDE header AS all_headers
 WITH (
   connector = 'webhook'
 );

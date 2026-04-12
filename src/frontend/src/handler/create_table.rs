@@ -32,6 +32,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::MetaBackend;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -1170,6 +1171,29 @@ pub(super) async fn handle_create_table_plan(
             let context = OptimizerContext::new(handler_args, explain_options);
 
             if !include_column_options.is_empty() && props.webhook_info.is_some() {
+                // Validate webhook-specific INCLUDE restrictions before processing.
+                for item in &include_column_options {
+                    if item.column_type.real_value().eq_ignore_ascii_case("header")
+                        && item.inner_field.is_none()
+                    {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "INCLUDE header (all-headers column) is not supported for webhook sources. Use INCLUDE header '<header-name>' AS <column> VARCHAR to extract individual headers."
+                                .to_owned(),
+                        )
+                        .into());
+                    }
+                    if let Some(ref dt) = item.header_inner_expect_type {
+                        let bound = bind_data_type(dt)?;
+                        if bound != DataType::Varchar {
+                            return Err(ErrorCode::InvalidInputSyntax(format!(
+                                "Webhook INCLUDE header columns must be VARCHAR, got {}. Use: INCLUDE header '<header-name>' AS <column> VARCHAR",
+                                bound
+                            ))
+                            .into());
+                        }
+                    }
+                }
+
                 // Webhook table with INCLUDE header columns: process them before
                 // generating the plan so they appear in the table catalog.
                 let mut columns = bind_sql_columns(&column_defs, false)?;

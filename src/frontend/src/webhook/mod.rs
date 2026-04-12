@@ -22,7 +22,7 @@ use axum::body::Bytes;
 use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::routing::post;
-use risingwave_common::array::{Array, ArrayBuilder, ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::catalog::TableId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, JsonbVal, Scalar};
@@ -296,8 +296,15 @@ pub(super) mod handlers {
                         }
                         body_col_idx = Some(table_col_idx as u32);
                     }
-                    _ => {
-                        // Other additional column types — skip for now.
+                    Some(other) => {
+                        return Err(err(
+                            anyhow!(
+                                "Webhook table `{}` contains unsupported additional column type {:?}",
+                                table,
+                                other
+                            ),
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                        ));
                     }
                 }
             }
