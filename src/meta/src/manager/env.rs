@@ -125,6 +125,8 @@ pub struct MetaOpts {
     pub iceberg_gc_interval_sec: u64,
     /// Maximum time to wait for an iceberg compaction task report before the lease expires.
     pub iceberg_compaction_report_timeout_sec: u64,
+    /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it.
+    pub iceberg_compaction_config_refresh_interval_sec: u64,
     pub time_travel_vacuum_interval_sec: u64,
     pub time_travel_vacuum_max_version_count: Option<u32>,
     /// Interval of hummock version checkpoint.
@@ -330,6 +332,7 @@ impl MetaOpts {
             vacuum_spin_interval_ms: 0,
             iceberg_gc_interval_sec: 3600,
             iceberg_compaction_report_timeout_sec: 30 * 60,
+            iceberg_compaction_config_refresh_interval_sec: 60,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             checkpoint_compression_algorithm:

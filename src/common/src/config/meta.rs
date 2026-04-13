@@ -175,6 +175,11 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::iceberg_compaction_report_timeout_sec")]
     pub iceberg_compaction_report_timeout_sec: u64,
 
+    /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it from
+    /// meta catalog.
+    #[serde(default = "default::meta::iceberg_compaction_config_refresh_interval_sec")]
+    pub iceberg_compaction_config_refresh_interval_sec: u64,
+
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
@@ -693,6 +698,10 @@ pub mod default {
 
         pub fn iceberg_compaction_report_timeout_sec() -> u64 {
             30 * 60
+        }
+
+        pub fn iceberg_compaction_config_refresh_interval_sec() -> u64 {
+            60
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
