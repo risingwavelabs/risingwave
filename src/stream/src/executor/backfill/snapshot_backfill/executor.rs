@@ -1116,3 +1116,485 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     }
     trace!(?barrier_epoch, "finish consuming snapshot");
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_hummock_test::test_utils::{HummockTestEnv, prepare_hummock_test_env};
+    use risingwave_rpc_client::HummockMetaClient;
+    use risingwave_storage::hummock::HummockStorage;
+    use risingwave_storage::table::batch_table::BatchTable;
+    use tokio::sync::mpsc::unbounded_channel;
+    use tokio::time::{Duration, timeout};
+
+    use super::*;
+    use crate::common::table::state_table::{
+        StateTable, StateTableBuilder, StateTableOpConsistencyLevel,
+    };
+    use crate::common::table::test_utils::gen_pbtable_with_value_indices;
+    use crate::executor::exchange::input::{Input, LocalInput};
+    use crate::executor::exchange::permit::channel_for_test;
+    use crate::executor::{ActorContext, DispatcherMessage, ExecutorInfo, MergeExecutorUpstream};
+    use crate::task::LocalBarrierManager;
+
+    const SOURCE_TABLE_ID: TableId = TableId::new(0x233);
+    const PROGRESS_TABLE_ID: TableId = TableId::new(0x234);
+
+    fn source_table_pb() -> risingwave_pb::catalog::PbTable {
+        gen_pbtable_with_value_indices(
+            SOURCE_TABLE_ID,
+            vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
+            vec![OrderType::ascending()],
+            vec![0],
+            0,
+            vec![0],
+        )
+    }
+
+    fn progress_table_pb() -> risingwave_pb::catalog::PbTable {
+        gen_pbtable_with_value_indices(
+            PROGRESS_TABLE_ID,
+            vec![
+                ColumnDesc::unnamed(ColumnId::new(0), DataType::Int16),
+                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
+                ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64),
+                ColumnDesc::unnamed(ColumnId::new(3), DataType::Boolean),
+                ColumnDesc::unnamed(ColumnId::new(4), DataType::Int64),
+            ],
+            vec![OrderType::ascending()],
+            vec![0],
+            1,
+            vec![1, 2, 3, 4],
+        )
+    }
+
+    fn source_batch_table(store: HummockStorage) -> BatchTable<HummockStorage> {
+        BatchTable::for_test(
+            store,
+            SOURCE_TABLE_ID,
+            vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64)],
+            vec![OrderType::ascending()],
+            vec![0],
+            vec![0],
+        )
+    }
+
+    async fn source_state_table(store: HummockStorage) -> StateTable<HummockStorage> {
+        StateTableBuilder::new(&source_table_pb(), store, None)
+            .with_op_consistency_level(StateTableOpConsistencyLevel::LogStoreEnabled)
+            .forbid_preload_all_rows()
+            .build()
+            .await
+    }
+
+    async fn progress_state_table(store: HummockStorage) -> StateTable<HummockStorage> {
+        StateTable::from_table_catalog(&progress_table_pb(), store, None).await
+    }
+
+    async fn commit_insert_epoch(
+        test_env: &HummockTestEnv,
+        source_state_table: &mut StateTable<HummockStorage>,
+        epoch: &mut EpochPair,
+        table_ids: HashSet<TableId>,
+        values: &[i64],
+    ) {
+        for value in values {
+            source_state_table.insert(OwnedRow::new(vec![Some((*value).into())]));
+        }
+        epoch.inc_for_test();
+        test_env.storage.start_epoch(epoch.curr, table_ids);
+        source_state_table.commit_for_test(*epoch).await.unwrap();
+        let res = test_env
+            .storage
+            .seal_and_sync_epoch(epoch.prev, HashSet::from_iter([SOURCE_TABLE_ID]))
+            .await
+            .unwrap();
+        test_env
+            .meta_client
+            .commit_epoch_with_change_log(epoch.prev, res, Some(vec![epoch.prev]))
+            .await
+            .unwrap();
+        test_env
+            .storage
+            .wait_version(test_env.manager.get_current_version().await)
+            .await;
+    }
+
+    fn start_progress_epochs(test_env: &HummockTestEnv, max_epoch: u64) {
+        for epoch in 1..=max_epoch {
+            test_env
+                .storage
+                .start_epoch(test_epoch(epoch), HashSet::from_iter([PROGRESS_TABLE_ID]));
+        }
+    }
+
+    fn make_upstream_input(
+        barrier_manager: LocalBarrierManager,
+        actor_ctx: ActorContextRef,
+        rx: crate::executor::exchange::permit::Receiver,
+    ) -> MergeExecutorInput {
+        MergeExecutorInput::new(
+            MergeExecutorUpstream::Singleton(LocalInput::new(rx, 1001.into()).boxed_input()),
+            actor_ctx,
+            1919.into(),
+            barrier_manager,
+            Arc::new(StreamingMetrics::unused()),
+            ExecutorInfo::for_test(
+                Schema::new(vec![Field::unnamed(DataType::Int64)]),
+                vec![0],
+                "SnapshotBackfillUpstream".to_owned(),
+                0,
+            ),
+        )
+    }
+
+    async fn expect_barrier_with_timeout(
+        executor: &mut BoxedMessageStream,
+        reason: &str,
+    ) -> Barrier {
+        let message = timeout(Duration::from_secs(10), executor.next())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for barrier: {reason}"))
+            .unwrap()
+            .unwrap();
+        match message {
+            Message::Barrier(barrier) => barrier,
+            other => panic!("expected barrier for {reason}, got {other:?}"),
+        }
+    }
+
+    async fn expect_chunk_with_timeout(
+        executor: &mut BoxedMessageStream,
+        reason: &str,
+    ) -> StreamChunk {
+        let message = timeout(Duration::from_secs(10), executor.next())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for chunk: {reason}"))
+            .unwrap()
+            .unwrap();
+        match message {
+            Message::Chunk(chunk) => chunk,
+            other => panic!("expected chunk for {reason}, got {other:?}"),
+        }
+    }
+
+    async fn expect_pending_with_timeout(executor: &mut BoxedMessageStream, reason: &str) {
+        assert!(
+            timeout(Duration::from_millis(200), executor.next())
+                .await
+                .is_err(),
+            "executor unexpectedly produced a message while waiting for {reason}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_backfill_without_upstream_on_hummock() {
+        let source_env = prepare_hummock_test_env().await;
+        source_env.register_table(source_table_pb()).await;
+        let progress_env = prepare_hummock_test_env().await;
+        progress_env.register_table(progress_table_pb()).await;
+
+        let mut source_state_table = source_state_table(source_env.storage.clone()).await;
+        let source_table = source_batch_table(source_env.storage.clone());
+        let progress_state_table = progress_state_table(progress_env.storage.clone()).await;
+
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+        source_env
+            .storage
+            .start_epoch(epoch.curr, HashSet::from_iter([SOURCE_TABLE_ID]));
+        source_state_table.init_epoch(epoch).await.unwrap();
+
+        commit_insert_epoch(
+            &source_env,
+            &mut source_state_table,
+            &mut epoch,
+            HashSet::from_iter([SOURCE_TABLE_ID]),
+            &[1],
+        )
+        .await;
+        commit_insert_epoch(
+            &source_env,
+            &mut source_state_table,
+            &mut epoch,
+            HashSet::from_iter([SOURCE_TABLE_ID]),
+            &[2],
+        )
+        .await;
+        commit_insert_epoch(
+            &source_env,
+            &mut source_state_table,
+            &mut epoch,
+            HashSet::from_iter([SOURCE_TABLE_ID]),
+            &[3],
+        )
+        .await;
+        commit_insert_epoch(
+            &source_env,
+            &mut source_state_table,
+            &mut epoch,
+            HashSet::from_iter([SOURCE_TABLE_ID]),
+            &[],
+        )
+        .await;
+        start_progress_epochs(&progress_env, 5);
+
+        let barrier_manager = LocalBarrierManager::for_test();
+        let progress = CreateMviewProgressReporter::for_test(barrier_manager);
+        let actor_ctx = ActorContext::for_test(1234);
+        let (barrier_tx, barrier_rx) = unbounded_channel();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(1)))
+            .unwrap();
+
+        let mut executor = SnapshotBackfillExecutor::new(
+            source_table,
+            progress_state_table,
+            None,
+            vec![0],
+            actor_ctx,
+            progress,
+            1024,
+            RateLimit::Disabled,
+            barrier_rx,
+            Arc::new(StreamingMetrics::unused()),
+            Some(test_epoch(3)),
+        )
+        .boxed()
+        .execute();
+
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "initial injected barrier")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(1)).epoch
+        );
+        assert_eq!(
+            expect_chunk_with_timeout(&mut executor, "snapshot chunk without upstream").await,
+            StreamChunk::from_pretty(
+                " I
+                + 1
+                + 2
+                + 3"
+            )
+        );
+        expect_pending_with_timeout(&mut executor, "snapshot finish barrier 2").await;
+
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(2)))
+            .unwrap();
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "snapshot progress barrier 2")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(2)).epoch
+        );
+
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(3)))
+            .unwrap();
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "snapshot progress barrier 3")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(3)).epoch
+        );
+
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(4)))
+            .unwrap();
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "post-snapshot barrier 4")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(4)).epoch
+        );
+
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(5)))
+            .unwrap();
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "steady-state barrier 5")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(5)).epoch
+        );
+
+        expect_pending_with_timeout(&mut executor, "next local barrier").await;
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_backfill_with_upstream_on_hummock() {
+        let source_env = prepare_hummock_test_env().await;
+        source_env.register_table(source_table_pb()).await;
+        let progress_env = prepare_hummock_test_env().await;
+        progress_env.register_table(progress_table_pb()).await;
+
+        let mut source_state_table = source_state_table(source_env.storage.clone()).await;
+        let source_table = source_batch_table(source_env.storage.clone());
+        let progress_state_table = progress_state_table(progress_env.storage.clone()).await;
+
+        let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+        source_env
+            .storage
+            .start_epoch(epoch.curr, HashSet::from_iter([SOURCE_TABLE_ID]));
+        source_state_table.init_epoch(epoch).await.unwrap();
+
+        commit_insert_epoch(
+            &source_env,
+            &mut source_state_table,
+            &mut epoch,
+            HashSet::from_iter([SOURCE_TABLE_ID]),
+            &[],
+        )
+        .await;
+        commit_insert_epoch(
+            &source_env,
+            &mut source_state_table,
+            &mut epoch,
+            HashSet::from_iter([SOURCE_TABLE_ID]),
+            &[],
+        )
+        .await;
+        commit_insert_epoch(
+            &source_env,
+            &mut source_state_table,
+            &mut epoch,
+            HashSet::from_iter([SOURCE_TABLE_ID]),
+            &[],
+        )
+        .await;
+        commit_insert_epoch(
+            &source_env,
+            &mut source_state_table,
+            &mut epoch,
+            HashSet::from_iter([SOURCE_TABLE_ID]),
+            &[4],
+        )
+        .await;
+        start_progress_epochs(&progress_env, 6);
+
+        let barrier_manager = LocalBarrierManager::for_test();
+        let progress = CreateMviewProgressReporter::for_test(barrier_manager.clone());
+        let actor_ctx = ActorContext::for_test(1235);
+        let (barrier_tx, barrier_rx) = unbounded_channel();
+        let (upstream_tx, upstream_rx) = channel_for_test();
+
+        upstream_tx
+            .send(
+                DispatcherMessage::Barrier(
+                    Barrier::new_test_barrier(test_epoch(5)).into_dispatcher(),
+                )
+                .into(),
+            )
+            .await
+            .unwrap();
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(1)))
+            .unwrap();
+
+        let mut executor = SnapshotBackfillExecutor::new(
+            source_table,
+            progress_state_table,
+            Some(make_upstream_input(
+                barrier_manager,
+                actor_ctx.clone(),
+                upstream_rx,
+            )),
+            vec![0],
+            actor_ctx,
+            progress,
+            1024,
+            RateLimit::Disabled,
+            barrier_rx,
+            Arc::new(StreamingMetrics::unused()),
+            Some(test_epoch(3)),
+        )
+        .boxed()
+        .execute();
+
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "initial injected barrier")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(1)).epoch
+        );
+        expect_pending_with_timeout(&mut executor, "snapshot finish barrier 2").await;
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(2)))
+            .unwrap();
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "snapshot progress barrier 2")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(2)).epoch
+        );
+
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(3)))
+            .unwrap();
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "snapshot progress barrier 3")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(3)).epoch
+        );
+
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(4)))
+            .unwrap();
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "snapshot completion barrier 4")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(4)).epoch
+        );
+
+        barrier_tx
+            .send(Barrier::new_test_barrier(test_epoch(5)))
+            .unwrap();
+        assert_eq!(
+            expect_chunk_with_timeout(&mut executor, "log-store replay chunk").await,
+            StreamChunk::from_pretty(
+                " I
+                + 4"
+            )
+        );
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "log-store completion barrier")
+                .await
+                .epoch,
+            Barrier::new_test_barrier(test_epoch(5)).epoch
+        );
+
+        upstream_tx
+            .send(DispatcherMessage::Chunk(StreamChunk::from_pretty(" I\n + 5")).into())
+            .await
+            .unwrap();
+        let stop_barrier = Barrier::new_test_barrier(test_epoch(6)).with_stop();
+        upstream_tx
+            .send(DispatcherMessage::Barrier(stop_barrier.clone().into_dispatcher()).into())
+            .await
+            .unwrap();
+        barrier_tx.send(stop_barrier.clone()).unwrap();
+
+        assert_eq!(
+            expect_chunk_with_timeout(&mut executor, "live upstream chunk after handoff").await,
+            StreamChunk::from_pretty(" I\n + 5")
+        );
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "final stop barrier")
+                .await
+                .epoch,
+            stop_barrier.epoch
+        );
+    }
+}
