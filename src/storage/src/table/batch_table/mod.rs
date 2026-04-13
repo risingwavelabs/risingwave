@@ -792,7 +792,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             .collect_vec();
 
         let prefix_hint = if self.read_prefix_len_hint != 0
-            && self.read_prefix_len_hint <= pk_prefix.len()
+            && self.read_prefix_len_hint == pk_prefix.len()
         {
             let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
                 start_key
