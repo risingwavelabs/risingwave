@@ -57,7 +57,6 @@ type CompactorChangeTx =
 type CompactorChangeRx =
     UnboundedReceiver<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
-const DEFAULT_ICEBERG_TRIGGER_SNAPSHOT_COUNT: usize = 10;
 const ICEBERG_COMPACTION_CONFIG_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Compaction track states using type-safe state machine pattern
@@ -107,17 +106,6 @@ impl CompactionTrack {
                 next_compaction_time: now + Duration::from_secs(trigger_interval_sec),
             },
         }
-    }
-
-    fn new_fallback(compaction_interval: u64, report_timeout: Duration, now: Instant) -> Self {
-        Self::new(
-            TaskType::Full,
-            compaction_interval,
-            // Preserve the legacy fallback threshold when sink config cannot be loaded yet.
-            DEFAULT_ICEBERG_TRIGGER_SNAPSHOT_COUNT,
-            report_timeout,
-            now,
-        )
     }
 
     /// Determines if compaction should be triggered.
@@ -470,24 +458,16 @@ impl IcebergCompactionManager {
         sink_id: SinkId,
         track_missing_at_check: bool,
         refreshed_config: Option<&IcebergConfig>,
-        compaction_interval: u64,
         now: Instant,
     ) -> Option<&'a mut CompactionTrack> {
         match guard.sink_schedules.entry(sink_id) {
             std::collections::hash_map::Entry::Occupied(entry) => Some(entry.into_mut()),
             std::collections::hash_map::Entry::Vacant(entry) => {
-                if !track_missing_at_check {
+                if !track_missing_at_check || refreshed_config.is_none() {
                     return None;
                 }
 
-                let track = match refreshed_config {
-                    Some(config) => self.create_compaction_track(config, now),
-                    None => CompactionTrack::new_fallback(
-                        compaction_interval,
-                        self.report_timeout(),
-                        now,
-                    ),
-                };
+                let track = self.create_compaction_track(refreshed_config.unwrap(), now);
                 Some(entry.insert(track))
             }
         }
@@ -558,8 +538,6 @@ impl IcebergCompactionManager {
     pub async fn update_iceberg_commit_info(&self, msg: IcebergSinkCompactionUpdate) {
         let IcebergSinkCompactionUpdate {
             sink_id,
-            compaction_interval,
-            commit_count_delta,
             force_compaction,
         } = msg;
         let now = Instant::now();
@@ -574,27 +552,32 @@ impl IcebergCompactionManager {
             .maybe_load_schedule_config(sink_id, should_refresh_config)
             .await;
 
-        // Manager-side sink config is authoritative for existing tracks. The runtime
-        // `compaction_interval` hint is only used to bootstrap a missing track when
-        // config load/create fails, so interval changes can lag until the next refresh.
         let mut guard = self.inner.write();
         let Some(track) = self.resolve_track_for_update(
             &mut guard,
             sink_id,
             track_missing_at_check,
             refreshed_config.as_ref(),
-            compaction_interval,
             now,
         ) else {
-            tracing::warn!(
-                sink_id = %sink_id,
-                "Ignoring iceberg compaction update because track disappeared before apply"
-            );
+            if track_missing_at_check && refreshed_config.is_none() {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    "Ignoring iceberg compaction update because sink config is unavailable"
+                );
+            } else {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    "Ignoring iceberg compaction update because track disappeared before apply"
+                );
+            }
             return;
         };
         Self::apply_schedule_refresh(track, refreshed_config.as_ref(), should_refresh_config, now);
 
-        track.record_commit(commit_count_delta);
+        if !force_compaction {
+            track.record_commit(1);
+        }
         if force_compaction {
             track.record_force_compaction(now);
         }
@@ -1390,28 +1373,6 @@ mod tests {
     }
 
     #[test]
-    fn test_new_fallback_track_uses_update_interval_hint() {
-        let now = Instant::now();
-        let track = CompactionTrack::new_fallback(45, Duration::from_secs(17), now);
-
-        assert_eq!(track.task_type, TaskType::Full);
-        assert_eq!(track.trigger_interval_sec, 45);
-        assert_eq!(
-            track.trigger_snapshot_count,
-            DEFAULT_ICEBERG_TRIGGER_SNAPSHOT_COUNT
-        );
-        assert_eq!(track.report_timeout, Duration::from_secs(17));
-        assert_eq!(track.last_config_refresh_at, now);
-        assert_eq!(track.pending_commit_count, 0);
-        match track.state {
-            CompactionTrackState::Idle {
-                next_compaction_time,
-            } => assert_eq!(next_compaction_time, now + Duration::from_secs(45)),
-            CompactionTrackState::Processing { .. } => panic!("fallback track should start idle"),
-        }
-    }
-
-    #[test]
     fn test_needs_config_refresh_respects_ttl() {
         let now = Instant::now();
         let track = new_track(now, 120, 10, 1);
@@ -1471,41 +1432,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_iceberg_commit_info_uses_interval_hint_for_missing_track_on_load_failure()
-    {
+    async fn test_update_iceberg_commit_info_skips_missing_track_on_load_failure() {
         let manager = build_test_manager().await;
         let sink_id = SinkId::new(42);
-        let before = Instant::now();
 
         manager
             .update_iceberg_commit_info(IcebergSinkCompactionUpdate {
                 sink_id,
-                compaction_interval: 45,
-                commit_count_delta: 1,
                 force_compaction: false,
             })
             .await;
 
-        let after = Instant::now();
         let guard = manager.inner.read();
-        let track = guard.sink_schedules.get(&sink_id).unwrap();
-        assert_eq!(track.trigger_interval_sec, 45);
-        assert_eq!(
-            track.trigger_snapshot_count,
-            DEFAULT_ICEBERG_TRIGGER_SNAPSHOT_COUNT
-        );
-        assert_eq!(track.pending_commit_count, 1);
-        assert!(track.last_config_refresh_at >= before);
-        assert!(track.last_config_refresh_at <= after);
-        match track.state {
-            CompactionTrackState::Idle {
-                next_compaction_time,
-            } => {
-                assert!(next_compaction_time >= before + Duration::from_secs(45));
-                assert!(next_compaction_time <= after + Duration::from_secs(45));
-            }
-            CompactionTrackState::Processing { .. } => panic!("fallback track should stay idle"),
-        }
+        assert!(!guard.sink_schedules.contains_key(&sink_id));
     }
 
     #[tokio::test]
@@ -1521,8 +1460,6 @@ mod tests {
         manager
             .update_iceberg_commit_info(IcebergSinkCompactionUpdate {
                 sink_id,
-                compaction_interval: 45,
-                commit_count_delta: 2,
                 force_compaction: false,
             })
             .await;
@@ -1531,7 +1468,7 @@ mod tests {
         let track = guard.sink_schedules.get(&sink_id).unwrap();
         assert_eq!(track.trigger_interval_sec, 120);
         assert_eq!(track.trigger_snapshot_count, 7);
-        assert_eq!(track.pending_commit_count, 5);
+        assert_eq!(track.pending_commit_count, 4);
         assert!(track.last_config_refresh_at > stale_refresh_at);
     }
 
@@ -1542,7 +1479,20 @@ mod tests {
         let now = Instant::now();
         let mut guard = manager.inner.write();
 
-        let track = manager.resolve_track_for_update(&mut guard, sink_id, false, None, 45, now);
+        let track = manager.resolve_track_for_update(&mut guard, sink_id, false, None, now);
+
+        assert!(track.is_none());
+        assert!(!guard.sink_schedules.contains_key(&sink_id));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_track_for_update_requires_config_for_missing_track() {
+        let manager = build_test_manager().await;
+        let sink_id = SinkId::new(45);
+        let now = Instant::now();
+        let mut guard = manager.inner.write();
+
+        let track = manager.resolve_track_for_update(&mut guard, sink_id, true, None, now);
 
         assert!(track.is_none());
         assert!(!guard.sink_schedules.contains_key(&sink_id));

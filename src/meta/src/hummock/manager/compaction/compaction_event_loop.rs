@@ -433,6 +433,9 @@ impl<D: CompactionEventDispatcher<EventType = E::EventType>, E: CompactorStreamE
         let shutdown_rx_shared = shutdown_rx.shared();
 
         let join_handle = tokio::spawn(async move {
+            // A compactor reconnect reuses the same `context_id`, so an older stream may still
+            // resolve after a newer stream has already been registered. Track a local generation
+            // per context to fence off stale stream results from the previous session.
             let mut stream_generations = HashMap::<HummockContextId, u64>::new();
             let push_stream =
                 |context_id: HummockContextId,
@@ -479,6 +482,9 @@ impl<D: CompactionEventDispatcher<EventType = E::EventType>, E: CompactorStreamE
                             continue;
                         };
                         if current_generation != stream_generation {
+                            // Ignore events, EOF and poll errors from superseded streams. Without
+                            // this fence, a late error from an old stream could remove the current
+                            // compactor session for the same `context_id`.
                             continue;
                         }
                         let (event, create_at, stream) = match compactor_stream_req {

@@ -17,14 +17,5 @@ use crate::sink::catalog::SinkId;
 pub struct IcebergSinkCompactionUpdate {
     // runtime event information
     pub sink_id: SinkId,
-
-    /// Bootstrap fallback interval hint used when the manager cannot load sink config
-    /// for a missing track yet. The manager remains the source of truth for refreshed
-    /// schedule config once the track exists.
-    pub compaction_interval: u64,
-
-    /// Number of newly committed sink epochs since the last update.
-    pub commit_count_delta: usize,
-
     pub force_compaction: bool,
 }
