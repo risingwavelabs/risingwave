@@ -113,15 +113,15 @@ The row store and Iceberg layer serve different purposes: the row store is for l
 ## Design decisions
 
 ### Ultimate cost efficiency
- 
+
 Internal state, tables, and materialized views are stored in object storage (S3 or equivalent), which is roughly 100x cheaper than RAM. This enables elastic scaling without data rebalancing and failure recovery in seconds. For latency-sensitive workloads, [elastic disk cache](https://docs.risingwave.com/get-started/disk-cache) pins hot data on local SSD or EBS, keeping p99 query latency at 10-20 ms.
- 
+
 ### Native experience for both humans and agents
- 
+
 RisingWave connects via the PostgreSQL wire protocol and works with psql, JDBC, and any Postgres-compatible tooling. For agents, RisingWave provides a MCP server, a CLI, and Skills, so agents can query and operate RisingWave without custom integration.
- 
+
 ### Openness
- 
+
 RisingWave [natively integrates with Apache Iceberg™](https://docs.risingwave.com/iceberg/overview) for continuous stream ingestion, direct reads via DataFusion, and automated table maintenance. Data in Iceberg is in an open format and accessible to any compatible query engine.
 
 ---
