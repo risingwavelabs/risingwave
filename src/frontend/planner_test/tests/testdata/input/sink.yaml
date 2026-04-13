@@ -138,7 +138,7 @@
     );
   expected_outputs:
     - explain_output
-- id: create_mock_iceberg_v3_sink_no_eq_delete
+- id: create_mock_iceberg_v3_sink_with_pk_index
   sql: |
     create table t1 (v1 int, v2 bigint, v3 varchar, v4 time);
     explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
@@ -178,7 +178,7 @@
     );
   expected_outputs:
     - explain_output
-- id: create_mock_iceberg_v3_sink_no_eq_delete_range_partition
+- id: create_mock_iceberg_v3_sink_with_pk_index_range_partition
   sql: |
     create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
     explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (

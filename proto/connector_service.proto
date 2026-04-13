@@ -225,12 +225,12 @@ service ConnectorService {
   rpc ValidateSource(ValidateSourceRequest) returns (ValidateSourceResponse);
 }
 
-enum CoordinationRole {
-  COORDINATION_ROLE_DEFAULT = 0;
-  COORDINATION_ROLE_DV_MERGER = 1;
-}
-
 message CoordinateRequest {
+  enum CoordinationRole {
+    UNSPECIFIED = 0;
+    DV_MERGER = 1;
+  }
+
   // The first request that starts a coordination between sink writer and coordinator.
   // The service will respond after sink writers of all vnodes have sent the request.
   message StartCoordinationRequest {

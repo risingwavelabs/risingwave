@@ -12,37 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use anyhow::anyhow;
 use itertools::Itertools;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnCatalog;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkMetaClient, SinkParam};
-use risingwave_pb::connector_service::CoordinationRole;
-use risingwave_pb::stream_plan::IcebergNoEqDeleteWriterNode;
+use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
+use risingwave_pb::stream_plan::IcebergWithPkIndexDvMergerNode;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
-use crate::executor::iceberg_no_eq_delete::{
-    CoordinatorStreamHandleInit, IcebergWriterImpl, WriterExecutor,
+use crate::executor::iceberg_with_pk_index::{
+    CoordinatorStreamHandleInit, DvHandlerImpl, DvMergerExecutor,
 };
 use crate::executor::{Executor, StreamExecutorError};
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
 
-pub struct IcebergNoEqDeleteWriterExecutorBuilder;
+pub struct IcebergWithPkIndexDvMergerExecutorBuilder;
 
-impl ExecutorBuilder for IcebergNoEqDeleteWriterExecutorBuilder {
-    type Node = IcebergNoEqDeleteWriterNode;
+impl ExecutorBuilder for IcebergWithPkIndexDvMergerExecutorBuilder {
+    type Node = IcebergWithPkIndexDvMergerNode;
 
     async fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
-        store: impl StateStore,
+        _store: impl StateStore,
     ) -> StreamResult<Executor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
 
@@ -105,7 +104,7 @@ impl ExecutorBuilder for IcebergNoEqDeleteWriterExecutorBuilder {
                 .filter(|col| !col.is_hidden)
                 .map(|col| col.column_desc.clone())
                 .collect(),
-            downstream_pk: downstream_pk.clone(),
+            downstream_pk,
             sink_type,
             ignore_delete,
             format_desc,
@@ -113,33 +112,21 @@ impl ExecutorBuilder for IcebergNoEqDeleteWriterExecutorBuilder {
             sink_from_name,
         };
 
-        // Build the PK index state table.
-        let pk_index_table = node.pk_index_table.as_ref().unwrap();
-        let vnodes = params.vnode_bitmap.clone().map(Arc::new);
-        let pk_index_state_table = StateTableBuilder::new(pk_index_table, store, vnodes)
-            .enable_preload_all_rows_by_config(&params.config)
-            .build()
-            .await;
-
         // Build IcebergConfig from properties.
         let iceberg_config = IcebergConfig::from_btreemap(properties_with_secret)
             .map_err(|e| StreamExecutorError::from((e, sink_id)))?;
 
-        // Load the Iceberg table after the state table is registered, so the writer actor
-        // does not miss the initial barrier while waiting on remote Iceberg metadata.
+        // Load the Iceberg table.
         let table = iceberg_config
             .load_table()
             .await
             .map_err(|e| StreamExecutorError::from((e, sink_id)))?;
 
-        // Build the real Iceberg writer.
-        let writer =
-            IcebergWriterImpl::build(&iceberg_config, &table, params.actor_context.id, sink_id)?;
+        // Build the real DV handler.
+        let handler = DvHandlerImpl::new(table, params.actor_context.id, sink_id)?;
 
-        // Extract pk indices from the sink desc's downstream_pk.
-        let pk_indices: Vec<usize> = downstream_pk.unwrap_or_default();
-
-        // Build the coordinator stream handle for committing data file metadata.
+        // Build the coordinator stream handle for committing DV metadata.
+        // DV Merger is a singleton executor, use a full vnode bitmap.
         let meta_client = params
             .env
             .meta_client()
@@ -149,20 +136,18 @@ impl ExecutorBuilder for IcebergNoEqDeleteWriterExecutorBuilder {
         let vnode_bitmap = params
             .vnode_bitmap
             .clone()
-            .ok_or_else(|| anyhow!("writer executor should have vnode bitmap"))?;
+            .unwrap_or_else(|| Bitmap::ones(VirtualNode::COUNT_FOR_COMPAT));
         let coordinator_handle_init = CoordinatorStreamHandleInit {
             coordination_client,
             sink_param: sink_param.clone(),
             vnode_bitmap,
-            role: CoordinationRole::Default,
+            role: CoordinationRole::DvMerger,
         };
 
-        let exec = WriterExecutor::new(
+        let exec = DvMergerExecutor::new(
             params.actor_context.clone(),
             input_executor,
-            pk_indices,
-            pk_index_state_table,
-            writer,
+            handler,
             Some(coordinator_handle_init),
         );
 

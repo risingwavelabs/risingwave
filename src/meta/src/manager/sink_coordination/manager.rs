@@ -24,10 +24,8 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{SinkCommittedEpochSubscriber, SinkError, SinkParam};
-use risingwave_pb::connector_service::coordinate_request::Msg;
-use risingwave_pb::connector_service::{
-    CoordinateRequest, CoordinateResponse, CoordinationRole, coordinate_request,
-};
+use risingwave_pb::connector_service::coordinate_request::{CoordinationRole, Msg};
+use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse, coordinate_request};
 use rw_futures_util::pending_on_none;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
@@ -157,7 +155,9 @@ impl SinkCoordinatorManager {
             }) => (
                 SinkParam::from_proto(param),
                 Bitmap::from(&vnode_bitmap),
-                CoordinationRole::try_from(role).unwrap_or(CoordinationRole::Default),
+                CoordinationRole::try_from(role).map_err(|_| {
+                    Status::invalid_argument(format!("invalid coordination role: {role}"))
+                })?,
             ),
             msg => {
                 return Err(Status::invalid_argument(format!(
@@ -437,8 +437,9 @@ mod tests {
         TwoPhaseCommitCoordinator,
     };
     use risingwave_meta_model::SinkSchemachange;
+    use risingwave_pb::connector_service::SinkMetadata;
+    use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
-    use risingwave_pb::connector_service::{CoordinationRole, SinkMetadata};
     use risingwave_pb::data::PbDataType;
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::PbField;
@@ -615,7 +616,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager
@@ -824,7 +825,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager
@@ -949,7 +950,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager
@@ -1063,7 +1064,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager
@@ -1233,7 +1234,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager
@@ -1703,7 +1704,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager
@@ -1835,7 +1836,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager
@@ -2000,7 +2001,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager
@@ -2147,7 +2148,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager
@@ -2328,7 +2329,7 @@ mod tests {
             CoordinatorStreamHandle::new_with_init_stream(
                 param.to_proto(),
                 vnode,
-                CoordinationRole::Default,
+                CoordinationRole::Unspecified,
                 |rx| async {
                     Ok(tonic::Response::new(
                         manager

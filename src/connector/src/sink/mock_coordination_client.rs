@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::bitmap::Bitmap;
+use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
 use risingwave_pb::connector_service::coordinate_response::{
     self, CommitResponse, StartCoordinationResponse,
 };
 use risingwave_pb::connector_service::{
-    CoordinateRequest, CoordinateResponse, CoordinationRole, PbSinkParam, coordinate_request,
+    CoordinateRequest, CoordinateResponse, PbSinkParam, coordinate_request,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{CoordinatorStreamHandle, SinkCoordinationRpcClient};

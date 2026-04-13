@@ -34,7 +34,8 @@ use risingwave_connector::sink::{
     Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam, build_sink,
 };
 use risingwave_meta_model::pending_sink_state::SinkState;
-use risingwave_pb::connector_service::{CoordinationRole, SinkMetadata, coordinate_request};
+use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
+use risingwave_pb::connector_service::{SinkMetadata, coordinate_request};
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;

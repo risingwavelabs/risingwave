@@ -18,12 +18,12 @@ use anyhow::anyhow;
 use futures::{Stream, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::coordinate_request::{
-    CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
+    CommitRequest, CoordinationRole, StartCoordinationRequest, UpdateVnodeBitmapRequest,
 };
 use risingwave_pb::connector_service::coordinate_response::StartCoordinationResponse;
 use risingwave_pb::connector_service::{
-    CoordinateRequest, CoordinateResponse, CoordinationRole, PbSinkParam, SinkMetadata,
-    coordinate_request, coordinate_response,
+    CoordinateRequest, CoordinateResponse, PbSinkParam, SinkMetadata, coordinate_request,
+    coordinate_response,
 };
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use tokio::sync::mpsc::Receiver;

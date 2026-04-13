@@ -15,5 +15,5 @@
 mod dv_merger;
 mod writer;
 
-pub use dv_merger::IcebergNoEqDeleteDvMergerExecutorBuilder;
-pub use writer::IcebergNoEqDeleteWriterExecutorBuilder;
+pub use dv_merger::IcebergWithPkIndexDvMergerExecutorBuilder;
+pub use writer::IcebergWithPkIndexWriterExecutorBuilder;

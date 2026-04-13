@@ -119,7 +119,7 @@ mod watermark_filter;
 mod wrapper;
 
 mod approx_percentile;
-pub mod iceberg_no_eq_delete;
+pub mod iceberg_with_pk_index;
 
 mod row_merge;
 

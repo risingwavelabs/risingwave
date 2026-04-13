@@ -25,8 +25,9 @@ use iceberg::Catalog;
 use iceberg::spec::{MAIN_BRANCH, SerializedDataFile};
 use iceberg::table::Table;
 use iceberg::transaction::FastAppendAction;
+use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
-use risingwave_pb::connector_service::{CoordinationRole, SinkMetadata};
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 
 use super::common::{
@@ -52,7 +53,7 @@ struct V3PreCommitData {
 /// This coordinator receives `IcebergV3CommitPayload` from both `WriterExecutors`
 /// (data files) and `DvMergerExecutors` (DV files), merges them, and commits
 /// a single Iceberg snapshot using `fast_append_with_retry`.
-pub struct IcebergV3SinkCommitter {
+pub struct IcebergWithPkIndexCommitter {
     catalog: Arc<dyn Catalog>,
     table: Table,
     config: IcebergConfig,
@@ -60,7 +61,7 @@ pub struct IcebergV3SinkCommitter {
     commit_retry_num: u32,
 }
 
-impl IcebergV3SinkCommitter {
+impl IcebergWithPkIndexCommitter {
     pub fn new(
         catalog: Arc<dyn Catalog>,
         table: Table,
@@ -79,12 +80,8 @@ impl IcebergV3SinkCommitter {
 }
 
 #[async_trait]
-impl TwoPhaseCommitCoordinator for IcebergV3SinkCommitter {
+impl TwoPhaseCommitCoordinator for IcebergWithPkIndexCommitter {
     async fn init(&mut self) -> Result<()> {
-        tracing::info!(
-            sink_id = %self.sink_id,
-            "Iceberg V3 sink coordinator initialized",
-        );
         Ok(())
     }
 
@@ -94,8 +91,6 @@ impl TwoPhaseCommitCoordinator for IcebergV3SinkCommitter {
         metadata: Vec<SinkMetadata>,
         _schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<Option<Vec<u8>>> {
-        tracing::debug!(epoch, sink_id = %self.sink_id, "V3 pre_commit: start");
-
         let mut all_data_files: Vec<serde_json::Value> = Vec::new();
         let mut all_dv_data_files: Vec<serde_json::Value> = Vec::new();
         let mut schema_id: Option<i32> = None;
@@ -106,7 +101,7 @@ impl TwoPhaseCommitCoordinator for IcebergV3SinkCommitter {
                 Some(Serialized(s)) => &s.metadata,
                 _ => {
                     return Err(SinkError::Coordinator(anyhow!(
-                        "V3 pre_commit: expected Serialized metadata"
+                        "expected serialized metadata for Iceberg V3 commit, but got non-serialized metadata"
                     )));
                 }
             };
@@ -287,6 +282,6 @@ impl TwoPhaseCommitCoordinator for IcebergV3SinkCommitter {
     }
 
     fn roles(&self) -> Arc<[CoordinationRole]> {
-        Arc::from([CoordinationRole::Default, CoordinationRole::DvMerger])
+        Arc::from([CoordinationRole::Unspecified, CoordinationRole::DvMerger])
     }
 }

@@ -38,7 +38,7 @@ pub use dv_merger::DvMergerExecutor;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::mock_coordination_client::SinkCoordinationRpcClientEnum;
-use risingwave_pb::connector_service::CoordinationRole;
+use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
 use risingwave_rpc_client::CoordinatorStreamHandle;
 pub use writer::{IcebergWriter, RowPosition, WriterExecutor};
 pub use writer_impl::IcebergWriterImpl;

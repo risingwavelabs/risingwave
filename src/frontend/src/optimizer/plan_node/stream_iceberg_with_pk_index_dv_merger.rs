@@ -14,7 +14,7 @@
 
 use pretty_xmlish::XmlNode;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_pb::stream_plan::IcebergNoEqDeleteDvMergerNode;
+use risingwave_pb::stream_plan::IcebergWithPkIndexDvMergerNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::stream::prelude::*;
@@ -26,20 +26,20 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-/// `StreamIcebergNoEqDeleteDvMerger` is the stateless singleton executor for the Iceberg V3 sink
+/// `StreamIcebergWithPkIndexDvMerger` is the stateless singleton executor for the Iceberg V3 sink
 /// (no equality delete). It merges delete-position messages from the upstream `WriterExecutor`
 /// with historical deletion vectors and writes merged DV files.
 ///
 /// This node enforces `Distribution::Single` (singleton) — an `Exchange` node is automatically
 /// inserted if the input is not already single-distributed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamIcebergNoEqDeleteDvMerger {
+pub struct StreamIcebergWithPkIndexDvMerger {
     pub base: PlanBase<Stream>,
     pub input: PlanRef,
     pub sink_desc: SinkDesc,
 }
 
-impl StreamIcebergNoEqDeleteDvMerger {
+impl StreamIcebergWithPkIndexDvMerger {
     pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
         // Enforce singleton distribution — inserts Exchange if needed.
         // `streaming_enforce_if_not_satisfies` is infallible.
@@ -66,13 +66,13 @@ impl StreamIcebergNoEqDeleteDvMerger {
     }
 }
 
-impl Distill for StreamIcebergNoEqDeleteDvMerger {
+impl Distill for StreamIcebergWithPkIndexDvMerger {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        childless_record("StreamIcebergNoEqDeleteDvMerger", vec![])
+        childless_record("StreamIcebergWithPkIndexDvMerger", vec![])
     }
 }
 
-impl PlanTreeNodeUnary<Stream> for StreamIcebergNoEqDeleteDvMerger {
+impl PlanTreeNodeUnary<Stream> for StreamIcebergWithPkIndexDvMerger {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -82,16 +82,16 @@ impl PlanTreeNodeUnary<Stream> for StreamIcebergNoEqDeleteDvMerger {
     }
 }
 
-impl_plan_tree_node_for_unary! { Stream, StreamIcebergNoEqDeleteDvMerger }
+impl_plan_tree_node_for_unary! { Stream, StreamIcebergWithPkIndexDvMerger }
 
-impl StreamNode for StreamIcebergNoEqDeleteDvMerger {
+impl StreamNode for StreamIcebergWithPkIndexDvMerger {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
-        NodeBody::IcebergNoEqDeleteDvMerger(Box::new(IcebergNoEqDeleteDvMergerNode {
+        NodeBody::IcebergWithPkIndexDvMerger(Box::new(IcebergWithPkIndexDvMergerNode {
             sink_desc: Some(self.sink_desc.to_proto()),
         }))
     }
 }
 
-impl ExprRewritable<Stream> for StreamIcebergNoEqDeleteDvMerger {}
+impl ExprRewritable<Stream> for StreamIcebergWithPkIndexDvMerger {}
 
-impl ExprVisitable for StreamIcebergNoEqDeleteDvMerger {}
+impl ExprVisitable for StreamIcebergWithPkIndexDvMerger {}

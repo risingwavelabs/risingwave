@@ -14,7 +14,7 @@
 
 pub mod common;
 mod prometheus;
-mod v3_committer;
+mod with_pk_index_committer;
 
 #[cfg(test)]
 mod test;
@@ -85,7 +85,7 @@ use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::catalog::SinkId;
 use crate::sink::coordinate::CoordinatedLogSinker;
-use crate::sink::iceberg::v3_committer::IcebergV3SinkCommitter;
+use crate::sink::iceberg::with_pk_index_committer::IcebergWithPkIndexCommitter;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkParam,
@@ -362,8 +362,8 @@ impl Sink for IcebergSink {
         let table = self.create_and_validate_table().await?;
         let exactly_once = self.config.is_exactly_once.unwrap_or_default();
 
-        if self.config.is_no_eq_delete_sink() {
-            let coordinator = IcebergV3SinkCommitter::new(
+        if self.config.enable_pk_index {
+            let coordinator = IcebergWithPkIndexCommitter::new(
                 catalog,
                 table,
                 self.config.clone(),

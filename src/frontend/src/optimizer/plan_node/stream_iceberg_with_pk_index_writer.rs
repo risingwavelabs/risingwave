@@ -16,7 +16,7 @@ use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_pb::stream_plan::IcebergNoEqDeleteWriterNode;
+use risingwave_pb::stream_plan::IcebergWithPkIndexWriterNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::stream::prelude::*;
@@ -31,20 +31,20 @@ use crate::optimizer::property::{
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-/// `StreamIcebergNoEqDeleteWriter` is the stateful writer executor for the Iceberg V3 sink
+/// `StreamIcebergWithPkIndexWriter` is the stateful writer executor for the Iceberg V3 sink
 /// (no equality delete). It maintains a PK index and writes data files to Iceberg.
 ///
 /// Output schema: `[file_path: Varchar, position: Int64]` — delete-position info for
 /// the downstream `DvMerger`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamIcebergNoEqDeleteWriter {
+pub struct StreamIcebergWithPkIndexWriter {
     pub base: PlanBase<Stream>,
     pub input: PlanRef,
     pub sink_desc: SinkDesc,
     pub pk_index_table: TableCatalog,
 }
 
-impl StreamIcebergNoEqDeleteWriter {
+impl StreamIcebergWithPkIndexWriter {
     pub fn new(input: PlanRef, sink_desc: SinkDesc, pk_index_table: TableCatalog) -> Self {
         let output_schema = Self::output_schema();
         let fd_set = FunctionalDependencySet::new(output_schema.len());
@@ -83,13 +83,13 @@ impl StreamIcebergNoEqDeleteWriter {
     }
 }
 
-impl Distill for StreamIcebergNoEqDeleteWriter {
+impl Distill for StreamIcebergWithPkIndexWriter {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        childless_record("StreamIcebergNoEqDeleteWriter", vec![])
+        childless_record("StreamIcebergWithPkIndexWriter", vec![])
     }
 }
 
-impl PlanTreeNodeUnary<Stream> for StreamIcebergNoEqDeleteWriter {
+impl PlanTreeNodeUnary<Stream> for StreamIcebergWithPkIndexWriter {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -99,22 +99,22 @@ impl PlanTreeNodeUnary<Stream> for StreamIcebergNoEqDeleteWriter {
     }
 }
 
-impl_plan_tree_node_for_unary! { Stream, StreamIcebergNoEqDeleteWriter }
+impl_plan_tree_node_for_unary! { Stream, StreamIcebergWithPkIndexWriter }
 
-impl StreamNode for StreamIcebergNoEqDeleteWriter {
+impl StreamNode for StreamIcebergWithPkIndexWriter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         let pk_index_table = self
             .pk_index_table
             .clone()
             .with_id(state.gen_table_id_wrapped());
 
-        NodeBody::IcebergNoEqDeleteWriter(Box::new(IcebergNoEqDeleteWriterNode {
+        NodeBody::IcebergWithPkIndexWriter(Box::new(IcebergWithPkIndexWriterNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             pk_index_table: Some(pk_index_table.to_internal_table_prost()),
         }))
     }
 }
 
-impl ExprRewritable<Stream> for StreamIcebergNoEqDeleteWriter {}
+impl ExprRewritable<Stream> for StreamIcebergWithPkIndexWriter {}
 
-impl ExprVisitable for StreamIcebergNoEqDeleteWriter {}
+impl ExprVisitable for StreamIcebergWithPkIndexWriter {}

@@ -32,6 +32,7 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 use risingwave_common::bail;
+use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 pub mod jdbc_jni_client;
 pub mod log_store;
@@ -88,7 +89,7 @@ use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_pb::catalog::PbSinkType;
-use risingwave_pb::connector_service::{CoordinationRole, PbSinkParam, SinkMetadata, TableSchema};
+use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_pb::id::ExecutorId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
@@ -858,7 +859,7 @@ pub trait SinglePhaseCommitCoordinator {
     }
 
     fn roles(&self) -> Arc<[CoordinationRole]> {
-        Arc::from([CoordinationRole::Default])
+        Arc::from([CoordinationRole::Unspecified])
     }
 }
 
@@ -895,7 +896,7 @@ pub trait TwoPhaseCommitCoordinator {
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);
 
     fn roles(&self) -> Arc<[CoordinationRole]> {
-        Arc::from([CoordinationRole::Default])
+        Arc::from([CoordinationRole::Unspecified])
     }
 }
 

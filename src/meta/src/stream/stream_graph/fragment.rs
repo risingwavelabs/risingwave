@@ -162,12 +162,12 @@ impl BuildingFragment {
 
                 has_job = true;
             }
-            NodeBody::IcebergNoEqDeleteWriter(node) => {
+            NodeBody::IcebergWithPkIndexWriter(node) => {
                 node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
 
                 has_job = true;
             }
-            NodeBody::IcebergNoEqDeleteDvMerger(node) => {
+            NodeBody::IcebergWithPkIndexDvMerger(node) => {
                 node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
 
                 has_job = true;

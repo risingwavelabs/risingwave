@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 
 use anyhow::Context;
+use hashbrown::HashMap;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::iceberg::common::{DvFileCommitMetadata, IcebergV3CommitPayload};
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
@@ -98,21 +99,6 @@ where
         Ok(())
     }
 
-    /// Extract (`file_path`, position) pairs from a delete position chunk.
-    fn extract_delete_positions(chunk: &StreamChunk) -> Vec<(String, i64)> {
-        let mut positions = Vec::new();
-        for (op, row) in chunk.rows() {
-            debug_assert_eq!(op, risingwave_common::array::Op::Insert);
-            let file_path = row
-                .datum_at(0)
-                .map(|d| d.into_utf8().to_owned())
-                .unwrap_or_default();
-            let offset = row.datum_at(1).map(|d| d.into_int64()).unwrap_or(0);
-            positions.push((file_path, offset));
-        }
-        positions
-    }
-
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mut input = self.input.take().unwrap().execute();
@@ -130,9 +116,20 @@ where
         for msg in input {
             match msg? {
                 Message::Chunk(chunk) => {
-                    let positions = Self::extract_delete_positions(&chunk);
-                    for (file_path, offset) in positions {
-                        pending_deletes.entry(file_path).or_default().insert(offset);
+                    for (op, row) in chunk.rows() {
+                        debug_assert_eq!(op, risingwave_common::array::Op::Insert);
+                        let file_path = row
+                            .datum_at(0)
+                            .map(|d| d.into_utf8())
+                            .context("file_path should not be null")?;
+                        let offset = row
+                            .datum_at(1)
+                            .map(|d| d.into_int64())
+                            .context("position should not be null")?;
+                        pending_deletes
+                            .entry_ref(file_path)
+                            .or_default()
+                            .insert(offset);
                     }
                 }
                 Message::Barrier(barrier) => {
@@ -193,9 +190,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::BTreeSet;
     use std::sync::{Arc, Mutex};
 
+    use hashbrown::HashMap;
     use risingwave_common::array::{Array, ArrayBuilder, I64ArrayBuilder, Op, Utf8ArrayBuilder};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;

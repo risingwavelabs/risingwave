@@ -28,10 +28,11 @@
 //! Uses the iceberg crate's `DeletionVectorWriter` which accepts
 //! `Vec<PositionDeleteInput>` and produces Puffin-format DV files.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use anyhow::Context;
+use hashbrown::HashMap;
 use iceberg::io::FileIO;
 use iceberg::spec::{
     DataContentType, DataFileFormat, FormatVersion, ManifestContentType, SerializedDataFile,
@@ -156,14 +157,6 @@ impl DvHandler for DvHandlerImpl {
     ) -> StreamExecutorResult<Option<DvFileCommitMetadata>> {
         if pending_deletes.is_empty() {
             return Ok(None);
-        }
-
-        if self.format_version < FormatVersion::V3 {
-            return Err(anyhow::anyhow!(
-                "deletion vectors require Iceberg format v3, got {:?}",
-                self.format_version
-            )
-            .into());
         }
 
         // Collect all PositionDeleteInputs, merging with existing DVs per file.

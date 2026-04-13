@@ -13125,6 +13125,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "glob",
+ "hashbrown 0.16.1",
  "hytra",
  "iceberg",
  "indexmap 2.13.0",

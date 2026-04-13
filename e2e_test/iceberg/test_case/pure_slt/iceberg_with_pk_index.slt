@@ -25,7 +25,8 @@ statement ok
 create table t_v3(id int primary key, name varchar, v1 int)
 with(
     commit_checkpoint_interval = 3,
-    format_version = 3
+    format_version = 3,
+    enable_pk_index = true
 ) engine = iceberg;
 
 statement ok
@@ -78,7 +79,7 @@ where schema_name = 'public'
   and source_name = '__iceberg_source_t_v3'
   and content = 'EqualityDeletes';
 ----
-t
+f
 
 query ??? rowsort retry 3 backoff 1s
 select * from t_v3;

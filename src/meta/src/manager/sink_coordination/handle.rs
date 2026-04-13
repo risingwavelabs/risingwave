@@ -18,11 +18,12 @@ use anyhow::anyhow;
 use futures::{TryStreamExt, ready};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::SinkParam;
+use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
 use risingwave_pb::connector_service::coordinate_response::{
     CommitResponse, StartCoordinationResponse,
 };
 use risingwave_pb::connector_service::{
-    CoordinateResponse, CoordinationRole, coordinate_request, coordinate_response,
+    CoordinateResponse, coordinate_request, coordinate_response,
 };
 use tonic::Status;
 

@@ -46,6 +46,7 @@ use risingwave_common::catalog::Schema;
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
+use thiserror_ext::AsReport;
 use tokio_retry::RetryIf;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use url::Url;
@@ -471,6 +472,15 @@ pub struct IcebergConfig {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub write_parquet_max_row_group_rows: Option<usize>,
+
+    /// Whether to enable PK index for upsert sink. Default is false.
+    /// It's only used for V3 upsert iceberg sink to generate delete vectors.
+    #[serde(
+        rename = "enable_pk_index",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub enable_pk_index: bool,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -501,6 +511,38 @@ impl IcebergConfig {
                  Please use 'merge-on-read' instead, which is strictly better for append-only workloads."
             )));
         }
+        Ok(())
+    }
+
+    pub(crate) fn validate_enable_pk_index(&self) -> Result<()> {
+        if !self.enable_pk_index {
+            return Ok(());
+        }
+
+        if self.r#type != SINK_TYPE_UPSERT {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` is only supported for upsert iceberg sink"
+            )));
+        }
+
+        if self.write_mode != IcebergWriteMode::MergeOnRead {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` is only supported for upsert iceberg sink with merge-on-read mode"
+            )));
+        }
+
+        if self.format_version < FormatVersion::V3 {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` is only supported for upsert iceberg sink with format version >= 3"
+            )));
+        }
+
+        if self.force_append_only {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` cannot be true when `force_append_only` is true"
+            )));
+        }
+
         Ok(())
     }
 
@@ -536,6 +578,7 @@ impl IcebergConfig {
 
         // Enforce merge-on-read for append-only sinks
         Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
+        config.validate_enable_pk_index()?;
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = values
@@ -656,13 +699,6 @@ impl IcebergConfig {
     /// Returns SNAPPY as default if parsing fails or not specified
     pub fn get_parquet_compression(&self) -> Compression {
         parse_parquet_compression(self.write_parquet_compression())
-    }
-
-    pub fn is_no_eq_delete_sink(&self) -> bool {
-        self.r#type == SINK_TYPE_UPSERT
-            && !self.force_append_only
-            && self.write_mode == IcebergWriteMode::MergeOnRead
-            && self.format_version >= FormatVersion::V3
     }
 }
 
@@ -1150,7 +1186,7 @@ pub async fn fast_append_with_retry(
         retry_strategy,
         || async {
             let table = catalog.load_table(table_ident).await.map_err(|e| {
-                CommitError::ReloadTable(anyhow::anyhow!("failed to load table: {e}"))
+                CommitError::ReloadTable(anyhow::anyhow!(e).context("failed to load iceberg table"))
             })?;
 
             if let Some(schema_id) = expected_schema_id
@@ -1180,13 +1216,17 @@ pub async fn fast_append_with_retry(
                 .add_data_files(data_files.clone());
 
             let tx = append_action.apply(txn).map_err(|e| {
-                tracing::error!(error = %e, "Failed to apply iceberg transaction");
-                CommitError::Commit(anyhow::anyhow!("failed to apply iceberg transaction: {e}"))
+                tracing::error!(error = %e.as_report(), "Failed to apply iceberg transaction");
+                CommitError::Commit(
+                    anyhow::anyhow!(e).context("failed to apply iceberg transaction"),
+                )
             })?;
 
             tx.commit(catalog.as_ref()).await.map_err(|e| {
-                tracing::error!(error = %e, "Failed to commit iceberg table");
-                CommitError::Commit(anyhow::anyhow!("failed to commit iceberg transaction: {e}"))
+                tracing::error!(error = %e.as_report(), "Failed to commit iceberg table");
+                CommitError::Commit(
+                    anyhow::anyhow!(e).context("failed to commit iceberg transaction"),
+                )
             })
         },
         |e: &CommitError| match e {
@@ -1253,7 +1293,7 @@ pub fn build_data_file_writer_builder(
         ParquetWriterBuilder::new(parquet_writer_properties, schema.clone());
     let target_file_size = (config.target_file_size_mb() * 1024 * 1024) as usize;
     let location_generator = DefaultLocationGenerator::new(table.metadata().clone())
-        .map_err(|e| anyhow::anyhow!("failed to create location generator: {e}"))?;
+        .map_err(|e| anyhow::anyhow!(e).context("failed to create location generator"))?;
     let file_name_generator = DefaultFileNameGenerator::new(
         actor_id_str.to_owned(),
         Some(unique_suffix.to_owned()),

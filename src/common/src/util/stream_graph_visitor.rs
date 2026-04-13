@@ -313,8 +313,8 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "MaterializedExprs");
             }
 
-            NodeBody::IcebergNoEqDeleteWriter(node) => {
-                always!(node.pk_index_table, "IcebergNoEqDeleteWriterPkIndex");
+            NodeBody::IcebergWithPkIndexWriter(node) => {
+                always!(node.pk_index_table, "IcebergWithPkIndexWriter");
             }
 
             // Vector Index Write
