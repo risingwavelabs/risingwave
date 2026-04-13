@@ -850,7 +850,7 @@ pub mod default {
         }
 
         pub fn enable_compaction_group_normalize() -> bool {
-            false
+            true
         }
 
         pub fn max_normalize_splits_per_round() -> u64 {
