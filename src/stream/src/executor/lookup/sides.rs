@@ -25,8 +25,9 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::StateStore;
-use risingwave_storage::table::batch_table::BatchTable;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 
+use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, BoxedMessageStream, Executor, Message, MessageStream};
 
@@ -53,7 +54,7 @@ impl std::fmt::Debug for StreamJoinSide {
 }
 
 /// Join side of Arrange Executor's stream
-pub(crate) struct ArrangeJoinSide<S: StateStore> {
+pub(crate) struct ArrangeJoinSide<S: StateStore, SD: ValueRowSerde> {
     /// The primary key indices of this side, used for state store
     pub pk_indices: Vec<usize>,
 
@@ -76,7 +77,7 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
     /// Whether to join with the arrangement of the current epoch
     pub use_current_epoch: bool,
 
-    pub batch_table: BatchTable<S>,
+    pub state_table: ReplicatedStateTable<S, SD>,
 }
 
 /// Message from the `arrange_join_stream`.
@@ -390,7 +391,7 @@ pub async fn stream_lookup_arrange_this_epoch(stream: Executor, arrangement: Exe
     }
 }
 
-impl<S: StateStore> std::fmt::Debug for ArrangeJoinSide<S> {
+impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for ArrangeJoinSide<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ArrangeJoinSide")
             .field("pk_indices", &self.pk_indices)
