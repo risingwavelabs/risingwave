@@ -1,6 +1,14 @@
+control substitution on
+
 # Test: session window closed by watermark advancement alone.
 # Verifies that EMIT ON WINDOW CLOSE emits session windows when the watermark
 # advances past the session boundary, even without new rows in the same partition.
+# Also verifies that the open_sessions internal table correctly tracks active sessions,
+# including session creation, selective closure, and multi-partition tracking.
+#
+# Watermark = tm - 5 min, Session gap = 10 min.
+# Sort buffers rows until watermark > row.tm, then emits to EOWC.
+# EOWC tracks open sessions and closes them when watermark >= mns (minimal_next_start).
 
 statement ok
 set RW_IMPLICIT_FLUSH to true;
@@ -28,50 +36,141 @@ from t
 window w as (partition by bar order by tm session with gap '10 minutes')
 emit on window close;
 
-# Insert two rows into partition bar=1, forming one session [16:51, 16:56].
-statement ok
-insert into t values
-  ('2023-05-06 16:51:00', 1, 1)
-, ('2023-05-06 16:56:00', 2, 1)
-;
+# Discover the open sessions internal table.
+let open_sessions_table_id, open_sessions_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'mv'
+  AND name LIKE '%opensessions%'
+ORDER BY id
+LIMIT 1
 
-# Nothing emitted yet - the session is not closed.
+# ========================================
+# Phase A: Initially no open sessions.
+# ========================================
+query TI
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
+
+# ========================================
+# Phase B: Create session for bar=1.
+# ========================================
+# Insert bar=1 at 10:00. Watermark = 9:55. Sort buffers (9:55 < 10:00).
+statement ok
+insert into t values ('2023-05-06 10:00:00', 1, 1);
+
+# Insert bar=2 at 10:06 => watermark = 10:01, Sort emits 10:00/bar=1.
+# EOWC: bar=1 session opens, mns = 10:00 + 10min = 10:10.
+# Watermark 10:01 < 10:10 => session stays open.
+statement ok
+insert into t values ('2023-05-06 10:06:00', 2, 2);
+
+# MV still empty - no sessions closed.
 query I
 select count(*) from mv;
 ----
 0
 
-# Insert a row into a DIFFERENT partition (bar=2) at a far-future time.
-# This advances watermark to 17:20 - 5min = 17:15.
-# bar=1's session minimal_next_start = 16:56 + 10min = 17:06.
-# Since watermark (17:15) >= minimal_next_start (17:06), bar=1's session closes.
-statement ok
-insert into t values
-  ('2023-05-06 17:20:00', 3, 2)
-;
+# open_sessions: 1 entry for bar=1 with mns = 10:10.
+query TI retry 11 backoff 1s
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
+2023-05-06 10:10:00 1
 
-# bar=1's session should now be emitted (2 rows), closed by watermark.
+# ========================================
+# Phase C: Create session for bar=2, both stay open.
+# ========================================
+# Insert bar=3 at 10:12 => watermark = 10:07.
+# Sort emits 10:06/bar=2.
+# EOWC: bar=2 session opens, mns = 10:06 + 10min = 10:16.
+# Watermark 10:07 < 10:10 => bar=1 stays open.
+# Watermark 10:07 < 10:16 => bar=2 stays open.
+statement ok
+insert into t values ('2023-05-06 10:12:00', 3, 3);
+
+# open_sessions: 2 entries, bar=1 (mns 10:10) and bar=2 (mns 10:16).
+query TI retry 11 backoff 1s
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
+2023-05-06 10:10:00 1
+2023-05-06 10:16:00 2
+
+# ========================================
+# Phase D: Close bar=1 via watermark, bar=2 stays open.
+# ========================================
+# Insert bar=4 at 10:16 => watermark = 10:11.
+# Sort: 10:12 > 10:11, nothing emitted.
+# EOWC gets only watermark 10:11.
+# bar=1: mns=10:10, 10:11 >= 10:10 => CLOSES!
+# bar=2: mns=10:16, 10:11 < 10:16 => stays open.
+statement ok
+insert into t values ('2023-05-06 10:16:00', 4, 4);
+
+# bar=1 session emitted (1 row).
+query TiiTTIi retry 11 backoff 1s
+select * from mv;
+----
+2023-05-06 10:00:00  1  1  2023-05-06 10:00:00  2023-05-06 10:00:00  1  1
+
+# open_sessions: only bar=2 remains.
+query TI retry 11 backoff 1s
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
+2023-05-06 10:16:00 2
+
+# ========================================
+# Phase E: Close bar=2, open bar=3 and bar=4.
+# ========================================
+# Insert bar=5 at 10:25 => watermark = 10:20.
+# Sort emits [10:12/bar=3, 10:16/bar=4].
+# EOWC: bar=3 session [10:12], mns = 10:22.
+# EOWC: bar=4 session [10:16], mns = 10:26.
+# Watermark 10:20 >= 10:16 => bar=2 CLOSES.
+# Watermark 10:20 < 10:22 => bar=3 stays open.
+# Watermark 10:20 < 10:26 => bar=4 stays open.
+statement ok
+insert into t values ('2023-05-06 10:25:00', 5, 5);
+
+# bar=2 session emitted (1 row).
 query TiiTTIi rowsort retry 11 backoff 1s
 select * from mv;
 ----
-2023-05-06 16:51:00  1  1  2023-05-06 16:51:00  2023-05-06 16:56:00  2  2
-2023-05-06 16:56:00  2  1  2023-05-06 16:51:00  2023-05-06 16:56:00  2  2
+2023-05-06 10:00:00  1  1  2023-05-06 10:00:00  2023-05-06 10:00:00  1  1
+2023-05-06 10:06:00  2  2  2023-05-06 10:06:00  2023-05-06 10:06:00  1  2
 
-# Advance watermark further to close bar=2's session.
-# Insert into bar=1 at 17:40. Watermark = 17:40 - 5min = 17:35.
-# bar=2's session minimal_next_start = 17:20 + 10min = 17:30.
-# Since watermark (17:35) >= minimal_next_start (17:30), bar=2's session closes.
+# open_sessions: bar=3 (mns 10:22) and bar=4 (mns 10:26).
+query TI retry 11 backoff 1s
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
+2023-05-06 10:22:00 3
+2023-05-06 10:26:00 4
+
+# ========================================
+# Phase F: Close all remaining sessions.
+# ========================================
+# Insert bar=6 at 10:45 => watermark = 10:40.
+# Sort emits [10:25/bar=5].
+# EOWC: bar=5 session [10:25], mns = 10:35.
+# Watermark 10:40 >= 10:22 => bar=3 CLOSES.
+# Watermark 10:40 >= 10:26 => bar=4 CLOSES.
+# Watermark 10:40 >= 10:35 => bar=5 CLOSES.
 statement ok
-insert into t values
-  ('2023-05-06 17:40:00', 4, 1)
-;
+insert into t values ('2023-05-06 10:45:00', 6, 6);
 
+# bar=3, bar=4, bar=5 sessions all emitted.
 query TiiTTIi rowsort retry 11 backoff 1s
 select * from mv;
 ----
-2023-05-06 16:51:00  1  1  2023-05-06 16:51:00  2023-05-06 16:56:00  2  2
-2023-05-06 16:56:00  2  1  2023-05-06 16:51:00  2023-05-06 16:56:00  2  2
-2023-05-06 17:20:00  3  2  2023-05-06 17:20:00  2023-05-06 17:20:00  1  3
+2023-05-06 10:00:00  1  1  2023-05-06 10:00:00  2023-05-06 10:00:00  1  1
+2023-05-06 10:06:00  2  2  2023-05-06 10:06:00  2023-05-06 10:06:00  1  2
+2023-05-06 10:12:00  3  3  2023-05-06 10:12:00  2023-05-06 10:12:00  1  3
+2023-05-06 10:16:00  4  4  2023-05-06 10:16:00  2023-05-06 10:16:00  1  4
+2023-05-06 10:25:00  5  5  2023-05-06 10:25:00  2023-05-06 10:25:00  1  5
+
+# All sessions closed. open_sessions table is empty.
+query TI retry 11 backoff 1s
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
 
 statement ok
 drop materialized view mv;

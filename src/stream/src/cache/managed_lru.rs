@@ -156,12 +156,6 @@ where
     pub fn clear(&mut self) {
         self.inner.clear();
     }
-
-    /// Iterate over all entries mutably, from least recently used to most recently used.
-    /// Does not update LRU ordering or size tracking.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&K, &mut V)> {
-        self.inner.iter_mut()
-    }
 }
 
 impl<K, V> ManagedLruCache<K, V>

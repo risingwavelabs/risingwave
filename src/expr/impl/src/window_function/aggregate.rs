@@ -250,6 +250,10 @@ where
     fn on_watermark(&mut self, watermark_encoded: &MemcmpEncoded) {
         self.buffer.on_watermark(watermark_encoded);
     }
+
+    fn minimal_next_start(&self) -> Option<&MemcmpEncoded> {
+        self.buffer.minimal_next_start()
+    }
 }
 
 impl<W> EstimateSize for AggregateState<W>

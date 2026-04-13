@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::window_function::WindowFuncKind;
+use risingwave_expr::window_function::{FrameBounds, WindowFuncKind};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanWindowFunction};
@@ -169,6 +169,56 @@ impl StreamEowcOverWindow {
 
         tbl_builder.build(dist_key, read_prefix_len_hint)
     }
+
+    /// Returns true if any window function uses a session frame.
+    fn needs_open_sessions_table(&self) -> bool {
+        self.window_functions()
+            .iter()
+            .any(|f| matches!(&f.frame.bounds, FrameBounds::Session(_)))
+    }
+
+    /// Infer the open sessions table for tracking partitions with unclosed session windows.
+    ///
+    /// Schema: `minimal_next_start` (same type as order key) + partition key columns.
+    /// PK: `(minimal_next_start ASC, partition_key_cols ASC)`.
+    /// Distribution: partition key columns (offset by 1 for the mns column).
+    fn infer_open_sessions_table(&self) -> TableCatalog {
+        let in_fields = self.core.input.schema().fields();
+        let mut tbl_builder = TableCatalogBuilder::default();
+
+        // Column 0: minimal_next_start (same type as order key for human-readable output)
+        let order_key_index = self.order_key_index();
+        let order_key_type = in_fields[order_key_index].data_type();
+        tbl_builder.add_column(&Field::with_name(order_key_type, "minimal_next_start"));
+
+        // Columns 1..N: partition key columns
+        let partition_key_indices = self.partition_key_indices();
+        for &idx in &partition_key_indices {
+            tbl_builder.add_column(&in_fields[idx]);
+        }
+
+        // PK: (mns ASC, pk_col_0 ASC, pk_col_1 ASC, ...)
+        tbl_builder.add_order_column(0, OrderType::ascending()); // mns
+        for i in 0..partition_key_indices.len() {
+            tbl_builder.add_order_column(i + 1, OrderType::ascending()); // pk_cols
+        }
+        // No point lookups on this table — only range scans by mns prefix.
+        let read_prefix_len_hint = 0;
+
+        // Distribution key: partition key columns (offset by 1 for mns column)
+        let in_dist_key = self.core.input.distribution().dist_column_indices();
+        let dist_key: Vec<usize> = in_dist_key
+            .iter()
+            .filter_map(|&idx| {
+                partition_key_indices
+                    .iter()
+                    .position(|&pk_idx| pk_idx == idx)
+            })
+            .map(|pos| pos + 1) // offset for mns column at index 0
+            .collect();
+
+        tbl_builder.build(dist_key, read_prefix_len_hint)
+    }
 }
 
 impl_distill_by_unit!(StreamEowcOverWindow, core, "StreamEowcOverWindow");
@@ -221,12 +271,23 @@ impl StreamNode for StreamEowcOverWindow {
             None
         };
 
+        let open_sessions_table = if self.needs_open_sessions_table() {
+            Some(
+                self.infer_open_sessions_table()
+                    .with_id(state.gen_table_id_wrapped())
+                    .to_internal_table_prost(),
+            )
+        } else {
+            None
+        };
+
         PbNodeBody::EowcOverWindow(Box::new(EowcOverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
             intermediate_state_table,
+            open_sessions_table,
         }))
     }
 }

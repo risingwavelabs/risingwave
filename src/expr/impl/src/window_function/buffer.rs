@@ -209,6 +209,10 @@ impl<W: WindowImpl> WindowBuffer<W> {
     pub fn on_watermark(&mut self, watermark_encoded: &MemcmpEncoded) {
         self.window_impl.on_watermark(watermark_encoded);
     }
+
+    pub fn minimal_next_start(&self) -> Option<&MemcmpEncoded> {
+        self.window_impl.minimal_next_start()
+    }
 }
 
 /// Wraps a reference to the buffer and some indices, to be used by [`WindowImpl`]s.
@@ -265,6 +269,12 @@ pub(super) trait WindowImpl {
     /// This is used by session windows to close the latest session when the watermark guarantees
     /// no more rows can extend it.
     fn on_watermark(&mut self, _watermark_encoded: &MemcmpEncoded) {}
+
+    /// Get the minimal next start of the latest session, if any.
+    /// Only meaningful for session window implementations.
+    fn minimal_next_start(&self) -> Option<&MemcmpEncoded> {
+        None
+    }
 }
 
 /// The sliding window implementation for `ROWS` frames.
@@ -660,6 +670,10 @@ impl<V: Clone> WindowImpl for SessionWindow<V> {
         if let Some(LatestSession { start_idx, .. }) = self.latest_session.as_mut() {
             *start_idx -= n;
         }
+    }
+
+    fn minimal_next_start(&self) -> Option<&MemcmpEncoded> {
+        self.latest_session.as_ref().map(|s| &s.minimal_next_start)
     }
 
     fn on_watermark(&mut self, watermark_encoded: &MemcmpEncoded) {

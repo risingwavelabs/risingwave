@@ -135,6 +135,12 @@ pub trait WindowState: EstimateSize {
     /// Used by session windows to close the latest session when the watermark guarantees
     /// no more rows can extend it.
     fn on_watermark(&mut self, _watermark_encoded: &MemcmpEncoded) {}
+
+    /// Get the minimal next start of the latest session, if any.
+    /// Only meaningful for session window states.
+    fn minimal_next_start(&self) -> Option<&MemcmpEncoded> {
+        None
+    }
 }
 
 pub type BoxedWindowState = Box<dyn WindowState + Send + Sync>;
