@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::ops::Bound;
 
+use anyhow::Context;
 use either::Either;
 use futures::TryStreamExt;
 use futures::stream::{self, PollNext};
@@ -193,6 +194,7 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
                     };
                 }
             }
+            self.source.write_chunk(chunk);
         }
         Ok(())
     }
@@ -236,6 +238,21 @@ async fn internal_messages_until_barrier(stream: impl MessageStream, expected_ba
             Message::Barrier(_) => return Ok(()),
         }
     }
+}
+
+pub(super) async fn expect_first_barrier(
+    stream: &mut (impl Stream<Item = StreamExecutorResult<InternalMessage>> + Unpin),
+) -> StreamExecutorResult<Barrier> {
+    let InternalMessage::Barrier(updates, barrier) = stream
+        .try_next()
+        .instrument_await("expect_first_barrier")
+        .await?
+        .context("failed to extract the first message: stream closed unexpectedly")?
+    else {
+        unreachable!("unexpected internal message");
+    };
+    assert!(updates.is_empty());
+    Ok(barrier)
 }
 
 // Align the left and right inputs according to their barriers,
@@ -675,10 +692,22 @@ impl<
             .chain(self.right.schema().data_types().into_iter())
             .collect();
 
-        let mut wait_first_barrier = true;
+        let input = align_input::<true>(self.left, self.right);
+        pin_mut!(input);
+        let barrier = expect_first_barrier(&mut input).await?;
+        let barrier_epoch = barrier.epoch;
+        yield Message::Barrier(barrier);
+        self.right_table.source.init_epoch(barrier_epoch).await?;
+        if !APPEND_ONLY {
+            self.memo_table
+                .as_mut()
+                .unwrap()
+                .init_epoch(barrier_epoch)
+                .await?;
+        }
 
         #[for_await]
-        for msg in align_input::<true>(self.left, self.right) {
+        for msg in input {
             self.right_table.cache.evict();
             self.metrics
                 .temporal_join_cached_entry_count
@@ -802,60 +831,40 @@ impl<
                 }
                 InternalMessage::Barrier(updates, barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
-                    let barrier_epoch = barrier.epoch;
 
-                    // Write right-side chunks to the replicated state table
-                    for chunk in &updates {
-                        self.right_table.source.write_chunk(chunk.clone());
-                    }
-
-                    if wait_first_barrier {
-                        wait_first_barrier = false;
-                        yield Message::Barrier(barrier);
-                        self.right_table.source.init_epoch(barrier_epoch).await?;
-                        if !APPEND_ONLY {
-                            self.memo_table
-                                .as_mut()
-                                .unwrap()
-                                .init_epoch(barrier_epoch)
-                                .await?;
-                        }
-                    } else {
-                        let right_post_commit =
-                            self.right_table.source.commit(barrier.epoch).await?;
-                        let memo_post_commit = if !APPEND_ONLY {
-                            Some(
-                                self.memo_table
-                                    .as_mut()
-                                    .unwrap()
-                                    .commit(barrier.epoch)
-                                    .await?,
-                            )
-                        } else {
-                            None
-                        };
-
-                        yield Message::Barrier(barrier);
-
-                        if let Some(((_new_vnodes, _prev_vnodes, _), true)) = right_post_commit
-                            .post_yield_barrier(update_vnode_bitmap.clone())
-                            .await?
-                        {
-                            self.right_table.cache.clear();
-                        }
-                        if let Some(memo_post_commit) = memo_post_commit {
-                            memo_post_commit
-                                .post_yield_barrier(update_vnode_bitmap.clone())
-                                .await?;
-                        }
-                    }
-
-                    // Update the LRU cache with right-side chunks
+                    // Write right-side chunks to the replicated state table and update LRU cache.
+                    // Must happen before commit.
                     self.right_table.update(
                         updates,
                         &self.right_join_keys,
                         &right_stream_key_indices,
                     )?;
+                    let right_post_commit = self.right_table.source.commit(barrier.epoch).await?;
+                    let memo_post_commit = if !APPEND_ONLY {
+                        Some(
+                            self.memo_table
+                                .as_mut()
+                                .unwrap()
+                                .commit(barrier.epoch)
+                                .await?,
+                        )
+                    } else {
+                        None
+                    };
+
+                    yield Message::Barrier(barrier);
+
+                    if let Some((_, true)) = right_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?
+                    {
+                        self.right_table.cache.clear();
+                    }
+                    if let Some(memo_post_commit) = memo_post_commit {
+                        memo_post_commit
+                            .post_yield_barrier(update_vnode_bitmap.clone())
+                            .await?;
+                    }
                 }
             }
         }

@@ -861,6 +861,19 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             .map(|col| col.data_type.clone())
             .collect();
 
+        // For replicated state tables (used in hash temporal join), the join key (pk_prefix) is
+        // guaranteed by the optimizer to cover the distribution key, which is required by
+        // `compute_prefix_vnode`. Assert this invariant at build time.
+        if IS_REPLICATED && prefix_hint_len > 0 {
+            assert!(
+                dist_key_in_pk_indices.iter().all(|&d| d < prefix_hint_len),
+                "replicated state table: distribution key indices {:?} must all be covered by \
+                 prefix_hint_len {}",
+                dist_key_in_pk_indices,
+                prefix_hint_len,
+            );
+        }
+
         let distribution =
             TableDistribution::new(self.vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
         assert_eq!(
@@ -955,6 +968,18 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
+
+        // For replicated state tables, pk columns must be explicitly provided by the write caller
+        // rather than being filled with None internally via i2o_mapping.
+        if IS_REPLICATED {
+            assert!(
+                pk_indices
+                    .iter()
+                    .all(|&pk_idx| output_indices.contains(&pk_idx)),
+                "all pk columns must be included in output_column_ids for replicated state table"
+            );
+        }
+
         let clean_watermark_index = self.clean_watermark_index;
         let watermark_serde = clean_watermark_index.map(|idx| {
             let pk_idx = pk_indices.iter().position(|&i| i == idx);
