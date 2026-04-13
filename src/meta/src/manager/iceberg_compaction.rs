@@ -512,11 +512,13 @@ impl IcebergCompactionManager {
         } = msg;
         let now = Instant::now();
         let refresh_interval = self.config_refresh_interval();
-        let (track_missing_at_check, should_refresh_config) = {
+        // Re-check after loading config because the track can be removed while this
+        // async path is waiting on catalog reads.
+        let (track_existed_at_check, should_refresh_config) = {
             let guard = self.inner.read();
             match guard.sink_schedules.get(&sink_id) {
-                Some(track) => (false, track.should_refresh_config(now, refresh_interval)),
-                None => (true, true),
+                Some(track) => (true, track.should_refresh_config(now, refresh_interval)),
+                None => (false, true),
             }
         };
         let refreshed_config = if should_refresh_config {
@@ -536,16 +538,34 @@ impl IcebergCompactionManager {
         };
 
         let mut guard = self.inner.write();
-        let (track, created_track) = match guard.sink_schedules.entry(sink_id) {
-            std::collections::hash_map::Entry::Occupied(entry) => (entry.into_mut(), false),
+        match guard.sink_schedules.entry(sink_id) {
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                let track = entry.into_mut();
+                if track.should_refresh_config(now, refresh_interval) {
+                    if let Some(config) = refreshed_config.as_ref() {
+                        self.refresh_schedule_config(track, config, now);
+                    } else if should_refresh_config {
+                        track.mark_config_refreshed(now);
+                    }
+                }
+
+                if force_compaction {
+                    track.record_force_compaction(now);
+                } else {
+                    track.record_commit();
+                }
+            }
             std::collections::hash_map::Entry::Vacant(entry) => {
-                if !track_missing_at_check {
+                // If the track existed before the await but is now gone, treat the update as
+                // stale instead of recreating scheduler state from old assumptions.
+                if track_existed_at_check {
                     tracing::warn!(
                         sink_id = %sink_id,
                         "Ignoring iceberg compaction update because track disappeared before apply"
                     );
                     return;
                 }
+
                 let Some(config) = refreshed_config.as_ref() else {
                     tracing::warn!(
                         sink_id = %sink_id,
@@ -553,26 +573,14 @@ impl IcebergCompactionManager {
                     );
                     return;
                 };
-                (
-                    entry.insert(self.create_compaction_track(config, now)),
-                    true,
-                )
-            }
-        };
 
-        if !created_track && track.should_refresh_config(now, refresh_interval) {
-            if let Some(config) = refreshed_config.as_ref() {
-                self.refresh_schedule_config(track, config, now);
-            } else {
-                track.mark_config_refreshed(now);
+                let track = entry.insert(self.create_compaction_track(config, now));
+                if force_compaction {
+                    track.record_force_compaction(now);
+                } else {
+                    track.record_commit();
+                }
             }
-        }
-
-        if !force_compaction {
-            track.record_commit();
-        }
-        if force_compaction {
-            track.record_force_compaction(now);
         }
     }
 
