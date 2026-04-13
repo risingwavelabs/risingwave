@@ -536,10 +536,8 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
 /// Check if the provided value is a valid max parallelism.
 fn check_streaming_max_parallelism(val: &usize) -> Result<(), String> {
     match val {
-        // TODO(var-vnode): this is to prevent confusion with singletons, after we distinguish
-        // them better, we may allow 1 as the max parallelism (though not much point).
-        0 | 1 => Err("STREAMING_MAX_PARALLELISM must be greater than 1".to_owned()),
-        2..=VirtualNode::MAX_COUNT => Ok(()),
+        0 => Err("STREAMING_MAX_PARALLELISM must be greater than 0".to_owned()),
+        1..=VirtualNode::MAX_COUNT => Ok(()),
         _ => Err(format!(
             "STREAMING_MAX_PARALLELISM must be less than or equal to {}",
             VirtualNode::MAX_COUNT
@@ -846,6 +844,43 @@ mod test {
                 }
                 other => panic!("unexpected error: {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn test_streaming_max_parallelism_accepts_one() {
+        let mut config = SessionConfig::default();
+
+        config
+            .set("streaming_max_parallelism", "1".to_owned(), &mut ())
+            .unwrap();
+
+        assert_eq!(config.streaming_max_parallelism(), 1);
+        assert_eq!(config.get("streaming_max_parallelism").unwrap(), "1");
+    }
+
+    #[test]
+    fn test_streaming_max_parallelism_rejects_zero() {
+        let mut config = SessionConfig::default();
+
+        let err = config
+            .set("streaming_max_parallelism", "0".to_owned(), &mut ())
+            .unwrap_err();
+
+        match err {
+            SessionConfigError::InvalidValue {
+                entry,
+                value,
+                source,
+            } => {
+                assert_eq!(entry, "streaming_max_parallelism");
+                assert_eq!(value, "0");
+                assert_eq!(
+                    source.to_string(),
+                    "STREAMING_MAX_PARALLELISM must be greater than 0"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
         }
     }
 }

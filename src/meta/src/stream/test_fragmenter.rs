@@ -28,6 +28,7 @@ use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
+use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -403,7 +404,7 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
     ]
 }
 
-fn make_stream_graph() -> StreamFragmentGraphProto {
+fn make_stream_graph_with_max_parallelism(max_parallelism: usize) -> StreamFragmentGraphProto {
     let fragments = make_stream_fragments();
     StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
@@ -413,9 +414,13 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         table_ids_cnt: 3,
         parallelism: None,
         backfill_parallelism: None,
-        max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
+        max_parallelism: max_parallelism as _,
         backfill_order: Default::default(),
     }
+}
+
+fn make_stream_graph() -> StreamFragmentGraphProto {
+    make_stream_graph_with_max_parallelism(VirtualNode::COUNT_FOR_TEST)
 }
 
 #[tokio::test]
@@ -480,6 +485,66 @@ async fn test_graph_builder() -> MetaResult<()> {
             }
         }
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_graph_builder_with_max_parallelism_one_keeps_hash_fragments_hash() -> MetaResult<()> {
+    let env = MetaSrvEnv::for_test().await;
+    let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
+
+    let graph = make_stream_graph_with_max_parallelism(1);
+    let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
+
+    let actor_graph_builder = ActorGraphBuilder::new(
+        job.id(),
+        CompleteStreamFragmentGraph::for_test(fragment_graph),
+        NonZeroUsize::new(1).unwrap(),
+    )?;
+    let ActorGraphBuildResult { graph, .. } = actor_graph_builder.generate_graph()?;
+
+    let source_fragment = graph
+        .values()
+        .find(|fragment| matches!(fragment.nodes.get_node_body().unwrap(), NodeBody::Source(_)))
+        .expect("source fragment not found");
+    assert_eq!(
+        source_fragment.distribution_type,
+        PbFragmentDistributionType::Hash,
+        "source fragment: {source_fragment:#?}"
+    );
+    assert_eq!(source_fragment.maybe_vnode_count, Some(1));
+
+    let middle_fragment = graph
+        .values()
+        .find(|fragment| {
+            matches!(
+                fragment.nodes.get_node_body().unwrap(),
+                NodeBody::SimpleAgg(_)
+            )
+        })
+        .expect("middle fragment not found");
+    assert_eq!(
+        middle_fragment.distribution_type,
+        PbFragmentDistributionType::Hash,
+        "middle fragment: {middle_fragment:#?}"
+    );
+    assert_eq!(middle_fragment.maybe_vnode_count, Some(1));
+
+    let singleton_fragment = graph
+        .values()
+        .find(|fragment| {
+            matches!(
+                fragment.nodes.get_node_body().unwrap(),
+                NodeBody::Materialize(_)
+            )
+        })
+        .expect("singleton fragment not found");
+    assert_eq!(
+        singleton_fragment.distribution_type,
+        PbFragmentDistributionType::Single
+    );
+    assert_eq!(singleton_fragment.maybe_vnode_count, Some(1));
 
     Ok(())
 }
