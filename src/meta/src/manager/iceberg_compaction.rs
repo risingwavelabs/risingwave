@@ -538,6 +538,29 @@ impl IcebergCompactionManager {
         };
 
         let mut guard = self.inner.write();
+        self.apply_commit_update_with_loaded_config(
+            &mut guard,
+            sink_id,
+            track_existed_at_check,
+            refreshed_config.as_ref(),
+            should_refresh_config,
+            force_compaction,
+            now,
+            refresh_interval,
+        );
+    }
+
+    fn apply_commit_update_with_loaded_config(
+        &self,
+        guard: &mut IcebergCompactionManagerInner,
+        sink_id: SinkId,
+        track_existed_at_check: bool,
+        refreshed_config: Option<&IcebergConfig>,
+        should_refresh_config: bool,
+        force_compaction: bool,
+        now: Instant,
+        refresh_interval: Duration,
+    ) {
         match guard.sink_schedules.entry(sink_id) {
             std::collections::hash_map::Entry::Occupied(entry) => {
                 let track = entry.into_mut();
@@ -1138,6 +1161,11 @@ mod tests {
         }
     }
 
+    fn start_in_flight(track: &mut CompactionTrack, task_id: u64, now: Instant) {
+        track.start_processing();
+        track.mark_dispatched(task_id, now);
+    }
+
     fn record_commits(track: &mut CompactionTrack, n: usize) {
         for _ in 0..n {
             track.record_commit();
@@ -1205,22 +1233,24 @@ mod tests {
     }
 
     #[test]
-    fn test_force_compaction_makes_track_triggerable() {
+    fn test_record_force_compaction_bootstraps_or_preserves_backlog() {
         let now = Instant::now();
-        let mut track = new_track(now, 300, 10, 0);
 
-        track.record_force_compaction(now);
+        for (initial_backlog, expected_backlog) in [(0, 1), (4, 4)] {
+            let mut track = new_track(now, 300, 10, initial_backlog);
 
-        assert_eq!(track.pending_commit_count, 1);
-        assert!(track.should_trigger(now));
+            track.record_force_compaction(now);
+
+            assert_eq!(track.pending_commit_count, expected_backlog);
+            assert!(track.should_trigger(now));
+        }
     }
 
     #[test]
     fn test_finish_success_clears_dispatched_baseline_and_starts_cooldown() {
         let now = Instant::now();
         let mut track = new_track(now, 120, 10, 12);
-        track.start_processing();
-        track.mark_dispatched(1, now);
+        start_in_flight(&mut track, 1, now);
 
         track.finish_success(now);
 
@@ -1241,8 +1271,7 @@ mod tests {
     fn test_finish_failed_preserves_backlog_and_allows_retry() {
         let now = Instant::now();
         let mut track = new_track(now, 120, 10, 4);
-        track.start_processing();
-        track.mark_dispatched(1, now);
+        start_in_flight(&mut track, 1, now);
 
         track.finish_failed(now);
 
@@ -1264,8 +1293,7 @@ mod tests {
         let now = Instant::now();
         let mut track = new_track(now, 120, 10, 5);
         track.report_timeout = Duration::from_secs(17);
-        track.start_processing();
-        track.mark_dispatched(1, now);
+        start_in_flight(&mut track, 1, now);
 
         match track.state {
             CompactionTrackState::InFlight { .. } => {}
@@ -1279,42 +1307,24 @@ mod tests {
     }
 
     #[test]
-    fn test_revert_pre_dispatch_failure_preserves_commits_arrived_during_dispatch() {
+    fn test_revert_pre_dispatch_failure_restores_idle_without_losing_backlog() {
         let now = Instant::now();
-        let mut track = new_track(now, 120, 10, 5);
-        track.start_processing();
+        for additional_commits in [0, 3] {
+            let mut track = new_track(now, 120, 10, 5);
+            track.start_processing();
+            record_commits(&mut track, additional_commits);
 
-        record_commits(&mut track, 3);
-        track.revert_pre_dispatch_failure();
+            track.revert_pre_dispatch_failure();
 
-        assert_eq!(track.pending_commit_count, 8);
-        match track.state {
-            CompactionTrackState::Idle {
-                next_compaction_time,
-            } => assert_eq!(next_compaction_time, now + Duration::from_secs(120)),
-            CompactionTrackState::PendingDispatch { .. }
-            | CompactionTrackState::InFlight { .. } => {
-                panic!("track should be restored to idle")
-            }
-        }
-    }
-
-    #[test]
-    fn test_revert_pre_dispatch_failure_without_new_commits_keeps_original_backlog() {
-        let now = Instant::now();
-        let mut track = new_track(now, 120, 10, 5);
-        track.start_processing();
-
-        track.revert_pre_dispatch_failure();
-
-        assert_eq!(track.pending_commit_count, 5);
-        match track.state {
-            CompactionTrackState::Idle {
-                next_compaction_time,
-            } => assert_eq!(next_compaction_time, now + Duration::from_secs(120)),
-            CompactionTrackState::PendingDispatch { .. }
-            | CompactionTrackState::InFlight { .. } => {
-                panic!("track should be restored to idle")
+            assert_eq!(track.pending_commit_count, 5 + additional_commits);
+            match track.state {
+                CompactionTrackState::Idle {
+                    next_compaction_time,
+                } => assert_eq!(next_compaction_time, now + Duration::from_secs(120)),
+                CompactionTrackState::PendingDispatch { .. }
+                | CompactionTrackState::InFlight { .. } => {
+                    panic!("track should be restored to idle")
+                }
             }
         }
     }
@@ -1343,23 +1353,11 @@ mod tests {
     }
 
     #[test]
-    fn test_force_compaction_preserves_existing_backlog() {
-        let now = Instant::now();
-        let mut track = new_track(now, 120, 10, 4);
-
-        track.record_force_compaction(now);
-
-        assert_eq!(track.pending_commit_count, 4);
-        assert!(track.should_trigger(now));
-    }
-
-    #[test]
     fn test_finish_failed_after_force_keeps_force_backlog() {
         let now = Instant::now();
         let mut track = new_track(now, 120, 10, 0);
         track.record_force_compaction(now);
-        track.start_processing();
-        track.mark_dispatched(1, now);
+        start_in_flight(&mut track, 1, now);
 
         track.finish_failed(now);
 
@@ -1372,8 +1370,7 @@ mod tests {
         let now = Instant::now();
         let mut track = new_track(now, 120, 10, 0);
         track.record_force_compaction(now);
-        track.start_processing();
-        track.mark_dispatched(1, now);
+        start_in_flight(&mut track, 1, now);
 
         track.finish_success(now);
 
@@ -1385,8 +1382,7 @@ mod tests {
     fn test_record_commit_during_processing_is_preserved_after_success() {
         let now = Instant::now();
         let mut track = new_track(now, 120, 10, 2);
-        track.start_processing();
-        track.mark_dispatched(1, now);
+        start_in_flight(&mut track, 1, now);
         record_commits(&mut track, 5);
 
         track.finish_success(now);
@@ -1486,19 +1482,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_refresh_schedule_config_updates_threshold_interval_and_refresh_timestamp() {
+    async fn test_apply_commit_update_with_loaded_config_refreshes_existing_idle_track() {
         let manager = build_test_manager().await;
+        let sink_id = SinkId::new(41);
         let now = Instant::now();
         let mut track = new_track(now, 120, 10, 1);
+        track.last_config_refresh_at = now - manager.config_refresh_interval();
+        manager.inner.write().sink_schedules.insert(sink_id, track);
+
         let refresh_at = now + Duration::from_secs(30);
         let config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
+        let mut guard = manager.inner.write();
 
-        manager.refresh_schedule_config(&mut track, &config, refresh_at);
+        manager.apply_commit_update_with_loaded_config(
+            &mut guard,
+            sink_id,
+            true,
+            Some(&config),
+            true,
+            false,
+            refresh_at,
+            manager.config_refresh_interval(),
+        );
 
+        let track = guard.sink_schedules.get(&sink_id).unwrap();
         assert_eq!(track.task_type, TaskType::SmallFiles);
         assert_eq!(track.trigger_interval_sec, 300);
         assert_eq!(track.trigger_snapshot_count, 3);
         assert_eq!(track.last_config_refresh_at, refresh_at);
+        assert_eq!(track.pending_commit_count, 2);
         match track.state {
             CompactionTrackState::Idle {
                 next_compaction_time,
@@ -1549,5 +1561,181 @@ mod tests {
         assert_eq!(track.trigger_snapshot_count, 7);
         assert_eq!(track.pending_commit_count, 4);
         assert!(track.last_config_refresh_at > stale_refresh_at);
+    }
+
+    #[tokio::test]
+    async fn test_apply_commit_update_with_loaded_config_creates_missing_track() {
+        let manager = build_test_manager().await;
+        let sink_id = SinkId::new(44);
+        let now = Instant::now();
+        let config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
+        let mut guard = IcebergCompactionManagerInner {
+            sink_schedules: HashMap::new(),
+        };
+
+        manager.apply_commit_update_with_loaded_config(
+            &mut guard,
+            sink_id,
+            false,
+            Some(&config),
+            true,
+            false,
+            now,
+            manager.config_refresh_interval(),
+        );
+
+        let track = guard.sink_schedules.get(&sink_id).unwrap();
+        assert_eq!(track.task_type, TaskType::SmallFiles);
+        assert_eq!(track.trigger_interval_sec, 300);
+        assert_eq!(track.trigger_snapshot_count, 3);
+        assert_eq!(track.pending_commit_count, 1);
+        assert_eq!(track.last_config_refresh_at, now);
+        assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_apply_commit_update_with_loaded_config_does_not_resurrect_disappeared_track() {
+        let manager = build_test_manager().await;
+        let sink_id = SinkId::new(45);
+        let now = Instant::now();
+        let config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
+        let mut guard = IcebergCompactionManagerInner {
+            sink_schedules: HashMap::new(),
+        };
+
+        manager.apply_commit_update_with_loaded_config(
+            &mut guard,
+            sink_id,
+            true,
+            Some(&config),
+            true,
+            false,
+            now,
+            manager.config_refresh_interval(),
+        );
+
+        assert!(!guard.sink_schedules.contains_key(&sink_id));
+    }
+
+    #[tokio::test]
+    async fn test_get_top_n_creates_pending_dispatch_handle_and_drop_restores_idle() {
+        let manager = build_test_manager().await;
+        let sink_id = SinkId::new(46);
+        let now = Instant::now();
+        let mut track = new_track(now, 120, 3, 3);
+        track.state = CompactionTrackState::Idle {
+            next_compaction_time: now - Duration::from_secs(1),
+        };
+        manager.inner.write().sink_schedules.insert(sink_id, track);
+
+        let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
+
+        assert_eq!(handles.len(), 1);
+        {
+            let guard = manager.inner.read();
+            assert!(matches!(
+                guard.sink_schedules.get(&sink_id).unwrap().state,
+                CompactionTrackState::PendingDispatch { .. }
+            ));
+        }
+
+        drop(handles);
+
+        let guard = manager.inner.read();
+        let track = guard.sink_schedules.get(&sink_id).unwrap();
+        assert_eq!(track.pending_commit_count, 3);
+        assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
+        let manager = build_test_manager().await;
+        let sink_id = SinkId::new(47);
+        let now = Instant::now();
+        let mut track = new_track(now, 120, 10, 2);
+        start_in_flight(&mut track, 9, now);
+        record_commits(&mut track, 3);
+        manager.inner.write().sink_schedules.insert(sink_id, track);
+
+        manager.handle_report_task(IcebergReportTask {
+            task_id: 9,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+        });
+
+        let guard = manager.inner.read();
+        let track = guard.sink_schedules.get(&sink_id).unwrap();
+        assert_eq!(track.pending_commit_count, 3);
+        assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_handle_report_task_failure_preserves_backlog_and_resets_to_idle() {
+        let manager = build_test_manager().await;
+        let sink_id = SinkId::new(471);
+        let now = Instant::now();
+        let mut track = new_track(now, 120, 10, 2);
+        start_in_flight(&mut track, 9, now);
+        record_commits(&mut track, 3);
+        manager.inner.write().sink_schedules.insert(sink_id, track);
+
+        manager.handle_report_task(IcebergReportTask {
+            task_id: 9,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Failed as i32,
+            error_message: Some("boom".to_owned()),
+        });
+
+        let guard = manager.inner.read();
+        let track = guard.sink_schedules.get(&sink_id).unwrap();
+        assert_eq!(track.pending_commit_count, 5);
+        assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_handle_report_task_ignores_stale_task_id() {
+        let manager = build_test_manager().await;
+        let sink_id = SinkId::new(48);
+        let now = Instant::now();
+        let mut track = new_track(now, 120, 10, 2);
+        start_in_flight(&mut track, 9, now);
+        manager.inner.write().sink_schedules.insert(sink_id, track);
+
+        manager.handle_report_task(IcebergReportTask {
+            task_id: 10,
+            sink_id: sink_id.as_raw_id(),
+            status: IcebergReportTaskStatus::Success as i32,
+            error_message: None,
+        });
+
+        let guard = manager.inner.read();
+        let track = guard.sink_schedules.get(&sink_id).unwrap();
+        assert_eq!(track.pending_commit_count, 2);
+        assert!(matches!(
+            track.state,
+            CompactionTrackState::InFlight { task_id: 9, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_get_top_n_retries_timed_out_inflight_task() {
+        let manager = build_test_manager().await;
+        let sink_id = SinkId::new(49);
+        let now = Instant::now();
+        let mut track = new_track(now, 120, 10, 2);
+        track.report_timeout = Duration::from_secs(1);
+        start_in_flight(&mut track, 7, now - Duration::from_secs(5));
+        manager.inner.write().sink_schedules.insert(sink_id, track);
+
+        let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
+
+        assert_eq!(handles.len(), 1);
+        let guard = manager.inner.read();
+        let track = guard.sink_schedules.get(&sink_id).unwrap();
+        assert!(matches!(
+            track.state,
+            CompactionTrackState::PendingDispatch { .. }
+        ));
     }
 }
