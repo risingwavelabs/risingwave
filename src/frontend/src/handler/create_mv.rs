@@ -32,7 +32,10 @@ use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
-use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
+use crate::handler::util::{
+    LongRunningNotificationAction, execute_with_long_running_notification,
+    reject_internal_table_dependencies,
+};
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
@@ -240,6 +243,12 @@ pub async fn handle_create_mv_bound(
     )? {
         return Ok(resp);
     }
+
+    reject_internal_table_dependencies(
+        session.as_ref(),
+        &dependent_relations,
+        "CREATE MATERIALIZED VIEW",
+    )?;
 
     let (table, graph, dependencies, resource_type) = {
         gen_create_mv_graph(
