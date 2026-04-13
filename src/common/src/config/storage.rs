@@ -256,7 +256,10 @@ pub struct StorageConfig {
     )]
     pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
     /// Pull interval for iceberg compaction task requests in milliseconds.
-    #[serde(default = "default::storage::iceberg_compaction_pull_interval_ms")]
+    #[serde(
+        default = "default::storage::iceberg_compaction_pull_interval_ms",
+        deserialize_with = "deserialize_iceberg_compaction_pull_interval_ms"
+    )]
     pub iceberg_compaction_pull_interval_ms: u64,
 
     #[serde(default = "default::storage::iceberg_compaction_target_binpack_group_size_mb")]
@@ -531,6 +534,19 @@ where
     if value == 0 {
         return Err(D::Error::custom(
             "storage.max_prefetch_block_number must be greater than 0",
+        ));
+    }
+    Ok(value)
+}
+
+fn deserialize_iceberg_compaction_pull_interval_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.iceberg_compaction_pull_interval_ms must be greater than 0",
         ));
     }
     Ok(value)
