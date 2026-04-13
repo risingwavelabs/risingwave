@@ -31,6 +31,7 @@ feature_gated_sink_mod!(google_pubsub, GooglePubSub, "google_pubsub");
 pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
+pub mod sqs;
 use risingwave_common::bail;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 pub mod jdbc_jni_client;
@@ -126,6 +127,7 @@ macro_rules! for_all_sinks {
                 { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
                 { Kinesis, $crate::sink::kinesis::KinesisSink, $crate::sink::kinesis::KinesisSinkConfig },
+                { Sqs, $crate::sink::sqs::SqsSink, $crate::sink::sqs::SqsSinkConfig },
                 { ClickHouse, $crate::sink::clickhouse::ClickHouseSink, $crate::sink::clickhouse::ClickHouseConfig },
                 { Iceberg, $crate::sink::iceberg::IcebergSink, $crate::sink::iceberg::IcebergConfig },
                 { Mqtt, $crate::sink::mqtt::MqttSink, $crate::sink::mqtt::MqttConfig },
@@ -957,6 +959,12 @@ pub enum SinkError {
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Kinesis error: {0}")]
     Kinesis(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("SQS error: {0}")]
+    Sqs(
         #[source]
         #[backtrace]
         anyhow::Error,

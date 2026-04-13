@@ -174,6 +174,17 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"LAKEKEEPER_CATALOG_URL="{catalog_url}""#,).unwrap();
                 writeln!(env, r#"RISEDEV_LAKEKEEPER_WITH_OPTIONS_COMMON="connector='iceberg',catalog.type='rest',catalog.uri='{catalog_url}'""#,).unwrap();
             }
+            ServiceConfig::LocalStack(c) => {
+                let endpoint = format!("http://{}:{}", c.address, c.port);
+                writeln!(env, r#"RISEDEV_LOCALSTACK_ENDPOINT="{endpoint}""#).unwrap();
+                // Common WITH options for the SQS sink when testing against LocalStack.
+                // Uses the test credentials that LocalStack accepts by default.
+                writeln!(
+                    env,
+                    r#"RISEDEV_SQS_WITH_OPTIONS_COMMON="aws.region='us-east-1',endpoint='{endpoint}',aws.credentials.access_key_id='test',aws.credentials.secret_access_key='test'""#
+                )
+                .unwrap();
+            }
             _ => {}
         }
     }
