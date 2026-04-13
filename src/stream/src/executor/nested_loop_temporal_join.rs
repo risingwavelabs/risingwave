@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use futures::StreamExt;
+use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
@@ -31,7 +31,9 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 
 use super::join::{JoinType, JoinTypePrimitive};
-use super::temporal_join::{InternalMessage, align_input, apply_indices_map, phase1};
+use super::temporal_join::{
+    InternalMessage, align_input, apply_indices_map, expect_first_barrier, phase1,
+};
 use super::{Execute, ExecutorInfo, Message, StreamExecutorError};
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::ReplicatedStateTable;
@@ -159,10 +161,16 @@ impl<S: StateStore, SD: ValueRowSerde, const T: JoinTypePrimitive>
             .chain(self.right.schema().data_types().into_iter())
             .collect();
 
-        let mut wait_first_barrier = true;
+        let input = align_input::<true>(self.left, self.right);
+        pin_mut!(input);
+
+        let barrier = expect_first_barrier(&mut input).await?;
+        let barrier_epoch = barrier.epoch;
+        yield Message::Barrier(barrier);
+        self.right_table.source.init_epoch(barrier_epoch).await?;
 
         #[for_await]
-        for msg in align_input::<true>(self.left, self.right) {
+        for msg in input {
             match msg? {
                 InternalMessage::WaterMark(watermark) => {
                     let output_watermark_col_idx = *left_to_output.get(&watermark.col_idx).unwrap();
@@ -261,27 +269,19 @@ impl<S: StateStore, SD: ValueRowSerde, const T: JoinTypePrimitive>
                 }
                 InternalMessage::Barrier(updates, barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
-                    let barrier_epoch = barrier.epoch;
 
                     // Write right-side chunks to the replicated state table
-                    for chunk in &updates {
-                        self.right_table.source.write_chunk(chunk.clone());
+                    for chunk in updates {
+                        self.right_table.source.write_chunk(chunk);
                     }
 
-                    if wait_first_barrier {
-                        wait_first_barrier = false;
-                        yield Message::Barrier(barrier);
-                        self.right_table.source.init_epoch(barrier_epoch).await?;
-                    } else {
-                        let right_post_commit =
-                            self.right_table.source.commit(barrier.epoch).await?;
+                    let right_post_commit = self.right_table.source.commit(barrier.epoch).await?;
 
-                        yield Message::Barrier(barrier);
+                    yield Message::Barrier(barrier);
 
-                        right_post_commit
-                            .post_yield_barrier(update_vnode_bitmap)
-                            .await?;
-                    }
+                    right_post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?;
                 }
             }
         }
