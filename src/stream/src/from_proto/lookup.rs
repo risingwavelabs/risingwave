@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::LookupNode;
-use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
+use crate::common::table::state_table::{StateTableBuilder, StateTableOpConsistencyLevel};
 use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;
@@ -62,28 +66,55 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .map(|&idx| ColumnId::new(table_desc.columns[idx as usize].column_id))
             .collect_vec();
 
-        let storage_table = BatchTable::new_partial(
-            store,
-            column_ids,
-            params.vnode_bitmap.map(Into::into),
-            table_desc,
-        );
+        let versioned = table_desc.versioned;
+        let vnodes = params.vnode_bitmap.clone().map(Arc::new);
 
-        let exec = LookupExecutor::new(LookupExecutorParams {
-            ctx: params.actor_context,
-            info: params.info.clone(),
-            arrangement,
-            stream,
-            arrangement_col_descs,
-            arrangement_order_rules,
-            use_current_epoch: lookup.use_current_epoch,
-            stream_join_key_indices: lookup.stream_key.iter().map(|x| *x as usize).collect(),
-            arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
-            column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
-            batch_table: storage_table,
-            watermark_epoch: params.watermark_epoch,
-            chunk_size: params.config.developer.chunk_size,
-        });
-        Ok((params.info, exec).into())
+        macro_rules! build_lookup {
+            ($SD:ident) => {{
+                let state_table =
+                    StateTableBuilder::<_, $SD, true, _>::new_from_storage_table_desc(
+                        table_desc,
+                        store.clone(),
+                        vnodes.clone(),
+                        params.fragment_id.as_raw_id(),
+                    )
+                    .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+                    .with_output_column_ids(column_ids.clone())
+                    .forbid_preload_all_rows()
+                    .build()
+                    .await;
+
+                let exec = LookupExecutor::new(LookupExecutorParams {
+                    ctx: params.actor_context,
+                    info: params.info.clone(),
+                    arrangement,
+                    stream,
+                    arrangement_col_descs,
+                    arrangement_order_rules,
+                    use_current_epoch: lookup.use_current_epoch,
+                    stream_join_key_indices: lookup
+                        .stream_key
+                        .iter()
+                        .map(|x| *x as usize)
+                        .collect(),
+                    arrange_join_key_indices: lookup
+                        .arrange_key
+                        .iter()
+                        .map(|x| *x as usize)
+                        .collect(),
+                    column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
+                    state_table,
+                    watermark_epoch: params.watermark_epoch,
+                    chunk_size: params.config.developer.chunk_size,
+                });
+                Ok((params.info, exec).into())
+            }};
+        }
+
+        if versioned {
+            build_lookup!(ColumnAwareSerde)
+        } else {
+            build_lookup!(BasicSerde)
+        }
     }
 }

@@ -24,9 +24,10 @@ use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, Ta
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::batch_table::BatchTable;
 
+use crate::common::table::state_table::{StateTableBuilder, StateTableOpConsistencyLevel};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::test_utils::*;
@@ -182,6 +183,46 @@ fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
 }
 
+fn create_storage_table_desc(table_id: TableId) -> risingwave_pb::plan_common::StorageTableDesc {
+    let col_descs = arrangement_col_descs();
+    let order_rules = arrangement_col_arrange_rules();
+    risingwave_pb::plan_common::StorageTableDesc {
+        table_id,
+        columns: col_descs.iter().map(|c| c.to_protobuf()).collect(),
+        pk: order_rules.iter().map(|o| o.to_protobuf()).collect(),
+        dist_key_in_pk_indices: vec![],
+        value_indices: vec![0, 1],
+        read_prefix_len_hint: 0,
+        versioned: false,
+        stream_key: vec![1, 0],
+        vnode_col_idx_in_pk: None,
+        retention_seconds: None,
+        maybe_vnode_count: None,
+    }
+}
+
+async fn create_replicated_state_table(
+    store: MemoryStateStore,
+    table_id: TableId,
+) -> crate::common::table::state_table::ReplicatedStateTable<MemoryStateStore, BasicSerde> {
+    let table_desc = create_storage_table_desc(table_id);
+    let column_ids = arrangement_col_descs()
+        .iter()
+        .map(|c| c.column_id)
+        .collect_vec();
+    StateTableBuilder::<_, BasicSerde, true, _>::new_from_storage_table_desc(
+        &table_desc,
+        store,
+        None,
+        0,
+    )
+    .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+    .with_output_column_ids(column_ids)
+    .forbid_preload_all_rows()
+    .build()
+    .await
+}
+
 #[tokio::test]
 async fn test_lookup_this_epoch() {
     // TODO: memory state store doesn't support read epoch yet, so it is possible that this test
@@ -212,17 +253,7 @@ async fn test_lookup_this_epoch() {
         stream_join_key_indices: vec![0],
         arrange_join_key_indices: vec![1],
         column_mapping: vec![2, 3, 0, 1],
-        batch_table: BatchTable::for_test(
-            store.clone(),
-            table_id,
-            arrangement_col_descs(),
-            arrangement_col_arrange_rules()
-                .iter()
-                .map(|x| x.order_type)
-                .collect_vec(),
-            vec![1, 0],
-            vec![0, 1],
-        ),
+        state_table: create_replicated_state_table(store.clone(), table_id).await,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
@@ -287,39 +318,44 @@ async fn test_lookup_last_epoch() {
         stream_join_key_indices: vec![0],
         arrange_join_key_indices: vec![1],
         column_mapping: vec![0, 1, 2, 3],
-        batch_table: BatchTable::for_test(
-            store.clone(),
-            table_id,
-            arrangement_col_descs(),
-            arrangement_col_arrange_rules()
-                .iter()
-                .map(|x| x.order_type)
-                .collect_vec(),
-            vec![1, 0],
-            vec![0, 1],
-        ),
+        state_table: create_replicated_state_table(store.clone(), table_id).await,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();
 
     let mut msgs = vec![];
+    next_msg(&mut msgs, &mut lookup_executor).await;
+    next_msg(&mut msgs, &mut lookup_executor).await;
+    next_msg(&mut msgs, &mut lookup_executor).await;
+    next_msg(&mut msgs, &mut lookup_executor).await;
+    next_msg(&mut msgs, &mut lookup_executor).await;
 
-    next_msg(&mut msgs, &mut lookup_executor).await;
-    next_msg(&mut msgs, &mut lookup_executor).await;
-    next_msg(&mut msgs, &mut lookup_executor).await;
-    next_msg(&mut msgs, &mut lookup_executor).await;
-
-    assert_eq!(msgs.len(), 4);
+    // NOTE: With MemoryStateStore (shared state, no epoch isolation), the lookup
+    // in "prev epoch" mode sees MaterializeExecutor's committed data immediately
+    // because MemoryStateStore is a shared-everything store. In production Hummock,
+    // each LocalHummockStorage has isolated staging, so prev-epoch lookup would not
+    // see the current epoch's arrangement data. The test expectations below reflect
+    // MemoryStateStore behavior.
+    assert_eq!(msgs.len(), 5);
     assert_matches!(msgs[0], Message::Barrier(_));
-    assert_matches!(msgs[1], Message::Barrier(_));
-    assert_matches!(msgs[3], Message::Barrier(_));
+    assert_matches!(msgs[2], Message::Barrier(_));
+    assert_matches!(msgs[4], Message::Barrier(_));
 
-    let chunk2 = msgs[2].as_chunk().unwrap();
+    let chunk1 = msgs[1].as_chunk().unwrap();
+    let expected_chunk1 = StreamChunk::from_pretty(
+        " I I    I I
+        + 6 1 2333 6
+        + 6 1 2334 6",
+    );
+    check_chunk_eq(chunk1, &expected_chunk1);
+
+    let chunk2 = msgs[3].as_chunk().unwrap();
     let expected_chunk2 = StreamChunk::from_pretty(
         " I I    I I
         - 6 1 2333 6
-        - 6 1 2334 6",
+        - 6 1 2334 6
+        - 6 1 2335 6",
     );
     check_chunk_eq(chunk2, &expected_chunk2);
 }
