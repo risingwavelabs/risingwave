@@ -46,6 +46,8 @@ Every graded entry should carry:
 
 Observability grade A/B/C must be assigned to the `control_unit` as a whole, not to an isolated field without context.
 
+Reviewers should speak explicitly in terms of grade A, grade B, and grade C so the admission bar stays stable across exemplar families.
+
 ## Calibration rules
 
 The rubric is not considered stable until the first exemplar batch is calibrated.
