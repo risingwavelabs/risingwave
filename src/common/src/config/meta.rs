@@ -405,7 +405,7 @@ pub struct MetaConfig {
     pub compact_task_table_size_partition_threshold_high: u64,
 
     /// The interval of the regular periodic compaction group split job.
-    /// This does not disable normalize-triggered splits when
+    /// This does not disable merge-triggered normalize splits when
     /// `enable_compaction_group_normalize` is enabled.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
@@ -413,7 +413,7 @@ pub struct MetaConfig {
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
-    /// Whether to normalize overlapping compaction groups before the regular split/merge scheduling.
+    /// Whether to normalize overlapping compaction groups before the regular merge scheduling.
     #[serde(default = "default::meta::enable_compaction_group_normalize")]
     pub enable_compaction_group_normalize: bool,
 
