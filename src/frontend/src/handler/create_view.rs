@@ -50,11 +50,12 @@ pub async fn handle_create_view(
     }
 
     // plan the query to validate it and resolve dependencies
-    let (dependent_relations, schema) = {
+    let (dependent_relations, dependent_secrets, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let super::query::RwBatchQueryPlanResult {
             schema,
             dependent_relations,
+            dependent_secrets,
             ..
         } = super::query::gen_batch_plan_by_statement(
             &session,
@@ -63,7 +64,7 @@ pub async fn handle_create_view(
         )?
         .unwrap_rw()?;
 
-        (dependent_relations, schema)
+        (dependent_relations, dependent_secrets, schema)
     };
 
     let columns = if columns.is_empty() {
@@ -111,7 +112,18 @@ pub async fn handle_create_view(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_view(view, dependent_relations.into_iter().collect())
+        .create_view(
+            view,
+            dependent_relations
+                .into_iter()
+                .chain(
+                    dependent_secrets
+                        .iter()
+                        .copied()
+                        .map(|id| id.as_object_id()),
+                )
+                .collect(),
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))
