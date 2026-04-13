@@ -17,7 +17,7 @@ use risingwave_pb::connector_service::coordinate_response::{
     self, CommitResponse, StartCoordinationResponse,
 };
 use risingwave_pb::connector_service::{
-    CoordinateRequest, CoordinateResponse, PbSinkParam, coordinate_request,
+    CoordinateRequest, CoordinateResponse, CoordinationRole, PbSinkParam, coordinate_request,
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{CoordinatorStreamHandle, SinkCoordinationRpcClient};
@@ -39,6 +39,7 @@ impl SinkCoordinationRpcClientEnum {
         self,
         param: &SinkParam,
         vnode_bitmap: Bitmap,
+        role: CoordinationRole,
     ) -> super::Result<(CoordinatorStreamHandle, Option<u64>)> {
         match self {
             SinkCoordinationRpcClientEnum::SinkCoordinationRpcClient(
@@ -48,6 +49,7 @@ impl SinkCoordinationRpcClientEnum {
                     sink_coordination_rpc_client,
                     param.to_proto(),
                     vnode_bitmap,
+                    role,
                 )
                 .await?;
                 Ok((handle, log_store_rewind_start_epoch))
@@ -56,7 +58,7 @@ impl SinkCoordinationRpcClientEnum {
                 mock_sink_coordination_rpc_client,
             ) => {
                 let handle = mock_sink_coordination_rpc_client
-                    .new_stream_handle(param.to_proto(), vnode_bitmap)
+                    .new_stream_handle(param.to_proto(), vnode_bitmap, role)
                     .await?;
                 Ok((handle, None))
             }
@@ -100,12 +102,15 @@ impl MockSinkCoordinationRpcClient {
         &self,
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
+        role: CoordinationRole,
     ) -> std::result::Result<CoordinatorStreamHandle, RpcError> {
-        let (res, _) =
-            CoordinatorStreamHandle::new_with_init_stream(param, vnode_bitmap, |rx| async move {
-                self.coordinate(rx).await
-            })
-            .await?;
+        let (res, _) = CoordinatorStreamHandle::new_with_init_stream(
+            param,
+            vnode_bitmap,
+            role,
+            |rx| async move { self.coordinate(rx).await },
+        )
+        .await?;
         Ok(res)
     }
 
@@ -123,6 +128,7 @@ impl MockSinkCoordinationRpcClient {
                         coordinate_request::StartCoordinationRequest {
                             param: Some(_param),
                             vnode_bitmap: Some(_vnode_bitmap),
+                            ..
                         },
                     )),
             }) => (),

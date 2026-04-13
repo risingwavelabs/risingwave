@@ -22,7 +22,7 @@ use risingwave_pb::connector_service::coordinate_response::{
     CommitResponse, StartCoordinationResponse,
 };
 use risingwave_pb::connector_service::{
-    CoordinateResponse, coordinate_request, coordinate_response,
+    CoordinateResponse, CoordinationRole, coordinate_request, coordinate_response,
 };
 use tonic::Status;
 
@@ -33,6 +33,7 @@ pub(super) struct SinkWriterCoordinationHandle {
     response_tx: SinkCoordinatorResponseSender,
     param: SinkParam,
     vnode_bitmap: Bitmap,
+    role: CoordinationRole,
     prev_epoch: Option<u64>,
 }
 
@@ -42,14 +43,20 @@ impl SinkWriterCoordinationHandle {
         response_tx: SinkCoordinatorResponseSender,
         param: SinkParam,
         vnode_bitmap: Bitmap,
+        role: CoordinationRole,
     ) -> Self {
         Self {
             request_stream,
             response_tx,
             param,
             vnode_bitmap,
+            role,
             prev_epoch: None,
         }
+    }
+
+    pub(super) fn role(&self) -> CoordinationRole {
+        self.role
     }
 
     pub(super) fn param(&self) -> &SinkParam {

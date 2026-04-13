@@ -78,7 +78,7 @@ where schema_name = 'public'
   and source_name = '__iceberg_source_t_v3'
   and content = 'EqualityDeletes';
 ----
-t
+f
 
 query ??? rowsort retry 3 backoff 1s
 select * from t_v3;

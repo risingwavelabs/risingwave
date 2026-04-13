@@ -1762,7 +1762,6 @@ pub async fn create_iceberg_engine_table(
     let mut sink_handler_args = handler_args.clone();
 
     let mut sink_with = with_common.clone();
-    sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
 
     if table.append_only {
         sink_with.insert("type".to_owned(), "append-only".to_owned());
@@ -1986,7 +1985,8 @@ pub async fn create_iceberg_engine_table(
         }
     }
 
-    if let Some(format_version) = handler_args.with_options.get(FORMAT_VERSION) {
+    let format_version = if let Some(format_version) = handler_args.with_options.get(FORMAT_VERSION)
+    {
         let format_version = format_version.parse::<u8>().map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!(
                 "format_version must be 1, 2 or 3: {}",
@@ -2002,9 +2002,12 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove(FORMAT_VERSION));
-    }
+        format_version
+    } else {
+        2
+    };
 
-    if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
+    let write_mode = if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
         let write_mode = IcebergWriteMode::try_from(write_mode.as_str()).map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!(
                 "invalid write_mode: {}, must be one of: {}, {}",
@@ -2034,11 +2037,17 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove("write_mode"));
+        write_mode
     } else {
         sink_with.insert(
             WRITE_MODE.to_owned(),
             ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
         );
+        IcebergWriteMode::MergeOnRead
+    };
+
+    if enable_iceberg_engine_auto_schema_change(format_version, table.append_only, write_mode) {
+        sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
     }
 
     if let Some(max_snapshots_num_before_compaction) =
@@ -2410,6 +2419,17 @@ pub async fn create_iceberg_engine_table(
     }
 
     Ok(())
+}
+
+fn enable_iceberg_engine_auto_schema_change(
+    format_version: u8,
+    append_only: bool,
+    write_mode: IcebergWriteMode,
+) -> bool {
+    // Iceberg V3 no-eq-delete sinks are rewritten into a multi-fragment plan:
+    // `Writer -> Exchange(Single) -> DvMerger`.
+    // Meta-side auto schema change currently only supports the legacy single-fragment sink shape.
+    !(format_version >= 3 && !append_only && write_mode == IcebergWriteMode::MergeOnRead)
 }
 
 pub fn check_create_table_with_source(

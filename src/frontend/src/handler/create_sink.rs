@@ -434,7 +434,7 @@ pub async fn gen_sink_plan(
 
     let sink_desc = sink_plan.sink_desc().clone();
 
-    let mut sink_plan: PlanRef = sink_plan.into();
+    let mut sink_plan: PlanRef = sink_plan.into_stream_plan()?;
 
     let ctx = sink_plan.ctx();
     let explain_trace = ctx.is_explain_trace();

@@ -1180,6 +1180,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.eowc_gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.vector_index_lookup_join")
+        .boxed(".stream_plan.StreamNode.node_body.iceberg_no_eq_delete_writer")
+        .boxed(".stream_plan.StreamNode.node_body.iceberg_no_eq_delete_dv_merger")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // prost-build 0.14+ only derives `Eq`/`Hash` for a subset of messages/oneofs.

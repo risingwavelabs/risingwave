@@ -19,14 +19,15 @@ use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, CreateType, FieldLike, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+    ColumnCatalog, CreateType, Field, FieldLike, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
 };
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
-use risingwave_connector::sink::iceberg::ICEBERG_SINK;
+use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -41,7 +42,8 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::derive::{derive_columns, derive_pk};
 use super::stream::prelude::*;
 use super::utils::{
-    Distill, IndicesDisplay, childless_record, infer_kv_log_store_table_catalog_inner,
+    Distill, IndicesDisplay, TableCatalogBuilder, childless_record,
+    infer_kv_log_store_table_catalog_inner,
 };
 use super::{
     ExprRewritable, PlanBase, StreamExchange, StreamNode, StreamPlanRef as PlanRef, StreamProject,
@@ -751,6 +753,69 @@ impl StreamSink {
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
         infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc().columns)
     }
+
+    /// Convert this `StreamSink` into a `PlanRef`.
+    ///
+    /// For Iceberg V3 no-eq-delete sinks, this rewrites the plan into
+    /// `Upstream → Writer → Exchange(Single) → DvMerger` instead of a single `SinkNode`.
+    /// For all other sinks, returns `self` as-is.
+    pub fn into_stream_plan(self) -> Result<PlanRef> {
+        use super::{StreamIcebergNoEqDeleteDvMerger, StreamIcebergNoEqDeleteWriter};
+
+        if !is_iceberg_no_eq_delete_sink(&self.sink_desc)? {
+            return Ok(self.into());
+        }
+
+        let pk_state_table = build_iceberg_no_eq_delete_pk_state_table(&self.sink_desc);
+        let sink_desc = self.sink_desc.clone();
+
+        let writer: PlanRef =
+            StreamIcebergNoEqDeleteWriter::new(self.input, sink_desc.clone(), pk_state_table)
+                .into();
+        let dv_merger: PlanRef = StreamIcebergNoEqDeleteDvMerger::new(writer, sink_desc).into();
+        Ok(dv_merger)
+    }
+}
+
+pub fn is_iceberg_no_eq_delete_sink(sink_desc: &SinkDesc) -> Result<bool> {
+    if !sink_desc
+        .properties
+        .get(CONNECTOR_TYPE_KEY)
+        .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
+    {
+        return Ok(false);
+    }
+
+    let iceberg_config = IcebergConfig::from_btreemap(sink_desc.properties.clone())?;
+
+    // Note: sink_type_in_prop remaps iceberg type='upsert' to SinkType::Retract,
+    // so we check the raw property string instead of sink_desc.sink_type.
+    Ok(iceberg_config.is_no_eq_delete_sink())
+}
+
+fn build_iceberg_no_eq_delete_pk_state_table(sink_desc: &SinkDesc) -> TableCatalog {
+    let mut builder = TableCatalogBuilder::default();
+    let mut value_indices = Vec::new();
+
+    for order in &sink_desc.plan_pk {
+        value_indices.push(builder.add_column(&Field::from(
+            &sink_desc.columns[order.column_index].column_desc,
+        )));
+    }
+
+    let file_path_idx = builder.add_column(&Field::with_name(DataType::Varchar, "file_path"));
+    let position_idx = builder.add_column(&Field::with_name(DataType::Int64, "position"));
+    value_indices.extend([file_path_idx, position_idx]);
+
+    for (idx, _) in sink_desc.plan_pk.iter().enumerate() {
+        builder.add_order_column(idx, OrderType::ascending());
+    }
+
+    builder.set_value_indices(value_indices);
+    builder.build(
+        (0..sink_desc.plan_pk.len()).collect(),
+        sink_desc.plan_pk.len(),
+    )
 }
 
 impl PlanTreeNodeUnary<Stream> for StreamSink {
@@ -822,6 +887,9 @@ mod test {
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::types::{DataType, StructType};
     use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_connector::sink::catalog::desc::SinkDesc;
+    use risingwave_connector::sink::catalog::{SinkId, SinkType};
+    use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergWriteMode};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::{IcebergPartitionInfo, *};
@@ -842,6 +910,42 @@ mod test {
                 is_hidden: false,
             },
         ]
+    }
+
+    fn create_iceberg_sink_desc(properties: &[(&str, &str)]) -> SinkDesc {
+        SinkDesc {
+            id: SinkId::new(1),
+            name: "s".to_owned(),
+            definition: "create sink s".to_owned(),
+            columns: create_column_catalog(),
+            plan_pk: vec![risingwave_common::util::sort_util::ColumnOrder::new(
+                0,
+                risingwave_common::util::sort_util::OrderType::ascending(),
+            )],
+            downstream_pk: Some(vec![0]),
+            distribution_key: vec![0],
+            properties: std::iter::once((
+                risingwave_connector::sink::CONNECTOR_TYPE_KEY.to_owned(),
+                ICEBERG_SINK.to_owned(),
+            ))
+            .chain(
+                properties
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string())),
+            )
+            .collect(),
+            secret_refs: Default::default(),
+            sink_type: SinkType::Upsert,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "db".to_owned(),
+            sink_from_name: "s".to_owned(),
+            target_table: None,
+            extra_partition_col_idx: None,
+            create_type: risingwave_common::catalog::CreateType::Foreground,
+            is_exactly_once: Some(true),
+            auto_refresh_schema_from_table: None,
+        }
     }
 
     #[test]
@@ -909,5 +1013,40 @@ mod test {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_detect_iceberg_no_eq_delete_sink() {
+        let sink_desc = create_iceberg_sink_desc(&[
+            ("type", "upsert"),
+            ("primary_key", "v1"),
+            ("write_mode", IcebergWriteMode::MergeOnRead.as_str()),
+            ("format_version", "3"),
+        ]);
+        assert!(is_iceberg_no_eq_delete_sink(&sink_desc).unwrap());
+
+        let sink_desc = create_iceberg_sink_desc(&[
+            ("type", "upsert"),
+            ("primary_key", "v1"),
+            ("write_mode", IcebergWriteMode::MergeOnRead.as_str()),
+            ("format_version", "2"),
+        ]);
+        assert!(!is_iceberg_no_eq_delete_sink(&sink_desc).unwrap());
+    }
+
+    #[test]
+    fn test_build_iceberg_no_eq_delete_pk_state_table() {
+        let sink_desc = create_iceberg_sink_desc(&[
+            ("type", "upsert"),
+            ("primary_key", "v1"),
+            ("write_mode", IcebergWriteMode::MergeOnRead.as_str()),
+            ("format_version", "3"),
+        ]);
+        let table = build_iceberg_no_eq_delete_pk_state_table(&sink_desc);
+        assert_eq!(table.columns.len(), 3);
+        assert_eq!(table.pk.len(), 1);
+        assert_eq!(table.pk[0].column_index, 0);
+        assert_eq!(table.columns[1].name(), "file_path");
+        assert_eq!(table.columns[2].name(), "position");
     }
 }

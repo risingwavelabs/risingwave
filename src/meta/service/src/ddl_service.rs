@@ -35,7 +35,7 @@ use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
+use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Sink, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
@@ -136,6 +136,31 @@ impl DdlServiceImpl {
             streaming_job: replace_streaming_job,
             fragment_graph: fragment_graph.unwrap(),
         }
+    }
+
+    fn enable_auto_refresh_schema_for_iceberg_sink(sink: &Sink) -> bool {
+        use risingwave_connector::sink::iceberg::{
+            FORMAT_VERSION, ICEBERG_WRITE_MODE_MERGE_ON_READ, WRITE_MODE,
+        };
+
+        let format_version = sink
+            .properties
+            .get(FORMAT_VERSION)
+            .and_then(|v| v.parse::<u8>().ok())
+            .unwrap_or(2);
+        let write_mode = sink
+            .properties
+            .get(WRITE_MODE)
+            .map(String::as_str)
+            .unwrap_or(ICEBERG_WRITE_MODE_MERGE_ON_READ);
+        let is_append_only = sink
+            .properties
+            .get("type")
+            .is_some_and(|v| v.eq_ignore_ascii_case("append-only"));
+
+        !(format_version >= 3
+            && !is_append_only
+            && write_mode.eq_ignore_ascii_case(ICEBERG_WRITE_MODE_MERGE_ON_READ))
     }
 
     fn default_streaming_job_resource_type() -> streaming_job_resource_type::ResourceType {
@@ -1642,7 +1667,9 @@ impl DdlService for DdlServiceImpl {
 
         // Mark sink as background creation, so that it won't block source creation.
         sink.create_type = PbCreateType::Background as _;
-        sink.auto_refresh_schema_from_table = Some(table_catalog.id);
+        if Self::enable_auto_refresh_schema_for_iceberg_sink(&sink) {
+            sink.auto_refresh_schema_from_table = Some(table_catalog.id);
+        }
 
         let mut fragment_graph = fragment_graph.unwrap();
 

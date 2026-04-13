@@ -88,7 +88,7 @@ use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_pb::catalog::PbSinkType;
-use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
+use risingwave_pb::connector_service::{CoordinationRole, PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_pb::id::ExecutorId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
@@ -827,6 +827,15 @@ pub enum SinkCommitCoordinator {
     TwoPhase(BoxTwoPhaseCoordinator),
 }
 
+impl SinkCommitCoordinator {
+    pub fn roles(&self) -> Arc<[CoordinationRole]> {
+        match self {
+            SinkCommitCoordinator::SinglePhase(coordinator) => coordinator.roles(),
+            SinkCommitCoordinator::TwoPhase(coordinator) => coordinator.roles(),
+        }
+    }
+}
+
 #[async_trait]
 pub trait SinglePhaseCommitCoordinator {
     /// Initialize the sink committer coordinator.
@@ -846,6 +855,10 @@ pub trait SinglePhaseCommitCoordinator {
             "Schema change is not implemented for single-phase commit coordinator {}",
             std::any::type_name::<Self>()
         )))
+    }
+
+    fn roles(&self) -> Arc<[CoordinationRole]> {
+        Arc::from([CoordinationRole::Default])
     }
 }
 
@@ -880,6 +893,10 @@ pub trait TwoPhaseCommitCoordinator {
 
     /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);
+
+    fn roles(&self) -> Arc<[CoordinationRole]> {
+        Arc::from([CoordinationRole::Default])
+    }
 }
 
 impl SinkImpl {
@@ -1099,6 +1116,13 @@ pub enum SinkError {
 
 impl From<sea_orm::DbErr> for SinkError {
     fn from(err: sea_orm::DbErr) -> Self {
+        SinkError::Iceberg(anyhow!(err))
+    }
+}
+
+#[allow(clippy::disallowed_types)]
+impl From<::iceberg::Error> for SinkError {
+    fn from(err: ::iceberg::Error) -> Self {
         SinkError::Iceberg(anyhow!(err))
     }
 }

@@ -21,7 +21,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::connector_service::{CoordinationRole, SinkMetadata};
 use tracing::{info, warn};
 
 use super::{
@@ -89,7 +89,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
     async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         let (mut coordinator_stream_handle, log_store_rewind_start_epoch) = self
             .sink_coordinate_client
-            .new_stream_handle(&self.param, self.vnode_bitmap)
+            .new_stream_handle(&self.param, self.vnode_bitmap, CoordinationRole::Default)
             .await?;
         let mut sink_writer = self.writer;
         log_reader.start_from(log_store_rewind_start_epoch).await?;

@@ -162,6 +162,16 @@ impl BuildingFragment {
 
                 has_job = true;
             }
+            NodeBody::IcebergNoEqDeleteWriter(node) => {
+                node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
+
+                has_job = true;
+            }
+            NodeBody::IcebergNoEqDeleteDvMerger(node) => {
+                node.sink_desc.as_mut().unwrap().id = job_id.as_sink_id();
+
+                has_job = true;
+            }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = job_id.as_mv_table_id();
                 dml_node.table_version_id = job.table_version_id().unwrap();

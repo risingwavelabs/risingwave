@@ -13156,6 +13156,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "risingwave_stream",
+ "roaring",
  "rw_futures_util",
  "serde",
  "serde_json",

@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::future::{Future, poll_fn};
 use std::pin::pin;
+use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
@@ -33,7 +34,7 @@ use risingwave_connector::sink::{
     Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam, build_sink,
 };
 use risingwave_meta_model::pending_sink_state::SinkState;
-use risingwave_pb::connector_service::{SinkMetadata, coordinate_request};
+use risingwave_pb::connector_service::{CoordinationRole, SinkMetadata, coordinate_request};
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
@@ -109,6 +110,70 @@ impl<R> AligningRequests<R> {
 
     fn aligned(&self) -> bool {
         self.committed_bitmap.as_ref().is_some_and(|b| b.all())
+    }
+}
+
+struct MultiRoleAligningRequests<R> {
+    role_alignments: HashMap<CoordinationRole, AligningRequests<R>>,
+    all_handle_ids: HashSet<HandleId>,
+}
+
+impl<R> MultiRoleAligningRequests<R> {
+    fn new(roles: &[CoordinationRole]) -> Self {
+        let role_alignments = roles
+            .iter()
+            .map(|role| {
+                (
+                    *role,
+                    AligningRequests {
+                        requests: Vec::new(),
+                        handle_ids: HashSet::new(),
+                        committed_bitmap: None,
+                    },
+                )
+            })
+            .collect();
+        Self {
+            role_alignments,
+            all_handle_ids: HashSet::new(),
+        }
+    }
+
+    fn add_new_request(
+        &mut self,
+        handle_id: HandleId,
+        request: R,
+        vnode_bitmap: &Bitmap,
+        role: CoordinationRole,
+    ) -> anyhow::Result<()>
+    where
+        R: Debug,
+    {
+        self.role_alignments
+            .entry(role)
+            .or_insert_with(|| AligningRequests {
+                requests: Vec::new(),
+                handle_ids: HashSet::new(),
+                committed_bitmap: None,
+            })
+            .add_new_request(handle_id, request, vnode_bitmap)?;
+        self.all_handle_ids.insert(handle_id);
+        Ok(())
+    }
+
+    fn aligned(&self) -> bool {
+        self.role_alignments
+            .values()
+            .all(|alignment| alignment.aligned())
+    }
+
+    fn take_requests(&mut self) -> (Vec<R>, HashSet<HandleId>) {
+        let mut all_requests = Vec::new();
+        for alignment in self.role_alignments.values_mut() {
+            all_requests.append(&mut alignment.requests);
+        }
+        let handle_ids = std::mem::take(&mut self.all_handle_ids);
+        (all_requests, handle_ids)
     }
 }
 
@@ -270,6 +335,7 @@ struct CoordinationHandleManager {
     writer_handles: HashMap<HandleId, SinkWriterCoordinationHandle>,
     next_handle_id: HandleId,
     request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+    roles: Arc<[CoordinationRole]>,
 }
 
 impl CoordinationHandleManager {
@@ -295,7 +361,10 @@ impl CoordinationHandleManager {
     }
 
     fn ack_aligned_initial_epoch(&mut self, aligned_initial_epoch: u64) -> anyhow::Result<()> {
-        for (handle_id, handle) in &mut self.writer_handles {
+        for (&handle_id, handle) in &mut self.writer_handles {
+            if !role_requires_initial_epoch_alignment(handle.role()) {
+                continue;
+            }
             handle
                 .ack_aligned_initial_epoch(aligned_initial_epoch)
                 .map_err(|_| {
@@ -417,6 +486,10 @@ impl CoordinationHandleManager {
         self.writer_handles[&handle_id].vnode_bitmap()
     }
 
+    fn role(&self, handle_id: HandleId) -> CoordinationRole {
+        self.writer_handles[&handle_id].role()
+    }
+
     fn stop_handle(&mut self, handle_id: HandleId) -> anyhow::Result<()> {
         self.writer_handles
             .remove(&handle_id)
@@ -426,12 +499,17 @@ impl CoordinationHandleManager {
 
     async fn wait_init_handles(&mut self) -> anyhow::Result<HashSet<HandleId>> {
         assert!(self.writer_handles.is_empty());
-        let mut init_requests = AligningRequests::default();
+        let mut init_requests = MultiRoleAligningRequests::new(&self.roles);
         while !init_requests.aligned() {
             let (handle_id, event) = self.next_event().await?;
             let unexpected_event = match event {
                 CoordinationHandleManagerEvent::NewHandle => {
-                    init_requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
+                    init_requests.add_new_request(
+                        handle_id,
+                        (),
+                        self.vnode_bitmap(handle_id),
+                        self.role(handle_id),
+                    )?;
                     continue;
                 }
                 event => event.name(),
@@ -441,32 +519,50 @@ impl CoordinationHandleManager {
                 unexpected_event
             ));
         }
-        Ok(init_requests.handle_ids)
+        Ok(init_requests.all_handle_ids)
     }
 
     async fn alter_parallelisms(
         &mut self,
         altered_handles: impl Iterator<Item = HandleId>,
     ) -> anyhow::Result<HashSet<HandleId>> {
-        let mut requests = AligningRequests::default();
+        // Use MultiRoleAligningRequests to handle different roles (e.g., Writer vs DvMerger)
+        // separately. Each role has its own vnode bitmap, so using a single AligningRequests
+        // would cause duplicate vnode errors when roles have overlapping vnodes.
+        let mut requests = MultiRoleAligningRequests::new(&self.roles);
         for handle_id in altered_handles {
-            requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
+            requests.add_new_request(
+                handle_id,
+                (),
+                self.vnode_bitmap(handle_id),
+                self.role(handle_id),
+            )?;
         }
         let mut remaining_handles: HashSet<_> = self
             .writer_handles
             .keys()
-            .filter(|handle_id| !requests.handle_ids.contains(handle_id))
+            .filter(|handle_id| !requests.all_handle_ids.contains(handle_id))
             .cloned()
             .collect();
         while !remaining_handles.is_empty() || !requests.aligned() {
             let (handle_id, event) = self.next_event().await?;
             match event {
                 CoordinationHandleManagerEvent::NewHandle => {
-                    requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
+                    requests.add_new_request(
+                        handle_id,
+                        (),
+                        self.vnode_bitmap(handle_id),
+                        self.role(handle_id),
+                    )?;
                 }
                 CoordinationHandleManagerEvent::UpdateVnodeBitmap => {
                     assert!(remaining_handles.remove(&handle_id));
-                    requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
+                    requests.add_new_request(
+                        handle_id,
+                        (),
+                        self.vnode_bitmap(handle_id),
+                        self.role(handle_id),
+                    )?;
                 }
                 CoordinationHandleManagerEvent::Stop => {
                     assert!(remaining_handles.remove(&handle_id));
@@ -488,7 +584,7 @@ impl CoordinationHandleManager {
                 }
             }
         }
-        Ok(requests.handle_ids)
+        Ok(requests.all_handle_ids)
     }
 }
 
@@ -500,6 +596,10 @@ impl CoordinationHandleManager {
 enum CoordinatorWorkerState {
     Running,
     WaitingForFlushed(HashSet<HandleId>),
+}
+
+fn role_requires_initial_epoch_alignment(role: CoordinationRole) -> bool {
+    !matches!(role, CoordinationRole::DvMerger)
 }
 
 pub struct CoordinatorWorker {
@@ -558,12 +658,14 @@ impl CoordinatorWorker {
         coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
     ) {
+        let roles = coordinator.roles();
         let mut worker = CoordinatorWorker {
             handle_manager: CoordinationHandleManager {
                 param,
                 writer_handles: HashMap::new(),
                 next_handle_id: 0,
                 request_rx,
+                roles,
             },
             prev_committed_epoch: None,
             curr_state: CoordinatorWorkerState::Running,
@@ -603,15 +705,29 @@ impl CoordinatorWorker {
         self.handle_manager
             .start(log_store_rewind_start_epoch, pending_handle_ids)?;
         if log_store_rewind_start_epoch.is_none() {
-            let mut align_requests = AligningRequests::default();
+            // Only roles that may need to rewind log store must align the initial epoch.
+            // DvMerger does not consume log store data, so it does not participate here.
+            let initial_alignment_roles = self
+                .handle_manager
+                .roles
+                .iter()
+                .copied()
+                .filter(|role| role_requires_initial_epoch_alignment(*role))
+                .collect_vec();
+            let mut align_requests = MultiRoleAligningRequests::new(&initial_alignment_roles);
             while !align_requests.aligned() {
                 let (handle_id, event) = self.handle_manager.next_event().await?;
                 match event {
                     CoordinationHandleManagerEvent::AlignInitialEpoch(initial_epoch) => {
+                        let role = self.handle_manager.role(handle_id);
+                        if !role_requires_initial_epoch_alignment(role) {
+                            continue;
+                        }
                         align_requests.add_new_request(
                             handle_id,
                             initial_epoch,
                             self.handle_manager.vnode_bitmap(handle_id),
+                            role,
                         )?;
                     }
                     other => {
@@ -619,11 +735,8 @@ impl CoordinatorWorker {
                     }
                 }
             }
-            let aligned_initial_epoch = align_requests
-                .requests
-                .into_iter()
-                .max()
-                .expect("non-empty");
+            let (requests, _handle_ids) = align_requests.take_requests();
+            let aligned_initial_epoch = requests.into_iter().max().expect("non-empty");
             self.handle_manager
                 .ack_aligned_initial_epoch(aligned_initial_epoch)?;
         }
@@ -675,7 +788,7 @@ impl CoordinatorWorker {
         self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
             .await?;
 
-        let mut pending_epochs: BTreeMap<u64, AligningRequests<_>> = BTreeMap::new();
+        let mut pending_epochs: BTreeMap<u64, MultiRoleAligningRequests<_>> = BTreeMap::new();
         let mut pending_new_handles = vec![];
         loop {
             let event = self.next_event(&mut two_phase_handler).await?;
@@ -786,20 +899,26 @@ impl CoordinatorWorker {
                     running_handles
                 );
             }
-            pending_epochs.entry(epoch).or_default().add_new_request(
-                handle_id,
-                commit_request,
-                self.handle_manager.vnode_bitmap(handle_id),
-            )?;
+            let role = self.handle_manager.role(handle_id);
+            pending_epochs
+                .entry(epoch)
+                .or_insert_with(|| MultiRoleAligningRequests::new(&self.handle_manager.roles))
+                .add_new_request(
+                    handle_id,
+                    commit_request,
+                    self.handle_manager.vnode_bitmap(handle_id),
+                    role,
+                )?;
             if pending_epochs
                 .first_key_value()
                 .expect("non-empty")
                 .1
                 .aligned()
             {
-                let (epoch, commit_requests) = pending_epochs.pop_first().expect("non-empty");
-                let mut metadatas = Vec::with_capacity(commit_requests.requests.len());
-                let mut requests = commit_requests.requests.into_iter();
+                let (epoch, mut commit_requests) = pending_epochs.pop_first().expect("non-empty");
+                let (requests_vec, handle_ids) = commit_requests.take_requests();
+                let mut metadatas = Vec::with_capacity(requests_vec.len());
+                let mut requests = requests_vec.into_iter();
                 let (first_metadata, first_schema_change) = requests.next().expect("non-empty");
                 metadatas.push(first_metadata);
                 for (metadata, schema_change) in requests {
@@ -877,8 +996,7 @@ impl CoordinatorWorker {
                     }
                 }
 
-                self.handle_manager
-                    .ack_commit(epoch, commit_requests.handle_ids)?;
+                self.handle_manager.ack_commit(epoch, handle_ids)?;
             }
         }
     }

@@ -1093,6 +1093,8 @@ mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
+mod stream_iceberg_no_eq_delete_dv_merger;
+mod stream_iceberg_no_eq_delete_writer;
 mod stream_join_common;
 mod stream_local_approx_percentile;
 mod stream_locality_provider;
@@ -1236,6 +1238,8 @@ pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
+pub use stream_iceberg_no_eq_delete_dv_merger::StreamIcebergNoEqDeleteDvMerger;
+pub use stream_iceberg_no_eq_delete_writer::StreamIcebergNoEqDeleteWriter;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_locality_provider::StreamLocalityProvider;
@@ -1413,6 +1417,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, LocalityProvider }
             , { Stream, EowcGapFill }
             , { Stream, GapFill }
+            , { Stream, IcebergNoEqDeleteWriter }
+            , { Stream, IcebergNoEqDeleteDvMerger }
             $(,$rest)*
         }
     };

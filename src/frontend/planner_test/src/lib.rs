@@ -890,7 +890,14 @@ impl TestCase {
                     true,
                 ) {
                     Ok(sink_plan) => {
-                        ret.sink_plan = Some(explain_plan(&sink_plan.into()));
+                        match sink_plan.into_stream_plan() {
+                            Ok(plan) => {
+                                ret.sink_plan = Some(explain_plan(&plan));
+                            }
+                            Err(err) => {
+                                ret.sink_error = Some(err.to_report_string_pretty());
+                            }
+                        }
                         break 'sink;
                     }
                     Err(err) => {

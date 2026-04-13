@@ -378,6 +378,15 @@ message SinkNode {
   optional uint32 rate_limit = 4;
 }
 
+message IcebergNoEqDeleteWriterNode {
+  SinkDesc sink_desc = 1;
+  catalog.Table pk_index_table = 2;
+}
+
+message IcebergNoEqDeleteDvMergerNode {
+  SinkDesc sink_desc = 1;
+}
+
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
   // this two field is expressing a list of usize pair, which means when project receives a
@@ -1175,6 +1184,8 @@ message StreamNode {
     EowcGapFillNode eowc_gap_fill = 153;
     GapFillNode gap_fill = 154;
     VectorIndexLookupJoinNode vector_index_lookup_join = 155;
+    IcebergNoEqDeleteWriterNode iceberg_no_eq_delete_writer = 156;
+    IcebergNoEqDeleteDvMergerNode iceberg_no_eq_delete_dv_merger = 157;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

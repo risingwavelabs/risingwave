@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::connector_service::{CoordinationRole, SinkMetadata};
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
@@ -124,6 +125,10 @@ impl SinglePhaseCommitCoordinator for BoxSinglePhaseCoordinator {
             .commit_schema_change(epoch, schema_change)
             .await
     }
+
+    fn roles(&self) -> Arc<[CoordinationRole]> {
+        self.deref().roles()
+    }
 }
 
 #[async_trait]
@@ -163,5 +168,9 @@ impl TwoPhaseCommitCoordinator for BoxTwoPhaseCoordinator {
 
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>) {
         self.deref_mut().abort(epoch, commit_metadata).await;
+    }
+
+    fn roles(&self) -> Arc<[CoordinationRole]> {
+        self.deref().roles()
     }
 }
