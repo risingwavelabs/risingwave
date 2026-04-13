@@ -136,15 +136,40 @@ Each element of `records` is stored as-is into the `body JSONB` column.
 {"error": "stream 'foo' not found"}
 ```
 
+### 7. Bearer Token Authentication
+
+Token = RisingWave database user where username = password = token string.
+
+- Token format: `rstream_` + 32 hex chars (e.g., `rstream_a8f3bc91d2e4f567890abcdef1234567`)
+- `POST /v1/tokens` creates a DB user: `CREATE USER <token> WITH PASSWORD '<token>' LOGIN`
+- Password stored as MD5: `md5(token + token)` (since password=username=token)
+- Auth middleware extracts `Authorization: Bearer <token>`, looks up user, verifies hash
+- Token management protected by `RSTREAM_ADMIN_SECRET` env var (open in dev mode)
+
+RBAC privilege mapping:
+
+| RStream action | Required privilege |
+|---|---|
+| Read stream | `CONNECT` on database + `SELECT` on `_records` |
+| Write stream | `INSERT` on `_records` |
+| Create stream | `CREATEDB` user attribute |
+| Delete stream | Database owner or superuser |
+| List streams | Only shows streams with `CONNECT` |
+| Get stream info | `CONNECT` on database |
+
+When creating a stream, the creator is automatically granted `CONNECT` on the
+database and `SELECT, INSERT` on `_records`.
+
 ## Implementation Status
 
-### Done (Write + Read Path)
+### Done (Write + Read + Auth)
 
 | File | What |
 |------|------|
-| `src/frontend/src/rstream/mod.rs` | Router: 6 routes on `/v1/streams` (GET records added) |
-| `src/frontend/src/rstream/handlers.rs` | 6 handlers: create, delete, append, read (unary + SSE), list, get |
-| `src/frontend/src/rstream/types.rs` | Request/response structs incl. ReadRecordsParams, RecordEntry |
+| `src/frontend/src/rstream/mod.rs` | Router with auth middleware, data routes + token routes |
+| `src/frontend/src/rstream/auth.rs` | Token generation, extraction, password verification |
+| `src/frontend/src/rstream/handlers.rs` | 9 handlers: stream CRUD, records read/write, token CRUD |
+| `src/frontend/src/rstream/types.rs` | Request/response structs, error type with WWW-Authenticate |
 | `src/frontend/src/rstream/README.md` | User-facing docs |
 | `src/frontend/src/webhook/mod.rs` | Mount rstream router via `.nest("/v1", ...)` |
 | `src/frontend/src/lib.rs` | `pub mod rstream;` |
@@ -164,7 +189,7 @@ Single endpoint `GET /v1/streams/{name}/records` serves two modes:
 
 - User-configurable barrier interval via create stream request
 - Stream metadata (record count, last _row_id, creation time)
-- Authentication
+- HTTP API for granting per-stream access (`POST /v1/tokens/{token}/grants`)
 - Multi-frontend request counter coordination
 - Stream grouping (multiple streams in one database) for high stream counts
 
@@ -172,6 +197,7 @@ Single endpoint `GET /v1/streams/{name}/records` serves two modes:
 
 | File | Purpose |
 |------|---------|
+| `src/frontend/src/rstream/auth.rs` | Token generation, bearer extraction, password verification |
 | `src/frontend/src/webhook/mod.rs` | Template: HTTP handler + fast_insert flow |
 | `src/frontend/src/webhook/utils.rs` | Error type pattern |
 | `src/frontend/src/scheduler/fast_insert.rs` | `choose_fast_insert_client()` for CN routing |

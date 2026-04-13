@@ -73,6 +73,18 @@ pub struct ReadRecordsResponse {
     pub next_cursor: Option<String>,
 }
 
+// --- Token response types ---
+
+#[derive(Serialize)]
+pub struct CreateTokenResponse {
+    pub token: String,
+}
+
+#[derive(Serialize)]
+pub struct ListTokensResponse {
+    pub tokens: Vec<String>,
+}
+
 #[derive(Serialize)]
 struct ErrorBody {
     error: String,
@@ -110,6 +122,12 @@ impl IntoResponse for RStreamError {
         })
         .into_response();
         *resp.status_mut() = self.code;
+        if self.code == StatusCode::UNAUTHORIZED {
+            resp.headers_mut().insert(
+                axum::http::header::WWW_AUTHENTICATE,
+                "Bearer".parse().unwrap(),
+            );
+        }
         resp
     }
 }

@@ -32,11 +32,17 @@ use risingwave_common::types::{DataType, JsonbVal, Scalar};
 use risingwave_pb::task_service::fast_insert_response;
 use tokio_stream::wrappers::ReceiverStream;
 
+use risingwave_common::acl::AclMode;
+
+use super::auth::{
+    AuthenticatedUser, generate_token, is_rstream_token_user, verify_admin_secret,
+};
 use super::types::*;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::DatabaseId;
+use crate::catalog::{DatabaseId, OwnedByUserCatalog};
 use crate::scheduler::choose_fast_insert_client;
 use crate::session::{SESSION_MANAGER, SessionManagerImpl};
+use crate::user::UserId;
 
 const RSTREAM_DB_PREFIX: &str = "rstream_";
 const RSTREAM_TABLE_NAME: &str = "_records";
@@ -45,6 +51,39 @@ const RSTREAM_DEFAULT_BARRIER_INTERVAL_MS: u32 = 100;
 
 fn stream_db_name(stream_name: &str) -> String {
     format!("{}{}", RSTREAM_DB_PREFIX, stream_name)
+}
+
+fn get_dev_db_id() -> Result<DatabaseId> {
+    let session_mgr = get_session_mgr();
+    let catalog_reader = session_mgr.env().catalog_reader();
+    let reader = catalog_reader.read_guard();
+    Ok(reader
+        .get_database_by_name(DEFAULT_DATABASE_NAME)
+        .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?
+        .id())
+}
+
+fn get_user_catalog(user_id: UserId) -> Result<crate::user::user_catalog::UserCatalog> {
+    let session_mgr = get_session_mgr();
+    let user_reader = session_mgr.env().user_info_reader();
+    let reader = user_reader.read_guard();
+    reader
+        .get_user_by_id(&user_id)
+        .cloned()
+        .ok_or_else(|| err(anyhow!("user not found"), StatusCode::UNAUTHORIZED))
+}
+
+/// Check that the user has CONNECT privilege on the stream's database.
+fn check_connect(user_id: UserId, db_id: DatabaseId, db_owner: UserId) -> Result<()> {
+    let user = get_user_catalog(user_id)?;
+    if user.is_super || db_owner == user.id || user.has_privilege(db_id, AclMode::Connect) {
+        Ok(())
+    } else {
+        Err(err(
+            anyhow!("permission denied: no CONNECT privilege on stream"),
+            StatusCode::FORBIDDEN,
+        ))
+    }
 }
 
 fn validate_stream_name(name: &str) -> Result<()> {
@@ -99,9 +138,20 @@ async fn run_sql(session: &Arc<crate::session::SessionImpl>, sql: &str) -> Resul
 }
 
 pub async fn handle_create_stream(
+    Extension(auth): Extension<AuthenticatedUser>,
     Json(req): Json<CreateStreamRequest>,
 ) -> Result<(StatusCode, Json<CreateStreamResponse>)> {
     validate_stream_name(&req.name)?;
+
+    // Check CREATEDB privilege
+    let user = get_user_catalog(auth.user_id)?;
+    if !user.is_super && !user.can_create_db {
+        return Err(err(
+            anyhow!("permission denied: CREATEDB privilege required to create streams"),
+            StatusCode::FORBIDDEN,
+        ));
+    }
+
     let db_name = stream_db_name(&req.name);
     let session_mgr = get_session_mgr();
 
@@ -118,14 +168,7 @@ pub async fn handle_create_stream(
     }
 
     // Step 1: Create database using a session on the default database
-    let dev_db_id = {
-        let catalog_reader = session_mgr.env().catalog_reader();
-        let reader = catalog_reader.read_guard();
-        reader
-            .get_database_by_name(DEFAULT_DATABASE_NAME)
-            .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?
-            .id()
-    };
+    let dev_db_id = get_dev_db_id()?;
 
     let dev_session = session_mgr
         .create_dummy_session(dev_db_id)
@@ -180,25 +223,55 @@ pub async fn handle_create_stream(
     )
     .await?;
 
+    // Step 4: Grant the creating user access to the stream
+    run_sql(
+        &dev_session,
+        &format!(
+            "GRANT CONNECT ON DATABASE {} TO {}",
+            db_name, auth.user_name
+        ),
+    )
+    .await?;
+    run_sql(
+        &stream_session,
+        &format!(
+            "GRANT SELECT, INSERT ON {} TO {}",
+            RSTREAM_TABLE_NAME, auth.user_name
+        ),
+    )
+    .await?;
+
     Ok((
         StatusCode::CREATED,
         Json(CreateStreamResponse { stream: req.name }),
     ))
 }
 
-pub async fn handle_delete_stream(Path(name): Path<String>) -> Result<StatusCode> {
+pub async fn handle_delete_stream(
+    Extension(auth): Extension<AuthenticatedUser>,
+    Path(name): Path<String>,
+) -> Result<StatusCode> {
     let db_name = stream_db_name(&name);
     let session_mgr = get_session_mgr();
 
-    // Check if stream exists
-    let db_id = {
+    // Check if stream exists and get owner
+    let (db_id, db_owner) = {
         let catalog_reader = session_mgr.env().catalog_reader();
         let reader = catalog_reader.read_guard();
-        reader
+        let db = reader
             .get_database_by_name(&db_name)
-            .map_err(|_| err(anyhow!("stream '{}' not found", name), StatusCode::NOT_FOUND))?
-            .id()
+            .map_err(|_| err(anyhow!("stream '{}' not found", name), StatusCode::NOT_FOUND))?;
+        (db.id(), db.owner())
     };
+
+    // Only database owner or superuser can delete
+    let user = get_user_catalog(auth.user_id)?;
+    if !user.is_super && db_owner != user.id {
+        return Err(err(
+            anyhow!("permission denied: only stream owner or superuser can delete"),
+            StatusCode::FORBIDDEN,
+        ));
+    }
 
     // Drop the table first
     let stream_session = session_mgr
@@ -212,15 +285,7 @@ pub async fn handle_delete_stream(Path(name): Path<String>) -> Result<StatusCode
     .await?;
 
     // Drop the database
-    let dev_db_id = {
-        let catalog_reader = session_mgr.env().catalog_reader();
-        let reader = catalog_reader.read_guard();
-        reader
-            .get_database_by_name(DEFAULT_DATABASE_NAME)
-            .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?
-            .id()
-    };
-
+    let dev_db_id = get_dev_db_id()?;
     let dev_session = session_mgr
         .create_dummy_session(dev_db_id)
         .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?;
@@ -231,6 +296,7 @@ pub async fn handle_delete_stream(Path(name): Path<String>) -> Result<StatusCode
 }
 
 pub async fn handle_append_records(
+    Extension(auth): Extension<AuthenticatedUser>,
     Extension(counter): Extension<Arc<AtomicU32>>,
     Path(name): Path<String>,
     Json(req): Json<AppendRecordsRequest>,
@@ -248,7 +314,7 @@ pub async fn handle_append_records(
 
     let request_id = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-    // Look up table info from catalog
+    // Look up table info from catalog and check INSERT privilege
     let (table_id, table_version_id, row_id_index) = {
         let catalog_reader = frontend_env.catalog_reader();
         let reader = catalog_reader.read_guard();
@@ -272,6 +338,18 @@ pub async fn handle_append_records(
                     StatusCode::INTERNAL_SERVER_ERROR,
                 )
             })?;
+
+        // Check INSERT privilege (fast_insert bypasses SQL-level checks)
+        let user = get_user_catalog(auth.user_id)?;
+        if !user.is_super
+            && table_catalog.owner != user.id
+            && !user.has_privilege(table_catalog.id(), AclMode::Insert)
+        {
+            return Err(err(
+                anyhow!("permission denied: INSERT privilege required"),
+                StatusCode::FORBIDDEN,
+            ));
+        }
 
         (
             table_catalog.id(),
@@ -332,7 +410,10 @@ pub async fn handle_append_records(
     }
 }
 
-pub async fn handle_list_streams() -> Result<Json<ListStreamsResponse>> {
+pub async fn handle_list_streams(
+    Extension(auth): Extension<AuthenticatedUser>,
+) -> Result<Json<ListStreamsResponse>> {
+    let user = get_user_catalog(auth.user_id)?;
     let session_mgr = get_session_mgr();
     let catalog_reader = session_mgr.env().catalog_reader();
     let reader = catalog_reader.read_guard();
@@ -340,24 +421,36 @@ pub async fn handle_list_streams() -> Result<Json<ListStreamsResponse>> {
     let streams: Vec<String> = reader
         .iter_databases()
         .filter_map(|db| {
-            db.name()
-                .strip_prefix(RSTREAM_DB_PREFIX)
-                .map(|s| s.to_owned())
+            let stream_name = db.name().strip_prefix(RSTREAM_DB_PREFIX)?;
+            // Only show streams the user can access
+            if user.is_super
+                || db.owner() == user.id
+                || user.has_privilege(db.id(), AclMode::Connect)
+            {
+                Some(stream_name.to_owned())
+            } else {
+                None
+            }
         })
         .collect();
 
     Ok(Json(ListStreamsResponse { streams }))
 }
 
-pub async fn handle_get_stream(Path(name): Path<String>) -> Result<Json<GetStreamResponse>> {
+pub async fn handle_get_stream(
+    Extension(auth): Extension<AuthenticatedUser>,
+    Path(name): Path<String>,
+) -> Result<Json<GetStreamResponse>> {
     let db_name = stream_db_name(&name);
     let session_mgr = get_session_mgr();
     let catalog_reader = session_mgr.env().catalog_reader();
     let reader = catalog_reader.read_guard();
 
-    reader
+    let db = reader
         .get_database_by_name(&db_name)
         .map_err(|_| err(anyhow!("stream '{}' not found", name), StatusCode::NOT_FOUND))?;
+
+    check_connect(auth.user_id, db.id(), db.owner())?;
 
     Ok(Json(GetStreamResponse { name }))
 }
@@ -453,10 +546,14 @@ async fn run_sql_query(
 }
 
 pub async fn handle_read_records(
+    Extension(auth): Extension<AuthenticatedUser>,
     Path(name): Path<String>,
     Query(params): Query<ReadRecordsParams>,
     headers: HeaderMap,
 ) -> Result<Response> {
+    // Check SELECT privilege on the _records table
+    check_read_privilege(&auth, &name)?;
+
     let wants_sse = headers
         .get(axum::http::header::ACCEPT)
         .and_then(|v| v.to_str().ok())
@@ -468,6 +565,55 @@ pub async fn handle_read_records(
     } else {
         handle_unary_fetch(name, params).await
     }
+}
+
+fn check_read_privilege(auth: &AuthenticatedUser, stream_name: &str) -> Result<()> {
+    let db_name = stream_db_name(stream_name);
+    let session_mgr = get_session_mgr();
+    let frontend_env = session_mgr.env();
+    let catalog_reader = frontend_env.catalog_reader();
+    let reader = catalog_reader.read_guard();
+
+    let db = reader
+        .get_database_by_name(&db_name)
+        .map_err(|_| {
+            err(
+                anyhow!("stream '{}' not found", stream_name),
+                StatusCode::NOT_FOUND,
+            )
+        })?;
+
+    let user = get_user_catalog(auth.user_id)?;
+    if user.is_super || db.owner() == user.id {
+        return Ok(());
+    }
+
+    // Check CONNECT on database
+    if !user.has_privilege(db.id(), AclMode::Connect) {
+        return Err(err(
+            anyhow!("permission denied: no CONNECT privilege on stream"),
+            StatusCode::FORBIDDEN,
+        ));
+    }
+
+    // Check SELECT on table
+    let search_path = Default::default();
+    let schema_path = SchemaPath::new(
+        Some(RSTREAM_SCHEMA_NAME),
+        &search_path,
+        risingwave_common::catalog::DEFAULT_SUPER_USER,
+    );
+    if let Ok((table_catalog, _)) =
+        reader.get_any_table_by_name(db.name(), schema_path, RSTREAM_TABLE_NAME)
+        && table_catalog.owner != user.id
+        && !user.has_privilege(table_catalog.id(), AclMode::Select)
+    {
+        return Err(err(
+            anyhow!("permission denied: SELECT privilege required"),
+            StatusCode::FORBIDDEN,
+        ));
+    }
+    Ok(())
 }
 
 async fn handle_unary_fetch(name: String, params: ReadRecordsParams) -> Result<Response> {
@@ -552,4 +698,70 @@ fn handle_sse_tailing(name: String, params: ReadRecordsParams) -> Result<Respons
     );
 
     Ok(sse.into_response())
+}
+
+// ---------------------------------------------------------------------------
+// Token management
+// ---------------------------------------------------------------------------
+
+pub async fn handle_create_token(headers: HeaderMap) -> Result<(StatusCode, Json<CreateTokenResponse>)> {
+    verify_admin_secret(&headers)?;
+
+    let token = generate_token();
+    let dev_db_id = get_dev_db_id()?;
+    let session_mgr = get_session_mgr();
+    let dev_session = session_mgr
+        .create_dummy_session(dev_db_id)
+        .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?;
+
+    // CREATE USER with token as both username and password.
+    // Stored hash = md5(token + token) since password=token, username=token.
+    run_sql(
+        &dev_session,
+        &format!("CREATE USER {} WITH PASSWORD '{}' LOGIN", token, token),
+    )
+    .await?;
+
+    Ok((StatusCode::CREATED, Json(CreateTokenResponse { token })))
+}
+
+pub async fn handle_delete_token(
+    Path(token): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode> {
+    verify_admin_secret(&headers)?;
+
+    if !is_rstream_token_user(&token) {
+        return Err(err(
+            anyhow!("not a valid rstream token"),
+            StatusCode::BAD_REQUEST,
+        ));
+    }
+
+    let dev_db_id = get_dev_db_id()?;
+    let session_mgr = get_session_mgr();
+    let dev_session = session_mgr
+        .create_dummy_session(dev_db_id)
+        .map_err(|e| err(e, StatusCode::INTERNAL_SERVER_ERROR))?;
+
+    run_sql(&dev_session, &format!("DROP USER {}", token)).await?;
+
+    Ok(StatusCode::OK)
+}
+
+pub async fn handle_list_tokens(headers: HeaderMap) -> Result<Json<ListTokensResponse>> {
+    verify_admin_secret(&headers)?;
+
+    let session_mgr = get_session_mgr();
+    let user_reader = session_mgr.env().user_info_reader();
+    let reader = user_reader.read_guard();
+
+    let tokens: Vec<String> = reader
+        .get_all_users()
+        .into_iter()
+        .filter(|u| is_rstream_token_user(&u.name))
+        .map(|u| u.name)
+        .collect();
+
+    Ok(Json(ListTokensResponse { tokens }))
 }
