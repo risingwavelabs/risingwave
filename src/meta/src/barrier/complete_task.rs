@@ -143,6 +143,7 @@ impl CompleteBarrierTask {
                 if job_id.is_none() {
                     Self::report_complete_event(
                         &env,
+                        database_id,
                         elapsed_secs,
                         &info.barrier_info,
                         command_name,
@@ -193,6 +194,7 @@ impl CompleteBarrierTask {
 impl CompleteBarrierTask {
     fn report_complete_event(
         env: &MetaSrvEnv,
+        database_id: DatabaseId,
         duration_sec: f64,
         barrier_info: &BarrierInfo,
         command: String,
@@ -205,6 +207,7 @@ impl CompleteBarrierTask {
             duration_sec,
             command,
             barrier_kind: barrier_info.kind.as_str_name().to_owned(),
+            database_id: database_id.as_raw_id(),
         };
         if cfg!(debug_assertions) || Deployment::current().is_ci() {
             // Add a warning log so that debug mode / CI can observe it
