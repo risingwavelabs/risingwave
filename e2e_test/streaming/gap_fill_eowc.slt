@@ -207,7 +207,7 @@ INSERT INTO gap_table_partitioned VALUES
     (1, '2024-05-21 10:10:00', 1000.0),
     (2, '2024-05-21 10:10:00', 2000.0);
 
-query ITR retry 6 backoff 1s
+query ITR
 SELECT device_id, ts, value
 FROM gap_filled_partitioned_eowc
 ORDER BY device_id, ts;
