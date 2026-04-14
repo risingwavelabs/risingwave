@@ -130,6 +130,10 @@ message GetStreamRequest {
     uint32 down_fragment_id = 4;
     uint64 up_partial_graph_id = 5;
     string term_id = 6;
+    // For multiplexed barrier coalescing: the list of upstream actor IDs whose
+    // barriers should be coalesced. When non-empty, this creates a barrier-only
+    // stream and triggers barrier group creation on the sender side.
+    repeated uint32 up_actor_ids = 7;
   }
 
   oneof value {

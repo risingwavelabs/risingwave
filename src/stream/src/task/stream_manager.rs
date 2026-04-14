@@ -34,7 +34,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::task::barrier_worker::{
     ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker, TakeReceiverRequest,
 };
-use crate::task::{FragmentId, StreamEnvironment, UpDownActorIds};
+use crate::task::{ActorId, FragmentId, StreamEnvironment, UpDownActorIds};
 
 #[cfg(test)]
 pub static LOCAL_TEST_ADDR: std::sync::LazyLock<risingwave_common::util::addr::HostAddr> =
@@ -154,6 +154,33 @@ impl LocalStreamManager {
                     result_sender,
                     upstream_fragment_id,
                 },
+            })
+            .await?
+    }
+
+    /// Create a barrier group for multiplexed barrier coalescing.
+    ///
+    /// This creates per-actor data channels (stored for later `take_receiver` calls),
+    /// a barrier-only channel with coalescer, and sends `CoalescedBarrierRemote` output
+    /// requests to each upstream actor's `DispatchExecutor`.
+    ///
+    /// Returns the barrier-only channel receiver.
+    pub async fn create_barrier_group(
+        &self,
+        partial_graph_id: PartialGraphId,
+        term_id: String,
+        up_actor_ids: Vec<ActorId>,
+        down_actor_id: ActorId,
+        upstream_fragment_id: FragmentId,
+    ) -> StreamResult<Receiver> {
+        self.actor_op_tx
+            .send_and_await(|result_sender| LocalActorOperation::CreateBarrierGroup {
+                partial_graph_id,
+                term_id,
+                up_actor_ids,
+                down_actor_id,
+                upstream_fragment_id,
+                result_sender,
             })
             .await?
     }
