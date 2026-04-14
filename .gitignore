@@ -95,4 +95,6 @@ book/
 
 # Build caches
 .m2/
-.omx/
+
+# Code agent temporary files
+docs/superpowers
