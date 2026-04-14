@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::poll_fn;
 use std::ops::{Bound, Range};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::AssertUnwindSafe;
 use std::sync::{Arc, LazyLock};
 use std::task::Poll;
 use std::time::{Duration, Instant};
@@ -35,6 +35,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::key::{FullKey, vnode_range};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -470,7 +471,7 @@ struct CacheRefillTask {
 
 impl CacheRefillTask {
     fn with_fail_open_locality_gate(gate_name: &'static str, check: impl FnOnce() -> bool) -> bool {
-        match catch_unwind(AssertUnwindSafe(check)) {
+        match rw_catch_unwind(AssertUnwindSafe(check)) {
             Ok(admit) => admit,
             Err(_) => {
                 tracing::warn!(
