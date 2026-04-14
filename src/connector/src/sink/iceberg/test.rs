@@ -337,6 +337,7 @@ fn test_parse_iceberg_config() {
             write_parquet_compression: None,
             write_parquet_max_row_group_rows: None,
             write_parquet_max_row_group_bytes: None,
+            enable_pk_index: false,
         };
 
     assert_eq!(iceberg_config, expected_iceberg_config);

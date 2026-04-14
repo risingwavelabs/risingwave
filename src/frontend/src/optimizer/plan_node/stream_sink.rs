@@ -26,7 +26,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
-use risingwave_connector::sink::iceberg::ICEBERG_SINK;
+use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -751,6 +751,38 @@ impl StreamSink {
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
         infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc().columns)
     }
+
+    /// Convert this `StreamSink` into a `PlanRef`.
+    ///
+    /// For Iceberg pk index sinks, this rewrites the plan into
+    /// `Upstream → Writer → Exchange(Single) → DvMerger` instead of a single `SinkNode`.
+    /// For all other sinks, returns `self` as-is.
+    pub fn into_stream_plan(self) -> Result<PlanRef> {
+        use super::{StreamIcebergWithPkIndexDvMerger, StreamIcebergWithPkIndexWriter};
+
+        if !is_iceberg_with_pk_index_sink(&self.sink_desc)? {
+            return Ok(self.into());
+        }
+
+        let writer: PlanRef =
+            StreamIcebergWithPkIndexWriter::new(self.input, self.sink_desc.clone()).into();
+        let dv_merger: PlanRef =
+            StreamIcebergWithPkIndexDvMerger::new(writer, self.sink_desc).into();
+        Ok(dv_merger)
+    }
+}
+
+pub fn is_iceberg_with_pk_index_sink(sink_desc: &SinkDesc) -> Result<bool> {
+    if !sink_desc
+        .properties
+        .get(CONNECTOR_TYPE_KEY)
+        .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
+    {
+        return Ok(false);
+    }
+
+    let iceberg_config = IcebergConfig::from_btreemap(sink_desc.properties.clone())?;
+    Ok(iceberg_config.enable_pk_index)
 }
 
 impl PlanTreeNodeUnary<Stream> for StreamSink {

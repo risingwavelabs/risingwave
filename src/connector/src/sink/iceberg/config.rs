@@ -129,6 +129,7 @@ pub const COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: &str = "commit_checkpoint_size_th
 pub const ORDER_KEY: &str = "order_key";
 pub const ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: u64 = 128;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
+pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
 pub(super) const PARQUET_CREATED_BY: &str =
     concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
@@ -461,6 +462,15 @@ pub struct IcebergConfig {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub write_parquet_max_row_group_bytes: Option<usize>,
+
+    /// Whether to enable PK index for upsert sink. Default is false.
+    /// It's used for V3 upsert iceberg sink to generate delete vectors.
+    #[serde(
+        rename = "enable_pk_index",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub enable_pk_index: bool,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -491,6 +501,38 @@ impl IcebergConfig {
                  Please use 'merge-on-read' instead, which is strictly better for append-only workloads."
             )));
         }
+        Ok(())
+    }
+
+    pub(crate) fn validate_enable_pk_index(&self) -> Result<()> {
+        if !self.enable_pk_index {
+            return Ok(());
+        }
+
+        if self.r#type != SINK_TYPE_UPSERT {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` is only supported for upsert iceberg sink"
+            )));
+        }
+
+        if self.write_mode != IcebergWriteMode::MergeOnRead {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` is only supported for upsert iceberg sink with merge-on-read mode"
+            )));
+        }
+
+        if self.format_version < FormatVersion::V3 {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` is only supported for upsert iceberg sink with format version >= 3"
+            )));
+        }
+
+        if self.force_append_only {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` cannot be true when `force_append_only` is true"
+            )));
+        }
+
         Ok(())
     }
 
@@ -526,6 +568,7 @@ impl IcebergConfig {
 
         // Enforce merge-on-read for append-only sinks
         Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
+        config.validate_enable_pk_index()?;
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = values
