@@ -1275,6 +1275,7 @@ mod tests {
     use std::hash::{BuildHasher, Hasher};
 
     use futures::pin_mut;
+    use multimap::MultiMap;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
     use risingwave_common::catalog::Field;
@@ -1282,7 +1283,6 @@ mod tests {
     use risingwave_common::util::hash_util::Crc32FastBuilder;
     use risingwave_expr::expr::{InputRefExpression, NonStrictExpression};
     use risingwave_pb::stream_plan::{DispatcherType, PbDispatchOutputMapping};
-    use multimap::MultiMap;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
