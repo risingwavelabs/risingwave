@@ -98,15 +98,18 @@ impl StreamEowcGapFill {
             tbl_builder.add_column(field);
         }
 
-        // PK: partition_cols + time_col + stream_key for buffer ordering
+        // PK: time_col + partition_cols + stream_key for buffer ordering.
+        // `SortBuffer` requires the watermark/time column to be the first pk column, while
+        // `partition_by` still participates in the remaining ordering and distribution.
         let mut added_to_pk = std::collections::HashSet::new();
-        for pc in &self.core.partition_by_cols {
-            tbl_builder.add_order_column(pc.index(), OrderType::ascending());
-            added_to_pk.insert(pc.index());
-        }
         let time_col_idx = self.time_col().index();
-        if added_to_pk.insert(time_col_idx) {
-            tbl_builder.add_order_column(time_col_idx, OrderType::ascending());
+        tbl_builder.add_order_column(time_col_idx, OrderType::ascending());
+        added_to_pk.insert(time_col_idx);
+
+        for pc in &self.core.partition_by_cols {
+            if added_to_pk.insert(pc.index()) {
+                tbl_builder.add_order_column(pc.index(), OrderType::ascending());
+            }
         }
         let input_ref = self.input();
         let input_stream_key = input_ref.expect_stream_key();
@@ -216,7 +219,12 @@ impl TryToStreamPb for StreamEowcGapFill {
                 .iter()
                 .map(|c| c.index() as u32)
                 .collect(),
-            upstream_stream_key: vec![],
+            upstream_stream_key: self
+                .input()
+                .expect_stream_key()
+                .iter()
+                .map(|&idx| idx as u32)
+                .collect(),
         })))
     }
 }
