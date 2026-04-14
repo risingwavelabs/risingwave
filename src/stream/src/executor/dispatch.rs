@@ -1277,15 +1277,20 @@ mod tests {
     use futures::pin_mut;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder};
+    use risingwave_common::catalog::Field;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::hash_util::Crc32FastBuilder;
+    use risingwave_expr::expr::{InputRefExpression, NonStrictExpression};
     use risingwave_pb::stream_plan::{DispatcherType, PbDispatchOutputMapping};
+    use multimap::MultiMap;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
     use crate::executor::exchange::output::Output;
     use crate::executor::exchange::permit::channel_for_test;
+    use crate::executor::project::ProjectExecutor;
     use crate::executor::receiver::ReceiverExecutor;
+    use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
     use crate::executor::{BarrierInner as Barrier, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 
@@ -1710,7 +1715,7 @@ mod tests {
             vec![0],
             DispatchOutputMapping::Simple(vec![0]),
             hash_mapping,
-            0.into(),
+            0,
         );
 
         hash_dispatcher.dispatch_data(projected).await.unwrap();
@@ -1769,7 +1774,7 @@ mod tests {
             vec![0],
             DispatchOutputMapping::Simple(vec![0]),
             hash_mapping,
-            0.into(),
+            0,
         );
 
         hash_dispatcher.dispatch_data(projected).await.unwrap();
@@ -1785,7 +1790,7 @@ mod tests {
             vec![0],
             DispatchOutputMapping::Simple(vec![0]),
             hash_mapping,
-            0.into(),
+            0,
         );
 
         let input = StreamChunk::from_pretty(
