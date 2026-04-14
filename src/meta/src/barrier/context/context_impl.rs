@@ -30,6 +30,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::PbInitReque
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
+use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{PostCollectCommand, ResumeBackfillTarget};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
@@ -241,6 +242,16 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
         Ok(())
     }
+
+    async fn load_batch_refresh_trigger_context(
+        &self,
+        job_id: JobId,
+        database_id: DatabaseId,
+        last_committed_epoch: u64,
+    ) -> MetaResult<BatchRefreshJobTriggerContext> {
+        self.load_batch_refresh_trigger_context_impl(job_id, database_id, last_committed_epoch)
+            .await
+    }
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -279,6 +290,150 @@ impl GlobalBarrierWorkerContextImpl {
 
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
+    }
+
+    /// Load the context metadata and resolve upstream log epochs for a batch refresh trigger.
+    async fn load_batch_refresh_trigger_context_impl(
+        &self,
+        job_id: JobId,
+        database_id: DatabaseId,
+        last_committed_epoch: u64,
+    ) -> MetaResult<BatchRefreshJobTriggerContext> {
+        use itertools::Itertools;
+        use sea_orm::TransactionTrait;
+
+        use crate::controller::scale::load_fragment_context_for_jobs;
+
+        // Load metadata from the catalog under a single transaction.
+        let inner = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
+        let txn = inner.db.begin().await?;
+
+        // 1. Load fragment context (job model, database model).
+        let fragment_context =
+            load_fragment_context_for_jobs(&txn, HashSet::from([job_id])).await?;
+
+        let streaming_job_model = fragment_context
+            .job_map
+            .get(&job_id)
+            .ok_or_else(|| anyhow::anyhow!("streaming job model not found for job {}", job_id))?
+            .clone();
+
+        let database_model = fragment_context
+            .database_map
+            .get(&database_id)
+            .ok_or_else(|| {
+                anyhow::anyhow!("database model not found for database {}", database_id)
+            })?;
+        let database_resource_group = database_model.resource_group.clone();
+
+        // 2. Load job definition.
+        let mut job_extra_info = self
+            .metadata_manager
+            .catalog_controller
+            .get_streaming_job_extra_info_in_txn(&txn, vec![job_id])
+            .await?;
+        let definition = job_extra_info
+            .remove(&job_id)
+            .ok_or_else(|| anyhow::anyhow!("extra info not found for job {}", job_id))?
+            .job_definition;
+
+        // 3. Get fragments from fragment_context and load downstream relations.
+        let fragments = fragment_context
+            .job_fragments
+            .get(&job_id)
+            .ok_or_else(|| anyhow::anyhow!("fragments not found for job {}", job_id))?
+            .clone();
+
+        // Derive upstream table IDs from the snapshot backfill scan nodes in the fragments.
+        let upstream_table_ids: HashSet<TableId> = {
+            use crate::stream::StreamFragmentGraph;
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                fragments.values().map(|f| (&f.nodes, f.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| {
+                anyhow::anyhow!("batch refresh job {} has no snapshot backfill info", job_id)
+            })?;
+            snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .into_keys()
+                .collect()
+        };
+
+        let fragment_ids: Vec<_> = fragments.keys().copied().collect();
+        let downstreams = self
+            .metadata_manager
+            .catalog_controller
+            .get_fragment_downstream_relations_in_txn(&txn, fragment_ids)
+            .await?;
+
+        // Resolve upstream log epochs from the hummock changelog.
+        let (upstream_table_log_epochs, target_upstream_epoch) = self
+            .hummock_manager
+            .on_current_version_and_table_change_log(|version, table_change_log| {
+                let mut target_upstream_epoch = last_committed_epoch;
+                let mut log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>> = HashMap::new();
+
+                for &upstream_table_id in &upstream_table_ids {
+                    let upstream_committed_epoch = version
+                        .state_table_info
+                        .info()
+                        .get(&upstream_table_id)
+                        .map(|info| info.committed_epoch)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "cannot get committed epoch for upstream table {}",
+                                upstream_table_id
+                            )
+                        })?;
+
+                    target_upstream_epoch =
+                        std::cmp::max(target_upstream_epoch, upstream_committed_epoch);
+
+                    if upstream_committed_epoch <= last_committed_epoch {
+                        continue;
+                    }
+
+                    if let Some(change_log) = table_change_log.get(&upstream_table_id) {
+                        let epochs = change_log
+                            .filter_epoch((last_committed_epoch, upstream_committed_epoch))
+                            .map(|epoch_log| {
+                                (
+                                    epoch_log.non_checkpoint_epochs.clone(),
+                                    epoch_log.checkpoint_epoch,
+                                )
+                            })
+                            .collect_vec();
+                        if !epochs.is_empty() {
+                            log_epochs.insert(upstream_table_id, epochs);
+                        }
+                    } else {
+                        anyhow::bail!(
+                            "upstream table {} has lagged downstream on epoch {} but no table change log (upstream committed: {})",
+                            upstream_table_id,
+                            last_committed_epoch,
+                            upstream_committed_epoch,
+                        );
+                    }
+                }
+
+                Ok((log_epochs, target_upstream_epoch))
+            })
+            .await?;
+
+        Ok(BatchRefreshJobTriggerContext {
+            fragments,
+            downstreams,
+            streaming_job_model,
+            definition,
+            database_resource_group,
+            upstream_table_log_epochs,
+            target_upstream_epoch,
+        })
     }
 }
 

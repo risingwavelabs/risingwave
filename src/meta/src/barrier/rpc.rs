@@ -1139,6 +1139,11 @@ impl PartialGraphRecoverer<'_> {
                 false,
             );
 
+            let refresh_interval_sec = job_extra_info
+                .get(&job_id)
+                .and_then(|info| info.refresh_interval_sec)
+                .unwrap_or(0);
+
             let job = BatchRefreshJobCheckpointControl::recover(
                 database_id,
                 job_id,
@@ -1150,6 +1155,7 @@ impl PartialGraphRecoverer<'_> {
                 mutation,
                 render_result,
                 self,
+                refresh_interval_sec,
             )?;
             independent_checkpoint_job_controls
                 .insert(job_id, IndependentCheckpointJobControl::BatchRefresh(job));
