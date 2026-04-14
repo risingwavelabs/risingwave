@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::num::NonZeroU64;
-
 use risingwave_common::session_config::parallelism::{
-    ConfigBackfillParallelism, ConfigParallelism,
+    ConfigBackfillParallelism, ConfigParallelism, DEFAULT_GLOBAL_STREAMING_PARALLELISM,
+    DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM,
 };
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -32,7 +31,7 @@ fn resolve_global_parallelism(
     global_streaming_parallelism: ConfigParallelism,
 ) -> ConfigParallelism {
     match global_streaming_parallelism {
-        ConfigParallelism::Default => ConfigParallelism::Bounded(NonZeroU64::new(64).unwrap()),
+        ConfigParallelism::Default => DEFAULT_GLOBAL_STREAMING_PARALLELISM,
         other => other,
     }
 }
@@ -45,7 +44,7 @@ fn resolve_default_parallelism(
         // Table/source only keep their legacy typed default on the untouched default path.
         // Once the global parallelism is explicitly set, they inherit that global value.
         Some(GraphJobType::Table | GraphJobType::Source) => match global_streaming_parallelism {
-            ConfigParallelism::Default => ConfigParallelism::Bounded(NonZeroU64::new(4).unwrap()),
+            ConfigParallelism::Default => DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM,
             other => resolve_global_parallelism(other),
         },
         Some(GraphJobType::MaterializedView | GraphJobType::Sink | GraphJobType::Index) | None => {
@@ -130,9 +129,7 @@ mod tests {
         assert_eq!(derive_parallelism(None, None, global).parallelism, None);
         assert_eq!(
             derive_parallelism(None, None, global).adaptive_strategy,
-            Some(AdaptiveParallelismStrategy::Bounded(
-                NonZeroUsize::new(64).unwrap()
-            ))
+            DEFAULT_GLOBAL_STREAMING_PARALLELISM.adaptive_strategy()
         );
     }
 
@@ -165,9 +162,7 @@ mod tests {
         assert_eq!(derive_parallelism(None, specific, global).parallelism, None);
         assert_eq!(
             derive_parallelism(None, specific, global).adaptive_strategy,
-            Some(AdaptiveParallelismStrategy::Bounded(
-                NonZeroUsize::new(64).unwrap()
-            ))
+            DEFAULT_GLOBAL_STREAMING_PARALLELISM.adaptive_strategy()
         );
     }
 
@@ -248,9 +243,7 @@ mod tests {
                 ConfigParallelism::Default
             )
             .adaptive_strategy,
-            Some(AdaptiveParallelismStrategy::Bounded(
-                NonZeroUsize::new(4).unwrap()
-            ))
+            DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM.adaptive_strategy()
         );
     }
 
@@ -285,9 +278,7 @@ mod tests {
                 ConfigParallelism::Default
             )
             .adaptive_strategy,
-            Some(AdaptiveParallelismStrategy::Bounded(
-                NonZeroUsize::new(4).unwrap()
-            ))
+            DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM.adaptive_strategy()
         );
     }
 
