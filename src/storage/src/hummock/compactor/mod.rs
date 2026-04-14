@@ -125,47 +125,76 @@ struct IcebergCompactionLogState {
 #[derive(Debug)]
 struct IcebergPlanCompletion {
     task_key: TaskKey,
-    success: bool,
     error_message: Option<String>,
+}
+
+#[derive(Debug)]
+enum IcebergTaskError {
+    Enqueue,
+    Execution(String),
 }
 
 type IcebergTaskReport = subscribe_iceberg_compaction_event_request::ReportTask;
 
-#[derive(Clone)]
 struct IcebergTaskTracker {
-    task_id: u64,
     sink_id: u32,
-    enqueued_plans: usize,
-    completed_plans: usize,
-    has_failure: bool,
-    first_error: Option<String>,
+    remaining_plans: usize,
+    error: Option<IcebergTaskError>,
 }
 
 impl IcebergTaskTracker {
-    fn new(task_id: u64, sink_id: u32, total_plans: usize, enqueued_plans: usize) -> Self {
+    fn new(sink_id: u32, remaining_plans: usize, enqueue_failed: bool) -> Self {
         Self {
-            task_id,
             sink_id,
-            enqueued_plans,
-            completed_plans: 0,
-            has_failure: enqueued_plans < total_plans,
-            first_error: (enqueued_plans < total_plans)
-                .then_some("Failed to enqueue all iceberg compaction plans".to_owned()),
+            remaining_plans,
+            error: enqueue_failed.then_some(IcebergTaskError::Enqueue),
         }
     }
 
-    fn on_plan_completion(&mut self, completion: &IcebergPlanCompletion) {
-        self.completed_plans += 1;
-        if !completion.success {
-            self.has_failure = true;
-            if self.first_error.is_none() {
-                self.first_error = completion.error_message.clone();
+    fn on_plan_completion(&mut self, error_message: Option<String>) {
+        if self.remaining_plans == 0 {
+            tracing::warn!(
+                sink_id = self.sink_id,
+                "Received extra iceberg plan completion after tracker was already finished"
+            );
+            return;
+        }
+        self.remaining_plans -= 1;
+        if let Some(error_message) = error_message {
+            match &mut self.error {
+                None | Some(IcebergTaskError::Enqueue) => {
+                    self.error = Some(IcebergTaskError::Execution(error_message));
+                }
+                Some(IcebergTaskError::Execution(_)) => {}
             }
         }
     }
 
     fn is_finished(&self) -> bool {
-        self.completed_plans >= self.enqueued_plans
+        self.remaining_plans == 0
+    }
+
+    fn into_report(self, task_id: u64) -> IcebergTaskReport {
+        match self.error {
+            None => build_iceberg_task_report(
+                task_id,
+                self.sink_id,
+                subscribe_iceberg_compaction_event_request::report_task::Status::Success,
+                None,
+            ),
+            Some(IcebergTaskError::Enqueue) => build_iceberg_task_report(
+                task_id,
+                self.sink_id,
+                subscribe_iceberg_compaction_event_request::report_task::Status::Failed,
+                Some("Failed to enqueue all iceberg compaction plans".to_owned()),
+            ),
+            Some(IcebergTaskError::Execution(error_message)) => build_iceberg_task_report(
+                task_id,
+                self.sink_id,
+                subscribe_iceberg_compaction_event_request::report_task::Status::Failed,
+                Some(error_message),
+            ),
+        }
     }
 }
 
@@ -492,27 +521,38 @@ pub fn start_iceberg_compactor(
                 let event: Option<Result<SubscribeIcebergCompactionEventResponse, _>> = tokio::select! {
                     // Handle task completion notifications
                     Some(plan_completion) = task_completion_rx.recv() => {
+                        let task_key = plan_completion.task_key;
+                        let error_message = plan_completion.error_message;
                         tracing::debug!(
-                            task_id = plan_completion.task_key.0,
-                            plan_index = plan_completion.task_key.1,
-                            success = plan_completion.success,
+                            task_id = task_key.0,
+                            plan_index = task_key.1,
+                            success = error_message.is_none(),
                             "Plan completed, updating queue state"
                         );
-                        task_queue.finish_running(plan_completion.task_key);
+                        task_queue.finish_running(task_key);
 
-                        let completed_task_id = plan_completion.task_key.0;
+                        let completed_task_id = task_key.0;
                         let mut finished_tracker = None;
                         if let Some(task_tracker) = task_trackers.get_mut(&completed_task_id) {
-                            task_tracker.on_plan_completion(&plan_completion);
+                            task_tracker.on_plan_completion(error_message);
                             if task_tracker.is_finished() {
                                 finished_tracker = task_trackers.remove(&completed_task_id);
                             }
+                        } else {
+                            tracing::warn!(
+                                task_id = completed_task_id,
+                                plan_index = task_key.1,
+                                "Received iceberg plan completion for unknown task tracker"
+                            );
                         }
 
                         if let Some(task_tracker) = finished_tracker {
-                            let report = build_iceberg_task_result(task_tracker);
-                            if send_iceberg_task_report(&request_sender, report.clone()).is_err() {
-                                pending_task_reports.push_back(report);
+                            let report = task_tracker.into_report(completed_task_id);
+                            if report_or_restart_iceberg_stream(
+                                &request_sender,
+                                &mut pending_task_reports,
+                                report,
+                            ) {
                                 continue 'start_stream;
                             }
                         }
@@ -570,6 +610,27 @@ pub fn start_iceberg_compactor(
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
                                 let sink_id = iceberg_compaction_task.sink_id;
+                                if task_trackers.contains_key(&task_id) {
+                                    tracing::warn!(
+                                        task_id,
+                                        sink_id,
+                                        "Received duplicate iceberg compaction task while previous task is still tracked"
+                                    );
+                                    let report = build_iceberg_task_report(
+                                        task_id,
+                                        sink_id,
+                                        subscribe_iceberg_compaction_event_request::report_task::Status::Failed,
+                                        Some("Duplicate iceberg compaction task id".to_owned()),
+                                    );
+                                    if report_or_restart_iceberg_stream(
+                                        &request_sender,
+                                        &mut pending_task_reports,
+                                        report,
+                                    ) {
+                                        continue 'start_stream;
+                                    }
+                                    continue 'consume_stream;
+                                }
                                 // Note: write_parquet_properties is now built from sink config (IcebergConfig) in create_task_execution
                                 let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
                                     .max_parallelism((worker_num as f32 * compactor_context.storage_opts.iceberg_compaction_task_parallelism_ratio) as u32)
@@ -592,13 +653,20 @@ pub fn start_iceberg_compactor(
                                     Ok(config) => config,
                                     Err(e) => {
                                         tracing::warn!(error = %e.as_report(), "Failed to build iceberg compactor runner config {}", task_id);
-                                        let report = build_failed_iceberg_task_report(
+                                        let report = build_iceberg_task_report(
                                             task_id,
                                             sink_id,
-                                            format!("Failed to build iceberg compactor runner config: {}", e.as_report()),
+                                            subscribe_iceberg_compaction_event_request::report_task::Status::Failed,
+                                            Some(format!(
+                                                "Failed to build iceberg compactor runner config: {}",
+                                                e.as_report()
+                                            )),
                                         );
-                                        if send_iceberg_task_report(&request_sender, report.clone()).is_err() {
-                                            pending_task_reports.push_back(report);
+                                        if report_or_restart_iceberg_stream(
+                                            &request_sender,
+                                            &mut pending_task_reports,
+                                            report,
+                                        ) {
                                             continue 'start_stream;
                                         }
                                         continue 'consume_stream;
@@ -614,13 +682,20 @@ pub fn start_iceberg_compactor(
                                     Ok(task_execution) => task_execution,
                                     Err(e) => {
                                         tracing::warn!(error = %e.as_report(), task_id, "Failed to create plan runners");
-                                        let report = build_failed_iceberg_task_report(
+                                        let report = build_iceberg_task_report(
                                             task_id,
                                             sink_id,
-                                            format!("Failed to create iceberg compaction task execution: {}", e.as_report()),
+                                            subscribe_iceberg_compaction_event_request::report_task::Status::Failed,
+                                            Some(format!(
+                                                "Failed to create iceberg compaction task execution: {}",
+                                                e.as_report()
+                                            )),
                                         );
-                                        if send_iceberg_task_report(&request_sender, report.clone()).is_err() {
-                                            pending_task_reports.push_back(report);
+                                        if report_or_restart_iceberg_stream(
+                                            &request_sender,
+                                            &mut pending_task_reports,
+                                            report,
+                                        ) {
                                             continue 'start_stream;
                                         }
                                         continue 'consume_stream;
@@ -632,15 +707,17 @@ pub fn start_iceberg_compactor(
 
                                 if plan_runners.is_empty() {
                                     tracing::info!(task_id, sink_id, "No plans to execute");
-                                    let task_tracker = IcebergTaskTracker::new(
+                                    let report = build_iceberg_task_report(
                                         task_id,
                                         sink_id,
-                                        0,
-                                        0,
+                                        subscribe_iceberg_compaction_event_request::report_task::Status::Success,
+                                        None,
                                     );
-                                    let report = build_iceberg_task_result(task_tracker);
-                                    if send_iceberg_task_report(&request_sender, report.clone()).is_err() {
-                                        pending_task_reports.push_back(report);
+                                    if report_or_restart_iceberg_stream(
+                                        &request_sender,
+                                        &mut pending_task_reports,
+                                        report,
+                                    ) {
                                         continue 'start_stream;
                                     }
                                     continue 'consume_stream;
@@ -705,21 +782,21 @@ pub fn start_iceberg_compactor(
                                 task_trackers.insert(
                                     task_id,
                                     IcebergTaskTracker::new(
-                                        task_id,
                                         sink_id,
-                                        total_plans,
                                         enqueued_count,
+                                        enqueued_count < total_plans,
                                     ),
                                 );
 
                                 if enqueued_count == 0
                                     && let Some(task_tracker) = task_trackers.remove(&task_id)
                                 {
-                                    let report = build_iceberg_task_result(task_tracker);
-                                    if send_iceberg_task_report(&request_sender, report.clone())
-                                        .is_err()
-                                    {
-                                        pending_task_reports.push_back(report);
+                                    let report = task_tracker.into_report(task_id);
+                                    if report_or_restart_iceberg_stream(
+                                        &request_sender,
+                                        &mut pending_task_reports,
+                                        report,
+                                    ) {
                                         continue 'start_stream;
                                     }
                                 }
@@ -756,37 +833,17 @@ pub fn start_iceberg_compactor(
     (join_handle, shutdown_tx)
 }
 
-fn build_iceberg_task_result(task_tracker: IcebergTaskTracker) -> IcebergTaskReport {
-    let (status, error_message) = if task_tracker.has_failure {
-        (
-            subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32,
-            task_tracker.first_error,
-        )
-    } else {
-        (
-            subscribe_iceberg_compaction_event_request::report_task::Status::Success as i32,
-            None,
-        )
-    };
-
-    subscribe_iceberg_compaction_event_request::ReportTask {
-        task_id: task_tracker.task_id,
-        sink_id: task_tracker.sink_id,
-        status,
-        error_message,
-    }
-}
-
-fn build_failed_iceberg_task_report(
+fn build_iceberg_task_report(
     task_id: u64,
     sink_id: u32,
-    error_message: String,
+    status: subscribe_iceberg_compaction_event_request::report_task::Status,
+    error_message: Option<String>,
 ) -> IcebergTaskReport {
     subscribe_iceberg_compaction_event_request::ReportTask {
         task_id,
         sink_id,
-        status: subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32,
-        error_message: Some(error_message),
+        status: status as i32,
+        error_message,
     }
 }
 
@@ -795,16 +852,22 @@ fn send_iceberg_task_report(
     report_event: IcebergTaskReport,
 ) -> Result<(), IcebergTaskReport> {
     if let Err(e) = request_sender.send(SubscribeIcebergCompactionEventRequest {
-        event: Some(
-            subscribe_iceberg_compaction_event_request::Event::ReportTask(report_event.clone()),
-        ),
+        event: Some(subscribe_iceberg_compaction_event_request::Event::ReportTask(report_event)),
         create_at: SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("Clock may have gone backwards")
             .as_millis() as u64,
     }) {
+        let error = e.as_report().to_string();
+        let SubscribeIcebergCompactionEventRequest {
+            event: Some(subscribe_iceberg_compaction_event_request::Event::ReportTask(report_event)),
+            ..
+        } = e.0
+        else {
+            unreachable!("failed iceberg task report send must return the original report");
+        };
         tracing::warn!(
-            error = %e.as_report(),
+            error,
             task_id = report_event.task_id,
             sink_id = report_event.sink_id,
             "Failed to report iceberg compaction task result - will retry on stream restart"
@@ -813,6 +876,18 @@ fn send_iceberg_task_report(
     }
 
     Ok(())
+}
+
+fn report_or_restart_iceberg_stream(
+    request_sender: &mpsc::UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+    pending_task_reports: &mut VecDeque<IcebergTaskReport>,
+    report_event: IcebergTaskReport,
+) -> bool {
+    if let Err(report_event) = send_iceberg_task_report(request_sender, report_event) {
+        pending_task_reports.push_back(report_event);
+        return true;
+    }
+    false
 }
 
 fn flush_pending_iceberg_task_reports(
@@ -1378,7 +1453,10 @@ fn schedule_queued_tasks(
                 plan_index = plan_index,
                 "Popped task missing runner - this should not happen"
             );
-            task_queue.finish_running(task_key);
+            let _ = task_completion_tx.send(IcebergPlanCompletion {
+                task_key,
+                error_message: Some("Iceberg task queue popped without runner".to_owned()),
+            });
             continue;
         };
 
@@ -1411,14 +1489,12 @@ fn schedule_queued_tasks(
             let completion = match result {
                 Ok(_) => IcebergPlanCompletion {
                     task_key,
-                    success: true,
                     error_message: None,
                 },
                 Err(e) => {
                     tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
                     IcebergPlanCompletion {
                         task_key,
-                        success: false,
                         error_message: Some(e.to_report_string()),
                     }
                 }
@@ -1594,11 +1670,61 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         drop(rx);
 
-        let report = build_failed_iceberg_task_report(7, 9, "send failure".to_owned());
+        let report = build_iceberg_task_report(
+            7,
+            9,
+            subscribe_iceberg_compaction_event_request::report_task::Status::Failed,
+            Some("send failure".to_owned()),
+        );
         let failed_report = send_iceberg_task_report(&tx, report.clone()).unwrap_err();
 
         assert_eq!(failed_report.task_id, report.task_id);
         assert_eq!(failed_report.sink_id, report.sink_id);
         assert_eq!(failed_report.error_message, report.error_message);
+    }
+
+    #[test]
+    fn test_build_iceberg_task_result_uses_first_failure() {
+        let mut tracker = IcebergTaskTracker::new(9, 2, true);
+        tracker.on_plan_completion(Some("first failure".to_owned()));
+        tracker.on_plan_completion(Some("second failure".to_owned()));
+
+        let report = tracker.into_report(7);
+
+        assert_eq!(
+            report.status,
+            subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32
+        );
+        assert_eq!(report.error_message.as_deref(), Some("first failure"));
+    }
+
+    #[test]
+    fn test_build_iceberg_task_result_reports_enqueue_failure_without_plan_error() {
+        let tracker = IcebergTaskTracker::new(9, 0, true);
+
+        let report = tracker.into_report(7);
+
+        assert_eq!(
+            report.status,
+            subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32
+        );
+        assert_eq!(
+            report.error_message.as_deref(),
+            Some("Failed to enqueue all iceberg compaction plans")
+        );
+    }
+
+    #[test]
+    fn test_build_iceberg_task_result_prefers_execution_error_over_enqueue_failure() {
+        let mut tracker = IcebergTaskTracker::new(9, 1, true);
+        tracker.on_plan_completion(Some("execution failure".to_owned()));
+
+        let report = tracker.into_report(7);
+
+        assert_eq!(
+            report.status,
+            subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32
+        );
+        assert_eq!(report.error_message.as_deref(), Some("execution failure"));
     }
 }
