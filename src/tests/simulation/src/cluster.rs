@@ -94,6 +94,10 @@ pub struct Configuration {
 
     /// Resource groups for compute nodes.
     pub compute_resource_groups: HashMap<usize, String>,
+
+    /// Roles for compute nodes (1-indexed). If not set, defaults to "both".
+    /// Values: "serving", "streaming", "both".
+    pub compute_node_roles: HashMap<usize, String>,
 }
 
 impl Default for Configuration {
@@ -122,6 +126,7 @@ metrics_level = "Disabled"
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
             compute_resource_groups: Default::default(),
+            compute_node_roles: Default::default(),
         }
     }
 }
@@ -245,6 +250,7 @@ default_parallelism = {default_parallelism}
             compute_node_cores: default_parallelism * 2,
             per_session_queries: vec![].into(),
             compute_resource_groups: Default::default(),
+            compute_node_roles: Default::default(),
         }
     }
 
@@ -538,6 +544,12 @@ impl Cluster {
                     .get(&i)
                     .cloned()
                     .unwrap_or(DEFAULT_RESOURCE_GROUP.to_string()),
+                "--role",
+                &conf
+                    .compute_node_roles
+                    .get(&i)
+                    .cloned()
+                    .unwrap_or("both".to_string()),
             ]);
             handle
                 .create_node()

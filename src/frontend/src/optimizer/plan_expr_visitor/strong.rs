@@ -69,7 +69,7 @@ impl Strong {
             ExprImpl::WindowFunction(_) => false,
             ExprImpl::UserDefinedFunction(_) => false,
             ExprImpl::Parameter(_) => false,
-            ExprImpl::Now(_) => false,
+            ExprImpl::Now(_) | ExprImpl::SecretRef(_) => false,
         }
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 };
 use tracing::warn;
 
-use crate::barrier::checkpoint::creating_job::CreatingJobInfo;
+use crate::barrier::checkpoint::independent_job::creating_job::CreatingJobInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
@@ -308,37 +308,11 @@ impl CreatingStreamingJobStatus {
         pending_non_checkpoint_barriers: &mut Vec<u64>,
         kind: PbBarrierKind,
     ) -> BarrierInfo {
-        {
-            {
-                let prev_epoch =
-                    TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
-                *prev_epoch_fake_physical_time += 1;
-                let curr_epoch =
-                    TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
-                let kind = match kind {
-                    PbBarrierKind::Unspecified => {
-                        unreachable!()
-                    }
-                    PbBarrierKind::Initial => {
-                        assert!(pending_non_checkpoint_barriers.is_empty());
-                        BarrierKind::Initial
-                    }
-                    PbBarrierKind::Barrier => {
-                        pending_non_checkpoint_barriers.push(prev_epoch.value().0);
-                        BarrierKind::Barrier
-                    }
-                    PbBarrierKind::Checkpoint => {
-                        pending_non_checkpoint_barriers.push(prev_epoch.value().0);
-                        BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers))
-                    }
-                };
-                BarrierInfo {
-                    prev_epoch,
-                    curr_epoch,
-                    kind,
-                }
-            }
-        }
+        super::super::new_fake_barrier(
+            prev_epoch_fake_physical_time,
+            pending_non_checkpoint_barriers,
+            kind,
+        )
     }
 
     pub(super) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
@@ -349,18 +323,6 @@ impl CreatingStreamingJobStatus {
             }
             CreatingStreamingJobStatus::Finishing(..)
             | CreatingStreamingJobStatus::Resetting(..) => None,
-            CreatingStreamingJobStatus::PlaceHolder => {
-                unreachable!()
-            }
-        }
-    }
-
-    pub(super) fn creating_job_info(&self) -> Option<&CreatingJobInfo> {
-        match self {
-            CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => Some(info),
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(_) => None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }

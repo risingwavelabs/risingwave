@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::from_prost_table_stats_map;
@@ -126,7 +127,7 @@ pub(super) fn collect_new_vector_index_info(
     }
 }
 
-pub(super) fn collect_creating_job_commit_epoch_info(
+pub(super) fn collect_independent_job_commit_epoch_info(
     commit_info: &mut CommitEpochInfo,
     epoch: u64,
     resps: Vec<BarrierCompleteResponse>,
@@ -189,4 +190,157 @@ pub(super) fn is_valid_after_worker_err(
     worker_id: WorkerId,
 ) -> bool {
     !node_to_collect.contains(&worker_id)
+}
+
+#[derive(Debug)]
+struct InflightBarrierNode<K, Item, Info> {
+    epoch: EpochPair,
+    to_collect: HashSet<K>,
+    collected: HashMap<K, Item>,
+    info: Info,
+}
+
+#[derive(Debug)]
+struct CollectedBarrierNode<K, Item, Info> {
+    epoch: EpochPair,
+    collected: HashMap<K, Item>,
+    info: Info,
+}
+
+#[derive(Debug)]
+pub(super) struct BarrierItemCollector<K, Item, Info> {
+    /// `prev_epoch` -> barrier
+    inflight_barriers: BTreeMap<u64, InflightBarrierNode<K, Item, Info>>,
+    /// newer epoch at the back. `push_back` and `pop_front`
+    collected_barriers: VecDeque<CollectedBarrierNode<K, Item, Info>>,
+}
+
+impl<K: std::fmt::Debug + Eq + std::hash::Hash, Item: std::fmt::Debug, Info: std::fmt::Debug>
+    BarrierItemCollector<K, Item, Info>
+{
+    pub(super) fn new() -> Self {
+        Self {
+            inflight_barriers: Default::default(),
+            collected_barriers: Default::default(),
+        }
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.inflight_barriers.is_empty() && self.collected_barriers.is_empty()
+    }
+
+    pub(super) fn inflight_barrier_num(&self) -> usize {
+        self.inflight_barriers.len()
+    }
+
+    pub(super) fn collected_barrier_num(&self) -> usize {
+        self.collected_barriers.len()
+    }
+
+    pub(super) fn enqueue(&mut self, epoch: EpochPair, to_collect: HashSet<K>, info: Info) {
+        assert!(!to_collect.is_empty());
+        if let Some((last_prev_epoch, last_barrier)) = self.inflight_barriers.last_key_value() {
+            assert_eq!(last_barrier.epoch.curr, epoch.prev);
+            assert!(*last_prev_epoch < epoch.prev);
+        }
+        self.inflight_barriers
+            .try_insert(
+                epoch.prev,
+                InflightBarrierNode {
+                    epoch,
+                    to_collect,
+                    collected: Default::default(),
+                    info,
+                },
+            )
+            .expect("non-duplicated");
+    }
+
+    pub(super) fn collect(&mut self, prev_epoch: u64, key: K, item: Item) {
+        let inflight_barrier = self
+            .inflight_barriers
+            .get_mut(&prev_epoch)
+            .expect("should exist");
+        assert!(inflight_barrier.to_collect.remove(&key));
+        inflight_barrier
+            .collected
+            .try_insert(key, item)
+            .expect("non-duplicate");
+    }
+
+    pub(super) fn barrier_collected(&mut self) -> Option<(EpochPair, &Info)> {
+        if let Some(entry) = self.inflight_barriers.first_entry()
+            && entry.get().to_collect.is_empty()
+        {
+            let InflightBarrierNode {
+                epoch,
+                collected,
+                info,
+                ..
+            } = entry.remove();
+            if let Some(prev_barrier) = self.collected_barriers.back() {
+                assert_eq!(prev_barrier.epoch.curr, epoch.prev);
+            }
+            self.collected_barriers.push_back(CollectedBarrierNode {
+                epoch,
+                collected,
+                info,
+            });
+            Some((
+                epoch,
+                &self.collected_barriers.back().expect("non-empty").info,
+            ))
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn advance_collected(&mut self) {
+        while self.barrier_collected().is_some() {}
+    }
+
+    pub(super) fn first_inflight_epoch(&self) -> Option<EpochPair> {
+        self.inflight_barriers
+            .first_key_value()
+            .map(|(_, barrier)| barrier.epoch)
+    }
+
+    pub(super) fn last_collected(&self) -> Option<(EpochPair, &HashMap<K, Item>, &Info)> {
+        self.collected_barriers
+            .back()
+            .map(|barrier| (barrier.epoch, &barrier.collected, &barrier.info))
+    }
+
+    pub(super) fn iter_infos(&self) -> impl Iterator<Item = &Info> + '_ {
+        self.inflight_barriers
+            .values()
+            .map(|barrier| &barrier.info)
+            .chain(self.collected_barriers.iter().map(|barrier| &barrier.info))
+    }
+
+    pub(super) fn into_infos(self) -> impl Iterator<Item = Info> {
+        self.inflight_barriers
+            .into_values()
+            .map(|barrier| barrier.info)
+            .chain(
+                self.collected_barriers
+                    .into_iter()
+                    .map(|barrier| barrier.info),
+            )
+    }
+
+    pub(super) fn iter_to_collect(&self) -> impl Iterator<Item = &HashSet<K>> + '_ {
+        self.inflight_barriers
+            .values()
+            .map(|barrier| &barrier.to_collect)
+    }
+
+    pub(super) fn take_collected_if(
+        &mut self,
+        cond: impl FnOnce(EpochPair) -> bool,
+    ) -> Option<(EpochPair, HashMap<K, Item>, Info)> {
+        self.collected_barriers
+            .pop_front_if(move |barrier| cond(barrier.epoch))
+            .map(|barrier| (barrier.epoch, barrier.collected, barrier.info))
+    }
 }

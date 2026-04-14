@@ -293,7 +293,7 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055"
 ] }
 tokio-util = "0.7"
 toml = "1.0"
-tonic = { package = "madsim-tonic", version = "0.6.0" }
+tonic = { package = "madsim-tonic", version = "0.6.0", features = ["zstd"] }
 tonic-build = { package = "madsim-tonic-build", version = "0.6.0" }
 tracing-opentelemetry = "=0.32.0"
 
@@ -427,6 +427,8 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "3efe6d0065963db2a2b7f30dee69f647e28dec81" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.15.0-json-no-preserve_order" }
+# patch to revert `Hash for StringRef` for compatibility with `&str` in vnode
+jsonbb = { git = "https://github.com/risingwavelabs/jsonbb.git", rev = "f618cd8c9bc517f35dec192d4e7553650894a011" }
 
 # patch to make zstd version compatible:
 # desired v4.9.0+2.10.0 requires: zstd-sys >= 2.0.15

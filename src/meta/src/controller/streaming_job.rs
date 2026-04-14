@@ -609,6 +609,12 @@ impl CatalogController {
             .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
             .collect_vec();
 
+        // Collect fragment IDs before consuming `fragments` for serving mapping notification.
+        let inserted_fragment_ids: Vec<crate::model::FragmentId> = fragments
+            .iter()
+            .map(|f| f.fragment_id as crate::model::FragmentId)
+            .collect();
+
         if !fragments.is_empty() {
             let fragment_models = fragments
                 .into_iter()
@@ -691,6 +697,13 @@ impl CatalogController {
         }
 
         txn.commit().await?;
+
+        // Notify serving module about newly inserted fragments so it can establish
+        // serving vnode mappings. This is driven by the fragment model insertion,
+        // decoupled from the barrier-driven streaming mapping notifications.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_update(inserted_fragment_ids);
 
         // FIXME: there's a gap between the catalog creation and notification, which may lead to
         // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
@@ -897,41 +910,14 @@ impl CatalogController {
             objs.extend(internal_table_objs);
         }
 
-        // Check if the job is creating sink into table.
-        if table_obj.is_none()
-            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_sink_id())
-                .select_only()
-                .column(sink::Column::TargetTable)
-                .into_tuple::<Option<TableId>>()
-                .one(&txn)
-                .await?
-        {
-            let tmp_id: Option<ObjectId> = ObjectDependency::find()
-                .select_only()
-                .column(object_dependency::Column::UsedBy)
-                .join(
-                    JoinType::InnerJoin,
-                    object_dependency::Relation::Object1.def(),
-                )
-                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-                .filter(
-                    object_dependency::Column::Oid
-                        .eq(target_table_id)
-                        .and(object::Column::ObjType.eq(ObjectType::Table))
-                        .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
-                )
-                .into_tuple()
-                .one(&txn)
-                .await?;
-            if let Some(tmp_id) = tmp_id {
-                tracing::warn!(
-                    id = %tmp_id,
-                    "aborting temp streaming job for sink into table"
-                );
-
-                Object::delete_by_id(tmp_id).exec(&txn).await?;
-            }
-        }
+        // Query fragment IDs before cascade-deleting them, for serving mapping cleanup.
+        let abort_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(job_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
@@ -963,6 +949,13 @@ impl CatalogController {
             let _ = tx.send(Err(abort_reason.clone()));
         }
         txn.commit().await?;
+
+        // Notify serving module about deleted fragments from the aborted job.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_delete(
+                abort_fragment_ids.iter().map(|id| *id as _).collect(),
+            );
 
         if !objs.is_empty() {
             // We also have notified the frontend about these objects,
@@ -1386,18 +1379,28 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (objects, delete_notification_objs) = Self::finish_replace_streaming_job_inner(
-            tmp_id,
-            replace_upstream,
-            sink_into_table_context,
-            &txn,
-            streaming_job,
-            drop_table_connector_ctx,
-            auto_refresh_schema_sinks,
-        )
-        .await?;
+        let (objects, delete_notification_objs, old_fragment_ids, new_fragment_ids) =
+            Self::finish_replace_streaming_job_inner(
+                tmp_id,
+                replace_upstream,
+                sink_into_table_context,
+                &txn,
+                streaming_job,
+                drop_table_connector_ctx,
+                auto_refresh_schema_sinks,
+            )
+            .await?;
 
         txn.commit().await?;
+
+        // Notify serving module: delete old fragment mappings, upsert new ones.
+        let notification_manager = self.env.notification_manager();
+        notification_manager.notify_serving_fragment_mapping_delete(
+            old_fragment_ids.iter().map(|id| *id as _).collect(),
+        );
+        notification_manager.notify_serving_fragment_mapping_update(
+            new_fragment_ids.iter().map(|id| *id as _).collect(),
+        );
 
         let mut version = self
             .notify_frontend(
@@ -1488,9 +1491,30 @@ impl CatalogController {
         streaming_job: StreamingJob,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
         auto_refresh_schema_sinks: Option<Vec<FinishAutoRefreshSchemaSinkContext>>,
-    ) -> MetaResult<(Vec<PbObject>, Option<(Vec<PbUserInfo>, Vec<PartialObject>)>)> {
+    ) -> MetaResult<(
+        Vec<PbObject>,
+        Option<(Vec<PbUserInfo>, Vec<PartialObject>)>,
+        Vec<FragmentId>,
+        Vec<FragmentId>,
+    )> {
         let original_job_id = streaming_job.id();
         let job_type = streaming_job.job_type();
+
+        // Query old fragment IDs (will be deleted) and new fragment IDs (will be reassigned).
+        let old_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(original_job_id))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        let new_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(tmp_id))
+            .into_tuple()
+            .all(txn)
+            .await?;
 
         let mut index_item_rewriter = None;
         let mut updated_iceberg_source_id: Option<SourceId> = None;
@@ -1842,7 +1866,12 @@ impl CatalogController {
                 Some(Self::drop_table_associated_source(txn, drop_table_connector_ctx).await?);
         }
 
-        Ok((objects, notification_objs))
+        Ok((
+            objects,
+            notification_objs,
+            old_fragment_ids,
+            new_fragment_ids,
+        ))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.
@@ -1853,6 +1882,20 @@ impl CatalogController {
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        // Query fragment IDs of the temp job and temp sinks before cascade-deleting them.
+        let mut all_job_ids: Vec<ObjectId> = vec![tmp_job_id.into()];
+        if let Some(ref sink_ids) = tmp_sink_ids {
+            all_job_ids.extend(sink_ids.iter().copied());
+        }
+        let abort_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.is_in(all_job_ids))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
         Object::delete_by_id(tmp_job_id).exec(&txn).await?;
         if let Some(tmp_sink_ids) = tmp_sink_ids {
             for tmp_sink_id in tmp_sink_ids {
@@ -1860,6 +1903,14 @@ impl CatalogController {
             }
         }
         txn.commit().await?;
+
+        // Notify serving module about deleted fragments from the aborted replace job.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_delete(
+                abort_fragment_ids.iter().map(|id| *id as _).collect(),
+            );
+
         Ok(())
     }
 

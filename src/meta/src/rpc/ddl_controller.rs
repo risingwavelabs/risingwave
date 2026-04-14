@@ -1302,6 +1302,15 @@ impl DdlController {
             removed_iceberg_table_sinks,
         } = release_ctx;
 
+        // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
+        // This is driven by the fragment model deletion (cascade from Object::delete_many),
+        // decoupled from the barrier-driven streaming mapping notifications.
+        self.env
+            .notification_manager_ref()
+            .notify_serving_fragment_mapping_delete(
+                removed_fragments.iter().map(|id| *id as _).collect(),
+            );
+
         self.stream_manager
             .drop_streaming_jobs(
                 database_id,

@@ -234,6 +234,7 @@ enable_shared_source = true
 switch_jdbc_pg_to_native = false
 max_barrier_batch_size = 1024
 hash_join_entry_state_max_rows = 30000
+join_hash_map_evict_interval_rows = 16
 now_progress_ratio = ""
 enable_explain_analyze_stats = true
 snapshot_iter_rebuild_interval_secs = 600
@@ -252,6 +253,8 @@ sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
 over_window_cache_policy = "full"
 enable_state_table_vnode_stats_pruning = false
+enable_vnode_key_stats_for_materialize = false
+max_concurrent_kv_log_store_historical_read = 0
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
@@ -408,6 +411,8 @@ skip_recent_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false
+req_concurrency_limit = 0
+http_concurrent_limit = 0
 opendal_upload_concurrency = 256
 opendal_writer_abort_on_err = false
 upload_part_size = 16777216

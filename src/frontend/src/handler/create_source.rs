@@ -893,15 +893,27 @@ pub async fn bind_create_source_or_table_with_connector(
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
-    // FIXME: ideally we can support it, but current way of handling iceberg additional columns are problematic.
-    // They are treated as normal user columns, so they will be lost if we allow user to specify columns.
-    // See `extract_iceberg_columns`
-    if with_properties.is_iceberg_connector() && !sql_columns_defs.is_empty() {
-        return Err(RwError::from(InvalidInputSyntax(
-            r#"Schema is automatically inferred for iceberg source and should not be specified
+    if with_properties.is_iceberg_connector() {
+        if is_create_source && !sql_pk_names.is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
+                    .to_owned(),
+                "Iceberg streaming ingestion only supports append-only sources. Remove the PRIMARY KEY clause."
+                    .to_owned(),
+            )
+            .into());
+        }
+
+        // FIXME: ideally we can support it, but current way of handling iceberg additional columns
+        // are problematic. They are treated as normal user columns, so they will be lost if we
+        // allow user to specify columns. See `extract_iceberg_columns`.
+        if !sql_columns_defs.is_empty() {
+            return Err(RwError::from(InvalidInputSyntax(
+                r#"Schema is automatically inferred for iceberg source and should not be specified
 
 HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
-        )));
+            )));
+        }
     }
 
     // Same for ADBC Snowflake connector - schema is automatically inferred
