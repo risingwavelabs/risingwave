@@ -26,7 +26,7 @@ rw_futures_util = { workspace = true }
 static_assertions = "1"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "sync",

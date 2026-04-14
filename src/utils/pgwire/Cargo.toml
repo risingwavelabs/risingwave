@@ -32,7 +32,7 @@ serde_json = "1"
 socket2 = "0.6"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "rt",
     "macros",
 ] }

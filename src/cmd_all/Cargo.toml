@@ -64,7 +64,7 @@ strum_macros = "0.28"
 tikv-jemallocator = { workspace = true, features = [
     "unprefixed_malloc_on_supported_platforms",
 ] }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "sync",

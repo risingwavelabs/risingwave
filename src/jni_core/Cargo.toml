@@ -19,7 +19,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "fs",
     "rt",
     "rt-multi-thread",

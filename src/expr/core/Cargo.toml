@@ -40,7 +40,7 @@ smallvec = { workspace = true }
 static_assertions = "1"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "rt-multi-thread",
     "macros",
 ] }

@@ -27,7 +27,7 @@ rustls = "0.23.5"
 rw-tokio = { version = "=1.48.0", package = "tokio" }
 thiserror-ext = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "sync",

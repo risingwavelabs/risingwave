@@ -27,7 +27,7 @@ risingwave_stream = { workspace = true, features = ["test"] }
 serde = { workspace = true }
 serde_yaml = "0.9"
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "fs",
     "rt",
     "rt-multi-thread",

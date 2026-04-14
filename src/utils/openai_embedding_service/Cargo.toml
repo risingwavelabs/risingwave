@@ -12,7 +12,7 @@ async-openai = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
 serde_json = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "sync",

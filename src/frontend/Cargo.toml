@@ -100,7 +100,7 @@ static_assertions = "1"
 tempfile = "3"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "sync",

@@ -11,7 +11,7 @@ repository = { workspace = true }
 governor = { workspace = true }
 
 [dev-dependencies]
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "sync",

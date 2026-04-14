@@ -12,7 +12,7 @@ anyhow = { version = "1", features = ["backtrace"] }
 clap = { workspace = true }
 path-absolutize = "3.1"
 similar = "2"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "rt",
     "rt-multi-thread",
     "sync",

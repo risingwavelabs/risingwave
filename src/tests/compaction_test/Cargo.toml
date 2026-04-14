@@ -20,7 +20,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_rt = { workspace = true }
 risingwave_storage = { workspace = true, features = ["test"] }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
+tokio = { workspace = true, features = [
     "fs",
     "rt",
     "rt-multi-thread",
