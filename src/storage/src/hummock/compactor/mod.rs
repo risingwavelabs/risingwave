@@ -60,7 +60,7 @@ use futures::{StreamExt, pin_mut};
 use iceberg_compaction::iceberg_compactor_runner::IcebergCompactorRunnerConfigBuilder;
 use iceberg_compaction::{
     IcebergPlanCompletion, IcebergTaskQueue, IcebergTaskReport, IcebergTaskTracker, PushResult,
-    build_iceberg_task_report, build_iceberg_task_result, create_task_execution,
+    ReportSendResult, build_iceberg_task_report, create_task_execution,
     flush_pending_iceberg_task_reports, send_or_buffer_iceberg_task_report,
 };
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
@@ -428,7 +428,10 @@ pub fn start_iceberg_compactor(
                 }
             };
 
-            if flush_pending_iceberg_task_reports(&request_sender, &mut pending_task_reports) {
+            if matches!(
+                flush_pending_iceberg_task_reports(&request_sender, &mut pending_task_reports),
+                ReportSendResult::RestartStream
+            ) {
                 continue 'start_stream;
             }
 
@@ -468,16 +471,19 @@ pub fn start_iceberg_compactor(
                         else {
                             continue 'consume_stream;
                         };
-                        if !tracker_entry.get_mut().on_plan_completion(error_message) {
+                        tracker_entry.get_mut().record_completion(error_message);
+                        if !tracker_entry.get().is_finished() {
                             continue 'consume_stream;
                         }
 
-                        let report =
-                            build_iceberg_task_result(completed_task_id, tracker_entry.remove());
-                        if send_or_buffer_iceberg_task_report(
-                            &request_sender,
-                            &mut pending_task_reports,
-                            report,
+                        let report = tracker_entry.remove().into_report(completed_task_id);
+                        if matches!(
+                            send_or_buffer_iceberg_task_report(
+                                &request_sender,
+                                &mut pending_task_reports,
+                                report,
+                            ),
+                            ReportSendResult::RestartStream
                         ) {
                             continue 'start_stream;
                         }
@@ -565,10 +571,13 @@ pub fn start_iceberg_compactor(
                                                 e.as_report()
                                             )),
                                         );
-                                        if send_or_buffer_iceberg_task_report(
-                                            &request_sender,
-                                            &mut pending_task_reports,
-                                            report,
+                                        if matches!(
+                                            send_or_buffer_iceberg_task_report(
+                                                &request_sender,
+                                                &mut pending_task_reports,
+                                                report,
+                                            ),
+                                            ReportSendResult::RestartStream
                                         ) {
                                             continue 'start_stream;
                                         }
@@ -593,10 +602,13 @@ pub fn start_iceberg_compactor(
                                                 e.as_report()
                                             )),
                                         );
-                                        if send_or_buffer_iceberg_task_report(
-                                            &request_sender,
-                                            &mut pending_task_reports,
-                                            report,
+                                        if matches!(
+                                            send_or_buffer_iceberg_task_report(
+                                                &request_sender,
+                                                &mut pending_task_reports,
+                                                report,
+                                            ),
+                                            ReportSendResult::RestartStream
                                         ) {
                                             continue 'start_stream;
                                         }
@@ -610,10 +622,13 @@ pub fn start_iceberg_compactor(
                                 if plan_runners.is_empty() {
                                     tracing::info!(task_id, sink_id, "No plans to execute");
                                     let report = build_iceberg_task_report(task_id, sink_id, None);
-                                    if send_or_buffer_iceberg_task_report(
-                                        &request_sender,
-                                        &mut pending_task_reports,
-                                        report,
+                                    if matches!(
+                                        send_or_buffer_iceberg_task_report(
+                                            &request_sender,
+                                            &mut pending_task_reports,
+                                            report,
+                                        ),
+                                        ReportSendResult::RestartStream
                                     ) {
                                         continue 'start_stream;
                                     }
@@ -683,10 +698,13 @@ pub fn start_iceberg_compactor(
                                         sink_id,
                                         Some("Failed to enqueue all iceberg compaction plans".to_owned()),
                                     );
-                                    if send_or_buffer_iceberg_task_report(
-                                        &request_sender,
-                                        &mut pending_task_reports,
-                                        report,
+                                    if matches!(
+                                        send_or_buffer_iceberg_task_report(
+                                            &request_sender,
+                                            &mut pending_task_reports,
+                                            report,
+                                        ),
+                                        ReportSendResult::RestartStream
                                     ) {
                                         continue 'start_stream;
                                     }
@@ -1504,9 +1522,9 @@ mod tests {
     #[test]
     fn test_build_iceberg_task_result_partial_enqueue_is_success_if_admitted_plan_succeeds() {
         let mut tracker = IcebergTaskTracker::new(9, 1);
-        tracker.on_plan_completion(None);
+        tracker.record_completion(None);
 
-        let report = build_iceberg_task_result(7, tracker);
+        let report = tracker.into_report(7);
 
         assert_eq!(
             report.status,
@@ -1518,10 +1536,10 @@ mod tests {
     #[test]
     fn test_build_iceberg_task_result_fails_if_all_admitted_plans_fail() {
         let mut tracker = IcebergTaskTracker::new(9, 2);
-        tracker.on_plan_completion(Some("first failure".to_owned()));
-        tracker.on_plan_completion(Some("second failure".to_owned()));
+        tracker.record_completion(Some("first failure".to_owned()));
+        tracker.record_completion(Some("second failure".to_owned()));
 
-        let report = build_iceberg_task_result(7, tracker);
+        let report = tracker.into_report(7);
 
         assert_eq!(
             report.status,

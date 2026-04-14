@@ -31,6 +31,11 @@ pub(crate) struct IcebergPlanCompletion {
 
 pub(crate) type IcebergTaskReport = subscribe_iceberg_compaction_event_request::ReportTask;
 
+pub(crate) enum ReportSendResult {
+    Sent,
+    RestartStream,
+}
+
 pub(crate) struct IcebergTaskTracker {
     sink_id: u32,
     remaining_plans: usize,
@@ -48,7 +53,7 @@ impl IcebergTaskTracker {
         }
     }
 
-    pub(crate) fn on_plan_completion(&mut self, error_message: Option<String>) -> bool {
+    pub(crate) fn record_completion(&mut self, error_message: Option<String>) {
         debug_assert!(self.remaining_plans > 0);
         self.remaining_plans -= 1;
         if let Some(error_message) = error_message {
@@ -58,27 +63,34 @@ impl IcebergTaskTracker {
         } else {
             self.successful_plans += 1;
         }
+    }
+
+    pub(crate) fn is_finished(&self) -> bool {
         self.remaining_plans == 0
+    }
+
+    pub(crate) fn into_report(self, task_id: u64) -> IcebergTaskReport {
+        let error_message = if self.successful_plans > 0 {
+            None
+        } else {
+            Some(
+                self.first_error
+                    .unwrap_or_else(|| "All admitted iceberg compaction plans failed".to_owned()),
+            )
+        };
+        make_iceberg_task_report(task_id, self.sink_id, error_message)
     }
 }
 
-pub(crate) fn build_iceberg_task_result(
+pub(crate) fn build_iceberg_task_report(
     task_id: u64,
-    task_tracker: IcebergTaskTracker,
+    sink_id: u32,
+    error_message: Option<String>,
 ) -> IcebergTaskReport {
-    let error_message = if task_tracker.successful_plans > 0 {
-        None
-    } else {
-        Some(
-            task_tracker
-                .first_error
-                .unwrap_or_else(|| "All admitted iceberg compaction plans failed".to_owned()),
-        )
-    };
-    build_iceberg_task_report(task_id, task_tracker.sink_id, error_message)
+    make_iceberg_task_report(task_id, sink_id, error_message)
 }
 
-pub(crate) fn build_iceberg_task_report(
+fn make_iceberg_task_report(
     task_id: u64,
     sink_id: u32,
     error_message: Option<String>,
@@ -124,24 +136,23 @@ pub(crate) fn send_or_buffer_iceberg_task_report(
     request_sender: &mpsc::UnboundedSender<SubscribeIcebergCompactionEventRequest>,
     pending_task_reports: &mut VecDeque<IcebergTaskReport>,
     report: IcebergTaskReport,
-) -> bool {
+) -> ReportSendResult {
     if let Err(report) = send_iceberg_task_report(request_sender, report) {
         pending_task_reports.push_back(report);
-        return true;
+        return ReportSendResult::RestartStream;
     }
-    false
+    ReportSendResult::Sent
 }
 
 pub(crate) fn flush_pending_iceberg_task_reports(
     request_sender: &mpsc::UnboundedSender<SubscribeIcebergCompactionEventRequest>,
     pending_task_reports: &mut VecDeque<IcebergTaskReport>,
-) -> bool {
-    // Returns true when flushing fails and the caller should restart the stream.
+) -> ReportSendResult {
     while let Some(report_event) = pending_task_reports.pop_front() {
         if let Err(report_event) = send_iceberg_task_report(request_sender, report_event) {
             pending_task_reports.push_front(report_event);
-            return true;
+            return ReportSendResult::RestartStream;
         }
     }
-    false
+    ReportSendResult::Sent
 }

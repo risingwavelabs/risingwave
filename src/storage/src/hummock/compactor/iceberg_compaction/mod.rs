@@ -14,8 +14,8 @@
 
 pub use self::iceberg_compactor_runner::create_task_execution;
 pub(crate) use self::report::{
-    IcebergPlanCompletion, IcebergTaskReport, IcebergTaskTracker, build_iceberg_task_report,
-    build_iceberg_task_result, flush_pending_iceberg_task_reports,
+    IcebergPlanCompletion, IcebergTaskReport, IcebergTaskTracker, ReportSendResult,
+    build_iceberg_task_report, flush_pending_iceberg_task_reports,
     send_or_buffer_iceberg_task_report,
 };
 use crate::hummock::compactor::iceberg_compaction::iceberg_compactor_runner::IcebergCompactionPlanRunner;
