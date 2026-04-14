@@ -50,10 +50,6 @@
 - [Batch Local Execution Mode](./design/batch-local-execution-mode.md)
 - [Consistent Hash](./design/consistent-hash.md)
 - [Keys](./design/keys.md)
-- [Control Unit Inventory](./design/control-unit-inventory.md)
-- [Control Unit Schema](./design/control-unit-schema.yaml)
-- [Control Unit Observability and Admission](./design/control-unit-observability-and-admission.md)
-- [Control Unit Rollout Safety](./design/control-unit-rollout-safety.md)
 <!--
 
 TODO:
