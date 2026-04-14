@@ -173,16 +173,17 @@ pub struct StreamingJobInfo {
 }
 
 impl NotificationManager {
-    pub(crate) fn notify_fragment_mapping(
+    /// Notify frontend about streaming worker slot mapping changes.
+    ///
+    /// This only sends streaming mapping updates to frontends. Serving mapping
+    /// notifications are decoupled and driven by fragment model changes (insert/delete)
+    /// instead of barrier-driven actor set changes.
+    pub(crate) fn notify_streaming_fragment_mapping(
         &self,
         operation: NotificationOperation,
         fragment_mappings: Vec<PbFragmentWorkerSlotMapping>,
     ) {
-        let fragment_ids = fragment_mappings
-            .iter()
-            .map(|mapping| mapping.fragment_id)
-            .collect_vec();
-        if fragment_ids.is_empty() {
+        if fragment_mappings.is_empty() {
             return;
         }
         // notify all fragment mappings to frontend.
@@ -192,23 +193,38 @@ impl NotificationManager {
                 NotificationInfo::StreamingWorkerSlotMapping(fragment_mapping),
             );
         }
+    }
 
-        // update serving vnode mappings.
-        match operation {
-            NotificationOperation::Add | NotificationOperation::Update => {
-                self.notify_local_subscribers(LocalNotification::FragmentMappingsUpsert(
-                    fragment_ids,
-                ));
-            }
-            NotificationOperation::Delete => {
-                self.notify_local_subscribers(LocalNotification::FragmentMappingsDelete(
-                    fragment_ids,
-                ));
-            }
-            op => {
-                tracing::warn!("unexpected fragment mapping op: {}", op.as_str_name());
-            }
+    /// Notify the serving module about fragment mapping changes.
+    ///
+    /// This should be called when fragments are inserted into or deleted from the meta store,
+    /// so that serving vnode mappings are kept in sync with the fragment model.
+    pub(crate) fn notify_serving_fragment_mapping_update(
+        &self,
+        fragment_ids: Vec<crate::model::FragmentId>,
+    ) {
+        if fragment_ids.is_empty() {
+            return;
         }
+        self.notify_local_subscribers(LocalNotification::ServingFragmentMappingsUpsert(
+            fragment_ids,
+        ));
+    }
+
+    /// Notify the serving module about fragment mapping deletions.
+    ///
+    /// This should be called when fragments are deleted from the meta store,
+    /// so that serving vnode mappings are cleaned up.
+    pub(crate) fn notify_serving_fragment_mapping_delete(
+        &self,
+        fragment_ids: Vec<crate::model::FragmentId>,
+    ) {
+        if fragment_ids.is_empty() {
+            return;
+        }
+        self.notify_local_subscribers(LocalNotification::ServingFragmentMappingsDelete(
+            fragment_ids,
+        ));
     }
 }
 

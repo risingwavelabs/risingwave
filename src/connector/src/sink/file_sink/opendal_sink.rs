@@ -255,7 +255,7 @@ impl OpenDalSinkWriter {
                     let bytes_written = w.bytes_written();
                     if bytes_written > 0 {
                         w.close().await?;
-                        tracing::info!(
+                        tracing::debug!(
                             "writer {} (executor_id: {}, created_time: {}) finish write file, bytes_written: {}",
                             self.unique_writer_id,
                             self.executor_id,
@@ -275,6 +275,11 @@ impl OpenDalSinkWriter {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    /// Returns whether there is pending data (i.e., an active writer that has not been committed yet).
+    pub fn has_pending_data(&self) -> bool {
+        self.sink_writer.is_some()
     }
 
     // Try commit if the batching condition is met.
