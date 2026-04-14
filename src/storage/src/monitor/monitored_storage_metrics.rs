@@ -60,7 +60,7 @@ pub struct MonitoredStorageMetrics {
     // [table_id, top_n, ef_search]
     pub vector_nearest_duration: LabelGuardedHistogramVec,
 
-    /// [table_id, op_type] — op_type: `insert`, `delete`, `seal_epoch`, `vector_insert`.
+    /// Prometheus label dimensions `table_id` and `op_type` (`insert`, `delete`, `seal_epoch`, `vector_insert`).
     /// Counts **attempted** wrapper calls (incremented before delegating to inner), not guaranteed successes.
     pub local_write_counts: LabelGuardedIntCounterVec,
 
