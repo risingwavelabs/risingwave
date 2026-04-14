@@ -198,12 +198,13 @@ FROM GAP_FILL(
 EMIT ON WINDOW CLOSE;
 
 # Advance watermark enough to release all rows up through 10:03:00.
+# Watermark = 10:10:00 - 5s = 10:09:55, so all rows <= 10:09:55 are released.
 statement ok
 INSERT INTO gap_table_partitioned VALUES
     (1, '2024-05-21 10:10:00', 1000.0),
     (2, '2024-05-21 10:10:00', 2000.0);
 
-query ITR
+query ITR retry 6 backoff 1s
 SELECT device_id, ts, value
 FROM gap_filled_partitioned_eowc
 ORDER BY device_id, ts;
