@@ -636,3 +636,24 @@ impl ToSql for JsonbRef<'_> {
         Ok(IsNull::No)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_backward_compatible() {
+        use std::hash::Hasher as _;
+
+        // Hash of sample input `"foo"` required to be the the magic number below.
+        // See #25336 for how the backward compatibility is doomed.
+        let s = r#""foo""#;
+        let j: JsonbVal = s.parse().unwrap();
+        let expected = expect_test::expect!["10172337927241793445"];
+
+        let mut state = std::hash::DefaultHasher::new();
+        j.hash(&mut state);
+        let actual = state.finish();
+        expected.assert_eq(&actual.to_string());
+    }
+}
