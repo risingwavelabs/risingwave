@@ -584,6 +584,47 @@
   sql: |
     CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
     CREATE MATERIALIZED VIEW mv AS SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+- name: eowc partition by single column
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts), WATERMARK FOR ts AS ts - INTERVAL '5' SECOND) APPEND ONLY;
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+  stream_plan: |-
+    StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
+      └─StreamExchange { dist: HashShard(t.device_id) }
+        └─StreamTableScan { table: t, columns: [t.device_id, t.ts, t.val], stream_scan_type: SnapshotBackfill, stream_key: [t.device_id, t.ts], pk: [device_id, ts], dist: UpstreamHashShard(t.device_id, t.ts) }
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamEowcGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
+      └─StreamExchange { dist: HashShard(t.device_id) }
+        └─StreamTableScan { table: t, columns: [t.device_id, t.ts, t.val], stream_scan_type: SnapshotBackfill, stream_key: [t.device_id, t.ts], pk: [device_id, ts], dist: UpstreamHashShard(t.device_id, t.ts) }
+  eowc_stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [device_id, ts, val], stream_key: [device_id, ts], pk_columns: [device_id, ts], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └── StreamEowcGapFill { time_col: $1, interval: '00:01:00':Interval, fill_strategies: [BoundFillStrategy { strategy: Locf, target_col: $2 }], partition_by: [$0] }
+        ├── tables: [ EowcGapFillBufferTable: 0, EowcGapFillPrevRowTable: 1 ]
+        └── StreamExchange Hash([0]) from 1
+
+    Fragment 1
+    StreamTableScan { table: t, columns: [t.device_id, t.ts, t.val], stream_scan_type: SnapshotBackfill, stream_key: [t.device_id, t.ts], pk: [device_id, ts], dist: UpstreamHashShard(t.device_id, t.ts) }
+    ├── tables: [ StreamScan: 2 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
+
+    Table 1 { columns: [ t_device_id, t_ts, t_val, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
+
+    Table 2
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, device_id, ts, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4, 5 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294 { columns: [ device_id, ts, val, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
+
 - name: partition by in materialized view without input pk
   sql: |
     CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
