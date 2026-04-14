@@ -58,8 +58,8 @@ use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, ConnectionRefValue, CreateSink,
     CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format,
-    FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
-    Statement, TableConstraint, WebhookSourceInfo, WithProperties,
+    FormatEncodeOptions, FromSourceTableInfo, Ident, ObjectName, OnConflict, SecretRefAsType,
+    SourceWatermark, Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
@@ -627,6 +627,7 @@ pub(crate) fn gen_create_table_plan_without_source(
         watermark_descs,
         source_catalog: None,
         version,
+        source_node_kind: SourceNodeKind::CreateTable,
     };
 
     gen_table_plan_inner(context.into(), schema_name, table_name, info, props)
@@ -639,6 +640,24 @@ fn gen_table_plan_with_source(
     version: TableVersion,
     props: CreateTableProps,
 ) -> Result<(PlanRef, TableCatalog)> {
+    gen_table_plan_with_source_inner(
+        context,
+        schema_name,
+        source_catalog,
+        version,
+        props,
+        SourceNodeKind::CreateTable,
+    )
+}
+
+fn gen_table_plan_with_source_inner(
+    context: OptimizerContextRef,
+    schema_name: Option<String>,
+    source_catalog: SourceCatalog,
+    version: TableVersion,
+    props: CreateTableProps,
+    source_node_kind: SourceNodeKind,
+) -> Result<(PlanRef, TableCatalog)> {
     let table_name = source_catalog.name.clone();
 
     let info = CreateTableInfo {
@@ -648,9 +667,124 @@ fn gen_table_plan_with_source(
         watermark_descs: source_catalog.watermark_descs.clone(),
         source_catalog: Some(source_catalog),
         version,
+        source_node_kind,
     };
 
     gen_table_plan_inner(context, schema_name, table_name, info, props)
+}
+
+/// Generate plan for `CREATE TABLE ... FROM source_name` (non-CDC shared source).
+///
+/// The table consumes from the upstream shared source via `StreamSourceScan` (source backfill),
+/// similar to how `CREATE MATERIALIZED VIEW` on a shared source works. The table does NOT have
+/// its own connector — format/encode and connector properties are all handled by the upstream source.
+/// Table columns are resolved from user-specified `column_defs`, same as a table without connector.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::type_complexity)]
+fn gen_create_table_plan_for_shared_source(
+    handler_args: HandlerArgs,
+    explain_options: ExplainOptions,
+    table_name: ObjectName,
+    column_defs: Vec<ColumnDef>,
+    _wildcard_idx: Option<usize>,
+    constraints: Vec<TableConstraint>,
+    source_watermarks: Vec<SourceWatermark>,
+    mut col_id_gen: ColumnIdGenerator,
+    _include_column_options: IncludeOption,
+    props: CreateTableProps,
+    from_source_info: FromSourceTableInfo,
+) -> Result<(
+    PlanRef,
+    Option<SourceCatalog>,
+    TableCatalog,
+    TableJobType,
+    Option<SourceId>,
+)> {
+    let session = &handler_args.session;
+    let db_name = &session.database();
+    let user_name = &session.user_name();
+    let search_path = session.config().search_path();
+
+    // Look up the source catalog.
+    let (source_schema, source_name) =
+        Binder::resolve_schema_qualified_name(db_name, &from_source_info.source_name)?;
+    let source = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::new(source_schema.as_deref(), &search_path, user_name);
+        let (source, _) =
+            catalog_reader.get_source_by_name(db_name, schema_path, source_name.as_str())?;
+        source.clone()
+    };
+
+    // Validate the source is shared.
+    if !source.info.is_shared() {
+        return Err(ErrorCode::NotSupported(
+            "Only shared sources can be used in CREATE TABLE FROM".into(),
+            "Recreate the source with `streaming_use_shared_source = true` (the default)".into(),
+        )
+        .into());
+    }
+
+    // Disallow source-defined generated columns for CREATE TABLE FROM.
+    if source.columns.iter().any(|c| c.is_generated()) {
+        return Err(ErrorCode::NotSupported(
+            "Sources with generated columns cannot be used in CREATE TABLE FROM".into(),
+            "Define generated columns on the table instead".into(),
+        )
+        .into());
+    }
+
+    // Build table columns from user-specified column_defs (same as table without connector).
+    let mut columns = bind_sql_columns(&column_defs, false)?;
+    for c in &mut columns {
+        col_id_gen.generate(c)?;
+    }
+
+    let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+
+    let watermark_descs = bind_source_watermark(
+        session,
+        table_name.real_value(),
+        source_watermarks,
+        &columns,
+    )?;
+
+    bind_sql_column_constraints(
+        session,
+        table_name.real_value(),
+        &mut columns,
+        &column_defs,
+        &pk_column_ids,
+    )?;
+
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
+    let context: OptimizerContextRef = OptimizerContext::new(handler_args, explain_options).into();
+
+    // Use the real upstream source catalog (with all columns including hidden ones like
+    // _rw_kafka_partition, _rw_kafka_offset) for the StreamSourceScan node.
+    let upstream_source_catalog: SourceCatalog = source.as_ref().clone();
+
+    let info = CreateTableInfo {
+        columns,
+        pk_column_ids,
+        row_id_index,
+        watermark_descs,
+        source_catalog: Some(upstream_source_catalog),
+        version: col_id_gen.into_version(),
+        source_node_kind: SourceNodeKind::CreateTableFromSharedSource,
+    };
+
+    let (plan, table) = gen_table_plan_inner(context, schema_name, table_name, info, props)?;
+
+    Ok((
+        plan,
+        None,
+        table,
+        TableJobType::SharedSource,
+        Some(source.id),
+    ))
 }
 
 /// On-conflict behavior either from user input or existing table catalog.
@@ -722,6 +856,9 @@ pub struct CreateTableInfo {
     pub watermark_descs: Vec<WatermarkDesc>,
     pub source_catalog: Option<SourceCatalog>,
     pub version: TableVersion,
+    /// The kind of source node to create for the external source plan.
+    /// Defaults to `CreateTable`. Use `CreateTableFromSharedSource` for `CREATE TABLE FROM source`.
+    pub source_node_kind: SourceNodeKind,
 }
 
 /// Arguments of the functions that generate a table plan, part 2.
@@ -747,9 +884,10 @@ fn gen_table_plan_inner(
 ) -> Result<(PlanRef, TableCatalog)> {
     let CreateTableInfo {
         ref columns,
-        row_id_index,
+        row_id_index: _,
         ref watermark_descs,
         ref source_catalog,
+        ref source_node_kind,
         ..
     } = info;
     let CreateTableProps { append_only, .. } = props;
@@ -761,17 +899,27 @@ fn gen_table_plan_inner(
     let session = context.session_ctx().clone();
     let retention_seconds = context.with_options().retention_seconds();
 
+    // Filter out table-defined generated columns for LogicalSource.
+    // Generated columns are handled by inject_project_for_generated_column_if_needed
+    // in gen_table_plan, not by LogicalSource.
+    let source_columns: Vec<ColumnCatalog> = columns
+        .iter()
+        .filter(|c| !c.is_generated())
+        .cloned()
+        .collect();
+    let source_row_id_index = source_columns.iter().position(|c| c.is_row_id_column());
+
     let source_node: LogicalPlanRef = LogicalSource::new(
         source_catalog.clone().map(Rc::new),
-        columns.clone(),
-        row_id_index,
-        SourceNodeKind::CreateTable,
+        source_columns.clone(),
+        source_row_id_index,
+        source_node_kind.clone(),
         context.clone(),
         None,
     )?
     .into();
 
-    let required_cols = FixedBitSet::with_capacity(columns.len());
+    let required_cols = FixedBitSet::with_capacity(source_columns.len());
     let plan_root = PlanRoot::new_with_logical_plan(
         source_node,
         RequiredDist::Any,
@@ -952,6 +1100,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
             watermark_descs,
             source_catalog: Some((*source).clone()),
             version: col_id_gen.into_version(),
+            source_node_kind: SourceNodeKind::CreateTable,
         },
         CreateTableProps {
             definition,
@@ -1105,6 +1254,7 @@ pub(super) async fn handle_create_table_plan(
     explain_options: ExplainOptions,
     format_encode: Option<FormatEncodeOptions>,
     cdc_table_info: Option<CdcTableInfo>,
+    from_source_table_info: Option<FromSourceTableInfo>,
     table_name: &ObjectName,
     column_defs: Vec<ColumnDef>,
     wildcard_idx: Option<usize>,
@@ -1142,6 +1292,25 @@ pub(super) async fn handle_create_table_plan(
         webhook_info,
         engine,
     };
+
+    // Handle CREATE TABLE FROM source (non-CDC shared source) first.
+    if let Some(from_source_info) = from_source_table_info {
+        let (plan, source, table, job_type, shared_source_id) =
+            gen_create_table_plan_for_shared_source(
+                handler_args,
+                explain_options,
+                table_name.clone(),
+                column_defs,
+                wildcard_idx,
+                constraints,
+                source_watermarks,
+                col_id_gen,
+                include_column_options,
+                props,
+                from_source_info,
+            )?;
+        return Ok((plan, source, table, job_type, shared_source_id));
+    }
 
     let ((plan, source, table), job_type, shared_shource_id) = match (
         format_encode,
@@ -1460,6 +1629,7 @@ pub async fn handle_create_table(
     on_conflict: Option<OnConflict>,
     with_version_columns: Vec<String>,
     cdc_table_info: Option<CdcTableInfo>,
+    from_source_table_info: Option<FromSourceTableInfo>,
     include_column_options: IncludeOption,
     webhook_info: Option<WebhookSourceInfo>,
     ast_engine: risingwave_sqlparser::ast::Engine,
@@ -1491,6 +1661,7 @@ pub async fn handle_create_table(
             ExplainOptions::default(),
             format_encode,
             cdc_table_info,
+            from_source_table_info,
             &table_name,
             column_defs.clone(),
             wildcard_idx,
@@ -1526,7 +1697,9 @@ pub async fn handle_create_table(
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
             let action = match job_type {
-                TableJobType::SharedCdcSource => LongRunningNotificationAction::MonitorBackfillJob,
+                TableJobType::SharedCdcSource | TableJobType::SharedSource => {
+                    LongRunningNotificationAction::MonitorBackfillJob
+                }
                 _ => LongRunningNotificationAction::DiagnoseBarrierLatency,
             };
             execute_with_long_running_notification(
@@ -2371,7 +2544,9 @@ pub async fn create_iceberg_engine_table(
 
     let catalog_writer = session.catalog_writer()?;
     let action = match job_type {
-        TableJobType::SharedCdcSource => LongRunningNotificationAction::MonitorBackfillJob,
+        TableJobType::SharedCdcSource | TableJobType::SharedSource => {
+            LongRunningNotificationAction::MonitorBackfillJob
+        }
         _ => LongRunningNotificationAction::DiagnoseBarrierLatency,
     };
     let res = execute_with_long_running_notification(
@@ -2482,6 +2657,7 @@ pub async fn generate_stream_graph_for_replace_table(
         with_version_columns,
         wildcard_idx,
         cdc_table_info,
+        from_source_table_info,
         format_encode,
         include_column_options,
         engine,
@@ -2525,8 +2701,12 @@ pub async fn generate_stream_graph_for_replace_table(
         engine,
     };
 
-    let ((plan, mut source, mut table), job_type) = match (format_encode, cdc_table_info.as_ref()) {
-        (Some(format_encode), None) => (
+    let ((plan, mut source, mut table), job_type) = match (
+        format_encode,
+        cdc_table_info.as_ref(),
+        from_source_table_info,
+    ) {
+        (Some(format_encode), None, None) => (
             gen_create_table_plan_with_source(
                 handler_args,
                 ExplainOptions::default(),
@@ -2544,7 +2724,7 @@ pub async fn generate_stream_graph_for_replace_table(
             .await?,
             TableJobType::General,
         ),
-        (None, None) => {
+        (None, None, None) => {
             let context = OptimizerContext::from_handler_args(handler_args);
             let (plan, table) = gen_create_table_plan(
                 context,
@@ -2558,7 +2738,24 @@ pub async fn generate_stream_graph_for_replace_table(
             )?;
             ((plan, None, table), TableJobType::General)
         }
-        (None, Some(cdc_table)) => {
+        (None, None, Some(from_source_info)) => {
+            let (plan, source, table, job_type, _source_id) =
+                gen_create_table_plan_for_shared_source(
+                    handler_args,
+                    ExplainOptions::default(),
+                    table_name,
+                    columns,
+                    wildcard_idx,
+                    constraints,
+                    source_watermarks,
+                    col_id_gen,
+                    include_column_options,
+                    props,
+                    from_source_info,
+                )?;
+            ((plan, source, table), job_type)
+        }
+        (None, Some(cdc_table), None) => {
             sanity_check_for_table_on_cdc_source(
                 append_only,
                 &columns,
@@ -2607,13 +2804,26 @@ pub async fn generate_stream_graph_for_replace_table(
 
             ((plan, None, table), TableJobType::SharedCdcSource)
         }
-        (Some(_), Some(_)) => {
+        (Some(_), Some(_), None) | (Some(_), Some(_), Some(_)) => {
             return Err(ErrorCode::NotSupported(
                 "Data format and encoding format doesn't apply to table created from a CDC source"
                     .into(),
                 "Remove the FORMAT and ENCODE specification".into(),
             )
             .into());
+        }
+        (Some(_), None, Some(_)) => {
+            return Err(ErrorCode::NotSupported(
+                "Data format and encoding format doesn't apply to table created from a shared source"
+                    .into(),
+                "Remove the FORMAT and ENCODE specification; format/encode is inherited from the source".into(),
+            )
+            .into());
+        }
+        (None, Some(_), Some(_)) => {
+            unreachable!(
+                "parser produces either cdc_table_info or from_source_table_info, not both"
+            )
         }
     };
 

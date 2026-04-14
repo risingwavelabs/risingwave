@@ -1776,10 +1776,11 @@ impl CompleteStreamFragmentGraph {
                             }
                         }
 
-                        // handle MV on MV/Source
+                        // handle MV on MV/Source, and table from shared source
                         StreamingJobType::MaterializedView
                         | StreamingJobType::Sink
-                        | StreamingJobType::Index => {
+                        | StreamingJobType::Index
+                        | StreamingJobType::Table(TableJobType::SharedSource) => {
                             // Build the extra edges between the upstream `Materialize` and
                             // the downstream `StreamScan` of the new job.
                             if upstream_fragment

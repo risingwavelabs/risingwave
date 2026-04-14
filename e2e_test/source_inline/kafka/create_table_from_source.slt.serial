@@ -1,0 +1,237 @@
+control substitution on
+
+# Test CREATE TABLE FROM source (shared non-CDC source backfill for tables)
+
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+system ok
+rpk topic delete test_table_from_source || true
+
+system ok
+rpk topic create test_table_from_source -p 4
+
+system ok
+cat << EOF | rpk topic produce test_table_from_source -f "%p %v\n" -p 0
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+EOF
+
+# Create a shared source
+statement ok
+SET streaming_use_shared_source TO true;
+
+statement ok
+create source s (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_table_from_source',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+sleep 1s
+
+# Test: CREATE TABLE FROM source uses source backfill (StreamSourceScan)
+statement ok
+create table t_from_source (v1 int, v2 varchar) FROM s;
+
+sleep 3s
+
+# Verify the table consumed data from the shared source via backfill
+query IT rowsort
+select v1, v2 from t_from_source;
+----
+1 a
+2 b
+3 c
+4 d
+
+# Test: DML works on the table (the Union of DML and source backfill paths)
+statement ok
+insert into t_from_source values (5, 'e');
+
+
+
+query IT rowsort
+select v1, v2 from t_from_source;
+----
+1 a
+2 b
+3 c
+4 d
+5 e
+
+# Test: new data from kafka is consumed
+system ok
+cat << EOF | rpk topic produce test_table_from_source -f "%p %v\n" -p 0
+0 {"v1": 6, "v2": "f"}
+1 {"v1": 7, "v2": "g"}
+EOF
+
+sleep 3s
+
+query IT rowsort
+select v1, v2 from t_from_source;
+----
+1 a
+2 b
+3 c
+4 d
+5 e
+6 f
+7 g
+
+# Test: DELETE works on the table
+statement ok
+delete from t_from_source where v1 = 3;
+
+
+
+query IT rowsort
+select v1, v2 from t_from_source;
+----
+1 a
+2 b
+4 d
+5 e
+6 f
+7 g
+
+# Test: UPDATE works on the table
+statement ok
+update t_from_source set v2 = 'updated' where v1 = 1;
+
+
+
+query IT rowsort
+select v1, v2 from t_from_source;
+----
+1 updated
+2 b
+4 d
+5 e
+6 f
+7 g
+
+# Test: new kafka data still arrives after DML operations
+system ok
+cat << EOF | rpk topic produce test_table_from_source -f "%p %v\n" -p 0
+0 {"v1": 8, "v2": "h"}
+EOF
+
+sleep 3s
+
+query IT rowsort
+select v1, v2 from t_from_source;
+----
+1 updated
+2 b
+4 d
+5 e
+6 f
+7 g
+8 h
+
+# Test: table-defined generated columns
+statement ok
+create table t_gen_col (v1 int, v2 varchar, v3 int AS v1 * 2) FROM s;
+
+sleep 3s
+
+# t_gen_col reads from the kafka source directly, so it sees all raw kafka data
+# (not the DML modifications on t_from_source)
+query IIT rowsort
+select v1, v3, v2 from t_gen_col;
+----
+1 2 a
+2 4 b
+3 6 c
+4 8 d
+6 12 f
+7 14 g
+8 16 h
+
+# Test: new data works with generated columns
+system ok
+cat << EOF | rpk topic produce test_table_from_source -f "%p %v\n" -p 0
+0 {"v1": 9, "v2": "i"}
+EOF
+
+sleep 3s
+
+query IIT rowsort
+select v1, v3, v2 from t_gen_col;
+----
+1 2 a
+2 4 b
+3 6 c
+4 8 d
+6 12 f
+7 14 g
+8 16 h
+9 18 i
+
+# Test: DML works with generated columns
+statement ok
+insert into t_gen_col (v1, v2) values (10, 'j');
+
+query IIT rowsort
+select v1, v3, v2 from t_gen_col;
+----
+1 2 a
+10 20 j
+2 4 b
+3 6 c
+4 8 d
+6 12 f
+7 14 g
+8 16 h
+9 18 i
+
+statement ok
+drop table t_gen_col;
+
+statement ok
+drop table t_from_source;
+
+# Test: error when source has generated columns
+statement ok
+drop source s cascade;
+
+statement ok
+create source s_gen (v1 int, v2 varchar, v3 int AS v1 + 1) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_table_from_source',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement error Sources with generated columns cannot be used in CREATE TABLE FROM
+create table t_err (v1 int, v2 varchar, v3 int) FROM s_gen;
+
+# Test: error when source is not shared
+statement ok
+SET streaming_use_shared_source TO false;
+
+statement ok
+create source s_non_shared (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_table_from_source',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+statement error Only shared sources can be used in CREATE TABLE FROM
+create table t_err (v1 int, v2 varchar) FROM s_non_shared;
+
+statement ok
+SET streaming_use_shared_source TO true;
+
+# Cleanup
+statement ok
+drop source s_gen;
+
+statement ok
+drop source s_non_shared;
+
+system ok
+rpk topic delete test_table_from_source;

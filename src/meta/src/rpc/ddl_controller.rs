@@ -1179,6 +1179,10 @@ impl DdlController {
                 self.validate_cdc_table(table, &stream_job_fragments)
                     .await?;
             }
+            StreamingJob::Table(None, _table, TableJobType::SharedSource) => {
+                // No CDC-specific validation needed for non-CDC shared source tables.
+                // The source is already registered as a streaming job.
+            }
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.
                 self.source_manager.register_source(source).await?;
@@ -2156,6 +2160,7 @@ impl DdlController {
                 )?
             }
             StreamingJobType::Table(TableJobType::SharedCdcSource)
+            | StreamingJobType::Table(TableJobType::SharedSource)
             | StreamingJobType::MaterializedView => {
                 // CDC tables or materialized views can have upstream jobs as well.
                 let upstream_root_fragments = self

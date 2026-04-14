@@ -403,6 +403,7 @@ pub async fn handle(
             on_conflict,
             with_version_columns,
             cdc_table_info,
+            from_source_table_info,
             include_column_options,
             webhook_info,
             engine,
@@ -447,6 +448,7 @@ pub async fn handle(
                     .map(|col| col.real_value())
                     .collect(),
                 cdc_table_info,
+                from_source_table_info,
                 include_column_options,
                 webhook_info,
                 engine,

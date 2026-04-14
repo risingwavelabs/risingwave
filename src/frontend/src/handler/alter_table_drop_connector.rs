@@ -144,6 +144,7 @@ fn rewrite_table_definition(
         with_version_columns,
         query,
         cdc_table_info: None,
+        from_source_table_info: None,
         include_column_options: vec![],
         webhook_info: None,
         engine,

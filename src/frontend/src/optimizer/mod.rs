@@ -757,6 +757,7 @@ impl LogicalPlanRoot {
             watermark_descs,
             source_catalog,
             version,
+            source_node_kind: _,
         }: CreateTableInfo,
         CreateTableProps {
             definition,
@@ -874,6 +875,7 @@ impl LogicalPlanRoot {
             )
             .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
             let mut external_source_node = stream_plan.plan;
+
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
             external_source_node = match kind {

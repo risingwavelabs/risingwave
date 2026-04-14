@@ -2589,16 +2589,22 @@ impl Parser<'_> {
             None
         };
 
-        let cdc_table_info = if self.parse_keyword(Keyword::FROM) {
+        let (cdc_table_info, from_source_table_info) = if self.parse_keyword(Keyword::FROM) {
             let source_name = self.parse_object_name()?;
-            self.expect_keyword(Keyword::TABLE)?;
-            let external_table_name = self.parse_literal_string()?;
-            Some(CdcTableInfo {
-                source_name,
-                external_table_name,
-            })
+            if self.parse_keyword(Keyword::TABLE) {
+                let external_table_name = self.parse_literal_string()?;
+                (
+                    Some(CdcTableInfo {
+                        source_name,
+                        external_table_name,
+                    }),
+                    None,
+                )
+            } else {
+                (None, Some(FromSourceTableInfo { source_name }))
+            }
         } else {
-            None
+            (None, None)
         };
 
         let webhook_wait_for_persistence = with_options
@@ -2677,6 +2683,7 @@ impl Parser<'_> {
             with_version_columns,
             query,
             cdc_table_info,
+            from_source_table_info,
             include_column_options: include_options,
             webhook_info,
             engine,

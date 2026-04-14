@@ -1226,6 +1226,12 @@ pub struct CdcTableInfo {
     pub external_table_name: String,
 }
 
+/// Info for `CREATE TABLE ... FROM source_name` (non-CDC shared source).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FromSourceTableInfo {
+    pub source_name: ObjectName,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CopyEntity {
     Query(Box<Query>),
@@ -1353,6 +1359,8 @@ pub enum Statement {
         query: Option<Box<Query>>,
         /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
+        /// `FROM source_name` (non-CDC shared source)
+        from_source_table_info: Option<FromSourceTableInfo>,
         /// `INCLUDE a AS b INCLUDE c`
         include_column_options: IncludeOption,
         /// `VALIDATE SECRET secure_secret_name AS secure_compare ()`
@@ -2069,6 +2077,7 @@ impl Statement {
                 with_version_columns,
                 query,
                 cdc_table_info,
+                from_source_table_info,
                 include_column_options,
                 webhook_info,
                 engine,
@@ -2127,6 +2136,9 @@ impl Statement {
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
                     write!(f, " TABLE '{}'", info.external_table_name)?;
+                }
+                if let Some(info) = from_source_table_info {
+                    write!(f, " FROM {}", info.source_name)?;
                 }
                 if let Some(info) = webhook_info
                     && let Some(signature_expr) = &info.signature_expr
@@ -3959,6 +3971,7 @@ impl Statement {
             include_column_options: Vec::new(),
             webhook_info: None,
             engine: Engine::Hummock,
+            from_source_table_info: None,
         }
     }
 }

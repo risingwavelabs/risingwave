@@ -94,6 +94,16 @@ impl LogicalSource {
 
         let base = PlanBase::new_logical_with_core(&core);
 
+        if core.kind == SourceNodeKind::CreateTableFromSharedSource {
+            let (source_core, project_exprs) = Self::derive_table_from_shared_source(core)?;
+            return Ok(LogicalSource {
+                base,
+                core: source_core,
+                output_exprs: Some(project_exprs),
+                output_row_id_index: None,
+            });
+        }
+
         let output_exprs = Self::derive_output_exprs_from_generated_columns(&core.column_catalog)?;
         let (core, output_row_id_index) = core.exclude_generated_columns();
 
@@ -179,6 +189,48 @@ impl LogicalSource {
         }
 
         Ok(Some(exprs))
+    }
+
+    /// For `CREATE TABLE FROM source`:
+    /// - `core.column_catalog` = table non-gen columns (gen cols filtered by caller).
+    /// - Source-defined gen cols are disallowed (validated in handler).
+    /// - Table gen cols are handled by `inject_project_for_generated_column_if_needed`.
+    ///
+    /// Returns `(source_core, project_exprs)` where:
+    /// - `source_core` has source columns as `column_catalog` (physical output of `StreamSourceScan`).
+    /// - `project_exprs` maps source cols → table non-gen cols (column remapping + cast).
+    fn derive_table_from_shared_source(
+        core: generic::Source,
+    ) -> Result<(generic::Source, Vec<ExprImpl>)> {
+        let table_non_gen_cols = core.column_catalog.clone();
+
+        let sc = core
+            .catalog
+            .as_ref()
+            .expect("CreateTableFromSharedSource requires source catalog");
+        let source_columns = sc.columns.clone();
+        let source_row_id_index = sc.row_id_index;
+
+        // Replace with source columns for physical output.
+        let mut source_core = core;
+        source_core.column_catalog = source_columns.clone();
+        source_core.row_id_index = source_row_id_index;
+
+        // Build source cols → table non-gen cols mapping.
+        let project_exprs: Vec<ExprImpl> = table_non_gen_cols
+            .iter()
+            .map(|table_col| {
+                let src_idx = source_columns
+                    .iter()
+                    .position(|c| c.name() == table_col.name())
+                    .expect("table non-gen column must exist in source columns");
+                let expr: ExprImpl =
+                    InputRef::new(src_idx, source_columns[src_idx].data_type().clone()).into();
+                expr.cast_assign(table_col.data_type()).map_err(Into::into)
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok((source_core, project_exprs))
     }
 
     fn create_non_shared_source_plan(core: generic::Source) -> Result<StreamPlanRef> {
@@ -454,6 +506,16 @@ impl ToStream for LogicalSource {
                 // Note: for create table, row_id and generated columns is created in plan_root.gen_table_plan.
                 // for shared source, row_id and generated columns is created after SourceBackfill node.
                 plan = Self::create_non_shared_source_plan(self.core.clone())?;
+            }
+            SourceNodeKind::CreateTableFromSharedSource => {
+                // core.column_catalog has source columns (set in new()), output_exprs has
+                // the source → table column projection.
+                plan = StreamSourceScan::new(self.core.clone()).into();
+
+                if let Some(exprs) = &self.output_exprs {
+                    let logical_project = generic::Project::new(exprs.clone(), plan);
+                    plan = StreamProject::new(logical_project).into();
+                }
             }
             SourceNodeKind::CreateMViewOrBatch => {
                 if self.is_shared_source() {

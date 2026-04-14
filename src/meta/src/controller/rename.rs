@@ -18,9 +18,9 @@ use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
 use risingwave_pb::plan_common::PbColumnDesc;
 use risingwave_sqlparser::ast::{
     Array, CdcTableInfo, CreateSink, CreateSinkStatement, CreateSourceStatement,
-    CreateSubscriptionStatement, Distinct, Expr, Function, FunctionArg, FunctionArgExpr,
-    FunctionArgList, Ident, ObjectName, Query, SelectItem, SetExpr, Statement, TableAlias,
-    TableFactor, TableWithJoins, Window,
+    CreateSubscriptionStatement, Distinct, Expr, FromSourceTableInfo, Function, FunctionArg,
+    FunctionArgExpr, FunctionArgList, Ident, ObjectName, Query, SelectItem, SetExpr, Statement,
+    TableAlias, TableFactor, TableWithJoins, Window,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -112,6 +112,12 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
             Some(CdcTableInfo {
                 source_name: table_name,
                 ..
+            }),
+            ..
+        } | Statement::CreateTable {
+            from_source_table_info:
+            Some(FromSourceTableInfo {
+                source_name: table_name,
             }),
             ..
         } => replace_table_name(table_name, to),

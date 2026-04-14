@@ -42,6 +42,9 @@ pub enum SourceNodeKind {
     /// - For non-shared source, `CREATE SOURCE` will not create a source node, and `CREATE MATERIALIZE VIEW` will create a `StreamSource`.
     /// - For shared source, `CREATE MATERIALIZE VIEW` will create `StreamSourceScan` instead of `StreamSource`.
     CreateMViewOrBatch,
+    /// `CREATE TABLE ... FROM source_name` where the source is a shared non-CDC source.
+    /// Produces `StreamSourceScan` (source backfill) instead of `StreamSource`.
+    CreateTableFromSharedSource,
 }
 
 /// [`Source`] returns contents of a table or other equivalent object
@@ -51,10 +54,14 @@ pub struct Source {
     /// If there is an external stream source, `catalog` will be `Some`. Otherwise, it is `None`.
     pub catalog: Option<Rc<SourceCatalog>>,
 
-    // NOTE: Here we store `column_catalog` and `row_id_index`
-    // because they are needed when `catalog` is None.
-    // When `catalog` is Some, they are the same as these fields in `catalog`.
+    /// The physical output columns of the `StreamSource` / `BatchSource` / `StreamSourceScan` node.
+    ///
+    /// This may differ from both `catalog.columns` and `LogicalSource`'s schema (`PlanBase`):
+    /// - Generated columns are excluded by `LogicalSource::new()` (re-added via `output_exprs`).
+    /// - For `CreateTableFromSharedSource`, this is the upstream source's columns, while
+    ///   `PlanBase` has the table's columns (bridged by `output_exprs`).
     pub column_catalog: Vec<ColumnCatalog>,
+    /// The position of `_row_id` in `column_catalog`, if applicable.
     pub row_id_index: Option<usize>,
 
     pub kind: SourceNodeKind,

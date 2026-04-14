@@ -438,6 +438,7 @@ impl TestCase {
                     on_conflict,
                     with_version_columns,
                     cdc_table_info,
+                    from_source_table_info,
                     include_column_options,
                     wildcard_idx,
                     webhook_info,
@@ -446,7 +447,7 @@ impl TestCase {
                 } => {
                     let format_encode = format_encode.map(|schema| schema.into_v2_with_warning());
 
-                    Box::pin(create_table::handle_create_table(
+                    if let Err(error) = Box::pin(create_table::handle_create_table(
                         handler_args,
                         name,
                         columns,
@@ -462,11 +463,21 @@ impl TestCase {
                             .map(|x| x.real_value())
                             .collect(),
                         cdc_table_info,
+                        from_source_table_info,
                         include_column_options,
                         webhook_info,
                         engine,
                     ))
-                    .await?;
+                    .await
+                    {
+                        let actual_result = TestCaseResult {
+                            planner_error: Some(error.to_report_string()),
+                            ..Default::default()
+                        };
+
+                        check_result(self, &actual_result)?;
+                        result = Some(actual_result);
+                    }
                 }
                 Statement::CreateSource { stmt } => {
                     if let Err(error) =

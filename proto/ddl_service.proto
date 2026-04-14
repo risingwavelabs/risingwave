@@ -219,6 +219,8 @@ enum TableJobType {
   TABLE_JOB_TYPE_GENERAL = 1;
   // table streaming job sharing a CDC source job
   TABLE_JOB_TYPE_SHARED_CDC_SOURCE = 2;
+  // table streaming job sharing a non-CDC source job (e.g., Kafka shared source)
+  TABLE_JOB_TYPE_SHARED_SOURCE = 3;
 }
 
 message CreateTableRequest {
