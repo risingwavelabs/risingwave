@@ -259,5 +259,9 @@ harness = false
 name = "protobuf_bench"
 harness = false
 
+[[bench]]
+name = "avro_bench"
+harness = false
+
 [lints]
 workspace = true

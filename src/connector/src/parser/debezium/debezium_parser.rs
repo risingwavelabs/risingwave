@@ -19,11 +19,12 @@ use risingwave_common::bail;
 use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::error::ConnectorResult;
+use crate::parser::unified::ChangeEvent;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::json::{
     BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
 };
-use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
+use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer_with_op;
 use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
     ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig,
@@ -150,21 +151,27 @@ impl DebeziumParser {
             None => None,
             Some(data) => Some(self.payload_builder.generate_accessor(data, meta).await?),
         };
-        let row_op = DebeziumChangeEvent::new(key_accessor, payload_accessor);
+        let mut row_op = DebeziumChangeEvent::new(key_accessor, payload_accessor);
 
-        match apply_row_operation_on_stream_chunk_writer(&row_op, &mut writer) {
-            Ok(_) => Ok(ParseResult::Rows),
+        let op = match row_op.op() {
+            Ok(op) => op,
             Err(err) => {
-                // Only try to access transaction control message if the row operation access failed
-                // to make it a fast path.
-                if let Some(transaction_control) =
+                return if let Some(transaction_control) =
                     row_op.transaction_control(&self.source_ctx.connector_props)
                 {
                     Ok(ParseResult::TransactionControl(transaction_control))
                 } else {
-                    Err(err)?
-                }
+                    Err(err.into())
+                };
             }
+        };
+        // `access_field` needs the row operation repeatedly while materializing columns.
+        // Cache it once so we don't re-read the Debezium `"op"` field for every column.
+        row_op.cache_op(op);
+
+        match apply_row_operation_on_stream_chunk_writer_with_op(&row_op, &mut writer, op) {
+            Ok(_) => Ok(ParseResult::Rows),
+            Err(err) => Err(err.into()),
         }
     }
 }

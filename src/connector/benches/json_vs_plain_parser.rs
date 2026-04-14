@@ -21,9 +21,12 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use json_common::*;
 use old_json_parser::JsonParser;
+use rand::Rng;
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::types::DataType;
 use risingwave_connector::parser::plain_parser::PlainParser;
 use risingwave_connector::parser::{SourceStreamChunkBuilder, SpecificParserConfig};
-use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
+use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 
 // The original implementation used to parse JSON prior to #13707.
 mod old_json_parser {
@@ -112,6 +115,32 @@ fn generate_json_rows() -> Vec<Vec<u8>> {
     records
 }
 
+fn generate_single_column_json_rows() -> Vec<Vec<u8>> {
+    let mut rng = rand::rng();
+    let mut records = Vec::with_capacity(NUM_RECORDS);
+    for _ in 0..NUM_RECORDS {
+        records.push(format!(r#"{{"i32":{}}}"#, rng.random::<i32>()).into_bytes());
+    }
+    records
+}
+
+fn generate_single_column_json_array_rows() -> Vec<Vec<u8>> {
+    let mut rng = rand::rng();
+    let mut records = Vec::with_capacity(NUM_RECORDS);
+    for _ in 0..NUM_RECORDS {
+        records.push(format!(r#"[{{"i32":{}}}]"#, rng.random::<i32>()).into_bytes());
+    }
+    records
+}
+
+fn get_single_descs() -> Vec<SourceColumnDesc> {
+    vec![SourceColumnDesc::simple(
+        "i32",
+        DataType::Int32,
+        ColumnId::from(0),
+    )]
+}
+
 fn bench_plain_parser_and_json_parser(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let records = generate_json_rows();
@@ -180,5 +209,203 @@ fn bench_plain_parser_and_json_parser(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_plain_parser_and_json_parser,);
+fn bench_plain_parser_and_json_parser_reuse(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let records = generate_json_rows();
+
+    let mut group = c.benchmark_group("plain parser and json parser comparison (reuse parser)");
+
+    let mut plain_parser = block_on(PlainParser::new(
+        SpecificParserConfig::DEFAULT_PLAIN_JSON,
+        get_descs(),
+        SourceContext::dummy().into(),
+    ))
+    .unwrap();
+    group.bench_function("plain_parser_reuse", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut builder = SourceStreamChunkBuilder::new(
+                    get_descs(),
+                    SourceCtrlOpts {
+                        chunk_size: NUM_RECORDS,
+                        split_txn: false,
+                    },
+                );
+                for record in &records {
+                    let writer = builder.row_writer();
+                    plain_parser
+                        .parse_inner(None, Some(record.clone()), writer)
+                        .await
+                        .unwrap();
+                }
+            })
+        })
+    });
+
+    let json_parser = JsonParser::new(
+        SpecificParserConfig::DEFAULT_PLAIN_JSON,
+        get_descs(),
+        SourceContext::dummy().into(),
+    )
+    .unwrap();
+    group.bench_function("json_parser_reuse", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut builder = SourceStreamChunkBuilder::new(
+                    get_descs(),
+                    SourceCtrlOpts {
+                        chunk_size: NUM_RECORDS,
+                        split_txn: false,
+                    },
+                );
+                for record in &records {
+                    let writer = builder.row_writer();
+                    json_parser
+                        .parse_inner(record.clone(), writer)
+                        .await
+                        .unwrap();
+                }
+            })
+        })
+    });
+
+    group.finish();
+}
+
+fn bench_plain_parser_and_json_parser_reuse_single_column(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let records = generate_single_column_json_rows();
+
+    let mut group =
+        c.benchmark_group("plain parser and json parser comparison (reuse parser, single column)");
+
+    let mut plain_parser = block_on(PlainParser::new(
+        SpecificParserConfig::DEFAULT_PLAIN_JSON,
+        get_single_descs(),
+        SourceContext::dummy().into(),
+    ))
+    .unwrap();
+    group.bench_function("plain_parser_reuse_single_column", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut builder = SourceStreamChunkBuilder::new(
+                    get_single_descs(),
+                    SourceCtrlOpts {
+                        chunk_size: NUM_RECORDS,
+                        split_txn: false,
+                    },
+                );
+                for record in &records {
+                    let writer = builder.row_writer();
+                    plain_parser
+                        .parse_inner(None, Some(record.clone()), writer)
+                        .await
+                        .unwrap();
+                }
+            })
+        })
+    });
+
+    let json_parser = JsonParser::new(
+        SpecificParserConfig::DEFAULT_PLAIN_JSON,
+        get_single_descs(),
+        SourceContext::dummy().into(),
+    )
+    .unwrap();
+    group.bench_function("json_parser_reuse_single_column", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut builder = SourceStreamChunkBuilder::new(
+                    get_single_descs(),
+                    SourceCtrlOpts {
+                        chunk_size: NUM_RECORDS,
+                        split_txn: false,
+                    },
+                );
+                for record in &records {
+                    let writer = builder.row_writer();
+                    json_parser
+                        .parse_inner(record.clone(), writer)
+                        .await
+                        .unwrap();
+                }
+            })
+        })
+    });
+
+    group.finish();
+}
+
+fn bench_plain_parser_and_json_parser_reuse_single_column_array(c: &mut Criterion) {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let records = generate_single_column_json_array_rows();
+
+    let mut group = c.benchmark_group(
+        "plain parser and json parser comparison (reuse parser, single column array)",
+    );
+
+    let mut plain_parser = block_on(PlainParser::new(
+        SpecificParserConfig::DEFAULT_PLAIN_JSON,
+        get_single_descs(),
+        SourceContext::dummy().into(),
+    ))
+    .unwrap();
+    group.bench_function("plain_parser_reuse_single_column_array", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut builder = SourceStreamChunkBuilder::new(
+                    get_single_descs(),
+                    SourceCtrlOpts {
+                        chunk_size: NUM_RECORDS,
+                        split_txn: false,
+                    },
+                );
+                for record in &records {
+                    let writer = builder.row_writer();
+                    plain_parser
+                        .parse_inner(None, Some(record.clone()), writer)
+                        .await
+                        .unwrap();
+                }
+            })
+        })
+    });
+
+    let json_parser = JsonParser::new(
+        SpecificParserConfig::DEFAULT_PLAIN_JSON,
+        get_single_descs(),
+        SourceContext::dummy().into(),
+    )
+    .unwrap();
+    group.bench_function("json_parser_reuse_single_column_array", |b| {
+        b.iter(|| {
+            rt.block_on(async {
+                let mut builder = SourceStreamChunkBuilder::new(
+                    get_single_descs(),
+                    SourceCtrlOpts {
+                        chunk_size: NUM_RECORDS,
+                        split_txn: false,
+                    },
+                );
+                for record in &records {
+                    let writer = builder.row_writer();
+                    json_parser
+                        .parse_inner(record.clone(), writer)
+                        .await
+                        .unwrap();
+                }
+            })
+        })
+    });
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_plain_parser_and_json_parser,
+    bench_plain_parser_and_json_parser_reuse,
+    bench_plain_parser_and_json_parser_reuse_single_column,
+    bench_plain_parser_and_json_parser_reuse_single_column_array,
+);
 criterion_main!(benches);

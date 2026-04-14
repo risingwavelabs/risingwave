@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context as _;
+use itertools::Itertools as _;
 use risingwave_common::bail;
 use thiserror_ext::AsReport;
 
+use super::unified::Access as _;
 use super::unified::json::{
-    BigintUnsignedHandlingMode, TimeHandling, TimestampHandling, TimestamptzHandling,
+    BigintUnsignedHandlingMode, JsonAccess, JsonParseOptions, TimeHandling, TimestampHandling,
+    TimestamptzHandling,
 };
 use super::unified::kv_event::KvEvent;
 use super::{
-    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, SourceStreamChunkRowWriter,
-    SpecificParserConfig,
+    AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, JsonProperties,
+    SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::error::ConnectorResult;
 use crate::parser::bytes_parser::BytesAccessBuilder;
@@ -40,9 +44,70 @@ pub struct PlainParser {
     pub payload_builder: AccessBuilderImpl,
     pub(crate) rw_columns: Vec<SourceColumnDesc>,
     pub source_ctx: SourceContextRef,
+    plain_json_fast_path: Option<PlainJsonFastPath>,
     // parsing transaction metadata for shared cdc source
     pub transaction_meta_builder: Option<AccessBuilderImpl>,
     pub schema_change_builder: Option<AccessBuilderImpl>,
+}
+
+#[derive(Debug, Clone)]
+struct PlainJsonFastPath {
+    payload_start_idx: usize,
+    json_parse_options: JsonParseOptions,
+}
+
+impl PlainJsonFastPath {
+    fn new(config: JsonProperties) -> Self {
+        let mut json_parse_options = JsonParseOptions::DEFAULT;
+        if let Some(mode) = config.timestamptz_handling {
+            json_parse_options.timestamptz_handling = mode;
+        }
+        Self {
+            payload_start_idx: if config.use_schema_registry { 5 } else { 0 },
+            json_parse_options,
+        }
+    }
+
+    fn parse_rows(
+        &self,
+        mut payload: Vec<u8>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
+    ) -> ConnectorResult<()> {
+        let value = simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
+            .context("failed to parse json payload")?;
+
+        if !matches!(value, simd_json::BorrowedValue::Array(_)) {
+            let accessor = JsonAccess::new_with_options(value, &self.json_parse_options);
+            writer
+                .do_insert_trusted(|column| accessor.access(&[&column.name], &column.data_type))?;
+            return Ok(());
+        }
+
+        let mut errors = Vec::new();
+        if let simd_json::BorrowedValue::Array(arr) = value {
+            for value in arr.into_iter() {
+                let accessor = JsonAccess::new_with_options(value, &self.json_parse_options);
+                match writer
+                    .do_insert_trusted(|column| accessor.access(&[&column.name], &column.data_type))
+                {
+                    Ok(_) => {}
+                    Err(err) => errors.push(err),
+                }
+            }
+        } else {
+            unreachable!("non-array payload already returned above");
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            bail!(
+                "failed to parse {} row(s) in a single json message: {}",
+                errors.len(),
+                errors.iter().format(", ")
+            );
+        }
+    }
 }
 
 impl PlainParser {
@@ -59,6 +124,11 @@ impl PlainParser {
             )?))
         } else {
             None
+        };
+
+        let plain_json_fast_path = match &props.encoding_config {
+            EncodingProperties::Json(config) => Some(PlainJsonFastPath::new(config.clone())),
+            _ => None,
         };
 
         let payload_builder = match props.encoding_config {
@@ -90,6 +160,7 @@ impl PlainParser {
             payload_builder,
             rw_columns,
             source_ctx,
+            plain_json_fast_path,
             transaction_meta_builder,
             schema_change_builder,
         })
@@ -202,6 +273,26 @@ impl PlainParser {
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<ParseResult> {
         let meta = writer.source_meta();
+        let can_fast_path_payload_only = key.is_none()
+            && self.key_builder.is_none()
+            && self.rw_columns.iter().all(|column| {
+                column.additional_column.column_type.is_none()
+                    && matches!(column.column_type, crate::source::SourceColumnType::Normal)
+            });
+
+        if can_fast_path_payload_only && let Some(data) = payload {
+            if let Some(fast_path) = &self.plain_json_fast_path {
+                fast_path.parse_rows(data, writer)?;
+                return Ok(ParseResult::Rows);
+            }
+
+            let payload_accessor = self.payload_builder.generate_accessor(data, meta).await?;
+            writer.do_insert_trusted(|column: &SourceColumnDesc| {
+                payload_accessor.access(&[&column.name], &column.data_type)
+            })?;
+            return Ok(ParseResult::Rows);
+        }
+
         let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
 
         if let Some(data) = key
