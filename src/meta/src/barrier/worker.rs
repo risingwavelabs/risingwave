@@ -24,6 +24,7 @@ use arc_swap::ArcSwap;
 use futures::{TryFutureExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::{AdaptiveParallelismStrategy, PAUSE_ON_NEXT_BOOTSTRAP_KEY};
 use risingwave_meta_model::WorkerId;
@@ -633,6 +634,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
                                 entering_running.enter();
                             }
+                            CheckpointControlEvent::BatchRefreshTrigger { database_id, job_id } => {
+                                self.handle_batch_refresh_trigger(database_id, job_id).await?;
+                            }
                         }
                     };
                     if let Err(e) = result {
@@ -819,6 +823,46 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             }
         };
         self.partial_graph_manager.notify_all_err(err);
+    }
+}
+
+impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
+    /// Handle a batch refresh trigger: load metadata + log epochs, then start a logstore
+    /// consumption run for the given batch refresh job.
+    async fn handle_batch_refresh_trigger(
+        &mut self,
+        database_id: DatabaseId,
+        job_id: JobId,
+    ) -> MetaResult<()> {
+        // 1. Get the last committed epoch for this job (read-only).
+        let last_committed_epoch = self
+            .checkpoint_control
+            .get_batch_refresh_trigger_info(database_id, job_id);
+
+        // 2. Load context metadata + resolve log epochs asynchronously.
+        let context = self
+            .context
+            .load_batch_refresh_trigger_context(job_id, database_id, last_committed_epoch)
+            .await?;
+
+        // 3. Start the refresh run.
+        let started = self.checkpoint_control.start_batch_refresh_run(
+            database_id,
+            job_id,
+            &context,
+            self.active_streaming_nodes.current(),
+            self.env.actor_id_generator(),
+            self.adaptive_parallelism_strategy,
+            &mut self.partial_graph_manager,
+        )?;
+
+        // 5. Update shared_actor_infos with the new fragment infos.
+        if started {
+            self.checkpoint_control
+                .apply_batch_refresh_fragment_infos(database_id, job_id);
+        }
+
+        Ok(())
     }
 }
 

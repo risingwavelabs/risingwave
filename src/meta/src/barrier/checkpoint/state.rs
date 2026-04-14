@@ -751,6 +751,7 @@ impl DatabaseCheckpointControl {
                         &logical,
                         worker_nodes,
                         adaptive_parallelism_strategy,
+                        refresh_interval_sec,
                     )?;
 
                     if let Some(fragment_infos) = job.fragment_infos() {
