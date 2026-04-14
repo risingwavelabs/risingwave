@@ -5949,9 +5949,15 @@ impl Parser<'_> {
             let name = self.parse_identifier()?;
 
             self.expect_token(&Token::RArrow)?;
-            let arg = self.parse_wildcard_or_expr()?.into();
+            let arg = if self.parse_keyword(Keyword::SECRET) {
+                FunctionArgExpr::SecretRef(self.parse_secret_ref()?)
+            } else {
+                self.parse_wildcard_or_expr()?.into()
+            };
 
             FunctionArg::Named { name, arg }
+        } else if self.parse_keyword(Keyword::SECRET) {
+            FunctionArg::Unnamed(FunctionArgExpr::SecretRef(self.parse_secret_ref()?))
         } else {
             FunctionArg::Unnamed(self.parse_wildcard_or_expr()?.into())
         };
@@ -6326,6 +6332,50 @@ mod tests {
                 parser.parse_expr().unwrap(),
                 Expr::Value(Value::Number("-9223372036854775808".to_owned()))
             )
+        });
+    }
+
+    #[test]
+    fn test_parse_function_arg_secret_ref() {
+        use crate::ast::{FunctionArg, FunctionArgExpr, SecretRefAsType, SecretRefValue};
+
+        // Unnamed secret argument
+        run_parser_method("SECRET my_secret", |parser| {
+            let (_variadic, arg) = parser.parse_function_args().unwrap();
+            assert_eq!(
+                arg,
+                FunctionArg::Unnamed(FunctionArgExpr::SecretRef(SecretRefValue {
+                    secret_name: ObjectName(vec![Ident::new_unchecked("my_secret")]),
+                    ref_as: SecretRefAsType::Text,
+                }))
+            );
+        });
+
+        // Unnamed secret argument with AS FILE
+        run_parser_method("SECRET my_secret AS FILE", |parser| {
+            let (_variadic, arg) = parser.parse_function_args().unwrap();
+            assert_eq!(
+                arg,
+                FunctionArg::Unnamed(FunctionArgExpr::SecretRef(SecretRefValue {
+                    secret_name: ObjectName(vec![Ident::new_unchecked("my_secret")]),
+                    ref_as: SecretRefAsType::File,
+                }))
+            );
+        });
+
+        // Named secret argument
+        run_parser_method("header => SECRET my_secret", |parser| {
+            let (_variadic, arg) = parser.parse_function_args().unwrap();
+            assert_eq!(
+                arg,
+                FunctionArg::Named {
+                    name: Ident::new_unchecked("header"),
+                    arg: FunctionArgExpr::SecretRef(SecretRefValue {
+                        secret_name: ObjectName(vec![Ident::new_unchecked("my_secret")]),
+                        ref_as: SecretRefAsType::Text,
+                    }),
+                }
+            );
         });
     }
 }

@@ -32,6 +32,7 @@ You may need to learn how to build and test RisingWave when implementing feature
 
 - Use `./risedev b` to build the project.
 - Use `./risedev c` to check if the code follow rust-clippy rules, coding styles, etc.
+- After changing config definitions or defaults under `src/common/src/config`, run `./risedev generate-example-config` to update `src/config/example.toml` and `src/config/docs.md`.
 
 ### Unit Test
 

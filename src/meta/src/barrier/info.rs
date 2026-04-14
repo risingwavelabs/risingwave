@@ -214,7 +214,7 @@ impl SharedActorInfos {
                 .collect_vec();
             if !mapping.is_empty() {
                 self.notification_manager
-                    .notify_fragment_mapping(Operation::Delete, mapping);
+                    .notify_streaming_fragment_mapping(Operation::Delete, mapping);
             }
         }
     }
@@ -234,7 +234,7 @@ impl SharedActorInfos {
         }
         if !mapping.is_empty() {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+                .notify_streaming_fragment_mapping(Operation::Delete, mapping);
         }
     }
 
@@ -348,15 +348,15 @@ impl SharedActorInfoWriter<'_> {
     pub(super) fn finish(self) {
         if let Some(mapping) = self.added_fragment_mapping {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Add, mapping);
+                .notify_streaming_fragment_mapping(Operation::Add, mapping);
         }
         if let Some(mapping) = self.updated_fragment_mapping {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Update, mapping);
+                .notify_streaming_fragment_mapping(Operation::Update, mapping);
         }
         if let Some(mapping) = self.deleted_fragment_mapping {
             self.notification_manager
-                .notify_fragment_mapping(Operation::Delete, mapping);
+                .notify_streaming_fragment_mapping(Operation::Delete, mapping);
         }
     }
 }

@@ -919,6 +919,7 @@ message EventLog {
     double duration_sec = 3;
     string command = 4;
     string barrier_kind = 5;
+    uint32 database_id = 6;
   }
   message EventInjectBarrierFail {
     uint64 prev_epoch = 1;
