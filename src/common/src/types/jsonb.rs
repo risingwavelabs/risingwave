@@ -670,6 +670,7 @@ mod tests {
         // See #25336 for how the backward compatibility is doomed.
         let s = r#""foo""#;
         let j: JsonbVal = s.parse().unwrap();
+        // Hash value persisted in production vnode state.
         let expected = expect_test::expect!["10172337927241793445"];
 
         let mut state = std::hash::DefaultHasher::new();
