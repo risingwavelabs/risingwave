@@ -452,7 +452,7 @@ pub struct IcebergConfig {
     pub write_parquet_max_row_group_rows: Option<usize>,
 
     /// Maximum size of a Parquet row group in bytes
-    /// Default is 128 MiB, matching Iceberg defaults.
+    /// Default is 128 `MiB`, matching Iceberg defaults.
     #[serde(rename = "compaction.write_parquet_max_row_group_bytes", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]

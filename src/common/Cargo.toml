@@ -16,10 +16,6 @@ arrow-54-array = { package = "arrow-array", version = "54" }
 arrow-54-buffer = { package = "arrow-buffer", version = "54" }
 arrow-54-cast = { package = "arrow-cast", version = "54" }
 arrow-54-schema = { package = "arrow-schema", version = "54" }
-arrow-56-array = { package = "arrow-array", version = "56" }
-arrow-56-buffer = { package = "arrow-buffer", version = "56" }
-arrow-56-cast = { package = "arrow-cast", version = "56" }
-arrow-56-schema = { package = "arrow-schema", version = "56" }
 arrow-57-array = { package = "arrow-array", version = "57" }
 arrow-57-buffer = { package = "arrow-buffer", version = "57" }
 arrow-57-cast = { package = "arrow-cast", version = "57" }
