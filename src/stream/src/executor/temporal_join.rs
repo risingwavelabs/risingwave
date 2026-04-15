@@ -883,3 +883,257 @@ impl<
         self.into_stream().boxed()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
+
+    use risingwave_common::array::*;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::hash::Key32;
+    use risingwave_common::types::{DataType, ScalarRefImpl};
+    use risingwave_common::util::epoch::{EpochPair, test_epoch};
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::util::value_encoding::BasicSerde;
+    use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+    use risingwave_storage::hummock::HummockStorage;
+
+    use super::*;
+    use crate::common::table::state_table::{
+        StateTable, StateTableBuilder, StateTableOpConsistencyLevel,
+    };
+    use crate::common::table::test_utils::gen_pbtable;
+    use crate::executor::monitor::StreamingMetrics;
+    use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
+    use crate::executor::{ActorContext, ExecutorInfo, JoinType};
+
+    /// Tests that a temporal join on a pk-prefix (join key is a strict prefix of the right table's
+    /// pk) correctly merges rows committed in epoch1 with rows staged/committed during epoch2, and
+    /// produces the right results when the left side arrives in epoch3.
+    ///
+    /// Right table: (key INT, seq INT, val INT), pk = (key, seq), SINGLETON distribution.
+    /// Join condition: `left.left_key` = right.key  (pk prefix: join uses only the first pk column).
+    ///
+    /// Pre-commit at epoch1: (1,1,100), (1,2,200), (2,1,300)
+    /// Epoch2:  right side sends insert (3,1,400) — written to replicated state table, committed
+    ///          at the epoch2 barrier.
+    /// Epoch3:  left side sends (`left_key=1`, `left_val=111`) and (`left_key=3`, `left_val=333`).
+    ///
+    /// Expected join output in epoch3:
+    ///   (1, 111, 1, 1, 100)  — key=1 row matched from epoch1 data (cache miss → state store read)
+    ///   (1, 111, 1, 2, 200)  — key=1 row matched from epoch1 data (same cache entry)
+    ///   (3, 333, 3, 1, 400)  — key=3 row matched from epoch2 data (cache miss → state store read)
+    #[tokio::test]
+    async fn test_temporal_join_pk_prefix_staging_merge() {
+        let test_env = prepare_hummock_test_env().await;
+        let table_id = TableId::new(1);
+
+        // Right table schema: (key INT col_id=1, seq INT col_id=2, val INT col_id=3)
+        // pk = (key idx=0, seq idx=1), SINGLETON distribution (empty distribution_key),
+        // read_prefix_len_hint = 2 (= full pk length).
+        let right_col_descs = vec![
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32),
+        ];
+        let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+        let pk_indices = vec![0usize, 1];
+        let pbtable = gen_pbtable(table_id, right_col_descs, order_types, pk_indices, 2);
+
+        test_env.register_table(pbtable.clone()).await;
+
+        // Pre-commit epoch1 data via a plain StateTable (bypasses the executor).
+        {
+            let mut setup_table =
+                StateTable::<HummockStorage>::from_table_catalog_inconsistent_op(
+                    &pbtable,
+                    test_env.storage.clone(),
+                    None,
+                )
+                .await;
+            test_env
+                .storage
+                .start_epoch(test_epoch(1), HashSet::from_iter([table_id]));
+            setup_table
+                .init_epoch(EpochPair::new_test_epoch(test_epoch(1)))
+                .await
+                .unwrap();
+            setup_table.insert(OwnedRow::new(vec![
+                Some(1i32.into()),
+                Some(1i32.into()),
+                Some(100i32.into()),
+            ]));
+            setup_table.insert(OwnedRow::new(vec![
+                Some(1i32.into()),
+                Some(2i32.into()),
+                Some(200i32.into()),
+            ]));
+            setup_table.insert(OwnedRow::new(vec![
+                Some(2i32.into()),
+                Some(1i32.into()),
+                Some(300i32.into()),
+            ]));
+            test_env
+                .storage
+                .start_epoch(test_epoch(2), HashSet::from_iter([table_id]));
+            setup_table
+                .commit_for_test(EpochPair::new_test_epoch(test_epoch(2)))
+                .await
+                .unwrap();
+            // Seal and commit epoch1 data in Hummock so it is visible to all readers.
+            test_env.commit_epoch(test_epoch(1)).await;
+        }
+
+        // Build the replicated state table for the executor (all 3 columns are output).
+        let output_column_ids = vec![ColumnId::new(1), ColumnId::new(2), ColumnId::new(3)];
+        let right_table = StateTableBuilder::<_, BasicSerde, true, _>::new(
+            &pbtable,
+            test_env.storage.clone(),
+            None,
+        )
+        .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+        .with_output_column_ids(output_column_ids)
+        .forbid_preload_all_rows()
+        .build()
+        .await;
+
+        // Left source: (left_key INT, left_val INT), stream_key = [0].
+        let left_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let (mut left_tx, left_source) = MockSource::channel();
+        let left_executor = left_source.into_executor(left_schema.clone(), vec![0]);
+
+        // Right source: mirrors the right table columns (key INT, seq INT, val INT),
+        // stream_key = [0, 1] (the pk).
+        let right_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let (mut right_tx, right_source) = MockSource::channel();
+        let right_executor = right_source.into_executor(right_schema.clone(), vec![0, 1]);
+
+        // table_output_indices: indices in right table output rows that form the output.
+        // All 3 columns are selected.
+        let table_output_indices = vec![0usize, 1, 2];
+        // table_stream_key_indices: pk of right table within the output row = [0, 1] (key, seq).
+        let table_stream_key_indices = vec![0usize, 1];
+
+        // Join on left.left_key (col 0) = right.key (col 0 in right source).
+        let left_join_keys = vec![0usize];
+        let right_join_keys = vec![0usize];
+        let null_safe = vec![false];
+        let join_key_data_types = vec![DataType::Int32];
+
+        // Output: all 5 columns — [left_key, left_val, key, seq, val].
+        let output_indices = vec![0usize, 1, 2, 3, 4];
+        let output_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let info =
+            ExecutorInfo::for_test(output_schema, vec![], "TemporalJoinTest".to_owned(), 0);
+
+        let executor = TemporalJoinExecutor::<
+            Key32,
+            HummockStorage,
+            BasicSerde,
+            { JoinType::Inner },
+            true,
+        >::new(
+            ActorContext::for_test(0),
+            info.clone(),
+            left_executor,
+            right_executor,
+            right_table,
+            left_join_keys,
+            right_join_keys,
+            null_safe,
+            None,  // no extra non-equi condition
+            output_indices,
+            table_output_indices,
+            table_stream_key_indices,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+            join_key_data_types,
+            None,  // no memo table (append-only inner join)
+        );
+
+        let mut stream = Box::new(executor).execute();
+
+        // Push the first barrier (init epoch2, prev = epoch1) on both sides.
+        left_tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+        right_tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+        stream.expect_barrier().await;
+
+        // Epoch2: right side inserts (3, 1, 400); left side is quiet.
+        // The epoch2→epoch3 barrier will trigger write_chunk + commit for the right table,
+        // making (3,1,400) visible as committed epoch2 data.
+        right_tx.push_chunk(StreamChunk::from_pretty(
+            " i i   i
+            + 3 1 400",
+        ));
+        // Start epoch3 before the barrier that commits epoch2 data.
+        test_env
+            .storage
+            .start_epoch(test_epoch(3), HashSet::from_iter([table_id]));
+        left_tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
+        right_tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
+        stream.expect_barrier().await;
+
+        // Start epoch4 before the stop barrier that commits epoch3 data.
+        test_env
+            .storage
+            .start_epoch(test_epoch(4), HashSet::from_iter([table_id]));
+
+        // Epoch3: left side sends two rows.
+        //   key=1 → cache miss → state store read → finds (1,1,100) and (1,2,200) from epoch1.
+        //   key=3 → cache miss → state store read → finds (3,1,400) from epoch2.
+        left_tx.push_chunk(StreamChunk::from_pretty(
+            " i   i
+            + 1 111
+            + 3 333",
+        ));
+        left_tx.push_barrier_with_prev_epoch_for_test(test_epoch(4), test_epoch(3), true);
+        right_tx.push_barrier_with_prev_epoch_for_test(test_epoch(4), test_epoch(3), true);
+
+        // Collect all output rows before the stop barrier.
+        let mut output_rows: Vec<[i32; 5]> = vec![];
+        loop {
+            match stream.next().await.unwrap().unwrap() {
+                Message::Chunk(chunk) => {
+                    for (op, row) in chunk.rows() {
+                        assert_eq!(op, Op::Insert);
+                        let row: [i32; 5] = std::array::from_fn(|i| {
+                            match row.datum_at(i).unwrap() {
+                                ScalarRefImpl::Int32(v) => v,
+                                _ => panic!("expected Int32"),
+                            }
+                        });
+                        output_rows.push(row);
+                    }
+                }
+                Message::Barrier(_) => break,
+                _ => {}
+            }
+        }
+
+        output_rows.sort();
+        assert_eq!(
+            output_rows,
+            vec![
+                [1, 111, 1, 1, 100], // key=1 matched epoch1 row (1,1,100)
+                [1, 111, 1, 2, 200], // key=1 matched epoch1 row (1,2,200)
+                [3, 333, 3, 1, 400], // key=3 matched epoch2 row (3,1,400)
+            ]
+        );
+    }
+}
