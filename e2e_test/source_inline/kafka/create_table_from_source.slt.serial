@@ -195,6 +195,44 @@ drop table t_gen_col;
 statement ok
 drop table t_from_source;
 
+# Test: wildcard (*) inherits columns from source
+statement ok
+create table t_wildcard (*) FROM s;
+
+sleep 3s
+
+query IT rowsort
+select v1, v2 from t_wildcard;
+----
+1 a
+2 b
+3 c
+4 d
+6 f
+7 g
+8 h
+9 i
+
+# Test: DML works on wildcard table
+statement ok
+insert into t_wildcard values (10, 'j');
+
+query IT rowsort
+select v1, v2 from t_wildcard;
+----
+1 a
+10 j
+2 b
+3 c
+4 d
+6 f
+7 g
+8 h
+9 i
+
+statement ok
+drop table t_wildcard;
+
 # Test: error when source has generated columns
 statement ok
 drop source s cascade;

@@ -34,7 +34,7 @@ use super::{
     StreamProject, StreamRowIdGen, StreamSource, StreamSourceScan, ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -95,6 +95,8 @@ impl LogicalSource {
         let base = PlanBase::new_logical_with_core(&core);
 
         if core.kind == SourceNodeKind::CreateTableFromSharedSource {
+            // `base` retains the table schema; `source_core` gets source columns;
+            // `output_exprs` bridges them via a StreamProject in `to_stream()`.
             let (source_core, project_exprs) = Self::derive_table_from_shared_source(core)?;
             return Ok(LogicalSource {
                 base,
@@ -211,24 +213,29 @@ impl LogicalSource {
         let source_columns = sc.columns.clone();
         let source_row_id_index = sc.row_id_index;
 
-        // Replace with source columns for physical output.
-        let mut source_core = core;
-        source_core.column_catalog = source_columns.clone();
-        source_core.row_id_index = source_row_id_index;
-
-        // Build source cols → table non-gen cols mapping.
+        // Build source cols → table non-gen cols mapping first, before moving source_columns.
         let project_exprs: Vec<ExprImpl> = table_non_gen_cols
             .iter()
             .map(|table_col| {
                 let src_idx = source_columns
                     .iter()
                     .position(|c| c.name() == table_col.name())
-                    .expect("table non-gen column must exist in source columns");
+                    .ok_or_else(|| {
+                        ErrorCode::BindError(format!(
+                            "column \"{}\" not found in source",
+                            table_col.name()
+                        ))
+                    })?;
                 let expr: ExprImpl =
                     InputRef::new(src_idx, source_columns[src_idx].data_type().clone()).into();
                 expr.cast_assign(table_col.data_type()).map_err(Into::into)
             })
             .collect::<Result<Vec<_>>>()?;
+
+        // Replace with source columns for physical output.
+        let mut source_core = core;
+        source_core.column_catalog = source_columns;
+        source_core.row_id_index = source_row_id_index;
 
         Ok((source_core, project_exprs))
     }

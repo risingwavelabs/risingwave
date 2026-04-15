@@ -156,6 +156,23 @@
         └─StreamUpstreamSinkUnion
   with_config_map:
     streaming_use_shared_source: 'true'
+- before:
+  - create_source
+  sql: |
+    EXPLAIN CREATE TABLE t(*) FROM s;
+  explain_output: |
+    StreamMaterialize { columns: [x, y, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamUnion { all: true }
+        ├─StreamExchange [no_shuffle] { dist: SomeShard }
+        │ └─StreamProject { exprs: [x, y, _row_id] }
+        │   └─StreamSourceScan { columns: [x, y, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
+        ├─StreamExchange { dist: HashShard(_row_id) }
+        │ └─StreamDml { columns: [x, y, _row_id] }
+        │   └─StreamSource
+        └─StreamUpstreamSinkUnion
+  with_config_map:
+    streaming_use_shared_source: 'true'
 - id: create_source_with_gen_col
   sql: |
     CREATE SOURCE s_gen(x int, y int, z int AS x + y)

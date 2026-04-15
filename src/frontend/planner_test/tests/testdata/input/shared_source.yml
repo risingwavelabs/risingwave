@@ -95,6 +95,15 @@
     EXPLAIN CREATE TABLE t(x int, y int, z int AS x + y) FROM s;
   expected_outputs:
     - explain_output
+# CREATE TABLE FROM source: wildcard inherits columns from source
+- with_config_map:
+    streaming_use_shared_source: true
+  before:
+    - create_source
+  sql: |
+    EXPLAIN CREATE TABLE t(*) FROM s;
+  expected_outputs:
+    - explain_output
 # CREATE TABLE FROM source: error when source has generated columns
 - id: create_source_with_gen_col
   sql: |

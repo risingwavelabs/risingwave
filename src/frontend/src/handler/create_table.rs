@@ -640,24 +640,6 @@ fn gen_table_plan_with_source(
     version: TableVersion,
     props: CreateTableProps,
 ) -> Result<(PlanRef, TableCatalog)> {
-    gen_table_plan_with_source_inner(
-        context,
-        schema_name,
-        source_catalog,
-        version,
-        props,
-        SourceNodeKind::CreateTable,
-    )
-}
-
-fn gen_table_plan_with_source_inner(
-    context: OptimizerContextRef,
-    schema_name: Option<String>,
-    source_catalog: SourceCatalog,
-    version: TableVersion,
-    props: CreateTableProps,
-    source_node_kind: SourceNodeKind,
-) -> Result<(PlanRef, TableCatalog)> {
     let table_name = source_catalog.name.clone();
 
     let info = CreateTableInfo {
@@ -667,7 +649,7 @@ fn gen_table_plan_with_source_inner(
         watermark_descs: source_catalog.watermark_descs.clone(),
         source_catalog: Some(source_catalog),
         version,
-        source_node_kind,
+        source_node_kind: SourceNodeKind::CreateTable,
     };
 
     gen_table_plan_inner(context, schema_name, table_name, info, props)
@@ -686,11 +668,10 @@ fn gen_create_table_plan_for_shared_source(
     explain_options: ExplainOptions,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
-    _wildcard_idx: Option<usize>,
+    wildcard_idx: Option<usize>,
     constraints: Vec<TableConstraint>,
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
-    _include_column_options: IncludeOption,
     props: CreateTableProps,
     from_source_info: FromSourceTableInfo,
 ) -> Result<(
@@ -734,15 +715,34 @@ fn gen_create_table_plan_for_shared_source(
         .into());
     }
 
-    // Build table columns from user-specified column_defs (same as table without connector).
-    let mut columns = bind_sql_columns(&column_defs, false)?;
-    for c in &mut columns {
-        col_id_gen.generate(c)?;
-    }
-
-    let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
-    let (mut columns, pk_column_ids, row_id_index) =
-        bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
+    let (mut columns, pk_column_ids, row_id_index) = if wildcard_idx.is_some() {
+        // Wildcard: inherit non-hidden columns from the source catalog.
+        if !column_defs.is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "wildcard(*) and column definitions cannot be used together".to_owned(),
+                "Remove the wildcard or column definitions".to_owned(),
+            )
+            .into());
+        }
+        let mut columns: Vec<ColumnCatalog> = source
+            .columns
+            .iter()
+            .filter(|c| !c.is_hidden())
+            .cloned()
+            .collect();
+        for c in &mut columns {
+            col_id_gen.generate(c)?;
+        }
+        bind_pk_and_row_id_on_relation(columns, vec![], true)?
+    } else {
+        // Explicit column definitions.
+        let mut columns = bind_sql_columns(&column_defs, false)?;
+        for c in &mut columns {
+            col_id_gen.generate(c)?;
+        }
+        let pk_names = bind_sql_pk_names(&column_defs, bind_table_constraints(&constraints)?)?;
+        bind_pk_and_row_id_on_relation(columns, pk_names, true)?
+    };
 
     let watermark_descs = bind_source_watermark(
         session,
@@ -751,13 +751,15 @@ fn gen_create_table_plan_for_shared_source(
         &columns,
     )?;
 
-    bind_sql_column_constraints(
-        session,
-        table_name.real_value(),
-        &mut columns,
-        &column_defs,
-        &pk_column_ids,
-    )?;
+    if !column_defs.is_empty() {
+        bind_sql_column_constraints(
+            session,
+            table_name.real_value(),
+            &mut columns,
+            &column_defs,
+            &pk_column_ids,
+        )?;
+    }
 
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let context: OptimizerContextRef = OptimizerContext::new(handler_args, explain_options).into();
@@ -1305,7 +1307,6 @@ pub(super) async fn handle_create_table_plan(
                 constraints,
                 source_watermarks,
                 col_id_gen,
-                include_column_options,
                 props,
                 from_source_info,
             )?;
@@ -2749,7 +2750,6 @@ pub async fn generate_stream_graph_for_replace_table(
                     constraints,
                     source_watermarks,
                     col_id_gen,
-                    include_column_options,
                     props,
                     from_source_info,
                 )?;
@@ -2804,13 +2804,18 @@ pub async fn generate_stream_graph_for_replace_table(
 
             ((plan, None, table), TableJobType::SharedCdcSource)
         }
-        (Some(_), Some(_), None) | (Some(_), Some(_), Some(_)) => {
+        (Some(_), Some(_), None) => {
             return Err(ErrorCode::NotSupported(
                 "Data format and encoding format doesn't apply to table created from a CDC source"
                     .into(),
                 "Remove the FORMAT and ENCODE specification".into(),
             )
             .into());
+        }
+        (Some(_), Some(_), Some(_)) => {
+            unreachable!(
+                "parser produces either cdc_table_info or from_source_table_info, not both"
+            )
         }
         (Some(_), None, Some(_)) => {
             return Err(ErrorCode::NotSupported(
