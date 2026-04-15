@@ -14,15 +14,7 @@ itertools = { workspace = true }
 parking_lot = { workspace = true }
 risingwave_common = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tracing = { version = "0.1" }
 
 [target.'cfg(not(madsim))'.dependencies]

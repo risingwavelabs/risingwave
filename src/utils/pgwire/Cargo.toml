@@ -32,10 +32,7 @@ serde_json = "1"
 socket2 = "0.6"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { workspace = true, features = [
-    "rt",
-    "macros",
-] }
+tokio = { workspace = true }
 tokio-openssl = "0.6.3"
 tracing = "0.1"
 url = "2"

@@ -12,16 +12,7 @@ anyhow = { version = "1", features = ["backtrace"] }
 clap = { workspace = true }
 path-absolutize = "3.1"
 similar = "2"
-tokio = { workspace = true, features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "process",
-    "io-util",
-] }
+tokio = { workspace = true, features = ["process", "io-util"] }
 tracing = "0.1"
 tracing-subscriber = "0.3.20"
 

@@ -20,15 +20,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_rt = { workspace = true }
 risingwave_storage = { workspace = true, features = ["test"] }
-tokio = { workspace = true, features = [
-    "fs",
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]

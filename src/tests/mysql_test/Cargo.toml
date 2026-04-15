@@ -12,15 +12,7 @@ repository = { workspace = true }
 [dev-dependencies]
 futures = "0.3"
 mysql_async = { workspace = true }
-tokio = { workspace = true, features = [
-    "fs",
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

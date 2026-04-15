@@ -22,15 +22,7 @@ serde = { workspace = true }
 serde_with = "3"
 serde_yaml = "0.9"
 thiserror-ext = { workspace = true }
-tokio = { workspace = true, features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 walkdir = "2"
 
 [target.'cfg(not(madsim))'.dependencies]

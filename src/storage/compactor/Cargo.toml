@@ -21,15 +21,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 serde = { workspace = true }
-tokio = { workspace = true, features = [
-  "fs",
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tonic = { workspace = true }
 tracing = "0.1"
 

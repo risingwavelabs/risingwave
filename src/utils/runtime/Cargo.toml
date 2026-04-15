@@ -27,15 +27,7 @@ rustls = "0.23.5"
 rw-tokio = { version = "=1.48.0", package = "tokio" }
 thiserror-ext = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
-tokio = { workspace = true, features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tracing = "0.1"
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { version = "0.3", features = [

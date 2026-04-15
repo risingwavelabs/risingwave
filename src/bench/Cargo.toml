@@ -27,15 +27,7 @@ risingwave_stream = { workspace = true, features = ["test"] }
 serde = { workspace = true }
 serde_yaml = "0.9"
 thiserror-ext = { workspace = true }
-tokio = { workspace = true, features = [
-    "fs",
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true, features = ["fs"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
