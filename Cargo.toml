@@ -170,7 +170,7 @@ iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "9
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "96a69c09dbc410358ed44a9e789c4ffa0b2d2871" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "96a69c09dbc410358ed44a9e789c4ffa0b2d2871" }
 
-adbc_core = { version = "0.22" }
+adbc_core = { version = "0.23" }
 adbc_snowflake = { version = "0.22", default-features = false }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"

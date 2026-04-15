@@ -13,12 +13,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "adbc_core"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46b169525a7c41670fe95874103c7c6ce713ac699123f81a200bc31f9ad3b02e"
+dependencies = [
+ "arrow-array 57.3.0",
+ "arrow-schema 57.3.0",
+]
+
+[[package]]
 name = "adbc_driver_manager"
 version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5beaa87308b040adcf482fb760f64ced1cbcd9469fe86ddd5be221dabbbc544e"
 dependencies = [
- "adbc_core",
+ "adbc_core 0.22.0",
  "adbc_ffi",
  "arrow-array 57.3.0",
  "arrow-schema 57.3.0",
@@ -34,7 +44,7 @@ version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3600ae9aec2907516d088189e3b863029280f1953dd0eab903c7f4c862a0ce81"
 dependencies = [
- "adbc_core",
+ "adbc_core 0.22.0",
  "arrow-array 57.3.0",
  "arrow-schema 57.3.0",
 ]
@@ -45,7 +55,7 @@ version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64f06c5e828893c43998ba630b574c109d53ec4b98c6686e97fffeea4545d7ee"
 dependencies = [
- "adbc_core",
+ "adbc_core 0.22.0",
  "adbc_driver_manager",
  "adbc_ffi",
  "arrow-array 57.3.0",
@@ -11938,7 +11948,7 @@ dependencies = [
 name = "risingwave_connector"
 version = "2.9.0-alpha"
 dependencies = [
- "adbc_core",
+ "adbc_core 0.23.0",
  "adbc_snowflake",
  "anyhow",
  "apache-avro 0.21.0 (git+https://github.com/risingwavelabs/avro-rs?rev=1f2723802d4fb77b97fa084f7bb81e3b60b9e03f)",
