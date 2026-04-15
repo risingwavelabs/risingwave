@@ -13,13 +13,10 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::DerefMut;
 
 use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_pb::stream_plan::PbSinkSchemaChange;
 
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::{
@@ -98,70 +95,5 @@ impl LogSinker for BoxLogSinker {
         mut log_reader: impl SinkLogReader,
     ) -> crate::sink::Result<!> {
         (self)(&mut log_reader).await
-    }
-}
-
-#[async_trait]
-impl SinglePhaseCommitCoordinator for BoxSinglePhaseCoordinator {
-    async fn init(&mut self) -> crate::sink::Result<()> {
-        self.deref_mut().init().await
-    }
-
-    async fn commit_data(
-        &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-    ) -> crate::sink::Result<()> {
-        self.deref_mut().commit_data(epoch, metadata).await
-    }
-
-    async fn commit_schema_change(
-        &mut self,
-        epoch: u64,
-        schema_change: PbSinkSchemaChange,
-    ) -> crate::sink::Result<()> {
-        self.deref_mut()
-            .commit_schema_change(epoch, schema_change)
-            .await
-    }
-}
-
-#[async_trait]
-impl TwoPhaseCommitCoordinator for BoxTwoPhaseCoordinator {
-    async fn init(&mut self) -> crate::sink::Result<()> {
-        self.deref_mut().init().await
-    }
-
-    async fn pre_commit(
-        &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        schema_change: Option<PbSinkSchemaChange>,
-    ) -> crate::sink::Result<Option<Vec<u8>>> {
-        self.deref_mut()
-            .pre_commit(epoch, metadata, schema_change)
-            .await
-    }
-
-    async fn commit_data(
-        &mut self,
-        epoch: u64,
-        commit_metadata: Vec<u8>,
-    ) -> crate::sink::Result<()> {
-        self.deref_mut().commit_data(epoch, commit_metadata).await
-    }
-
-    async fn commit_schema_change(
-        &mut self,
-        epoch: u64,
-        schema_change: PbSinkSchemaChange,
-    ) -> crate::sink::Result<()> {
-        self.deref_mut()
-            .commit_schema_change(epoch, schema_change)
-            .await
-    }
-
-    async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>) {
-        self.deref_mut().abort(epoch, commit_metadata).await;
     }
 }
