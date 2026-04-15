@@ -666,7 +666,7 @@ mod tests {
     fn test_hash_backward_compatible() {
         use std::hash::Hasher as _;
 
-        // Hash of sample input `"foo"` required to be the the magic number below.
+        // Hash of sample input `"foo"` required to be the magic number below.
         // See #25336 for how the backward compatibility is doomed.
         let s = r#""foo""#;
         let j: JsonbVal = s.parse().unwrap();
