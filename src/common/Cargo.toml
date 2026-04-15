@@ -24,6 +24,10 @@ arrow-57-array = { package = "arrow-array", version = "57" }
 arrow-57-buffer = { package = "arrow-buffer", version = "57" }
 arrow-57-cast = { package = "arrow-cast", version = "57" }
 arrow-57-schema = { package = "arrow-schema", version = "57" }
+arrow-58-array = { package = "arrow-array", version = "58" }
+arrow-58-buffer = { package = "arrow-buffer", version = "58" }
+arrow-58-cast = { package = "arrow-cast", version = "58" }
+arrow-58-schema = { package = "arrow-schema", version = "58" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"

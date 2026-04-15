@@ -29,11 +29,10 @@ use iceberg_compaction_core::config::{
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
-use parquet_57::file::properties::WriterProperties;
+use parquet_58::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
-    iceberg_compaction_enable_dynamic_size_estimation,
     iceberg_compaction_enable_heuristic_output_parallelism,
-    iceberg_compaction_max_concurrent_closes, iceberg_compaction_size_estimation_smoothing_factor,
+    iceberg_compaction_max_concurrent_closes,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::sink::iceberg::{
@@ -71,10 +70,6 @@ pub struct IcebergCompactorRunnerConfig {
     pub enable_heuristic_output_parallelism: bool,
     #[builder(default = "iceberg_compaction_max_concurrent_closes()")]
     pub max_concurrent_closes: usize,
-    #[builder(default = "iceberg_compaction_enable_dynamic_size_estimation()")]
-    pub enable_dynamic_size_estimation: bool,
-    #[builder(default = "iceberg_compaction_size_estimation_smoothing_factor()")]
-    pub size_estimation_smoothing_factor: f64,
     #[builder]
     pub target_binpack_group_size_mb: Option<u64>,
     #[builder]
@@ -241,7 +236,7 @@ impl IcebergCompactionPlanRunner {
         // Build writer properties from sink configuration
         let write_parquet_properties = WriterProperties::builder()
             .set_compression(iceberg_config.get_parquet_compression())
-            .set_max_row_group_size(iceberg_config.write_parquet_max_row_group_rows())
+            .set_max_row_group_bytes(iceberg_config.write_parquet_max_row_group_bytes())
             .set_created_by(concat!("risingwave version ", env!("CARGO_PKG_VERSION")).to_owned())
             .build();
 
@@ -251,8 +246,6 @@ impl IcebergCompactionPlanRunner {
             .write_parquet_properties(write_parquet_properties)
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
-            .enable_dynamic_size_estimation(config.enable_dynamic_size_estimation)
-            .size_estimation_smoothing_factor(config.size_estimation_smoothing_factor)
             .build()
             .unwrap_or_else(|e| {
                 panic!(
@@ -469,7 +462,8 @@ pub async fn create_plan_runners(
         TaskType::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -483,27 +477,29 @@ pub async fn create_plan_runners(
 
             let config = builder
                 .build()
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                .map_err(|e| HummockError::compaction_executor(format!("{e}")))?;
 
             CompactionPlanningConfig::SmallFiles(config)
         }
         TaskType::Full => {
             let config = FullCompactionConfigBuilder::default()
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
                 .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
                 .grouping_strategy(grouping_strategy)
                 .build()
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                .map_err(|e| HummockError::compaction_executor(format!("{e}")))?;
 
             CompactionPlanningConfig::Full(config)
         }
 
         TaskType::FilesWithDelete => {
             let config = FilesWithDeletesConfigBuilder::default()
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -511,7 +507,7 @@ pub async fn create_plan_runners(
                 .grouping_strategy(grouping_strategy)
                 .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold())
                 .build()
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                .map_err(|e| HummockError::compaction_executor(format!("{e}")))?;
 
             CompactionPlanningConfig::FilesWithDeletes(config)
         }

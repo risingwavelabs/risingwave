@@ -115,7 +115,7 @@ opendal = { workspace = true, features = [
 opensearch = { version = "2.3.0", features = ["rustls-tls"] }
 openssl = "0.10.72"
 parking_lot = { workspace = true }
-parquet = { version = "57", features = ["async"] }
+parquet = { version = "58", features = ["async"] }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
 phf = { version = "0.13", features = ["macros"] }
