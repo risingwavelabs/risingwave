@@ -487,7 +487,7 @@ impl HummockManager {
 }
 
 impl HummockManager {
-    async fn maybe_normalize_compaction_groups(&self, schedule_type: &'static str) {
+    async fn maybe_normalize_compaction_groups_before_merge(&self) {
         if !self.env.opts.enable_compaction_group_normalize {
             return;
         }
@@ -505,17 +505,15 @@ impl HummockManager {
             Ok(split_count) => {
                 if split_count > 0 {
                     tracing::info!(
-                        "normalize compaction groups finished with {} split(s) before {} scheduling",
-                        split_count,
-                        schedule_type
+                        "normalize compaction groups finished with {} split(s) before merge scheduling",
+                        split_count
                     );
                 }
             }
             Err(e) => {
                 tracing::warn!(
                     error = %e.as_report(),
-                    "failed to normalize compaction groups before {} scheduling",
-                    schedule_type
+                    "failed to normalize compaction groups before merge scheduling"
                 );
             }
         }
@@ -608,7 +606,6 @@ impl HummockManager {
     /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
     async fn on_handle_schedule_group_split(&self) {
         let table_write_throughput = self.table_write_throughput_statistic_manager.read().clone();
-        self.maybe_normalize_compaction_groups("split").await;
 
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| Reverse(group.group_size));
@@ -650,7 +647,7 @@ impl HummockManager {
     /// 2. The compaction group is a small group.
     /// 3. All tables in compaction group is in a low throughput state.
     async fn on_handle_schedule_group_merge(&self) {
-        self.maybe_normalize_compaction_groups("merge").await;
+        self.maybe_normalize_compaction_groups_before_merge().await;
 
         let created_tables = match self.metadata_manager.get_created_table_ids().await {
             Ok(created_tables) => HashSet::from_iter(created_tables),
