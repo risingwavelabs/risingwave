@@ -25,7 +25,7 @@ dependencies = [
  "libloading 0.8.9",
  "toml 0.9.12+spec-1.1.0",
  "windows-registry 0.6.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2158,7 +2158,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -4756,7 +4756,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6800,7 +6800,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -7341,7 +7341,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8013,8 +8013,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18351aac4194337d6ea9ffbd25b3d1540ecc0754142af1bff5ba7392d1f6f771"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
 dependencies = [
  "ahash 0.8.11",
  "async-channel 2.5.0",
@@ -8045,8 +8044,7 @@ dependencies = [
 [[package]]
 name = "madsim-aws-sdk-s3"
 version = "0.5.0+1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b442215f0047e7e7df7b98991129c43ee5fb186ce899e8f7e27515bc99de508"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http 0.60.12",
@@ -8063,8 +8061,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
 dependencies = [
  "darling 0.14.4",
  "proc-macro2",
@@ -8075,8 +8072,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.4.4+0.34.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2490d64ab39a227e00ea40aa9eec250061f282a3c95e5a8528b3f19881d9f12e"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
 dependencies = [
  "async-channel 1.9.0",
  "async-trait",
@@ -8099,8 +8095,7 @@ dependencies = [
 [[package]]
 name = "madsim-tokio"
 version = "0.2.30"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d3eb2acc57c82d21d699119b859e2df70a91dbdb84734885a1e72be83bdecb5"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
 dependencies = [
  "madsim",
  "spin 0.9.8",
@@ -8110,8 +8105,7 @@ dependencies = [
 [[package]]
 name = "madsim-tonic"
 version = "0.6.0+0.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ac0690bd19e3eb32f4974b4a1d7b7e3a93395a853aab2cfe0eee74bd5ada2f3"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
 dependencies = [
  "async-stream",
  "chrono",
@@ -8126,8 +8120,7 @@ dependencies = [
 [[package]]
 name = "madsim-tonic-build"
 version = "0.6.0+0.14"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2df12aca583def22dfeb88ec9d9c8f82045db3575c4973153f89bf2688f9367"
+source = "git+https://github.com/risingwavelabs/madsim.git?rev=595455fd05058b3b48bf281bea3ada1bca3d6646#595455fd05058b3b48bf281bea3ada1bca3d6646"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -8870,7 +8863,7 @@ version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77e878c846a8abae00dd069496dbe8751b16ac1c3d6bd2a7283a938e8228f90d"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -8891,7 +8884,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.21.7",
  "chrono",
  "getrandom 0.2.11",
  "http 1.4.0",
@@ -10399,8 +10392,8 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.14.0",
+ "heck 0.4.1",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "once_cell",
@@ -10418,8 +10411,8 @@ name = "prost-build"
 version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.14.0",
+ "heck 0.4.1",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "petgraph 0.8.3",
@@ -10440,7 +10433,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -10452,7 +10445,7 @@ version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -13486,7 +13479,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -15345,7 +15338,7 @@ dependencies = [
  "getrandom 0.3.1",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
