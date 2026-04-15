@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use futures::{StreamExt, pin_mut};
+use futures::{StreamExt, TryStreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
@@ -79,22 +79,28 @@ async fn phase1_handle_chunk<S: StateStore, SD: ValueRowSerde, E: phase1::Phase1
 
     for (op, left_row) in chunk.rows() {
         let mut matched = false;
-        for vnode in right_table.source.vnodes().iter_vnodes() {
-            let iter = right_table
-                .source
-                .iter_with_vnode_and_output_indices(
-                    vnode,
-                    &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                    PrefetchOptions::prefetch_for_large_range_scan(),
-                )
-                .await?;
-            #[for_await]
-            for right_row in iter {
-                let right_row = right_row?;
-                matched = true;
-                if let Some(chunk) = E::append_matched_row(op, &mut builder, left_row, right_row) {
-                    yield chunk;
-                }
+        // Create a per-vnode stream for each vnode and flatten them concurrently.
+        let source = &right_table.source;
+        let right_rows = stream::iter(source.vnodes().iter_vnodes())
+            .then(|vnode| async move {
+                Ok::<_, StreamExecutorError>(Box::pin(
+                    source
+                        .iter_with_vnode_and_output_indices(
+                            vnode,
+                            &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                            PrefetchOptions::prefetch_for_large_range_scan(),
+                        )
+                        .await?,
+                ))
+            })
+            .try_flatten_unordered(None);
+        pin_mut!(right_rows);
+        #[for_await]
+        for right_row in right_rows {
+            let right_row = right_row?;
+            matched = true;
+            if let Some(chunk) = E::append_matched_row(op, &mut builder, left_row, right_row) {
+                yield chunk;
             }
         }
         if let Some(chunk) = E::match_end(&mut builder, op, left_row, right_size, matched) {
