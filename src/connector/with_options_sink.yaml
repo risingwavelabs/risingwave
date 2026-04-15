@@ -749,8 +749,8 @@ IcebergConfig:
   - name: compaction.write_parquet_max_row_group_rows
     field_type: usize
     comments: |-
-      Deprecated: maximum number of rows in a Parquet row group
-      Accepted for backward compatibility, but ignored; use `compaction.write_parquet_max_row_group_bytes`
+      Deprecated: maximum number of rows in a Parquet row group.
+      Accepted for backward compatibility, but ignored by the writer.
     required: false
     default: Default::default
     allow_alter_on_fly: true
@@ -758,7 +758,7 @@ IcebergConfig:
     field_type: usize
     comments: |-
       Maximum size of a Parquet row group in bytes
-      Default is 128 MiB, matching Iceberg defaults
+      Default is 128 `MiB`, matching Iceberg defaults.
     required: false
     default: Default::default
     allow_alter_on_fly: true

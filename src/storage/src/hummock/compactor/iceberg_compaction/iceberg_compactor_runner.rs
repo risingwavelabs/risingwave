@@ -477,7 +477,7 @@ pub async fn create_plan_runners(
 
             let config = builder
                 .build()
-                .map_err(|e| HummockError::compaction_executor(format!("{e}")))?;
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
             CompactionPlanningConfig::SmallFiles(config)
         }
@@ -491,7 +491,7 @@ pub async fn create_plan_runners(
                 .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
                 .grouping_strategy(grouping_strategy)
                 .build()
-                .map_err(|e| HummockError::compaction_executor(format!("{e}")))?;
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
             CompactionPlanningConfig::Full(config)
         }
@@ -507,7 +507,7 @@ pub async fn create_plan_runners(
                 .grouping_strategy(grouping_strategy)
                 .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold())
                 .build()
-                .map_err(|e| HummockError::compaction_executor(format!("{e}")))?;
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
             CompactionPlanningConfig::FilesWithDeletes(config)
         }
