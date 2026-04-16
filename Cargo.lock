@@ -6848,7 +6848,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=96a69c09dbc410358ed44a9e789c4ffa0b2d2871#96a69c09dbc410358ed44a9e789c4ffa0b2d2871"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=acb81a279950795fb6c04148698e6769fccf1b0b#acb81a279950795fb6c04148698e6769fccf1b0b"
 dependencies = [
  "anyhow",
  "apache-avro 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6906,7 +6906,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=96a69c09dbc410358ed44a9e789c4ffa0b2d2871#96a69c09dbc410358ed44a9e789c4ffa0b2d2871"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=acb81a279950795fb6c04148698e6769fccf1b0b#acb81a279950795fb6c04148698e6769fccf1b0b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6921,7 +6921,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=96a69c09dbc410358ed44a9e789c4ffa0b2d2871#96a69c09dbc410358ed44a9e789c4ffa0b2d2871"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=acb81a279950795fb6c04148698e6769fccf1b0b#acb81a279950795fb6c04148698e6769fccf1b0b"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6943,7 +6943,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=bdd3ee39b51f5085861ee6778c80da46837cc115#bdd3ee39b51f5085861ee6778c80da46837cc115"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=28db1029879be162b38485854fe888a642e0d0c2#28db1029879be162b38485854fe888a642e0d0c2"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6973,7 +6973,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=96a69c09dbc410358ed44a9e789c4ffa0b2d2871#96a69c09dbc410358ed44a9e789c4ffa0b2d2871"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=acb81a279950795fb6c04148698e6769fccf1b0b#acb81a279950795fb6c04148698e6769fccf1b0b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9511,6 +9511,9 @@ dependencies = [
  "num-integer",
  "num-traits",
  "object_store",
+ "parquet-variant",
+ "parquet-variant-compute",
+ "parquet-variant-json",
  "paste",
  "seq-macro",
  "simdutf8",
@@ -9519,6 +9522,50 @@ dependencies = [
  "tokio",
  "twox-hash",
  "zstd",
+]
+
+[[package]]
+name = "parquet-variant"
+version = "57.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6c31f8f9bfefb9dbf67b0807e00fd918676954a7477c889be971ac904103184"
+dependencies = [
+ "arrow-schema 57.3.0",
+ "chrono",
+ "half 2.7.1",
+ "indexmap 2.13.0",
+ "simdutf8",
+ "uuid",
+]
+
+[[package]]
+name = "parquet-variant-compute"
+version = "57.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "196cd9f7178fed3ac8d5e6d2b51193818e896bbc3640aea3fde3440114a8f39c"
+dependencies = [
+ "arrow 57.3.0",
+ "arrow-schema 57.3.0",
+ "chrono",
+ "half 2.7.1",
+ "indexmap 2.13.0",
+ "parquet-variant",
+ "parquet-variant-json",
+ "uuid",
+]
+
+[[package]]
+name = "parquet-variant-json"
+version = "57.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed23d7acc90ef60f7fdbcc473fa2fdaefa33542ed15b84388959346d52c839be"
+dependencies = [
+ "arrow-schema 57.3.0",
+ "base64 0.22.1",
+ "chrono",
+ "parquet-variant",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -11626,6 +11673,8 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "parking_lot 0.12.5",
+ "parquet-variant-compute",
+ "parquet-variant-json",
  "parse-display",
  "paste",
  "pin-project-lite",
