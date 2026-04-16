@@ -710,6 +710,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
     fn reset_watermark(&mut self) {
         self.pk_prefix_skip_watermark_state.reset_watermark();
         self.non_pk_prefix_skip_watermark_state.reset_watermark();
+        self.value_skip_watermark_state.reset_watermark();
     }
 
     #[inline(always)]
