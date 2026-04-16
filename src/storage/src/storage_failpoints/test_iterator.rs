@@ -416,6 +416,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
         Arc::new(TaskProgress::default()),
         sstable_store,
         100,
+        vec![table_id as u32].into_iter().collect(),
     );
     let mut cnt = 0;
     sstable_iter.seek(None).await.unwrap();
