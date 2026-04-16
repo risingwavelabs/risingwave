@@ -1,15 +1,15 @@
-DROP TABLE IF EXISTS supplier;
+DROP TABLE supplier;
 
-DROP TABLE IF EXISTS part;
+DROP TABLE part;
 
-DROP TABLE IF EXISTS partsupp;
+DROP TABLE partsupp;
 
-DROP TABLE IF EXISTS customer;
+DROP TABLE customer;
 
-DROP TABLE IF EXISTS orders;
+DROP TABLE orders;
 
-DROP TABLE IF EXISTS lineitem;
+DROP TABLE lineitem;
 
-DROP TABLE IF EXISTS nation;
+DROP TABLE nation;
 
-DROP TABLE IF EXISTS region;
+DROP TABLE region;

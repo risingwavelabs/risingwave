@@ -1,5 +1,5 @@
-DROP TABLE IF EXISTS bid;
+DROP TABLE bid;
 
-DROP TABLE IF EXISTS auction;
+DROP TABLE auction;
 
-DROP TABLE IF EXISTS person;
+DROP TABLE person;

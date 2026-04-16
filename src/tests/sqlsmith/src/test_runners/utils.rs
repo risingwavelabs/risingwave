@@ -292,7 +292,7 @@ pub(super) async fn drop_tables(testdata: &str, client: &Client) {
         for name in &names {
             tracing::info!("Dropping materialized view: {}", name);
             client
-                .simple_query(&format!("DROP MATERIALIZED VIEW IF EXISTS {name}"))
+                .simple_query(&format!("DROP MATERIALIZED VIEW {name}"))
                 .await
                 .unwrap();
         }

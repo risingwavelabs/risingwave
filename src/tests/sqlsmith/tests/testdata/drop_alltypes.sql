@@ -1,5 +1,5 @@
-DROP TABLE IF EXISTS alltypes1;
+DROP TABLE alltypes1;
 
-DROP TABLE IF EXISTS alltypes2;
+DROP TABLE alltypes2;
 
-DROP TABLE IF EXISTS alltypes3;
+DROP TABLE alltypes3;
