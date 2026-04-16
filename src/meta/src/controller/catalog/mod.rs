@@ -220,10 +220,7 @@ impl CatalogController {
             .notification_manager()
             .notify_frontend(
                 NotificationOperation::Update,
-                NotificationInfo::ObjectGroup(PbObjectGroup {
-                    objects: vec![],
-                    dependencies: vec![],
-                }),
+                NotificationInfo::ObjectGroup(PbObjectGroup { objects: vec![] }),
             )
             .await
     }
