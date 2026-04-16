@@ -100,15 +100,7 @@ static_assertions = "1"
 tempfile = "3"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
 toml = { workspace = true }

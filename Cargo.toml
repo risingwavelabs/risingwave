@@ -179,8 +179,7 @@ jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
 lru = "0.16"
-# madsim = "0.2.34"
-madsim = { git = "https://github.com/tabVersion/madsim.git", rev = "498afcee77a0856b86af66cad61598ac968afcf1" }
+madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = [
     "native-tls-tls",
@@ -204,7 +203,7 @@ prost-derive = { version = "=0.14.3" }
 prost-reflect = { version = "0.16.3", features = ["serde"] }
 prost-types = { version = "=0.14.3" }
 rand = { version = "0.9", features = ["small_rng"] }
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/tabVersion/madsim.git", rev = "498afcee77a0856b86af66cad61598ac968afcf1", features = [
+rdkafka = { package = "madsim-rdkafka", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646", features = [
     "cmake-build",
 ] }
 redis = { version = "1.0" }
@@ -288,14 +287,22 @@ tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git"
     "profiling",
     "stats",
 ], rev = "64a2d988d687a94cd859855e19241cd8b0705466" }
+tokio = { package = "madsim-tokio", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0dd1055", features = [
     "net",
     "fs",
 ] }
 tokio-util = "0.7"
 toml = "1.0"
-tonic = { package = "madsim-tonic", version = "0.6.0", features = ["zstd"] }
-tonic-build = { package = "madsim-tonic-build", version = "0.6.0" }
+tonic = { package = "madsim-tonic", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646", features = ["zstd"] }
+tonic-build = { package = "madsim-tonic-build", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
 tracing-opentelemetry = "=0.32.0"
 
 [workspace.lints.rust]
@@ -416,8 +423,15 @@ opt-level = 2
 
 [patch.crates-io]
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
+# Keep transitive madsim-family resolution aligned to the same upstream rev.
+madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
+madsim-aws-sdk-s3 = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
+madsim-macros = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
+madsim-rdkafka = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
+madsim-tokio = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
+madsim-tonic = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
+madsim-tonic-build = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
 # Patch third-party crates for deterministic simulation.
-madsim = { git = "https://github.com/tabVersion/madsim.git", rev = "498afcee77a0856b86af66cad61598ac968afcf1" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "e79a7ae" }
 # Don't patch `tokio-stream`, but only use the madsim version for **direct** dependencies.
 # Imagine an unpatched dependency depends on the original `tokio` and the patched `tokio-stream`.
@@ -429,6 +443,8 @@ tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev =
 sqlx = { git = "https://github.com/madsim-rs/sqlx.git", rev = "3efe6d0065963db2a2b7f30dee69f647e28dec81" }
 # patch to remove preserve_order from serde_json
 bson = { git = "https://github.com/risingwavelabs/bson-rust", tag = "v2.15.0-json-no-preserve_order" }
+# patch to revert `Hash for StringRef` for compatibility with `&str` in vnode
+jsonbb = { git = "https://github.com/risingwavelabs/jsonbb.git", rev = "f618cd8c9bc517f35dec192d4e7553650894a011" }
 
 # patch to make zstd version compatible:
 # desired v4.9.0+2.10.0 requires: zstd-sys >= 2.0.15
