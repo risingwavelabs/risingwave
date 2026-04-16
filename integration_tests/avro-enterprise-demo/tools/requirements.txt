@@ -1,0 +1,4 @@
+confluent-kafka[avro,schemaregistry]==2.11.1
+psycopg2-binary==2.9.10
+boto3==1.39.11
+requests==2.32.4

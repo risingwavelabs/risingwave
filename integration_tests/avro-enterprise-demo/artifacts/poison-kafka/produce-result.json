@@ -1,0 +1,16 @@
+{
+  "deliveries": [
+    {
+      "label": "poison",
+      "partition": 0,
+      "offset": 8,
+      "key": "c-poison"
+    },
+    {
+      "label": "followup_valid",
+      "partition": 0,
+      "offset": 9,
+      "key": "c-1999"
+    }
+  ]
+}
