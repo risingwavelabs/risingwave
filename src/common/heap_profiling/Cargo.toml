@@ -21,7 +21,7 @@ risingwave_rpc_client = { workspace = true }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio" }
+tokio = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 

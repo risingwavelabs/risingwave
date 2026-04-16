@@ -327,6 +327,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     params.config.developer.chunk_size,
                     metrics,
                     log_store_identity,
+                    params.env.kv_log_store_historical_read_semaphore(),
                     pk_info,
                 );
 

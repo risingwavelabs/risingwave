@@ -10,6 +10,11 @@ repository = { workspace = true }
 [features]
 default = []
 datafusion = ["dep:datafusion", "dep:datafusion-common"]
+datafusion-backtrace = [
+    "datafusion",
+    "datafusion/backtrace",
+    "datafusion-common/backtrace",
+]
 all-sources = ["source-adbc_snowflake"]
 source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 
@@ -27,12 +32,9 @@ bytes = "1"
 chrono = { workspace = true }
 clap = { workspace = true }
 datafusion = { version = "52", optional = true, features = [
-    "backtrace",
     "nested_expressions",
 ] }
-datafusion-common = { version = "52", optional = true, features = [
-    "backtrace",
-] }
+datafusion-common = { version = "52", optional = true }
 downcast-rs = "2.0"
 dyn-clone = "1.0.14"
 easy-ext = "1"
@@ -98,15 +100,7 @@ static_assertions = "1"
 tempfile = "3"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
 toml = { workspace = true }

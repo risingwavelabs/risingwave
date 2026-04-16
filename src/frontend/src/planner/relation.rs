@@ -212,19 +212,20 @@ impl Planner {
                     &field.name
                 };
                 if let Some((i, source_column)) = column_map.get(source_filed_name) {
-                    let mut input_ref =
-                        ExprImpl::InputRef(InputRef::new(*i, field.data_type.clone()).into());
-                    if matches!(plan_target, PlanTarget::Source)
-                        && source_column.column_desc.data_type != field.data_type
-                    {
+                    let input_type = &source_column.column_desc.data_type;
+                    if matches!(plan_target, PlanTarget::Source) && input_type != &field.data_type {
+                        let mut input_ref =
+                            ExprImpl::InputRef(InputRef::new(*i, input_type.clone()).into());
                         FunctionCall::cast_mut(
                             &mut input_ref,
-                            &field.data_type(),
+                            &field.data_type,
                             CastContext::Explicit,
                         )
                         .unwrap();
+                        input_ref
+                    } else {
+                        ExprImpl::InputRef(InputRef::new(*i, field.data_type.clone()).into())
                     }
-                    input_ref
                 } else {
                     // fields like `_rw_timestamp`, would not be found in source.
                     ExprImpl::Literal(Literal::new(None, field.data_type.clone()).into())

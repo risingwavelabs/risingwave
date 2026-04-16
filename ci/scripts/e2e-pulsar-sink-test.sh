@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Exits as soon as any line fails.
+set -euo pipefail
+
 source ci/scripts/common.sh
 
 while getopts 'p:' opt; do
@@ -18,15 +21,12 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
-
-echo "--- starting risingwave cluster"
-risedev ci-start ci-sink-test
-sleep 1
+sink_test_env_setup "$profile"
 
 echo "--- waiting until pulsar is healthy"
 HTTP_CODE=404
 MAX_RETRY=20
+set +e
 while [[ $HTTP_CODE -ne 200 && MAX_RETRY -gt 0 ]]
 do
     HTTP_CODE=$(curl --connect-timeout 2 -s -o /dev/null -w ''%{http_code}'' http://pulsar-server:8080/admin/v2/clusters)
@@ -34,9 +34,7 @@ do
     ((MAX_RETRY--))
     sleep 5
 done
-
-# Exits as soon as any line fails.
-set -euo pipefail
+set -e
 
 echo "--- testing pulsar sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/pulsar_sink.slt'

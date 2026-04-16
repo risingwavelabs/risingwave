@@ -1018,6 +1018,7 @@ impl SubscriptionCursor {
             schema,
             stmt_type: StatementType::SELECT,
             dependent_relations: vec![],
+            dependent_secrets: vec![],
         })
     }
 

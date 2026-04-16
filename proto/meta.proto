@@ -270,6 +270,7 @@ message ListStreamingJobStatesResponse {
     string config_override = 9;
     uint32 database_id = 7;
     uint32 schema_id = 8;
+    optional string adaptive_parallelism_strategy = 10;
   }
   repeated StreamingJobState states = 1;
 }
@@ -918,6 +919,7 @@ message EventLog {
     double duration_sec = 3;
     string command = 4;
     string barrier_kind = 5;
+    uint32 database_id = 6;
   }
   message EventInjectBarrierFail {
     uint64 prev_epoch = 1;

@@ -173,6 +173,13 @@ services:
       timeout: 5s
       retries: 5
 
+  pubsub-emulator:
+    image: tabbbb/pubsub-emulator:475.0.0
+    command: >
+      gcloud beta emulators pubsub start --project=demo --host-port=0.0.0.0:8900
+    ports:
+      - "8900:8900"
+
   source-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
@@ -190,6 +197,69 @@ services:
       - message_queue_sasl_1
       - message_queue_sasl_2
       - rabbitmq-server
+      - pubsub-emulator
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  source-generic-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - vault-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  source-kafka-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - message_queue
+      - schemaregistry
+      - vault-server
+      - message_queue_sasl_1
+      - message_queue_sasl_2
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  source-cdc-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - mysql
+      - sqlserver-server
+      - db
+      - mongodb
+      - mongodb-setup
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  source-pulsar-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - pulsar-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  source-mqtt-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - rabbitmq-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  source-nats-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - nats-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  source-pubsub-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
@@ -241,6 +311,121 @@ services:
       - mongodb
       - mongodb-setup
       - sqlserver-server
+      - pubsub-emulator
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-common-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-postgres-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - db
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-remote-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - mysql
+      - db
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-kafka-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - message_queue
+      - schemaregistry
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-elasticsearch-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-pulsar-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - pulsar-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-mqtt-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - mqtt-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-clickhouse-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - clickhouse-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-sqlserver-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - sqlserver-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-redis-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - redis-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-doris-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - doris-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-starrocks-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - starrocks-fe-server
+      - starrocks-be-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-cassandra-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - cassandra-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-mongodb-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - mongodb
+      - mongodb-setup
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s

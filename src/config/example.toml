@@ -57,6 +57,7 @@ table_high_write_throughput_threshold = 16777216
 table_low_write_throughput_threshold = 4194304
 compaction_task_max_heartbeat_interval_secs = 30
 compaction_task_max_progress_interval_secs = 600
+compaction_task_id_refill_capacity = 64
 hybrid_partition_vnode_count = 4
 event_log_enabled = true
 event_log_channel_max_size = 10
@@ -69,6 +70,8 @@ table_stat_throuput_window_seconds_for_merge = 240
 compact_task_table_size_partition_threshold_low = 134217728
 compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10
+enable_compaction_group_normalize = true
+max_normalize_splits_per_round = 4
 periodic_scheduling_compaction_group_merge_interval_sec = 600
 compaction_group_merge_dimension_threshold = 1.2
 cdc_table_split_init_sleep_interval_splits = 1000
@@ -231,6 +234,7 @@ enable_shared_source = true
 switch_jdbc_pg_to_native = false
 max_barrier_batch_size = 1024
 hash_join_entry_state_max_rows = 30000
+join_hash_map_evict_interval_rows = 16
 now_progress_ratio = ""
 enable_explain_analyze_stats = true
 snapshot_iter_rebuild_interval_secs = 600
@@ -249,6 +253,8 @@ sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
 over_window_cache_policy = "full"
 enable_state_table_vnode_stats_pruning = false
+enable_vnode_key_stats_for_materialize = false
+max_concurrent_kv_log_store_historical_read = 0
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
@@ -405,6 +411,8 @@ skip_recent_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false
+req_concurrency_limit = 0
+http_concurrent_limit = 0
 opendal_upload_concurrency = 256
 opendal_writer_abort_on_err = false
 upload_part_size = 16777216

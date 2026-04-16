@@ -190,15 +190,7 @@ tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "5935
     "time",
 ] }
 time = "0.3.47"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
