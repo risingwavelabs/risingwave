@@ -470,7 +470,6 @@ impl<C: CompactionFilter> CompactorRunner<C> {
     pub async fn run(mut self) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         self.left.rewind().await?;
         self.right.rewind().await?;
-        self.executor.reset_watermark();
         let mut skip_raw_block_count = 0;
         let mut skip_raw_block_size = 0;
         while self.left.is_valid() && self.right.is_valid() {
@@ -543,6 +542,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
 
             let target_key = second.current_sstable().key();
             let iter = first.sstable_iter.as_mut().unwrap().iter.as_mut().unwrap();
+            self.executor.reset_watermark();
             self.executor.run(iter, target_key).await?;
             if !iter.is_valid() {
                 first.sstable_iter.as_mut().unwrap().iter.take();
@@ -561,6 +561,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             let sstable_iter = rest_data.sstable_iter.as_mut().unwrap();
             let target_key = FullKey::decode(&sstable_iter.sstable.meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
+                self.executor.reset_watermark();
                 self.executor.run(iter, target_key).await?;
                 assert!(
                     !iter.is_valid(),
@@ -588,6 +589,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
                     let mut iter = sstable_iter.iter.take().unwrap();
+                    self.executor.reset_watermark();
                     self.executor.run(&mut iter, target_key).await?;
                 } else {
                     let largest_key = sstable_iter.current_block_largest();
@@ -707,7 +709,6 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
     fn reset_watermark(&mut self) {
         self.pk_prefix_skip_watermark_state.reset_watermark();
         self.non_pk_prefix_skip_watermark_state.reset_watermark();
-        self.value_skip_watermark_state.reset_watermark();
     }
 
     #[inline(always)]
