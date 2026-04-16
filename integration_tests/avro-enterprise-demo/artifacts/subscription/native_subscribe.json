@@ -1,0 +1,22 @@
+{
+  "subscription_name": "customer_change_audit_sub",
+  "cursor_name": "customer_change_audit_cur",
+  "mode": "SINCE NOW()",
+  "seed_action_id": 1776064346,
+  "initial_rows": [],
+  "observed_rows": [
+    {
+      "customer_key": "c-1001",
+      "action_type": "subscription_demo",
+      "amount": "11.11",
+      "action_ts": "2026-04-07 09:18:00",
+      "channel": "subscription-demo",
+      "full_name": "Alice Wong",
+      "status": "ACTIVE",
+      "segment": "enterprise",
+      "city": "Seattle",
+      "op": "Insert",
+      "rw_timestamp": 1776064346844
+    }
+  ]
+}

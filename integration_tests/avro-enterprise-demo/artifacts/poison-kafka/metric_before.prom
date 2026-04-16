@@ -1,0 +1,2 @@
+user_source_error_cnt{error_type="AccessError",fragment_id="381",source_id="565",source_name="customer_actions_cdc"} 1
+user_source_error_cnt{error_type="AccessError",fragment_id="405",source_id="601",source_name="customer_actions_cdc"} 2

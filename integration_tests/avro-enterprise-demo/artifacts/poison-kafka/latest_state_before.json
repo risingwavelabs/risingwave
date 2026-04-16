@@ -1,0 +1,30 @@
+{
+  "c-1001": {
+    "account_uuid": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+    "balance": "225.75",
+    "city": "Seattle",
+    "customer_key": "c-1001",
+    "email_normalized": "alice.sales@example.com",
+    "event_ts": "2026-04-07T09:10:00.000000Z",
+    "full_name": "Alice Wong",
+    "postal_code": "98109",
+    "preferred_contact_text": "email",
+    "segment": "enterprise",
+    "status": "ACTIVE",
+    "tag_count": 3
+  },
+  "c-1004": {
+    "account_uuid": null,
+    "balance": "15.00",
+    "city": "Portland",
+    "customer_key": "c-1004",
+    "email_normalized": "dan@example.com",
+    "event_ts": "2026-04-07T09:11:00.000000Z",
+    "full_name": "Dan Cruz",
+    "postal_code": "97201",
+    "preferred_contact_text": "9",
+    "segment": "growth",
+    "status": "ACTIVE",
+    "tag_count": 2
+  }
+}

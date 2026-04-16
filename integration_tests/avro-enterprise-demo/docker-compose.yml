@@ -1,0 +1,222 @@
+---
+services:
+  risingwave-standalone:
+    image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.7.1}
+    command: "standalone --meta-opts=\" \
+                    --listen-addr 0.0.0.0:5690 \
+                    --advertise-addr 0.0.0.0:5690 \
+                    --dashboard-host 0.0.0.0:5691 \
+                    --prometheus-host 0.0.0.0:1250 \
+                    --prometheus-endpoint http://prometheus-0:9500 \
+                    --backend sql \
+                    --sql-endpoint postgres://postgres:@postgres-0:5432/metadata \
+                    --state-store hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001 \
+                    --data-directory hummock_001 \
+                    --config-path /risingwave.toml\" \
+                 --compute-opts=\" \
+                    --config-path /risingwave.toml \
+                    --listen-addr 0.0.0.0:5688 \
+                    --prometheus-listener-addr 0.0.0.0:1250 \
+                    --advertise-addr 0.0.0.0:5688 \
+                    --async-stack-trace verbose \
+                    --parallelism 8 \
+                    --total-memory-bytes 21474836480 \
+                    --role both \
+                    --meta-address http://0.0.0.0:5690 \
+                    --memory-manager-target-bytes 22333829939 \" \
+                 --frontend-opts=\" \
+                   --config-path /risingwave.toml \
+                   --listen-addr 0.0.0.0:4566 \
+                   --advertise-addr 0.0.0.0:4566 \
+                   --prometheus-listener-addr 0.0.0.0:1250 \
+                   --health-check-listener-addr 0.0.0.0:6786 \
+                   --meta-addr http://0.0.0.0:5690 \
+                   --frontend-total-memory-bytes=4294967296\" \
+                 --compactor-opts=\" \
+                   --listen-addr 0.0.0.0:6660 \
+                   --prometheus-listener-addr 0.0.0.0:1250 \
+                   --advertise-addr 0.0.0.0:6660 \
+                   --meta-address http://0.0.0.0:5690 \
+                   --compactor-total-memory-bytes=4294967296\""
+    expose:
+      - "6660"
+      - "4566"
+      - "5688"
+      - "5690"
+      - "1250"
+      - "5691"
+    ports:
+      - "14566:4566"
+      - "15690:5690"
+      - "15691:5691"
+      - "21250:1250"
+    depends_on:
+      - postgres-0
+      - minio-0
+    volumes:
+      - "../../docker/risingwave.toml:/risingwave.toml"
+    environment:
+      RUST_BACKTRACE: "1"
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY:-true}
+      RW_TELEMETRY_TYPE: ${RW_TELEMETRY_TYPE:-"docker-compose"}
+      RW_SECRET_STORE_PRIVATE_KEY_HEX: ${RW_SECRET_STORE_PRIVATE_KEY_HEX:-0123456789abcdef0123456789abcdef}
+      RW_LICENSE_KEY: ${RW_LICENSE_KEY:-}
+    container_name: risingwave-standalone
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - bash -c 'printf "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/6660; exit $$?;'
+        - bash -c 'printf "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/5688; exit $$?;'
+        - bash -c '> /dev/tcp/127.0.0.1/4566; exit $$?;'
+        - bash -c 'printf "GET / HTTP/1.1\n\n" > /dev/tcp/127.0.0.1/5690; exit $$?;'
+      interval: 1s
+      timeout: 5s
+    restart: always
+
+  postgres-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: postgres-0
+
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+
+  message_queue:
+    image: "redpandadata/redpanda:latest"
+    command:
+      - redpanda
+      - start
+      - "--smp"
+      - "1"
+      - "--reserve-memory"
+      - 0M
+      - "--memory"
+      - 4G
+      - "--overprovisioned"
+      - "--node-id"
+      - "0"
+      - "--check=false"
+      - "--kafka-addr"
+      - "PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092"
+      - "--advertise-kafka-addr"
+      - "PLAINTEXT://message_queue:29092,OUTSIDE://localhost:39093"
+    expose:
+      - "29092"
+      - "9092"
+      - "9644"
+    ports:
+      - "39092:29092"
+      - "39093:9092"
+      - "39644:9644"
+      - "38081:8081"
+    depends_on: []
+    volumes:
+      - "message_queue:/var/lib/redpanda/data"
+    environment: {}
+    container_name: message_queue
+    healthcheck:
+      test: curl -f localhost:9644/v1/status/ready
+      interval: 1s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  source-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: customerdb
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=postgres --dbname=customerdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "8433:5432"
+
+  demo-tools:
+    build:
+      context: .
+      dockerfile: tools/Dockerfile
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    depends_on:
+      - risingwave-standalone
+      - message_queue
+      - minio-0
+      - source-postgres
+    entrypoint:
+      - /bin/bash
+      - -lc
+    command:
+      - sleep infinity
+
+  push-receiver:
+    build:
+      context: .
+      dockerfile: tools/Dockerfile
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    environment:
+      FAIL_ONCE_CUSTOMER_KEY: c-1004
+      RECEIVER_PORT: 8080
+    entrypoint:
+      - /bin/bash
+      - -lc
+    command:
+      - python /workspace/scripts/http_receiver.py
+    ports:
+      - "18080:8080"
+    depends_on:
+      - risingwave-standalone
+
+  push-bridge:
+    build:
+      context: .
+      dockerfile: tools/Dockerfile
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    entrypoint:
+      - /bin/bash
+      - -lc
+    command:
+      - python /workspace/scripts/push_bridge.py
+    depends_on:
+      - message_queue
+      - push-receiver
+
+volumes:
+  risingwave-standalone:
+    external: false
+  postgres-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+
+name: risingwave-avro-enterprise-demo
