@@ -86,3 +86,143 @@ labels:
   - "src\\/frontend\\/src\\/optimizer\\/rule\\/table_function_to_internal_get_channel_delta_stats\\.rs"
   - "e2e_test\\/table_function\\/internal_get_channel_delta_stats\\.slt"
   - "ci\\/scripts\\/e2e-monitoring-tests\\.sh"
+
+- label: "ci/run-e2e-source-tests"
+  files:
+  - "ci\\/scripts\\/e2e-source-test\\.sh"
+  - "e2e_test\\/source_inline\\/fs\\/.*"
+  - "e2e_test\\/source_inline\\/refresh\\/.*"
+  - "e2e_test\\/source_inline\\/vault\\/vault_secret_ddl\\.slt"
+  - "e2e_test\\/webhook\\/.*"
+
+- label: "ci/run-e2e-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-sink-test\\.sh"
+  - "e2e_test\\/sink\\/append_only_sink\\.slt"
+  - "e2e_test\\/sink\\/auto_schema_change\\.slt"
+  - "e2e_test\\/sink\\/blackhole_sink\\.slt"
+  - "e2e_test\\/sink\\/file_sink\\.slt"
+  - "e2e_test\\/sink\\/force_compaction_sink\\.slt"
+  - "e2e_test\\/sink\\/license\\.slt"
+  - "e2e_test\\/sink\\/nexmark_endless_mvs\\/.*"
+  - "e2e_test\\/sink\\/nexmark_endless_sinks\\/.*"
+  - "e2e_test\\/sink\\/rate_limit\\.slt"
+  - "e2e_test\\/sink\\/sink_into_table\\/.*"
+  - "e2e_test\\/sink\\/sink_vector_columns\\.slt"
+
+# Split source connector tests
+- label: "ci/run-e2e-kafka-source-tests"
+  files:
+  - "ci\\/scripts\\/e2e-source-kafka-test\\.sh"
+  - "e2e_test\\/debug_mode_only\\/debug_splits\\.slt"
+  - "e2e_test\\/kafka-sasl\\/.*"
+  - "e2e_test\\/source_inline\\/connection\\/.*"
+  - "e2e_test\\/source_inline\\/kafka\\/.*"
+  - "e2e_test\\/source_inline\\/vault\\/vault_secret_source\\.slt"
+  - "src\\/connector\\/src\\/source\\/kafka\\/.*"
+
+- label: "ci/run-e2e-cdc-source-tests"
+  files:
+  - "ci\\/scripts\\/e2e-source-cdc-test\\.sh"
+  - "ci\\/scripts\\/e2e-source-mysql-cdc-reset\\.sh"
+  - "ci\\/scripts\\/e2e-source-mysql-offline-schema-change\\.sh"
+  - "e2e_test\\/source_inline\\/cdc\\/.*"
+  - "e2e_test\\/source_inline\\/tvf\\/.*"
+  - "e2e_test\\/source_legacy\\/cdc\\/.*"
+  - "e2e_test\\/source_legacy\\/cdc_inline\\/.*"
+  - "src\\/connector\\/src\\/source\\/cdc\\/.*"
+
+- label: "ci/run-e2e-pulsar-source-tests"
+  files:
+  - "ci\\/scripts\\/e2e-source-pulsar-test\\.sh"
+  - "e2e_test\\/source_inline\\/pulsar\\/.*"
+  - "e2e_test\\/source_legacy\\/pulsar\\/.*"
+  - "src\\/connector\\/src\\/source\\/pulsar\\/.*"
+
+- label: "ci/run-e2e-mqtt-source-tests"
+  files:
+  - "ci\\/scripts\\/e2e-source-mqtt-test\\.sh"
+  - "e2e_test\\/source_inline\\/mqtt\\/.*"
+  - "src\\/connector\\/src\\/source\\/mqtt\\/.*"
+
+- label: "ci/run-e2e-nats-source-tests"
+  files:
+  - "ci\\/scripts\\/e2e-source-nats-test\\.sh"
+  - "e2e_test\\/source_inline\\/nats\\/.*"
+  - "src\\/connector\\/src\\/source\\/nats\\/.*"
+
+- label: "ci/run-e2e-pubsub-source-tests"
+  files:
+  - "ci\\/scripts\\/e2e-source-pubsub-test\\.sh"
+  - "e2e_test\\/source_inline\\/pubsub\\/.*"
+  - "src\\/connector\\/src\\/source\\/google_pubsub\\/.*"
+
+# Split sink connector tests
+- label: "ci/run-e2e-kafka-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-kafka-sink-test\\.sh"
+  - "e2e_test\\/sink\\/bug_fixes\\/issue_24367\\.slt"
+  - "e2e_test\\/sink\\/kafka\\/.*"
+  - "src\\/connector\\/src\\/sink\\/kafka\\.rs"
+
+- label: "ci/run-e2e-jdbc-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-jdbc-sink-test\\.sh"
+  - "e2e_test\\/sink\\/create_sink_as\\.slt"
+  - "e2e_test\\/sink\\/remote\\/.*"
+  - "src\\/connector\\/src\\/sink\\/remote\\.rs"
+  - "src\\/connector\\/src\\/sink\\/jdbc_jni_client\\.rs"
+
+- label: "ci/run-e2e-elasticsearch-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-elasticsearch-sink-ci-test\\.sh"
+  - "e2e_test\\/sink\\/elasticsearch\\/.*"
+  - "src\\/connector\\/src\\/sink\\/elasticsearch_opensearch\\/.*"
+
+- label: "ci/run-e2e-postgres-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-postgres-sink-test\\.sh"
+  - "e2e_test\\/sink\\/postgres_sink\\.slt"
+  - "src\\/connector\\/src\\/sink\\/postgres\\.rs"
+
+- label: "ci/run-e2e-pulsar-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/pulsar\\.rs"
+
+- label: "ci/run-e2e-mqtt-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/mqtt\\.rs"
+
+- label: "ci/run-e2e-clickhouse-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/clickhouse\\.rs"
+
+- label: "ci/run-e2e-sqlserver-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/sqlserver\\.rs"
+
+- label: "ci/run-e2e-redis-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/redis\\.rs"
+
+- label: "ci/run-e2e-doris-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/doris\\.rs"
+  - "src\\/connector\\/src\\/sink\\/doris_starrocks_connector\\.rs"
+
+- label: "ci/run-e2e-starrocks-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/starrocks\\.rs"
+  - "src\\/connector\\/src\\/sink\\/doris_starrocks_connector\\.rs"
+
+- label: "ci/run-e2e-cassandra-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/remote\\.rs"
+
+- label: "ci/run-e2e-mongodb-sink-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/mongodb\\.rs"
+
+- label: "ci/run-e2e-deltalake-sink-rust-tests"
+  files:
+  - "src\\/connector\\/src\\/sink\\/deltalake\\.rs"
