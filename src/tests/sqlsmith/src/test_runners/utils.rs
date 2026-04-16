@@ -238,7 +238,7 @@ pub(super) async fn create_mviews(
 }
 
 pub(super) fn format_drop_mview(mview: &Table) -> String {
-    format!("DROP MATERIALIZED VIEW IF EXISTS {}", mview.name)
+    format!("DROP MATERIALIZED VIEW IF EXISTS {} CASCADE", mview.name)
 }
 
 /// Drops mview tables.
@@ -249,12 +249,32 @@ pub(super) async fn drop_mview_table(mview: &Table, client: &Client) {
         .unwrap();
 }
 
-/// Drops mview tables and seed tables
-pub(super) async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
+/// Drops mview tables and seed tables.
+/// Queries the system catalog directly to find all existing materialized views,
+/// rather than relying on the tracked list. This handles cases where a CREATE MATERIALIZED VIEW
+/// timed out client-side but still completed on the server.
+pub(super) async fn drop_tables(testdata: &str, client: &Client) {
     tracing::info!("Cleaning tables");
 
-    for mview in mviews.iter().rev() {
-        drop_mview_table(mview, client).await;
+    // Drop all materialized views in the public schema, discovered via system catalog.
+    // Using CASCADE handles inter-MV dependencies regardless of order.
+    let rows = client
+        .simple_query(
+            "SELECT matviewname FROM pg_matviews WHERE schemaname = 'public' ORDER BY matviewname",
+        )
+        .await
+        .unwrap();
+    for msg in rows {
+        if let SimpleQueryMessage::Row(row) = msg {
+            let name = row.get(0).unwrap();
+            tracing::info!("Dropping materialized view: {}", name);
+            client
+                .simple_query(&format!(
+                    "DROP MATERIALIZED VIEW IF EXISTS {name} CASCADE"
+                ))
+                .await
+                .unwrap();
+        }
     }
 
     let seed_files = ["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
