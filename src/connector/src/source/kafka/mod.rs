@@ -173,7 +173,7 @@ pub struct KafkaProperties {
     #[serde(flatten)]
     pub rdkafka_properties_consumer: RdKafkaPropertiesConsumer,
 
-    /// Whether to wait for backfill completion when creating the table.
+    /// Whether to wait for backfill completion when creating the table with connector.
     #[serde(
         rename = "backfill.wait",
         default,
