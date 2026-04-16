@@ -514,7 +514,6 @@ pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorCon
 }
 
 struct CompactTaskInputSsts {
-    compact_table_ids: Vec<StateTableId>,
     sstable_infos: Vec<SstableInfo>,
     compaction_size: u64,
 }
@@ -540,7 +539,13 @@ fn optimize_by_copy_block_with_input(
         .map(|table_info| table_info.total_key_count)
         .sum::<u64>();
 
-    let single_table = task_input.compact_table_ids.len() == 1;
+    let input_table_ids: HashSet<TableId> = HashSet::from_iter(
+        task_input
+            .sstable_infos
+            .iter()
+            .flat_map(|sst| sst.table_ids.clone()),
+    );
+    let single_table = input_table_ids.len() == 1;
     context.storage_opts.enable_fast_compaction
         && all_ssts_are_blocked_filter
         && !compact_task.contains_range_tombstone()
@@ -661,7 +666,6 @@ fn build_compact_task_input_ssts(compact_task: &CompactTask) -> CompactTaskInput
         .map(|table_info| table_info.sst_size)
         .sum();
     CompactTaskInputSsts {
-        compact_table_ids,
         sstable_infos,
         compaction_size,
     }
