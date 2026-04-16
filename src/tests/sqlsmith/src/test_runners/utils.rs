@@ -238,7 +238,7 @@ pub(super) async fn create_mviews(
 }
 
 pub(super) fn format_drop_mview(mview: &Table) -> String {
-    format!("DROP MATERIALIZED VIEW IF EXISTS {} CASCADE", mview.name)
+    format!("DROP MATERIALIZED VIEW IF EXISTS {}", mview.name)
 }
 
 /// Drops mview tables.
@@ -250,30 +250,49 @@ pub(super) async fn drop_mview_table(mview: &Table, client: &Client) {
 }
 
 /// Drops mview tables and seed tables.
-/// Queries the system catalog directly to find all existing materialized views,
-/// rather than relying on the tracked list. This handles cases where a CREATE MATERIALIZED VIEW
-/// timed out client-side but still completed on the server.
+/// Queries the system catalog to find all existing MVs (catching any that were
+/// created server-side after a client-side timeout). Drops leaf MVs (those with
+/// no dependents) each iteration without CASCADE, so genuine dependency bugs
+/// surface as real errors rather than being silently swallowed.
 pub(super) async fn drop_tables(testdata: &str, client: &Client) {
     tracing::info!("Cleaning tables");
 
-    // Drop all materialized views in the public schema, discovered via system catalog.
-    // Using CASCADE handles inter-MV dependencies regardless of order.
-    let rows = client
-        .simple_query(
-            "SELECT mv.name FROM rw_materialized_views mv \
-             JOIN rw_schemas s ON mv.schema_id = s.id \
-             WHERE s.name = 'public' ORDER BY mv.name",
-        )
-        .await
-        .unwrap();
-    for msg in rows {
-        if let SimpleQueryMessage::Row(row) = msg {
-            let name = row.get(0).unwrap();
+    // Drop MVs in the public schema using leaf-node iteration: each pass drops
+    // only MVs that no other object currently depends on. This handles inter-MV
+    // dependencies in the correct order without needing CASCADE.
+    loop {
+        let rows = client
+            .simple_query(
+                "SELECT mv.name \
+                 FROM rw_catalog.rw_materialized_views mv \
+                 JOIN rw_catalog.rw_schemas s ON mv.schema_id = s.id \
+                 WHERE s.name = 'public' \
+                   AND NOT EXISTS ( \
+                         SELECT 1 FROM rw_catalog.rw_depend d WHERE d.refobjid = mv.id \
+                       ) \
+                 ORDER BY mv.name",
+            )
+            .await
+            .unwrap();
+        let names: Vec<String> = rows
+            .into_iter()
+            .filter_map(|msg| {
+                if let SimpleQueryMessage::Row(row) = msg {
+                    row.get(0).map(|s| s.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if names.is_empty() {
+            break;
+        }
+
+        for name in &names {
             tracing::info!("Dropping materialized view: {}", name);
             client
-                .simple_query(&format!(
-                    "DROP MATERIALIZED VIEW IF EXISTS {name} CASCADE"
-                ))
+                .simple_query(&format!("DROP MATERIALIZED VIEW IF EXISTS {name}"))
                 .await
                 .unwrap();
         }
