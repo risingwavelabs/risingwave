@@ -758,6 +758,7 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, next_full_key, prev_full_key};
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
@@ -767,8 +768,8 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::iterator::{HummockIterator, MergeIterator};
     use crate::hummock::test_utils::{
-        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_info, test_key_of,
-        test_value_of,
+        TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_info,
+        gen_test_sstable_with_table_ids, test_key_of, test_value_of,
     };
     use crate::hummock::value::HummockValue;
 
@@ -1224,6 +1225,53 @@ mod tests {
                     .as_raw_id()
             );
         }
+
+        {
+            let block_metas = vec![
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(1), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(2), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+                BlockMeta {
+                    smallest_key: FullKey::for_test(TableId::new(3), Vec::default(), 0).encode(),
+                    ..Default::default()
+                },
+            ];
+
+            let ret = filter_block_metas(
+                &block_metas,
+                &HashSet::from_iter(vec![1_u32.into(), 3_u32.into()].into_iter()),
+                KeyRange::default(),
+            );
+            let ret = &block_metas[ret];
+
+            assert_eq!(3, ret.len());
+            assert_eq!(
+                1,
+                FullKey::decode(&ret[0].smallest_key)
+                    .user_key
+                    .table_id
+                    .as_raw_id()
+            );
+            assert_eq!(
+                2,
+                FullKey::decode(&ret[1].smallest_key)
+                    .user_key
+                    .table_id
+                    .as_raw_id()
+            );
+            assert_eq!(
+                3,
+                FullKey::decode(&ret[2].smallest_key)
+                    .user_key
+                    .table_id
+                    .as_raw_id()
+            );
+        }
     }
 
     #[tokio::test]
@@ -1311,5 +1359,61 @@ mod tests {
             }
             assert_eq!(total_key_count, key_count);
         }
+    }
+
+    #[tokio::test]
+    async fn test_concat_iterator_skips_hole_table_blocks() {
+        let sstable_store = mock_sstable_store().await;
+
+        let key_1 = FullKey::for_test(TableId::new(1), b"a".to_vec(), test_epoch(1));
+        let key_2 = FullKey::for_test(TableId::new(2), b"b".to_vec(), test_epoch(1));
+        let key_3 = FullKey::for_test(TableId::new(3), b"c".to_vec(), test_epoch(1));
+        let kv_pairs = vec![
+            (key_1.clone(), HummockValue::put(b"value-1".to_vec())),
+            (key_2.clone(), HummockValue::put(b"value-2".to_vec())),
+            (key_3.clone(), HummockValue::put(b"value-3".to_vec())),
+        ];
+
+        let (_sstable, table_info) = gen_test_sstable_with_table_ids(
+            default_builder_opt_for_test(),
+            10,
+            kv_pairs.into_iter(),
+            sstable_store.clone(),
+            vec![1, 2, 3],
+        )
+        .await;
+
+        let table_info: SstableInfo = SstableInfoInner {
+            table_ids: vec![1.into(), 3.into()],
+            ..table_info.get_inner()
+        }
+        .into();
+
+        let mut iter = ConcatSstableIterator::for_test(
+            vec![1, 3],
+            vec![table_info.clone()],
+            KeyRange::default(),
+            sstable_store.clone(),
+        );
+        iter.rewind().await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), key_1.to_ref());
+
+        iter.next().await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), key_3.to_ref());
+
+        iter.next().await.unwrap();
+        assert!(!iter.is_valid());
+
+        let mut iter = ConcatSstableIterator::for_test(
+            vec![1, 3],
+            vec![table_info],
+            KeyRange::default(),
+            sstable_store,
+        );
+        iter.seek(key_2.to_ref()).await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), key_3.to_ref());
     }
 }
