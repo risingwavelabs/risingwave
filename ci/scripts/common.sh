@@ -23,10 +23,15 @@ export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 export SLT_FAIL_FAST=true
 export SLT_KEEP_DB_ON_FAILURE=true
 export SLT_SHUTDOWN_TIMEOUT=10
-export CARGO_LLVM_COV=1
-export CARGO_LLVM_COV_SHOW_ENV=1
-export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target" # used to locate object files, should be same as `CARGO_TARGET_DIR`
-export LLVM_PROFILE_FILE="${CARGO_LLVM_COV_TARGET_DIR}/risingwave-%p.profraw" # used both by executables generating profraw files and `cargo llvm-cov` to find them
+
+# Coverage instrumentation is only enabled when RW_CI_ENABLE_COVERAGE=1 (set in main-cron).
+# This avoids the 10-20% build/test overhead on PR builds where coverage is not needed.
+if [[ "${RW_CI_ENABLE_COVERAGE:-0}" == "1" ]]; then
+  export CARGO_LLVM_COV=1
+  export CARGO_LLVM_COV_SHOW_ENV=1
+  export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target" # used to locate object files, should be same as `CARGO_TARGET_DIR`
+  export LLVM_PROFILE_FILE="${CARGO_LLVM_COV_TARGET_DIR}/risingwave-%p.profraw" # used both by executables generating profraw files and `cargo llvm-cov` to find them
+fi
 
 unset LANG
 
@@ -67,9 +72,11 @@ function generate_and_upload_coverage_report() {
 function exit_hook() {
   ret=$?
 
-  # Generate and upload coverage report on successful completion
+  # Generate and upload coverage report on successful completion (only when coverage is enabled)
   if [ $ret -eq 0 ]; then
-    generate_and_upload_coverage_report
+    if [[ "${RW_CI_ENABLE_COVERAGE:-0}" == "1" ]]; then
+      generate_and_upload_coverage_report
+    fi
     exit 0
   fi
 
