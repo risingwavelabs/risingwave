@@ -78,6 +78,16 @@ create table t_bad (v1 int) with (
 ) FORMAT PLAIN ENCODE JSON;
 
 
+# Test: backfill.wait is not supported for CREATE SOURCE (even with kafka)
+statement error backfill.wait is not supported for CREATE SOURCE
+create source s_bad (v1 int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_wait_for_backfill',
+  scan.startup.mode = 'earliest',
+  backfill.wait = 'true'
+) FORMAT PLAIN ENCODE JSON;
+
+
 # Test: wait_for_backfill with empty topic should return immediately
 system ok
 rpk topic delete test_wait_for_backfill_empty || true
