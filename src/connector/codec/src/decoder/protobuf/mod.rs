@@ -66,7 +66,7 @@ impl Access for ProtobufAccess<'_> {
             })?;
 
         parser::from_protobuf_message_field(
-            &field_desc,
+            field_desc,
             &self.message,
             type_expected,
             self.messages_as_jsonb,
