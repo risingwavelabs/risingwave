@@ -2293,7 +2293,7 @@ pub async fn create_iceberg_engine_table(
         .map(|v| v.to_owned());
     if let Some(order_key) = &order_key {
         validate_order_key_columns(order_key, table.columns().iter().map(|col| col.name()))
-            .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?;
+            .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_report_string()))?;
 
         sink_with.insert(ORDER_KEY.to_owned(), order_key.to_owned());
 
