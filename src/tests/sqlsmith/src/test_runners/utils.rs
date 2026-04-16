@@ -286,6 +286,33 @@ pub(super) async fn drop_tables(testdata: &str, client: &Client) {
             .collect();
 
         if names.is_empty() {
+            // No leaf MVs remain — verify no MVs at all are left.
+            let remaining = client
+                .simple_query(
+                    "SELECT mv.name \
+                     FROM rw_catalog.rw_materialized_views mv \
+                     JOIN rw_catalog.rw_schemas s ON mv.schema_id = s.id \
+                     WHERE s.name = 'public'",
+                )
+                .await
+                .unwrap();
+            let remaining_names: Vec<String> = remaining
+                .into_iter()
+                .filter_map(|msg| {
+                    if let SimpleQueryMessage::Row(row) = msg {
+                        row.get(0).map(|s| s.to_owned())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !remaining_names.is_empty() {
+                panic!(
+                    "MV cleanup stalled: no leaf MVs but these still exist: {:?}. \
+                     This indicates an unexpected dependency on a non-MV object.",
+                    remaining_names
+                );
+            }
             break;
         }
 
