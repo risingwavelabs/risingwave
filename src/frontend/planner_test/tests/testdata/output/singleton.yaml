@@ -38,8 +38,8 @@
   sql: |
     select mv1.v from mv mv1, mv mv2 where mv1.v = mv2.v order by mv1.v limit 10;
   batch_plan: |-
-    BatchTopN { order: [mv.v ASC], limit: 10, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 10, offset: 0 }
+    └─BatchExchange { order: [mv.v ASC], dist: Single }
       └─BatchTopN { order: [mv.v ASC], limit: 10, offset: 0 }
         └─BatchHashJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
           ├─BatchExchange { order: [], dist: HashShard(mv.v) }

@@ -52,7 +52,7 @@ impl BatchTopN {
             self.core.limit_attr.with_ties(),
         );
         let new_offset = 0;
-        let partial_input: PlanRef = if input.order().satisfies(&self.core.order)
+        let partial_input: PlanRef = if input.orders().iter().any(|o| o.satisfies(&self.core.order))
             && !self.core.limit_attr.with_ties()
         {
             let logical_partial_limit = generic::Limit::new(input, new_limit.limit(), new_offset);
@@ -65,15 +65,26 @@ impl BatchTopN {
             batch_partial_topn.into()
         };
 
-        let ensure_single_dist =
-            RequiredDist::single().batch_enforce_if_not_satisfies(partial_input, &Order::any())?;
+        let exchange_order = if self.core.limit_attr.with_ties() {
+            Order::any()
+        } else {
+            self.core.order.clone()
+        };
+        let ensure_single_dist = RequiredDist::single()
+            .batch_enforce_if_not_satisfies(partial_input, &exchange_order)?;
 
-        let batch_global_topn = self.clone_with_input(ensure_single_dist);
-        Ok(batch_global_topn.into())
+        if self.core.limit_attr.with_ties() {
+            let batch_global_topn = self.clone_with_input(ensure_single_dist);
+            Ok(batch_global_topn.into())
+        } else {
+            self.one_phase_topn(ensure_single_dist)
+        }
     }
 
     fn one_phase_topn(&self, input: PlanRef) -> Result<PlanRef> {
-        if input.order().satisfies(&self.core.order) && !self.core.limit_attr.with_ties() {
+        if input.orders().iter().any(|o| o.satisfies(&self.core.order))
+            && !self.core.limit_attr.with_ties()
+        {
             let logical_limit =
                 generic::Limit::new(input, self.core.limit_attr.limit(), self.core.offset);
             let batch_limit = BatchLimit::new(logical_limit);
