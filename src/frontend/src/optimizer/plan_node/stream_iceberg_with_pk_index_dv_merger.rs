@@ -41,9 +41,8 @@ pub struct StreamIcebergWithPkIndexDvMerger {
 
 impl StreamIcebergWithPkIndexDvMerger {
     pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
-        // Enforce singleton distribution — inserts Exchange if needed.
-        // `streaming_enforce_if_not_satisfies` is infallible.
-        let input = RequiredDist::single()
+        debug_assert_eq!(input.schema().len(), 2); // Expecting `[file_path, position]` from the Writer.
+        let input = RequiredDist::shard_by_key(2, &[0])
             .streaming_enforce_if_not_satisfies(input)
             .expect("single distribution enforcement is infallible");
 

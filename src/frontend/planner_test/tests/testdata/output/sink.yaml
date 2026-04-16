@@ -284,8 +284,8 @@
     );
   explain_output: |
     StreamIcebergWithPkIndexDvMerger
-    └─StreamExchange { dist: Single }
-      └─StreamIcebergWithPkIndexWriter
+    └─StreamExchange { dist: HashShard(file_path) }
+      └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4, t1._row_id(hidden)], downstream_pk: [t1.v1] }
         └─StreamExchange { dist: HashShard($expr1) }
           └─StreamProject { exprs: [t1.v1, t1.v2, t1.v3, t1.v4, t1._row_id, Row(t1.v1, IcebergTransform('bucket[1]':Varchar, t1.v2), IcebergTransform('truncate[1]':Varchar, t1.v3), null:Time) as $expr1] }
             └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
@@ -311,8 +311,8 @@
     );
   explain_output: |
     StreamIcebergWithPkIndexDvMerger
-    └─StreamExchange { dist: Single }
-      └─StreamIcebergWithPkIndexWriter
+    └─StreamExchange { dist: HashShard(file_path) }
+      └─StreamIcebergWithPkIndexWriter { columns: [v1, v2, v3, v4, t1._row_id(hidden)], downstream_pk: [t1.v1] }
         └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4, _row_id] }
 - id: create_upsert_jdbc_sink_with_downstream_pk1_separate_sink
   sql: |

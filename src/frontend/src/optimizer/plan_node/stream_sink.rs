@@ -764,8 +764,7 @@ impl StreamSink {
             return Ok(self.into());
         }
 
-        let writer: PlanRef =
-            StreamIcebergWithPkIndexWriter::new(self.input, self.sink_desc.clone()).into();
+        let writer: PlanRef = StreamIcebergWithPkIndexWriter::from_stream_sink(&self)?.into();
         let dv_merger: PlanRef =
             StreamIcebergWithPkIndexDvMerger::new(writer, self.sink_desc).into();
         Ok(dv_merger)

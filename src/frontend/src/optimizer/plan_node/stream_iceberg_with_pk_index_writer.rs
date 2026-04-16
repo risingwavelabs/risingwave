@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::XmlNode;
+use anyhow::Context;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
@@ -22,7 +23,9 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use super::stream::prelude::*;
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
+use crate::optimizer::plan_node::utils::{
+    Distill, IndicesDisplay, TableCatalogBuilder, childless_record,
+};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
@@ -45,39 +48,31 @@ pub struct StreamIcebergWithPkIndexWriter {
 }
 
 impl StreamIcebergWithPkIndexWriter {
-    pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
-        let pk_index_table = build_iceberg_pk_state_table(&sink_desc);
-        Self::new_with_pk_index_table(input, sink_desc, pk_index_table)
-    }
-
-    fn new_with_pk_index_table(
-        input: PlanRef,
-        sink_desc: SinkDesc,
-        pk_index_table: TableCatalog,
-    ) -> Self {
+    pub fn from_stream_sink(sink: &super::StreamSink) -> Result<Self> {
         let output_schema = output_schema();
         let fd_set = FunctionalDependencySet::new(output_schema.len());
-        let distribution = match input.distribution() {
+        let dist = match sink.distribution() {
             Distribution::Single => Distribution::Single,
             _ => Distribution::SomeShard,
         };
         let base = PlanBase::new_stream(
-            input.ctx(),
+            sink.ctx(),
             output_schema,
-            Some(vec![]), // no stream key
+            Some(vec![]),
             fd_set,
-            distribution,
+            dist,
             StreamKind::AppendOnly,
-            input.emit_on_window_close(),
+            sink.emit_on_window_close(),
             WatermarkColumns::new(),
             MonotonicityMap::new(),
         );
-        Self {
+        let pk_index_table = build_iceberg_pk_state_table(sink.sink_desc())?;
+        Ok(Self {
             base,
-            input,
-            sink_desc,
+            input: sink.input(),
+            sink_desc: sink.sink_desc().clone(),
             pk_index_table,
-        }
+        })
     }
 }
 
@@ -88,10 +83,15 @@ fn output_schema() -> risingwave_common::catalog::Schema {
     ])
 }
 
-fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> TableCatalog {
+fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> Result<TableCatalog> {
     let mut builder = TableCatalogBuilder::default();
 
-    for order in &sink_desc.plan_pk {
+    let downstream_pk = sink_desc
+        .downstream_pk
+        .as_ref()
+        .context("Missing downstream PK in Iceberg sink desc")?;
+    for &idx in downstream_pk {
+        let order = &sink_desc.plan_pk[idx];
         builder.add_column(&Field::from(
             &sink_desc.columns[order.column_index].column_desc,
         ));
@@ -103,15 +103,34 @@ fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> TableCatalog {
         builder.add_order_column(idx, order.order_type);
     }
 
-    builder.build(
+    let res = builder.build(
         (0..sink_desc.plan_pk.len()).collect(),
         sink_desc.plan_pk.len(),
-    )
+    );
+    Ok(res)
 }
 
 impl Distill for StreamIcebergWithPkIndexWriter {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        childless_record("StreamIcebergWithPkIndexWriter", vec![])
+        let column_names = self
+            .sink_desc
+            .columns
+            .iter()
+            .map(|col| col.name_with_hidden().to_string())
+            .map(Pretty::from)
+            .collect();
+        let column_names = Pretty::Array(column_names);
+        let mut vec = Vec::with_capacity(2);
+        vec.push(("columns", column_names));
+        if let Some(pk) = &self.sink_desc.downstream_pk {
+            let sink_pk = IndicesDisplay {
+                indices: pk,
+                schema: self.input.schema(),
+            };
+            vec.push(("downstream_pk", sink_pk.distill()));
+        }
+
+        childless_record("StreamIcebergWithPkIndexWriter", vec)
     }
 }
 
@@ -121,7 +140,12 @@ impl PlanTreeNodeUnary<Stream> for StreamIcebergWithPkIndexWriter {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new_with_pk_index_table(input, self.sink_desc.clone(), self.pk_index_table.clone())
+        Self {
+            base: self.base.clone(),
+            input,
+            sink_desc: self.sink_desc.clone(),
+            pk_index_table: self.pk_index_table.clone(),
+        }
     }
 }
 
