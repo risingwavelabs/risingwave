@@ -260,7 +260,9 @@ pub(super) async fn drop_tables(testdata: &str, client: &Client) {
     // Using CASCADE handles inter-MV dependencies regardless of order.
     let rows = client
         .simple_query(
-            "SELECT matviewname FROM pg_matviews WHERE schemaname = 'public' ORDER BY matviewname",
+            "SELECT mv.name FROM rw_materialized_views mv \
+             JOIN rw_schemas s ON mv.schema_id = s.id \
+             WHERE s.name = 'public' ORDER BY mv.name",
         )
         .await
         .unwrap();
