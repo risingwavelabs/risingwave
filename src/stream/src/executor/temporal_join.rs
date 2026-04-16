@@ -946,13 +946,12 @@ mod tests {
 
         // Pre-commit epoch1 data via a plain StateTable (bypasses the executor).
         {
-            let mut setup_table =
-                StateTable::<HummockStorage>::from_table_catalog_inconsistent_op(
-                    &pbtable,
-                    test_env.storage.clone(),
-                    None,
-                )
-                .await;
+            let mut setup_table = StateTable::<HummockStorage>::from_table_catalog_inconsistent_op(
+                &pbtable,
+                test_env.storage.clone(),
+                None,
+            )
+            .await;
             test_env
                 .storage
                 .start_epoch(test_epoch(1), HashSet::from_iter([table_id]));
@@ -1038,8 +1037,7 @@ mod tests {
             Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Int32),
         ]);
-        let info =
-            ExecutorInfo::for_test(output_schema, vec![], "TemporalJoinTest".to_owned(), 0);
+        let info = ExecutorInfo::for_test(output_schema, vec![], "TemporalJoinTest".to_owned(), 0);
 
         let executor = TemporalJoinExecutor::<
             Key32,
@@ -1056,7 +1054,7 @@ mod tests {
             left_join_keys,
             right_join_keys,
             null_safe,
-            None,  // no extra non-equi condition
+            None, // no extra non-equi condition
             output_indices,
             table_output_indices,
             table_stream_key_indices,
@@ -1064,7 +1062,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             1024,
             join_key_data_types,
-            None,  // no memo table (append-only inner join)
+            None, // no memo table (append-only inner join)
         );
 
         let mut stream = Box::new(executor).execute();
@@ -1112,12 +1110,11 @@ mod tests {
                 Message::Chunk(chunk) => {
                     for (op, row) in chunk.rows() {
                         assert_eq!(op, Op::Insert);
-                        let row: [i32; 5] = std::array::from_fn(|i| {
-                            match row.datum_at(i).unwrap() {
+                        let row: [i32; 5] =
+                            std::array::from_fn(|i| match row.datum_at(i).unwrap() {
                                 ScalarRefImpl::Int32(v) => v,
                                 _ => panic!("expected Int32"),
-                            }
-                        });
+                            });
                         output_rows.push(row);
                     }
                 }
