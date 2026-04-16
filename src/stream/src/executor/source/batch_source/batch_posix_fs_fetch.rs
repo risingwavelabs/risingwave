@@ -17,6 +17,7 @@ use std::io::BufRead;
 use std::path::Path;
 
 use either::Either;
+use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::id::TableId;
@@ -25,7 +26,8 @@ use risingwave_connector::parser::{ByteStreamSourceParserImpl, CommonParserConfi
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::OpendalPosixFs;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceContext, SourceCtrlOpts, SourceMessage, SourceMeta, SplitMetaData,
+    ConnectorProperties, SourceChunkStream, SourceContext, SourceCtrlOpts, SourceMessage,
+    SourceMessageEvent, SourceMeta, SourceReaderEvent, SplitMetaData,
 };
 use thiserror_ext::AsReport;
 use tokio::fs;
@@ -38,6 +40,21 @@ use crate::task::LocalBarrierManager;
 
 /// Maximum number of files to process in a single batch
 const BATCH_SIZE: usize = 1000;
+
+fn into_data_chunk_stream(
+    stream: impl futures::Stream<Item = risingwave_connector::error::ConnectorResult<SourceReaderEvent>>
+    + Send
+    + 'static,
+) -> impl SourceChunkStream {
+    stream
+        .try_filter_map(|event| async move {
+            Ok(match event {
+                SourceReaderEvent::DataChunk(chunk) => Some(chunk),
+                SourceReaderEvent::SplitProgress(_) => None,
+            })
+        })
+        .boxed()
+}
 
 /// Executor for fetching and processing files in batch mode for refreshable tables.
 ///
@@ -192,13 +209,16 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                 };
 
                 // TODO(tab): avoid rebuilding ByteStreamSourceParserImpl for each file
-                // Parser is created per line because it's consumed by parse_stream
+                // Parser is rebuilt per line because `parse_stream_with_events` consumes it.
                 let parser =
                     ByteStreamSourceParserImpl::create(parser_config.clone(), source_ctx.clone())
                         .await?;
 
-                let chunk_stream = parser
-                    .parse_stream(Box::pin(futures::stream::once(async { Ok(vec![message]) })));
+                let chunk_stream = into_data_chunk_stream(parser.parse_stream_with_events(
+                    Box::pin(futures::stream::once(async {
+                        Ok(SourceMessageEvent::Data(vec![message]))
+                    })),
+                ));
 
                 #[for_await]
                 for chunk in chunk_stream {

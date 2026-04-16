@@ -44,6 +44,7 @@ use super::{
     SourceStateTableHandler, StreamSourceCore,
     apply_rate_limit_with_for_streaming_file_source_reader, get_split_offset_col_idx,
     get_split_offset_mapping_from_chunk, prune_additional_cols,
+    source_reader_event_to_chunk_stream,
 };
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
@@ -256,10 +257,12 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build_stream(batch, column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        let optional_stream: BoxStreamingFileSourceChunkStream = stream
-            .map(|item| item.map(Some))
-            .chain(stream::once(async { Ok(None) }))
-            .boxed();
+        let optional_stream: BoxStreamingFileSourceChunkStream =
+            source_reader_event_to_chunk_stream(stream)
+                .boxed()
+                .map(|item| item.map(Some))
+                .chain(stream::once(async { Ok(None) }))
+                .boxed();
         Ok(
             apply_rate_limit_with_for_streaming_file_source_reader(optional_stream, rate_limit_rps)
                 .boxed(),

@@ -21,7 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sink_test_env_setup "$profile" true 40
+sink_test_env_setup "$profile" --need-connector --sleep-duration 40
 
 echo "--- install cassandra"
 wget --no-verbose $(get_latest_cassandra_download_url) -O cassandra_latest.tar.gz
