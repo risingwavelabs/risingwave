@@ -14,6 +14,61 @@ class PulsarCat:
         self.admin_url = admin_url
         self.client = None
 
+    @staticmethod
+    def _topic_resource_path(topic: str) -> str:
+        """Convert a Pulsar topic into the admin API resource path format."""
+        return topic.replace("://", "/")
+
+    def _topic_admin_url(self, topic: str, *parts: str) -> str:
+        """Build an admin API URL for a topic resource."""
+        path_parts = [self._topic_resource_path(topic), *parts]
+        return f"{self.admin_url}/admin/v2/{'/'.join(path_parts)}"
+
+    @staticmethod
+    def _force_delete_params(force: bool) -> dict[str, str]:
+        """Build delete parameters for forced topic removal."""
+        return {"force": "true"} if force else {}
+
+    @staticmethod
+    def _is_partitioned_topic_conflict(response) -> bool:
+        """Check whether a delete conflict means the topic is partitioned."""
+        if response.status_code != 409:
+            return False
+
+        try:
+            error_info = response.json()
+        except Exception:
+            return False
+
+        return "partitioned topic" in error_info.get("reason", "").lower()
+
+    def _delete_topic_request(
+        self,
+        topic: str,
+        *,
+        force: bool,
+        partitioned: bool = False,
+    ):
+        """Delete a topic or partitioned topic via the admin API."""
+        if partitioned:
+            url = self._topic_admin_url(topic, "partitions")
+        else:
+            url = self._topic_admin_url(topic)
+        return requests.delete(url, params=self._force_delete_params(force))
+
+    @staticmethod
+    def _iter_input_messages(key_delimiter: str | None):
+        """Yield parsed messages from stdin for the produce command."""
+        for line in sys.stdin:
+            line = line.rstrip('\n\r')
+            if not line:
+                continue
+
+            if key_delimiter and key_delimiter in line:
+                yield line.split(key_delimiter, 1)
+            else:
+                yield None, line
+
     def _normalize_topic(self, topic: str, default_persistent: bool = True) -> str:
         """Normalize topic name by adding scheme and default namespace if missing.
 
@@ -30,7 +85,11 @@ class PulsarCat:
         scheme = 'persistent://' if default_persistent else 'non-persistent://'
         return f'{scheme}public/default/{topic}'
 
-    def _normalize_topic_with_persistence(self, topic: str, non_persistent: bool = False) -> str:
+    def _normalize_topic_with_persistence(
+        self,
+        topic: str,
+        non_persistent: bool = False,
+    ) -> str:
         """Normalize topic name and handle persistence type conversion.
 
         Args:
@@ -73,11 +132,11 @@ class PulsarCat:
 
         if partitions > 0:
             # Create partitioned topic
-            url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}/partitions"
+            url = self._topic_admin_url(topic, "partitions")
             response = requests.put(url, json=partitions)
         else:
             # Create non-partitioned topic
-            url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}"
+            url = self._topic_admin_url(topic)
             response = requests.put(url)
 
         if response.status_code in [200, 204, 409]:  # 409 means already exists
@@ -99,33 +158,21 @@ class PulsarCat:
         print(f"Dropping topic: {topic}")
 
         # Try to delete as non-partitioned topic first
-        url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}"
-        params = {}
-        if force:
-            params['force'] = 'true'
-        response = requests.delete(url, params=params)
+        response = self._delete_topic_request(topic, force=force)
 
         # If we get a 409 error saying it's a partitioned topic, try deleting as partitioned
-        if response.status_code == 409:
-            try:
-                error_info = response.json()
-                if "partitioned topic" in error_info.get("reason", "").lower():
-                    print("Detected partitioned topic, trying partitioned topic deletion...")
+        if self._is_partitioned_topic_conflict(response):
+            print("Detected partitioned topic, trying partitioned topic deletion...")
+            response = self._delete_topic_request(
+                topic,
+                force=force,
+                partitioned=True,
+            )
 
-                    # Delete as partitioned topic
-                    partitioned_url = f"{self.admin_url}/admin/v2/{topic.replace('://', '/')}/partitions"
-                    partitioned_params = {}
-                    if force:
-                        partitioned_params['force'] = 'true'
-                    response = requests.delete(partitioned_url, params=partitioned_params)
-
-                    if response.status_code in [200, 204]:
-                        print(f"Partitioned topic {topic} dropped successfully")
-                        print("All partitions have been deleted")
-                        return
-            except:
-                # If we can't parse the error, fall through to general error handling
-                pass
+            if response.status_code in [200, 204]:
+                print(f"Partitioned topic {topic} dropped successfully")
+                print("All partitions have been deleted")
+                return
 
         # Handle the response
         if response.status_code in [200, 204]:
@@ -168,24 +215,18 @@ class PulsarCat:
 
         try:
             line_count = 0
-            for line in sys.stdin:
-                line = line.rstrip('\n\r')
-                if line:  # Only send non-empty lines
-                    if key_delimiter and key_delimiter in line:
-                        # Split only on first occurrence
-                        parts = line.split(key_delimiter, 1)
-                        message_key = parts[0]
-                        message_payload = parts[1] if len(parts) > 1 else ''
-                        producer.send(
-                            message_payload.encode('utf-8'),
-                            partition_key=message_key
-                        )
-                        line_count += 1
-                        print(f"Sent message {line_count}: key='{message_key}', payload='{message_payload}'")
-                    else:
-                        producer.send(line.encode('utf-8'))
-                        line_count += 1
-                        print(f"Sent message {line_count}: {line}")
+            for message_key, message_payload in self._iter_input_messages(key_delimiter):
+                if message_key is not None:
+                    producer.send(
+                        message_payload.encode('utf-8'),
+                        partition_key=message_key
+                    )
+                    line_count += 1
+                    print(f"Sent message {line_count}: key='{message_key}', payload='{message_payload}'")
+                else:
+                    producer.send(message_payload.encode('utf-8'))
+                    line_count += 1
+                    print(f"Sent message {line_count}: {message_payload}")
         except KeyboardInterrupt:
             print(f"\nProduced {line_count} messages")
         finally:
@@ -279,8 +320,7 @@ class PulsarCat:
         print(f"Compacting topic: {topic}")
 
         # Use admin API to compact topic
-        encoded_topic = topic.replace('://', '/')
-        url = f"{self.admin_url}/admin/v2/{encoded_topic}/compaction"
+        url = self._topic_admin_url(topic, "compaction")
         for method_name, method in (("PUT", requests.put), ("POST", requests.post)):
             response = method(url)
             if response.status_code in [200, 204]:
@@ -299,8 +339,7 @@ class PulsarCat:
         print(f"Checking compaction status for topic: {topic}")
 
         # Use admin API to get compaction status
-        encoded_topic = topic.replace('://', '/')
-        url = f"{self.admin_url}/admin/v2/{encoded_topic}/compaction"
+        url = self._topic_admin_url(topic, "compaction")
 
         try:
             response = requests.get(url)

@@ -1,19 +1,27 @@
-import sys
 import json
 import importlib
+import sys
+from pathlib import Path
+
 from google.protobuf.source_context_pb2 import SourceContext
-from confluent_kafka import Producer
 from confluent_kafka.serialization import (
     SerializationContext,
     MessageField,
 )
-from confluent_kafka.schema_registry import SchemaRegistryClient
 from confluent_kafka.schema_registry.protobuf import ProtobufSerializer
 
+for parent in Path(__file__).resolve().parents:
+    if (parent / "e2e_test").is_dir():
+        parent_str = str(parent)
+        if parent_str not in sys.path:
+            sys.path.insert(0, parent_str)
+        break
 
-def delivery_report(err, msg):
-    if err is not None:
-        print("Delivery failed for User record {}: {}".format(msg.value(), err))
+from e2e_test.py_utils.kafka import (  # noqa: E402
+    create_kafka_producer,
+    create_schema_registry_client,
+    produce_serialized_messages,
+)
 
 
 def get_user(i):
@@ -42,25 +50,28 @@ def get_user_with_more_fields(i):
 def send_to_kafka(
     producer_conf, schema_registry_conf, topic, num_records, get_user_fn, pb_message
 ):
-    schema_registry_client = SchemaRegistryClient(schema_registry_conf)
+    schema_registry_client = create_schema_registry_client(schema_registry_conf)
     serializer = ProtobufSerializer(
         pb_message,
         schema_registry_client,
         {"use.deprecated.format": False, "skip.known.types": True},
     )
 
-    producer = Producer(producer_conf)
-    for i in range(num_records):
-        user = get_user_fn(i)
+    producer = create_kafka_producer(producer_conf)
 
-        producer.produce(
-            topic=topic,
-            partition=0,
-            key=json.dumps({"id": i}), # RisingWave does not handle key schema, so we use json
-            value=serializer(user, SerializationContext(topic, MessageField.VALUE)),
-            on_delivery=delivery_report,
-        )
-    producer.flush()
+    def build_messages():
+        for i in range(num_records):
+            user = get_user_fn(i)
+            yield {
+                # RisingWave does not handle key schema, so we use json.
+                "key": json.dumps({"id": i}),
+                "value": serializer(
+                    user,
+                    SerializationContext(topic, MessageField.VALUE),
+                ),
+            }
+
+    produce_serialized_messages(producer, topic, build_messages())
     print("Send {} records to kafka\n".format(num_records))
 
 

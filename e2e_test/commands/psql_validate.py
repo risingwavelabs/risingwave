@@ -25,12 +25,22 @@ Wildcard Matching:
 """
 
 import argparse
-import psycopg2
-import re
-import os
-import sys
 import logging  # Import logging module
+import re
+import sys
+from pathlib import Path
+
+import psycopg2
 from psycopg2 import sql
+
+for parent in Path(__file__).resolve().parents:
+    if (parent / "e2e_test").is_dir():
+        parent_str = str(parent)
+        if parent_str not in sys.path:
+            sys.path.insert(0, parent_str)
+        break
+
+from e2e_test.py_utils.risingwave import connect_risingwave  # noqa: E402
 
 
 # Configure logging
@@ -115,13 +125,13 @@ def create_regex_from_template(template: str, wildcard="%"):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Execute SQL and validate output against a template using '%s' wildcards."
+        description="Execute SQL and validate output against a template using '%%' wildcards."
     )
     parser.add_argument("--sql", required=True, help="SQL query to execute.")
     parser.add_argument(
         "--expected",
         required=True,
-        help="Expected output template with '%' as wildcard.",
+        help="Expected output template with '%%' as wildcard.",
     )
     parser.add_argument(
         "--db", default="dev", help="Database name to connect to (default: dev)."
@@ -145,11 +155,11 @@ def main():
     actual_output_raw = ""  # Initialize to handle potential errors before assignment
     try:
         dbname = args.db
-        conn_string = f"host='{os.environ.get("RISEDEV_RW_FRONTEND_LISTEN_ADDRESS")}' port='{os.environ.get('RISEDEV_RW_FRONTEND_PORT')}' dbname='{dbname}' user='root' password=''"
         logger.debug(
-            f"Connecting to: {conn_string.replace('password=\'\'', 'password=***')}..."
-        )  # Hide password if any
-        conn = psycopg2.connect(conn_string)
+            "Connecting to RisingWave database %s via environment frontend settings...",
+            dbname,
+        )
+        conn = connect_risingwave(dbname)
         conn.autocommit = True
         cur = conn.cursor()
 

@@ -2,11 +2,25 @@
 
 import argparse
 import json
-import time
-import sys
 import os
+import sys
+import time
+from pathlib import Path
+
 from confluent_kafka import Producer
-import psycopg2
+
+for parent in Path(__file__).resolve().parents:
+    if (parent / "e2e_test").is_dir():
+        parent_str = str(parent)
+        if parent_str not in sys.path:
+            sys.path.insert(0, parent_str)
+        break
+
+from e2e_test.py_utils.risingwave import (  # noqa: E402
+    connect_risingwave,
+    fetchall,
+    fetchone,
+)
 
 
 def produce_records(producer, topic, records):
@@ -64,13 +78,7 @@ def main():
 
         # Connect to RisingWave
         try:
-            conn = psycopg2.connect(
-                host=os.environ.get("RISEDEV_RW_FRONTEND_LISTEN_ADDRESS"),
-                port=os.environ.get("RISEDEV_RW_FRONTEND_PORT"),
-                user='root',
-                password='',
-                database=args.db_name
-            )
+            conn = connect_risingwave(args.db_name)
             cur = conn.cursor()
             print(f"Connected to RisingWave database: {args.db_name}")
         except Exception as e:
@@ -106,13 +114,11 @@ def main():
             time.sleep(3)
 
             # Step 6: Select count(*) from the table
-            cur.execute(f"SELECT COUNT(*) FROM {table_name}")
-            count_result = cur.fetchone()[0]
+            count_result = fetchone(cur, f"SELECT COUNT(*) FROM {table_name}")[0]
             print(f"Count from table {table_name}: {count_result}")
 
             # Also show the actual records for verification
-            cur.execute(f"SELECT * FROM {table_name} ORDER BY id")
-            records = cur.fetchall()
+            records = fetchall(cur, f"SELECT * FROM {table_name} ORDER BY id")
             print(f"Records in table:")
             for record in records:
                 print(f"  {record}")
