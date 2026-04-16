@@ -542,6 +542,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
 
             let target_key = second.current_sstable().key();
             let iter = first.sstable_iter.as_mut().unwrap().iter.as_mut().unwrap();
+            self.executor.reset_watermark();
             self.executor.run(iter, target_key).await?;
             if !iter.is_valid() {
                 first.sstable_iter.as_mut().unwrap().iter.take();
@@ -560,6 +561,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             let sstable_iter = rest_data.sstable_iter.as_mut().unwrap();
             let target_key = FullKey::decode(&sstable_iter.sstable.meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
+                self.executor.reset_watermark();
                 self.executor.run(iter, target_key).await?;
                 assert!(
                     !iter.is_valid(),
@@ -587,6 +589,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
                     let mut iter = sstable_iter.iter.take().unwrap();
+                    self.executor.reset_watermark();
                     self.executor.run(&mut iter, target_key).await?;
                 } else {
                     let largest_key = sstable_iter.current_block_largest();
@@ -703,6 +706,16 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         self.last_key_is_delete = false;
     }
 
+    fn reset_watermark(&mut self) {
+        self.pk_prefix_skip_watermark_state.reset_watermark();
+        self.non_pk_prefix_skip_watermark_state.reset_watermark();
+    }
+
+    #[inline(always)]
+    fn should_skip_block(&self, table_id: TableId) -> bool {
+        !self.compact_table_ids.contains(&table_id)
+    }
+
     #[inline(always)]
     fn may_report_process_key(&mut self, key_count: u32) {
         const PROGRESS_KEY_INTERVAL: u32 = 100;
@@ -719,12 +732,10 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
-        if !self.compact_table_ids.contains(&iter.table_id()) {
+        if self.should_skip_block(iter.table_id()) {
+            iter.finish_block();
             return Ok(());
         }
-
-        self.pk_prefix_skip_watermark_state.reset_watermark();
-        self.non_pk_prefix_skip_watermark_state.reset_watermark();
 
         while iter.is_valid() && iter.key().le(&target_key) {
             let is_new_user_key =
@@ -795,11 +806,8 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
     }
 
     pub fn shall_copy_raw_block(&mut self, smallest_key: &FullKey<&[u8]>) -> bool {
-        if !self
-            .compact_table_ids
-            .contains(&smallest_key.user_key.table_id)
-        {
-            // If the table id of smallest key is in compact_table_ids, we can not copy the raw block
+        if self.should_skip_block(smallest_key.user_key.table_id) {
+            // If the table id of smallest key is not in compact_table_ids, we can not copy the raw block.
             return false;
         }
 
