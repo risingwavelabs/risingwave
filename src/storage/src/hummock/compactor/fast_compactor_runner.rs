@@ -446,6 +446,8 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             compaction_catalog_agent_ref,
         );
 
+        let compact_table_ids = HashSet::from_iter(task.build_compact_table_ids());
+
         Self {
             executor: CompactTaskExecutor::new(
                 sst_builder,
@@ -455,6 +457,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                 non_pk_prefix_state,
                 value_skip_watermark_state,
                 compaction_filter,
+                compact_table_ids,
             ),
             left,
             right,
@@ -652,6 +655,7 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
     value_skip_watermark_state: ValueSkipWatermarkState,
     compaction_filter: C,
+    compact_table_ids: HashSet<TableId>,
 }
 
 impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
@@ -663,6 +667,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
         value_skip_watermark_state: ValueSkipWatermarkState,
         compaction_filter: C,
+        compact_table_ids: HashSet<TableId>,
     ) -> Self {
         Self {
             builder,
@@ -678,6 +683,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             non_pk_prefix_skip_watermark_state,
             value_skip_watermark_state,
             compaction_filter,
+            compact_table_ids,
         }
     }
 
@@ -713,6 +719,10 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
+        if !self.compact_table_ids.contains(&iter.table_id()) {
+            return Ok(());
+        }
+
         self.pk_prefix_skip_watermark_state.reset_watermark();
         self.non_pk_prefix_skip_watermark_state.reset_watermark();
 
@@ -785,6 +795,14 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
     }
 
     pub fn shall_copy_raw_block(&mut self, smallest_key: &FullKey<&[u8]>) -> bool {
+        if !self
+            .compact_table_ids
+            .contains(&smallest_key.user_key.table_id)
+        {
+            // If the table id of smallest key is in compact_table_ids, we can not copy the raw block
+            return false;
+        }
+
         if self.last_key_is_delete && self.last_key.user_key.as_ref().eq(&smallest_key.user_key) {
             // If the last key is delete tombstone, we can not append the origin block
             // because it would cause a deleted key could be see by user again.

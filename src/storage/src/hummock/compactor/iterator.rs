@@ -62,7 +62,7 @@ pub struct SstableStreamIterator {
     sstable_info: SstableInfo,
 
     /// To Filter out the blocks
-    sstable_table_ids: HashSet<StateTableId>,
+    compact_table_ids: HashSet<StateTableId>,
     task_progress: Arc<TaskProgress>,
     io_retry_times: usize,
     max_io_retry_times: usize,
@@ -96,16 +96,15 @@ impl SstableStreamIterator {
         task_progress: Arc<TaskProgress>,
         sstable_store: SstableStoreRef,
         max_io_retry_times: usize,
+        compact_table_ids: HashSet<StateTableId>,
     ) -> Self {
-        let sstable_table_ids = HashSet::from_iter(sstable_info.table_ids.iter().cloned());
-
         // Further filter the block_metas_range with sstable_info.key_range
         // This is necessary when the SST is split into multiple SstableInfo with different key ranges
         let block_metas_range = {
             let block_metas = &sstable.meta.block_metas[block_metas_range.clone()];
             let inner_range = filter_block_metas(
                 block_metas,
-                &sstable_table_ids,
+                &compact_table_ids,
                 sstable_info.key_range.clone(),
             );
             // Adjust the range to be relative to the original block_metas
@@ -124,7 +123,7 @@ impl SstableStreamIterator {
             block_metas_range,
             block_idx: 0,
             stats_ptr: stats.remote_io_time.clone(),
-            sstable_table_ids,
+            compact_table_ids,
             sstable_info,
             sstable_store,
             task_progress,
@@ -163,7 +162,7 @@ impl SstableStreamIterator {
 
     async fn prune_from_valid_block_iter(&mut self) -> HummockResult<()> {
         while let Some(block_iter) = self.block_iter.as_mut() {
-            if self.sstable_table_ids.contains(&block_iter.table_id()) {
+            if self.compact_table_ids.contains(&block_iter.table_id()) {
                 return Ok(());
             } else {
                 self.next_block().await?;
@@ -385,7 +384,7 @@ pub struct ConcatSstableIterator {
     /// All non-overlapping tables.
     sstables: Vec<SstableInfo>,
 
-    existing_table_ids: HashSet<StateTableId>,
+    compact_table_ids: HashSet<StateTableId>,
 
     sstable_store: SstableStoreRef,
 
@@ -399,7 +398,7 @@ impl ConcatSstableIterator {
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
     pub fn new(
-        existing_table_ids: Vec<StateTableId>,
+        compact_table_ids: Vec<StateTableId>,
         sst_infos: Vec<SstableInfo>,
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
@@ -411,7 +410,7 @@ impl ConcatSstableIterator {
             sstable_iter: None,
             cur_idx: 0,
             sstables: sst_infos,
-            existing_table_ids: HashSet::from_iter(existing_table_ids),
+            compact_table_ids: HashSet::from_iter(compact_table_ids),
             sstable_store,
             task_progress,
             stats: StoreLocalStatistic::default(),
@@ -460,7 +459,7 @@ impl ConcatSstableIterator {
             let mut found = table_info
                 .table_ids
                 .iter()
-                .any(|table_id| self.existing_table_ids.contains(table_id));
+                .any(|table_id| self.compact_table_ids.contains(table_id));
             if !found {
                 self.cur_idx += 1;
                 seek_key = None;
@@ -479,9 +478,18 @@ impl ConcatSstableIterator {
                 None => self.key_range.clone(),
             };
 
+            let compact_sstable_table_ids = {
+                // unite table_ids between sstable and compact_table_ids
+                let sstable_table_ids = HashSet::from_iter(table_info.table_ids.iter().cloned());
+                sstable_table_ids
+                    .intersection(&self.compact_table_ids)
+                    .cloned()
+                    .collect()
+            };
+
             let block_metas_range = filter_block_metas(
                 &sstable.meta.block_metas,
-                &self.existing_table_ids,
+                &compact_sstable_table_ids,
                 filter_key_range,
             );
 
@@ -497,6 +505,7 @@ impl ConcatSstableIterator {
                     self.task_progress.clone(),
                     self.sstable_store.clone(),
                     self.max_io_retry_times,
+                    compact_sstable_table_ids,
                 );
                 sstable_iter.seek(seek_key).await?;
 
@@ -660,7 +669,7 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
 
 pub(crate) fn filter_block_metas(
     block_metas: &[BlockMeta],
-    existing_table_ids: &HashSet<TableId>,
+    compact_table_ids: &HashSet<TableId>,
     key_range: KeyRange,
 ) -> Range<usize> {
     if block_metas.is_empty() {
@@ -699,7 +708,7 @@ pub(crate) fn filter_block_metas(
     // skip blocks that are not in existing_table_ids
     while start_index <= end_index {
         let start_block_table_id = block_metas[start_index].table_id();
-        if existing_table_ids.contains(&start_block_table_id) {
+        if compact_table_ids.contains(&start_block_table_id) {
             break;
         }
 
@@ -718,7 +727,7 @@ pub(crate) fn filter_block_metas(
 
     while start_index <= end_index {
         let end_block_table_id = block_metas[end_index].table_id();
-        if existing_table_ids.contains(&end_block_table_id) {
+        if compact_table_ids.contains(&end_block_table_id) {
             break;
         }
 
