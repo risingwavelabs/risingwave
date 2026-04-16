@@ -337,7 +337,8 @@ macro_rules! for_all_fragment_type_flags {
                 StreamCdcScan,
                 VectorIndexWrite,
                 UpstreamSinkUnion,
-                LocalityProvider
+                LocalityProvider,
+                SourceWaitForBackfill
             },
             {},
             0

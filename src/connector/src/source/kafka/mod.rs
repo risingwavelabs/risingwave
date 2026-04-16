@@ -18,6 +18,7 @@ use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 
 use crate::connector_common::{AwsAuthProps, KafkaConnectionProps, KafkaPrivateLinkCommon};
+use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
@@ -171,6 +172,14 @@ pub struct KafkaProperties {
 
     #[serde(flatten)]
     pub rdkafka_properties_consumer: RdKafkaPropertiesConsumer,
+
+    /// Whether to wait for backfill completion when creating the table.
+    #[serde(
+        rename = "backfill.wait",
+        default,
+        deserialize_with = "deserialize_optional_bool_from_string"
+    )]
+    pub backfill_wait: Option<bool>,
 
     #[serde(flatten)]
     pub privatelink_common: KafkaPrivateLinkCommon,

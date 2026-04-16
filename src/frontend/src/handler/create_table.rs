@@ -489,6 +489,20 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let session = &handler_args.session;
     let (with_properties, refresh_mode) =
         bind_connector_props(&handler_args, &format_encode, false)?;
+
+    // Validate backfill.wait option: only supported for kafka connector currently.
+    if with_properties
+        .get("backfill.wait")
+        .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+        && !with_properties.is_kafka_connector()
+    {
+        return Err(ErrorCode::NotSupported(
+            "backfill.wait is not supported for this connector, currently only 'kafka' is supported".to_owned(),
+            "Use a kafka connector or remove the backfill.wait option".to_owned(),
+        )
+        .into());
+    }
+
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
         not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;

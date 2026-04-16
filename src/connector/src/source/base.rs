@@ -887,6 +887,14 @@ impl SplitImpl {
     pub fn encode_to_json_inner(&self) -> JsonbVal {
         dispatch_split_impl!(self, |inner| inner.encode_to_json())
     }
+
+    pub fn backfill_target_offset(&self) -> Option<String> {
+        dispatch_split_impl!(self, |inner| inner.backfill_target_offset())
+    }
+
+    pub fn current_offset(&self) -> Option<String> {
+        dispatch_split_impl!(self, |inner| inner.current_offset())
+    }
 }
 
 use risingwave_common::types::DataType;
@@ -972,6 +980,18 @@ pub trait SplitMetaData: Sized {
     fn encode_to_json(&self) -> JsonbVal;
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
     fn update_offset(&mut self, last_seen_offset: String) -> crate::error::ConnectorResult<()>;
+
+    /// Returns the backfill target offset for this split, if set.
+    /// Used by `wait_for_backfill` to determine when backfill is complete.
+    fn backfill_target_offset(&self) -> Option<String> {
+        None
+    }
+
+    /// Returns the current consumed offset for this split, if available.
+    /// Used by `wait_for_backfill` to check whether the split has reached its target offset.
+    fn current_offset(&self) -> Option<String> {
+        None
+    }
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,

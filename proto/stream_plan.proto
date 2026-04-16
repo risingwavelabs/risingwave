@@ -284,6 +284,9 @@ message StreamSource {
   optional Columns downstream_columns = 11;
   plan_common.SourceRefreshMode refresh_mode = 12;
   optional uint32 associated_table_id = 13;
+  // Whether to wait for backfill to complete before returning from DDL.
+  // When true, the source executor will track progress and report backfill completion.
+  bool wait_for_backfill = 14;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future

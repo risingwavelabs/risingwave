@@ -32,6 +32,12 @@ pub struct KafkaSplit {
     /// A better approach would be to make it **inclusive**. <https://github.com/risingwavelabs/risingwave/pull/16257>
     pub(crate) start_offset: Option<i64>,
     pub(crate) stop_offset: Option<i64>,
+    /// The target offset for backfill completion. When `wait_for_backfill` is enabled,
+    /// this is set to `high_watermark - 1` at table creation time. The source executor
+    /// reports backfill as complete when all splits' current offsets reach their targets.
+    /// Uses `serde(default)` for backward compatibility with existing state.
+    #[serde(default)]
+    pub(crate) backfill_target_offset: Option<i64>,
 }
 
 impl SplitMetaData for KafkaSplit {
@@ -52,6 +58,14 @@ impl SplitMetaData for KafkaSplit {
         self.start_offset = Some(last_seen_offset.as_str().parse::<i64>().unwrap());
         Ok(())
     }
+
+    fn backfill_target_offset(&self) -> Option<String> {
+        self.backfill_target_offset.map(|o| o.to_string())
+    }
+
+    fn current_offset(&self) -> Option<String> {
+        self.start_offset.map(|o| o.to_string())
+    }
 }
 
 impl KafkaSplit {
@@ -66,6 +80,7 @@ impl KafkaSplit {
             partition,
             start_offset,
             stop_offset,
+            backfill_target_offset: None,
         }
     }
 }

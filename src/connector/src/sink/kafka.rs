@@ -300,6 +300,7 @@ impl From<KafkaConfig> for KafkaProperties {
             privatelink_common: val.privatelink_common,
             aws_auth_props: val.aws_auth_props,
             group_id_prefix: None,
+            backfill_wait: None,
             unknown_fields: Default::default(),
         }
     }
