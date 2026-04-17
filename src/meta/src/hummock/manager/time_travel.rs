@@ -100,7 +100,7 @@ impl HummockManager {
                 .into_tuple::<HummockVersionId>()
                 .all(&txn)
                 .await?;
-            // Ensure at leaset 1 version BELOW watermark_version_id if applying time_travel_vacuum_max_version_count.
+            // Ensure at least 1 version BELOW watermark_version_id if applying time_travel_vacuum_max_version_count.
             if earliest2_version_ids.len() == 2 {
                 watermark_version_id = std::cmp::min(
                     watermark_version_id,
