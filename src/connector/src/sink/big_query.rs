@@ -323,6 +323,22 @@ impl BigQuerySink {
 }
 
 impl BigQuerySink {
+    fn is_decimal_type_compatible(bigquery_type: &str) -> bool {
+        let normalized = bigquery_type.trim().to_ascii_uppercase();
+        matches!(
+            normalized.split_once('(').map_or(normalized.as_str(), |(prefix, _)| prefix),
+            "NUMERIC" | "BIGNUMERIC"
+        )
+    }
+
+    fn is_data_type_compatible(rw_data_type: &DataType, bigquery_type: &str) -> Result<bool> {
+        if matches!(rw_data_type, DataType::Decimal) {
+            return Ok(Self::is_decimal_type_compatible(bigquery_type));
+        }
+
+        Ok(Self::get_string_and_check_support_from_datatype(rw_data_type)? == bigquery_type)
+    }
+
     fn check_column_name_and_type(
         &self,
         big_query_columns_desc: HashMap<String, String>,
@@ -349,7 +365,7 @@ impl BigQuerySink {
                 ))
             })?;
             let data_type_string = Self::get_string_and_check_support_from_datatype(&i.data_type)?;
-            if data_type_string.ne(value) {
+            if !Self::is_data_type_compatible(&i.data_type, value)? {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Data type mismatch for column `{:?}`. BigQuery side: `{:?}`, RisingWave side: `{:?}`. ",
                     i.name,
@@ -981,12 +997,15 @@ fn build_protobuf_field(
 mod test {
 
     use std::assert_matches::assert_matches;
+    use std::collections::HashMap;
 
+    use crate::connector_common::AwsAuthProps;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, StructType};
 
     use crate::sink::big_query::{
-        BigQuerySink, build_protobuf_descriptor_pool, build_protobuf_schema,
+        BigQueryCommon, BigQueryConfig, BigQuerySink, build_protobuf_descriptor_pool,
+        build_protobuf_schema,
     };
 
     #[tokio::test]
@@ -1065,5 +1084,60 @@ mod test {
             v3_v3_message.get_field_by_name("v2").unwrap().kind(),
             prost_reflect::Kind::Int64
         );
+    }
+
+    #[test]
+    fn test_decimal_type_family_compatibility() {
+        assert!(BigQuerySink::is_decimal_type_compatible("NUMERIC"));
+        assert!(BigQuerySink::is_decimal_type_compatible("numeric(31, 2)"));
+        assert!(BigQuerySink::is_decimal_type_compatible("BIGNUMERIC"));
+        assert!(BigQuerySink::is_decimal_type_compatible("bignumeric(35, 12)"));
+        assert!(!BigQuerySink::is_decimal_type_compatible("STRING"));
+    }
+
+    #[test]
+    fn test_decimal_schema_check_accepts_parameterized_numeric_types() {
+        let sink = BigQuerySink {
+            config: BigQueryConfig {
+                common: BigQueryCommon {
+                    local_path: None,
+                    s3_path: None,
+                    project: "project".to_owned(),
+                    dataset: "dataset".to_owned(),
+                    table: "table".to_owned(),
+                    auto_create: false,
+                    credentials: None,
+                },
+                aws_auth_props: AwsAuthProps {
+                    region: None,
+                    endpoint: None,
+                    access_key: None,
+                    secret_key: None,
+                    session_token: None,
+                    arn: None,
+                    external_id: None,
+                    profile: None,
+                    msk_signer_timeout_sec: None,
+                },
+                r#type: "append-only".to_owned(),
+            },
+            schema: Schema {
+                fields: vec![Field::with_name(DataType::Decimal, "capitalizedcost")],
+            },
+            pk_indices: vec![],
+            is_append_only: true,
+        };
+
+        sink.check_column_name_and_type(HashMap::from([(
+            "capitalizedcost".to_owned(),
+            "NUMERIC(31, 2)".to_owned(),
+        )]))
+        .unwrap();
+
+        sink.check_column_name_and_type(HashMap::from([(
+            "capitalizedcost".to_owned(),
+            "BIGNUMERIC(35, 12)".to_owned(),
+        )]))
+        .unwrap();
     }
 }
