@@ -26,6 +26,11 @@ use risingwave_pb::plan_common::additional_column::ColumnType;
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
+
+/// JDBC type constants found in Debezium schema change events.
+mod debezium_sql_types {
+    pub const STRUCT: i32 = 2002;
+}
 use crate::parser::TransactionControl;
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::schema_change::TableChangeType;
@@ -230,16 +235,30 @@ pub fn parse_schema_change(
                 for col in columns.array_elements().unwrap() {
                     let name = jsonb_access_field!(col, "name", string);
                     let type_name = jsonb_access_field!(col, "typeName", string);
-                    // Determine if this column is an enum type
+                    // User-defined types (enum, composite) are not in the
+                    // `type_name_to_pg_type` whitelist because their type names are
+                    // user-chosen. We detect them via Debezium metadata instead:
+                    //  - Enum: has a non-null `enumValues` field in the column descriptor.
+                    //  - Composite (STRUCT): identified by `jdbcType == 2002`.
+                    // Both are mapped to Varchar — enum values are plain strings, and
+                    // composite values are converted to text by our CustomConverter.
                     let is_enum = matches!(col.access_object_field("enumValues"), Some(val) if !val.is_jsonb_null());
+                    let is_composite = col
+                        .access_object_field("jdbcType")
+                        .and_then(|v| v.as_number().ok())
+                        .map(|n| n.0 as i32)
+                        == Some(debezium_sql_types::STRUCT);
+
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
-                            let ty = type_name_to_pg_type(type_name.as_str());
-                            if is_enum {
+                            if is_composite || is_enum {
                                 tracing::debug!(target: "auto_schema_change",
-                                    "Convert PostgreSQL user defined enum type '{}' to VARCHAR", type_name);
+                                    "Convert PostgreSQL user-defined type '{}' ({}) to VARCHAR",
+                                    type_name,
+                                    if is_composite { "composite" } else { "enum" });
                                 DataType::Varchar
                             } else {
+                                let ty = type_name_to_pg_type(type_name.as_str());
                                 match ty {
                                     Some(ty) => match pg_type_to_rw_type(&ty) {
                                         Ok(data_type) => data_type,
