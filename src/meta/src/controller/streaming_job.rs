@@ -3044,9 +3044,16 @@ impl CatalogController {
                         .unwrap_or_default(),
                 );
 
-                let (_sink_to_add_secret_dep, _sink_to_remove_secret_dep) =
-                    sink_options_with_secret
-                        .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
+                let (sink_to_add_secret_dep, sink_to_remove_secret_dep) = sink_options_with_secret
+                    .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
+
+                update_secret_dependencies(
+                    &txn,
+                    sink_to_add_secret_dep,
+                    sink_to_remove_secret_dep,
+                    sink_id.as_object_id(),
+                )
+                .await?;
 
                 // Prepare sink update
                 let active_sink = sink::ActiveModel {
