@@ -745,10 +745,9 @@ impl CatalogController {
                     object::Column::DatabaseId
                         .eq(table_obj.database_id)
                         .and(object::Column::SchemaId.eq(table_obj.schema_id))
-                        .and(sink::Column::Name.eq(format!(
-                            "{}{}",
-                            ICEBERG_SINK_PREFIX, table.name
-                        ))),
+                        .and(
+                            sink::Column::Name.eq(format!("{}{}", ICEBERG_SINK_PREFIX, table.name)),
+                        ),
                 )
                 .into_tuple::<SinkId>()
                 .one(txn)
