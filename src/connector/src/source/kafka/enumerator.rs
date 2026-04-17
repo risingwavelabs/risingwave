@@ -182,6 +182,26 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
+        // `KafkaSplitEnumerator` uses `BaseConsumer`, which does not have a background polling
+        // thread. Poll once per `list_splits` invocation so meta's periodic source-manager tick
+        // can serve queued callbacks like librdkafka statistics events.
+        if let Some(Err(poll_err)) = {
+            #[cfg(not(madsim))]
+            {
+                self.client.poll(Duration::ZERO)
+            }
+            #[cfg(madsim)]
+            {
+                self.client.poll(Duration::ZERO).await
+            }
+        } {
+            tracing::warn!(
+                 error = %poll_err,
+                topic = self.topic,
+                broker_address = self.broker_address,
+                "failed to poll kafka client");
+        }
+
         let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
             format!(
                 "failed to fetch metadata from kafka ({})",
