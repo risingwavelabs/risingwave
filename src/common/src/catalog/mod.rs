@@ -598,6 +598,11 @@ mod tests {
                     131072,
                     "LOCALITY_PROVIDER",
                 ),
+                (
+                    SourceWaitForBackfill,
+                    262144,
+                    "SOURCE_WAIT_FOR_BACKFILL",
+                ),
             ]
         "#]]
         .assert_debug_eq(
