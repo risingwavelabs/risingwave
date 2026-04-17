@@ -286,6 +286,10 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
 
+    /// Whether `MaterializeExecutor` enables vnode key stats for its state table.
+    #[serde(default = "default::developer::enable_vnode_key_stats_for_materialize")]
+    pub enable_vnode_key_stats_for_materialize: bool,
+
     /// The maximum number of kv log store readers that can concurrently read historical data
     /// (i.e., from the state store) during initialization. A reader is considered "initializing"
     /// until it has read at least one row from the historical stream or the stream returns empty.
