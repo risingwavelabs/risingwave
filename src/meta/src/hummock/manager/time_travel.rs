@@ -168,11 +168,15 @@ impl HummockManager {
                 .into_tuple()
                 .all(&txn)
                 .await?;
-        // Reuse hummock_time_travel_epoch_version_insert_batch_size as threshold.
         let delete_sst_batch_size = self
             .env
             .opts
             .hummock_time_travel_epoch_version_insert_batch_size;
+        let delta_fetch_batch_size = self
+            .env
+            .opts
+            .hummock_time_travel_delta_fetch_batch_size
+            .max(1);
         let mut sst_ids_to_delete: HashSet<_> = HashSet::default();
         async fn delete_sst_in_batch(
             txn: &DatabaseTransaction,
@@ -196,32 +200,44 @@ impl HummockManager {
             }
             Ok(())
         }
-        for delta_id_to_delete in delta_ids_to_delete {
-            let delta_to_delete = hummock_time_travel_delta::Entity::find_by_id(delta_id_to_delete)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| {
-                    Error::TimeTravel(anyhow!(format!(
-                        "version delta {} not found",
-                        delta_id_to_delete
-                    )))
-                })?;
-            let delta_to_delete = IncompleteHummockVersionDelta::from_persisted_protobuf_owned(
-                delta_to_delete.version_delta.to_protobuf(),
-            );
-            let new_sst_ids = delta_to_delete.newly_added_sst_ids(true);
-            // The SST ids added and then deleted by compaction between the 2 versions.
-            sst_ids_to_delete.extend(&new_sst_ids - &latest_valid_version_sst_ids);
-            if sst_ids_to_delete.len() >= delete_sst_batch_size {
-                delete_sst_in_batch(
-                    &txn,
-                    std::mem::take(&mut sst_ids_to_delete),
-                    delete_sst_batch_size,
-                )
-                .await?;
+        for delta_id_batch in delta_ids_to_delete.chunks(delta_fetch_batch_size) {
+            let mut delta_to_delete_by_id: HashMap<_, _> =
+                hummock_time_travel_delta::Entity::find()
+                    .filter(
+                        hummock_time_travel_delta::Column::VersionId
+                            .is_in(delta_id_batch.iter().copied()),
+                    )
+                    .all(&txn)
+                    .await?
+                    .into_iter()
+                    .map(|delta| (delta.version_id, delta))
+                    .collect();
+            for &delta_id_to_delete in delta_id_batch {
+                let delta_to_delete = delta_to_delete_by_id
+                    .remove(&delta_id_to_delete)
+                    .ok_or_else(|| {
+                        Error::TimeTravel(anyhow!(format!(
+                            "version delta {} not found",
+                            delta_id_to_delete
+                        )))
+                    })?;
+                let delta_to_delete = IncompleteHummockVersionDelta::from_persisted_protobuf_owned(
+                    delta_to_delete.version_delta.to_protobuf(),
+                );
+                let new_sst_ids = delta_to_delete.newly_added_sst_ids(true);
+                // The SST ids added and then deleted by compaction between the 2 versions.
+                sst_ids_to_delete.extend(&new_sst_ids - &latest_valid_version_sst_ids);
+                if sst_ids_to_delete.len() >= delete_sst_batch_size {
+                    delete_sst_in_batch(
+                        &txn,
+                        std::mem::take(&mut sst_ids_to_delete),
+                        delete_sst_batch_size,
+                    )
+                    .await?;
+                }
+                let new_object_ids = delta_to_delete.newly_added_object_ids(true);
+                object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             }
-            let new_object_ids = delta_to_delete.newly_added_object_ids(true);
-            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
         }
         let mut next_version_sst_ids = latest_valid_version_sst_ids;
         for prev_version_id in version_ids_to_delete {
