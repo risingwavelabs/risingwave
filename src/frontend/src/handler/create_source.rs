@@ -1243,6 +1243,7 @@ pub mod tests {
         DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
+    use risingwave_pb::plan_common::EncodeType;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::source_catalog::SourceCatalog;
@@ -1299,6 +1300,37 @@ pub mod tests {
             .into(),
         };
         assert_eq!(columns, expected_columns, "{columns:#?}");
+    }
+
+    #[tokio::test]
+    async fn test_create_mqtt_source_with_protobuf() {
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
+        let sql = format!(
+            r#"CREATE SOURCE t_mqtt
+    WITH (
+        connector = 'mqtt',
+        url = 'mqtt://localhost:1883',
+        topic = 'test_topic'
+    )
+    FORMAT PLAIN ENCODE PROTOBUF (
+        message = '.test.TestRecord',
+        schema.location = 'file://{}'
+    )"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t_mqtt")
+            .unwrap();
+
+        assert_eq!(source.name, "t_mqtt");
+        assert_eq!(source.info.row_encode, EncodeType::Protobuf as i32);
     }
 
     #[tokio::test]
