@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use iceberg::spec::FormatVersion;
+use iceberg::spec::{FormatVersion, NullOrder, SortDirection};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, FieldRef as ArrowFieldRef,
     Fields as ArrowFields, Schema as ArrowSchema,
@@ -27,9 +27,10 @@ use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT
 use crate::sink::iceberg::{
     COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
     CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, IcebergConfig, IcebergWriteMode,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, IcebergConfig, IcebergOrderKeyField,
+    IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
+    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_order_key_exprs, validate_order_key_columns,
 };
 
 pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
@@ -188,6 +189,47 @@ fn test_compatible_arrow_schema() {
 }
 
 #[test]
+fn test_parse_order_key_exprs() {
+    let parsed =
+        parse_order_key_exprs("v1, v2 desc nulls first, v3 asc nulls last".to_owned()).unwrap();
+    assert_eq!(
+        parsed,
+        vec![
+            IcebergOrderKeyField {
+                column: "v1".to_owned(),
+                direction: SortDirection::Ascending,
+                null_order: NullOrder::First,
+            },
+            IcebergOrderKeyField {
+                column: "v2".to_owned(),
+                direction: SortDirection::Descending,
+                null_order: NullOrder::First,
+            },
+            IcebergOrderKeyField {
+                column: "v3".to_owned(),
+                direction: SortDirection::Ascending,
+                null_order: NullOrder::Last,
+            },
+        ]
+    );
+}
+
+#[test]
+fn test_parse_order_key_exprs_reject_invalid_inputs() {
+    assert!(parse_order_key_exprs("bucket(4, v1)".to_owned()).is_err());
+    assert!(parse_order_key_exprs("v1, v1 desc".to_owned()).is_err());
+    assert!(parse_order_key_exprs("v1 nulls".to_owned()).is_err());
+}
+
+#[test]
+fn test_validate_order_key_columns() {
+    let parsed = validate_order_key_columns("v1 desc", ["v1", "v2"]).unwrap();
+    assert_eq!(parsed[0].column, "v1");
+    assert!(validate_order_key_columns("_row_id", ["_row_id"]).is_err());
+    assert!(validate_order_key_columns("v3", ["v1", "v2"]).is_err());
+}
+
+#[test]
 fn test_parse_iceberg_config() {
     let values = [
             ("connector", "iceberg"),
@@ -264,6 +306,7 @@ fn test_parse_iceberg_config() {
             force_append_only: false,
             primary_key: Some(vec!["v1".to_owned()]),
             partition_by: Some("v1, identity(v1), truncate(4,v2), bucket(5,v1), year(v3), month(v4), day(v5), hour(v6), void(v1)".to_owned()),
+            order_key: None,
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -682,6 +725,7 @@ fn test_config_constants_consistency() {
         "snapshot_expiration_clear_expired_meta_data"
     );
     assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
+    assert_eq!(ORDER_KEY, "order_key");
 }
 
 /// Test parsing all compaction.* prefix configs and their default values.

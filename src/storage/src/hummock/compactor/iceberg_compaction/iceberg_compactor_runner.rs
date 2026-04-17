@@ -469,7 +469,7 @@ pub async fn create_plan_runners(
         TaskType::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -489,7 +489,7 @@ pub async fn create_plan_runners(
         }
         TaskType::Full => {
             let config = FullCompactionConfigBuilder::default()
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -503,7 +503,7 @@ pub async fn create_plan_runners(
 
         TaskType::FilesWithDelete => {
             let config = FilesWithDeletesConfigBuilder::default()
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
