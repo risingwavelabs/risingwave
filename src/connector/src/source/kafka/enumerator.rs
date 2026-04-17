@@ -28,6 +28,7 @@ use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
 use risingwave_common::id::FragmentId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
+use thiserror_ext::AsReport;
 
 use crate::connector_common::read_kafka_log_level;
 use crate::error::{ConnectorError, ConnectorResult};
@@ -196,7 +197,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             }
         } {
             tracing::warn!(
-                 error = %poll_err,
+                error = %poll_err.as_report(),
                 topic = self.topic,
                 broker_address = self.broker_address,
                 "failed to poll kafka client");
