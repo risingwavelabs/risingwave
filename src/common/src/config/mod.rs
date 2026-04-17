@@ -286,6 +286,10 @@ pub mod default {
             1000
         }
 
+        pub fn hummock_time_travel_delta_fetch_batch_size() -> usize {
+            100
+        }
+
         pub fn hummock_gc_history_insert_batch_size() -> usize {
             1000
         }
