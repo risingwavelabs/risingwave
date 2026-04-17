@@ -111,6 +111,13 @@ struct DependentSourceFragmentUpdate {
 }
 
 #[derive(Debug)]
+struct DependentSinkFragmentUpdate {
+    job_id: JobId,
+    with_properties: BTreeMap<String, String>,
+    secret_refs: BTreeMap<String, PbSecretRef>,
+}
+
+#[derive(Debug)]
 struct ReplaceOriginalJobInfo {
     max_parallelism: i32,
     timezone: Option<String>,
@@ -3027,51 +3034,49 @@ impl CatalogController {
                 let sink_id = sink.sink_id;
 
                 // Validate that sink props can be altered
-                match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
-                    Some(connector) => {
-                        let connector_type = connector.to_lowercase();
-                        check_sink_allow_alter_on_fly_fields(&connector_type, &prop_keys)
-                            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+                validate_sink_props(&sink, &alter_props.clone(), &alter_secret_refs.clone())?;
 
-                        match_sink_name_str!(
-                            connector_type.as_str(),
-                            SinkType,
-                            {
-                                let mut new_sink_props = sink.properties.0.clone();
-                                new_sink_props.extend(alter_props.clone());
-                                SinkType::validate_alter_config(&new_sink_props)
-                            },
-                            |sink: &str| Err(SinkError::Config(anyhow!(
-                                "unsupported sink type {}",
-                                sink
-                            )))
-                        )?
-                    }
-                    None => {
-                        return Err(SinkError::Config(anyhow!(
-                            "connector not specified when alter sink"
-                        ))
-                        .into());
-                    }
-                };
+                let mut sink_options_with_secret = WithOptionsSecResolved::new(
+                    sink.properties.0.clone(),
+                    sink.secret_ref
+                        .clone()
+                        .map(|secret_ref| secret_ref.to_protobuf())
+                        .unwrap_or_default(),
+                );
 
-                let mut new_sink_props = sink.properties.0.clone();
-                new_sink_props.extend(alter_props.clone());
+                let (_sink_to_add_secret_dep, _sink_to_remove_secret_dep) =
+                    sink_options_with_secret
+                        .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
 
                 // Prepare sink update
                 let active_sink = sink::ActiveModel {
                     sink_id: Set(sink_id),
-                    properties: Set(risingwave_meta_model::Property(new_sink_props.clone())),
+                    properties: Set(risingwave_meta_model::Property(
+                        sink_options_with_secret.as_plaintext().clone(),
+                    )),
+                    secret_ref: Set((!sink_options_with_secret.as_secret().is_empty())
+                        .then(|| SecretRef::from(sink_options_with_secret.as_secret().clone()))),
                     ..Default::default()
                 };
                 sink_updates.push(active_sink);
 
                 // Prepare fragment updates for this sink
-                sink_fragment_updates.push((sink_id, new_sink_props.clone()));
+                sink_fragment_updates.push(DependentSinkFragmentUpdate {
+                    job_id: sink_id.as_job_id(),
+                    with_properties: sink_options_with_secret.as_plaintext().clone(),
+                    secret_refs: sink_options_with_secret.as_secret().clone(),
+                });
 
                 // Collect the complete properties for runtime broadcast
-                let complete_sink_props: HashMap<String, String> =
-                    new_sink_props.into_iter().collect();
+                let complete_sink_props = LocalSecretManager::global()
+                    .fill_secrets(
+                        sink_options_with_secret.as_plaintext().clone(),
+                        sink_options_with_secret.as_secret().clone(),
+                    )
+                    .map_err(MetaError::from)?
+                    .into_iter()
+                    .collect::<HashMap<String, String>>();
+
                 updated_sinks_with_props.push((sink_id, complete_sink_props));
             }
 
@@ -3081,17 +3086,23 @@ impl CatalogController {
             }
 
             // Batch execute sink fragment updates using the reusable function
-            for (sink_id, new_sink_props) in sink_fragment_updates {
+            for DependentSinkFragmentUpdate {
+                job_id,
+                with_properties,
+                secret_refs,
+            } in sink_fragment_updates
+            {
                 update_connector_props_fragments(
                     &txn,
-                    vec![sink_id.as_job_id()],
+                    vec![job_id],
                     FragmentTypeFlag::Sink,
                     |node, found| {
                         if let PbNodeBody::Sink(node) = node
                             && let Some(sink_desc) = &mut node.sink_desc
-                            && sink_desc.id == sink_id.as_raw_id()
+                            && sink_desc.id == job_id.as_raw_id()
                         {
-                            sink_desc.properties = new_sink_props.clone();
+                            sink_desc.properties = with_properties.clone();
+                            sink_desc.secret_refs = secret_refs.clone();
                             *found = true;
                         }
                     },
