@@ -92,7 +92,7 @@ pub struct BigQueryCommon {
     pub dataset: String,
     #[serde(rename = "bigquery.table")]
     pub table: String,
-    #[serde(default)] // default false
+    #[serde(default, rename = "create_table_if_not_exists")] // default false
     #[serde_as(as = "DisplayFromStr")]
     pub auto_create: bool,
     #[serde(rename = "bigquery.credentials")]
