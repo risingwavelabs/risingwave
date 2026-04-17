@@ -276,7 +276,7 @@ pub mod default {
         }
 
         pub fn time_travel_vacuum_max_version_count() -> Option<u32> {
-            Some(10000)
+            Some(100000)
         }
 
         pub fn hummock_time_travel_epoch_version_insert_batch_size() -> usize {
