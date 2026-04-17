@@ -88,25 +88,30 @@ impl HummockManager {
             txn.commit().await?;
             return Ok(());
         };
+        // metadata BELOW watermark_version_id will be truncated.
         let mut watermark_version_id =
             std::cmp::min(version_watermark.version_id, min_pinned_version_id);
-        if let Some(max_version_count) = self.env.opts.time_travel_vacuum_max_version_count
-            && let Some(earliest_version_id) = hummock_time_travel_version::Entity::find()
+        if let Some(max_version_count) = self.env.opts.time_travel_vacuum_max_version_count {
+            let earliest2_version_ids = hummock_time_travel_version::Entity::find()
                 .select_only()
                 .column(hummock_time_travel_version::Column::VersionId)
                 .order_by_asc(hummock_time_travel_version::Column::VersionId)
+                .limit(2)
                 .into_tuple::<HummockVersionId>()
-                .one(&txn)
-                .await?
-        {
-            watermark_version_id = std::cmp::min(
-                watermark_version_id,
-                HummockVersionId::new(
-                    earliest_version_id
-                        .as_raw_id()
-                        .saturating_add(max_version_count.into()),
-                ),
-            );
+                .all(&txn)
+                .await?;
+            // Ensure at leaset 1 version BELOW watermark_version_id if applying time_travel_vacuum_max_version_count.
+            if earliest2_version_ids.len() == 2 {
+                watermark_version_id = std::cmp::min(
+                    watermark_version_id,
+                    HummockVersionId::new(std::cmp::max(
+                        earliest2_version_ids[0]
+                            .as_raw_id()
+                            .saturating_add(max_version_count.into()),
+                        earliest2_version_ids[1].as_raw_id(),
+                    )),
+                );
+            }
         }
         let res = hummock_epoch_to_version::Entity::delete_many()
             .filter(
