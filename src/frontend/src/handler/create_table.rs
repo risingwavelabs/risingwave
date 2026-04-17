@@ -103,10 +103,10 @@ use risingwave_connector::sink::iceberg::{
     COMPACTION_WRITE_PARQUET_COMPRESSION, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
     CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
     ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
-    ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode,
+    ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode, ORDER_KEY,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
     SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
-    parse_partition_by_exprs, sync_iceberg_table_comments,
+    parse_partition_by_exprs, sync_iceberg_table_comments, validate_order_key_columns,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -2285,6 +2285,19 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove("partition_by"));
+    }
+
+    let order_key = handler_args
+        .with_options
+        .get(ORDER_KEY)
+        .map(|v| v.to_owned());
+    if let Some(order_key) = &order_key {
+        validate_order_key_columns(order_key, table.columns().iter().map(|col| col.name()))
+            .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_report_string()))?;
+
+        sink_with.insert(ORDER_KEY.to_owned(), order_key.to_owned());
+
+        source.as_mut().map(|x| x.with_properties.remove(ORDER_KEY));
     }
 
     sink_handler_args.with_options =

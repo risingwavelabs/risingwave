@@ -70,7 +70,7 @@ table_stat_throuput_window_seconds_for_merge = 240
 compact_task_table_size_partition_threshold_low = 134217728
 compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10
-enable_compaction_group_normalize = false
+enable_compaction_group_normalize = true
 max_normalize_splits_per_round = 4
 periodic_scheduling_compaction_group_merge_interval_sec = 600
 compaction_group_merge_dimension_threshold = 1.2
@@ -253,6 +253,7 @@ sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
 over_window_cache_policy = "full"
 enable_state_table_vnode_stats_pruning = false
+enable_vnode_key_stats_for_materialize = false
 max_concurrent_kv_log_store_historical_read = 0
 
 [streaming.developer.compute_client_config]

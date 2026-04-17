@@ -71,7 +71,7 @@ use crate::handler::create_mv::parse_column_names;
 use crate::handler::util::{
     LongRunningNotificationAction, check_connector_match_connection_type,
     ensure_connection_type_allowed, execute_with_long_running_notification,
-    get_table_catalog_by_table_name,
+    get_table_catalog_by_table_name, reject_internal_table_dependencies,
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
@@ -281,6 +281,7 @@ pub async fn gen_sink_plan(
     let (
         dependent_relations,
         dependent_udfs,
+        dependent_secrets,
         bound,
         auto_refresh_schema_from_table,
         source_table_for_comment,
@@ -331,11 +332,14 @@ pub async fn gen_sink_plan(
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
+            binder.included_secrets().clone(),
             bound,
             auto_refresh_schema_from_table,
             source_table_for_comment,
         )
     };
+
+    reject_internal_table_dependencies(session, &dependent_relations, "CREATE SINK")?;
 
     let col_names = if sink_into_table_name.is_some() {
         parse_column_names(&stmt.columns)
@@ -467,6 +471,12 @@ pub async fn gen_sink_plan(
         RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
             .into_iter()
             .chain(dependent_udfs.iter().copied().map_into())
+            .chain(
+                dependent_secrets
+                    .iter()
+                    .copied()
+                    .map(|id| id.as_object_id()),
+            )
             .collect();
 
     let sink_catalog = sink_desc.into_catalog(

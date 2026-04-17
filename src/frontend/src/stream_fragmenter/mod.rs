@@ -17,7 +17,6 @@ use anyhow::Context;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
-use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod parallelism;
 mod rewrite;
@@ -79,7 +78,6 @@ pub struct BuildFragmentGraphState {
     has_snapshot_backfill: bool,
     has_cross_db_snapshot_backfill: bool,
     has_any_backfill: bool,
-    tables: HashMap<TableId, Table>,
 }
 
 impl BuildFragmentGraphState {
@@ -421,18 +419,6 @@ fn build_fragment(
 
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
-            NodeBody::EowcGapFill(node) => {
-                let table = node.buffer_table.as_ref().unwrap().clone();
-                state.tables.insert(table.id, table);
-                let table = node.prev_row_table.as_ref().unwrap().clone();
-                state.tables.insert(table.id, table);
-            }
-
-            NodeBody::GapFill(node) => {
-                let table = node.state_table.as_ref().unwrap().clone();
-                state.tables.insert(table.id, table);
-            }
-
             NodeBody::StreamScan(node) => {
                 current_fragment
                     .fragment_type_mask
@@ -463,12 +449,6 @@ fn build_fragment(
                 // memorize table id for later use
                 // The table id could be a upstream CDC source
                 state.dependent_table_ids.insert(node.table_id);
-
-                // Add state table if present
-                if let Some(state_table) = &node.state_table {
-                    let table = state_table.clone();
-                    state.tables.insert(table.id, table);
-                }
             }
 
             NodeBody::StreamCdcScan(node) => {

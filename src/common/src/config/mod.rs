@@ -448,6 +448,10 @@ pub mod default {
             false
         }
 
+        pub fn enable_vnode_key_stats_for_materialize() -> bool {
+            false
+        }
+
         pub fn max_concurrent_kv_log_store_historical_read() -> usize {
             0
         }
