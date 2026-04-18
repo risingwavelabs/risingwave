@@ -130,6 +130,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         }
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
+        // The meta-side split enumerator does not export librdkafka native stats, so disable
+        // periodic statistics callbacks here even if the source properties enable them for
+        // compute-side readers.
+        config.set("statistics.interval.ms", "0");
         let mut scan_start_offset = match properties
             .scan_startup_mode
             .as_ref()
