@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
+use risingwave_common::catalog::{BACKFILL_FRAGMENTS, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::{IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
@@ -481,13 +481,11 @@ impl StreamJobFragments {
                 // We don't track any fragments' progress.
                 return vec![];
             }
-            if fragment_type_mask.contains_any([
-                FragmentTypeFlag::Values,
-                FragmentTypeFlag::StreamScan,
-                FragmentTypeFlag::SourceScan,
-                FragmentTypeFlag::LocalityProvider,
-                FragmentTypeFlag::SourceWaitForBackfill,
-            ]) {
+            if fragment_type_mask.contains_any(
+                BACKFILL_FRAGMENTS
+                    .into_iter()
+                    .chain([FragmentTypeFlag::Values]),
+            ) {
                 actor_ids.extend(actors.map(|actor_id| {
                     (
                         actor_id,

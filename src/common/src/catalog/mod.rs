@@ -445,6 +445,15 @@ impl FragmentTypeFlag {
     }
 }
 
+/// Fragments that perform backfill and report progress via `CreateMviewProgressReporter`.
+/// Note: `Values` reports progress too but has no upstream to backfill, so it's excluded.
+pub const BACKFILL_FRAGMENTS: [FragmentTypeFlag; 4] = [
+    FragmentTypeFlag::StreamScan,
+    FragmentTypeFlag::SourceScan,
+    FragmentTypeFlag::LocalityProvider,
+    FragmentTypeFlag::SourceWaitForBackfill,
+];
+
 #[derive(Clone, Copy, Debug, Hash, PartialOrd, PartialEq, Eq, Default)]
 pub struct FragmentTypeMask(u32);
 

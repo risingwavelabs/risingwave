@@ -14,7 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use risingwave_common::catalog::{FragmentTypeFlag, TableId};
+use risingwave_common::catalog::{BACKFILL_FRAGMENTS, TableId};
 pub use risingwave_common::id::ActorId;
 
 use crate::controller::fragment::InflightFragmentInfo;
@@ -77,11 +77,7 @@ impl BackfillOrderState {
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
         for fragment in fragment_infos.values() {
-            if fragment.fragment_type_mask.contains_any([
-                FragmentTypeFlag::StreamScan,
-                FragmentTypeFlag::SourceScan,
-                FragmentTypeFlag::LocalityProvider,
-            ]) {
+            if fragment.fragment_type_mask.contains_any(BACKFILL_FRAGMENTS) {
                 let fragment_id = fragment.fragment_id;
                 backfill_nodes.insert(
                     fragment_id,
@@ -145,11 +141,7 @@ impl BackfillOrderState {
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
         for (fragment_id, fragment) in fragment_infos {
-            if fragment.fragment_type_mask.contains_any([
-                FragmentTypeFlag::StreamScan,
-                FragmentTypeFlag::SourceScan,
-                FragmentTypeFlag::LocalityProvider,
-            ]) {
+            if fragment.fragment_type_mask.contains_any(BACKFILL_FRAGMENTS) {
                 backfill_nodes.insert(
                     *fragment_id,
                     BackfillNode {
