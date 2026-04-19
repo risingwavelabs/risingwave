@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use either::Either;
 use futures::stream::{PollNext, select_with_strategy};
 use itertools::Itertools;
-use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::id::SourceId;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
@@ -294,6 +294,69 @@ impl BackfillStage {
     }
 }
 
+fn stage_name(state: &BackfillState) -> &'static str {
+    match state {
+        BackfillState::Backfilling(_) => "Backfilling",
+        BackfillState::SourceCachingUp(_) => "SourceCachingUp",
+        BackfillState::Finished => "Finished",
+    }
+}
+
+fn state_backfill_offset(state: &BackfillState) -> Option<&str> {
+    match state {
+        BackfillState::Backfilling(Some(offset)) => Some(offset.as_str()),
+        BackfillState::SourceCachingUp(offset) => Some(offset.as_str()),
+        BackfillState::Backfilling(None) | BackfillState::Finished => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn log_backfill_stage_transition(
+    actor_id: &str,
+    split_id: &str,
+    path: &'static str,
+    stage_from: &'static str,
+    stage_to: &'static str,
+    upstream_offset: Option<&str>,
+    backfill_offset: Option<&str>,
+    target_offset: Option<&str>,
+) {
+    tracing::info!(
+        actor_id,
+        split_id,
+        path,
+        stage_from,
+        stage_to,
+        upstream_offset,
+        backfill_offset,
+        target_offset,
+        "source backfill stage transition"
+    );
+}
+
+fn summarize_visible_offset_bounds(
+    chunk: &StreamChunk,
+    visible: &Bitmap,
+    split_idx: usize,
+    offset_idx: usize,
+) -> Option<(String, String)> {
+    let mut first = None;
+    let mut last = None;
+    for (row_idx, (_, row)) in chunk.rows().enumerate() {
+        if !visible.is_set(row_idx) {
+            continue;
+        }
+        let split = row.datum_at(split_idx).unwrap().into_utf8();
+        let offset = row.datum_at(offset_idx).unwrap().into_utf8();
+        let cur = format!("{split}:{offset}");
+        if first.is_none() {
+            first = Some(cur.clone());
+        }
+        last = Some(cur);
+    }
+    first.zip(last)
+}
+
 impl<S: StateStore> SourceBackfillExecutorInner<S> {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
@@ -381,6 +444,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute(mut self, input: Executor) {
+        let actor_id_str = self.actor_ctx.id.to_string();
         let mut input = input.execute();
 
         // Poll the upstream to get the first barrier.
@@ -429,6 +493,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         num_consumed_rows: 0,
                         target_offset: None, // init with None
                     });
+                tracing::info!(
+                    actor_id = actor_id_str.as_str(),
+                    split_id = split_id.as_ref(),
+                    restored_stage = stage_name(&backfill_state.state),
+                    restored_offset = state_backfill_offset(&backfill_state.state),
+                    target_offset = backfill_state.target_offset.as_deref(),
+                    "source backfill restored state"
+                );
                 backfill_states.insert(split_id, backfill_state);
             }
         }
@@ -799,12 +871,56 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 for (i, (_, row)) in chunk.rows().enumerate() {
                                     let split = row.datum_at(split_idx).unwrap().into_utf8();
                                     let offset = row.datum_at(offset_idx).unwrap().into_utf8();
+                                    let before_stage = {
+                                        let before = backfill_stage.states.get(split).unwrap();
+                                        stage_name(&before.state)
+                                    };
                                     let vis = backfill_stage.handle_upstream_row(split, offset);
+                                    let after = backfill_stage.states.get(split).unwrap();
+                                    let after_stage = stage_name(&after.state);
+                                    if before_stage != after_stage {
+                                        log_backfill_stage_transition(
+                                            actor_id_str.as_str(),
+                                            split,
+                                            "upstream",
+                                            before_stage,
+                                            after_stage,
+                                            Some(offset),
+                                            state_backfill_offset(&after.state),
+                                            after.target_offset.as_deref(),
+                                        );
+                                    }
+                                    if vis {
+                                        tracing::debug!(
+                                            actor_id = actor_id_str.as_str(),
+                                            split_id = split,
+                                            path = "upstream",
+                                            stage = after_stage,
+                                            upstream_offset = offset,
+                                            target_offset = after.target_offset.as_deref(),
+                                            "source backfill row selected for emit"
+                                        );
+                                    }
                                     new_vis.set(i, vis);
                                 }
                                 // emit chunk if vis is not empty. i.e., some splits finished backfilling.
                                 let new_vis = new_vis.finish();
-                                if new_vis.count_ones() != 0 {
+                                let card = new_vis.count_ones();
+                                if card != 0 {
+                                    if let Some((first_visible, last_visible)) =
+                                        summarize_visible_offset_bounds(
+                                            &chunk, &new_vis, split_idx, offset_idx,
+                                        )
+                                    {
+                                        tracing::info!(
+                                            actor_id = actor_id_str.as_str(),
+                                            path = "upstream",
+                                            visible_rows = card,
+                                            first_visible,
+                                            last_visible,
+                                            "source backfill yielding chunk"
+                                        );
+                                    }
                                     let new_chunk = chunk.clone_with_vis(new_vis);
                                     yield Message::Chunk(new_chunk);
                                 }
@@ -875,13 +991,56 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         for (i, (_, row)) in chunk.rows().enumerate() {
                             let split_id = row.datum_at(split_idx).unwrap().into_utf8();
                             let offset = row.datum_at(offset_idx).unwrap().into_utf8();
+                            let before_stage = {
+                                let before = backfill_stage.states.get(split_id).unwrap();
+                                stage_name(&before.state)
+                            };
                             let vis = backfill_stage.handle_backfill_row(split_id, offset);
+                            let after = backfill_stage.states.get(split_id).unwrap();
+                            let after_stage = stage_name(&after.state);
+                            if before_stage != after_stage {
+                                log_backfill_stage_transition(
+                                    actor_id_str.as_str(),
+                                    split_id,
+                                    "backfill",
+                                    before_stage,
+                                    after_stage,
+                                    None,
+                                    Some(offset),
+                                    after.target_offset.as_deref(),
+                                );
+                            }
+                            if vis {
+                                tracing::debug!(
+                                    actor_id = actor_id_str.as_str(),
+                                    split_id,
+                                    path = "backfill",
+                                    stage = after_stage,
+                                    backfill_offset = offset,
+                                    target_offset = after.target_offset.as_deref(),
+                                    "source backfill row selected for emit"
+                                );
+                            }
                             new_vis.set(i, vis);
                         }
 
                         let new_vis = new_vis.finish();
                         let card = new_vis.count_ones();
                         if card != 0 {
+                            if let Some((first_visible, last_visible)) =
+                                summarize_visible_offset_bounds(
+                                    &chunk, &new_vis, split_idx, offset_idx,
+                                )
+                            {
+                                tracing::info!(
+                                    actor_id = actor_id_str.as_str(),
+                                    path = "backfill",
+                                    visible_rows = card,
+                                    first_visible,
+                                    last_visible,
+                                    "source backfill yielding chunk"
+                                );
+                            }
                             let new_chunk = chunk.clone_with_vis(new_vis);
                             yield Message::Chunk(new_chunk);
                             source_backfill_row_count.inc_by(card as u64);

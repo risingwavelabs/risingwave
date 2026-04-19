@@ -52,6 +52,19 @@ DROP SINK nexmark_auction;
 statement ok
 DROP SINK nexmark_bid;
 
+# Diagnostic point A: verify Kafka message count after sink drop.
+# If count > 50, the sink produced duplicates (at-least-once delivery).
+system ok
+echo "[nexmark-diag-A] topic watermarks after sink drop:" && rpk topic describe nexmark-bid -p
+
+system ok
+tmp=$(mktemp /tmp/nexmark-diag-A.XXXXXX) && \
+echo "[nexmark-diag-A] consuming messages:" && \
+timeout 15s rpk topic consume nexmark-bid --offset start --num 1000 -f '%p\t%o\t%v\n' > "$tmp" 2>/dev/null || true && \
+echo "[nexmark-diag-A] message count (expected 50):" && wc -l < "$tmp" && \
+echo "[nexmark-diag-A] duplicate payloads:" && cut -f3 "$tmp" | sort | uniq -c | sort -nr | head && \
+rm -f "$tmp"
+
 statement ok
 DROP SINK nexmark_person;
 
