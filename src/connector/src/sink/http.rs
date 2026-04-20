@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -108,7 +108,8 @@ fn validate_http_sink(
 
     let parsed_url = url
         .parse()
-        .map_err(|e| SinkError::Config(anyhow!("invalid URL: {}", e)))?;
+        .context("invalid URL")
+        .map_err(SinkError::Config)?;
 
     Ok((col_type, parsed_url))
 }
@@ -176,22 +177,26 @@ impl HttpSinkWriter {
             config
                 .content_type
                 .parse()
-                .map_err(|e| SinkError::Http(anyhow!("invalid content_type: {}", e)))?,
+                .context("invalid content_type")
+                .map_err(SinkError::Http)?,
         );
         for (k, v) in &headers {
             let name: reqwest::header::HeaderName = k
                 .parse()
-                .map_err(|e| SinkError::Http(anyhow!("invalid header name '{}': {}", k, e)))?;
+                .with_context(|| format!("invalid header name '{k}'"))
+                .map_err(SinkError::Http)?;
             let value: reqwest::header::HeaderValue = v
                 .parse()
-                .map_err(|e| SinkError::Http(anyhow!("invalid header value for '{}': {}", k, e)))?;
+                .with_context(|| format!("invalid header value for '{k}'"))
+                .map_err(SinkError::Http)?;
             header_map.insert(name, value);
         }
 
         let client = reqwest::Client::builder()
             .default_headers(header_map)
             .build()
-            .map_err(|e| SinkError::Http(anyhow!("failed to build HTTP client: {}", e)))?;
+            .context("failed to build HTTP client")
+            .map_err(SinkError::Http)?;
 
         Ok(Self {
             client,
@@ -228,7 +233,8 @@ impl AsyncTruncateSinkWriter for HttpSinkWriter {
                 .body(payload)
                 .send()
                 .await
-                .map_err(|e| SinkError::Http(anyhow!("HTTP request failed: {}", e)))?;
+                .context("HTTP request failed")
+                .map_err(SinkError::Http)?;
 
             if !resp.status().is_success() {
                 let status = resp.status();
