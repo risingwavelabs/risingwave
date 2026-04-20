@@ -36,7 +36,7 @@ where
     tokio::select! {
         result = &mut future => result.map_err(Into::into),
         _ = shutdown_rx.cancelled() => {
-            Err(SchedulerError::QueryCancelled("cancelled by user".to_owned()).into())
+            Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into())
         }
     }
 }

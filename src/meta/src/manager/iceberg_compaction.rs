@@ -752,8 +752,9 @@ impl IcebergCompactionManager {
             task_type: TaskType::Full as i32, // default to full compaction
         }))?;
 
-        // If the RPC future is dropped by tonic because the frontend query is cancelled,
-        // dropping this guard sends a best-effort cancel event to the assigned compactor.
+        // If this method exits before `disarm()` is called, dropping this guard sends a
+        // best-effort cancel event to the assigned compactor. This covers frontend query
+        // cancellation as well as other early-return paths after the task has been assigned.
         let mut cancel_guard = ManualCompactionCancelGuard::new(compactor, sink_id, task_id);
 
         tracing::info!(
