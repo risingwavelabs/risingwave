@@ -1468,6 +1468,7 @@ mod tests {
             source_table,
             progress_state_table,
             None,
+            None,
             vec![0],
             actor_ctx,
             progress,
@@ -1477,6 +1478,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             Some(test_epoch(3)),
         )
+        .expect("snapshot backfill executor should be created")
         .boxed()
         .execute();
 
@@ -1618,6 +1620,7 @@ mod tests {
                 actor_ctx.clone(),
                 upstream_rx,
             )),
+            None,
             vec![0],
             actor_ctx,
             progress,
@@ -1627,6 +1630,7 @@ mod tests {
             Arc::new(StreamingMetrics::unused()),
             Some(test_epoch(3)),
         )
+        .expect("snapshot backfill executor should be created")
         .boxed()
         .execute();
 
