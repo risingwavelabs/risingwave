@@ -5,6 +5,10 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+export MONGODB_URL="mongodb://mongodb:27017/?replicaSet=rs0"
+export RISEDEV_MONGODB_WITH_OPTIONS_COMMON="connector='mongodb',mongodb.url='${MONGODB_URL}'"
+export PATH="$(pwd)/e2e_test/commands:${PATH}"
+
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -21,7 +25,12 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sink_test_env_setup "$profile"
+download_and_prepare_rw "$profile" source
+
+echo "--- starting risingwave cluster"
+cargo make ci-start ci-sink-test
+sleep 1
+export MONGODB_CONTAINER="$(docker ps --filter label=com.docker.compose.service=mongodb --format '{{.Names}}' | head -n 1)"
 
 # install the mongo shell
 wget --no-verbose http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb

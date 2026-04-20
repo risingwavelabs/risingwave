@@ -1,3 +1,14 @@
+control substitution on
+
+system ok retry 30 backoff 1s
+test "$(mongosh --eval 'db.runCommand({ ping: 1 }).ok')" = "1"
+
+system ok
+mongosh --eval '
+db.getSiblingDB("demo").dropDatabase();
+db.getSiblingDB("shard_2024_01").dropDatabase();
+'
+
 statement ok
 set sink_decouple = false;
 
@@ -24,15 +35,14 @@ create table t1(
 statement ok
 create sink t1_sink from t1
 with (
-    connector='mongodb',
+    ${RISEDEV_MONGODB_WITH_OPTIONS_COMMON},
     type = 'append-only',
-    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
     collection.name = 'demo.t1',
     mongodb.bulk_write.max_entries = '1024'
 );
 
 statement ok
-insert into t1 values(1, 2, 3, 4, 5.0, 6.0, '7', '\xDe00BeEf', date '2022-04-08', time '18:20:49',
+insert into t1 values(1, 2, 3, 4, 5.0, 6.0, '7', decode('De00BeEf', 'hex'), date '2022-04-08', time '18:20:49',
                       '2022-03-13 01:00:00'::timestamp, '2022-03-13 01:00:00Z'::timestamptz, interval '4 hour',
                       ROW(ROW(8), 9), ARRAY['a', 'b', 'c'], '{"a": [{"b": 1}], "c": true}'::jsonb);
 
@@ -46,9 +56,8 @@ create table t2(
 statement ok
 create sink t2_sink from t2
 with (
-    connector='mongodb',
+    ${RISEDEV_MONGODB_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
     collection.name = 'demo.t2',
     mongodb.bulk_write.max_entries = '1024',
     collection.name.field = 'collection_name',
@@ -73,9 +82,8 @@ create table t3(
 statement ok
 create sink t3_sink from t3
 with (
-    connector='mongodb',
+    ${RISEDEV_MONGODB_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
     collection.name = 'demo.t3',
     mongodb.bulk_write.max_entries = '1024',
     primary_key='a,b'
@@ -99,9 +107,8 @@ create table t4(
 statement ok
 create sink t4_sink from t4
 with (
-    connector='mongodb',
+    ${RISEDEV_MONGODB_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
     collection.name = 'demo.t4',
     mongodb.bulk_write.max_entries = '1024',
     primary_key='v1'
@@ -125,9 +132,8 @@ create table t5(
 statement ok
 create sink t5_sink from t5
 with (
-    connector='mongodb',
+    ${RISEDEV_MONGODB_WITH_OPTIONS_COMMON},
     type = 'upsert',
-    mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
     collection.name = 'demo.t4',
     mongodb.bulk_write.max_entries = '1024',
     primary_key='v1'
@@ -145,7 +151,23 @@ update t5 set v2 = 200 where v1 = 2;
 statement ok
 FLUSH;
 
-sleep 5s
+system ok retry 10 backoff 1s
+test "$(mongosh --eval 'db.getSiblingDB("demo").t1.countDocuments({})')" = "1"
+
+system ok retry 10 backoff 1s
+test "$(mongosh --eval 'db.getSiblingDB("demo").t2.countDocuments({})')" = "1"
+
+system ok retry 10 backoff 1s
+test "$(mongosh --eval 'db.getSiblingDB("shard_2024_01").tenant_1.countDocuments({})')" = "1"
+
+system ok retry 10 backoff 1s
+test "$(mongosh --eval 'db.getSiblingDB("demo").t3.countDocuments({})')" = "1"
+
+system ok retry 10 backoff 1s
+test "$(mongosh --eval 'db.getSiblingDB("demo").t4.countDocuments({ _id: 1, v1: 1, v2: 10, v3: 1, v4: 1 })')" = "1"
+
+system ok retry 10 backoff 1s
+test "$(mongosh --eval 'db.getSiblingDB("demo").t4.countDocuments({ _id: 2, v1: 2, v2: 200, v3: 2, v4: 2 })')" = "1"
 
 statement ok
 DROP SINK t1_sink;
@@ -170,3 +192,9 @@ DROP SINK t5_sink;
 
 statement ok
 DROP TABLE t5;
+
+system ok
+mongosh --eval '
+db.getSiblingDB("demo").dropDatabase();
+db.getSiblingDB("shard_2024_01").dropDatabase();
+'

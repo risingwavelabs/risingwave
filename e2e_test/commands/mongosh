@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REAL_PATH=$(echo "$PATH" | sed "s,$(dirname "$0"):,,g")
+
+uri="${MONGODB_URL}"
+if [[ $# -gt 0 && "$1" == mongodb://* ]]; then
+  uri="$1"
+  shift
+fi
+
+if PATH="${REAL_PATH}" command -v mongosh >/dev/null 2>&1; then
+  PATH="${REAL_PATH}" mongosh --quiet "${uri}" "$@"
+else
+  docker exec -i "${MONGODB_CONTAINER}" mongosh --quiet "${uri}" "$@"
+fi
