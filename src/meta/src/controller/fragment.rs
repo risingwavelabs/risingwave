@@ -1175,7 +1175,7 @@ impl CatalogController {
         Ok(actor_infos)
     }
 
-    pub fn get_worker_slot_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
+    pub fn get_worker_mappings(&self) -> Vec<PbFragmentWorkerSlotMapping> {
         let guard = self.env.shared_actor_info.read_guard();
         guard
             .iter_over_fragments()

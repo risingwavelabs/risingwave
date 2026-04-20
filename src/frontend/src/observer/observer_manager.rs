@@ -26,7 +26,7 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::FrontendHummockVersion;
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersionDeltas, HummockVersionStats};
 use risingwave_pb::meta::object::{ObjectInfo, PbObjectInfo};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -153,6 +153,7 @@ impl ObserverState for FrontendObserverNode {
             cluster_resource,
             object_dependencies,
         } = snapshot;
+        let worker_parallelisms = build_worker_parallelisms(&nodes);
 
         for db in databases {
             catalog_guard.create_database(&db)
@@ -194,8 +195,8 @@ impl ObserverState for FrontendObserverNode {
 
         self.worker_node_manager.refresh(
             nodes,
-            convert_worker_slot_mapping(&streaming_worker_slot_mappings),
-            convert_worker_slot_mapping(&serving_worker_slot_mappings),
+            convert_worker_mapping(&streaming_worker_slot_mappings, &worker_parallelisms),
+            convert_worker_mapping(&serving_worker_slot_mappings, &worker_parallelisms),
         );
         self.hummock_snapshot_manager
             .init(FrontendHummockVersion::from_protobuf(
@@ -468,11 +469,14 @@ impl FrontendObserverNode {
             return;
         };
         match info {
-            Info::StreamingWorkerSlotMapping(streaming_worker_slot_mapping) => {
-                let fragment_id = streaming_worker_slot_mapping.fragment_id;
+            Info::StreamingWorkerSlotMapping(streaming_worker_mapping) => {
+                let fragment_id = streaming_worker_mapping.fragment_id;
+                let worker_parallelisms =
+                    build_worker_parallelisms(&self.worker_node_manager.list_compute_nodes());
                 let mapping = || {
-                    WorkerSlotMapping::from_protobuf(
-                        streaming_worker_slot_mapping.mapping.as_ref().unwrap(),
+                    WorkerSlotMapping::from_protobuf_with_worker_parallelisms(
+                        streaming_worker_mapping.mapping.as_ref().unwrap(),
+                        &worker_parallelisms,
                     )
                 };
 
@@ -501,10 +505,15 @@ impl FrontendObserverNode {
         mappings: Vec<FragmentWorkerSlotMapping>,
         op: Operation,
     ) {
+        let worker_parallelisms =
+            build_worker_parallelisms(&self.worker_node_manager.list_compute_nodes());
         match op {
             Operation::Add | Operation::Update => {
                 self.worker_node_manager
-                    .upsert_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
+                    .upsert_serving_fragment_mapping(convert_worker_mapping(
+                        &mappings,
+                        &worker_parallelisms,
+                    ));
             }
             Operation::Delete => self.worker_node_manager.remove_serving_fragment_mapping(
                 mappings
@@ -515,7 +524,10 @@ impl FrontendObserverNode {
             ),
             Operation::Snapshot => {
                 self.worker_node_manager
-                    .set_serving_fragment_mapping(convert_worker_slot_mapping(&mappings));
+                    .set_serving_fragment_mapping(convert_worker_mapping(
+                        &mappings,
+                        &worker_parallelisms,
+                    ));
             }
             _ => panic!("receive an unsupported notify {:?}", op),
         }
@@ -564,8 +576,9 @@ impl FrontendObserverNode {
     }
 }
 
-fn convert_worker_slot_mapping(
+fn convert_worker_mapping(
     worker_slot_mappings: &[FragmentWorkerSlotMapping],
+    worker_parallelisms: &HashMap<u32, u32>,
 ) -> HashMap<FragmentId, WorkerSlotMapping> {
     worker_slot_mappings
         .iter()
@@ -574,9 +587,25 @@ fn convert_worker_slot_mapping(
                  fragment_id,
                  mapping,
              }| {
-                let mapping = WorkerSlotMapping::from_protobuf(mapping.as_ref().unwrap());
+                let mapping = WorkerSlotMapping::from_protobuf_with_worker_parallelisms(
+                    mapping.as_ref().unwrap(),
+                    worker_parallelisms,
+                );
                 (*fragment_id, mapping)
             },
         )
+        .collect()
+}
+
+fn build_worker_parallelisms(worker_nodes: &[WorkerNode]) -> HashMap<u32, u32> {
+    worker_nodes
+        .iter()
+        .filter(|worker| worker.r#type() == WorkerType::ComputeNode)
+        .map(|worker| {
+            (
+                worker.id.as_raw_id(),
+                u32::try_from(worker.compute_node_parallelism().max(1)).unwrap_or(1),
+            )
+        })
         .collect()
 }
