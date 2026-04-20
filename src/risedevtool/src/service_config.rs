@@ -309,6 +309,8 @@ pub struct PubsubConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+    #[serde(default)]
+    pub user_managed: bool,
     #[serde(with = "string")]
     pub port: u16,
     pub address: String,
