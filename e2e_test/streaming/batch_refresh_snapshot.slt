@@ -10,6 +10,65 @@ DROP TABLE IF EXISTS t_batch;
 statement ok
 CREATE TABLE t_batch (v1 int);
 
+# ── Tests: SQL operations forbidden for batch refresh MVs ────────────────────
+
+statement ok
+CREATE MATERIALIZED VIEW mv_up AS SELECT * FROM t_batch;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_batch WITH (refresh.interval.sec = 5) AS
+SELECT * FROM mv_up;
+
+statement error ALTER MATERIALIZED VIEW is not supported for batch refresh materialized views
+ALTER MATERIALIZED VIEW mv_batch AS SELECT v1 + 1 AS v1 FROM mv_up;
+
+statement ok
+DROP MATERIALIZED VIEW mv_batch;
+
+statement ok
+DROP MATERIALIZED VIEW mv_up;
+
+# ── Tests: streaming/batch-refresh jobs cannot depend on a batch-refresh MV ──
+
+statement ok
+CREATE MATERIALIZED VIEW mv_up AS SELECT * FROM t_batch;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_batch WITH (refresh.interval.sec = 5) AS
+SELECT * FROM mv_up;
+
+statement error creating streaming jobs on batch refresh materialized views is not supported
+CREATE MATERIALIZED VIEW mv_on_batch AS SELECT * FROM mv_batch;
+
+statement error creating streaming jobs on batch refresh materialized views is not supported
+CREATE MATERIALIZED VIEW mv_batch_on_batch WITH (refresh.interval.sec = 5) AS
+SELECT * FROM mv_batch;
+
+statement ok
+DROP MATERIALIZED VIEW mv_batch;
+
+statement ok
+DROP MATERIALIZED VIEW mv_up;
+
+# ── Tests: batch refresh MV cannot read directly from a source ────────────────
+
+statement ok
+CREATE SOURCE src_test (v1 int) WITH (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    datagen.rows.per.second = '1'
+);
+
+statement error batch refresh materialized views must not depend on sources
+CREATE MATERIALIZED VIEW mv_batch_source_bad WITH (refresh.interval.sec = 5) AS
+SELECT * FROM src_test;
+
+statement ok
+DROP SOURCE src_test;
+
+# ── Tests: batch refresh periodic refresh behavior ───────────────────────────
+
 statement ok
 INSERT INTO t_batch VALUES (1), (2);
 
