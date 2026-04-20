@@ -442,6 +442,39 @@ pub struct ClickHouseConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct NatsConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+    pub monitor_port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct MqttConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct MongoDbConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -597,6 +630,8 @@ pub enum ServiceConfig {
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
     ClickHouse(ClickHouseConfig),
+    Nats(NatsConfig),
+    Mqtt(MqttConfig),
     MongoDb(MongoDbConfig),
     ElasticSearch(ElasticSearchConfig),
     OpenSearch(OpenSearchConfig),
@@ -617,6 +652,8 @@ pub enum TaskGroup {
     Postgres,
     SqlServer,
     ClickHouse,
+    Nats,
+    Mqtt,
     MongoDb,
     ElasticSearch,
     OpenSearch,
@@ -649,6 +686,8 @@ impl ServiceConfig {
             Self::Postgres(c) => &c.id,
             Self::SqlServer(c) => &c.id,
             Self::ClickHouse(c) => &c.id,
+            Self::Nats(c) => &c.id,
+            Self::Mqtt(c) => &c.id,
             Self::MongoDb(c) => &c.id,
             Self::ElasticSearch(c) => &c.id,
             Self::OpenSearch(c) => &c.id,
@@ -682,6 +721,8 @@ impl ServiceConfig {
             Self::Postgres(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
             Self::ClickHouse(c) => Some(c.http_port),
+            Self::Nats(c) => Some(c.port),
+            Self::Mqtt(c) => Some(c.port),
             Self::MongoDb(c) => Some(c.port),
             Self::ElasticSearch(c) => Some(c.port),
             Self::OpenSearch(c) => Some(c.port),
@@ -714,6 +755,8 @@ impl ServiceConfig {
             Self::Postgres(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
             Self::ClickHouse(c) => c.user_managed,
+            Self::Nats(c) => c.user_managed,
+            Self::Mqtt(c) => c.user_managed,
             Self::MongoDb(c) => c.user_managed,
             Self::ElasticSearch(c) => c.user_managed,
             Self::OpenSearch(c) => c.user_managed,
@@ -758,6 +801,8 @@ impl ServiceConfig {
             }
             ServiceConfig::SqlServer(_) => SqlServer,
             ServiceConfig::ClickHouse(_) => ClickHouse,
+            ServiceConfig::Nats(_) => Nats,
+            ServiceConfig::Mqtt(_) => Mqtt,
             ServiceConfig::MongoDb(_) => MongoDb,
             ServiceConfig::ElasticSearch(_) => ElasticSearch,
             ServiceConfig::OpenSearch(_) => OpenSearch,

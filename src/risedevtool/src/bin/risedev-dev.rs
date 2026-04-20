@@ -31,10 +31,11 @@ use risedev::{
     ClickHouseService, CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask,
     DorisService, DummyService, ElasticSearchService, EnsureStopService, ExecuteContext,
     FrontendService, GrafanaService, KafkaService, LakekeeperService, MetaNodeService,
-    MinioService, MoatService, MongoDbService, MongoDbSetupTask, MySqlService, OpenSearchService,
-    PostgresService, PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
-    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, StarrocksService, Task,
-    TaskGroup, TempoService, generate_risedev_env, preflight_check,
+    MinioService, MoatService, MongoDbService, MongoDbSetupTask, MqttService, MySqlService,
+    NatsService, OpenSearchService, PostgresService, PrometheusService, PubsubService,
+    PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
+    SqlServerService, SqliteConfig, StarrocksService, Task, TaskGroup, TempoService,
+    generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -360,6 +361,23 @@ fn task_main(
                         "clickhouse http://{}:{}/, native {}:{}",
                         c.address, c.http_port, c.address, c.native_port
                     ));
+                }
+                ServiceConfig::Nats(c) => {
+                    NatsService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb.set_message(format!(
+                        "nats {}:{}, monitor {}",
+                        c.address, c.port, c.monitor_port
+                    ));
+                }
+                ServiceConfig::Mqtt(c) => {
+                    MqttService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb.set_message(format!("mqtt {}:{}", c.address, c.port));
                 }
                 ServiceConfig::MongoDb(c) => {
                     MongoDbService::new(c.clone()).execute(&mut ctx)?;

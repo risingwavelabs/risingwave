@@ -181,11 +181,47 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::Nats(c) => {
+                let server_url = format!("nats://{}:{}", c.address, c.port);
+                writeln!(env, r#"NATS_SERVER_URL="{server_url}""#).unwrap();
+                writeln!(env, r#"RISEDEV_NATS_SERVER_URL="{server_url}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_NATS_WITH_OPTIONS_COMMON="connector='nats',server_url='{server_url}'""#,
+                )
+                .unwrap();
+            }
+            ServiceConfig::Mqtt(c) => {
+                let url = format!("tcp://{}:{}", c.address, c.port);
+                writeln!(env, r#"MQTT_URL="{url}""#).unwrap();
+                writeln!(env, r#"RISEDEV_MQTT_URL="{url}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_MQTT_WITH_OPTIONS_COMMON="connector='mqtt',url='{url}'""#,
+                )
+                .unwrap();
+            }
             ServiceConfig::Minio(c) => {
                 let endpoint = format!("http://{}:{}", c.address, c.port);
                 writeln!(env, r#"RISEDEV_MINIO_ENDPOINT="{endpoint}""#).unwrap();
                 writeln!(env, r#"RISEDEV_MINIO_ACCESS_KEY="{0}""#, c.root_user).unwrap();
                 writeln!(env, r#"RISEDEV_MINIO_SECRET_KEY="{0}""#, c.root_password).unwrap();
+
+                // Defaults used by `e2e_test/sink/deltalake_rust_sink.slt`.
+                writeln!(
+                    env,
+                    r#"RISEDEV_DELTALAKE_LOCATION="s3a://deltalake/deltalake-test""#
+                )
+                .unwrap();
+                writeln!(env, r#"RISEDEV_DELTALAKE_S3_ENDPOINT="{endpoint}""#).unwrap();
+                writeln!(env, r#"RISEDEV_DELTALAKE_S3_REGION="us-east-1""#).unwrap();
+                writeln!(env, r#"RISEDEV_DELTALAKE_S3_ACCESS_KEY="{0}""#, c.root_user).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_DELTALAKE_S3_SECRET_KEY="{0}""#,
+                    c.root_password
+                )
+                .unwrap();
             }
             ServiceConfig::MongoDb(c) => {
                 let host = &c.address;
