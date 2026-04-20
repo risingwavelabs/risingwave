@@ -160,6 +160,16 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
     ) -> MetaResult<()> {
         unimplemented!()
     }
+
+    async fn load_batch_refresh_trigger_context(
+        &self,
+        _job_id: JobId,
+        _database_id: DatabaseId,
+        _last_committed_epoch: u64,
+    ) -> MetaResult<crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext>
+    {
+        unimplemented!()
+    }
 }
 
 #[tokio::test]

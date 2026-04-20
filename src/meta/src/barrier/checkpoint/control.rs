@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::future::{Future, poll_fn};
 use std::ops::Bound::{Excluded, Unbounded};
+use std::sync::atomic::AtomicU32;
 use std::task::Poll;
 
 use anyhow::anyhow;
@@ -38,7 +39,9 @@ use risingwave_pb::stream_service::streaming_control_stream_response::ResetParti
 use tracing::{debug, warn};
 
 use crate::barrier::cdc_progress::CdcProgress;
-use crate::barrier::checkpoint::independent_job::IndependentCheckpointJobControl;
+use crate::barrier::checkpoint::independent_job::{
+    BatchRefreshJobTriggerContext, IndependentCheckpointJobControl,
+};
 use crate::barrier::checkpoint::recovery::{
     DatabaseRecoveringState, DatabaseStatusAction, EnterInitializing, EnterRunning,
     RecoveringStateAction,
@@ -482,11 +485,83 @@ impl CheckpointControl {
                 },
             )
     }
+
+    // ── Batch refresh trigger helpers (delegating to DatabaseCheckpointControl) ──
+
+    pub(crate) fn get_batch_refresh_trigger_info(
+        &self,
+        database_id: DatabaseId,
+        job_id: JobId,
+    ) -> u64 {
+        let database = self
+            .databases
+            .get(&database_id)
+            .and_then(|s| s.running_state())
+            .expect("database should be running for batch refresh trigger");
+        database.get_batch_refresh_trigger_info(job_id)
+    }
+
+    pub(crate) fn start_batch_refresh_run(
+        &mut self,
+        database_id: DatabaseId,
+        job_id: JobId,
+        context: &BatchRefreshJobTriggerContext,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        actor_id_counter: &AtomicU32,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+        partial_graph_manager: &mut PartialGraphManager,
+    ) -> MetaResult<bool> {
+        let database = self
+            .databases
+            .get_mut(&database_id)
+            .and_then(|s| s.running_state_mut())
+            .expect("database should be running");
+        database.start_batch_refresh_run(
+            job_id,
+            context,
+            worker_nodes,
+            actor_id_counter,
+            adaptive_parallelism_strategy,
+            partial_graph_manager,
+        )
+    }
+
+    pub(crate) fn apply_batch_refresh_fragment_infos(
+        &mut self,
+        database_id: DatabaseId,
+        job_id: JobId,
+    ) {
+        let database = self
+            .databases
+            .get_mut(&database_id)
+            .and_then(|s| s.running_state_mut())
+            .expect("database should be running");
+        let br_job = match database
+            .independent_checkpoint_job_controls
+            .get(&job_id)
+            .expect("job should exist")
+        {
+            IndependentCheckpointJobControl::BatchRefresh(job) => job,
+            _ => panic!("expected batch refresh job"),
+        };
+        if let Some(fragment_infos) = br_job.fragment_infos() {
+            database
+                .database_info
+                .shared_actor_infos
+                .upsert(database_id, fragment_infos.values().map(|f| (f, job_id)));
+        }
+    }
 }
 
 pub(crate) enum CheckpointControlEvent<'a> {
     EnteringInitializing(DatabaseStatusAction<'a, EnterInitializing>),
     EnteringRunning(DatabaseStatusAction<'a, EnterRunning>),
+    /// A batch refresh job is idle and its upstream has advanced past the refresh interval.
+    /// Carries owned values so the async handler can call into context without borrowing self.
+    BatchRefreshTrigger {
+        database_id: DatabaseId,
+        job_id: JobId,
+    },
 }
 
 impl CheckpointControl {
@@ -551,7 +626,25 @@ impl CheckpointControl {
             };
             for (&database_id, database_status) in &mut this_mut.databases {
                 match database_status {
-                    DatabaseCheckpointControlStatus::Running(_) => {}
+                    DatabaseCheckpointControlStatus::Running(database) => {
+                        // Check if any idle batch refresh job should start a refresh run.
+                        if let Some(committed_epoch) = database.committed_epoch {
+                            for (job_id, job) in &database.independent_checkpoint_job_controls {
+                                if let IndependentCheckpointJobControl::BatchRefresh(br_job) = job
+                                    && br_job.should_start_refresh(committed_epoch)
+                                {
+                                    let job_id = *job_id;
+                                    let _ = this.take().expect("checked Some");
+                                    return Poll::Ready(
+                                        CheckpointControlEvent::BatchRefreshTrigger {
+                                            database_id,
+                                            job_id,
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                    }
                     DatabaseCheckpointControlStatus::Recovering(state) => {
                         let poll_result = state.poll_next_event(cx);
                         if let Poll::Ready(action) = poll_result {
@@ -1283,5 +1376,49 @@ impl DatabaseCheckpointControl {
         self.enqueue_command(epoch, jobs_to_wait);
 
         Ok(())
+    }
+
+    // ── Batch refresh trigger helpers ────────────────────────────────────────
+
+    /// Get the last committed epoch for a batch refresh job.
+    pub(crate) fn get_batch_refresh_trigger_info(&self, job_id: JobId) -> u64 {
+        let job = self
+            .independent_checkpoint_job_controls
+            .get(&job_id)
+            .expect("batch refresh job should exist");
+        match job {
+            IndependentCheckpointJobControl::BatchRefresh(br_job) => br_job
+                .last_committed_epoch()
+                .expect("idle job must have a last_committed_epoch"),
+            _ => panic!("job {} should be a batch refresh job", job_id),
+        }
+    }
+
+    /// Whether the batch refresh job already has its cached context populated.
+    /// Start a batch refresh logstore consumption run.
+    /// Returns true if a run was started, false if no log epochs to consume.
+    pub(crate) fn start_batch_refresh_run(
+        &mut self,
+        job_id: JobId,
+        context: &BatchRefreshJobTriggerContext,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        actor_id_counter: &AtomicU32,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+        partial_graph_manager: &mut PartialGraphManager,
+    ) -> MetaResult<bool> {
+        let job = self
+            .independent_checkpoint_job_controls
+            .get_mut(&job_id)
+            .expect("batch refresh job should exist");
+        match job {
+            IndependentCheckpointJobControl::BatchRefresh(br_job) => br_job.start_refresh_run(
+                context,
+                worker_nodes,
+                actor_id_counter,
+                adaptive_parallelism_strategy,
+                partial_graph_manager,
+            ),
+            _ => panic!("job {} should be a batch refresh job", job_id),
+        }
     }
 }

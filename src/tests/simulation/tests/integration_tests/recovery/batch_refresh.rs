@@ -18,7 +18,7 @@ use anyhow::Result;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use tokio::time::sleep;
 
-use crate::utils::kill_cn_and_wait_recover;
+use crate::utils::{kill_cn_and_meta_and_wait_recover, kill_cn_and_wait_recover};
 
 /// Test batch refresh MV recovery:
 ///
@@ -154,4 +154,95 @@ async fn test_batch_refresh_recovery() -> Result<()> {
     eprintln!("=== Cleanup: all done");
 
     Ok(())
+}
+
+/// Verify that after the configured `refresh.interval.sec` elapses, the
+/// batch-refresh MV picks up upstream changes through a periodic refresh run,
+/// and that recovery while the job is in the idle / log-store-consuming phase
+/// does not break subsequent refresh cycles.
+///
+/// This test specifically exercises the periodic-refresh trigger introduced in
+/// this branch (not the initial snapshot-consumption path).
+#[tokio::test]
+async fn test_batch_refresh_periodic_update() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+
+    // Upstream table + MV (batch refresh requires an MV as upstream).
+    session.run("CREATE TABLE t(v1 int);").await?;
+    session.run("INSERT INTO t VALUES (1), (2);").await?;
+    session.flush().await?;
+
+    session
+        .run("CREATE MATERIALIZED VIEW mv_up AS SELECT * FROM t;")
+        .await?;
+
+    // Short refresh interval so we don't need to wait long per cycle.
+    session
+        .run(
+            "CREATE MATERIALIZED VIEW mv_batch WITH (refresh.interval.sec = 3) AS SELECT * FROM mv_up;",
+        )
+        .await?;
+
+    // Initial snapshot content.
+    let mv_batch_count = session.run("SELECT COUNT(*) FROM mv_batch;").await?;
+    assert_eq!(mv_batch_count, "2");
+
+    // ── First cycle: upstream inserts must appear after a refresh interval. ──
+    session
+        .run("INSERT INTO t SELECT * FROM generate_series(3, 100);")
+        .await?;
+    session.flush().await?;
+    wait_for_batch_mv_count(&mut session, "100", "first periodic refresh").await?;
+
+    // ── Recover while job is idle / between refresh cycles. ──────────────────
+    kill_cn_and_wait_recover(&cluster).await;
+
+    // ── Second cycle: changes after recovery must still be picked up. ────────
+    session
+        .run("INSERT INTO t SELECT * FROM generate_series(101, 200);")
+        .await?;
+    session.flush().await?;
+    wait_for_batch_mv_count(&mut session, "200", "periodic refresh after CN recovery").await?;
+
+    // ── Recover using meta + CN together, then run another cycle. ────────────
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
+
+    session.run("DELETE FROM t WHERE v1 <= 50;").await?;
+    session.flush().await?;
+    wait_for_batch_mv_count(&mut session, "150", "periodic refresh after meta+CN recovery")
+        .await?;
+
+    session.run("DROP MATERIALIZED VIEW mv_batch;").await?;
+    session.run("DROP MATERIALIZED VIEW mv_up;").await?;
+    session.run("DROP TABLE t;").await?;
+
+    Ok(())
+}
+
+/// Poll `mv_batch` every second, up to ~30s, expecting the row count to reach
+/// `expected`. Returns an error describing the last observed count on timeout.
+async fn wait_for_batch_mv_count(
+    session: &mut risingwave_simulation::cluster::Session,
+    expected: &str,
+    stage: &str,
+) -> Result<()> {
+    let mut last = String::new();
+    for _ in 0..30 {
+        match session.run("SELECT COUNT(*) FROM mv_batch;").await {
+            Ok(c) => {
+                last = c.clone();
+                if c == expected {
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                last = format!("<query error: {}>", e);
+            }
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
+    Err(anyhow::anyhow!(
+        "{stage}: expected mv_batch count = {expected}, last observed = {last}"
+    ))
 }
