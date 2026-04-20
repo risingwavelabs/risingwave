@@ -29,8 +29,10 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::batch_plan::{ScanRange, scan_range};
 use risingwave_pb::common::PbThrottleType;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
@@ -87,11 +89,77 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
+    /// Decode a scan range (eq prefix + range bounds) from the scan range proto.
+    fn decode_pk_scan_range(
+        pb_scan_range: Option<&ScanRange>,
+        upstream_table: &BatchTable<S>,
+    ) -> StreamExecutorResult<Option<PkScanRange>> {
+        let Some(pb_scan_range) = pb_scan_range else {
+            return Ok(None);
+        };
+
+        let pk_types = upstream_table.pk_serializer().get_data_types();
+        let mut index = 0;
+        let pk_prefix = OwnedRow::new(
+            pb_scan_range
+                .eq_conds
+                .iter()
+                .map(|v| {
+                    let ty = pk_types
+                        .get(index)
+                        .ok_or_else(|| anyhow!("pk_prefix index out of bounds"))?;
+                    index += 1;
+                    Ok(deserialize_datum(v.as_slice(), ty)?)
+                })
+                .collect::<StreamExecutorResult<Vec<_>>>()?,
+        );
+
+        if pb_scan_range.lower_bound.is_none() && pb_scan_range.upper_bound.is_none() {
+            return Ok(Some((pk_prefix, (Bound::Unbounded, Bound::Unbounded))));
+        }
+
+        let build_bound =
+            |bound: &scan_range::Bound, idx: usize| -> StreamExecutorResult<Bound<OwnedRow>> {
+                let mut i = idx;
+                let row = OwnedRow::new(
+                    bound
+                        .value
+                        .iter()
+                        .map(|v| {
+                            let ty = pk_types
+                                .get(i)
+                                .ok_or_else(|| anyhow!("range bound index out of bounds"))?;
+                            i += 1;
+                            Ok(deserialize_datum(v.as_slice(), ty)?)
+                        })
+                        .collect::<StreamExecutorResult<Vec<_>>>()?,
+                );
+                if bound.inclusive {
+                    Ok(Bound::Included(row))
+                } else {
+                    Ok(Bound::Excluded(row))
+                }
+            };
+
+        let next_col_bounds: PkRangeBounds = match (
+            pb_scan_range.lower_bound.as_ref(),
+            pb_scan_range.upper_bound.as_ref(),
+        ) {
+            (Some(lb), Some(ub)) => (build_bound(lb, index)?, build_bound(ub, index)?),
+            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub, index)?),
+            (Some(lb), None) => (build_bound(lb, index)?, Bound::Unbounded),
+            (None, None) => unreachable!(),
+        };
+
+        Ok(Some((pk_prefix, next_col_bounds)))
+    }
+
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         upstream_table: BatchTable<S>,
         progress_state_table: StateTable<S>,
         upstream: Option<MergeExecutorInput>,
+        pb_pk_scan_range: Option<&ScanRange>,
         output_indices: Vec<usize>,
         actor_ctx: ActorContextRef,
         progress: CreateMviewProgressReporter,
@@ -100,8 +168,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
         snapshot_epoch: Option<u64>,
-        pk_scan_range: Option<PkScanRange>,
-    ) -> Self {
+    ) -> StreamExecutorResult<Self> {
         if let Some(upstream) = &upstream {
             assert_eq!(&upstream.info.schema, upstream_table.schema());
         }
@@ -113,13 +180,14 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 upstream_table.schema()
             )
         };
+        let pk_scan_range = Self::decode_pk_scan_range(pb_pk_scan_range, &upstream_table)?;
         if !matches!(rate_limit, RateLimit::Disabled) {
             trace!(
                 ?rate_limit,
                 "create snapshot backfill executor with rate limit"
             );
         }
-        Self {
+        Ok(Self {
             upstream_table,
             progress_state_table,
             upstream,
@@ -132,7 +200,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             metrics,
             snapshot_epoch,
             pk_scan_range,
-        }
+        })
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
