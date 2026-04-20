@@ -48,6 +48,22 @@ CREATE SINK s_bad_url FROM t_url WITH (
 statement ok
 DROP TABLE t_url;
 
+# ---- Validation: auto schema change should be rejected ----
+statement ok
+CREATE TABLE t_auto_schema_change (payload varchar primary key);
+
+statement error http sink does not support schema change
+CREATE SINK s_auto_schema_change FROM t_auto_schema_change WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    primary_key = 'payload',
+    auto.schema.change = 'true'
+);
+
+statement ok
+DROP TABLE t_auto_schema_change;
+
 # ---- Success: varchar payload ----
 statement ok
 CREATE TABLE t_varchar (payload varchar);

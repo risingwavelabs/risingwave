@@ -31,18 +31,14 @@ use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, Sink, SinkError, SinkParam, Sin
 
 pub const HTTP_SINK: &str = "http";
 
-fn default_content_type() -> String {
-    "application/json".to_owned()
-}
-
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct HttpConfig {
     /// The endpoint URL to POST data to.
     pub url: String,
 
-    /// Content-Type header value. Defaults to "application/json".
-    #[serde(default = "default_content_type")]
-    pub content_type: String,
+    /// Content-Type header value. Defaults to `text/plain` for `varchar` and `application/json`
+    /// for `jsonb`.
+    pub content_type: Option<String>,
 
     /// Sink type, must be "append-only".
     pub r#type: String,
@@ -114,9 +110,18 @@ fn validate_http_sink(
     Ok((col_type, parsed_url))
 }
 
+fn default_content_type(col_type: &DataType) -> &'static str {
+    match col_type {
+        DataType::Varchar => "text/plain",
+        DataType::Jsonb => "application/json",
+        _ => unreachable!("validated HTTP sink column type"),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct HttpSink {
     pub config: HttpConfig,
+    col_type: DataType,
     headers: BTreeMap<String, String>,
 }
 
@@ -140,10 +145,14 @@ impl TryFrom<SinkParam> for HttpSink {
             .properties
             .get("url")
             .ok_or_else(|| SinkError::Config(anyhow!("missing 'url' in WITH")))?;
-        validate_http_sink(param.sink_type.is_append_only(), &schema, url)?;
+        let (col_type, _) = validate_http_sink(param.sink_type.is_append_only(), &schema, url)?;
 
         let (config, headers) = HttpConfig::from_btreemap(param.properties)?;
-        Ok(Self { config, headers })
+        Ok(Self {
+            config,
+            col_type,
+            headers,
+        })
     }
 }
 
@@ -157,8 +166,13 @@ impl Sink for HttpSink {
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        let content_type = self
+            .config
+            .content_type
+            .as_deref()
+            .unwrap_or_else(|| default_content_type(&self.col_type));
         Ok(
-            HttpSinkWriter::new(self.config.clone(), self.headers.clone())?
+            HttpSinkWriter::new(self.config.clone(), self.headers.clone(), content_type)?
                 .into_log_sinker(usize::MAX),
         )
     }
@@ -170,12 +184,15 @@ pub struct HttpSinkWriter {
 }
 
 impl HttpSinkWriter {
-    pub fn new(config: HttpConfig, headers: BTreeMap<String, String>) -> Result<Self> {
+    pub fn new(
+        config: HttpConfig,
+        headers: BTreeMap<String, String>,
+        content_type: &str,
+    ) -> Result<Self> {
         let mut header_map = reqwest::header::HeaderMap::new();
         header_map.insert(
             reqwest::header::CONTENT_TYPE,
-            config
-                .content_type
+            content_type
                 .parse()
                 .context("invalid content_type")
                 .map_err(SinkError::Http)?,

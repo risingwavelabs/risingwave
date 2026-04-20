@@ -442,9 +442,10 @@ HttpConfig:
     required: true
   - name: content_type
     field_type: String
-    comments: Content-Type header value. Defaults to "application/json".
+    comments: |-
+      Content-Type header value. Defaults to `text/plain` for `varchar` and `application/json`
+      for `jsonb`.
     required: false
-    default: '"application/json" . to_owned ()'
   - name: r#type
     field_type: String
     comments: Sink type, must be "append-only".

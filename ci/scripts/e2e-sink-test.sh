@@ -55,6 +55,9 @@ grep -q '"event"' "$HTTP_SINK_OUTPUT"
 test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 3
 # Verify the custom header set via header.x_test = 'rw-http-sink' was sent
 grep -q '"x_test": "rw-http-sink"' "$HTTP_SINK_HEADERS"
+# Verify inferred default content types for varchar and jsonb payloads
+grep -q '"content-type": "text/plain"' "$HTTP_SINK_HEADERS"
+grep -q '"content-type": "application/json"' "$HTTP_SINK_HEADERS"
 
 kill "$HTTP_SINK_SERVER_PID" || true
 rm -f "$HTTP_SINK_OUTPUT" "$HTTP_SINK_HEADERS"
