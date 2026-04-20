@@ -92,7 +92,7 @@ pub struct BigQueryCommon {
     pub dataset: String,
     #[serde(rename = "bigquery.table")]
     pub table: String,
-    #[serde(default, rename = "create_table_if_not_exists")] // default false
+    #[serde(default, alias = "create_table_if_not_exists")] // default false
     #[serde_as(as = "DisplayFromStr")]
     pub auto_create: bool,
     #[serde(rename = "bigquery.credentials")]
@@ -997,7 +997,7 @@ fn build_protobuf_field(
 mod test {
 
     use std::assert_matches::assert_matches;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use crate::connector_common::AwsAuthProps;
     use risingwave_common::catalog::{Field, Schema};
@@ -1139,5 +1139,36 @@ mod test {
             "BIGNUMERIC(35, 12)".to_owned(),
         )]))
         .unwrap();
+    }
+
+    #[test]
+    fn test_bigquery_config_accepts_legacy_auto_create_key() {
+        let config = BigQueryConfig::from_btreemap(BTreeMap::from([
+            ("bigquery.project".to_owned(), "project".to_owned()),
+            ("bigquery.dataset".to_owned(), "dataset".to_owned()),
+            ("bigquery.table".to_owned(), "table".to_owned()),
+            ("auto_create".to_owned(), "true".to_owned()),
+            ("type".to_owned(), "append-only".to_owned()),
+        ]))
+        .unwrap();
+
+        assert!(config.common.auto_create);
+    }
+
+    #[test]
+    fn test_bigquery_config_accepts_create_table_if_not_exists_alias() {
+        let config = BigQueryConfig::from_btreemap(BTreeMap::from([
+            ("bigquery.project".to_owned(), "project".to_owned()),
+            ("bigquery.dataset".to_owned(), "dataset".to_owned()),
+            ("bigquery.table".to_owned(), "table".to_owned()),
+            (
+                "create_table_if_not_exists".to_owned(),
+                "true".to_owned(),
+            ),
+            ("type".to_owned(), "append-only".to_owned()),
+        ]))
+        .unwrap();
+
+        assert!(config.common.auto_create);
     }
 }
