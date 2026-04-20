@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ -n "${DORIS_CONTAINER:-}" ]]; then
+  exec docker exec -i "${DORIS_CONTAINER}" mysql -h127.0.0.1 -P9030 -uroot "$@"
+fi
+
+REAL_PATH=$(echo "$PATH" | sed "s,$(dirname "$0"):,,g")
+PATH=${REAL_PATH} exec mysql --host="${DORIS_HOST}" --port="${DORIS_QUERY_PORT}" -uroot "$@"

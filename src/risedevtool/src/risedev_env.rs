@@ -159,6 +159,79 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::ClickHouse(c) => {
+                let host = &c.address;
+                let http_port = &c.http_port;
+                let native_port = &c.native_port;
+                let user = &c.user;
+                let password = &c.password;
+                let database = &c.database;
+                let http_url = format!("http://{host}:{http_port}");
+
+                writeln!(env, r#"CLICKHOUSE_HOST="{host}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_PORT="{native_port}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_HTTP_PORT="{http_port}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_USER="{user}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_DATABASE="{database}""#).unwrap();
+                writeln!(env, r#"RISEDEV_CLICKHOUSE_HTTP_URL="{http_url}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON="connector='clickhouse',clickhouse.url='{http_url}',clickhouse.user='{user}',clickhouse.password='{password}',clickhouse.database='{database}'""#,
+                )
+                .unwrap();
+            }
+            ServiceConfig::Minio(c) => {
+                let endpoint = format!("http://{}:{}", c.address, c.port);
+                writeln!(env, r#"RISEDEV_MINIO_ENDPOINT="{endpoint}""#).unwrap();
+                writeln!(env, r#"RISEDEV_MINIO_ACCESS_KEY="{0}""#, c.root_user).unwrap();
+                writeln!(env, r#"RISEDEV_MINIO_SECRET_KEY="{0}""#, c.root_password).unwrap();
+            }
+            ServiceConfig::Doris(c) => {
+                let host = &c.address;
+                let http_port = &c.http_port;
+                let query_port = &c.query_port;
+                let user = &c.user;
+                let password = &c.password;
+                let database = &c.database;
+                let http_url = format!("http://{host}:{http_port}");
+                writeln!(env, r#"DORIS_HOST="{host}""#).unwrap();
+                writeln!(env, r#"DORIS_HTTP_PORT="{http_port}""#).unwrap();
+                writeln!(env, r#"DORIS_QUERY_PORT="{query_port}""#).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"DORIS_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
+                writeln!(env, r#"DORIS_USER="{user}""#).unwrap();
+                writeln!(env, r#"DORIS_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"DORIS_DATABASE="{database}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_DORIS_WITH_OPTIONS_COMMON="connector='doris',doris.url='{http_url}',doris.user='{user}',doris.password='{password}',doris.database='{database}'""#,
+                )
+                .unwrap();
+            }
+            ServiceConfig::Starrocks(c) => {
+                let host = &c.address;
+                let http_port = &c.http_port;
+                let query_port = &c.query_port;
+                let user = &c.user;
+                let password = &c.password;
+                let database = &c.database;
+                writeln!(env, r#"STARROCKS_HOST="{host}""#).unwrap();
+                writeln!(env, r#"STARROCKS_HTTP_PORT="{http_port}""#).unwrap();
+                writeln!(env, r#"STARROCKS_QUERY_PORT="{query_port}""#).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"STARROCKS_CONTAINER="risedev-{}-fe""#, c.id).unwrap();
+                }
+                writeln!(env, r#"STARROCKS_USER="{user}""#).unwrap();
+                writeln!(env, r#"STARROCKS_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"STARROCKS_DATABASE="{database}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_STARROCKS_WITH_OPTIONS_COMMON="connector='starrocks',starrocks.host='{host}',starrocks.mysqlport='{query_port}',starrocks.httpport='{http_port}',starrocks.user='{user}',starrocks.password='{password}',starrocks.database='{database}'""#,
+                )
+                .unwrap();
+            }
             ServiceConfig::MetaNode(meta_node_config) => {
                 writeln!(
                     env,

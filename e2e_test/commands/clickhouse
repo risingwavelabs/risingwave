@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+cat | curl --fail -sS --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" "${RISEDEV_CLICKHOUSE_HTTP_URL}/?database=${CLICKHOUSE_DATABASE}&enable_json_type=1" --data-binary @-

@@ -817,9 +817,6 @@ profile:
       - use: frontend
       - use: compactor
       - use: pubsub
-        user-managed: true
-        address: pubsub-emulator
-        port: 8900
         persist-data: true
       - use: kafka
         user-managed: true
@@ -834,136 +831,6 @@ profile:
         broker-port: 6650
         http-port: 8080
         user-managed: true
-      - use: mysql
-        port: 3306
-        address: mysql
-        user: root
-        password: 123456
-        user-managed: true
-      - use: postgres
-        port: 5432
-        address: db
-        user: postgres
-        password: post\tgres
-        user-managed: true
-
-  ci-source-kafka-test:
-    config-path: src/config/ci-recovery.toml
-    steps:
-      - use: minio
-      - use: meta-node
-        meta-backend: env
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: kafka
-        user-managed: true
-        address: message_queue
-        port: 29092
-      - use: schema-registry
-        user-managed: true
-        address: schemaregistry
-        port: 8082
-
-  ci-source-cdc-test:
-    config-path: src/config/ci-recovery.toml
-    steps:
-      - use: minio
-      - use: meta-node
-        meta-backend: env
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: mysql
-        port: 3306
-        address: mysql
-        user: root
-        password: 123456
-        user-managed: true
-      - use: postgres
-        port: 5432
-        address: db
-        user: postgres
-        password: post\tgres
-        user-managed: true
-
-  ci-source-pulsar-test:
-    config-path: src/config/ci-recovery.toml
-    steps:
-      - use: minio
-      - use: meta-node
-        meta-backend: env
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: pulsar
-        address: pulsar-server
-        broker-port: 6650
-        http-port: 8080
-        user-managed: true
-
-  ci-source-pubsub-test:
-    config-path: src/config/ci-recovery.toml
-    steps:
-      - use: minio
-      - use: meta-node
-        meta-backend: env
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: pubsub
-        persist-data: true
-
-  ci-sink-kafka-test:
-    config-path: src/config/ci-recovery.toml
-    steps:
-      - use: minio
-      - use: meta-node
-        meta-backend: env
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: kafka
-        user-managed: true
-        address: message_queue
-        port: 29092
-      - use: schema-registry
-        user-managed: true
-        address: schemaregistry
-        port: 8082
-
-  ci-sink-postgres-test:
-    config-path: src/config/ci-recovery.toml
-    steps:
-      - use: minio
-      - use: meta-node
-        meta-backend: env
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: postgres
-        port: 5432
-        address: db
-        user: postgres
-        password: post\tgres
-        user-managed: true
-
-  ci-sink-jdbc-test:
-    config-path: src/config/ci-recovery.toml
-    steps:
-      - use: minio
-      - use: meta-node
-        meta-backend: env
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
       - use: mysql
         port: 3306
         address: mysql
@@ -1212,6 +1079,51 @@ profile:
         password: 123456
         database: risedev
         user-managed: true
+
+  local-clickhouse-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-clickhouse-sink-test
+      - use: sqlite
+        id: sqlite-local-clickhouse-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: clickhouse
+
+  local-doris-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-doris-sink-test
+      - use: sqlite
+        id: sqlite-local-doris-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: doris
+
+  local-starrocks-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-starrocks-sink-test
+      - use: sqlite
+        id: sqlite-local-starrocks-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: starrocks
 
   postgres-with-latency:
     steps:
@@ -1615,8 +1527,6 @@ template:
   pubsub:
     id: pubsub-${port}
 
-    user-managed: false
-
     address: "127.0.0.1"
 
     port: 5980
@@ -1742,6 +1652,66 @@ template:
 
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+  # ClickHouse service backed by docker.
+  clickhouse:
+    # Id to be picked-up by services
+    id: clickhouse-${http-port}
+
+    # address of ClickHouse
+    address: "127.0.0.1"
+
+    # listen port of ClickHouse HTTP API
+    http-port: 8123
+
+    # listen port of ClickHouse native protocol
+    native-port: 9000
+
+    # These configs will be passed to risedev-env and the container initialization.
+    user: default
+    password: default
+    database: default
+
+    # The docker image. Can be overridden to use a different version.
+    image: "clickhouse/clickhouse-server:25.5"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+  # Doris service backed by docker.
+  doris:
+    id: doris-${query-port}
+    address: "127.0.0.1"
+    http-port: 8030
+    query-port: 9030
+    be-http-port: 8040
+    user: users
+    password: "123456"
+    database: demo
+    image: "apache/doris:2.1.9-all"
+    persist-data: false
+    user-managed: false
+
+  # StarRocks service backed by docker.
+  starrocks:
+    id: starrocks-${query-port}
+    address: "127.0.0.1"
+    http-port: 28030
+    rpc-port: 29020
+    query-port: 29030
+    be-http-port: 28040
+    be-heartbeat-port: 29050
+    user: users
+    password: "123456"
+    database: demo
+    fe-image: "starrocks/fe-ubuntu:3.1.7"
+    be-image: "starrocks/be-ubuntu:3.1.7"
+    persist-data: false
     user-managed: false
 
   # Lakekeeper Apache Iceberg REST Catalog service backed by binary.

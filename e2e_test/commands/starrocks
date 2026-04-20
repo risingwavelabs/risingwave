@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [[ -n "${STARROCKS_CONTAINER:-}" ]]; then
+  exec docker exec -i "${STARROCKS_CONTAINER}" mysql -h127.0.0.1 -P9030 -uroot "$@"
+fi
+
+REAL_PATH=$(echo "$PATH" | sed "s,$(dirname "$0"):,,g")
+PATH=${REAL_PATH} exec mysql --host="${STARROCKS_HOST}" --port="${STARROCKS_QUERY_PORT}" -uroot "$@"

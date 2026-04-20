@@ -309,8 +309,6 @@ pub struct PubsubConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
-    #[serde(default)]
-    pub user_managed: bool,
     #[serde(with = "string")]
     pub port: u16,
     pub address: String,
@@ -423,6 +421,74 @@ pub struct SqlServerConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct ClickHouseConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub http_port: u16,
+    pub native_port: u16,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct DorisConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub http_port: u16,
+    pub query_port: u16,
+    pub be_http_port: u16,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct StarrocksConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub http_port: u16,
+    pub rpc_port: u16,
+    pub query_port: u16,
+    pub be_http_port: u16,
+    pub be_heartbeat_port: u16,
+
+    pub user: String,
+    pub password: String,
+    pub database: String,
+
+    pub fe_image: String,
+    pub be_image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct LakekeeperConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -476,6 +542,9 @@ pub enum ServiceConfig {
     MySql(MySqlConfig),
     Postgres(PostgresConfig),
     SqlServer(SqlServerConfig),
+    ClickHouse(ClickHouseConfig),
+    Doris(DorisConfig),
+    Starrocks(StarrocksConfig),
     Lakekeeper(LakekeeperConfig),
     Moat(MoatConfig),
 }
@@ -490,6 +559,9 @@ pub enum TaskGroup {
     MySql,
     Postgres,
     SqlServer,
+    ClickHouse,
+    Doris,
+    Starrocks,
     Redis,
     Lakekeeper,
     Moat,
@@ -516,6 +588,9 @@ impl ServiceConfig {
             Self::MySql(c) => &c.id,
             Self::Postgres(c) => &c.id,
             Self::SqlServer(c) => &c.id,
+            Self::ClickHouse(c) => &c.id,
+            Self::Doris(c) => &c.id,
+            Self::Starrocks(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
             Self::Lakekeeper(c) => &c.id,
             Self::Moat(c) => &c.id,
@@ -543,6 +618,9 @@ impl ServiceConfig {
             Self::MySql(c) => Some(c.port),
             Self::Postgres(c) => Some(c.port),
             Self::SqlServer(c) => Some(c.port),
+            Self::ClickHouse(c) => Some(c.http_port),
+            Self::Doris(c) => Some(c.query_port),
+            Self::Starrocks(c) => Some(c.query_port),
             Self::SchemaRegistry(c) => Some(c.port),
             Self::Lakekeeper(c) => Some(c.port),
             Self::Moat(c) => Some(c.port),
@@ -562,13 +640,16 @@ impl ServiceConfig {
             Self::Tempo(_c) => false,
             Self::AwsS3(_c) => false,
             Self::Kafka(c) => c.user_managed,
-            Self::Pubsub(c) => c.user_managed,
+            Self::Pubsub(_c) => false,
             Self::Pulsar(c) => c.user_managed,
             Self::Redis(_c) => false,
             Self::Opendal(_c) => false,
             Self::MySql(c) => c.user_managed,
             Self::Postgres(c) => c.user_managed,
             Self::SqlServer(c) => c.user_managed,
+            Self::ClickHouse(c) => c.user_managed,
+            Self::Doris(c) => c.user_managed,
+            Self::Starrocks(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
             Self::Lakekeeper(c) => c.user_managed,
             Self::Moat(_c) => false,
@@ -607,6 +688,9 @@ impl ServiceConfig {
                 }
             }
             ServiceConfig::SqlServer(_) => SqlServer,
+            ServiceConfig::ClickHouse(_) => ClickHouse,
+            ServiceConfig::Doris(_) => Doris,
+            ServiceConfig::Starrocks(_) => Starrocks,
             ServiceConfig::Lakekeeper(_) => Lakekeeper,
             ServiceConfig::Moat(_) => Moat,
         }
