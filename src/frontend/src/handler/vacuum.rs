@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_batch::task::ShutdownToken;
 use risingwave_common::bail;
 use risingwave_common::catalog::Engine;
 use risingwave_connector::sink::CONNECTOR_TYPE_KEY;
@@ -21,6 +24,22 @@ use risingwave_sqlparser::ast::ObjectName;
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::{HandlerArgs, RwPgResponse};
+use crate::scheduler::SchedulerError;
+
+async fn await_cancelable<T, E, F>(shutdown_rx: &mut ShutdownToken, future: F) -> Result<T>
+where
+    E: Into<RwError>,
+    F: Future<Output = std::result::Result<T, E>>,
+{
+    tokio::pin!(future);
+
+    tokio::select! {
+        result = &mut future => result.map_err(Into::into),
+        _ = shutdown_rx.cancelled() => {
+            Err(SchedulerError::QueryCancelled("cancelled by user".to_owned()).into())
+        }
+    }
+}
 
 pub async fn handle_vacuum(
     handler_args: HandlerArgs,
@@ -100,25 +119,33 @@ pub async fn handle_vacuum(
         }
     };
 
+    let mut shutdown_rx = session.reset_cancel_query_flag();
+
     if full {
         // VACUUM FULL: perform compaction followed by snapshot expiration
-        session
-            .env()
-            .meta_client()
-            .compact_iceberg_table(sink_id)
-            .await?;
-        session
-            .env()
-            .meta_client()
-            .expire_iceberg_table_snapshots(sink_id)
-            .await?;
+        await_cancelable(
+            &mut shutdown_rx,
+            session.env().meta_client().compact_iceberg_table(sink_id),
+        )
+        .await?;
+        await_cancelable(
+            &mut shutdown_rx,
+            session
+                .env()
+                .meta_client()
+                .expire_iceberg_table_snapshots(sink_id),
+        )
+        .await?;
     } else {
         // Regular VACUUM: only expire snapshots
-        session
-            .env()
-            .meta_client()
-            .expire_iceberg_table_snapshots(sink_id)
-            .await?;
+        await_cancelable(
+            &mut shutdown_rx,
+            session
+                .env()
+                .meta_client()
+                .expire_iceberg_table_snapshots(sink_id),
+        )
+        .await?;
     }
     Ok(PgResponse::builder(StatementType::VACUUM).into())
 }

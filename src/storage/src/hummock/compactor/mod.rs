@@ -607,6 +607,13 @@ pub fn start_iceberg_compactor(
                                 // set flag
                                 pull_task_ack = true;
                             },
+                            risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CancelCompactTask(cancel_compact_task) => {
+                                cancel_iceberg_task(
+                                    cancel_compact_task.task_id,
+                                    &mut task_queue,
+                                    &shutdown_map,
+                                );
+                            },
                         }
                     }
                     Some(Err(e)) => {
@@ -1217,6 +1224,51 @@ fn schedule_queued_tasks(
                 tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
             }
         });
+    }
+}
+
+fn cancel_iceberg_task(
+    task_id: u64,
+    task_queue: &mut IcebergTaskQueue,
+    shutdown_map: &Arc<Mutex<HashMap<TaskKey, Sender<()>>>>,
+) {
+    let cancelled_waiting = task_queue.cancel_waiting_task(task_id);
+
+    let cancelled_running = {
+        let mut shutdown_guard = shutdown_map.lock().unwrap();
+        let task_keys: Vec<_> = shutdown_guard
+            .keys()
+            .filter(|(running_task_id, _)| *running_task_id == task_id)
+            .copied()
+            .collect();
+
+        for task_key in &task_keys {
+            if let Some(tx) = shutdown_guard.remove(task_key)
+                && tx.send(()).is_err()
+            {
+                tracing::warn!(
+                    task_id = task_key.0,
+                    plan_index = task_key.1,
+                    "Cancellation of running iceberg compaction plan failed"
+                );
+            }
+        }
+
+        task_keys.len()
+    };
+
+    if cancelled_waiting == 0 && cancelled_running == 0 {
+        tracing::warn!(
+            task_id = task_id,
+            "Attempting to cancel non-existent iceberg compaction task"
+        );
+    } else {
+        tracing::info!(
+            task_id = task_id,
+            cancelled_waiting = cancelled_waiting,
+            cancelled_running = cancelled_running,
+            "Cancelled iceberg compaction task"
+        );
     }
 }
 
