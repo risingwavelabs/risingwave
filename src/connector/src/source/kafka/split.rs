@@ -18,6 +18,23 @@ use serde::{Deserialize, Serialize};
 use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
 
+/// Per-split state machine for the `backfill.wait` feature.
+///
+/// - `Disabled`: `backfill.wait` was not enabled, or the partition was empty at creation time.
+/// - `Pending { target }`: the split must catch up to `target` (`high_watermark - 1` captured
+///   at the moment the enumerator saw this partition) before `CREATE TABLE` can return.
+/// - `Finished`: the split has already reached its target in a previous actor lifetime. No
+///   further tracking is needed; on restart the executor can immediately report finish.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash, Default)]
+pub enum KafkaBackfillWaitState {
+    #[default]
+    Disabled,
+    Pending {
+        target: i64,
+    },
+    Finished,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct KafkaSplit {
     pub(crate) topic: String,
@@ -32,12 +49,10 @@ pub struct KafkaSplit {
     /// A better approach would be to make it **inclusive**. <https://github.com/risingwavelabs/risingwave/pull/16257>
     pub(crate) start_offset: Option<i64>,
     pub(crate) stop_offset: Option<i64>,
-    /// The target offset for backfill completion. When `wait_for_backfill` is enabled,
-    /// this is set to `high_watermark - 1` at table creation time. The source executor
-    /// reports backfill as complete when all splits' current offsets reach their targets.
-    /// Uses `serde(default)` for backward compatibility with existing state.
+    /// Tracks the `backfill.wait` state of this split. `#[serde(default)]` makes old persisted
+    /// state deserialize as [`KafkaBackfillWaitState::Disabled`] for backward compatibility.
     #[serde(default)]
-    pub(crate) backfill_target_offset: Option<i64>,
+    pub(crate) backfill_wait_state: KafkaBackfillWaitState,
 }
 
 impl SplitMetaData for KafkaSplit {
@@ -60,11 +75,23 @@ impl SplitMetaData for KafkaSplit {
     }
 
     fn backfill_target_offset(&self) -> Option<String> {
-        self.backfill_target_offset.map(|o| o.to_string())
+        match &self.backfill_wait_state {
+            KafkaBackfillWaitState::Pending { target } => Some(target.to_string()),
+            KafkaBackfillWaitState::Disabled | KafkaBackfillWaitState::Finished => None,
+        }
     }
 
     fn current_offset(&self) -> Option<String> {
         self.start_offset.map(|o| o.to_string())
+    }
+
+    fn mark_backfill_finished(&mut self) {
+        if matches!(
+            self.backfill_wait_state,
+            KafkaBackfillWaitState::Pending { .. }
+        ) {
+            self.backfill_wait_state = KafkaBackfillWaitState::Finished;
+        }
     }
 }
 
@@ -80,7 +107,7 @@ impl KafkaSplit {
             partition,
             start_offset,
             stop_offset,
-            backfill_target_offset: None,
+            backfill_wait_state: KafkaBackfillWaitState::Disabled,
         }
     }
 }

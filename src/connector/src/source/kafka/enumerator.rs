@@ -34,7 +34,7 @@ use crate::connector_common::read_kafka_log_level;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::SourceEnumeratorContextRef;
 use crate::source::base::SplitEnumerator;
-use crate::source::kafka::split::KafkaSplit;
+use crate::source::kafka::split::{KafkaBackfillWaitState, KafkaSplit};
 use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaConnectionProps, KafkaContextCommon, KafkaProperties,
     RwConsumerContext,
@@ -231,25 +231,25 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let ret: Vec<_> = topic_partitions
             .into_iter()
             .map(|partition| {
-                let backfill_target_offset = if self.wait_for_backfill {
+                let backfill_wait_state = if self.wait_for_backfill {
                     let (low, high) = watermarks.get(&partition).unwrap();
                     if high > low {
                         // high_watermark - 1 is the offset of the last available message.
                         // This matches the "last seen offset" convention used by start_offset.
-                        Some(*high - 1)
+                        KafkaBackfillWaitState::Pending { target: *high - 1 }
                     } else {
-                        // Empty partition: no data to backfill.
-                        None
+                        // Empty partition: nothing to backfill.
+                        KafkaBackfillWaitState::Finished
                     }
                 } else {
-                    None
+                    KafkaBackfillWaitState::Disabled
                 };
                 KafkaSplit {
                     topic: self.topic.clone(),
                     partition,
                     start_offset: start_offsets.remove(&partition).unwrap(),
                     stop_offset: stop_offsets.remove(&partition).unwrap(),
-                    backfill_target_offset,
+                    backfill_wait_state,
                 }
             })
             .collect();
@@ -403,7 +403,7 @@ impl KafkaSplitEnumerator {
                     partition: *partition,
                     start_offset: Some(start_offset),
                     stop_offset: Some(stop_offset),
-                    backfill_target_offset: None,
+                    backfill_wait_state: KafkaBackfillWaitState::Disabled,
                 }
             })
             .collect::<Vec<KafkaSplit>>())

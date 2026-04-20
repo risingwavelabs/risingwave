@@ -895,6 +895,10 @@ impl SplitImpl {
     pub fn current_offset(&self) -> Option<String> {
         dispatch_split_impl!(self, |inner| inner.current_offset())
     }
+
+    pub fn mark_backfill_finished(&mut self) {
+        dispatch_split_impl!(self, |inner| inner.mark_backfill_finished())
+    }
 }
 
 use risingwave_common::types::DataType;
@@ -981,8 +985,9 @@ pub trait SplitMetaData: Sized {
     fn restore_from_json(value: JsonbVal) -> Result<Self>;
     fn update_offset(&mut self, last_seen_offset: String) -> crate::error::ConnectorResult<()>;
 
-    /// Returns the backfill target offset for this split, if set.
-    /// Used by `wait_for_backfill` to determine when backfill is complete.
+    /// Returns the backfill target offset for this split, if the split is still waiting to
+    /// catch up. Used by `wait_for_backfill` to determine when backfill is complete.
+    /// Returns `None` if the split is not tracked (disabled) or has already finished.
     fn backfill_target_offset(&self) -> Option<String> {
         None
     }
@@ -992,6 +997,11 @@ pub trait SplitMetaData: Sized {
     fn current_offset(&self) -> Option<String> {
         None
     }
+
+    /// Transition this split's `wait_for_backfill` tracking to the finished state.
+    /// Called by the source executor after reporting `finish` so that the split is no longer
+    /// tracked on subsequent actor restarts. No-op for splits that don't track backfill state.
+    fn mark_backfill_finished(&mut self) {}
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,

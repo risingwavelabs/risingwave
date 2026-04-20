@@ -251,6 +251,11 @@ impl<S: StateStore> SourceExecutor<S> {
                 {
                     recover_state
                 } else {
+                    // No persisted state => partition discovered after DDL started.
+                    // Mark `Finished` so `wait_for_backfill` doesn't extend its criteria
+                    // beyond the creation-time backlog. No-op for non-Pending states.
+                    let mut split = split;
+                    split.mark_backfill_finished();
                     split
                 };
 
@@ -585,9 +590,21 @@ impl<S: StateStore> SourceExecutor<S> {
         if backfill_target_offsets.is_empty() || all_reached {
             progress.finish(epoch, consumed_rows);
             *backfill_finished = true;
+            // Transition splits to `Finished`; persisted on the next barrier.
+            // Edge case: if the actor crashes between this in-memory transition and
+            // the next persist, a post-DDL split whose `Finished` mark was not yet
+            // persisted re-appears as `Pending` at init and causes one `done=false`
+            // warn (`update the progress of an created streaming job`) on meta after
+            // restart, then self-heals.
+            let core = &mut self.stream_source_core;
+            for (split_id, split) in &mut core.latest_split_info {
+                split.mark_backfill_finished();
+                core.updated_splits_in_epoch
+                    .insert(split_id.clone(), split.clone());
+            }
             tracing::info!(
                 actor_id = %self.actor_ctx.id,
-                source_id = %self.stream_source_core.source_id,
+                source_id = %core.source_id,
                 "Source backfill finished, all splits reached target offsets"
             );
         } else {
@@ -1084,8 +1101,9 @@ impl<S: StateStore> SourceExecutor<S> {
                         )
                         .await?;
 
-                        // Rebuild backfill target offsets after split change, so that
-                        // removed splits don't block completion and added splits are tracked.
+                        // Rebuild target offsets so removed splits don't block completion.
+                        // Post-DDL splits are marked `Finished` in `update_state_if_changed`,
+                        // so the rebuild only picks up creation-time / migrated Pending splits.
                         if self.backfill_progress.is_some() && !backfill_finished {
                             backfill_target_offsets = Self::build_backfill_target_offsets(
                                 &self.stream_source_core.latest_split_info,
