@@ -159,6 +159,56 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::MongoDb(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let url = format!("mongodb://{host}:{port}/?replicaSet=rs0");
+                writeln!(env, r#"MONGODB_HOST="{host}""#).unwrap();
+                writeln!(env, r#"MONGODB_PORT="{port}""#).unwrap();
+                writeln!(env, r#"MONGODB_URL="{url}""#).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"MONGODB_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_MONGODB_WITH_OPTIONS_COMMON="connector='mongodb',mongodb.url='{url}'""#,
+                )
+                .unwrap();
+            }
+            ServiceConfig::ElasticSearch(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let user = &c.user;
+                let password = &c.password;
+                let url = format!("http://{host}:{port}");
+                writeln!(env, r#"ELASTICSEARCH_HOST="{host}""#).unwrap();
+                writeln!(env, r#"ELASTICSEARCH_PORT="{port}""#).unwrap();
+                writeln!(env, r#"ELASTICSEARCH_USER="{user}""#).unwrap();
+                writeln!(env, r#"ELASTICSEARCH_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"RISEDEV_ELASTICSEARCH_URL="{url}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_ELASTICSEARCH_WITH_OPTIONS_COMMON="connector='elasticsearch',url='{url}',username='{user}',password='{password}'""#,
+                )
+                .unwrap();
+            }
+            ServiceConfig::OpenSearch(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let user = &c.user;
+                let password = &c.password;
+                let url = format!("http://{host}:{port}");
+                writeln!(env, r#"OPENSEARCH_HOST="{host}""#).unwrap();
+                writeln!(env, r#"OPENSEARCH_PORT="{port}""#).unwrap();
+                writeln!(env, r#"OPENSEARCH_USER="{user}""#).unwrap();
+                writeln!(env, r#"OPENSEARCH_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"RISEDEV_OPENSEARCH_URL="{url}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_OPENSEARCH_WITH_OPTIONS_COMMON="connector='opensearch',url='{url}',username='{user}',password='{password}'""#,
+                )
+                .unwrap();
+            }
             ServiceConfig::MetaNode(meta_node_config) => {
                 writeln!(
                     env,

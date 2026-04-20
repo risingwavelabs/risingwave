@@ -213,6 +213,11 @@ impl ConfigExpander {
                     "mysql" => ServiceConfig::MySql(serde_yaml::from_str(&out_str)?),
                     "postgres" => ServiceConfig::Postgres(serde_yaml::from_str(&out_str)?),
                     "sqlserver" => ServiceConfig::SqlServer(serde_yaml::from_str(&out_str)?),
+                    "mongodb" => ServiceConfig::MongoDb(serde_yaml::from_str(&out_str)?),
+                    "elasticsearch" => {
+                        ServiceConfig::ElasticSearch(serde_yaml::from_str(&out_str)?)
+                    }
+                    "opensearch" => ServiceConfig::OpenSearch(serde_yaml::from_str(&out_str)?),
                     "schema-registry" => {
                         ServiceConfig::SchemaRegistry(serde_yaml::from_str(&out_str)?)
                     }
