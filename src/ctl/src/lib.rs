@@ -367,22 +367,11 @@ enum MetaCommands {
         #[clap(long)]
         ignore_id: bool,
     },
-    /// Reschedule the actors in the stream graph
+    /// Deprecated: legacy manual worker-diff reschedule has been removed
     ///
-    /// The format is `fragment_id-[worker_id:count]+[worker_id:count]`
-    /// You can provide either decreased `worker_ids` only or increased only, but decreased should be preceded by
-    /// `added` when both are provided.
-    ///
-    /// For example, for plan `100-[1:1]+[4:1]` the follow request will be generated:
-    /// ```text
-    /// {
-    ///     100: WorkerReschedule {
-    ///         increased_actor_count: { 1: 1 },
-    ///         decreased_actor_count: { 4: 1 },
-    ///     }
-    /// }
-    /// ```
-    /// Use ; to separate multiple fragment
+    /// Use SQL instead:
+    /// - job-level: `ALTER TABLE|MATERIALIZED VIEW|SOURCE ... SET PARALLELISM`
+    /// - fragment-level: `ALTER FRAGMENT ... SET PARALLELISM`
     #[clap(verbatim_doc_comment)]
     #[clap(group(clap::ArgGroup::new("input_group").required(true).args(&["plan", "from"])))]
     Reschedule {

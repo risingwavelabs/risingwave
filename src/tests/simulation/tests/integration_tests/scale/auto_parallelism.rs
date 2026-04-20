@@ -25,8 +25,19 @@ use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_c
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
+use crate::utils::wait_all_database_recovered;
+
 /// Please ensure that this value is the same as the one in the `risingwave-auto-scale.toml` file.
 pub const MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE: u64 = 15;
+
+async fn locate_table_fragment(cluster: &mut Cluster) -> Result<Fragment> {
+    cluster
+        .locate_one_fragment(vec![
+            identity_contains("materialize"),
+            no_identity_contains("simpleAgg"),
+        ])
+        .await
+}
 
 #[tokio::test]
 async fn test_passive_online_and_offline() -> Result<()> {
@@ -312,15 +323,6 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
         .await?
         .assert_result_eq("ADAPTIVE");
 
-    async fn locate_table_fragment(cluster: &mut Cluster) -> Result<Fragment> {
-        cluster
-            .locate_one_fragment(vec![
-                identity_contains("materialize"),
-                no_identity_contains("simpleAgg"),
-            ])
-            .await
-    }
-
     let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
 
     let all_worker_slots = table_mat_fragment.all_worker_count();
@@ -434,6 +436,67 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     } else {
         assert_eq!(used_worker_slots.len(), config.compute_nodes - 1);
     }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_auto_parallelism_startup_reconciliation_after_recovery_window() -> Result<()> {
+    const STARTUP_RECONCILIATION_FIRST_DELAY_SECS: u64 = 20;
+    const PARALLELISM_CONTROL_PERIOD_SECS: u64 = 10;
+
+    let config = Configuration::for_auto_parallelism_with_first_delay(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE,
+        true,
+        STARTUP_RECONCILIATION_FIRST_DELAY_SECS,
+    );
+    let mut cluster = Cluster::start(config.clone()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("create table t (v1 int);").await?;
+
+    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
+    let initial_parallelism = table_mat_fragment.parallelism();
+    assert_eq!(
+        table_mat_fragment.used_worker_count().len(),
+        config.compute_nodes
+    );
+
+    cluster.simple_kill_nodes(["compute-2", "compute-3"]).await;
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+    .await;
+
+    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
+    assert_eq!(table_mat_fragment.used_worker_count().len(), 1);
+
+    cluster.simple_kill_nodes(["meta-1"]).await;
+    sleep(Duration::from_secs(1)).await;
+    cluster.simple_restart_nodes(["meta-1"]).await;
+
+    wait_all_database_recovered(&mut cluster).await;
+
+    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
+    assert_eq!(table_mat_fragment.used_worker_count().len(), 1);
+
+    // Restart workers before the monitor's first tick so startup reconciliation
+    // must expand the one-worker recovery layout back to the full worker set.
+    cluster
+        .simple_restart_nodes(["compute-2", "compute-3"])
+        .await;
+
+    sleep(Duration::from_secs(
+        STARTUP_RECONCILIATION_FIRST_DELAY_SECS + PARALLELISM_CONTROL_PERIOD_SECS * 2,
+    ))
+    .await;
+
+    let table_mat_fragment = locate_table_fragment(&mut cluster).await?;
+    assert_eq!(table_mat_fragment.parallelism(), initial_parallelism);
+    assert_eq!(
+        table_mat_fragment.used_worker_count().len(),
+        config.compute_nodes
+    );
 
     Ok(())
 }
