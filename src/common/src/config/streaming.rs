@@ -86,6 +86,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_topn_cache_min_capacity")]
     pub topn_cache_min_capacity: usize,
 
+    /// High capacity factor for TopN cache. The high cache capacity is calculated as
+    /// `(offset + limit) * topn_cache_high_capacity_factor`.
+    #[serde(default = "default::developer::stream_topn_cache_high_capacity_factor")]
+    pub topn_cache_high_capacity_factor: usize,
+
     /// The maximum size of the chunk produced by executor at a time.
     #[serde(default = "default::developer::stream_chunk_size")]
     pub chunk_size: usize,
