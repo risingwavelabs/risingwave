@@ -2,13 +2,86 @@
 
 set -e
 
-# If `uv` not installed, delegate to the system `python`.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+DEFAULT_REQUIREMENTS_FILE="${REPO_ROOT}/e2e_test/requirements.txt"
+
+resolve_requirements_file() {
+  local target="${1:-}"
+  if [[ -z "${target}" ]]; then
+    printf '%s\n' "${DEFAULT_REQUIREMENTS_FILE}"
+    return
+  fi
+
+  if [[ "${target}" = "-c" || "${target}" = "-" ]]; then
+    printf '\n'
+    return
+  fi
+
+  local candidate_path
+  if [[ "${target}" = /* ]]; then
+    candidate_path="${target}"
+  else
+    candidate_path="${REPO_ROOT}/${target}"
+  fi
+
+  local search_dir
+  search_dir="$(dirname "${candidate_path}")"
+  while [[ "${search_dir}" = "${REPO_ROOT}"* ]]; do
+    local requirements_file="${search_dir}/requirements.txt"
+    if [[ -f "${requirements_file}" ]]; then
+      printf '%s\n' "${requirements_file}"
+      return
+    fi
+    if [[ "${search_dir}" = "${REPO_ROOT}" ]]; then
+      break
+    fi
+    search_dir="$(dirname "${search_dir}")"
+  done
+
+  printf '%s\n' "${DEFAULT_REQUIREMENTS_FILE}"
+}
+
+REQUIREMENTS_FILE="$(resolve_requirements_file "${1:-}")"
+
+# If `uv` not installed, create a lightweight local virtualenv on demand instead of
+# delegating to the bare system python without test dependencies.
 if ! command -v uv >/dev/null; then
-  # Strip the current directory from the PATH to access the system `python`.
-  REAL_PATH=$(echo "$PATH" | sed "s,$(dirname "$0"):,,g")
-  PYTHON=$(PATH="${REAL_PATH}" which python || PATH="${REAL_PATH}" which python3)
-  exec ${PYTHON} "$@"
+  REAL_PATH="$(echo "$PATH" | sed "s,${SCRIPT_DIR}:,,g")"
+  SYSTEM_PYTHON="$(PATH="${REAL_PATH}" command -v python3 || true)"
+  if [[ -z "${SYSTEM_PYTHON}" ]]; then
+    echo "python3 is required to run e2e python helpers" >&2
+    exit 1
+  fi
+
+  VENV_DIR="${REPO_ROOT}/.risingwave/.venv/e2e-python"
+  VENV_PYTHON="${VENV_DIR}/bin/python3"
+  STAMP_FILE="${VENV_DIR}/.requirements.stamp"
+
+  mkdir -p "$(dirname "${VENV_DIR}")"
+  if [[ ! -x "${VENV_PYTHON}" ]]; then
+    "${SYSTEM_PYTHON}" -m venv "${VENV_DIR}"
+  fi
+
+  if [[ -n "${REQUIREMENTS_FILE}" ]]; then
+    requirements_hash="$(shasum "${REQUIREMENTS_FILE}" | awk '{print $1}')"
+    installed_hash=""
+    if [[ -f "${STAMP_FILE}" ]]; then
+      installed_hash="$(cat "${STAMP_FILE}")"
+    fi
+
+    if [[ "${requirements_hash}" != "${installed_hash}" ]]; then
+      "${VENV_PYTHON}" -m pip install --disable-pip-version-check -r "${REQUIREMENTS_FILE}" >&2
+      printf '%s' "${requirements_hash}" > "${STAMP_FILE}"
+    fi
+  fi
+
+  exec "${VENV_PYTHON}" "$@"
 fi
 
 # Use `uv` to run the script within an ephemeral environment.
-exec uv run --with-requirements "e2e_test/requirements.txt" "$@"
+if [[ -z "${REQUIREMENTS_FILE}" ]]; then
+  exec uv run "$@"
+fi
+
+exec uv run --with-requirements "${REQUIREMENTS_FILE}" "$@"

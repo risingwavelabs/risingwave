@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# Exits as soon as any line fails.
-set -euo pipefail
-
 source ci/scripts/common.sh
 
 while getopts 'p:' opt; do
@@ -21,7 +18,17 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sink_test_env_setup "$profile"
+download_and_prepare_rw "$profile" source
+
+echo "--- starting risingwave cluster"
+cargo make ci-start ci-sink-test
+sleep 1
+
+set -euo pipefail
+
+export MQTT_URL="tcp://mqtt-server:1883"
+export RISEDEV_MQTT_URL="tcp://mqtt-server:1883"
+export RISEDEV_MQTT_WITH_OPTIONS_COMMON="connector='mqtt',url='tcp://mqtt-server:1883'"
 
 echo "--- testing mqtt sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/mqtt_sink.slt'
@@ -29,4 +36,4 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/mqtt_sink.slt'
 sleep 1
 
 echo "--- Kill cluster"
-risedev ci-kill
+cargo make ci-kill

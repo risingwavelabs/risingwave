@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Prepare the Delta table on MinIO so that `deltalake` sink validation can pass.
+# This mirrors `ci/scripts/e2e-deltalake-sink-rust-test.sh`, but is runnable locally.
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/../.." && pwd)"
+
+env_file="${repo_root}/.risingwave/config/risedev-env"
+if [ -z "${RISEDEV_DELTALAKE_LOCATION:-}" ] && [ -f "${env_file}" ]; then
+  # Allow running this script standalone without manually sourcing risedev-env.
+  set -a
+  # shellcheck source=/dev/null
+  source "${env_file}"
+  set +a
+fi
+
+: "${RISEDEV_DELTALAKE_LOCATION:?missing}"
+: "${RISEDEV_DELTALAKE_S3_ENDPOINT:?missing}"
+: "${RISEDEV_DELTALAKE_S3_ACCESS_KEY:?missing}"
+: "${RISEDEV_DELTALAKE_S3_SECRET_KEY:?missing}"
+
+work_dir="${repo_root}/.risingwave/.deltalake"
+mkdir -p "${work_dir}"
+
+echo "--- creating minio bucket"
+(cd "${repo_root}" && ./risedev mc mb hummock-minio/deltalake) || true
+
+spark_tgz="spark-3.3.1-bin-hadoop3.tgz"
+spark_dir="${work_dir}/spark-3.3.1-bin-hadoop3"
+spark_sql="${spark_dir}/bin/spark-sql"
+
+if [ ! -x "${spark_sql}" ]; then
+  echo "--- downloading spark (once)"
+  cd "${work_dir}"
+  if [ ! -f "${spark_tgz}" ]; then
+    curl -fL -o "${spark_tgz}" "https://rw-ci-deps-dist.s3.amazonaws.com/${spark_tgz}"
+  fi
+  tar -xf "${spark_tgz}" --no-same-owner
+fi
+
+DEPENDENCIES="io.delta:delta-core_2.12:2.2.0,org.apache.hadoop:hadoop-aws:3.3.2"
+
+echo "--- creating deltalake table at ${RISEDEV_DELTALAKE_LOCATION}"
+"${spark_sql}" --packages "${DEPENDENCIES}" \
+  --conf 'spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension' \
+  --conf 'spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog' \
+  --conf "spark.hadoop.fs.s3a.access.key=${RISEDEV_DELTALAKE_S3_ACCESS_KEY}" \
+  --conf "spark.hadoop.fs.s3a.secret.key=${RISEDEV_DELTALAKE_S3_SECRET_KEY}" \
+  --conf "spark.hadoop.fs.s3a.endpoint=${RISEDEV_DELTALAKE_S3_ENDPOINT}" \
+  --conf 'spark.hadoop.fs.s3a.path.style.access=true' \
+  --S --e "create table delta.\`${RISEDEV_DELTALAKE_LOCATION}\`(v1 int, v2 short, v3 long, v4 float, v5 double, v6 string, v7 date, v8 Timestamp, v9 boolean, v10 decimal, v11 ARRAY<decimal>) using delta;"
+
+echo "--- done"

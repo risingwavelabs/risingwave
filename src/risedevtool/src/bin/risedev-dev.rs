@@ -31,7 +31,8 @@ use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
     LakekeeperService, MetaNodeService, MinioService, MoatService, MySqlService, PostgresService,
-    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
+    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService, MqttService,
+    NatsService,
     SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
     TempoService, generate_risedev_env, preflight_check,
 };
@@ -346,6 +347,23 @@ fn task_main(
                     }
                     ctx.pb
                         .set_message(format!("sqlserver {}:{}", c.address, c.port));
+                }
+                ServiceConfig::Nats(c) => {
+                    NatsService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb.set_message(format!(
+                        "nats {}:{}, monitor {}",
+                        c.address, c.port, c.monitor_port
+                    ));
+                }
+                ServiceConfig::Mqtt(c) => {
+                    MqttService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb.set_message(format!("mqtt {}:{}", c.address, c.port));
                 }
                 ServiceConfig::Lakekeeper(c) => {
                     let mut service = LakekeeperService::new(c.clone())?;
