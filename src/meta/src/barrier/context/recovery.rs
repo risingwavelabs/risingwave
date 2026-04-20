@@ -172,7 +172,6 @@ pub fn render_runtime_info(
             &extra.job_definition,
             actor_id_generator,
             worker_nodes.current(),
-            adaptive_parallelism_strategy,
             &database_model.resource_group,
             streaming_job_model,
             partial_graph_id,

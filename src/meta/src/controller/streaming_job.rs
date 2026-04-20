@@ -222,6 +222,7 @@ impl CatalogController {
     ///
     /// Some of the fields in the given streaming job are placeholders, which will
     /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
+    #[expect(clippy::too_many_arguments)]
     #[await_tree::instrument]
     pub async fn create_job_catalog(
         &self,

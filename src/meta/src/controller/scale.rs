@@ -2810,6 +2810,7 @@ mod tests {
             max_parallelism: 16,
             specific_resource_group: None,
             is_serverless_backfill: false,
+            refresh_interval_sec: None,
         };
 
         let database_model = database::Model {
@@ -2895,6 +2896,7 @@ mod tests {
             max_parallelism: 16,
             specific_resource_group: None,
             is_serverless_backfill: false,
+            refresh_interval_sec: None,
         };
 
         let database_model = database::Model {

@@ -1082,6 +1082,8 @@ impl DdlController {
                 dependencies,
                 resource_type.clone(),
                 &fragment_graph.backfill_parallelism,
+                adaptive_parallelism_strategy,
+                backfill_adaptive_parallelism_strategy,
                 refresh_interval_sec,
             )
             .await
