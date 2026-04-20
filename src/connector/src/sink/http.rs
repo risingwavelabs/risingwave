@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, anyhow};
+use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -74,14 +75,17 @@ impl HttpConfig {
     }
 }
 
-/// Validates the HTTP sink parameters and returns the extracted column type and parsed URL
-/// so callers can use them directly without re-parsing.
+/// Validates the HTTP sink parameters and returns the parsed URL and default headers so callers
+/// can use them directly without re-parsing.
 fn validate_http_sink(
     is_append_only: bool,
+    ignore_delete: bool,
     schema: &Schema,
     url: &str,
-) -> Result<(DataType, reqwest::Url)> {
-    if !is_append_only {
+    content_type: Option<&str>,
+    headers: &BTreeMap<String, String>,
+) -> Result<(reqwest::Url, HeaderMap)> {
+    if !is_append_only && !ignore_delete {
         return Err(SinkError::Config(anyhow!(
             "HTTP sink only supports append-only mode"
         )));
@@ -107,22 +111,38 @@ fn validate_http_sink(
         .context("invalid URL")
         .map_err(SinkError::Config)?;
 
-    Ok((col_type, parsed_url))
-}
-
-fn default_content_type(col_type: &DataType) -> &'static str {
-    match col_type {
-        DataType::Varchar => "text/plain",
-        DataType::Jsonb => "application/json",
-        _ => unreachable!("validated HTTP sink column type"),
+    let mut header_map = HeaderMap::new();
+    header_map.insert(
+        CONTENT_TYPE,
+        content_type
+            .unwrap_or(match col_type {
+                DataType::Varchar => "text/plain",
+                DataType::Jsonb => "application/json",
+                _ => unreachable!("validated HTTP sink column type"),
+            })
+            .parse()
+            .context("invalid content_type")
+            .map_err(SinkError::Config)?,
+    );
+    for (k, v) in headers {
+        let name: HeaderName = k
+            .parse()
+            .with_context(|| format!("invalid header name '{k}'"))
+            .map_err(SinkError::Config)?;
+        let value: HeaderValue = v
+            .parse()
+            .with_context(|| format!("invalid header value for '{k}'"))
+            .map_err(SinkError::Config)?;
+        header_map.insert(name, value);
     }
+
+    Ok((parsed_url, header_map))
 }
 
 #[derive(Clone, Debug)]
 pub struct HttpSink {
-    pub config: HttpConfig,
-    col_type: DataType,
-    headers: BTreeMap<String, String>,
+    endpoint: String,
+    header_map: HeaderMap,
 }
 
 impl EnforceSecret for HttpSink {
@@ -141,17 +161,18 @@ impl TryFrom<SinkParam> for HttpSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let url = param
-            .properties
-            .get("url")
-            .ok_or_else(|| SinkError::Config(anyhow!("missing 'url' in WITH")))?;
-        let (col_type, _) = validate_http_sink(param.sink_type.is_append_only(), &schema, url)?;
-
         let (config, headers) = HttpConfig::from_btreemap(param.properties)?;
+        let (_parsed_url, header_map) = validate_http_sink(
+            param.sink_type.is_append_only(),
+            param.ignore_delete,
+            &schema,
+            &config.url,
+            config.content_type.as_deref(),
+            &headers,
+        )?;
         Ok(Self {
-            config,
-            col_type,
-            headers,
+            endpoint: config.url,
+            header_map,
         })
     }
 }
@@ -166,13 +187,8 @@ impl Sink for HttpSink {
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        let content_type = self
-            .config
-            .content_type
-            .as_deref()
-            .unwrap_or_else(|| default_content_type(&self.col_type));
         Ok(
-            HttpSinkWriter::new(self.config.clone(), self.headers.clone(), content_type)?
+            HttpSinkWriter::new(self.endpoint.clone(), self.header_map.clone())?
                 .into_log_sinker(usize::MAX),
         )
     }
@@ -184,41 +200,14 @@ pub struct HttpSinkWriter {
 }
 
 impl HttpSinkWriter {
-    pub fn new(
-        config: HttpConfig,
-        headers: BTreeMap<String, String>,
-        content_type: &str,
-    ) -> Result<Self> {
-        let mut header_map = reqwest::header::HeaderMap::new();
-        header_map.insert(
-            reqwest::header::CONTENT_TYPE,
-            content_type
-                .parse()
-                .context("invalid content_type")
-                .map_err(SinkError::Http)?,
-        );
-        for (k, v) in &headers {
-            let name: reqwest::header::HeaderName = k
-                .parse()
-                .with_context(|| format!("invalid header name '{k}'"))
-                .map_err(SinkError::Http)?;
-            let value: reqwest::header::HeaderValue = v
-                .parse()
-                .with_context(|| format!("invalid header value for '{k}'"))
-                .map_err(SinkError::Http)?;
-            header_map.insert(name, value);
-        }
-
+    pub fn new(endpoint: String, header_map: HeaderMap) -> Result<Self> {
         let client = reqwest::Client::builder()
             .default_headers(header_map)
             .build()
             .context("failed to build HTTP client")
             .map_err(SinkError::Http)?;
 
-        Ok(Self {
-            client,
-            endpoint: config.url,
-        })
+        Ok(Self { client, endpoint })
     }
 }
 

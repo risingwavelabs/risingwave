@@ -57,12 +57,43 @@ CREATE SINK s_auto_schema_change FROM t_auto_schema_change WITH (
     connector = 'http',
     url = 'http://localhost:18081',
     type = 'append-only',
+    ignore_delete = 'true',
     primary_key = 'payload',
     auto.schema.change = 'true'
 );
 
 statement ok
 DROP TABLE t_auto_schema_change;
+
+# ---- Success: ignore_delete allows non-append-only input ----
+statement ok
+CREATE TABLE t_ignore_delete_src (payload varchar);
+
+statement ok
+CREATE SINK s_ignore_delete FROM t_ignore_delete_src WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    ignore_delete = 'true'
+);
+
+statement ok
+INSERT INTO t_ignore_delete_src VALUES ('before update');
+
+statement ok
+UPDATE t_ignore_delete_src SET payload = 'after update' WHERE payload = 'before update';
+
+statement ok
+DELETE FROM t_ignore_delete_src WHERE payload = 'after update';
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_ignore_delete;
+
+statement ok
+DROP TABLE t_ignore_delete_src;
 
 # ---- Success: varchar payload ----
 statement ok

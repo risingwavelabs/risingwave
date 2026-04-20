@@ -48,11 +48,12 @@ risedev slt './e2e_test/sink/http_sink.slt'
 # Allow a moment for in-flight requests to complete
 sleep 1
 # Verify bodies reached the mock server
+grep -Fx 'before update' "$HTTP_SINK_OUTPUT"
 grep -Fx 'hello world' "$HTTP_SINK_OUTPUT"
 grep -Fx '{"key":"value"}' "$HTTP_SINK_OUTPUT"
 grep -q '"event"' "$HTTP_SINK_OUTPUT"
-# Exactly 2 lines from varchar test (NULL was skipped) + 1 from jsonb
-test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 3
+# Exactly 1 line from ignore_delete test + 2 from varchar test (NULL was skipped) + 1 from jsonb
+test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 4
 # Verify the custom header set via header.x_test = 'rw-http-sink' was sent
 grep -q '"x_test": "rw-http-sink"' "$HTTP_SINK_HEADERS"
 # Verify inferred default content types for varchar and jsonb payloads
