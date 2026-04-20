@@ -820,7 +820,7 @@ impl TestCase {
                     return Err(anyhow!("expect a query"));
                 };
 
-                let (stream_plan, table) = match create_mv::gen_create_mv_plan(
+                let (stream_plan, table) = match create_mv::explain_create_mv_plan(
                     &session,
                     context.clone(),
                     q,

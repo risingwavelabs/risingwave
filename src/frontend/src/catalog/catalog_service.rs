@@ -95,6 +95,7 @@ pub trait CatalogWriter: Send + Sync {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<()>;
 
     async fn replace_materialized_view(
@@ -344,11 +345,19 @@ impl CatalogWriter for CatalogWriterImpl {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(table, graph, dependencies, resource_type, if_not_exists)
+            .create_materialized_view(
+                table,
+                graph,
+                dependencies,
+                resource_type,
+                if_not_exists,
+                refresh_interval_sec,
+            )
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?

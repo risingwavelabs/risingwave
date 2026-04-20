@@ -306,6 +306,7 @@ impl CatalogWriter for MockCatalogWriter {
         dependencies: HashSet<ObjectId>,
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
+        _refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -355,6 +356,7 @@ impl CatalogWriter for MockCatalogWriter {
             dependencies,
             streaming_job_resource_type::ResourceType::Regular(true),
             if_not_exists,
+            None,
         )
         .await?;
         Ok(())

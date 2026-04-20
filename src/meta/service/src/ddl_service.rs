@@ -552,7 +552,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies,
                 resource_type,
                 if_not_exists: req.if_not_exists,
-                refresh_interval_sec: None,
+                refresh_interval_sec: req.refresh_interval_sec,
             })
             .await?;
 
