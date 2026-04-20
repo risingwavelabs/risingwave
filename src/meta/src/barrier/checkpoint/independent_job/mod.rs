@@ -140,7 +140,7 @@ impl IndependentCheckpointJobControl {
     pub(crate) fn on_partial_graph_reset(self) {
         match self {
             Self::CreatingStreamingJob(j) => j.on_partial_graph_reset(),
-            Self::BatchRefresh(mut j) => j.on_partial_graph_reset(),
+            Self::BatchRefresh(j) => j.on_partial_graph_reset(),
         }
     }
 

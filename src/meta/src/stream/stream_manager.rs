@@ -523,38 +523,41 @@ impl GlobalStreamManager {
             refresh_interval_sec,
         };
 
-        let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
-            if let Some(refresh_interval_sec) = refresh_interval_sec {
-                // Batch refresh jobs must not contain source or source-backfill nodes,
-                // because we skip split assignment resolution for them.
-                for fragment in info.stream_job_fragments.inner.fragments.values() {
-                    let mask = fragment.fragment_type_mask;
-                    if mask.contains(FragmentTypeFlag::Source)
-                        || mask.contains(FragmentTypeFlag::SourceScan)
-                    {
-                        bail!(
-                            "batch refresh materialized views must not depend on sources directly; \
-                             fragment {} has source/source-backfill nodes",
-                            fragment.fragment_id
-                        );
-                    }
+        let job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+            let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "batch refresh materialized view must have snapshot backfill upstream"
+                )
+            })?;
+            // Batch refresh jobs must not contain source or source-backfill nodes,
+            // because we skip split assignment resolution for them.
+            for fragment in info.stream_job_fragments.inner.fragments.values() {
+                let mask = fragment.fragment_type_mask;
+                if mask.contains(FragmentTypeFlag::Source)
+                    || mask.contains(FragmentTypeFlag::SourceScan)
+                {
+                    bail!(
+                        "batch refresh materialized views must not depend on sources directly; \
+                         fragment {} has source/source-backfill nodes",
+                        fragment.fragment_id
+                    );
                 }
-                tracing::debug!(
-                    ?snapshot_backfill_info,
-                    refresh_interval_sec,
-                    "sending Command::CreateBatchRefreshStreamingJob"
-                );
-                CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
-                    snapshot_backfill_info,
-                    refresh_interval_sec,
-                })
-            } else {
-                tracing::debug!(
-                    ?snapshot_backfill_info,
-                    "sending Command::CreateSnapshotBackfillStreamingJob"
-                );
-                CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
             }
+            tracing::debug!(
+                ?snapshot_backfill_info,
+                refresh_interval_sec,
+                "sending Command::CreateBatchRefreshStreamingJob"
+            );
+            CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+                snapshot_backfill_info,
+                refresh_interval_sec,
+            })
+        } else if let Some(snapshot_backfill_info) = snapshot_backfill_info {
+            tracing::debug!(
+                ?snapshot_backfill_info,
+                "sending Command::CreateSnapshotBackfillStreamingJob"
+            );
+            CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
         } else {
             tracing::debug!("sending Command::CreateStreamingJob");
             if let Some(new_upstream_sink) = new_upstream_sink {

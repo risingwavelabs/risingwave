@@ -96,10 +96,6 @@ pub(crate) struct BatchRefreshRenderResult {
     pub node_actors: HashMap<WorkerId, HashSet<ActorId>>,
     pub state_table_ids: HashSet<TableId>,
     pub actors_to_create: StreamJobActorsToCreate,
-    /// The rendered stream actors (needed by create path for mutation construction).
-    pub stream_actors: HashMap<FragmentId, Vec<StreamActor>>,
-    /// Actor-to-worker mapping (needed by create path for mutation construction).
-    pub actor_location: HashMap<ActorId, WorkerId>,
 }
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -336,8 +332,34 @@ impl BatchRefreshJobCheckpointControl {
             node_actors,
             state_table_ids,
             actors_to_create,
-            stream_actors,
-            actor_location,
+        })
+    }
+
+    /// Build the initial `Add` mutation for the partial graph's first barrier.
+    ///
+    /// The rendered actors come from a prior `render_actors_and_build_job_info()` call;
+    /// `backfill_nodes_to_pause` is derived from the job's backfill ordering.
+    pub(crate) fn build_initial_partial_graph_mutation(
+        render_result: &BatchRefreshRenderResult,
+        backfill_ordering: &ExtendedFragmentBackfillOrder,
+    ) -> Mutation {
+        let added_actors: Vec<ActorId> = render_result
+            .fragment_infos
+            .values()
+            .flat_map(|f| f.actors.keys().copied())
+            .collect();
+        let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(backfill_ordering)
+            .into_iter()
+            .collect();
+        Mutation::Add(AddMutation {
+            actor_dispatchers: Default::default(),
+            added_actors,
+            actor_splits: Default::default(),
+            pause: false,
+            subscriptions_to_add: Default::default(),
+            backfill_nodes_to_pause,
+            actor_cdc_table_snapshot_splits: None,
+            new_upstream_sinks: Default::default(),
         })
     }
 
@@ -395,8 +417,8 @@ impl BatchRefreshJobCheckpointControl {
 impl BatchRefreshJobCheckpointControl {
     /// Create from DDL command. Starts in `ConsumingSnapshot`.
     ///
-    /// Takes a pre-rendered `BatchRefreshRenderResult` (produced by
-    /// `render_actors_and_build_job_info()`).
+    /// Internally calls `render_actors_and_build_job_info()` and injects the
+    /// partial-graph initial barrier.
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         database_id: DatabaseId,
@@ -407,22 +429,43 @@ impl BatchRefreshJobCheckpointControl {
         snapshot_epoch: u64,
         version_stat: &HummockVersionStats,
         partial_graph_manager: &mut PartialGraphManager,
-        render_result: BatchRefreshRenderResult,
-        backfill_ordering: &ExtendedFragmentBackfillOrder,
-        locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
+        logical: &BatchRefreshLogicalFragments,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     ) -> MetaResult<Self> {
         debug!(
             %job_id,
             "new batch refresh job"
         );
 
-        let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(backfill_ordering)
-            .into_iter()
-            .collect();
+        let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+        let backfill_ordering = &create_info.info.fragment_backfill_ordering;
+        let actor_id_generator = partial_graph_manager
+            .control_stream_manager()
+            .env
+            .actor_id_generator();
+
+        let render_result = Self::render_actors_and_build_job_info(
+            &logical.fragments,
+            &logical.downstreams,
+            &create_info.info.definition,
+            actor_id_generator,
+            worker_nodes,
+            adaptive_parallelism_strategy,
+            &create_info.info.database_resource_group,
+            &create_info.info.streaming_job_model,
+            partial_graph_id,
+        )?;
+        let initial_partial_graph_mutation =
+            Self::build_initial_partial_graph_mutation(&render_result, backfill_ordering);
+
         let backfill_order_state = BackfillOrderState::new(
             backfill_ordering,
             &render_result.fragment_infos,
-            locality_fragment_state_table_mapping,
+            create_info
+                .info
+                .locality_fragment_state_table_mapping
+                .clone(),
         );
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
@@ -440,26 +483,6 @@ impl BatchRefreshJobCheckpointControl {
             PbBarrierKind::Checkpoint,
         );
 
-        let added_actors: Vec<ActorId> = render_result
-            .stream_actors
-            .values()
-            .flatten()
-            .map(|actor| actor.actor_id)
-            .collect();
-
-        let initial_mutation = Mutation::Add(AddMutation {
-            actor_dispatchers: Default::default(),
-            added_actors,
-            actor_splits: Default::default(),
-            pause: false,
-            subscriptions_to_add: Default::default(),
-            backfill_nodes_to_pause,
-            actor_cdc_table_snapshot_splits: None,
-            new_upstream_sinks: Default::default(),
-        });
-
-        let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
-
         let mut graph_adder = partial_graph_manager.add_partial_graph(
             partial_graph_id,
             BatchRefreshBarrierStats::new(job_id, snapshot_epoch),
@@ -472,7 +495,7 @@ impl BatchRefreshJobCheckpointControl {
             &render_result.state_table_ids,
             initial_barrier_info,
             Some(render_result.actors_to_create),
-            Some(initial_mutation),
+            Some(initial_partial_graph_mutation),
             notifiers,
             Some(create_info),
             false,
@@ -483,7 +506,7 @@ impl BatchRefreshJobCheckpointControl {
 
         graph_adder.added();
         assert!(pending_non_checkpoint_barriers.is_empty());
-        Ok(Self {
+        let this = Self {
             partial_graph_id,
             job_id,
             snapshot_backfill_upstream_tables,
@@ -499,7 +522,8 @@ impl BatchRefreshJobCheckpointControl {
                 node_actors: render_result.node_actors,
                 state_table_ids: render_result.state_table_ids,
             },
-        })
+        };
+        Ok(this)
     }
 
     /// Recover from a persistent state during recovery.
@@ -915,7 +939,7 @@ impl BatchRefreshJobCheckpointControl {
     }
 
     /// Called when the partial graph reset is confirmed (drop only).
-    pub(super) fn on_partial_graph_reset(&mut self) {
+    pub(super) fn on_partial_graph_reset(mut self) {
         match &mut self.status {
             BatchRefreshJobStatus::Resetting { notifiers } => {
                 for notifier in notifiers.drain(..) {

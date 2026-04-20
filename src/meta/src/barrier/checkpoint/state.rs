@@ -34,7 +34,7 @@ use risingwave_pb::stream_plan::barrier_mutation::{Mutation, PbMutation};
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{
-    PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
+    AddMutation, PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
     PbUpstreamSinkInfo, ThrottleMutation,
 };
 use tracing::warn;
@@ -633,7 +633,9 @@ impl DatabaseCheckpointControl {
                 cross_db_snapshot_backfill_info,
             }) => {
                 {
-                    assert!(!self.state.is_paused());
+                    if self.state.is_paused() {
+                        bail!("cannot create batch refresh job while database barrier is paused");
+                    }
                     let snapshot_epoch = barrier_info.prev_epoch();
                     let job_id = info.stream_job_fragments.stream_job_id();
                     let database_id = info.streaming_job.database_id();
@@ -694,50 +696,42 @@ impl DatabaseCheckpointControl {
                         downstreams: info.stream_job_fragments.downstreams.clone(),
                     };
 
-                    // 3. Render actors via unified method.
-                    let partial_graph_id = to_partial_graph_id(self.database_id, Some(job_id));
-                    let render_result =
-                        BatchRefreshJobCheckpointControl::render_actors_and_build_job_info(
-                            &logical.fragments,
-                            &logical.downstreams,
-                            &info.definition,
-                            partial_graph_manager
-                                .control_stream_manager()
-                                .env
-                                .actor_id_generator(),
-                            worker_nodes,
-                            adaptive_parallelism_strategy,
-                            &info.database_resource_group,
-                            &info.streaming_job_model,
-                            partial_graph_id,
-                        )?;
-
-                    // 4. Build database graph mutation (before consuming render_result).
-                    // For batch refresh, no upstream dispatchers are extracted from edges.
-                    let snapshot_backfill_info_clone =
-                        batch_refresh_info.snapshot_backfill_info.clone();
-                    let refresh_interval_sec = batch_refresh_info.refresh_interval_sec;
-                    let empty_split_assignment = Default::default();
-                    let mut empty_edges = FragmentEdgeBuilder::new(std::iter::empty()).build();
-                    let mutation = Command::create_streaming_job_to_mutation(
-                        &info,
-                        &CreateStreamingJobType::BatchRefresh(batch_refresh_info),
-                        self.state.is_paused(),
-                        &mut empty_edges,
-                        partial_graph_manager.control_stream_manager(),
-                        None,
-                        &empty_split_assignment,
-                        &render_result.stream_actors,
-                        &render_result.actor_location,
-                    )?;
-
-                    // 5. Create BatchRefreshJobCheckpointControl.
+                    // 3. Create BatchRefreshJobCheckpointControl. `new()` handles actor
+                    //    rendering, the partial-graph initial barrier, and produces the
+                    //    database-graph mutation for the main barrier.
                     assert!(
                         !self
                             .independent_checkpoint_job_controls
                             .contains_key(&job_id),
                         "duplicated creating batch refresh job {job_id}"
                     );
+
+                    let snapshot_backfill_info_clone =
+                        batch_refresh_info.snapshot_backfill_info.clone();
+                    let refresh_interval_sec = batch_refresh_info.refresh_interval_sec;
+
+                    // Database-graph `Add` mutation: batch refresh has no actors in the
+                    // database graph; it only needs to register snapshot-backfill
+                    // subscribers on the upstream MV tables.
+                    let subscriber_id =
+                        info.stream_job_fragments.stream_job_id().as_subscriber_id();
+                    let mutation = Mutation::Add(AddMutation {
+                        actor_dispatchers: Default::default(),
+                        added_actors: Default::default(),
+                        actor_splits: Default::default(),
+                        pause: false,
+                        subscriptions_to_add: snapshot_backfill_info_clone
+                            .upstream_mv_table_id_to_backfill_epoch
+                            .keys()
+                            .map(|table_id| PbSubscriptionUpstreamInfo {
+                                subscriber_id,
+                                upstream_mv_table_id: *table_id,
+                            })
+                            .collect(),
+                        backfill_nodes_to_pause: Default::default(),
+                        actor_cdc_table_snapshot_splits: None,
+                        new_upstream_sinks: Default::default(),
+                    });
 
                     let job = BatchRefreshJobCheckpointControl::new(
                         database_id,
@@ -754,9 +748,9 @@ impl DatabaseCheckpointControl {
                         snapshot_epoch,
                         hummock_version_stats,
                         partial_graph_manager,
-                        render_result,
-                        &info.fragment_backfill_ordering,
-                        info.locality_fragment_state_table_mapping.clone(),
+                        &logical,
+                        worker_nodes,
+                        adaptive_parallelism_strategy,
                     )?;
 
                     if let Some(fragment_infos) = job.fragment_infos() {
