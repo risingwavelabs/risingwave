@@ -14,13 +14,13 @@
 
 use std::sync::Arc;
 
+use futures::future::BoxFuture;
 use futures_async_stream::try_stream;
 use parking_lot::RwLock;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use risingwave_common::util::epoch::Epoch;
 use tokio::sync::oneshot;
 
 use crate::error::{DmlError, Result};
@@ -195,20 +195,25 @@ impl WriteHandle {
         Ok(())
     }
 
-    pub async fn end_returning_epoch(mut self) -> Result<Epoch> {
+    /// Like `end`, but waits until the data has been durably persisted before returning.
+    /// The `DmlExecutor` fires the persistence signal after `try_wait_epoch` succeeds.
+    pub async fn end_wait_persistence(self) -> Result<()> {
+        self.end_wait_persistence_future()?.await
+    }
+
+    /// Like `end`, but returns a future so the caller can await the persistence ack separately
+    /// from issuing the end message.
+    pub fn end_wait_persistence_future(mut self) -> Result<BoxFuture<'static, Result<()>>> {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Committed;
-        // Await the notifier.
-        let (epoch_notifier_tx, epoch_notifier_rx) = oneshot::channel();
-        let notifier = self.write_txn_control_msg_returning_epoch(TxnMsg::End(
-            self.txn_id,
-            Some(epoch_notifier_tx),
-        ))?;
-        notifier.await.map_err(|_| DmlError::ReaderClosed)?;
-        let epoch = epoch_notifier_rx
-            .await
-            .map_err(|_| DmlError::ReaderClosed)?;
-        Ok(epoch)
+        let (persistence_tx, persistence_rx) = oneshot::channel();
+        let notifier =
+            self.write_txn_control_msg(TxnMsg::End(self.txn_id, Some(persistence_tx)))?;
+        Ok(Box::pin(async move {
+            notifier.await.map_err(|_| DmlError::ReaderClosed)?;
+            persistence_rx.await.map_err(|_| DmlError::ReaderClosed)?;
+            Ok(())
+        }))
     }
 
     pub fn rollback(mut self) -> Result<oneshot::Receiver<usize>> {
@@ -241,21 +246,6 @@ impl WriteHandle {
     /// Same as the `write_txn_data_msg`, but it is not an async function and send control message
     /// without permit acquiring.
     fn write_txn_control_msg(&self, txn_msg: TxnMsg) -> Result<oneshot::Receiver<usize>> {
-        assert_eq!(self.txn_id, txn_msg.txn_id());
-        let (notifier_tx, notifier_rx) = oneshot::channel();
-        match self.tx.send_immediate(txn_msg, notifier_tx) {
-            Ok(_) => Ok(notifier_rx),
-
-            // It's possible that the source executor is scaled in or migrated, so the channel
-            // is closed. To guarantee the transactional atomicity, bail out.
-            Err(_) => Err(DmlError::ReaderClosed),
-        }
-    }
-
-    fn write_txn_control_msg_returning_epoch(
-        &self,
-        txn_msg: TxnMsg,
-    ) -> Result<oneshot::Receiver<usize>> {
         assert_eq!(self.txn_id, txn_msg.txn_id());
         let (notifier_tx, notifier_rx) = oneshot::channel();
         match self.tx.send_immediate(txn_msg, notifier_tx) {
@@ -402,6 +392,30 @@ mod tests {
         // Rollback on drop
         drop(write_handle);
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Rollback(_));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_end_wait_persistence() -> Result<()> {
+        let table_dml_handle = Arc::new(new_table_dml_handle());
+        let mut reader = table_dml_handle.stream_reader().into_stream();
+        let mut write_handle = table_dml_handle
+            .write_handle(TEST_SESSION_ID, TEST_TRANSACTION_ID)
+            .unwrap();
+        write_handle.begin().unwrap();
+
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
+
+        let handle = tokio::spawn(async move {
+            write_handle.end_wait_persistence().await.unwrap();
+        });
+
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, Some(persistence_notifier)) => {
+            persistence_notifier.send(()).unwrap();
+        });
+
+        handle.await.unwrap();
 
         Ok(())
     }
