@@ -70,7 +70,6 @@ define_keywords!(
     ADAPTIVE,
     ADMIN,
     ADD,
-    ADMIN,
     AGGREGATE,
     ALL,
     ALLOCATE,
