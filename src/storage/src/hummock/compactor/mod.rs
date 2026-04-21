@@ -841,6 +841,28 @@ pub fn start_compactor(
                         match event {
                             ResponseEvent::CompactTask(compact_task) => {
                                 let compact_task = CompactTask::from(compact_task);
+                                if compact_task.build_compact_table_ids().is_empty() {
+                                    tracing::info!(
+                                        task_id = compact_task.task_id,
+                                        "Skip compaction task because no existing table ids remain in input SSTs"
+                                    );
+                                    let (compact_task, table_stats, object_timestamps) =
+                                        compact_done(
+                                            compact_task,
+                                            context.clone(),
+                                            vec![],
+                                            TaskStatus::Success,
+                                        );
+
+                                    send_report_task_event(
+                                        &compact_task,
+                                        table_stats,
+                                        object_timestamps,
+                                        &request_sender,
+                                    );
+
+                                    continue 'consume_stream;
+                                }
                                 let parallelism =
                                     calculate_task_parallelism(&compact_task, &context);
 

@@ -171,15 +171,7 @@ impl CompactTask {
         if self.task_type == TaskType::VnodeWatermark {
             return true;
         }
-        let exist_table_ids =
-            HashSet::<TableId>::from_iter(self.existing_table_ids.iter().copied());
-        self.input_ssts.iter().all(|level| {
-            level.table_infos.iter().all(|sst| {
-                sst.table_ids
-                    .iter()
-                    .all(|table_id| !exist_table_ids.contains(table_id))
-            })
-        })
+        self.build_compact_table_ids().is_empty()
     }
 }
 
@@ -617,5 +609,32 @@ impl From<ReportTask> for PbReportTask {
                 .collect_vec(),
             object_timestamps: value.object_timestamps,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::TableId;
+
+    use super::CompactTask;
+    use crate::level::InputLevel;
+    use crate::sstable_info::{SstableInfo, SstableInfoInner};
+
+    #[test]
+    fn test_empty_sstable_table_ids_is_trivial_reclaim() {
+        let task = CompactTask {
+            input_ssts: vec![InputLevel {
+                table_infos: vec![SstableInfo::from(SstableInfoInner {
+                    table_ids: vec![],
+                    ..Default::default()
+                })],
+                ..Default::default()
+            }],
+            existing_table_ids: vec![TableId::new(1)],
+            ..Default::default()
+        };
+
+        assert!(task.build_compact_table_ids().is_empty());
+        assert!(task.is_trivial_reclaim());
     }
 }
