@@ -24,15 +24,20 @@ use risingwave_common::array::Op;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::hash::table_distribution::SINGLETON_VNODE;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
-    FlushCurrentEpochOptions, LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory,
-    LogWriter, LogWriterExt, LogWriterMetrics,
+    FlushCurrentEpochOptions, FlushCurrentEpochResult, LogReader, LogReaderExt, LogReaderMetrics,
+    LogStoreFactory, LogWriter, LogWriterExt, LogWriterMetrics, ReportedSinkErrorRow,
+    ReportedSinkErrorRows,
 };
 use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam,
@@ -50,8 +55,12 @@ use crate::common::change_buffer::{OutputKind, output_kind};
 use crate::common::compact_chunk::{
     InconsistencyBehavior, StreamChunkCompactor, compact_chunk_inline,
 };
+use crate::common::table::state_table::StateTableInner;
 use crate::executor::prelude::*;
-pub struct SinkExecutor<F: LogStoreFactory> {
+
+type ErrorStateTable<S> = StateTableInner<S, ColumnAwareSerde>;
+
+pub struct SinkExecutor<F: LogStoreFactory, S: StateStore> {
     actor_context: ActorContextRef,
     info: ExecutorInfo,
     input: Executor,
@@ -59,11 +68,66 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     input_columns: Vec<ColumnCatalog>,
     sink_param: SinkParam,
     log_store_factory: F,
+    error_table: Option<ErrorStateTable<S>>,
     sink_writer_param: SinkWriterParam,
     chunk_size: usize,
     input_data_types: Vec<DataType>,
     non_append_only_behavior: Option<NonAppendOnlyBehavior>,
     rate_limit: Option<u32>,
+}
+
+struct PendingErrorRows {
+    rows_by_epoch: Vec<(u64, Vec<ReportedSinkErrorRow>)>,
+}
+
+impl PendingErrorRows {
+    fn add_reported_rows(&mut self, reported: ReportedSinkErrorRows) {
+        if self
+            .rows_by_epoch
+            .last()
+            .is_none_or(|(epoch, _)| *epoch != reported.epoch)
+        {
+            if let Some((epoch, _)) = self.rows_by_epoch.last() {
+                assert!(
+                    *epoch < reported.epoch,
+                    "reported sink error rows should be ordered by epoch"
+                );
+            }
+            self.rows_by_epoch.push((reported.epoch, vec![]));
+        }
+        let (_, rows) = self
+            .rows_by_epoch
+            .last_mut()
+            .expect("rows_by_epoch should have current reported epoch");
+        rows.extend(reported.rows);
+    }
+
+    fn drain_ready_rows(&mut self, epoch: u64) -> Vec<(u64, ReportedSinkErrorRow)> {
+        let mut rows = vec![];
+        let ready_epoch_count = self
+            .rows_by_epoch
+            .iter()
+            .take_while(|(reported_epoch, _)| *reported_epoch <= epoch)
+            .count();
+        for (reported_epoch, epoch_rows) in self.rows_by_epoch.drain(..ready_epoch_count) {
+            rows.extend(
+                epoch_rows
+                    .into_iter()
+                    .map(|reported_row| (reported_epoch, reported_row)),
+            );
+        }
+        rows
+    }
+}
+
+fn select_error_vnode(vnodes: Option<&Bitmap>) -> i16 {
+    let Some(vnodes) = vnodes else {
+        return SINGLETON_VNODE.to_index() as i16;
+    };
+    vnodes
+        .iter_ones()
+        .next()
+        .unwrap_or(SINGLETON_VNODE.to_index()) as i16
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -230,7 +294,7 @@ macro_rules! dispatch_output_kind {
     };
 }
 
-impl<F: LogStoreFactory> SinkExecutor<F> {
+impl<F: LogStoreFactory, S: StateStore> SinkExecutor<F, S> {
     #[allow(clippy::too_many_arguments)]
     #[expect(clippy::unused_async)]
     pub async fn new(
@@ -242,6 +306,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         sink_param: SinkParam,
         columns: Vec<ColumnCatalog>,
         log_store_factory: F,
+        error_table: Option<ErrorStateTable<S>>,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
         rate_limit: Option<u32>,
@@ -279,12 +344,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             None
         };
 
-        tracing::info!(
-            sink_id = %sink_param.sink_id,
-            actor_id = %actor_context.id,
-            ?non_append_only_behavior,
-            "Sink executor info"
-        );
+        tracing::info!(sink_id = %sink_param.sink_id, actor_id = %actor_context.id, ?non_append_only_behavior, "Sink executor info");
 
         Ok(Self {
             actor_context,
@@ -294,6 +354,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             input_columns: columns,
             sink_param,
             log_store_factory,
+            error_table,
             sink_writer_param,
             chunk_size,
             input_data_types,
@@ -392,6 +453,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     let write_log_stream = Self::execute_write_log(
                         processed_input,
                         log_writer.monitored(log_writer_metrics),
+                        self.error_table,
                         actor_id,
                         fragment_id,
                         sink_id,
@@ -426,10 +488,12 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_write_log<W: LogWriter>(
         input: impl MessageStream,
         mut log_writer: W,
+        mut error_table: Option<ErrorStateTable<S>>,
         actor_id: ActorId,
         fragment_id: FragmentId,
         sink_id: SinkId,
@@ -444,8 +508,20 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         yield Message::Barrier(barrier);
 
         log_writer.init(epoch_pair, is_pause_on_startup).await?;
+        if let Some(error_table) = error_table.as_mut() {
+            error_table.init_epoch(epoch_pair).await?;
+        }
 
         let mut is_paused = false;
+        let mut error_vnode = select_error_vnode(
+            error_table
+                .as_ref()
+                .map(ErrorStateTable::vnodes)
+                .map(|v| &**v),
+        );
+        let mut pending_error_rows = PendingErrorRows {
+            rows_by_epoch: vec![],
+        };
 
         #[for_await]
         for msg in input {
@@ -465,7 +541,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if let Some(schema_change) = &schema_change {
                         info!(?schema_change, %sink_id, "sink receive schema change");
                     }
-                    let post_flush = log_writer
+                    let FlushCurrentEpochResult {
+                        post_flush,
+                        reported_error_rows,
+                    } = log_writer
                         .flush_current_epoch(
                             barrier.epoch.curr,
                             FlushCurrentEpochOptions {
@@ -476,8 +555,41 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             },
                         )
                         .await?;
+                    for reported_error_rows in reported_error_rows {
+                        pending_error_rows.add_reported_rows(reported_error_rows);
+                    }
+                    let ready_rows = pending_error_rows.drain_ready_rows(barrier.epoch.curr);
+                    if let Some(error_table) = error_table.as_mut() {
+                        for (row_id, (read_epoch, reported_row)) in
+                            ready_rows.into_iter().enumerate()
+                        {
+                            let mut values =
+                                Vec::with_capacity(reported_row.row.as_inner().len() + 6);
+                            values.push(Some(ScalarImpl::Int64(barrier.epoch.curr as i64)));
+                            values.push(Some(ScalarImpl::Int32(row_id as i32)));
+                            values.push(Some(ScalarImpl::Int16(error_vnode)));
+                            values.push(Some(ScalarImpl::Int16(reported_row.op.to_i16())));
+                            values.push(Some(ScalarImpl::Int64(read_epoch as i64)));
+                            values.push(reported_row.extra_info.map(ScalarImpl::Jsonb));
+                            values.extend(reported_row.row.into_inner().into_vec());
+                            error_table.insert(OwnedRow::new(values));
+                        }
+                    } else if !ready_rows.is_empty() {
+                        return Err(anyhow::anyhow!(
+                            "sink {} received {} error rows but has no error table",
+                            sink_id,
+                            ready_rows.len()
+                        )
+                        .into());
+                    }
 
                     let mutation = barrier.mutation.clone();
+                    let barrier_epoch = barrier.epoch;
+                    let post_commit = if let Some(error_table) = error_table.as_mut() {
+                        Some(error_table.commit(barrier_epoch).await?)
+                    } else {
+                        None
+                    };
                     yield Message::Barrier(barrier);
                     if F::REBUILD_SINK_ON_UPDATE_VNODE_BITMAP
                         && let Some(new_vnode_bitmap) = update_vnode_bitmap.clone()
@@ -490,6 +602,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             .map_err(|_| anyhow!("fail to wait rebuild sink finish"))?;
                     }
                     post_flush.post_yield_barrier().await?;
+                    if let Some(post_commit) = post_commit {
+                        post_commit
+                            .post_yield_barrier(update_vnode_bitmap.clone())
+                            .await?;
+                        if let Some(new_vnodes) = update_vnode_bitmap.clone() {
+                            error_vnode = select_error_vnode(Some(&new_vnodes));
+                        }
+                    }
 
                     if let Some(mutation) = mutation.as_deref() {
                         match mutation {
@@ -679,8 +799,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     }
 
     #[expect(clippy::too_many_arguments)]
-    async fn execute_consume_log<S: Sink, R: LogReader>(
-        mut sink: S,
+    async fn execute_consume_log<SI: Sink, R: LogReader>(
+        mut sink: SI,
         log_reader: R,
         columns: Vec<ColumnCatalog>,
         mut sink_param: SinkParam,
@@ -757,10 +877,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         loop {
             let future = async {
                 loop {
-                    let Err(e) = sink
+                    let log_sinker = sink
                         .new_log_sinker(sink_writer_param.clone())
-                        .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
-                        .await;
+                        .await
+                        .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
+                    let e = match log_sinker.consume_log_and_sink(&mut log_reader).await {
+                        Ok(never) => match never {},
+                        Err(e) => e,
+                    };
                     GLOBAL_ERROR_METRICS.user_sink_error.report([
                         "sink_executor_error".to_owned(),
                         sink_param.sink_id.to_string(),
@@ -858,7 +982,7 @@ enum RebuildSinkMessage {
     UpdateConfig(HashMap<String, String>),
 }
 
-impl<F: LogStoreFactory> Execute for SinkExecutor<F> {
+impl<F: LogStoreFactory, S: StateStore> Execute for SinkExecutor<F, S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner()
     }
@@ -869,6 +993,7 @@ mod test {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_connector::sink::build_sink;
+    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -952,7 +1077,7 @@ mod test {
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
-        let sink_executor = SinkExecutor::new(
+        let sink_executor = SinkExecutor::<_, MemoryStateStore>::new(
             ActorContext::for_test(0),
             info,
             source,
@@ -961,6 +1086,7 @@ mod test {
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::for_test(1),
+            None,
             1024,
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
             None,
@@ -1091,7 +1217,7 @@ mod test {
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
-        let sink_executor = SinkExecutor::new(
+        let sink_executor = SinkExecutor::<_, MemoryStateStore>::new(
             ActorContext::for_test(0),
             info,
             source,
@@ -1100,6 +1226,7 @@ mod test {
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::for_test(1),
+            None,
             1024,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             None,
@@ -1199,7 +1326,7 @@ mod test {
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
-        let sink_executor = SinkExecutor::new(
+        let sink_executor = SinkExecutor::<_, MemoryStateStore>::new(
             ActorContext::for_test(0),
             info,
             source,
@@ -1208,6 +1335,7 @@ mod test {
             sink_param,
             columns,
             BoundedInMemLogStoreFactory::for_test(1),
+            None,
             1024,
             vec![DataType::Int64, DataType::Int64],
             None,
@@ -1322,7 +1450,7 @@ mod test {
 
         let sink = build_sink(sink_param.clone()).unwrap();
 
-        let sink_executor = SinkExecutor::new(
+        let sink_executor = SinkExecutor::<_, MemoryStateStore>::new(
             ActorContext::for_test(0),
             info,
             source,
@@ -1331,6 +1459,7 @@ mod test {
             sink_param,
             columns.clone(),
             BoundedInMemLogStoreFactory::for_test(1),
+            None,
             1024,
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             None,

@@ -175,7 +175,7 @@ impl LogSinker for BigQueryLogSinker {
         loop {
             tokio::select!(
                 offset = self.bigquery_future_manager.next_offset() => {
-                        log_reader.truncate(offset?)?;
+                        log_reader.truncate(offset?, vec![])?;
                 }
                 item_result = log_reader.next_item(), if self.bigquery_future_manager.offset_queue.len() <= self.future_num => {
                     let (epoch, item) = item_result?;

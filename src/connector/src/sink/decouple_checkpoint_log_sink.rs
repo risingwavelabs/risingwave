@@ -138,7 +138,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                             sink_writer_metrics
                                 .sink_commit_duration
                                 .observe(start_time.elapsed().as_secs_f64());
-                            log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                            log_reader.truncate(TruncateOffset::Barrier { epoch }, vec![])?;
 
                             current_checkpoint = 0;
                         } else {

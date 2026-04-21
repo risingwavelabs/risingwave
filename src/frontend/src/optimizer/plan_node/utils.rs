@@ -23,11 +23,15 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
-    StreamJobStatus,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay,
+    INITIAL_TABLE_VERSION_ID, Schema, StreamJobStatus,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
+};
+use risingwave_common::constants::sink_error::{
+    PK_ORDERING as SINK_ERROR_PK_ORDERING, PREDEFINED_COLUMNS as SINK_ERROR_PREDEFINED_COLUMNS,
+    VNODE_COLUMN_INDEX as SINK_ERROR_VNODE_COLUMN_INDEX,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::license::Feature;
@@ -42,7 +46,7 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
 use super::{BatchPlanRef, StreamPlanRef, pretty_config};
-use crate::catalog::table_catalog::TableType;
+use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
@@ -423,6 +427,46 @@ pub fn infer_kv_log_store_table_catalog_inner(
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
 }
 
+pub fn infer_sink_error_table_catalog_inner(columns: &[ColumnCatalog]) -> TableCatalog {
+    let mut table_catalog_builder = TableCatalogBuilder::default();
+
+    let mut value_indices = Vec::with_capacity(SINK_ERROR_PREDEFINED_COLUMNS.len() + columns.len());
+
+    for (name, data_type) in SINK_ERROR_PREDEFINED_COLUMNS {
+        let index = table_catalog_builder.add_column(&Field::with_name(data_type, name));
+        value_indices.push(index);
+    }
+
+    table_catalog_builder.set_vnode_col_idx(SINK_ERROR_VNODE_COLUMN_INDEX);
+
+    for (i, ordering) in SINK_ERROR_PK_ORDERING.iter().enumerate() {
+        table_catalog_builder.add_order_column(i, *ordering);
+    }
+
+    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+
+    for column in columns.iter().filter(|column| !column.is_hidden) {
+        let index = table_catalog_builder.add_column(&Field::from(&column.column_desc));
+        value_indices.push(index);
+    }
+
+    table_catalog_builder.set_value_indices(value_indices);
+    let mut table =
+        table_catalog_builder.build(vec![SINK_ERROR_VNODE_COLUMN_INDEX], read_prefix_len_hint);
+    let next_column_id = table
+        .columns
+        .iter()
+        .map(|column| column.column_desc.column_id)
+        .max()
+        .expect("sink error table should have columns")
+        .next();
+    table.version = Some(TableVersion {
+        version_id: INITIAL_TABLE_VERSION_ID,
+        next_column_id,
+    });
+    table
+}
+
 pub fn infer_synced_kv_log_store_table_catalog_inner(
     input: &StreamPlanRef,
     columns: &[Field],
@@ -466,6 +510,68 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
         .collect_vec();
 
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
+}
+
+#[cfg(test)]
+#[expect(clippy::items_after_test_module)]
+mod tests {
+    use itertools::Itertools;
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
+    use risingwave_common::constants::sink_error::{
+        EPOCH_COLUMN_NAME, EXTRA_INFO_COLUMN_NAME, PREDEFINED_COLUMNS, READ_EPOCH_COLUMN_NAME,
+        ROW_ID_COLUMN_NAME, ROW_OP_COLUMN_NAME, VNODE_COLUMN_INDEX, VNODE_COLUMN_NAME,
+    };
+    use risingwave_common::types::DataType;
+
+    use super::infer_sink_error_table_catalog_inner;
+    use crate::catalog::ColumnId;
+
+    #[test]
+    fn test_infer_sink_error_table_catalog() {
+        let columns = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("name", ColumnId::new(0), DataType::Varchar),
+                is_hidden: false,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("secret", ColumnId::new(1), DataType::Int64),
+                is_hidden: true,
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc::named("id", ColumnId::new(2), DataType::Int32),
+                is_hidden: false,
+            },
+        ];
+
+        let table = infer_sink_error_table_catalog_inner(&columns);
+
+        let column_names = table.columns.iter().map(|c| c.name()).collect_vec();
+        assert_eq!(
+            column_names,
+            vec![
+                EPOCH_COLUMN_NAME,
+                ROW_ID_COLUMN_NAME,
+                VNODE_COLUMN_NAME,
+                ROW_OP_COLUMN_NAME,
+                READ_EPOCH_COLUMN_NAME,
+                EXTRA_INFO_COLUMN_NAME,
+                "name",
+                "id",
+            ]
+        );
+        assert_eq!(table.columns.len(), PREDEFINED_COLUMNS.len() + 2);
+        assert_eq!(table.vnode_col_index, Some(VNODE_COLUMN_INDEX));
+        assert_eq!(table.distribution_key, vec![VNODE_COLUMN_INDEX]);
+        assert_eq!(table.pk.len(), 3);
+        assert_eq!(
+            table
+                .pk
+                .iter()
+                .map(|order| order.column_index)
+                .collect_vec(),
+            vec![0, 1, 2]
+        );
+    }
 }
 
 /// Check that all leaf nodes must be stream table scan,

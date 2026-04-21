@@ -20,6 +20,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
@@ -40,6 +41,7 @@ use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
     KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
 };
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::{SinkExecutor, StreamExecutorError};
 
 pub struct SinkExecutorBuilder;
@@ -264,6 +266,22 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             "sink[{}]-[{}]-executor[{}]",
             connector, sink_id, params.executor_id
         );
+        let error_table = match node.error_table.as_ref() {
+            Some(table) => Some(
+                StateTableBuilder::<_, ColumnAwareSerde, false, ()>::new(
+                    table,
+                    state_store.clone(),
+                    params.vnode_bitmap.clone().map(Arc::new),
+                )
+                .with_op_consistency_level(
+                    crate::common::table::state_table::StateTableOpConsistencyLevel::Inconsistent,
+                )
+                .forbid_preload_all_rows()
+                .build()
+                .await,
+            ),
+            None => None,
+        };
 
         let sink = build_sink(sink_param.clone())
             .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
@@ -299,6 +317,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     sink_param,
                     columns,
                     factory,
+                    error_table,
                     chunk_size,
                     input_data_types,
                     node.rate_limit.map(|x| x as _),
@@ -340,6 +359,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     sink_param,
                     columns,
                     factory,
+                    error_table,
                     chunk_size,
                     input_data_types,
                     node.rate_limit.map(|x| x as _),

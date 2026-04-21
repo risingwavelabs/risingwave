@@ -376,6 +376,7 @@ message SinkNode {
   catalog.Table table = 2;
   SinkLogStoreType log_store_type = 3;
   optional uint32 rate_limit = 4;
+  optional catalog.Table error_table = 5;
 }
 
 message ProjectNode {

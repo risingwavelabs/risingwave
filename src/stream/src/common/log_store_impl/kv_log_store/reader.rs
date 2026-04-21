@@ -30,7 +30,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::util::epoch::{EpochExt, EpochPair};
 use risingwave_connector::sink::log_store::{
-    ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
+    ChunkId, LogReader, LogStoreReadItem, LogStoreResult, ReportedSinkErrorRow, TruncateOffset,
 };
 use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_storage::hummock::CachePolicy;
@@ -510,7 +510,11 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         })
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
         if offset > self.latest_offset.expect("should exist before truncation") {
             return Err(anyhow!(
                 "truncate at a later offset {:?} than the current latest offset {:?}",
@@ -528,22 +532,27 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     truncate_offset
                 ));
             }
-            self.rx.truncate_buffer(offset);
+            self.rx.truncate_buffer(offset, error_rows);
             self.truncate_offset = Some(offset);
         } else {
             // For historical data, no need to truncate at seq id level. Only truncate at barrier.
-            if let TruncateOffset::Barrier { epoch } = &offset {
-                if let Some(truncate_offset) = &self.truncate_offset
-                    && offset <= *truncate_offset
-                {
-                    return Err(anyhow!(
-                        "truncate offset {:?} earlier than prev truncate offset {:?}",
-                        offset,
-                        truncate_offset
-                    ));
+            match offset {
+                TruncateOffset::Chunk { epoch, .. } => {
+                    self.rx.buffer_historical_truncate_rows(epoch, error_rows);
                 }
-                self.rx.truncate_historical(*epoch);
-                self.truncate_offset = Some(offset);
+                TruncateOffset::Barrier { epoch } => {
+                    if let Some(truncate_offset) = &self.truncate_offset
+                        && offset <= *truncate_offset
+                    {
+                        return Err(anyhow!(
+                            "truncate offset {:?} earlier than prev truncate offset {:?}",
+                            offset,
+                            truncate_offset
+                        ));
+                    }
+                    self.rx.truncate_historical(epoch, error_rows);
+                    self.truncate_offset = Some(offset);
+                }
             }
         }
         Ok(())

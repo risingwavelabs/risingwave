@@ -72,6 +72,7 @@ async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>) -> Result<()> {
             .split("\n")
             .filter(|line| {
                 line.contains(table_name_prefix)
+                    && !line.to_ascii_lowercase().contains("sinkerror")
                     && line
                         .strip_prefix(table_name_prefix)
                         .unwrap()
