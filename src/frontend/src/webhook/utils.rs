@@ -58,6 +58,14 @@ impl From<anyhow::Error> for WebhookError {
     }
 }
 
+impl std::fmt::Display for WebhookError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.err)
+    }
+}
+
+impl std::error::Error for WebhookError {}
+
 impl IntoResponse for WebhookError {
     fn into_response(self) -> axum::response::Response {
         let mut resp = Json(json!({

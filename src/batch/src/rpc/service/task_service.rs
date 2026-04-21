@@ -12,14 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 
+use anyhow::Context;
+use futures::stream::{FuturesOrdered, StreamExt};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_dml::TableDmlHandleRef;
+use risingwave_dml::dml_manager::DmlManagerRef;
+use risingwave_dml::error::DmlError;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
-    FastInsertResponse, GetDataResponse, TaskInfoResponse, fast_insert_response,
+    FastInsertResponse, GetDataResponse, IngestDmlAckResponse, IngestDmlInitRequest,
+    IngestDmlInitResponse, IngestDmlPayloadRequest, IngestDmlRequest, IngestDmlResponse,
+    TaskInfoResponse, fast_insert_response, ingest_dml_request, ingest_dml_response,
 };
 use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
@@ -47,11 +56,13 @@ impl BatchServiceImpl {
 
 pub type TaskInfoResponseResult = Result<TaskInfoResponse, Status>;
 pub type GetDataResponseResult = Result<GetDataResponse, Status>;
+pub type IngestDmlResponseResult = Result<IngestDmlResponse, Status>;
 
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
     type CreateTaskStream = ReceiverStream<TaskInfoResponseResult>;
     type ExecuteStream = ReceiverStream<GetDataResponseResult>;
+    type IngestDmlStream = ReceiverStream<IngestDmlResponseResult>;
 
     async fn create_task(
         &self,
@@ -137,6 +148,90 @@ impl TaskService for BatchServiceImpl {
             },
         }
     }
+
+    async fn ingest_dml(
+        &self,
+        request: Request<tonic::Streaming<IngestDmlRequest>>,
+    ) -> Result<Response<Self::IngestDmlStream>, Status> {
+        let mut req_stream = request.into_inner();
+        let init = match req_stream.message().await? {
+            Some(req) => match req.request {
+                Some(ingest_dml_request::Request::Init(init)) => init,
+                Some(ingest_dml_request::Request::Payload(_)) => {
+                    return Err(Status::invalid_argument(
+                        "first ingest dml message must be init",
+                    ));
+                }
+                None => return Err(Status::invalid_argument("empty ingest dml request")),
+            },
+            None => return Err(Status::invalid_argument("empty ingest dml stream")),
+        };
+
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+        let (table_dml_handle, request_id) = self.init_ingest_dml(&init)?;
+        let _ = tx.send(Ok(Self::ingest_dml_init_response())).await;
+
+        let dml_manager = self.env.dml_manager_ref();
+        tokio::spawn(async move {
+            let result: Result<(), String> = async {
+                let mut pending_acks = FuturesOrdered::new();
+
+                loop {
+                    tokio::select! {
+                        req = req_stream.message() => {
+                            let req = req
+                                .map_err(|err| {
+                                    format!(
+                                        "ingest dml stream read failed: {}",
+                                        err.as_report()
+                                    )
+                                })?
+                                .ok_or_else(|| "ingest dml stream closed unexpectedly".to_owned())?;
+                            let payload = match req.request {
+                                Some(ingest_dml_request::Request::Payload(payload)) => payload,
+                                Some(ingest_dml_request::Request::Init(_)) | None => {
+                                    Err("unexpected non-payload request in ingest dml stream".to_owned())?
+                                }
+                            };
+
+                            let dml_id = payload.dml_id;
+                            let wait_fut = Self::do_ingest_dml_payload(
+                                table_dml_handle.clone(),
+                                dml_manager.clone(),
+                                request_id,
+                                payload,
+                            )
+                            .await
+                            .map_err(|err| format!("ingest dml {} failed: {}", dml_id, err.as_report()))?;
+
+                            pending_acks.push_back(async move { wait_fut.await.map(|()| dml_id) });
+                        }
+                        ack = pending_acks.next(), if !pending_acks.is_empty() => {
+                            let ack_dml_id = ack
+                                .expect("branch guarded by non-empty pending_acks")
+                                .map_err(|err: DmlError| format!("ingest dml persistence failed: {}", err.as_report()))?;
+
+                            if tx
+                                .send(Ok(BatchServiceImpl::ingest_dml_ack_response(ack_dml_id)))
+                                .await
+                                .is_err()
+                            {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+            .await;
+
+            if let Err(err) = result {
+                let _ = tx.send(Err(Status::internal(err))).await;
+            }
+        });
+
+        Ok(Response::new(ReceiverStream::new(rx)))
+    }
 }
 
 impl BatchServiceImpl {
@@ -210,5 +305,64 @@ impl BatchServiceImpl {
             .do_execute(data_chunk, wait_for_persistence)
             .await?;
         Ok(())
+    }
+
+    fn init_ingest_dml(
+        &self,
+        init: &IngestDmlInitRequest,
+    ) -> Result<(TableDmlHandleRef, u32), Status> {
+        let table_id = init.table_id;
+        let table_version_id = init.table_version_id;
+        let table_dml_handle = self
+            .env
+            .dml_manager_ref()
+            .table_dml_handle(table_id, table_version_id)
+            .map_err(|err| Status::internal(format!("{}", err.as_report())))?;
+        Ok((table_dml_handle, init.request_id))
+    }
+
+    async fn do_ingest_dml_payload(
+        table_dml_handle: TableDmlHandleRef,
+        dml_manager: DmlManagerRef,
+        request_id: u32,
+        payload: IngestDmlPayloadRequest,
+    ) -> Result<impl Future<Output = risingwave_dml::error::Result<()>> + Send + 'static, BatchError>
+    {
+        let pb_chunk = payload.chunk.ok_or_else(|| {
+            BatchError::Internal(anyhow::anyhow!("no chunk in IngestDmlPayloadRequest"))
+        })?;
+        let chunk = StreamChunk::from_protobuf(&pb_chunk)
+            .context("failed to decode chunk")
+            .map_err(BatchError::Internal)?;
+        let txn_id = dml_manager.gen_txn_id();
+        let mut write_handle = table_dml_handle
+            .write_handle(request_id, txn_id)
+            .map_err(BatchError::Dml)?;
+
+        write_handle.begin().map_err(BatchError::Dml)?;
+        write_handle
+            .write_chunk(chunk)
+            .await
+            .map_err(BatchError::Dml)?;
+        let persistence_future = write_handle
+            .end_wait_persistence()
+            .map_err(BatchError::Dml)?;
+        Ok(persistence_future)
+    }
+
+    fn ingest_dml_init_response() -> IngestDmlResponse {
+        IngestDmlResponse {
+            response: Some(ingest_dml_response::Response::Init(
+                IngestDmlInitResponse {},
+            )),
+        }
+    }
+
+    fn ingest_dml_ack_response(dml_id: u64) -> IngestDmlResponse {
+        IngestDmlResponse {
+            response: Some(ingest_dml_response::Response::Ack(IngestDmlAckResponse {
+                dml_id,
+            })),
+        }
     }
 }
