@@ -509,6 +509,7 @@ fn rewrite_log_store_table(
     extend_sink_columns(&mut log_store_table.columns, newly_added_columns, |name| {
         format!("{}_{}", upstream_table_name, name)
     });
+    log_store_table.value_indices = (0..log_store_table.columns.len() as i32).collect();
 }
 
 /// Rewrite `StreamScan` + Merge to match the new upstream schema.
