@@ -1039,9 +1039,9 @@ impl MetaClient {
         set_option: Option<bool>,
     ) -> Result<u64> {
         let request = GrantRoleRequest {
-            role_ids: role_ids.into_iter().map(Into::into).collect(),
-            member_ids: member_ids.into_iter().map(Into::into).collect(),
-            granted_by: granted_by.into(),
+            role_ids: role_ids.into_iter().map(|id| id.as_raw_id()).collect(),
+            member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
+            granted_by: granted_by.as_raw_id(),
             admin_option,
             inherit_option,
             set_option,
@@ -1061,10 +1061,10 @@ impl MetaClient {
         revoke_set_option: bool,
     ) -> Result<u64> {
         let request = RevokeRoleRequest {
-            role_ids: role_ids.into_iter().map(Into::into).collect(),
-            member_ids: member_ids.into_iter().map(Into::into).collect(),
-            granted_by: granted_by.into(),
-            revoked_by: revoked_by.into(),
+            role_ids: role_ids.into_iter().map(|id| id.as_raw_id()).collect(),
+            member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
+            granted_by: granted_by.as_raw_id(),
+            revoked_by: revoked_by.as_raw_id(),
             revoke_admin_option,
             revoke_inherit_option,
             revoke_set_option,
