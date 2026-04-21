@@ -21,7 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sink_test_env_setup "$profile" true
+sink_test_env_setup "$profile" --need-connector
 
 # prepare minio deltalake sink
 echo "--- preparing deltalake"

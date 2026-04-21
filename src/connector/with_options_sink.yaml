@@ -434,6 +434,22 @@ GooglePubSubConfig:
       The provided account credential must have the
       `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
     required: false
+HttpConfig:
+  fields:
+  - name: url
+    field_type: String
+    comments: The endpoint URL to POST data to.
+    required: true
+  - name: content_type
+    field_type: String
+    comments: |-
+      Content-Type header value. Defaults to `text/plain` for `varchar` and `application/json`
+      for `jsonb`.
+    required: false
+  - name: r#type
+    field_type: String
+    comments: Sink type, must be "append-only".
+    required: true
 IcebergConfig:
   fields:
   - name: r#type
@@ -619,6 +635,10 @@ IcebergConfig:
     field_type: HashMap<String,String>
     required: false
   - name: partition_by
+    field_type: String
+    required: false
+    default: Default::default
+  - name: order_key
     field_type: String
     required: false
     default: Default::default

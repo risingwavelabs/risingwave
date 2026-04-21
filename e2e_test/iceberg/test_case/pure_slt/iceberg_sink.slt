@@ -91,7 +91,8 @@ CREATE SINK s7 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH 
     table.name='e2e_auto_create_table',
     commit_checkpoint_interval = 1,
     create_table_if_not_exists = 'true',
-    partition_by = 'v1'
+    partition_by = 'v1',
+    order_key = 'v2 desc nulls last, v1 asc'
 );
 
 statement ok

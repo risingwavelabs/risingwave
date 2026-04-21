@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::num::NonZeroU64;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 pub use commit::*;
 pub use config::*;
 pub use create_table::*;
@@ -90,6 +90,15 @@ impl IcebergSink {
     }
 
     pub fn new(config: IcebergConfig, param: SinkParam) -> Result<Self> {
+        if let Some(order_key) = &config.order_key {
+            validate_order_key_columns(
+                order_key,
+                param.columns.iter().map(|column| column.name.as_str()),
+            )
+            .context("invalid order_key")
+            .map_err(SinkError::Config)?;
+        }
+
         let unique_column_ids = if config.r#type == SINK_TYPE_UPSERT && !config.force_append_only {
             if let Some(pk) = &config.primary_key {
                 let mut unique_column_ids = Vec::with_capacity(pk.len());
@@ -226,7 +235,6 @@ impl Sink for IcebergSink {
                 );
             }
 
-            // log compaction_interval
             tracing::info!(
                 "Alter config compaction_interval set to {} seconds",
                 compaction_interval

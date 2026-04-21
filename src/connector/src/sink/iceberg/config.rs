@@ -126,6 +126,7 @@ pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
     "compaction.write_parquet_max_row_group_bytes";
 pub const COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: &str = "commit_checkpoint_size_threshold_mb";
+pub const ORDER_KEY: &str = "order_key";
 pub const ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: u64 = 128;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
 
@@ -311,6 +312,9 @@ pub struct IcebergConfig {
 
     #[serde(default)]
     pub partition_by: Option<String>,
+
+    #[serde(default)]
+    pub order_key: Option<String>,
 
     /// Commit every n(>0) checkpoints, default is 60.
     #[serde(default = "iceberg_default_commit_checkpoint_interval")]
