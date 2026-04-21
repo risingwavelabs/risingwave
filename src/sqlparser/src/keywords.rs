@@ -68,6 +68,7 @@ define_keywords!(
     ABS,
     ACTION,
     ADAPTIVE,
+    ADMIN,
     ADD,
     ADMIN,
     AGGREGATE,

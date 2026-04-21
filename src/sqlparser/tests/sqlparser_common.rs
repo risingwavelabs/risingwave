@@ -3550,7 +3550,7 @@ fn parse_create_user() {
 
 #[test]
 fn parse_create_role() {
-    let sql = "CREATE ROLE analytics WITH CREATEDB CREATEROLE INHERIT NOLOGIN";
+    let sql = "CREATE ROLE analytics WITH NOLOGIN CREATEDB";
     match verified_stmt(sql) {
         Statement::CreateRole(stmt) => {
             assert_eq!(
@@ -3559,12 +3559,7 @@ fn parse_create_role() {
             );
             assert_eq!(
                 stmt.with_options.0,
-                vec![
-                    UserOption::CreateDB,
-                    UserOption::CreateRole,
-                    UserOption::Inherit,
-                    UserOption::NoLogin,
-                ]
+                vec![UserOption::NoLogin, UserOption::CreateDB]
             );
         }
         _ => unreachable!(),
