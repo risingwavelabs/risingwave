@@ -38,21 +38,25 @@ use tokio::sync::mpsc::UnboundedReceiver;
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum TruncateOffset {
     Chunk { epoch: u64, chunk_id: ChunkId },
     Barrier { epoch: u64 },
 }
 
-impl PartialOrd for TruncateOffset {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+impl Ord for TruncateOffset {
+    fn cmp(&self, other: &Self) -> Ordering {
         let extract = |offset: &TruncateOffset| match offset {
             TruncateOffset::Chunk { epoch, chunk_id } => (*epoch, *chunk_id),
             TruncateOffset::Barrier { epoch } => (*epoch, usize::MAX),
         };
-        let this = extract(self);
-        let other = extract(other);
-        this.partial_cmp(&other)
+        extract(self).cmp(&extract(other))
+    }
+}
+
+impl PartialOrd for TruncateOffset {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -219,7 +223,7 @@ pub struct TransformChunkLogReader<F: Fn(StreamChunk) -> StreamChunk, R: LogRead
 
 pub struct TruncateBarrierLogReader<R: LogReader> {
     inner: R,
-    pending_barriers: VecDeque<TruncateOffset>,
+    pending_barriers: VecDeque<u64>,
 }
 
 impl<R: LogReader> TruncateBarrierLogReader<R> {
@@ -228,17 +232,6 @@ impl<R: LogReader> TruncateBarrierLogReader<R> {
             inner,
             pending_barriers: VecDeque::new(),
         }
-    }
-
-    fn truncate_pending_barriers_before(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        while let Some(barrier_offset) = self.pending_barriers.front().copied() {
-            if barrier_offset >= offset {
-                break;
-            }
-            self.inner.truncate(barrier_offset)?;
-            self.pending_barriers.pop_front();
-        }
-        Ok(())
     }
 }
 
@@ -286,19 +279,31 @@ impl<R: LogReader> LogReader for TruncateBarrierLogReader<R> {
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
         let (epoch, item) = self.inner.next_item().await?;
         if matches!(item, LogStoreReadItem::Barrier { .. }) {
-            self.pending_barriers
-                .push_back(TruncateOffset::Barrier { epoch });
+            self.pending_barriers.push_back(epoch);
         }
         Ok((epoch, item))
     }
 
     fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        self.truncate_pending_barriers_before(offset)?;
-        let should_pop_current_barrier = self.pending_barriers.front().copied() == Some(offset);
-        self.inner.truncate(offset)?;
-        if should_pop_current_barrier {
-            self.pending_barriers.pop_front();
+        while let Some(front_epoch) = self.pending_barriers.front().copied() {
+            match (TruncateOffset::Barrier { epoch: front_epoch }).cmp(&offset) {
+                Ordering::Less => {
+                    self.inner
+                        .truncate(TruncateOffset::Barrier { epoch: front_epoch })?;
+                    self.pending_barriers.pop_front();
+                }
+                Ordering::Equal => {
+                    self.inner.truncate(offset)?;
+                    self.pending_barriers.pop_front();
+                    return Ok(());
+                }
+                Ordering::Greater => {
+                    self.inner.truncate(offset)?;
+                    return Ok(());
+                }
+            }
         }
+        self.inner.truncate(offset)?;
         Ok(())
     }
 
