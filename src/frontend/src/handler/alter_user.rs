@@ -244,6 +244,13 @@ pub async fn handle_alter_user(
     Ok(response_builder.into())
 }
 
+pub async fn handle_alter_role(
+    handler_args: HandlerArgs,
+    stmt: AlterUserStatement,
+) -> Result<RwPgResponse> {
+    handle_alter_user(handler_args, stmt).await
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

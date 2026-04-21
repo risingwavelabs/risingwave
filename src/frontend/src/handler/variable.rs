@@ -109,6 +109,18 @@ pub(super) fn handle_set_time_zone(
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
 
+pub(super) fn handle_set_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    bail_not_implemented!(
+        "SET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
+    );
+}
+
+pub(super) fn handle_reset_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    bail_not_implemented!(
+        "RESET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
+    );
+}
+
 pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");

@@ -158,6 +158,21 @@ pub async fn handle_create_user(
     Ok(response_builder.into())
 }
 
+pub async fn handle_create_role(
+    handler_args: HandlerArgs,
+    mut stmt: CreateUserStatement,
+) -> Result<RwPgResponse> {
+    let has_explicit_login = stmt
+        .with_options
+        .0
+        .iter()
+        .any(|option| matches!(option, UserOption::Login | UserOption::NoLogin));
+    if !has_explicit_login {
+        stmt.with_options.0.push(UserOption::NoLogin);
+    }
+    handle_create_user(handler_args, stmt).await
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
