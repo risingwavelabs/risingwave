@@ -338,20 +338,19 @@ pub fn parse_schema_change(
                                     }
                                 }
 
-                                let snapshot_value: Datum = if let Some(value_text) = value_text {
-                                    Some(ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
-                                        |err| {
-                                            tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
-                                            AccessError::TypeError {
-                                                expected: "constant expression".into(),
-                                                got: data_type.to_string(),
-                                                value: value_text,
-                                            }
-                                        },
-                                    )?)
-                                } else {
-                                    None
-                                };
+                                let snapshot_value: Datum = value_text.and_then(|value_text| {
+                                    ScalarImpl::from_text(value_text.as_str(), &data_type)
+                                        .inspect_err(|err| {
+                                            tracing::warn!(
+                                                target: "auto_schema_change",
+                                                error = %err.as_report(),
+                                                data_type = %data_type,
+                                                default_value_expression = default_val_expr_str,
+                                                "non-constant default value expression, adding column without default"
+                                            );
+                                        })
+                                        .ok()
+                                });
 
                                 if snapshot_value.is_none() {
                                     tracing::warn!(target: "auto_schema_change", "failed to parse default value expression: {}", default_val_expr_str);
