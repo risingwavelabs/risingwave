@@ -47,6 +47,7 @@ pub use super::table::Entity as Table;
 pub use super::user::Entity as User;
 pub use super::user_default_privilege::Entity as UserDefaultPrivilege;
 pub use super::user_privilege::Entity as UserPrivilege;
+pub use super::user_role_membership::Entity as UserRoleMembership;
 pub use super::view::Entity as View;
 pub use super::worker::Entity as Worker;
 pub use super::worker_property::Entity as WorkerProperty;
