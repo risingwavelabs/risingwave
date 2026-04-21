@@ -530,18 +530,20 @@ pub async fn handle_grant_role(
     _handler_args: HandlerArgs,
     _stmt: Statement,
 ) -> Result<RwPgResponse> {
-    bail_not_implemented!(
+    Err(not_implemented!(
         "role membership GRANT is parsed and dispatched, but backend role membership semantics are not implemented yet"
-    );
+    )
+    .into())
 }
 
 pub async fn handle_revoke_role(
     _handler_args: HandlerArgs,
     _stmt: Statement,
 ) -> Result<RwPgResponse> {
-    bail_not_implemented!(
+    Err(not_implemented!(
         "role membership REVOKE is parsed and dispatched, but backend role membership semantics are not implemented yet"
-    );
+    )
+    .into())
 }
 
 pub async fn handle_alter_default_privileges(
