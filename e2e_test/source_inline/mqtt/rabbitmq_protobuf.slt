@@ -17,14 +17,14 @@ create table t_rabbitmq_mqtt_pb (
   qos = 'at_least_once'
 ) format plain encode protobuf (
   message = 'mqtt.TestRecord',
-  schema.location = 'file:///risingwave/e2e_test/source_inline/mqtt/mqtt_simple.proto'
+  schema.location = 'file:///risingwave/e2e_test/source_inline/mqtt/mqtt_simple.pb'
 );
 
 sleep 1s
 
 # Produce initial messages
 system ok
-python3 e2e_test/source_inline/mqtt/rabbitmq_protobuf_operation.py produce test_topic_pb 100 protobuf
+python3 e2e_test/source_inline/mqtt/rabbitmq_operation.py produce test_topic_pb 100 protobuf
 
 sleep 3s
 
