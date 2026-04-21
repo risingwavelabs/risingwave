@@ -23,3 +23,9 @@
 - input: REVOKE ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema FROM user1
   formatted_sql: REVOKE ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema FROM user1 RESTRICT
   formatted_ast: 'Revoke { privileges: All { with_privileges_keyword: true }, objects: AllSourcesInSchema { schemas: [ObjectName([Ident { value: "schema", quote_style: None }])] }, grantees: [Ident { value: "user1", quote_style: None }], granted_by: None, revoke_grant_option: false, cascade: false }'
+- input: GRANT role_a TO user_b WITH ADMIN OPTION
+  formatted_sql: GRANT role_a TO user_b WITH ADMIN OPTION
+  formatted_ast: 'GrantRole { roles: [Ident { value: "role_a", quote_style: None }], grantees: [Ident { value: "user_b", quote_style: None }], with_admin_option: true }'
+- input: REVOKE ADMIN OPTION FOR role_a FROM user_b
+  formatted_sql: REVOKE ADMIN OPTION FOR role_a FROM user_b RESTRICT
+  formatted_ast: 'RevokeRole { roles: [Ident { value: "role_a", quote_style: None }], grantees: [Ident { value: "user_b", quote_style: None }], revoke_admin_option: true, cascade: false }'

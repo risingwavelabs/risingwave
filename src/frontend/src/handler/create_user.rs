@@ -104,8 +104,11 @@ pub async fn handle_create_user(
                 UserOption::NoSuperUser => user_info.is_super = false,
                 UserOption::CreateDB => user_info.can_create_db = true,
                 UserOption::NoCreateDB => user_info.can_create_db = false,
-                UserOption::CreateUser => user_info.can_create_user = true,
-                UserOption::NoCreateUser => user_info.can_create_user = false,
+                UserOption::CreateRole | UserOption::CreateUser => user_info.can_create_user = true,
+                UserOption::NoCreateRole | UserOption::NoCreateUser => {
+                    user_info.can_create_user = false
+                }
+                UserOption::Inherit | UserOption::NoInherit => {}
                 UserOption::Login => user_info.can_login = true,
                 UserOption::NoLogin => user_info.can_login = false,
                 UserOption::Admin => user_info.is_admin = true,

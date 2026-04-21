@@ -1058,8 +1058,12 @@ pub enum UserOption {
     NoSuperUser,
     CreateDB,
     NoCreateDB,
+    CreateRole,
+    NoCreateRole,
     CreateUser,
     NoCreateUser,
+    Inherit,
+    NoInherit,
     Login,
     NoLogin,
     Admin,
@@ -1076,8 +1080,12 @@ impl fmt::Display for UserOption {
             UserOption::NoSuperUser => write!(f, "NOSUPERUSER"),
             UserOption::CreateDB => write!(f, "CREATEDB"),
             UserOption::NoCreateDB => write!(f, "NOCREATEDB"),
+            UserOption::CreateRole => write!(f, "CREATEROLE"),
+            UserOption::NoCreateRole => write!(f, "NOCREATEROLE"),
             UserOption::CreateUser => write!(f, "CREATEUSER"),
             UserOption::NoCreateUser => write!(f, "NOCREATEUSER"),
+            UserOption::Inherit => write!(f, "INHERIT"),
+            UserOption::NoInherit => write!(f, "NOINHERIT"),
             UserOption::Login => write!(f, "LOGIN"),
             UserOption::NoLogin => write!(f, "NOLOGIN"),
             UserOption::Admin => write!(f, "ADMIN"),
@@ -1099,7 +1107,9 @@ pub struct UserOptions(pub Vec<UserOption>);
 struct UserOptionsBuilder {
     super_user: Option<UserOption>,
     create_db: Option<UserOption>,
+    create_role: Option<UserOption>,
     create_user: Option<UserOption>,
+    inherit: Option<UserOption>,
     login: Option<UserOption>,
     admin: Option<UserOption>,
     password: Option<UserOption>,
@@ -1114,7 +1124,13 @@ impl UserOptionsBuilder {
         if let Some(option) = self.create_db {
             options.push(option);
         }
+        if let Some(option) = self.create_role {
+            options.push(option);
+        }
         if let Some(option) = self.create_user {
+            options.push(option);
+        }
+        if let Some(option) = self.inherit {
             options.push(option);
         }
         if let Some(option) = self.login {
@@ -1154,8 +1170,12 @@ impl ParseTo for UserOptions {
                 "nosuperuser" => (&mut builder.super_user, UserOption::NoSuperUser),
                 "createdb" => (&mut builder.create_db, UserOption::CreateDB),
                 "nocreatedb" => (&mut builder.create_db, UserOption::NoCreateDB),
+                "createrole" => (&mut builder.create_role, UserOption::CreateRole),
+                "nocreaterole" => (&mut builder.create_role, UserOption::NoCreateRole),
                 "createuser" => (&mut builder.create_user, UserOption::CreateUser),
                 "nocreateuser" => (&mut builder.create_user, UserOption::NoCreateUser),
+                "inherit" => (&mut builder.inherit, UserOption::Inherit),
+                "noinherit" => (&mut builder.inherit, UserOption::NoInherit),
                 "login" => (&mut builder.login, UserOption::Login),
                 "nologin" => (&mut builder.login, UserOption::NoLogin),
                 "admin" => (&mut builder.admin, UserOption::Admin),
