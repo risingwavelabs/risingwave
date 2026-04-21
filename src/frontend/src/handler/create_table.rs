@@ -100,8 +100,9 @@ use risingwave_connector::sink::iceberg::{
     COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_DELETE_FILES_COUNT_THRESHOLD,
     COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, COMPACTION_SMALL_FILES_THRESHOLD_MB,
     COMPACTION_TARGET_FILE_SIZE_MB, COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE,
-    COMPACTION_WRITE_PARQUET_COMPRESSION, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
-    CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
+    COMPACTION_WRITE_PARQUET_COMPRESSION, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
+    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, CompactionType, ENABLE_COMPACTION,
+    ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
     ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
     ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode, ORDER_KEY,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
@@ -2246,6 +2247,34 @@ pub async fn create_iceberg_engine_table(
         source.as_mut().map(|x| {
             x.with_properties
                 .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS)
+        });
+    }
+
+    if let Some(write_parquet_max_row_group_bytes) = handler_args
+        .with_options
+        .get(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
+    {
+        let write_parquet_max_row_group_bytes = write_parquet_max_row_group_bytes
+            .parse::<usize>()
+            .map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "{} must be a positive integer: {}",
+                    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, write_parquet_max_row_group_bytes
+                ))
+            })?;
+        if write_parquet_max_row_group_bytes == 0 {
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES
+            ));
+        }
+        sink_with.insert(
+            COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES.to_owned(),
+            write_parquet_max_row_group_bytes.to_string(),
+        );
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
         });
     }
 

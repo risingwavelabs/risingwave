@@ -1243,6 +1243,7 @@ impl FromIntoArrow for F64 {
 impl FromIntoArrow for Date {
     type ArrowType = i32;
 
+    #[allow(deprecated)]
     fn from_arrow(value: Self::ArrowType) -> Self {
         Date(arrow_array::types::Date32Type::to_naive_date(value))
     }
