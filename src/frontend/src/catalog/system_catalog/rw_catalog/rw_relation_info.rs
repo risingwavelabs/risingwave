@@ -49,7 +49,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
         let schemas = catalog_reader.get_all_schema_names(&reader.auth_context.database)?;
         let user_reader = reader.user_info_reader.read_guard();
         let current_user = user_reader
-            .get_user_by_name(&reader.auth_context.user_name)
+            .get_user_by_name(reader.auth_context.current_user_name())
             .expect("user not found");
         for schema in &schemas {
             let schema_catalog =
@@ -94,7 +94,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
     let schemas = catalog_reader.get_all_schema_names(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
     let current_user = user_reader
-        .get_user_by_name(&reader.auth_context.user_name)
+        .get_user_by_name(reader.auth_context.current_user_name())
         .expect("user not found");
     for schema in &schemas {
         let schema_catalog =

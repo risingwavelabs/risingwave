@@ -535,7 +535,7 @@ impl Binder {
                     for path in paths {
                         let mut schema_name = path;
                         if schema_name == USER_NAME_WILD_CARD {
-                            schema_name = &binder.auth_context.user_name;
+                            schema_name = binder.auth_context.current_user_name();
                         }
 
                         if binder

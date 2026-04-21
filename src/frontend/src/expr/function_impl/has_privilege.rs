@@ -364,7 +364,11 @@ fn get_function_id_by_name(
                 reason: e.to_report_string().into(),
             }
         })?;
-    let schema_path = SchemaPath::new(schema.as_deref(), search_path, &auth_context.user_name);
+    let schema_path = SchemaPath::new(
+        schema.as_deref(),
+        search_path,
+        auth_context.current_user_name(),
+    );
 
     let reader = &catalog_reader.read_guard();
     Ok(reader

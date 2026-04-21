@@ -44,7 +44,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<IcebergTables>> {
     let catalog_reader = reader.catalog_reader.read_guard();
     let user_reader = reader.user_info_reader.read_guard();
     let user = user_reader
-        .get_user_by_name(&reader.auth_context.user_name)
+        .get_user_by_name(reader.auth_context.current_user_name())
         .ok_or_else(|| anyhow!("User not found"))?;
 
     let mut res = Vec::new();

@@ -46,9 +46,9 @@ fn pg_table_is_visible_impl(
     let catalog_reader = catalog.read_guard();
     let user_reader = user_info.read_guard();
     let user_info = user_reader
-        .get_user_by_name(&auth_context.user_name)
+        .get_user_by_name(auth_context.current_user_name())
         .ok_or(user_not_found_err(
-            format!("User {} not found", auth_context.user_name).as_str(),
+            format!("User {} not found", auth_context.current_user_name()).as_str(),
         ))?;
     // Return true only if:
     // 1. The schema of the object exists in the search path.
