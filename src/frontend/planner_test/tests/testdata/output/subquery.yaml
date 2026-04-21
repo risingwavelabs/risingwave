@@ -93,7 +93,7 @@
     Failed to bind expression: t.x
 
     Caused by:
-      Item not found: Invalid column: x
+      Item not found: missing FROM-clause entry for table "t"
 - sql: |
     create table t(x int);
     select * from t, (select t.x) as t1;
@@ -101,7 +101,7 @@
     Failed to bind expression: t.x
 
     Caused by:
-      Item not found: Invalid column: x
+      Item not found: missing FROM-clause entry for table "t"
 - sql: |
     create table t(x int);
     select * from t CROSS JOIN (select t.x) as t1;
@@ -109,7 +109,7 @@
     Failed to bind expression: t.x
 
     Caused by:
-      Item not found: Invalid column: x
+      Item not found: missing FROM-clause entry for table "t"
 - sql: |
     create table ab (a int, b int);
     create table bc (b int, c int);
@@ -382,7 +382,7 @@
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/
+    See also: https://docs.risingwave.com/processing/sql/dynamic-filters
 - sql: |
     SELECT 1 a, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g')) b
   optimized_logical_plan_for_batch: |-
@@ -597,7 +597,7 @@
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/
+    See also: https://docs.risingwave.com/processing/sql/dynamic-filters
 - name: test over window subquery 3
   sql: |
     CREATE TABLE integers(i INTEGER);
@@ -655,7 +655,7 @@
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://docs.risingwave.com/docs/current/sql-pattern-dynamic-filters/
+    See also: https://docs.risingwave.com/processing/sql/dynamic-filters
 - name: test over window subquery 5
   sql: |
     CREATE TABLE integers(i INTEGER, correlated_col int);

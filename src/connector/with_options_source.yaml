@@ -94,6 +94,10 @@ AzblobProperties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
+    required: false
+    default: Default::default
   - name: compression_format
     field_type: CompressionFormat
     required: false
@@ -114,6 +118,10 @@ BatchPosixFsProperties:
     required: false
   - name: compression_format
     field_type: CompressionFormat
+    required: false
+    default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
     required: false
     default: Default::default
 DatagenProperties:
@@ -165,6 +173,10 @@ GcsProperties:
     required: false
   - name: compression_format
     field_type: CompressionFormat
+    required: false
+    default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
     required: false
     default: Default::default
   - name: compression_format
@@ -1155,6 +1167,10 @@ OpendalS3Properties:
     field_type: CompressionFormat
     required: false
     default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
+    required: false
+    default: Default::default
 PosixFsProperties:
   fields:
   - name: posix_fs.root
@@ -1171,6 +1187,10 @@ PosixFsProperties:
     required: false
   - name: compression_format
     field_type: CompressionFormat
+    required: false
+    default: Default::default
+  - name: parquet.case_insensitive
+    field_type: bool
     required: false
     default: Default::default
   - name: compression_format
@@ -1228,9 +1248,18 @@ PubsubProperties:
   - name: pubsub.parallelism
     field_type: u32
     comments: |-
-      `parallelism` is the number of parallel consumers to run for the subscription.
-      TODO: use system parallelism if not set
+      Deprecated: ignored since adaptive split mode was introduced.
+      Split count now adapts automatically to the number of actors.
+      Kept for backward compatibility with existing DDL.
     required: false
+  - name: pubsub.ack_deadline_seconds
+    field_type: i32
+    comments: |-
+      The ack deadline in seconds for the streaming pull subscriber.
+      This is the maximum time the server will wait for an ack before redelivering the message.
+      Must be between 10 and 600 seconds. Defaults to 60.
+    required: false
+    allow_alter_on_fly: true
 PulsarProperties:
   fields:
   - name: scan.startup.mode

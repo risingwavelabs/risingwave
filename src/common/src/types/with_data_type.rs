@@ -148,3 +148,9 @@ impl<const N: usize> WithDataType for TypedId<N, u32> {
         DataType::Int32
     }
 }
+
+impl<const N: usize> WithDataType for TypedId<N, u64> {
+    fn default_data_type() -> DataType {
+        DataType::Int64
+    }
+}

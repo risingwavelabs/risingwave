@@ -434,6 +434,22 @@ GooglePubSubConfig:
       The provided account credential must have the
       `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
     required: false
+HttpConfig:
+  fields:
+  - name: url
+    field_type: String
+    comments: The endpoint URL to POST data to.
+    required: true
+  - name: content_type
+    field_type: String
+    comments: |-
+      Content-Type header value. Defaults to `text/plain` for `varchar` and `application/json`
+      for `jsonb`.
+    required: false
+  - name: r#type
+    field_type: String
+    comments: Sink type, must be "append-only".
+    required: true
 IcebergConfig:
   fields:
   - name: r#type
@@ -622,11 +638,23 @@ IcebergConfig:
     field_type: String
     required: false
     default: Default::default
+  - name: order_key
+    field_type: String
+    required: false
+    default: Default::default
   - name: commit_checkpoint_interval
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 60.
     required: false
     default: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+    allow_alter_on_fly: true
+  - name: commit_checkpoint_size_threshold_mb
+    field_type: u64
+    comments: |-
+      Commit on the next checkpoint barrier after buffered write size exceeds this threshold.
+      Default is 128 MB.
+    required: false
+    default: Some (ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
     allow_alter_on_fly: true
   - name: create_table_if_not_exists
     field_type: bool
@@ -726,6 +754,23 @@ IcebergConfig:
     comments: |-
       Compaction type: `full`, `small-files`, or `files-with-delete`
       If not set, will default to `full`
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.write_parquet_compression
+    field_type: String
+    comments: |-
+      Parquet compression codec
+      Supported values: uncompressed, snappy, gzip, lzo, brotli, lz4, zstd
+      Default is snappy
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: compaction.write_parquet_max_row_group_rows
+    field_type: usize
+    comments: |-
+      Maximum number of rows in a Parquet row group
+      Default is 122880 (from developer config)
     required: false
     default: Default::default
     allow_alter_on_fly: true

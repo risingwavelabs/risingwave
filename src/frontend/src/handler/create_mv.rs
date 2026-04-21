@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{FunctionId, ObjectId};
+use risingwave_common::catalog::{FunctionId, ObjectId, SecretId};
 use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
@@ -32,7 +32,10 @@ use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
-use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
+use crate::handler::util::{
+    LongRunningNotificationAction, execute_with_long_running_notification,
+    reject_internal_table_dependencies,
+};
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
@@ -163,12 +166,13 @@ pub async fn handle_create_mv(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
-    let (dependent_relations, dependent_udfs, bound_query) = {
+    let (dependent_relations, dependent_udfs, dependent_secrets, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
         let bound_query = binder.bind_query(&query)?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
+            binder.included_secrets().clone(),
             bound_query,
         )
     };
@@ -179,6 +183,7 @@ pub async fn handle_create_mv(
         bound_query,
         dependent_relations,
         dependent_udfs,
+        dependent_secrets,
         columns,
         emit_mode,
     )
@@ -222,6 +227,7 @@ pub async fn handle_create_mv_bound(
     query: BoundQuery,
     dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
+    dependent_secrets: HashSet<SecretId>,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
@@ -238,6 +244,12 @@ pub async fn handle_create_mv_bound(
         return Ok(resp);
     }
 
+    reject_internal_table_dependencies(
+        session.as_ref(),
+        &dependent_relations,
+        "CREATE MATERIALIZED VIEW",
+    )?;
+
     let (table, graph, dependencies, resource_type) = {
         gen_create_mv_graph(
             handler_args,
@@ -245,6 +257,7 @@ pub async fn handle_create_mv_bound(
             query,
             dependent_relations,
             dependent_udfs,
+            dependent_secrets,
             columns,
             emit_mode,
         )
@@ -289,6 +302,7 @@ pub(crate) async fn gen_create_mv_graph(
     query: BoundQuery,
     dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>,
+    dependent_secrets: HashSet<SecretId>,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<(
@@ -304,11 +318,19 @@ pub(crate) async fn gen_create_mv_graph(
         risingwave_common::license::Feature::ResourceGroup.check_available()?;
     }
 
-    let is_serverless_backfill = with_options
+    let serverless_backfill_from_with = with_options
         .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
-        .unwrap_or_default()
-        .parse::<bool>()
-        .unwrap_or(false);
+        .map(|value| value.parse::<bool>().unwrap_or(false));
+    let is_serverless_backfill = match serverless_backfill_from_with {
+        Some(value) => value,
+        None => {
+            if resource_group.is_some() {
+                false
+            } else {
+                handler_args.session.config().enable_serverless_backfill()
+            }
+        }
+    };
 
     if resource_group.is_some() && is_serverless_backfill {
         return Err(RwError::from(InvalidInputSyntax(
@@ -392,6 +414,12 @@ It only indicates the physical clustering of the data, which may improve the per
     let dependencies = RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
         .into_iter()
         .chain(dependent_udfs.iter().copied().map_into())
+        .chain(
+            dependent_secrets
+                .iter()
+                .copied()
+                .map(|id| id.as_object_id()),
+        )
         .collect();
 
     let graph = build_graph_with_strategy(

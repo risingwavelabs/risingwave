@@ -20,7 +20,7 @@ risingwave_rpc_client = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }
 tower-http = { version = "0.6", features = ["add-extension", "compression-gzip"] }

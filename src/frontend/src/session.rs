@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
+use std::iter;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
@@ -74,6 +75,7 @@ use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{GLOBAL_SOURCE_METRICS, SourceMetrics};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -191,6 +193,13 @@ pub(crate) struct FrontendEnv {
     /// Memory context used for batch executors in frontend.
     mem_context: MemoryContext,
 
+    #[cfg(feature = "datafusion")]
+    /// Shared budget context for **DataFusion** spillable operators.
+    /// Created by [`crate::datafusion::execute::memory_ctx::create_df_spillable_budget_ctx`];
+    /// caps total spillable usage so unspillable operators always have headroom.
+    /// Not used by the RisingWave batch engine.
+    df_spillable_budget_ctx: MemoryContext,
+
     /// address of the serverless backfill controller.
     serverless_backfill_controller_addr: String,
 
@@ -283,6 +292,8 @@ impl FrontendEnv {
             creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
             compute_runtime,
             mem_context: MemoryContext::none(),
+            #[cfg(feature = "datafusion")]
+            df_spillable_budget_ctx: MemoryContext::none(),
             serverless_backfill_controller_addr: Default::default(),
             prometheus_client: None,
             prometheus_selector: String::new(),
@@ -443,7 +454,9 @@ impl FrontendEnv {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
                 .add_service(FrontendServiceServer::new(frontend_srv))
-                .add_service(MonitorServiceServer::new(monitor_srv))
+                .add_service(configured_monitor_service_server(
+                    MonitorServiceServer::new(monitor_srv),
+                ))
                 .serve(frontend_rpc_addr)
                 .await
                 .unwrap();
@@ -506,6 +519,9 @@ impl FrontendEnv {
             frontend_metrics.batch_total_mem.clone(),
             batch_memory_limit as u64,
         );
+        #[cfg(feature = "datafusion")]
+        let df_spillable_budget_ctx =
+            crate::datafusion::create_df_spillable_budget_ctx(&mem_context);
 
         // Initialize Prometheus client if endpoint is provided
         let prometheus_client = if let Some(ref endpoint) = opts.prometheus_endpoint {
@@ -565,6 +581,8 @@ impl FrontendEnv {
                 creating_streaming_job_tracker,
                 compute_runtime,
                 mem_context,
+                #[cfg(feature = "datafusion")]
+                df_spillable_budget_ctx,
                 prometheus_client,
                 prometheus_selector,
             },
@@ -707,6 +725,11 @@ impl FrontendEnv {
 
     pub fn mem_context(&self) -> MemoryContext {
         self.mem_context.clone()
+    }
+
+    #[cfg(feature = "datafusion")]
+    pub fn df_spillable_budget_ctx(&self) -> MemoryContext {
+        self.df_spillable_budget_ctx.clone()
     }
 }
 
@@ -1312,17 +1335,43 @@ impl SessionImpl {
         Ok(secret.clone())
     }
 
-    pub fn list_change_log_epochs(
+    pub async fn list_change_log_epochs(
         &self,
         table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        Ok(self
+        let Some(max_epoch) = self
             .env
             .hummock_snapshot_manager()
             .acquire()
-            .list_change_log_epochs(table_id, min_epoch, max_count))
+            .version()
+            .state_table_info
+            .info()
+            .get(&table_id)
+            .map(|s| s.committed_epoch)
+        else {
+            return Ok(vec![]);
+        };
+        let ret = self
+            .env
+            .meta_client_ref()
+            .get_hummock_table_change_log(
+                Some(min_epoch),
+                Some(max_epoch),
+                Some(iter::once(table_id).collect()),
+                true,
+                Some(max_count),
+            )
+            .await?;
+        let Some(e) = ret.get(&table_id) else {
+            return Ok(vec![]);
+        };
+        Ok(e.iter()
+            .flat_map(|l| l.epochs())
+            .filter(|e| *e >= min_epoch && *e <= max_epoch)
+            .take(max_count as usize)
+            .collect())
     }
 
     pub fn clear_cancel_query_flag(&self) {
@@ -1376,7 +1425,7 @@ impl SessionImpl {
             );
         }
         let stmt = stmts.swap_remove(0);
-        let rsp = handle(self, stmt, sql.clone(), formats).await?;
+        let rsp = Box::pin(handle(self, stmt, sql.clone(), formats)).await?;
         Ok(rsp)
     }
 
@@ -1640,7 +1689,6 @@ impl SessionManagerImpl {
                 client_addr,
             );
 
-            // TODO: adding `FATAL` message support for no matching HBA entry.
             let Some(hba_entry_opt) = hba_entry_opt else {
                 bail_permission_denied!(
                     "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
@@ -1749,7 +1797,7 @@ impl Session for SessionImpl {
         let sql: Arc<str> = Arc::from(sql_str);
         // The handle can be slow. Release potential large String early.
         drop(string);
-        let rsp = handle(self, stmt, sql, vec![format]).await?;
+        let rsp = Box::pin(handle(self, stmt, sql, vec![format])).await?;
         Ok(rsp)
     }
 
@@ -1784,7 +1832,7 @@ impl Session for SessionImpl {
     }
 
     async fn execute(self: Arc<Self>, portal: Portal) -> Result<PgResponse<PgResponseStream>> {
-        let rsp = handle_execute(self, portal).await?;
+        let rsp = Box::pin(handle_execute(self, portal)).await?;
         Ok(rsp)
     }
 
@@ -1884,6 +1932,10 @@ impl Session for SessionImpl {
             }
         }
         Ok(())
+    }
+
+    fn user(&self) -> String {
+        self.user_name()
     }
 }
 

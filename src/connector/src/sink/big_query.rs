@@ -27,6 +27,7 @@ use futures_async_stream::try_stream;
 use gcp_bigquery_client::Client;
 use gcp_bigquery_client::error::BQError;
 use gcp_bigquery_client::model::query_request::QueryRequest;
+use gcp_bigquery_client::model::query_response::ResultSet;
 use gcp_bigquery_client::model::table::Table;
 use gcp_bigquery_client::model::table_field_schema::TableFieldSchema;
 use gcp_bigquery_client::model::table_schema::TableSchema;
@@ -42,14 +43,11 @@ use google_cloud_googleapis::cloud::bigquery::storage::v1::{
 use google_cloud_pubsub::client::google_cloud_auth;
 use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
 use phf::{Set, phf_set};
-use prost::Message;
-use prost_014::Message as Message014;
 use prost_reflect::{FieldDescriptor, MessageDescriptor};
 use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
     field_descriptor_proto,
 };
-use prost_types_014::DescriptorProto as DescriptorProto014;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -541,7 +539,7 @@ impl Sink for BigQuerySink {
                 .get(project_id, dataset_id, table_id, None)
                 .await
             {
-                Err(BQError::RequestError(_)) => {
+                Err(BQError::ResponseError { error }) if error.error.code == 404 => {
                     // early return: no need to query schema to check column and type
                     return self
                         .create_table(
@@ -559,7 +557,7 @@ impl Sink for BigQuerySink {
             }
         }
 
-        let mut rs = client
+        let rs = client
             .job()
             .query(
                 &self.config.common.project,
@@ -568,6 +566,7 @@ impl Sink for BigQuerySink {
                     project_id, dataset_id, table_id,
                 )),
             ).await.map_err(|e| SinkError::BigQuery(e.into()))?;
+        let mut rs = ResultSet::new_from_query_response(rs);
 
         let mut big_query_schema = HashMap::default();
         while rs.next_row() {
@@ -686,7 +685,7 @@ impl BigQuerySinkWriter {
                 message_descriptor,
                 proto_field,
                 writer_pb_schema: ProtoSchema {
-                    proto_descriptor: Some(to_gcloud_descriptor(&descriptor_proto)?),
+                    proto_descriptor: Some(descriptor_proto.clone()),
                 },
             },
             resp_stream,
@@ -899,13 +898,6 @@ fn build_protobuf_descriptor_pool(desc: &DescriptorProto) -> Result<prost_reflec
     })
     .context("failed to build descriptor pool")
     .map_err(SinkError::BigQuery)
-}
-
-fn to_gcloud_descriptor(desc: &DescriptorProto) -> Result<DescriptorProto014> {
-    let bytes = Message::encode_to_vec(desc);
-    Message014::decode(bytes.as_slice())
-        .context("failed to convert descriptor proto")
-        .map_err(SinkError::BigQuery)
 }
 
 fn build_protobuf_schema<'a>(

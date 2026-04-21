@@ -25,7 +25,7 @@ bytes = { version = "1", features = ["serde"] }
 derive_builder = "0.20"
 dyn-clone = "1.0.14"
 either = "1"
-enum-as-inner = "0.6"
+enum-as-inner = "0.7"
 fail = "0.5"
 faiss = { workspace = true }
 foyer = { workspace = true }
@@ -33,7 +33,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
 iceberg = { workspace = true }
-iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "e5b75408cef82ce25d70ab1b05e42d46aaabd22b" }
+iceberg-compaction-core = { git = "https://github.com/nimtable/iceberg-compaction.git", rev = "0e6d9c6eb73270d3a3f6a8ea56ecac11c2050769" }
 itertools = { workspace = true }
 libc = "0.2"
 lz4 = "1.28.0"
@@ -43,7 +43,7 @@ moka = { version = "0.12.0", features = ["future", "sync"] }
 more-asserts = "0.3"
 num-integer = "0.1"
 parking_lot = { workspace = true }
-parquet = { workspace = true }
+parquet_57 = { package = "parquet", version = "57" }
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 rand = { workspace = true }
@@ -68,15 +68,7 @@ tempfile = "3"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "fs",
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tokio-retry = "0.3"
 tonic = { workspace = true }
 tracing = "0.1"

@@ -181,7 +181,7 @@ pub async fn register_tables_with_id_for_test(
     register_table_ids_to_compaction_group(
         hummock_manager_ref,
         table_ids,
-        StaticCompactionGroupId::StateDefault.into(),
+        StaticCompactionGroupId::StateDefault,
     )
     .await;
 }
@@ -204,7 +204,7 @@ pub async fn register_tables_with_catalog_for_test(
     register_table_ids_to_compaction_group(
         hummock_manager_ref,
         &table_ids,
-        StaticCompactionGroupId::StateDefault.into(),
+        StaticCompactionGroupId::StateDefault,
     )
     .await;
 }

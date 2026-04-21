@@ -16,7 +16,7 @@
 //!
 //! This should the default arrow version to be used in our system.
 //!
-//! The corresponding version of arrow is currently used by `udf` and `iceberg` sink.
+//! The corresponding version of arrow is currently used by `udf`.
 
 use std::sync::Arc;
 

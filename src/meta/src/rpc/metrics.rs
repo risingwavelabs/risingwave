@@ -102,8 +102,6 @@ pub struct MetaMetrics {
     // ********************************** Snapshot Backfill ***************************
     /// The barrier latency in second of `table_id` and snapshto backfill `barrier_type`
     pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec, // (table_id, barrier_type)
-    /// The latency of commit epoch of `table_id`
-    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec, // (table_id, )
     /// The lags between the upstream epoch and the downstream epoch.
     pub snapshot_backfill_lag: LabelGuardedIntGaugeVec, // (table_id, )
     /// The number of inflight barriers of `table_id`
@@ -170,6 +168,8 @@ pub struct MetaMetrics {
     pub table_change_log_object_count: IntGaugeVec,
     /// Size of objects per table change log.
     pub table_change_log_object_size: IntGaugeVec,
+    /// Min epoch currently retained in table change log.
+    pub table_change_log_min_epoch: IntGaugeVec,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -219,6 +219,8 @@ pub struct MetaMetrics {
     pub sink_info: IntGaugeVec,
     /// A dummy gauge metrics with its label to be relation info
     pub relation_info: IntGaugeVec,
+    /// A dummy gauge metrics with its label to be the mapping from database id to database name
+    pub database_info: IntGaugeVec,
     /// Backfill progress per fragment
     pub backfill_fragment_progress: IntGaugeVec,
 
@@ -332,13 +334,6 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
-        let opts = histogram_opts!(
-            "meta_snapshot_backfill_barrier_wait_commit_duration_seconds",
-            "snapshot backfill barrier_wait_commit_latency",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
-        );
-        let snapshot_backfill_wait_commit_latency =
-            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
         let snapshot_backfill_lag = register_guarded_int_gauge_vec_with_registry!(
             "meta_snapshot_backfill_upstream_lag",
@@ -557,6 +552,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let table_change_log_min_epoch = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_min_epoch",
+            "min epoch currently retained in table change log",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
         let time_travel_object_count = register_int_gauge_with_registry!(
             "storage_time_travel_object_count",
             "total number of objects that is referenced by time travel.",
@@ -742,6 +745,14 @@ impl MetaMetrics {
             "relation_info",
             "Information of the database relation (table/source/sink/materialized view/index/internal)",
             &["id", "database", "schema", "name", "resource_group", "type"],
+            registry
+        )
+        .unwrap();
+
+        let database_info = register_int_gauge_vec_with_registry!(
+            "database_info",
+            "Mapping from database id to database name",
+            &["database_id", "database_name"],
             registry
         )
         .unwrap();
@@ -948,7 +959,6 @@ impl MetaMetrics {
             last_committed_barrier_time,
             barrier_interval_by_database,
             snapshot_backfill_barrier_latency,
-            snapshot_backfill_wait_commit_latency,
             snapshot_backfill_lag,
             snapshot_backfill_inflight_barrier_num,
             recovery_failure_cnt,
@@ -975,6 +985,7 @@ impl MetaMetrics {
             total_object_size,
             table_change_log_object_count,
             table_change_log_object_size,
+            table_change_log_min_epoch,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
@@ -1000,6 +1011,7 @@ impl MetaMetrics {
             table_info,
             sink_info,
             relation_info,
+            database_info,
             backfill_fragment_progress,
             system_param_info,
             l0_compact_level_count,
@@ -1314,6 +1326,28 @@ pub async fn refresh_relation_info_metrics(
     }
 }
 
+pub async fn refresh_database_info_metrics(
+    catalog_controller: &CatalogControllerRef,
+    meta_metrics: Arc<MetaMetrics>,
+) {
+    let databases = match catalog_controller.list_databases().await {
+        Ok(databases) => databases,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get databases");
+            return;
+        }
+    };
+
+    meta_metrics.database_info.reset();
+
+    for db in databases {
+        meta_metrics
+            .database_info
+            .with_label_values(&[&db.id.to_string(), &db.name])
+            .set(1);
+    }
+}
+
 fn extract_backfill_fragment_info(
     distribution: &FragmentDistribution,
 ) -> Option<BackfillFragmentInfo> {
@@ -1545,6 +1579,12 @@ pub fn start_info_monitor(
             .await;
 
             refresh_relation_info_metrics(
+                &metadata_manager.catalog_controller,
+                meta_metrics.clone(),
+            )
+            .await;
+
+            refresh_database_info_metrics(
                 &metadata_manager.catalog_controller,
                 meta_metrics.clone(),
             )

@@ -603,7 +603,7 @@ mod tests {
             register_table_ids_to_compaction_group(
                 hummock_manager.as_ref(),
                 &[1],
-                StaticCompactionGroupId::StateDefault.into(),
+                StaticCompactionGroupId::StateDefault,
             )
             .await;
             let _sst_infos =
@@ -611,8 +611,8 @@ mod tests {
             let _receiver = compactor_manager.add_compactor(context_id);
             hummock_manager
                 .get_compact_task(
-                    StaticCompactionGroupId::StateDefault.into(),
-                    &mut default_compaction_selector(),
+                    StaticCompactionGroupId::StateDefault,
+                    &mut *default_compaction_selector(),
                 )
                 .await
                 .unwrap()

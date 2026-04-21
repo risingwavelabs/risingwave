@@ -9,6 +9,7 @@ repository = { workspace = true }
 
 [dependencies]
 ahash = "0.8"
+allocator-api2 = "0.2"
 anyhow = "1"
 arc-swap = { workspace = true }
 arrow-54-array = { package = "arrow-array", version = "54" }
@@ -19,6 +20,10 @@ arrow-56-array = { package = "arrow-array", version = "56" }
 arrow-56-buffer = { package = "arrow-buffer", version = "56" }
 arrow-56-cast = { package = "arrow-cast", version = "56" }
 arrow-56-schema = { package = "arrow-schema", version = "56" }
+arrow-57-array = { package = "arrow-array", version = "57" }
+arrow-57-buffer = { package = "arrow-buffer", version = "57" }
+arrow-57-cast = { package = "arrow-cast", version = "57" }
+arrow-57-schema = { package = "arrow-schema", version = "57" }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -37,20 +42,19 @@ crc32fast = "1"
 easy-ext = "1"
 educe = "0.6"
 either = "1"
-enum-as-inner = "0.6"
+enum-as-inner = "0.7"
 enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
 faiss = { workspace = true }
 fixedbitset = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hashbrown = { workspace = true }
 hashbrown0_14 = { workspace = true }
 hashbrown0_15 = { workspace = true }
 hex = "0.4.3"
 http = "1"
 humantime = "2.3"
-ipnet = "2.9"
+ipnet = "2.12"
 itertools = { workspace = true }
 itoa = "1.0"
 jiff = "0.1.15"
@@ -102,20 +106,13 @@ smallvec = { workspace = true }
 speedate = "0.15.0"
 stacker = "0.1"
 static_assertions = "1"
-strum = "0.27"
-strum_macros = "0.27"
+strum = "0.28"
+strum_macros = "0.28"
 sysinfo = { version = "0.38", default-features = false, features = ["system"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tinyvec = { version = "1", features = ["rustc_1_55", "grab_spare_slice"] }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true }
 tokio-retry = "0.3"
 tokio-util = { workspace = true }
 toml = { workspace = true }
@@ -128,7 +125,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-http-body = "0.4.5"
+http-body = "1.0.1"
 tower-layer = "0.3.3"
 tower-service = "0.3.3"
 workspace-hack = { path = "../workspace-hack" }

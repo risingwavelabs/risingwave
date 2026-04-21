@@ -21,15 +21,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 serde = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-  "fs",
-  "rt",
-  "rt-multi-thread",
-  "sync",
-  "macros",
-  "time",
-  "signal",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tonic = { workspace = true }
 tracing = "0.1"
 

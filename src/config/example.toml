@@ -19,11 +19,14 @@ full_gc_interval_sec = 3600
 full_gc_object_limit = 100000
 gc_history_retention_time_sec = 21600
 max_inflight_time_travel_query = 1000
-periodic_compaction_interval_sec = 60
+periodic_compaction_interval_sec = 300
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
 iceberg_gc_interval_sec = 3600
 hummock_version_checkpoint_interval_sec = 30
+checkpoint_compression_algorithm = "zstd"
+checkpoint_read_chunk_size = 134217728
+checkpoint_read_max_in_flight_chunks = 4
 enable_hummock_data_archive = false
 hummock_time_travel_snapshot_interval = 100
 min_delta_log_num_for_hummock_version_checkpoint = 10
@@ -54,6 +57,7 @@ table_high_write_throughput_threshold = 16777216
 table_low_write_throughput_threshold = 4194304
 compaction_task_max_heartbeat_interval_secs = 30
 compaction_task_max_progress_interval_secs = 600
+compaction_task_id_refill_capacity = 64
 hybrid_partition_vnode_count = 4
 event_log_enabled = true
 event_log_channel_max_size = 10
@@ -66,6 +70,8 @@ table_stat_throuput_window_seconds_for_merge = 240
 compact_task_table_size_partition_threshold_low = 134217728
 compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10
+enable_compaction_group_normalize = true
+max_normalize_splits_per_round = 4
 periodic_scheduling_compaction_group_merge_interval_sec = 600
 compaction_group_merge_dimension_threshold = 1.2
 cdc_table_split_init_sleep_interval_splits = 1000
@@ -100,8 +106,8 @@ emergency_level0_sub_level_partition = 256
 level0_stop_write_threshold_max_sst_count = 5000
 level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = true
-vnode_aligned_level_size_threshold = ""
 max_kv_count_for_xor16 = 262144
+max_vnode_key_range_bytes = ""
 
 [meta.developer]
 cached_traces_num = 256
@@ -117,20 +123,26 @@ hummock_time_travel_sst_info_insert_batch_size = 100
 time_travel_vacuum_interval_sec = 30
 time_travel_vacuum_max_version_count = 10000
 hummock_time_travel_epoch_version_insert_batch_size = 1000
+hummock_time_travel_delta_fetch_batch_size = 100
 hummock_gc_history_insert_batch_size = 1000
 hummock_time_travel_filter_out_objects_batch_size = 1000
 hummock_time_travel_filter_out_objects_v1 = false
 hummock_time_travel_filter_out_objects_list_version_batch_size = 10
 hummock_time_travel_filter_out_objects_list_delta_batch_size = 1000
+table_change_log_insert_batch_size = 1000
+table_change_log_delete_batch_size = 1000
 
 [meta.developer.compute_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [meta.developer.stream_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [meta.developer.frontend_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [meta.meta_store_config]
 max_connections = 10
@@ -161,9 +173,11 @@ local_execute_buffer_size = 64
 
 [batch.developer.compute_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [batch.developer.frontend_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [frontend]
 max_total_query_size_bytes = 1073741824
@@ -221,6 +235,7 @@ enable_shared_source = true
 switch_jdbc_pg_to_native = false
 max_barrier_batch_size = 1024
 hash_join_entry_state_max_rows = 30000
+join_hash_map_evict_interval_rows = 16
 now_progress_ratio = ""
 enable_explain_analyze_stats = true
 snapshot_iter_rebuild_interval_secs = 600
@@ -238,9 +253,13 @@ join_encoding_type = "memory_optimized"
 sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
 over_window_cache_policy = "full"
+enable_state_table_vnode_stats_pruning = false
+enable_vnode_key_stats_for_materialize = false
+max_concurrent_kv_log_store_historical_read = 0
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
+pool_setup_concurrency = 0
 
 [storage]
 share_buffers_sync_parallelism = 1
@@ -285,6 +304,7 @@ compactor_max_overlap_sst_count = 64
 compactor_max_preload_meta_file_count = 32
 vector_file_block_size_kb = 1024
 time_travel_version_cache_capacity = 10
+table_change_log_cache_capacity = 60
 iceberg_compaction_enable_validate = false
 iceberg_compaction_max_record_batch_rows = 1024
 iceberg_compaction_min_size_per_partition_mb = 1024
@@ -379,6 +399,7 @@ worker_threads = 0
 max_blocking_threads = 0
 
 [storage.cache_refill]
+meta_refill_concurrency = 0
 data_refill_levels = []
 timeout_ms = 6000
 concurrency = 10
@@ -391,6 +412,8 @@ skip_recent_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false
+req_concurrency_limit = 0
+http_concurrent_limit = 0
 opendal_upload_concurrency = 256
 opendal_writer_abort_on_err = false
 upload_part_size = 16777216
@@ -446,7 +469,7 @@ enable_tracing = false
 use_new_object_prefix_strategy = ""
 license_key = ""
 time_travel_retention_ms = 600000
-adaptive_parallelism_strategy = "AUTO"
+adaptive_parallelism_strategy = "BOUNDED(64)"
 per_database_isolation = true
 enforce_secret = false
 

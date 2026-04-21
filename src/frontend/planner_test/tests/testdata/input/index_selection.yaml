@@ -582,6 +582,17 @@
     INNER JOIN t3 ON t3.id=t2.t3_id;
   expected_outputs:
     - stream_plan
+- name: stream index selection with casted group key
+  sql: |
+    create table t (transacttime timestamp, mark_price double precision);
+    create index idx on t (transacttime);
+    select
+      transacttime::date as transact_date,
+      count(*) as cnt
+    from t
+    group by transacttime::date;
+  expected_outputs:
+    - stream_plan
 - name: topn index selection for scan with output column idx
   sql: |
     create table t (c int, b int, a int);
@@ -593,5 +604,29 @@
   sql: |
     create table t (c int, b int, a int, primary key (a, b, c));
     select b from t where a = 1 order by b, c limit 1;
+  expected_outputs:
+    - batch_plan
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by c;
+  expected_outputs:
+    - batch_plan
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by c limit 5;
+  expected_outputs:
+    - batch_plan
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c;
+  expected_outputs:
+    - batch_plan
+- name: batch sort elimination with eq-prefix-derived orders
+  sql: |
+    create table t (a int, b int, c int, d int, primary key (a, b, c, d));
+    select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c limit 5;
   expected_outputs:
     - batch_plan

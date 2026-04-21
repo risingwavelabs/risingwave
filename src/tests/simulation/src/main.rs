@@ -178,6 +178,7 @@ async fn main() {
             vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".to_owned()].into()
         },
         compute_resource_groups: Default::default(),
+        compute_node_roles: Default::default(),
     };
     let kill_opts = KillOpts {
         kill_meta: false,

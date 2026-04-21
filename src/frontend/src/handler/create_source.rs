@@ -47,8 +47,9 @@ use risingwave_connector::parser::{
 use risingwave_connector::schema::AWS_GLUE_SCHEMA_ARN_KEY;
 use risingwave_connector::schema::schema_registry::{
     SCHEMA_REGISTRY_BACKOFF_DURATION_KEY, SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
-    SCHEMA_REGISTRY_MAX_DELAY_KEY, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_RETRIES_MAX_KEY,
-    SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig, name_strategy_from_str,
+    SCHEMA_REGISTRY_CA_PEM_PATH, SCHEMA_REGISTRY_MAX_DELAY_KEY, SCHEMA_REGISTRY_PASSWORD,
+    SCHEMA_REGISTRY_RETRIES_MAX_KEY, SCHEMA_REGISTRY_USERNAME, SchemaRegistryConfig,
+    name_strategy_from_str,
 };
 use risingwave_connector::source::cdc::{
     CDC_MONGODB_STRONG_SCHEMA_KEY, CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL,
@@ -89,7 +90,7 @@ use crate::catalog::CatalogError;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::ErrorCode::{self, Deprecated, InvalidInputSyntax, NotSupported, ProtocolError};
 use crate::error::{Result, RwError};
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprRewriter, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::handler::create_table::{
     ColumnIdGenerator, bind_pk_and_row_id_on_relation, bind_sql_column_constraints,
@@ -144,6 +145,7 @@ fn try_consume_schema_registry_config_from_options(
     [
         SCHEMA_REGISTRY_USERNAME,
         SCHEMA_REGISTRY_PASSWORD,
+        SCHEMA_REGISTRY_CA_PEM_PATH,
         SCHEMA_REGISTRY_MAX_DELAY_KEY,
         SCHEMA_REGISTRY_BACKOFF_DURATION_KEY,
         SCHEMA_REGISTRY_BACKOFF_FACTOR_KEY,
@@ -681,6 +683,8 @@ pub(super) fn bind_source_watermark(
     let mut binder = Binder::new_for_ddl(session);
     binder.bind_columns_to_context(name.clone(), column_catalogs)?;
 
+    let mut session_tz = SessionTimezone::new(session.config().timezone());
+
     let watermark_descs = source_watermarks
         .into_iter()
         .map(|source_watermark| {
@@ -688,6 +692,10 @@ pub(super) fn bind_source_watermark(
             let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
 
             let expr = binder.bind_expr(&source_watermark.expr)?;
+            // Apply session timezone rewrite so that timestamptz +/- interval operations
+            // are transformed into the timezone-aware variant (e.g. `subtract_with_time_zone`).
+            // Without this, intervals containing days/months would fail at runtime.
+            let expr = session_tz.rewrite_expr(expr);
             let watermark_col_type = column_catalogs[watermark_idx].data_type();
             let watermark_expr_type = &expr.return_type();
             if watermark_col_type != watermark_expr_type {
@@ -885,15 +893,27 @@ pub async fn bind_create_source_or_table_with_connector(
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
-    // FIXME: ideally we can support it, but current way of handling iceberg additional columns are problematic.
-    // They are treated as normal user columns, so they will be lost if we allow user to specify columns.
-    // See `extract_iceberg_columns`
-    if with_properties.is_iceberg_connector() && !sql_columns_defs.is_empty() {
-        return Err(RwError::from(InvalidInputSyntax(
-            r#"Schema is automatically inferred for iceberg source and should not be specified
+    if with_properties.is_iceberg_connector() {
+        if is_create_source && !sql_pk_names.is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
+                    .to_owned(),
+                "Iceberg streaming ingestion only supports append-only sources. Remove the PRIMARY KEY clause."
+                    .to_owned(),
+            )
+            .into());
+        }
+
+        // FIXME: ideally we can support it, but current way of handling iceberg additional columns
+        // are problematic. They are treated as normal user columns, so they will be lost if we
+        // allow user to specify columns. See `extract_iceberg_columns`.
+        if !sql_columns_defs.is_empty() {
+            return Err(RwError::from(InvalidInputSyntax(
+                r#"Schema is automatically inferred for iceberg source and should not be specified
 
 HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
-        )));
+            )));
+        }
     }
 
     // Same for ADBC Snowflake connector - schema is automatically inferred

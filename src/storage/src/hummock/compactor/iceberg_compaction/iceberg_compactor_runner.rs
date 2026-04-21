@@ -29,8 +29,7 @@ use iceberg_compaction_core::config::{
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
-use parquet::basic::Compression;
-use parquet::file::properties::WriterProperties;
+use parquet_57::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
     iceberg_compaction_enable_dynamic_size_estimation,
     iceberg_compaction_enable_heuristic_output_parallelism,
@@ -56,13 +55,6 @@ static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegist
         ))
     });
 
-pub fn default_writer_properties() -> WriterProperties {
-    WriterProperties::builder()
-        .set_compression(Compression::SNAPPY)
-        .set_created_by(concat!("risingwave version ", env!("CARGO_PKG_VERSION")).to_owned())
-        .build()
-}
-
 #[derive(Builder, Debug, Clone)]
 pub struct IcebergCompactorRunnerConfig {
     #[builder(default = "4")]
@@ -75,8 +67,6 @@ pub struct IcebergCompactorRunnerConfig {
     pub enable_validate_compaction: bool,
     #[builder(default = "1024")]
     pub max_record_batch_rows: usize,
-    #[builder(default = "default_writer_properties()")]
-    pub write_parquet_properties: WriterProperties,
     #[builder(default = "iceberg_compaction_enable_heuristic_output_parallelism()")]
     pub enable_heuristic_output_parallelism: bool,
     #[builder(default = "iceberg_compaction_max_concurrent_closes()")]
@@ -248,10 +238,17 @@ impl IcebergCompactionPlanRunner {
     ) -> HummockResult<RewriteFilesStat> {
         let statistics = analyze_task_statistics(&compaction_plan);
 
+        // Build writer properties from sink configuration
+        let write_parquet_properties = WriterProperties::builder()
+            .set_compression(iceberg_config.get_parquet_compression())
+            .set_max_row_group_size(iceberg_config.write_parquet_max_row_group_rows())
+            .set_created_by(concat!("risingwave version ", env!("CARGO_PKG_VERSION")).to_owned())
+            .build();
+
         let compaction_execution_config = CompactionExecutionConfigBuilder::default()
             .enable_validate_compaction(config.enable_validate_compaction)
             .max_record_batch_rows(config.max_record_batch_rows)
-            .write_parquet_properties(config.write_parquet_properties.clone())
+            .write_parquet_properties(write_parquet_properties)
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
             .enable_dynamic_size_estimation(config.enable_dynamic_size_estimation)
@@ -472,7 +469,7 @@ pub async fn create_plan_runners(
         TaskType::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -492,7 +489,7 @@ pub async fn create_plan_runners(
         }
         TaskType::Full => {
             let config = FullCompactionConfigBuilder::default()
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -506,7 +503,7 @@ pub async fn create_plan_runners(
 
         TaskType::FilesWithDelete => {
             let config = FilesWithDeletesConfigBuilder::default()
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)

@@ -22,7 +22,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{FunctionId, Schema};
+use risingwave_common::catalog::{FunctionId, Schema, SecretId};
 use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
@@ -182,6 +182,7 @@ pub async fn handle_execute(
                 bound,
                 dependent_relations,
                 dependent_udfs,
+                dependent_secrets,
                 ..
             } = bound_result;
             let create_mv = if let BoundStatement::CreateView(create_mv) = bound {
@@ -218,6 +219,7 @@ pub async fn handle_execute(
                 *query,
                 dependent_relations,
                 dependent_udfs,
+                dependent_secrets,
                 columns,
                 emit_mode,
             )
@@ -273,6 +275,7 @@ pub struct BoundResult {
     pub(crate) dependent_relations: HashSet<ObjectId>,
     /// TODO(rc): merge with `dependent_relations`
     pub(crate) dependent_udfs: HashSet<FunctionId>,
+    pub(crate) dependent_secrets: HashSet<SecretId>,
 }
 
 fn gen_bound(mut binder: Binder, stmt: Statement) -> Result<BoundResult> {
@@ -290,6 +293,7 @@ fn gen_bound(mut binder: Binder, stmt: Statement) -> Result<BoundResult> {
         parsed_params: None,
         dependent_relations: binder.included_relations().clone(),
         dependent_udfs: binder.included_udfs().clone(),
+        dependent_secrets: binder.included_secrets().clone(),
     })
 }
 
@@ -302,6 +306,7 @@ pub struct RwBatchQueryPlanResult {
     // subset of the final one. i.e. the final one may contain more implicit dependencies on
     // indices.
     pub(crate) dependent_relations: Vec<ObjectId>,
+    pub(crate) dependent_secrets: Vec<SecretId>,
 }
 
 fn gen_batch_query_plan(
@@ -314,6 +319,7 @@ fn gen_batch_query_plan(
         must_dist,
         bound,
         dependent_relations,
+        dependent_secrets,
         ..
     } = bind_result;
 
@@ -329,27 +335,27 @@ fn gen_batch_query_plan(
 
     #[cfg(feature = "datafusion")]
     {
-        use crate::optimizer::DataFusionExecuteCheckerExt;
+        if session.config().enable_datafusion_engine() {
+            use thiserror_ext::AsReport;
 
-        let execute_by_datafusion = if session.config().enable_datafusion_engine() {
-            let check_result = optimized_logical.plan.check_for_datafusion();
-            if !check_result.supported && check_result.have_iceberg_scan {
-                tracing::warn!(
-                    "DataFusion execution disabled because of unsupported plan nodes in the logical plan. The performance may be degraded."
-                );
+            use crate::datafusion::{GenDataFusionPlanError, try_gen_datafusion_plan};
+
+            match try_gen_datafusion_plan(&optimized_logical) {
+                Ok(plan) => {
+                    return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
+                        plan,
+                        schema,
+                        stmt_type,
+                    }));
+                }
+                Err(GenDataFusionPlanError::MissingIcebergScan) => {}
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to generate DataFusion plan, fallback to RisingWave plan: {}",
+                        err.as_report()
+                    );
+                }
             }
-            check_result.supported && check_result.have_iceberg_scan
-        } else {
-            false
-        };
-
-        if execute_by_datafusion {
-            let plan = optimized_logical.gen_datafusion_logical_plan()?;
-            return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
-                plan,
-                schema,
-                stmt_type,
-            }));
         }
     }
 
@@ -388,6 +394,7 @@ fn gen_batch_query_plan(
         schema,
         stmt_type,
         dependent_relations: dependent_relations.into_iter().collect_vec(),
+        dependent_secrets: dependent_secrets.into_iter().collect_vec(),
     };
     Ok(BatchPlanChoice::Rw(result))
 }
