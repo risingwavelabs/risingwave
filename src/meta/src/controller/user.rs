@@ -1024,117 +1024,6 @@ impl CatalogController {
         txn.commit().await?;
         Ok(())
     }
-
-    #[tokio::test]
-    async fn test_role_membership_lifecycle() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
-        mgr.create_user(make_test_user("role_a")).await?;
-        mgr.create_user(make_test_user("role_b")).await?;
-        mgr.create_user(make_test_user("member_1")).await?;
-        mgr.create_user(make_test_user("member_2")).await?;
-
-        let role_a = mgr.get_user_by_name("role_a").await?;
-        let role_b = mgr.get_user_by_name("role_b").await?;
-        let member_1 = mgr.get_user_by_name("member_1").await?;
-        let member_2 = mgr.get_user_by_name("member_2").await?;
-
-        let (_, memberships) = mgr
-            .grant_role(
-                vec![role_a.user_id],
-                vec![role_b.user_id],
-                TEST_ROOT_USER_ID,
-                Some(true),
-                None,
-                None,
-            )
-            .await?;
-        assert_eq!(memberships.len(), 1);
-        assert!(memberships[0].admin_option);
-        assert!(memberships[0].inherit_option);
-        assert!(memberships[0].set_option);
-
-        let (_, memberships) = mgr
-            .grant_role(
-                vec![role_a.user_id],
-                vec![member_1.user_id],
-                role_b.user_id,
-                None,
-                None,
-                None,
-            )
-            .await?;
-        assert_eq!(memberships.len(), 1);
-        assert_eq!(memberships[0].granted_by, role_b.user_id);
-        assert!(!memberships[0].admin_option);
-        assert!(memberships[0].inherit_option);
-        assert!(memberships[0].set_option);
-
-        let member_1_memberships = mgr.list_role_memberships(&[member_1.user_id]).await?;
-        assert_eq!(member_1_memberships.len(), 1);
-        assert_eq!(member_1_memberships[0].role_id, role_a.user_id);
-        assert_eq!(member_1_memberships[0].member_id, member_1.user_id);
-
-        assert!(
-            mgr.grant_role(
-                vec![role_b.user_id],
-                vec![role_a.user_id],
-                TEST_ROOT_USER_ID,
-                None,
-                None,
-                None,
-            )
-            .await
-            .is_err()
-        );
-
-        mgr.revoke_role(
-            vec![role_a.user_id],
-            vec![role_b.user_id],
-            TEST_ROOT_USER_ID,
-            TEST_ROOT_USER_ID,
-            true,
-            false,
-            false,
-        )
-        .await?;
-
-        assert!(
-            mgr.grant_role(
-                vec![role_a.user_id],
-                vec![member_2.user_id],
-                role_b.user_id,
-                None,
-                None,
-                None,
-            )
-            .await
-            .is_err()
-        );
-
-        mgr.revoke_role(
-            vec![role_a.user_id],
-            vec![member_1.user_id],
-            role_b.user_id,
-            TEST_ROOT_USER_ID,
-            false,
-            false,
-            false,
-        )
-        .await?;
-        mgr.revoke_role(
-            vec![role_a.user_id],
-            vec![role_b.user_id],
-            TEST_ROOT_USER_ID,
-            TEST_ROOT_USER_ID,
-            false,
-            false,
-            false,
-        )
-        .await?;
-
-        mgr.drop_user(role_b.user_id).await?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -1410,15 +1299,18 @@ mod tests {
             )
             .await?;
         assert_eq!(memberships.len(), 1);
-        assert_eq!(memberships[0].granted_by, role_b.user_id);
+        assert_eq!(memberships[0].granted_by, role_b.user_id.as_raw_id());
         assert!(!memberships[0].admin_option);
         assert!(memberships[0].inherit_option);
         assert!(memberships[0].set_option);
 
         let member_1_memberships = mgr.list_role_memberships(&[member_1.user_id]).await?;
         assert_eq!(member_1_memberships.len(), 1);
-        assert_eq!(member_1_memberships[0].role_id, role_a.user_id);
-        assert_eq!(member_1_memberships[0].member_id, member_1.user_id);
+        assert_eq!(member_1_memberships[0].role_id, role_a.user_id.as_raw_id());
+        assert_eq!(
+            member_1_memberships[0].member_id,
+            member_1.user_id.as_raw_id()
+        );
 
         assert!(
             mgr.grant_role(
