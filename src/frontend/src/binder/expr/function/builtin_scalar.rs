@@ -533,7 +533,7 @@ impl Binder {
 
                     let mut schema_names = vec![];
                     for path in paths {
-                        let mut schema_name = path;
+                        let mut schema_name: &str = path;
                         if schema_name == USER_NAME_WILD_CARD {
                             schema_name = binder.auth_context.current_user_name();
                         }
@@ -543,7 +543,7 @@ impl Binder {
                             .get_schema_by_name(&binder.db_name, schema_name)
                             .is_ok()
                         {
-                            schema_names.push(schema_name.as_str());
+                            schema_names.push(schema_name);
                         }
                     }
 

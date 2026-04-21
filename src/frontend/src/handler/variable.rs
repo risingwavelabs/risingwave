@@ -25,7 +25,7 @@ use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value
 
 use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::error::Result;
-use crate::handler::HandlerArgs;
+use crate::handler::{HandlerArgs, bail_not_implemented};
 
 /// convert `SetVariableValue` to string while remove the quotes on literals.
 pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
