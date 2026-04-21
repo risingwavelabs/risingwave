@@ -17,6 +17,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::Fields;
@@ -112,13 +113,13 @@ pub(super) fn handle_set_time_zone(
 pub(super) fn handle_set_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
     bail_not_implemented!(
         "SET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
-    );
+    )
 }
 
 pub(super) fn handle_reset_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
     bail_not_implemented!(
         "RESET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
-    );
+    )
 }
 
 pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
