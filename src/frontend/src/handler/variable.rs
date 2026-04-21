@@ -111,6 +111,8 @@ pub(super) fn handle_set_time_zone(
 }
 
 pub(super) fn handle_set_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    // The parser surface is available so clients and tests can bind the syntax, but
+    // active-role session semantics are implemented in a later lane.
     Err(not_implemented!(
         "SET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
     )
@@ -118,6 +120,7 @@ pub(super) fn handle_set_role(_handler_args: HandlerArgs) -> Result<RwPgResponse
 }
 
 pub(super) fn handle_reset_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    // See `handle_set_role` above for the staged rollout rationale.
     Err(not_implemented!(
         "RESET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
     )
