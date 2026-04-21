@@ -148,6 +148,8 @@
   formatted_sql: CREATE USER full_admin WITH SUPERUSER CREATEDB LOGIN ADMIN PASSWORD 'secure'
 - input: CREATE USER user WITH NOADMIN NOSUPERUSER NOCREATEDB
   formatted_sql: CREATE USER user WITH NOSUPERUSER NOCREATEDB NOADMIN
+- input: CREATE ROLE analytics WITH CREATEDB CREATEROLE INHERIT NOLOGIN
+  formatted_sql: CREATE ROLE analytics WITH CREATEDB CREATEROLE INHERIT NOLOGIN
 - input: CREATE SINK snk
   error_msg: |-
     sql parser error: expected FROM or AS after CREATE SINK sink_name, found: EOF

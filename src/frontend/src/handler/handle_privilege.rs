@@ -16,8 +16,8 @@ use std::collections::HashSet;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::acl;
 use risingwave_common::catalog::is_system_schema;
+use risingwave_common::{acl, not_implemented};
 use risingwave_pb::common::PbObjectType;
 use risingwave_pb::user::alter_default_privilege_request::{
     Operation as AlterDefaultPrivilegeOperation, PbGrantPrivilege as OpGrantPrivilege,

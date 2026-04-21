@@ -46,6 +46,7 @@
     - [Relational Table](./design/relational-table.md)
     - [Multiple Object Storage Backends](./design/multi-object-store.md)
 - [Meta Service](./design/meta-service.md)
+- [RBAC Parser Surface](./design/rbac-parser-surface.md)
 - [Data Model and Encoding](./design/data-model-and-encoding.md)
 - [Batch Local Execution Mode](./design/batch-local-execution-mode.md)
 - [Consistent Hash](./design/consistent-hash.md)

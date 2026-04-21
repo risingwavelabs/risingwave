@@ -95,14 +95,15 @@ fn alter_prost_user_info(
                 user_info.can_create_db = false;
                 update_fields.insert(UpdateField::CreateDb);
             }
-            UserOption::CreateUser => {
+            UserOption::CreateRole | UserOption::CreateUser => {
                 user_info.can_create_user = true;
                 update_fields.insert(UpdateField::CreateUser);
             }
-            UserOption::NoCreateUser => {
+            UserOption::NoCreateRole | UserOption::NoCreateUser => {
                 user_info.can_create_user = false;
                 update_fields.insert(UpdateField::CreateUser);
             }
+            UserOption::Inherit | UserOption::NoInherit => {}
             UserOption::Login => {
                 user_info.can_login = true;
                 update_fields.insert(UpdateField::Login);
