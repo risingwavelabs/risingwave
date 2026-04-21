@@ -25,7 +25,7 @@ use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value
 
 use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::error::Result;
-use crate::handler::{HandlerArgs, bail_not_implemented};
+use crate::handler::HandlerArgs;
 
 /// convert `SetVariableValue` to string while remove the quotes on literals.
 pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
@@ -111,15 +111,17 @@ pub(super) fn handle_set_time_zone(
 }
 
 pub(super) fn handle_set_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
-    bail_not_implemented!(
+    Err(not_implemented!(
         "SET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
-    );
+    )
+    .into())
 }
 
 pub(super) fn handle_reset_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
-    bail_not_implemented!(
+    Err(not_implemented!(
         "RESET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
-    );
+    )
+    .into())
 }
 
 pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
