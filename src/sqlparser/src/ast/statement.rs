@@ -1023,6 +1023,36 @@ pub enum AlterUserMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RoleContextModifier {
+    Session,
+    Local,
+}
+
+impl fmt::Display for RoleContextModifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RoleContextModifier::Session => write!(f, "SESSION"),
+            RoleContextModifier::Local => write!(f, "LOCAL"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SetRoleSpec {
+    Name(Ident),
+    None,
+}
+
+impl fmt::Display for SetRoleSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SetRoleSpec::Name(name) => write!(f, "{}", name),
+            SetRoleSpec::None => write!(f, "NONE"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UserOption {
     SuperUser,
     NoSuperUser,

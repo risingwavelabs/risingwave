@@ -317,6 +317,7 @@ impl Parser<'_> {
                 Keyword::ALTER => Ok(self.parse_alter()?),
                 Keyword::COPY => Ok(self.parse_copy()?),
                 Keyword::SET => Ok(self.parse_set()?),
+                Keyword::RESET => Ok(self.parse_reset()?),
                 Keyword::SHOW => {
                     if self.parse_keyword(Keyword::CREATE) {
                         Ok(self.parse_show_create()?)
@@ -1990,6 +1991,8 @@ impl Parser<'_> {
             self.parse_create_database()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_create_user()
+        } else if self.parse_keyword(Keyword::ROLE) {
+            self.parse_create_role()
         } else if self.parse_keyword(Keyword::SECRET) {
             self.parse_create_secret()
         } else {
@@ -2395,6 +2398,10 @@ impl Parser<'_> {
     //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL | OAUTH
     fn parse_create_user(&mut self) -> ModalResult<Statement> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
+    }
+
+    fn parse_create_role(&mut self) -> ModalResult<Statement> {
+        Ok(Statement::CreateRole(CreateUserStatement::parse_to(self)?))
     }
 
     fn parse_create_secret(&mut self) -> ModalResult<Statement> {
@@ -3145,6 +3152,8 @@ impl Parser<'_> {
             self.parse_alter_connection()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
+        } else if self.parse_keyword(Keyword::ROLE) {
+            self.parse_alter_role()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
         } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
@@ -3215,6 +3224,10 @@ impl Parser<'_> {
 
     pub fn parse_alter_user(&mut self) -> ModalResult<Statement> {
         Ok(Statement::AlterUser(AlterUserStatement::parse_to(self)?))
+    }
+
+    pub fn parse_alter_role(&mut self) -> ModalResult<Statement> {
+        Ok(Statement::AlterRole(AlterUserStatement::parse_to(self)?))
     }
 
     pub fn parse_alter_table(&mut self) -> ModalResult<Statement> {
@@ -5001,7 +5014,23 @@ impl Parser<'_> {
 
     pub fn parse_set(&mut self) -> ModalResult<Statement> {
         let modifier = self.parse_one_of_keywords(&[Keyword::SESSION, Keyword::LOCAL]);
-        if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
+        if self.parse_keyword(Keyword::ROLE) {
+            let context_modifier = match modifier {
+                Some(Keyword::SESSION) => Some(RoleContextModifier::Session),
+                Some(Keyword::LOCAL) => Some(RoleContextModifier::Local),
+                _ => None,
+            };
+            let role_name = if self.parse_keyword(Keyword::NONE) {
+                SetRoleSpec::None
+            } else {
+                SetRoleSpec::Name(self.parse_identifier()?)
+            };
+
+            Ok(Statement::SetRole {
+                context_modifier,
+                role_name,
+            })
+        } else if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
             let value = alt((
                 Keyword::DEFAULT.value(SetTimeZoneValue::Default),
                 Keyword::LOCAL.value(SetTimeZoneValue::Local),
@@ -5064,6 +5093,14 @@ impl Parser<'_> {
                 variable: config_param.param,
                 value: config_param.value,
             })
+        }
+    }
+
+    pub fn parse_reset(&mut self) -> ModalResult<Statement> {
+        if self.parse_keyword(Keyword::ROLE) {
+            Ok(Statement::ResetRole)
+        } else {
+            self.expected("ROLE after RESET")
         }
     }
 
@@ -5555,6 +5592,36 @@ impl Parser<'_> {
 
     /// Parse a GRANT statement.
     pub fn parse_grant(&mut self) -> ModalResult<Statement> {
+        if !self.peek_nth_any_of_keywords(
+            0,
+            &[
+                Keyword::ALL,
+                Keyword::CONNECT,
+                Keyword::CREATE,
+                Keyword::DELETE,
+                Keyword::EXECUTE,
+                Keyword::INSERT,
+                Keyword::REFERENCES,
+                Keyword::SELECT,
+                Keyword::TEMPORARY,
+                Keyword::TRIGGER,
+                Keyword::TRUNCATE,
+                Keyword::UPDATE,
+                Keyword::USAGE,
+            ],
+        ) {
+            let roles = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_keyword(Keyword::TO)?;
+            let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
+            let with_admin_option =
+                self.parse_keywords(&[Keyword::WITH, Keyword::ADMIN, Keyword::OPTION]);
+            return Ok(Statement::GrantRole {
+                roles,
+                grantees,
+                with_admin_option,
+            });
+        }
+
         let (privileges, objects) = self.parse_grant_revoke_privileges_objects()?;
 
         self.expect_keyword(Keyword::TO)?;
@@ -5768,6 +5835,50 @@ impl Parser<'_> {
     pub fn parse_revoke(&mut self) -> ModalResult<Statement> {
         let revoke_grant_option =
             self.parse_keywords(&[Keyword::GRANT, Keyword::OPTION, Keyword::FOR]);
+        let revoke_admin_option = if !revoke_grant_option {
+            self.parse_keywords(&[Keyword::ADMIN, Keyword::OPTION, Keyword::FOR])
+        } else {
+            false
+        };
+
+        if revoke_admin_option
+            || !self.peek_nth_any_of_keywords(
+                0,
+                &[
+                    Keyword::ALL,
+                    Keyword::CONNECT,
+                    Keyword::CREATE,
+                    Keyword::DELETE,
+                    Keyword::EXECUTE,
+                    Keyword::INSERT,
+                    Keyword::REFERENCES,
+                    Keyword::SELECT,
+                    Keyword::TEMPORARY,
+                    Keyword::TRIGGER,
+                    Keyword::TRUNCATE,
+                    Keyword::UPDATE,
+                    Keyword::USAGE,
+                ],
+            )
+        {
+            let roles = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_keyword(Keyword::FROM)?;
+            let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
+
+            let cascade = self.parse_keyword(Keyword::CASCADE);
+            let restrict = self.parse_keyword(Keyword::RESTRICT);
+            if cascade && restrict {
+                parser_err!("Cannot specify both CASCADE and RESTRICT in REVOKE");
+            }
+
+            return Ok(Statement::RevokeRole {
+                roles,
+                grantees,
+                revoke_admin_option,
+                cascade,
+            });
+        }
+
         let (privileges, objects) = self.parse_grant_revoke_privileges_objects()?;
 
         self.expect_keyword(Keyword::FROM)?;

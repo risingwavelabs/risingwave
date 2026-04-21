@@ -526,6 +526,24 @@ pub async fn handle_revoke_privilege(
     Ok(PgResponse::empty_result(StatementType::REVOKE_PRIVILEGE))
 }
 
+pub async fn handle_grant_role(
+    _handler_args: HandlerArgs,
+    _stmt: Statement,
+) -> Result<RwPgResponse> {
+    bail_not_implemented!(
+        "role membership GRANT is parsed and dispatched, but backend role membership semantics are not implemented yet"
+    );
+}
+
+pub async fn handle_revoke_role(
+    _handler_args: HandlerArgs,
+    _stmt: Statement,
+) -> Result<RwPgResponse> {
+    bail_not_implemented!(
+        "role membership REVOKE is parsed and dispatched, but backend role membership semantics are not implemented yet"
+    );
+}
+
 pub async fn handle_alter_default_privileges(
     handler_args: HandlerArgs,
     stmt: Statement,

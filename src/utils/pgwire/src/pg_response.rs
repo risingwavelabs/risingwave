@@ -283,7 +283,9 @@ impl StatementType {
             Statement::CreateSink { .. } => Ok(StatementType::CREATE_SINK),
             Statement::CreateFunction { .. } => Ok(StatementType::CREATE_FUNCTION),
             Statement::CreateDatabase { .. } => Ok(StatementType::CREATE_DATABASE),
-            Statement::CreateUser { .. } => Ok(StatementType::CREATE_USER),
+            Statement::CreateUser { .. } | Statement::CreateRole { .. } => {
+                Ok(StatementType::CREATE_USER)
+            }
             Statement::CreateView { materialized, .. } => {
                 if *materialized {
                     Ok(StatementType::CREATE_MATERIALIZED_VIEW)
@@ -296,15 +298,24 @@ impl StatementType {
             Statement::AlterFragment { .. } => Ok(StatementType::ALTER_FRAGMENT),
             Statement::DropFunction { .. } => Ok(StatementType::DROP_FUNCTION),
             Statement::Discard(..) => Ok(StatementType::DISCARD),
-            Statement::SetVariable { .. } => Ok(StatementType::SET_VARIABLE),
+            Statement::AlterUser { .. } | Statement::AlterRole { .. } => {
+                Ok(StatementType::UPDATE_USER)
+            }
+            Statement::SetVariable { .. } | Statement::SetRole { .. } | Statement::ResetRole => {
+                Ok(StatementType::SET_VARIABLE)
+            }
             Statement::ShowVariable { .. } => Ok(StatementType::SHOW_VARIABLE),
             Statement::StartTransaction { .. } => Ok(StatementType::START_TRANSACTION),
             Statement::Begin { .. } => Ok(StatementType::BEGIN),
             Statement::Abort => Ok(StatementType::ABORT),
             Statement::Commit { .. } => Ok(StatementType::COMMIT),
             Statement::Rollback { .. } => Ok(StatementType::ROLLBACK),
-            Statement::Grant { .. } => Ok(StatementType::GRANT_PRIVILEGE),
-            Statement::Revoke { .. } => Ok(StatementType::REVOKE_PRIVILEGE),
+            Statement::Grant { .. } | Statement::GrantRole { .. } => {
+                Ok(StatementType::GRANT_PRIVILEGE)
+            }
+            Statement::Revoke { .. } | Statement::RevokeRole { .. } => {
+                Ok(StatementType::REVOKE_PRIVILEGE)
+            }
             Statement::Describe { .. } => Ok(StatementType::DESCRIBE),
             Statement::ShowCreateObject { .. } | Statement::ShowObjects { .. } => {
                 Ok(StatementType::SHOW_COMMAND)
