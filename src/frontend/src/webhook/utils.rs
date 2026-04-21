@@ -26,6 +26,7 @@ use thiserror_ext::AsReport;
 
 use crate::expr::ExprImpl;
 
+#[derive(Debug)]
 pub struct WebhookError {
     err: anyhow::Error,
     code: StatusCode,
@@ -37,6 +38,13 @@ pub(crate) fn err(err: impl Into<anyhow::Error>, code: StatusCode) -> WebhookErr
     WebhookError {
         err: err.into(),
         code,
+    }
+}
+
+impl WebhookError {
+    #[cfg(test)]
+    pub(crate) fn code(&self) -> StatusCode {
+        self.code
     }
 }
 

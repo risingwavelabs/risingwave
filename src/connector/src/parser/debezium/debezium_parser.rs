@@ -224,7 +224,7 @@ mod tests {
 
         let columns = schema
             .iter()
-            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .map(|c| SourceColumnDesc::from_column_desc(&c.column_desc, false))
             .collect::<Vec<_>>();
 
         let props = SpecificParserConfig {
@@ -300,7 +300,7 @@ mod tests {
 
         let columns = columns
             .iter()
-            .map(SourceColumnDesc::from)
+            .map(|c| SourceColumnDesc::from_column_desc(c, false))
             .collect::<Vec<_>>();
 
         let props = SpecificParserConfig {

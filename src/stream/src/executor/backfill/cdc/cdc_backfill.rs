@@ -858,7 +858,7 @@ pub async fn transform_upstream(
     // convert to source column desc to feed into parser
     let columns_with_meta = output_columns
         .iter()
-        .map(SourceColumnDesc::from)
+        .map(|column_desc| SourceColumnDesc::from_column_desc(column_desc, false))
         .collect_vec();
     let mut parser = DebeziumParser::new(
         props,

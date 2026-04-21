@@ -282,7 +282,7 @@ mod tests {
 
         let columns = schema
             .iter()
-            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .map(|c| SourceColumnDesc::from_column_desc(&c.column_desc, false))
             .collect::<Vec<_>>();
 
         let source_ctx = SourceContext {
@@ -447,7 +447,7 @@ mod tests {
 
         let columns = schema
             .iter()
-            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .map(|c| SourceColumnDesc::from_column_desc(&c.column_desc, false))
             .collect::<Vec<_>>();
 
         // format plain encode json parser
@@ -518,7 +518,7 @@ mod tests {
 
         let columns = schema
             .iter()
-            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .map(|c| SourceColumnDesc::from_column_desc(&c.column_desc, false))
             .collect::<Vec<_>>();
 
         // format plain encode json parser

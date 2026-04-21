@@ -132,7 +132,7 @@ impl SourceDescBuilder {
         let mut columns: Vec<_> = self
             .columns
             .iter()
-            .map(|c| SourceColumnDesc::from(&c.column_desc))
+            .map(|c| SourceColumnDesc::from_column_desc(&c.column_desc, false))
             .collect();
 
         // currently iceberg uses other columns. See `extract_iceberg_columns`

@@ -24,7 +24,8 @@ use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 
 /// `SourceColumnDesc` is used to describe a column in the Source.
 ///
-/// See the implementation of `From<&ColumnDesc>` for the difference between `SourceColumnDesc` and [`ColumnDesc`].
+/// See [`SourceColumnDesc::from_column_desc`] for the difference between `SourceColumnDesc`
+/// and [`ColumnDesc`].
 #[derive(Clone, Debug)]
 pub struct SourceColumnDesc {
     pub name: String,
@@ -96,7 +97,7 @@ impl SourceColumnDesc {
     pub fn hidden_addition_col_from_column_desc(c: &ColumnDesc) -> Self {
         Self {
             is_hidden_addition_col: true,
-            ..c.into()
+            ..Self::from_column_desc(c, false)
         }
     }
 
@@ -118,8 +119,8 @@ impl SourceColumnDesc {
     }
 }
 
-impl From<&ColumnDesc> for SourceColumnDesc {
-    fn from(
+impl SourceColumnDesc {
+    pub fn from_column_desc(
         ColumnDesc {
             data_type,
             column_id,
@@ -132,6 +133,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             system_column: _,
             nullable: _,
         }: &ColumnDesc,
+        is_pk: bool,
     ) -> Self {
         if let Some(option) = generated_or_default_column {
             debug_assert!(
@@ -154,7 +156,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             additional_column: additional_column.clone(),
             // additional fields below
             column_type,
-            is_pk: false,
+            is_pk,
             is_hidden_addition_col: false,
         }
     }

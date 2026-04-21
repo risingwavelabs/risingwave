@@ -22,7 +22,11 @@ use axum::body::Bytes;
 use axum::extract::{Extension, Path};
 use axum::http::{HeaderMap, Method, StatusCode};
 use axum::routing::post;
+#[cfg(not(madsim))]
+use axum_server::tls_openssl::OpenSSLConfig;
+use pgwire::pg_protocol::TlsConfig;
 use risingwave_common::array::{Array, ArrayBuilder, DataChunk};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, JsonbVal, Scalar};
 use risingwave_pb::catalog::WebhookSourceInfo;
@@ -33,7 +37,9 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{self, CorsLayer};
 
+use crate::webhook::payload::WebhookJsonDecoder;
 use crate::webhook::utils::{Result, err};
+mod payload;
 mod utils;
 use risingwave_rpc_client::ComputeClient;
 
@@ -42,15 +48,39 @@ pub type Service = Arc<WebhookService>;
 // We always use the `root` user to connect to the database to allow the webhook service to access all tables.
 const USER: &str = "root";
 
+#[derive(Clone, Debug)]
+enum PayloadSchema {
+    SingleJsonb,
+    FullSchema {
+        columns: Vec<ColumnDesc>,
+        pk_column_names: std::collections::HashSet<String>,
+    },
+}
+
+impl PayloadSchema {
+    fn new(columns: Vec<ColumnDesc>, pk_column_names: std::collections::HashSet<String>) -> Self {
+        if columns.len() == 1 && columns[0].data_type == DataType::Jsonb {
+            Self::SingleJsonb
+        } else {
+            Self::FullSchema {
+                columns,
+                pk_column_names,
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
-pub struct FastInsertContext {
-    pub webhook_source_info: WebhookSourceInfo,
-    pub fast_insert_request: FastInsertRequest,
-    pub compute_client: ComputeClient,
+struct FastInsertContext {
+    webhook_source_info: WebhookSourceInfo,
+    fast_insert_request: FastInsertRequest,
+    compute_client: ComputeClient,
+    payload_schema: PayloadSchema,
 }
 
 pub struct WebhookService {
     webhook_addr: SocketAddr,
+    tls_config: Option<TlsConfig>,
     counter: AtomicU32,
 }
 
@@ -80,6 +110,7 @@ pub(super) mod handlers {
             webhook_source_info,
             mut fast_insert_request,
             compute_client,
+            payload_schema,
         } = acquire_table_info(request_id, &database, &schema, &table).await?;
 
         let WebhookSourceInfo {
@@ -120,7 +151,28 @@ pub(super) mod handlers {
             ));
         }
 
-        let data_chunk = generate_data_chunk(is_batched, &body)?;
+        let data_chunk = match &payload_schema {
+            PayloadSchema::SingleJsonb => generate_data_chunk(is_batched, &body)?,
+            PayloadSchema::FullSchema {
+                columns,
+                pk_column_names,
+            } => {
+                let mut decoder = WebhookJsonDecoder::new(
+                    &headers,
+                    columns
+                        .iter()
+                        .map(|column| {
+                            risingwave_connector::source::SourceColumnDesc::from_column_desc(
+                                column,
+                                pk_column_names.contains(column.name.as_str()),
+                            )
+                        })
+                        .collect(),
+                )
+                .await?;
+                decoder.decode(is_batched, &body)?
+            }
+        };
 
         // fill the data_chunk
         fast_insert_request.data_chunk = Some(data_chunk.to_protobuf());
@@ -148,7 +200,6 @@ pub(super) mod handlers {
                     StatusCode::UNPROCESSABLE_ENTITY,
                 )
             })?;
-
             let jsonb_val = JsonbVal::from(json_value);
             builder.append(Some(jsonb_val.as_scalar_ref()));
 
@@ -190,11 +241,25 @@ pub(super) mod handlers {
         let search_path = SearchPath::default();
         let schema_path = SchemaPath::new(Some(schema.as_str()), &search_path, USER);
 
-        let (webhook_source_info, table_id, version_id, row_id_index) = {
+        let (webhook_source_info, table_id, version_id, row_id_index, payload_schema) = {
             let reader = frontend_env.catalog_reader().read_guard();
             let (table_catalog, _schema) = reader
                 .get_any_table_by_name(database.as_str(), schema_path, table)
                 .map_err(|e| err(e, StatusCode::NOT_FOUND))?;
+
+            let (columns_to_insert, row_id_index) = table_catalog.columns_to_insert();
+            let payload_schema = PayloadSchema::new(
+                columns_to_insert
+                    .into_iter()
+                    .map(|column| column.column_desc)
+                    .collect(),
+                table_catalog
+                    .pk_column_names()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+            );
+            let row_id_index = row_id_index.map(|row_id_index| row_id_index as u32);
 
             let webhook_source_info = table_catalog
                 .webhook_info
@@ -210,14 +275,14 @@ pub(super) mod handlers {
                 webhook_source_info,
                 table_catalog.id(),
                 table_catalog.version_id().expect("table must be versioned"),
-                table_catalog.row_id_index.map(|idx| idx as u32),
+                row_id_index,
+                payload_schema,
             )
         };
 
         let fast_insert_request = FastInsertRequest {
             table_id,
             table_version_id: version_id,
-            column_indices: vec![0],
             // leave the data_chunk empty for now
             data_chunk: None,
             row_id_index,
@@ -233,6 +298,7 @@ pub(super) mod handlers {
             webhook_source_info,
             fast_insert_request,
             compute_client,
+            payload_schema,
         })
     }
 
@@ -251,9 +317,10 @@ pub(super) mod handlers {
 }
 
 impl WebhookService {
-    pub fn new(webhook_addr: SocketAddr) -> Self {
+    pub fn new(webhook_addr: SocketAddr, tls_config: Option<TlsConfig>) -> Self {
         Self {
             webhook_addr,
+            tls_config,
             counter: AtomicU32::new(0),
         }
     }
@@ -279,14 +346,24 @@ impl WebhookService {
             .nest("/webhook", api_router)
             .layer(CompressionLayer::new());
 
-        let listener = TcpListener::bind(&srv.webhook_addr)
-            .await
-            .context("Failed to bind dashboard address")?;
-
         #[cfg(not(madsim))]
-        axum::serve(listener, app)
-            .await
-            .context("Failed to serve dashboard service")?;
+        {
+            if let Some(tls_config) = &srv.tls_config {
+                let config = OpenSSLConfig::from_pem_file(&tls_config.cert, &tls_config.key)
+                    .context("Failed to load TLS config for webhook service")?;
+                axum_server::bind_openssl(srv.webhook_addr, config)
+                    .serve(app.into_make_service())
+                    .await
+                    .context("Failed to serve webhook service over TLS")?;
+            } else {
+                let listener = TcpListener::bind(&srv.webhook_addr)
+                    .await
+                    .context("Failed to bind dashboard address")?;
+                axum::serve(listener, app)
+                    .await
+                    .context("Failed to serve dashboard service")?;
+            }
+        }
 
         Ok(())
     }
@@ -300,7 +377,7 @@ mod tests {
     #[ignore]
     async fn test_webhook_server() -> anyhow::Result<()> {
         let addr = SocketAddr::from(([127, 0, 0, 1], 4560));
-        let service = crate::webhook::WebhookService::new(addr);
+        let service = crate::webhook::WebhookService::new(addr, None);
         service.serve().await?;
         Ok(())
     }

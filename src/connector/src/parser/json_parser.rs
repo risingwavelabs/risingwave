@@ -71,9 +71,19 @@ impl AccessBuilder for JsonAccessBuilder {
 impl JsonAccessBuilder {
     pub fn new(config: JsonProperties) -> ConnectorResult<Self> {
         let mut json_parse_options = JsonParseOptions::DEFAULT;
+        if let Some(mode) = config.timestamp_handling {
+            json_parse_options.timestamp_handling = mode;
+        }
         if let Some(mode) = config.timestamptz_handling {
             json_parse_options.timestamptz_handling = mode;
         }
+        if let Some(mode) = config.time_handling {
+            json_parse_options.time_handling = mode;
+        }
+        if let Some(mode) = config.bigint_unsigned_handling {
+            json_parse_options.bigint_unsigned_handling = mode;
+        }
+        json_parse_options.handle_toast_columns = config.handle_toast_columns;
         Ok(Self {
             value: None,
             payload_start_idx: if config.use_schema_registry { 5 } else { 0 },
@@ -318,7 +328,7 @@ mod tests {
             ColumnDesc::named("VarcharCastToI64", 11.into(), DataType::Int64),
         ]
         .iter()
-        .map(SourceColumnDesc::from)
+        .map(|c| SourceColumnDesc::from_column_desc(c, false))
         .collect_vec();
 
         let parser = make_parser(descs);
@@ -380,7 +390,7 @@ mod tests {
             ])),
         )]
         .iter()
-        .map(SourceColumnDesc::from)
+        .map(|c| SourceColumnDesc::from_column_desc(c, false))
         .collect_vec();
 
         let parser = make_parser(descs);
@@ -416,7 +426,7 @@ mod tests {
             ])),
         )]
         .iter()
-        .map(SourceColumnDesc::from)
+        .map(|c| SourceColumnDesc::from_column_desc(c, false))
         .collect_vec();
 
         let parser = make_parser(descs);
