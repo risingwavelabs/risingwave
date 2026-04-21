@@ -15,7 +15,11 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-/// The catalog `pg_auth_members` shows the membership relations between roles. Any non-circular set of relationships is allowed.
+/// The catalog `pg_auth_members` shows the membership relations between roles. Any non-circular
+/// set of relationships is allowed.
+///
+/// The shape is defined here ahead of the full frontend/meta membership plumbing so planner and
+/// catalog compatibility work can target PostgreSQL's expected columns.
 /// Ref: `https://www.postgresql.org/docs/current/catalog-pg-auth-members.html`
 #[system_catalog(view, "pg_catalog.pg_auth_members")]
 #[derive(Fields)]

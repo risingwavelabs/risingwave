@@ -736,17 +736,47 @@ impl FrontendEnv {
 #[derive(Clone)]
 pub struct AuthContext {
     pub database: String,
+    pub session_user_name: String,
+    pub session_user_id: UserId,
     pub user_name: String,
     pub user_id: UserId,
 }
 
 impl AuthContext {
     pub fn new(database: String, user_name: String, user_id: UserId) -> Self {
+        Self::new_with_current(database, user_name.clone(), user_id, user_name, user_id)
+    }
+
+    pub fn new_with_current(
+        database: String,
+        session_user_name: String,
+        session_user_id: UserId,
+        current_user_name: String,
+        current_user_id: UserId,
+    ) -> Self {
         Self {
             database,
-            user_name,
-            user_id,
+            session_user_name,
+            session_user_id,
+            user_name: current_user_name,
+            user_id: current_user_id,
         }
+    }
+
+    pub fn session_user_name(&self) -> &str {
+        &self.session_user_name
+    }
+
+    pub fn session_user_id(&self) -> UserId {
+        self.session_user_id
+    }
+
+    pub fn current_user_name(&self) -> &str {
+        &self.user_name
+    }
+
+    pub fn current_user_id(&self) -> UserId {
+        self.user_id
     }
 }
 pub struct SessionImpl {
@@ -962,11 +992,19 @@ impl SessionImpl {
     }
 
     pub fn user_name(&self) -> String {
-        self.auth_context.read().user_name.clone()
+        self.auth_context.read().current_user_name().to_owned()
     }
 
     pub fn user_id(&self) -> UserId {
-        self.auth_context.read().user_id
+        self.auth_context.read().current_user_id()
+    }
+
+    pub fn session_user_name(&self) -> String {
+        self.auth_context.read().session_user_name().to_owned()
+    }
+
+    pub fn session_user_id(&self) -> UserId {
+        self.auth_context.read().session_user_id()
     }
 
     pub fn update_database(&self, database: String) {
@@ -2033,5 +2071,26 @@ pub fn cancel_creating_jobs_in_session(session_id: SessionId, sessions_map: Sess
     } else {
         info!("Current session finished, ignoring cancel creating request");
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthContext;
+
+    #[test]
+    fn auth_context_tracks_session_and_current_user_separately() {
+        let ctx = AuthContext::new_with_current(
+            "dev".to_owned(),
+            "login_role".to_owned(),
+            1,
+            "active_role".to_owned(),
+            2,
+        );
+
+        assert_eq!(ctx.session_user_name(), "login_role");
+        assert_eq!(ctx.session_user_id(), 1);
+        assert_eq!(ctx.current_user_name(), "active_role");
+        assert_eq!(ctx.current_user_id(), 2);
     }
 }

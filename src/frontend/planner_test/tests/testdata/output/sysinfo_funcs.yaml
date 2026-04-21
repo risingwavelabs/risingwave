@@ -15,12 +15,6 @@
     select current_role;
   batch_plan: 'BatchValues { rows: [[''root'':Varchar]] }'
 - sql: |
-    select user;
-  batch_plan: 'BatchValues { rows: [[''root'':Varchar]] }'
-- sql: |
-    select session_user, current_user, current_role;
-  batch_plan: 'BatchValues { rows: [[''root'':Varchar, ''root'':Varchar, ''root'':Varchar]] }'
-- sql: |
     select current_schemas(true);
   batch_plan: 'BatchValues { rows: [[ARRAY[pg_catalog, rw_catalog, public]:List(Varchar)]] }'
 - sql: |

@@ -17,6 +17,9 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_roles` provides access to information about database roles. This is simply a
 /// publicly readable view of `pg_authid` that blanks out the password field.
+///
+/// Today this is a compatibility shim over `rw_catalog.rw_users`; membership-derived role state
+/// will be layered in as the unified principal model lands.
 /// Ref: `https://www.postgresql.org/docs/current/view-pg-roles.html`
 #[system_catalog(
     view,

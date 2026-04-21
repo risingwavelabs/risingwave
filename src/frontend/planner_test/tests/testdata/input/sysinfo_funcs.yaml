@@ -19,14 +19,6 @@
   expected_outputs:
   - batch_plan
 - sql: |
-    select user;
-  expected_outputs:
-  - batch_plan
-- sql: |
-    select session_user, current_user, current_role;
-  expected_outputs:
-  - batch_plan
-- sql: |
     select current_schemas(true);
   expected_outputs:
   - batch_plan

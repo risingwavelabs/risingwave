@@ -109,18 +109,19 @@ impl Binder {
         fn session_user() -> Handle {
             guard_by_len(|binder, []| {
                 Ok(ExprImpl::literal_varchar(
-                    binder.auth_context.user_name.clone(),
+                    binder.auth_context.session_user_name().to_owned(),
                 ))
             })
         }
 
-        // `CURRENT_USER` is the user name of the user that is executing the command,
-        // `CURRENT_ROLE`, `USER` are synonyms for `CURRENT_USER`. Since we don't support
-        // `SET ROLE xxx` for now, they will all returns session user name.
+        // `CURRENT_USER` is the user name of the user that is executing the command and
+        // `CURRENT_ROLE`, `USER` are synonyms for `CURRENT_USER`. We still default the current
+        // user to the session user until `SET ROLE` support lands, but keep the identities
+        // separate in `AuthContext` so the binder is ready for effective-role semantics.
         fn current_user() -> Handle {
             guard_by_len(|binder, []| {
                 Ok(ExprImpl::literal_varchar(
-                    binder.auth_context.user_name.clone(),
+                    binder.auth_context.current_user_name().to_owned(),
                 ))
             })
         }
@@ -660,7 +661,12 @@ impl Binder {
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
-                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                        inputs.insert(
+                            0,
+                            ExprImpl::literal_varchar(
+                                binder.auth_context.current_user_name().to_owned(),
+                            ),
+                        );
                     }
                     if inputs.len() == 3 {
                         Ok(FunctionCall::new(ExprType::HasDatabasePrivilege, inputs)?.into())
@@ -673,7 +679,12 @@ impl Binder {
                 })),
                 ("has_table_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
-                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                        inputs.insert(
+                            0,
+                            ExprImpl::literal_varchar(
+                                binder.auth_context.current_user_name().to_owned(),
+                            ),
+                        );
                     }
                     if inputs.len() == 3 {
                         if inputs[1].return_type() == DataType::Varchar {
@@ -689,7 +700,12 @@ impl Binder {
                 })),
                 ("has_any_column_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
-                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                        inputs.insert(
+                            0,
+                            ExprImpl::literal_varchar(
+                                binder.auth_context.current_user_name().to_owned(),
+                            ),
+                        );
                     }
                     if inputs.len() == 3 {
                         if inputs[1].return_type() == DataType::Varchar {
@@ -705,7 +721,12 @@ impl Binder {
                 })),
                 ("has_schema_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
-                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                        inputs.insert(
+                            0,
+                            ExprImpl::literal_varchar(
+                                binder.auth_context.current_user_name().to_owned(),
+                            ),
+                        );
                     }
                     if inputs.len() == 3 {
                         Ok(FunctionCall::new(ExprType::HasSchemaPrivilege, inputs)?.into())
@@ -718,7 +739,12 @@ impl Binder {
                 })),
                 ("has_function_privilege", raw(|binder, mut inputs| {
                     if inputs.len() == 2 {
-                        inputs.insert(0, ExprImpl::literal_varchar(binder.auth_context.user_name.clone()));
+                        inputs.insert(
+                            0,
+                            ExprImpl::literal_varchar(
+                                binder.auth_context.current_user_name().to_owned(),
+                            ),
+                        );
                     }
                     if inputs.len() == 3 {
                         Ok(FunctionCall::new(ExprType::HasFunctionPrivilege, inputs)?.into())
