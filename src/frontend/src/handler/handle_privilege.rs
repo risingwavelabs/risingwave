@@ -526,22 +526,65 @@ pub async fn handle_revoke_privilege(
     Ok(PgResponse::empty_result(StatementType::REVOKE_PRIVILEGE))
 }
 
-pub async fn handle_grant_role(
-    _handler_args: HandlerArgs,
-    _stmt: Statement,
-) -> Result<RwPgResponse> {
-    bail_not_implemented!(
-        "role membership GRANT is parsed and dispatched, but backend role membership semantics are not implemented yet"
-    );
+pub async fn handle_grant_role(handler_args: HandlerArgs, stmt: Statement) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let Statement::GrantRole {
+        roles,
+        grantees,
+        with_admin_option,
+    } = stmt
+    else {
+        return Err(ErrorCode::BindError("Invalid grant role statement".to_owned()).into());
+    };
+
+    let role_ids = bind_user_from_idents(&session, roles)?;
+    let member_ids = bind_user_from_idents(&session, grantees)?;
+    let user_info_writer = session.user_info_writer()?;
+    user_info_writer
+        .grant_role(
+            role_ids,
+            member_ids,
+            session.user_id(),
+            Some(with_admin_option),
+            None,
+            None,
+        )
+        .await?;
+
+    Ok(PgResponse::empty_result(StatementType::GRANT_PRIVILEGE))
 }
 
 pub async fn handle_revoke_role(
-    _handler_args: HandlerArgs,
-    _stmt: Statement,
+    handler_args: HandlerArgs,
+    stmt: Statement,
 ) -> Result<RwPgResponse> {
-    bail_not_implemented!(
-        "role membership REVOKE is parsed and dispatched, but backend role membership semantics are not implemented yet"
-    );
+    let session = handler_args.session;
+    let Statement::RevokeRole {
+        roles,
+        grantees,
+        revoke_admin_option,
+        cascade: _,
+    } = stmt
+    else {
+        return Err(ErrorCode::BindError("Invalid revoke role statement".to_owned()).into());
+    };
+
+    let role_ids = bind_user_from_idents(&session, roles)?;
+    let member_ids = bind_user_from_idents(&session, grantees)?;
+    let user_info_writer = session.user_info_writer()?;
+    user_info_writer
+        .revoke_role(
+            role_ids,
+            member_ids,
+            session.user_id(),
+            session.user_id(),
+            revoke_admin_option,
+            false,
+            false,
+        )
+        .await?;
+
+    Ok(PgResponse::empty_result(StatementType::REVOKE_PRIVILEGE))
 }
 
 pub async fn handle_alter_default_privileges(

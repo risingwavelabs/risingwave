@@ -64,9 +64,9 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<Model> for PbRoleMembership {
     fn from(value: Model) -> Self {
         Self {
-            role_id: value.role_id,
-            member_id: value.member_id,
-            granted_by: value.granted_by,
+            role_id: value.role_id.into(),
+            member_id: value.member_id.into(),
+            granted_by: value.granted_by.into(),
             admin_option: value.admin_option,
             inherit_option: value.inherit_option,
             set_option: value.set_option,
