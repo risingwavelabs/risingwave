@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+method="${1:-GET}"
+path="${2:-/}"
+shift $(( $# >= 2 ? 2 : $# ))
+
+data_args=()
+if [ -p /dev/stdin ]; then
+  data_args=(--data-binary @-)
+fi
+
+if [ "${#data_args[@]}" -gt 0 ]; then
+  curl --fail -sS -u "${OPENSEARCH_USER}:${OPENSEARCH_PASSWORD}" \
+    -H 'Content-Type: application/json' \
+    -X "${method}" \
+    "${RISEDEV_OPENSEARCH_URL}${path}" \
+    "${data_args[@]}" \
+    "$@"
+else
+  curl --fail -sS -u "${OPENSEARCH_USER}:${OPENSEARCH_PASSWORD}" \
+    -H 'Content-Type: application/json' \
+    -X "${method}" \
+    "${RISEDEV_OPENSEARCH_URL}${path}" \
+    "$@"
+fi
