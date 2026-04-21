@@ -1029,6 +1029,50 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn grant_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        admin_option: Option<bool>,
+        inherit_option: Option<bool>,
+        set_option: Option<bool>,
+    ) -> Result<u64> {
+        let request = GrantRoleRequest {
+            role_ids: role_ids.into_iter().map(Into::into).collect(),
+            member_ids: member_ids.into_iter().map(Into::into).collect(),
+            granted_by: granted_by.into(),
+            admin_option,
+            inherit_option,
+            set_option,
+        };
+        let resp = self.inner.grant_role(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn revoke_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        revoked_by: UserId,
+        revoke_admin_option: bool,
+        revoke_inherit_option: bool,
+        revoke_set_option: bool,
+    ) -> Result<u64> {
+        let request = RevokeRoleRequest {
+            role_ids: role_ids.into_iter().map(Into::into).collect(),
+            member_ids: member_ids.into_iter().map(Into::into).collect(),
+            granted_by: granted_by.into(),
+            revoked_by: revoked_by.into(),
+            revoke_admin_option,
+            revoke_inherit_option,
+            revoke_set_option,
+        };
+        let resp = self.inner.revoke_role(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn alter_default_privilege(
         &self,
         user_ids: Vec<UserId>,
@@ -2751,6 +2795,8 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
+            ,{ user_client, grant_role, GrantRoleRequest, GrantRoleResponse }
+            ,{ user_client, revoke_role, RevokeRoleRequest, RevokeRoleResponse }
             ,{ user_client, alter_default_privilege, AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }

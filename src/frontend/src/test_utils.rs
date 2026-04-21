@@ -1101,6 +1101,31 @@ impl UserInfoWriter for MockUserInfoWriter {
         Ok(())
     }
 
+    async fn grant_role(
+        &self,
+        _role_ids: Vec<UserId>,
+        _member_ids: Vec<UserId>,
+        _granted_by: UserId,
+        _admin_option: Option<bool>,
+        _inherit_option: Option<bool>,
+        _set_option: Option<bool>,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn revoke_role(
+        &self,
+        _role_ids: Vec<UserId>,
+        _member_ids: Vec<UserId>,
+        _granted_by: UserId,
+        _revoked_by: UserId,
+        _revoke_admin_option: bool,
+        _revoke_inherit_option: bool,
+        _revoke_set_option: bool,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     async fn alter_default_privilege(
         &self,
         _users: Vec<UserId>,

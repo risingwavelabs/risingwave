@@ -69,6 +69,27 @@ pub trait UserInfoWriter: Send + Sync {
         cascade: bool,
     ) -> Result<()>;
 
+    async fn grant_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        admin_option: Option<bool>,
+        inherit_option: Option<bool>,
+        set_option: Option<bool>,
+    ) -> Result<()>;
+
+    async fn revoke_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        revoked_by: UserId,
+        revoke_admin_option: bool,
+        revoke_inherit_option: bool,
+        revoke_set_option: bool,
+    ) -> Result<()>;
+
     async fn alter_default_privilege(
         &self,
         users: Vec<UserId>,
@@ -134,6 +155,54 @@ impl UserInfoWriter for UserInfoWriterImpl {
                 revoke_by,
                 revoke_grant_option,
                 cascade,
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn grant_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        admin_option: Option<bool>,
+        inherit_option: Option<bool>,
+        set_option: Option<bool>,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .grant_role(
+                role_ids,
+                member_ids,
+                granted_by,
+                admin_option,
+                inherit_option,
+                set_option,
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn revoke_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        revoked_by: UserId,
+        revoke_admin_option: bool,
+        revoke_inherit_option: bool,
+        revoke_set_option: bool,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .revoke_role(
+                role_ids,
+                member_ids,
+                granted_by,
+                revoked_by,
+                revoke_admin_option,
+                revoke_inherit_option,
+                revoke_set_option,
             )
             .await?;
         self.wait_version(version).await

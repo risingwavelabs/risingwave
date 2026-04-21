@@ -71,7 +71,7 @@ async fn test_create_role_with_login_preserves_login_capability() {
 }
 
 #[tokio::test]
-async fn test_grant_revoke_role_dispatches_with_explicit_not_implemented_errors() {
+async fn test_grant_revoke_role_dispatches() {
     let frontend = LocalFrontend::new(Default::default()).await;
 
     frontend.run_sql("CREATE ROLE role_a").await.unwrap();
@@ -80,25 +80,15 @@ async fn test_grant_revoke_role_dispatches_with_explicit_not_implemented_errors(
         .await
         .unwrap();
 
-    let grant_err = frontend
+    frontend
         .run_sql("GRANT role_a TO user_b WITH ADMIN OPTION")
         .await
-        .unwrap_err()
-        .to_string();
-    assert!(
-        grant_err.contains("role membership GRANT is parsed and dispatched"),
-        "unexpected error: {grant_err}"
-    );
+        .unwrap();
 
-    let revoke_err = frontend
+    frontend
         .run_sql("REVOKE ADMIN OPTION FOR role_a FROM user_b")
         .await
-        .unwrap_err()
-        .to_string();
-    assert!(
-        revoke_err.contains("role membership REVOKE is parsed and dispatched"),
-        "unexpected error: {revoke_err}"
-    );
+        .unwrap();
 }
 
 #[tokio::test]
