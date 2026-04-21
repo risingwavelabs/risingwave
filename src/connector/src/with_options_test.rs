@@ -623,6 +623,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map.try_insert(
@@ -631,6 +632,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map.try_insert(
@@ -639,7 +641,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
-
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
 
