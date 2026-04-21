@@ -44,6 +44,11 @@ impl Reducer {
         }
     }
 
+    /// Consumes the reducer and returns the underlying client.
+    pub fn into_client(self) -> Client {
+        self.checker.into_client()
+    }
+
     /// Perform reduction on a SQL input containing multiple statements,
     /// where only the **last** statement is considered the failing one.
     ///
@@ -199,7 +204,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "✓ Valid list-batch reduction! Removed {} items, SQL len {} → {}",
+                                "â Valid list-batch reduction! Removed {} items, SQL len {} â {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -246,7 +251,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "✓ Valid attr-batch reduction! Removed {} attributes, SQL len {} → {}",
+                                "â Valid attr-batch reduction! Removed {} attributes, SQL len {} â {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -293,7 +298,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "✓ Valid replace-batch reduction! Applied {} replacements, SQL len {} → {}",
+                                "â Valid replace-batch reduction! Applied {} replacements, SQL len {} â {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -340,7 +345,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "✓ Valid pullup-batch reduction! Applied {} pullups, SQL len {} → {}",
+                                "â Valid pullup-batch reduction! Applied {} pullups, SQL len {} â {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -420,7 +425,7 @@ impl Reducer {
                     continue;
                 }
 
-                tracing::info!("✓ Valid reduction found! SQL len {} → {}", sql_len, new_len);
+                tracing::info!("â Valid reduction found! SQL len {} â {}", sql_len, new_len);
                 tracing::info!("Applying candidate and continuing to next iteration");
                 ast_node = new_ast;
                 sql_len = new_len;
