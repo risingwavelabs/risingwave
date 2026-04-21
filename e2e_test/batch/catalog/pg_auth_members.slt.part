@@ -1,0 +1,80 @@
+statement ok
+CREATE ROLE rw_role_catalog_test;
+
+statement ok
+CREATE ROLE rw_role_member_test WITH LOGIN;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+root root root
+
+statement ok
+GRANT rw_role_catalog_test TO rw_role_member_test WITH ADMIN OPTION;
+
+query TTTTT
+SELECT rolname,
+       rolcanlogin::text,
+       rolsuper::text,
+       rolcreatedb::text,
+       rolcreaterole::text
+FROM pg_catalog.pg_roles
+WHERE rolname IN ('rw_role_catalog_test', 'rw_role_member_test')
+ORDER BY 1;
+----
+rw_role_catalog_test false false false false
+rw_role_member_test true false false false
+
+query TTT
+SELECT roleid::regrole::text,
+       member::regrole::text,
+       admin_option::text
+FROM pg_catalog.pg_auth_members
+WHERE roleid::regrole::text = 'rw_role_catalog_test'
+  AND member::regrole::text = 'rw_role_member_test'
+ORDER BY 1, 2;
+----
+rw_role_catalog_test rw_role_member_test true
+
+statement ok
+SET ROLE rw_role_catalog_test;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+root rw_role_catalog_test rw_role_catalog_test
+
+statement ok
+RESET ROLE;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+root root root
+
+statement ok
+SET ROLE NONE;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+root root root
+
+statement ok
+REVOKE rw_role_catalog_test FROM rw_role_member_test;
+
+query
+SELECT roleid::regrole::text,
+       member::regrole::text,
+       admin_option::text
+FROM pg_catalog.pg_auth_members
+WHERE roleid::regrole::text = 'rw_role_catalog_test'
+  AND member::regrole::text = 'rw_role_member_test'
+ORDER BY 1, 2;
+----
+
+statement ok
+DROP ROLE rw_role_member_test;
+
+statement ok
+DROP ROLE rw_role_catalog_test;
