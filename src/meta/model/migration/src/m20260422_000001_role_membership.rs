@@ -51,7 +51,7 @@ impl MigrationTrait for Migration {
                             .default(true),
                     )
                     .foreign_key(
-                        ForeignKey::create()
+                        &mut ForeignKey::create()
                             .name("FK_user_role_membership_role_id")
                             .from(UserRoleMembership::Table, UserRoleMembership::RoleId)
                             .to(User::Table, User::UserId)
@@ -59,7 +59,7 @@ impl MigrationTrait for Migration {
                             .to_owned(),
                     )
                     .foreign_key(
-                        ForeignKey::create()
+                        &mut ForeignKey::create()
                             .name("FK_user_role_membership_member_id")
                             .from(UserRoleMembership::Table, UserRoleMembership::MemberId)
                             .to(User::Table, User::UserId)
@@ -67,7 +67,7 @@ impl MigrationTrait for Migration {
                             .to_owned(),
                     )
                     .foreign_key(
-                        ForeignKey::create()
+                        &mut ForeignKey::create()
                             .name("FK_user_role_membership_granted_by")
                             .from(UserRoleMembership::Table, UserRoleMembership::GrantedBy)
                             .to(User::Table, User::UserId)
