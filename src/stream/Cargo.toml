@@ -20,6 +20,7 @@ async-stream = "0.3"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 await-tree = { workspace = true }
+bincode = { version = "2.0", features = ["serde"] }
 bytes = "1"
 cfg-if = "1"
 delta_btree_map = { path = "../utils/delta_btree_map" }
@@ -32,6 +33,7 @@ foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 glob = "0.3"
+hashbrown = { workspace = true }
 hytra = "0.1.2"
 iceberg = { workspace = true }
 indexmap = "2"
@@ -72,6 +74,7 @@ tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
 url = "2"
+uuid = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

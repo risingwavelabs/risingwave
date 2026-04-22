@@ -29,6 +29,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::IcebergError;
 use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
@@ -310,6 +311,14 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
 
         Ok(())
     }
+
+    fn roles(&self) -> Arc<[CoordinationRole]> {
+        if self.config.enable_pk_index {
+            Arc::from([CoordinationRole::Unspecified, CoordinationRole::DvMerger])
+        } else {
+            Arc::from([CoordinationRole::Unspecified])
+        }
+    }
 }
 
 #[async_trait]
@@ -427,6 +436,14 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         // TODO: Files that have been written but not committed should be deleted.
         tracing::debug!("Abort not implemented yet");
     }
+
+    fn roles(&self) -> Arc<[CoordinationRole]> {
+        if self.config.enable_pk_index {
+            Arc::from([CoordinationRole::Unspecified, CoordinationRole::DvMerger])
+        } else {
+            Arc::from([CoordinationRole::Unspecified])
+        }
+    }
 }
 
 /// Methods Required to Achieve Exactly Once Semantics
@@ -438,6 +455,7 @@ impl IcebergSinkCommitter {
     ) -> Result<Option<(Vec<IcebergCommitResult>, i64)>> {
         let write_results: Vec<IcebergCommitResult> = metadata
             .iter()
+            .filter(|m| m.metadata.is_some())
             .map(IcebergCommitResult::try_from)
             .collect::<Result<Vec<IcebergCommitResult>>>()?;
 

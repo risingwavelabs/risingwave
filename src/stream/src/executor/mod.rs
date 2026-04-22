@@ -90,6 +90,7 @@ mod filter;
 mod gap_fill;
 pub mod hash_join;
 mod hop_window;
+mod iceberg_with_pk_index;
 mod join;
 pub mod locality_provider;
 mod lookup;
@@ -153,6 +154,9 @@ pub use filter::{FilterExecutor, UpsertFilterExecutor};
 pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
+pub use iceberg_with_pk_index::{
+    CoordinatorStreamHandleInit, DvHandlerImpl, DvMergerExecutor, IcebergWriterImpl, WriterExecutor,
+};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
 pub use lookup::*;

@@ -65,12 +65,13 @@ use super::{
 use crate::sink::writer::SinkWriter;
 use crate::sink::{Result, SinkParam};
 
-/// None means no project.
-/// Prepare represent the extra partition column idx.
-/// Done represents the project idx vec.
+/// `None` means no projection is needed.
+/// `Prepare` stores the extra partition column index.
+/// `Done` stores the finalized projection indices.
 ///
-/// The `ProjectIdxVec` will be late-evaluated. When we encounter the Prepare state first, we will use the data chunk schema
-/// to create the project idx vec.
+/// `ProjectIdxVec` is initialized lazily. When we first encounter `Prepare`, we
+/// derive the projection indices from the current chunk schema and cache them in
+/// `Done`.
 enum ProjectIdxVec {
     None,
     Prepare(usize),
@@ -306,7 +307,7 @@ impl IcebergSinkWriterInner {
             })
     }
 
-    fn build_append_only(
+    pub fn build_append_only(
         config: &IcebergConfig,
         table: Table,
         writer_param: &SinkWriterParam,
@@ -411,7 +412,7 @@ impl IcebergSinkWriterInner {
         })
     }
 
-    fn build_upsert(
+    pub fn build_upsert(
         config: &IcebergConfig,
         table: Table,
         unique_column_ids: Vec<usize>,
@@ -600,6 +601,216 @@ impl IcebergSinkWriterInner {
             uncommitted_write_bytes: 0,
         })
     }
+
+    fn prepare_writer(&mut self) -> Result<()> {
+        match &mut self.writer {
+            IcebergWriterDispatch::Append {
+                writer,
+                writer_builder,
+            } => {
+                if writer.is_none() {
+                    *writer = Some(Box::new(
+                        writer_builder
+                            .build()
+                            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
+                    ));
+                }
+            }
+            IcebergWriterDispatch::Upsert {
+                writer,
+                writer_builder,
+                ..
+            } => {
+                if writer.is_none() {
+                    *writer = Some(Box::new(
+                        writer_builder
+                            .build()
+                            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
+                    ));
+                }
+            }
+        };
+        Ok(())
+    }
+
+    fn process_chunk(&mut self, chunk: StreamChunk) -> Result<Option<(RecordBatch, usize)>> {
+        let (mut chunk, ops) = chunk.compact_vis().into_parts();
+        match &mut self.project_idx_vec {
+            ProjectIdxVec::None => {}
+            ProjectIdxVec::Prepare(idx) => {
+                if *idx >= chunk.columns().len() {
+                    return Err(SinkError::Iceberg(anyhow!(
+                        "invalid extra partition column index {}",
+                        idx
+                    )));
+                }
+                let project_idx_vec = (0..*idx)
+                    .chain(*idx + 1..chunk.columns().len())
+                    .collect_vec();
+                chunk = chunk.project(&project_idx_vec);
+                self.project_idx_vec = ProjectIdxVec::Done(project_idx_vec);
+            }
+            ProjectIdxVec::Done(idx_vec) => {
+                chunk = chunk.project(idx_vec);
+            }
+        }
+        if ops.is_empty() {
+            return Ok(None);
+        }
+        let write_batch_size = chunk.estimated_heap_size();
+        let batch = match &self.writer {
+            IcebergWriterDispatch::Append { .. } => {
+                // separate out insert chunk
+                let filters =
+                    chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
+                chunk.set_visibility(filters);
+                IcebergArrowConvert
+                    .to_record_batch(self.arrow_schema.clone(), &chunk.compact_vis())
+                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
+            }
+            IcebergWriterDispatch::Upsert {
+                arrow_schema_with_op_column,
+                ..
+            } => {
+                let chunk = IcebergArrowConvert
+                    .to_record_batch(self.arrow_schema.clone(), &chunk)
+                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+                let ops = Arc::new(Int32Array::from(
+                    ops.iter()
+                        .map(|op| match op {
+                            Op::UpdateInsert | Op::Insert => INSERT_OP,
+                            Op::UpdateDelete | Op::Delete => DELETE_OP,
+                        })
+                        .collect_vec(),
+                ));
+                let mut columns = chunk.columns().to_vec();
+                columns.push(ops);
+                RecordBatch::try_new(arrow_schema_with_op_column.clone(), columns)
+                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
+            }
+        };
+        Ok(Some((batch, write_batch_size)))
+    }
+
+    pub async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+        self.prepare_writer()?;
+        let Some((batch, write_batch_size)) = self.process_chunk(chunk)? else {
+            return Ok(());
+        };
+
+        let writer = self.writer.get_writer().unwrap();
+        writer
+            .write(batch)
+            .instrument_await("iceberg_write")
+            .await
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+        self.metrics.write_bytes.inc_by(write_batch_size as _);
+        self.uncommitted_write_bytes = self
+            .uncommitted_write_bytes
+            .saturating_add(write_batch_size as u64);
+        Ok(())
+    }
+
+    pub async fn write_batch_with_position(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> Result<Vec<PositionDeleteInput>> {
+        debug_assert!(
+            matches!(self.writer, IcebergWriterDispatch::Append { .. }),
+            "write_batch_with_position should only be called for append-only writer"
+        );
+
+        self.prepare_writer()?;
+        let Some((batch, write_batch_size)) = self.process_chunk(chunk)? else {
+            return Ok(vec![]);
+        };
+
+        let writer = self.writer.get_writer().unwrap();
+        let positions = writer
+            .write_with_position(batch)
+            .instrument_await("iceberg_write")
+            .await
+            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+        self.metrics.write_bytes.inc_by(write_batch_size as _);
+        self.uncommitted_write_bytes = self
+            .uncommitted_write_bytes
+            .saturating_add(write_batch_size as u64);
+        Ok(positions)
+    }
+
+    pub async fn close(&mut self) -> Result<Option<Vec<DataFile>>> {
+        let res = match &mut self.writer {
+            IcebergWriterDispatch::Append {
+                writer,
+                writer_builder,
+            } => {
+                let close_result = match writer.take() {
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await?)
+                    }
+                    _ => None,
+                };
+                match writer_builder.build() {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        tracing::warn!("Failed to build new writer after close");
+                    }
+                }
+                close_result
+            }
+            IcebergWriterDispatch::Upsert {
+                writer,
+                writer_builder,
+                ..
+            } => {
+                let close_result = match writer.take() {
+                    Some(mut writer) => {
+                        Some(writer.close().instrument_await("iceberg_close").await?)
+                    }
+                    _ => None,
+                };
+                match writer_builder.build() {
+                    Ok(new_writer) => {
+                        *writer = Some(Box::new(new_writer));
+                    }
+                    _ => {
+                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
+                        // here because current writer may close successfully. So we just log the error.
+                        tracing::warn!("Failed to build new writer after close");
+                    }
+                }
+                close_result
+            }
+        };
+        Ok(res)
+    }
+
+    pub fn generate_commit_metadata(&self, data_files: Vec<DataFile>) -> Result<SinkMetadata> {
+        let format_version = self.table.metadata().format_version();
+        let partition_type = self.table.metadata().default_partition_type();
+        let serialized_data_files = data_files
+            .into_iter()
+            .map(|f| {
+                // Truncate large column statistics BEFORE serialization
+                let truncated = truncate_datafile(f);
+                let res = SerializedDataFile::try_from(truncated, partition_type, format_version)?;
+                Ok(res)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        SinkMetadata::try_from(&IcebergCommitResult {
+            data_files: serialized_data_files,
+            schema_id: self.table.metadata().current_schema_id(),
+            partition_spec_id: self.table.metadata().default_partition_spec_id(),
+        })
+    }
+
+    pub fn partition_type(&self) -> &iceberg::spec::StructType {
+        self.table.metadata().default_partition_type()
+    }
 }
 
 #[async_trait]
@@ -634,104 +845,7 @@ impl SinkWriter for IcebergSinkWriter {
         let Self::Initialized(inner) = self else {
             unreachable!("IcebergSinkWriter should be initialized before barrier");
         };
-
-        // Try to build writer if it's None.
-        match &mut inner.writer {
-            IcebergWriterDispatch::Append {
-                writer,
-                writer_builder,
-            } => {
-                if writer.is_none() {
-                    *writer = Some(Box::new(
-                        writer_builder
-                            .build()
-                            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-                    ));
-                }
-            }
-            IcebergWriterDispatch::Upsert {
-                writer,
-                writer_builder,
-                ..
-            } => {
-                if writer.is_none() {
-                    *writer = Some(Box::new(
-                        writer_builder
-                            .build()
-                            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
-                    ));
-                }
-            }
-        };
-
-        // Process the chunk.
-        let (mut chunk, ops) = chunk.compact_vis().into_parts();
-        match &mut inner.project_idx_vec {
-            ProjectIdxVec::None => {}
-            ProjectIdxVec::Prepare(idx) => {
-                if *idx >= chunk.columns().len() {
-                    return Err(SinkError::Iceberg(anyhow!(
-                        "invalid extra partition column index {}",
-                        idx
-                    )));
-                }
-                let project_idx_vec = (0..*idx)
-                    .chain(*idx + 1..chunk.columns().len())
-                    .collect_vec();
-                chunk = chunk.project(&project_idx_vec);
-                inner.project_idx_vec = ProjectIdxVec::Done(project_idx_vec);
-            }
-            ProjectIdxVec::Done(idx_vec) => {
-                chunk = chunk.project(idx_vec);
-            }
-        }
-        if ops.is_empty() {
-            return Ok(());
-        }
-        let write_batch_size = chunk.estimated_heap_size();
-        let batch = match &inner.writer {
-            IcebergWriterDispatch::Append { .. } => {
-                // separate out insert chunk
-                let filters =
-                    chunk.visibility() & ops.iter().map(|op| *op == Op::Insert).collect::<Bitmap>();
-                chunk.set_visibility(filters);
-                IcebergArrowConvert
-                    .to_record_batch(inner.arrow_schema.clone(), &chunk.compact_vis())
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
-            }
-            IcebergWriterDispatch::Upsert {
-                arrow_schema_with_op_column,
-                ..
-            } => {
-                let chunk = IcebergArrowConvert
-                    .to_record_batch(inner.arrow_schema.clone(), &chunk)
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-                let ops = Arc::new(Int32Array::from(
-                    ops.iter()
-                        .map(|op| match op {
-                            Op::UpdateInsert | Op::Insert => INSERT_OP,
-                            Op::UpdateDelete | Op::Delete => DELETE_OP,
-                        })
-                        .collect_vec(),
-                ));
-                let mut columns = chunk.columns().to_vec();
-                columns.push(ops);
-                RecordBatch::try_new(arrow_schema_with_op_column.clone(), columns)
-                    .map_err(|err| SinkError::Iceberg(anyhow!(err)))?
-            }
-        };
-
-        let writer = inner.writer.get_writer().unwrap();
-        writer
-            .write(batch)
-            .instrument_await("iceberg_write")
-            .await
-            .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
-        inner.metrics.write_bytes.inc_by(write_batch_size as _);
-        inner.uncommitted_write_bytes = inner
-            .uncommitted_write_bytes
-            .saturating_add(write_batch_size as u64);
-        Ok(())
+        inner.write_batch(chunk).await
     }
 
     fn should_commit_on_checkpoint(&self) -> bool {
@@ -753,77 +867,12 @@ impl SinkWriter for IcebergSinkWriter {
             return Ok(None);
         }
 
-        let close_result = match &mut inner.writer {
-            IcebergWriterDispatch::Append {
-                writer,
-                writer_builder,
-            } => {
-                let close_result = match writer.take() {
-                    Some(mut writer) => {
-                        Some(writer.close().instrument_await("iceberg_close").await)
-                    }
-                    _ => None,
-                };
-                match writer_builder.build() {
-                    Ok(new_writer) => {
-                        *writer = Some(Box::new(new_writer));
-                    }
-                    _ => {
-                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                        // here because current writer may close successfully. So we just log the error.
-                        tracing::warn!("Failed to build new writer after close");
-                    }
-                }
-                close_result
-            }
-            IcebergWriterDispatch::Upsert {
-                writer,
-                writer_builder,
-                ..
-            } => {
-                let close_result = match writer.take() {
-                    Some(mut writer) => {
-                        Some(writer.close().instrument_await("iceberg_close").await)
-                    }
-                    _ => None,
-                };
-                match writer_builder.build() {
-                    Ok(new_writer) => {
-                        *writer = Some(Box::new(new_writer));
-                    }
-                    _ => {
-                        // In this case, the writer is closed and we can't build a new writer. But we can't return the error
-                        // here because current writer may close successfully. So we just log the error.
-                        tracing::warn!("Failed to build new writer after close");
-                    }
-                }
-                close_result
-            }
-        };
-
-        match close_result {
-            Some(Ok(result)) => {
-                inner.uncommitted_write_bytes = 0;
-                let format_version = inner.table.metadata().format_version();
-                let partition_type = inner.table.metadata().default_partition_type();
-                let data_files = result
-                    .into_iter()
-                    .map(|f| {
-                        // Truncate large column statistics BEFORE serialization
-                        let truncated = truncate_datafile(f);
-                        SerializedDataFile::try_from(truncated, partition_type, format_version)
-                            .map_err(|err| SinkError::Iceberg(anyhow!(err)))
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                Ok(Some(SinkMetadata::try_from(&IcebergCommitResult {
-                    data_files,
-                    schema_id: inner.table.metadata().current_schema_id(),
-                    partition_spec_id: inner.table.metadata().default_partition_spec_id(),
-                })?))
-            }
-            Some(Err(err)) => Err(SinkError::Iceberg(anyhow!(err))),
-            None => Err(SinkError::Iceberg(anyhow!("No writer to close"))),
-        }
+        let data_files = inner
+            .close()
+            .await?
+            .ok_or_else(|| anyhow!("No writer to close"))?;
+        let res = inner.generate_commit_metadata(data_files)?;
+        Ok(Some(res))
     }
 }
 
@@ -850,7 +899,7 @@ const MAX_COLUMN_STAT_SIZE: usize = 10240; // 10KB
 ///
 /// # Returns
 /// The modified `DataFile` with large statistics truncated
-fn truncate_datafile(mut data_file: DataFile) -> DataFile {
+pub fn truncate_datafile(mut data_file: DataFile) -> DataFile {
     // Process lower_bounds - remove entries with large values
     data_file.lower_bounds.retain(|field_id, datum| {
         // Use to_bytes() to get the actual binary size without JSON serialization overhead

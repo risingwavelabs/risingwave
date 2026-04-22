@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use futures::{Stream, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::coordinate_request::{
-    CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
+    CommitRequest, CoordinationRole, StartCoordinationRequest, UpdateVnodeBitmapRequest,
 };
 use risingwave_pb::connector_service::coordinate_response::StartCoordinationResponse;
 use risingwave_pb::connector_service::{
@@ -40,9 +40,10 @@ impl CoordinatorStreamHandle {
         mut client: SinkCoordinationRpcClient,
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
+        role: CoordinationRole,
     ) -> Result<(Self, Option<u64>), RpcError> {
         let (instance, log_store_rewind_start_epoch) =
-            Self::new_with_init_stream(param, vnode_bitmap, |rx| async move {
+            Self::new_with_init_stream(param, vnode_bitmap, role, |rx| async move {
                 client.coordinate(ReceiverStream::new(rx)).await
             })
             .await?;
@@ -53,6 +54,7 @@ impl CoordinatorStreamHandle {
     pub async fn new_with_init_stream<F, St, Fut>(
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
+        role: CoordinationRole,
         init_stream: F,
     ) -> Result<(Self, Option<u64>), RpcError>
     where
@@ -66,6 +68,7 @@ impl CoordinatorStreamHandle {
                     StartCoordinationRequest {
                         vnode_bitmap: Some(vnode_bitmap.to_protobuf()),
                         param: Some(param),
+                        role: role as i32,
                     },
                 )),
             },

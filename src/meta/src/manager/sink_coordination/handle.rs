@@ -18,12 +18,11 @@ use anyhow::anyhow;
 use futures::{TryStreamExt, ready};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::SinkParam;
+use risingwave_pb::connector_service::coordinate_request::{self, CoordinationRole};
 use risingwave_pb::connector_service::coordinate_response::{
     CommitResponse, StartCoordinationResponse,
 };
-use risingwave_pb::connector_service::{
-    CoordinateResponse, coordinate_request, coordinate_response,
-};
+use risingwave_pb::connector_service::{CoordinateResponse, coordinate_response};
 use tonic::Status;
 
 use crate::manager::sink_coordination::{SinkCoordinatorResponseSender, SinkWriterRequestStream};
@@ -33,6 +32,7 @@ pub(super) struct SinkWriterCoordinationHandle {
     response_tx: SinkCoordinatorResponseSender,
     param: SinkParam,
     vnode_bitmap: Bitmap,
+    role: CoordinationRole,
     prev_epoch: Option<u64>,
 }
 
@@ -42,12 +42,14 @@ impl SinkWriterCoordinationHandle {
         response_tx: SinkCoordinatorResponseSender,
         param: SinkParam,
         vnode_bitmap: Bitmap,
+        role: CoordinationRole,
     ) -> Self {
         Self {
             request_stream,
             response_tx,
             param,
             vnode_bitmap,
+            role,
             prev_epoch: None,
         }
     }
@@ -58,6 +60,10 @@ impl SinkWriterCoordinationHandle {
 
     pub(super) fn vnode_bitmap(&self) -> &Bitmap {
         &self.vnode_bitmap
+    }
+
+    pub(super) fn role(&self) -> CoordinationRole {
+        self.role
     }
 
     pub(super) fn start(
@@ -85,7 +91,7 @@ impl SinkWriterCoordinationHandle {
                     aligned_initial_epoch,
                 )),
             }))
-            .map_err(|_| anyhow!("fail to send start response"))
+            .map_err(|_| anyhow!("fail to send align-initial-epoch response"))
     }
 
     pub(super) fn abort(self, status: Status) {
