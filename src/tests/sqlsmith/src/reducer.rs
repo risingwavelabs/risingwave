@@ -130,11 +130,11 @@ async fn log_explain_plan(client: &Client, sql: &str) {
         let explain_query = format!("EXPLAIN {}", last_stmt);
         match client.simple_query(&explain_query).await {
             Ok(rows) => {
-                let plan: Vec<&str> = rows
+                let plan: Vec<String> = rows
                     .iter()
                     .filter_map(|msg| {
                         if let tokio_postgres::SimpleQueryMessage::Row(row) = msg {
-                            row.get(0)
+                            row.get(0).map(|s| s.to_owned())
                         } else {
                             None
                         }
