@@ -378,11 +378,17 @@ impl SinkUpdateKind {
 
 /// Result of the read-only preparation step before applying a sink update.
 ///
+/// This bundles the original update intent together with the metadata loaded
+/// across the async gap, so the apply step can consume a single object.
+///
 /// `allow_track_initialization` stays `true` only when the sink had no track
 /// before the async config load. This lets the apply step initialize a new
 /// track for first-time updates, while preventing a stale update from
 /// resurrecting a track that disappeared during the async gap.
 struct PreparedSinkUpdate {
+    sink_id: SinkId,
+    kind: SinkUpdateKind,
+    now: Instant,
     allow_track_initialization: bool,
     loaded_config: Option<IcebergConfig>,
 }
@@ -415,38 +421,27 @@ impl IcebergCompactionManager {
     }
 
     pub async fn update_iceberg_commit_info(&self, msg: IcebergSinkCompactionUpdate) {
-        let IcebergSinkCompactionUpdate {
-            sink_id,
-            force_compaction,
-        } = msg;
-        let now = Instant::now();
-        let refresh_interval = self.config_refresh_interval();
-        let sink_update = if force_compaction {
-            SinkUpdateKind::ForceCompaction
-        } else {
-            SinkUpdateKind::Commit
-        };
-        let prepared_update = self
-            .prepare_sink_update(sink_id, now, refresh_interval)
-            .await;
+        let prepared_update = self.prepare_sink_update(msg, Instant::now()).await;
 
         let mut guard = self.inner.write();
-        self.apply_sink_update(
-            &mut guard,
-            sink_id,
-            sink_update,
-            now,
-            refresh_interval,
-            prepared_update,
-        );
+        self.apply_sink_update(&mut guard, prepared_update);
     }
 
     async fn prepare_sink_update(
         &self,
-        sink_id: SinkId,
+        msg: IcebergSinkCompactionUpdate,
         now: Instant,
-        refresh_interval: Duration,
     ) -> PreparedSinkUpdate {
+        let IcebergSinkCompactionUpdate {
+            sink_id,
+            force_compaction,
+        } = msg;
+        let kind = if force_compaction {
+            SinkUpdateKind::ForceCompaction
+        } else {
+            SinkUpdateKind::Commit
+        };
+        let refresh_interval = self.config_refresh_interval();
         let (allow_track_initialization, should_refresh_config) = {
             let guard = self.inner.read();
             match guard.sink_schedules.get(&sink_id) {
@@ -472,6 +467,9 @@ impl IcebergCompactionManager {
         };
 
         PreparedSinkUpdate {
+            sink_id,
+            kind,
+            now,
             allow_track_initialization,
             loaded_config,
         }
@@ -480,16 +478,16 @@ impl IcebergCompactionManager {
     fn apply_sink_update(
         &self,
         guard: &mut IcebergCompactionManagerInner,
-        sink_id: SinkId,
-        sink_update: SinkUpdateKind,
-        now: Instant,
-        refresh_interval: Duration,
         prepared_update: PreparedSinkUpdate,
     ) {
         let PreparedSinkUpdate {
+            sink_id,
+            kind,
+            now,
             allow_track_initialization,
             loaded_config,
         } = prepared_update;
+        let refresh_interval = self.config_refresh_interval();
 
         match guard.sink_schedules.entry(sink_id) {
             Entry::Occupied(entry) => {
@@ -500,7 +498,7 @@ impl IcebergCompactionManager {
                     self.refresh_schedule_config(track, config, now);
                 }
 
-                sink_update.apply_to_track(track, now);
+                kind.apply_to_track(track, now);
             }
             Entry::Vacant(entry) => {
                 if !allow_track_initialization {
@@ -520,7 +518,7 @@ impl IcebergCompactionManager {
                 };
 
                 let track = entry.insert(self.create_compaction_track(config, now));
-                sink_update.apply_to_track(track, now);
+                kind.apply_to_track(track, now);
             }
         }
     }

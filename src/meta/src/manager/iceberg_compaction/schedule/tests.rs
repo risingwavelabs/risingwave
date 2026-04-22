@@ -388,11 +388,10 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
 
     manager.apply_sink_update(
         &mut guard,
-        sink_id,
-        SinkUpdateKind::Commit,
-        refresh_at,
-        manager.config_refresh_interval(),
         PreparedSinkUpdate {
+            sink_id,
+            kind: SinkUpdateKind::Commit,
+            now: refresh_at,
             allow_track_initialization: false,
             loaded_config: Some(config),
         },
@@ -468,11 +467,10 @@ async fn test_apply_sink_update_creates_missing_track() {
 
     manager.apply_sink_update(
         &mut guard,
-        sink_id,
-        SinkUpdateKind::Commit,
-        now,
-        manager.config_refresh_interval(),
         PreparedSinkUpdate {
+            sink_id,
+            kind: SinkUpdateKind::Commit,
+            now,
             allow_track_initialization: true,
             loaded_config: Some(config),
         },
@@ -500,11 +498,10 @@ async fn test_apply_sink_update_does_not_resurrect_disappeared_track() {
 
     manager.apply_sink_update(
         &mut guard,
-        sink_id,
-        SinkUpdateKind::Commit,
-        now,
-        manager.config_refresh_interval(),
         PreparedSinkUpdate {
+            sink_id,
+            kind: SinkUpdateKind::Commit,
+            now,
             allow_track_initialization: false,
             loaded_config: Some(config),
         },
