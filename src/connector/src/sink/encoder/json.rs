@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(test)]
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -27,9 +29,6 @@ use risingwave_common::types::{DataType, DatumRef, JsonbVal, ScalarRefImpl, ToTe
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{Map, Value, json};
 use thiserror_ext::AsReport;
-
-#[cfg(test)]
-use std::collections::{HashMap, HashSet};
 
 use super::{
     CustomJsonType, DateHandlingMode, DorisJsonConfig, JsonbHandlingMode, KafkaConnectParams,
