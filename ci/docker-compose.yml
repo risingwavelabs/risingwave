@@ -260,6 +260,8 @@ services:
 
   source-pubsub-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - pubsub-emulator
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s

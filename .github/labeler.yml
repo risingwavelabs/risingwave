@@ -226,3 +226,5 @@ labels:
 - label: "ci/run-e2e-deltalake-sink-rust-tests"
   files:
   - "src\\/connector\\/src\\/sink\\/deltalake\\.rs"
+  - "ci\\/scripts\\/e2e-deltalake-sink-rust-test\\.sh"
+  - "e2e_test\\/sink\\/deltalake_rust_sink\\.slt"
