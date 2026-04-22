@@ -122,6 +122,12 @@ download_old_connector_artifact() {
 setup_old_cluster() {
   echo "--- Build risedev for $OLD_VERSION, it may not be backwards compatible"
   git config --global --add safe.directory /risingwave
+  # `common.sh` exports GIT_SHA=$BUILDKITE_COMMIT (the PR tip). After we
+  # check out an old tag, vergen's VERGEN_GIT_SHA reflects the old commit,
+  # and the compile-time assertion in src/cmd_all/src/bin/risingwave.rs
+  # panics because the two SHAs disagree. Drop GIT_SHA so the old build
+  # only relies on VERGEN_GIT_SHA.
+  unset GIT_SHA
   git checkout "v${OLD_VERSION}"
   cargo build -p risedev
   echo "--- Get RisingWave binary for $OLD_VERSION"
