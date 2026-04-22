@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use expect_test::expect;
@@ -27,10 +28,10 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::id::FragmentId;
 use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH, MAX_EPOCH, test_epoch};
-use risingwave_hummock_sdk::key::{FullKey, TableKeyRange, prefixed_range_with_vnode};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, prefixed_range_with_vnode};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo, SyncResult};
-use risingwave_meta::hummock::CommitEpochInfo;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::{CommitEpochInfo, MockHummockMetaClient};
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
@@ -45,7 +46,9 @@ use risingwave_storage::store_impl::verify::VerifyStateStore;
 
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{TestIngestBatch, gen_key_from_str, with_hummock_storage};
+use crate::test_utils::{
+    TestIngestBatch, gen_key_from_str, register_tables_with_id_for_test, with_hummock_storage,
+};
 
 #[tokio::test]
 async fn test_empty_read() {
@@ -1436,6 +1439,128 @@ async fn test_replicated_local_hummock_storage() {
         "#]];
         expected.assert_debug_eq(&actual);
     }
+}
+
+#[tokio::test]
+async fn test_iter_uncommitted_log_reads_staging_ssts() {
+    let table_id = TableId::new(233);
+    let sstable_store = mock_sstable_store().await;
+    let mut hummock_options = default_opts_for_test();
+    // Force the uploader to spill flushed imms into staging SSTs within the current epoch.
+    hummock_options.shared_buffer_capacity_mb = 1;
+    hummock_options.shared_buffer_flush_ratio = 0.0;
+    hummock_options.shared_buffer_min_batch_flush_size_mb = 0;
+    let hummock_options = Arc::new(hummock_options);
+    let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
+    let hummock_storage = HummockStorage::for_test(
+        hummock_options,
+        sstable_store,
+        Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_id as _,
+        )),
+        get_notification_client_for_test(
+            env,
+            hummock_manager_ref.clone(),
+            cluster_ctl_ref,
+            worker_id,
+        )
+        .await,
+    )
+    .await
+    .unwrap();
+    register_tables_with_id_for_test(
+        hummock_storage.compaction_catalog_manager_ref(),
+        &hummock_manager_ref,
+        &[table_id],
+    )
+    .await;
+
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions {
+            table_id,
+            fragment_id: FragmentId::default(),
+            op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
+                check_old_value: CHECK_BYTES_EQUAL.clone(),
+                is_log_store: true,
+            },
+            table_option: Default::default(),
+            is_replicated: false,
+            vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+            upload_on_flush: true,
+        })
+        .await;
+
+    let epoch = test_epoch(1);
+    hummock_storage.start_epoch(epoch, HashSet::from_iter([table_id]));
+    local.init_for_test(epoch).await.unwrap();
+
+    let key1 = gen_key_from_str(VirtualNode::ZERO, "key1");
+    let key2 = gen_key_from_str(VirtualNode::ZERO, "key2");
+    let key3 = gen_key_from_str(VirtualNode::ZERO, "key3");
+    let value1 = Bytes::from_static(b"value1");
+    let value2 = Bytes::from_static(b"value2");
+    let value10 = Bytes::from_static(b"value10");
+    let value3 = Bytes::from_static(b"value3");
+
+    LocalStateStore::insert(&mut local, key1.clone(), value1.clone(), None).unwrap();
+    LocalStateStore::insert(&mut local, key2.clone(), value2.clone(), None).unwrap();
+    local.flush().await.unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let has_staging_sst = {
+            let read_version = local.read_version();
+            let staging = read_version.read();
+            !staging.staging().sst.is_empty()
+        };
+        if has_staging_sst {
+            break;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for uploaded staging SSTs"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    LocalStateStore::insert(
+        &mut local,
+        key1.clone(),
+        value10.clone(),
+        Some(value1.clone()),
+    )
+    .unwrap();
+    local.delete(key2.clone(), value2.clone()).unwrap();
+    LocalStateStore::insert(&mut local, key3.clone(), value3.clone(), None).unwrap();
+    local.flush().await.unwrap();
+
+    let mut iter = tokio::time::timeout(Duration::from_secs(5), local.iter_uncommitted_log())
+        .await
+        .expect("timed out creating iter_uncommitted_log iterator")
+        .unwrap();
+    let mut actual = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some((key, change)) = iter.try_next().await.unwrap() {
+            actual.push((
+                TableKey(Bytes::copy_from_slice(key.as_ref())),
+                change
+                    .try_map(|value| Ok(Bytes::copy_from_slice(value)))
+                    .unwrap(),
+            ));
+        }
+    })
+    .await
+    .expect("timed out consuming iter_uncommitted_log iterator");
+
+    assert_eq!(
+        actual,
+        vec![
+            (key1, ChangeLogValue::Insert(value10)),
+            (key3, ChangeLogValue::Insert(value3)),
+        ]
+    );
 }
 
 #[tokio::test]
