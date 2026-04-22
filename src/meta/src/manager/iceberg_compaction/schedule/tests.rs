@@ -463,6 +463,7 @@ async fn test_apply_sink_update_creates_missing_track() {
     let config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
     let mut guard = IcebergCompactionManagerInner {
         sink_schedules: HashMap::new(),
+        manual_task_waiters: HashMap::new(),
     };
 
     manager.apply_sink_update(
@@ -494,6 +495,7 @@ async fn test_apply_sink_update_does_not_resurrect_disappeared_track() {
     let config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
     let mut guard = IcebergCompactionManagerInner {
         sink_schedules: HashMap::new(),
+        manual_task_waiters: HashMap::new(),
     };
 
     manager.apply_sink_update(
@@ -562,6 +564,63 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
     let track = guard.sink_schedules.get(&sink_id).unwrap();
     assert_eq!(track.pending_commit_count, 3);
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+}
+
+#[tokio::test]
+async fn test_handle_report_task_completes_manual_waiter_on_success() {
+    let manager = build_test_manager().await;
+    let task_id = 42;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    manager
+        .inner
+        .write()
+        .manual_task_waiters
+        .insert(task_id, tx);
+
+    manager.handle_report_task(IcebergReportTask {
+        task_id,
+        sink_id: SinkId::new(47).as_raw_id(),
+        status: IcebergReportTaskStatus::Success as i32,
+        error_message: None,
+    });
+
+    assert!(rx.await.unwrap().is_ok());
+    assert!(
+        !manager
+            .inner
+            .read()
+            .manual_task_waiters
+            .contains_key(&task_id)
+    );
+}
+
+#[tokio::test]
+async fn test_handle_report_task_completes_manual_waiter_on_failure() {
+    let manager = build_test_manager().await;
+    let task_id = 43;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    manager
+        .inner
+        .write()
+        .manual_task_waiters
+        .insert(task_id, tx);
+
+    manager.handle_report_task(IcebergReportTask {
+        task_id,
+        sink_id: SinkId::new(48).as_raw_id(),
+        status: IcebergReportTaskStatus::Failed as i32,
+        error_message: Some("boom".to_owned()),
+    });
+
+    let error = rx.await.unwrap().unwrap_err();
+    assert!(error.to_string().contains("boom"));
+    assert!(
+        !manager
+            .inner
+            .read()
+            .manual_task_waiters
+            .contains_key(&task_id)
+    );
 }
 
 #[tokio::test]

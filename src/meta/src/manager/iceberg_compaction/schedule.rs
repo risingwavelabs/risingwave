@@ -684,6 +684,10 @@ impl IcebergCompactionManager {
     }
 
     pub fn handle_report_task(&self, report: IcebergReportTask) {
+        if self.complete_manual_task_if_any(&report) {
+            return;
+        }
+
         let sink_id = SinkId::from(report.sink_id);
         let task_id = report.task_id;
         let status = IcebergReportTaskStatus::try_from(report.status)

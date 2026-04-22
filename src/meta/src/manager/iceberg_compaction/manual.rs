@@ -13,46 +13,84 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use iceberg::spec::Operation;
 use risingwave_connector::sink::catalog::SinkId;
-use risingwave_connector::sink::iceberg::should_enable_iceberg_cow;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportTask as IcebergReportTask;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_task::Status as IcebergReportTaskStatus;
+use tokio::sync::oneshot;
 
 use super::*;
+use crate::hummock::sequence::next_compaction_task_id;
 
 impl IcebergCompactionManager {
+    fn register_manual_task_waiter(&self, task_id: u64) -> oneshot::Receiver<MetaResult<()>> {
+        let (tx, rx) = oneshot::channel();
+        let previous = self.inner.write().manual_task_waiters.insert(task_id, tx);
+        debug_assert!(previous.is_none(), "manual waiter already registered");
+        rx
+    }
+
+    fn clear_manual_task_waiter(&self, task_id: u64) {
+        self.inner.write().manual_task_waiters.remove(&task_id);
+    }
+
+    pub(super) fn complete_manual_task_if_any(&self, report: &IcebergReportTask) -> bool {
+        let Some(waiter) = self
+            .inner
+            .write()
+            .manual_task_waiters
+            .remove(&report.task_id)
+        else {
+            return false;
+        };
+
+        let status = IcebergReportTaskStatus::try_from(report.status)
+            .unwrap_or(IcebergReportTaskStatus::Unspecified);
+        let result = match status {
+            IcebergReportTaskStatus::Success => Ok(()),
+            IcebergReportTaskStatus::Failed | IcebergReportTaskStatus::Unspecified => {
+                let message = report
+                    .error_message
+                    .clone()
+                    .unwrap_or_else(|| "manual iceberg compaction failed".to_owned());
+                Err(anyhow!(
+                    "Manual iceberg compaction task {} for sink {} failed: {}",
+                    report.task_id,
+                    report.sink_id,
+                    message
+                )
+                .into())
+            }
+        };
+
+        let _ = waiter.send(result);
+        true
+    }
+
     pub async fn trigger_manual_compaction(&self, sink_id: SinkId) -> MetaResult<u64> {
         use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
-
-        let iceberg_config = self.load_iceberg_config(sink_id).await?;
-        let initial_table = iceberg_config.load_table().await?;
-        let initial_snapshot_id = initial_table
-            .metadata()
-            .current_snapshot()
-            .map(|s| s.snapshot_id())
-            .unwrap_or(0);
-        let initial_timestamp = chrono::Utc::now().timestamp_millis();
 
         let compactor = self
             .iceberg_compactor_manager
             .next_compactor()
             .ok_or_else(|| anyhow!("No iceberg compactor available"))?;
 
-        let task_id = self
-            .env
-            .hummock_seq
-            .next_interval("compaction_task", 1)
-            .await?;
-
+        let task_id = next_compaction_task_id(&self.env).await?;
         let sink_param = self.get_sink_param(sink_id).await?;
+        let waiter = self.register_manual_task_waiter(task_id);
 
-        compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
-            task_id,
-            sink_id: sink_id.as_raw_id(),
-            props: sink_param.properties,
-            task_type: TaskType::Full as i32,
-        }))?;
+        if let Err(error) =
+            compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
+                task_id,
+                sink_id: sink_id.as_raw_id(),
+                props: sink_param.properties,
+                task_type: TaskType::Full as i32,
+            }))
+        {
+            self.clear_manual_task_waiter(task_id);
+            return Err(error);
+        }
 
         tracing::info!(
             "Manual compaction triggered for sink {} with task ID {}, waiting for completion...",
@@ -60,14 +98,8 @@ impl IcebergCompactionManager {
             task_id
         );
 
-        self.wait_for_compaction_completion(
-            &sink_id,
-            iceberg_config,
-            initial_snapshot_id,
-            initial_timestamp,
-            task_id,
-        )
-        .await?;
+        self.wait_for_compaction_completion(&sink_id, task_id, waiter)
+            .await?;
 
         Ok(task_id)
     }
@@ -75,80 +107,27 @@ impl IcebergCompactionManager {
     async fn wait_for_compaction_completion(
         &self,
         sink_id: &SinkId,
-        iceberg_config: IcebergConfig,
-        initial_snapshot_id: i64,
-        initial_timestamp: i64,
         task_id: u64,
+        waiter: oneshot::Receiver<MetaResult<()>>,
     ) -> MetaResult<()> {
-        const INITIAL_POLL_INTERVAL_SECS: u64 = 2;
-        const MAX_POLL_INTERVAL_SECS: u64 = 60;
-        const MAX_WAIT_TIME_SECS: u64 = 1800;
-        const BACKOFF_MULTIPLIER: f64 = 1.5;
+        let _cleanup_guard =
+            scopeguard::guard(task_id, |task_id| self.clear_manual_task_waiter(task_id));
 
-        let mut elapsed_time = 0;
-        let mut current_interval_secs = INITIAL_POLL_INTERVAL_SECS;
-
-        let cow =
-            should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
-
-        while elapsed_time < MAX_WAIT_TIME_SECS {
-            let poll_interval = std::time::Duration::from_secs(current_interval_secs);
-            tokio::time::sleep(poll_interval).await;
-            elapsed_time += current_interval_secs;
-
-            tracing::info!(
-                "Checking iceberg compaction completion for sink {} task_id={}, elapsed={}s, interval={}s",
+        match tokio::time::timeout(self.report_timeout(), waiter).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(anyhow!(
+                "Manual iceberg compaction waiter dropped unexpectedly for sink {} (task_id={})",
                 sink_id,
-                task_id,
-                elapsed_time,
-                current_interval_secs
-            );
-
-            let current_table = iceberg_config.load_table().await?;
-
-            let metadata = current_table.metadata();
-            let new_snapshots: Vec<_> = metadata
-                .snapshots()
-                .filter(|snapshot| {
-                    let snapshot_timestamp = snapshot.timestamp_ms();
-                    let snapshot_id = snapshot.snapshot_id();
-                    snapshot_timestamp > initial_timestamp && snapshot_id != initial_snapshot_id
-                })
-                .collect();
-
-            for snapshot in new_snapshots {
-                let summary = snapshot.summary();
-                if cow {
-                    if matches!(summary.operation, Operation::Overwrite) {
-                        tracing::info!(
-                            "Iceberg compaction completed for sink {} task_id={} with Overwrite operation",
-                            sink_id,
-                            task_id
-                        );
-                        return Ok(());
-                    }
-                } else if matches!(summary.operation, Operation::Replace) {
-                    tracing::info!(
-                        "Iceberg compaction completed for sink {} task_id={} with Replace operation",
-                        sink_id,
-                        task_id
-                    );
-                    return Ok(());
-                }
-            }
-
-            current_interval_secs = std::cmp::min(
-                MAX_POLL_INTERVAL_SECS,
-                ((current_interval_secs as f64) * BACKOFF_MULTIPLIER) as u64,
-            );
+                task_id
+            )
+            .into()),
+            Err(_) => Err(anyhow!(
+                "Iceberg compaction did not report completion within {} seconds for sink {} (task_id={})",
+                self.report_timeout().as_secs(),
+                sink_id,
+                task_id
+            )
+            .into()),
         }
-
-        Err(anyhow!(
-            "Iceberg compaction did not complete within {} seconds for sink {} (task_id={})",
-            MAX_WAIT_TIME_SECS,
-            sink_id,
-            task_id
-        )
-        .into())
     }
 }
