@@ -19,11 +19,10 @@ use risingwave_common::array::{DataChunk, Op, SerialArray, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_pb::task_service::FastInsertRequest;
 
-use crate::error::Result;
+use crate::error::{BatchError, Result};
 
 /// A fast insert executor spacially designed for non-pgwire inserts such as websockets and webhooks.
 pub struct FastInsertExecutor {
@@ -94,8 +93,8 @@ impl FastInsertExecutor {
     pub async fn do_execute(
         self,
         data_chunk_to_insert: DataChunk,
-        returning_epoch: bool,
-    ) -> Result<Epoch> {
+        wait_for_persistence: bool,
+    ) -> Result<()> {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
@@ -140,12 +139,14 @@ impl FastInsertExecutor {
             Result::Ok(())
         };
         write_txn_data(data_chunk_to_insert).await?;
-        if returning_epoch {
-            write_handle.end_returning_epoch().await.map_err(Into::into)
+        if wait_for_persistence {
+            write_handle
+                .end_wait_persistence()
+                .map_err(BatchError::from)?
+                .await
+                .map_err(BatchError::from)
         } else {
-            write_handle.end().await?;
-            // the returned epoch is invalid and should not be used.
-            Ok(Epoch(INVALID_EPOCH))
+            write_handle.end().await.map_err(Into::into)
         }
     }
 }
@@ -153,7 +154,6 @@ impl FastInsertExecutor {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::ops::Bound;
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
@@ -162,8 +162,6 @@ mod tests {
     use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::JsonbVal;
     use risingwave_dml::dml_manager::DmlManager;
-    use risingwave_storage::hummock::test_utils::{ReadOptions, StateStoreReadTestExt};
-    use risingwave_storage::memory::MemoryStateStore;
     use serde_json::json;
 
     use super::*;
@@ -173,9 +171,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fast_insert() -> Result<()> {
-        let epoch = Epoch::now();
         let dml_manager = Arc::new(DmlManager::for_test());
-        let store = MemoryStateStore::new();
         // Schema of the table
         let mut schema = Schema::new(vec![Field::unnamed(DataType::Jsonb)]);
         schema.fields.push(Field::unnamed(DataType::Serial)); // row_id column
@@ -221,28 +217,22 @@ mod tests {
             0,
         ));
         let handle = tokio::spawn(async move {
-            let epoch_received = insert_executor.do_execute(data_chunk, true).await.unwrap();
-            assert_eq!(epoch, epoch_received);
+            insert_executor.do_execute(data_chunk, true).await.unwrap();
         });
 
         // Read
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Data(_, chunk) => {
-            assert_eq!(chunk.columns().len(),2);
+            assert_eq!(chunk.columns().len(), 2);
             let array = chunk.columns()[0].as_jsonb().iter().collect::<Vec<_>>();
             assert_eq!(JsonbVal::from(array[0].unwrap()), jsonb_val);
         });
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, Some(epoch_notifier)) => {
-            epoch_notifier.send(epoch).unwrap();
+        // Simulate the DmlExecutor: fire the persistence notifier after try_wait_epoch succeeds.
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, Some(persistence_notifier)) => {
+            persistence_notifier.send(()).unwrap();
         });
-        let epoch = u64::MAX;
-        let full_range = (Bound::Unbounded, Bound::Unbounded);
-        let store_content = store
-            .scan(full_range, epoch, None, ReadOptions::default())
-            .await?;
-        assert!(store_content.is_empty());
 
         handle.await.unwrap();
 

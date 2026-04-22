@@ -21,7 +21,6 @@ use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
     FastInsertResponse, GetDataResponse, TaskInfoResponse, fast_insert_response,
 };
-use risingwave_storage::dispatch_state_store;
 use thiserror_ext::AsReport;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -204,28 +203,12 @@ impl BatchServiceImpl {
     }
 
     async fn do_fast_insert(&self, insert_req: FastInsertRequest) -> Result<(), BatchError> {
-        let table_id = insert_req.table_id;
         let wait_for_persistence = insert_req.wait_for_persistence;
         let (executor, data_chunk) =
             FastInsertExecutor::build(self.env.dml_manager_ref(), insert_req)?;
-        let epoch = executor
+        executor
             .do_execute(data_chunk, wait_for_persistence)
             .await?;
-        if wait_for_persistence {
-            dispatch_state_store!(self.env.state_store(), store, {
-                use risingwave_hummock_sdk::HummockReadEpoch;
-                use risingwave_storage::StateStore;
-                use risingwave_storage::store::TryWaitEpochOptions;
-
-                store
-                    .try_wait_epoch(
-                        HummockReadEpoch::Committed(epoch.0),
-                        TryWaitEpochOptions { table_id },
-                    )
-                    .await
-                    .map_err(BatchError::from)?;
-            });
-        }
         Ok(())
     }
 }
