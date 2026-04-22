@@ -128,6 +128,14 @@ impl LocalStateStore for PanicStateStore {
     }
 }
 
+impl LocalStateStoreReadLog for PanicStateStore {
+    type ChangeLogIter = PanicStateStoreIter<StateStoreReadLogItem>;
+
+    async fn iter_uncommitted_log(&self) -> StorageResult<Self::ChangeLogIter> {
+        panic!("should not operate on the panic state store!");
+    }
+}
+
 impl StateStoreWriteEpochControl for PanicStateStore {
     async fn flush(&mut self) -> StorageResult<usize> {
         panic!("should not operate on the panic state store!");

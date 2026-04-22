@@ -34,6 +34,7 @@ use super::version::VersionUpdate;
 use crate::error::StorageResult;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
+use crate::hummock::iterator::change_log::BaseChangeLogIterator;
 use crate::hummock::iterator::{
     Backward, BackwardUserIterator, ConcatIteratorInner, Forward, HummockIteratorUnion,
     IteratorFactory, MergeIterator, UserIterator,
@@ -427,6 +428,66 @@ impl LocalStateStore for LocalHummockStorage {
     }
 }
 
+impl LocalStateStoreReadLog for LocalHummockStorage {
+    type ChangeLogIter = LocalHummockStorageChangeLogIterator;
+
+    async fn iter_uncommitted_log(&self) -> StorageResult<Self::ChangeLogIter> {
+        assert!(
+            !self.mem_table.is_dirty(),
+            "iter_uncommitted_log requires all writes to be flushed before reading the local changelog"
+        );
+
+        let current_epoch = self.epoch();
+        let imms = {
+            let read_version = self.read_version.read();
+            read_version
+                .staging()
+                .pending_imms
+                .iter()
+                .map(|(imm, _)| imm)
+                .chain(read_version.staging().uploading_imms.iter())
+                .filter(|imm| imm.min_epoch() <= current_epoch && current_epoch <= imm.max_epoch())
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+
+        debug_assert!(
+            imms.iter().all(SharedBufferBatch::has_old_value),
+            "local changelog iteration expects imm old values to be preserved"
+        );
+
+        let new_value_iter = MergeIterator::new(
+            imms.iter()
+                .cloned()
+                .map(SharedBufferBatch::into_forward_iter),
+        );
+        let old_value_iter = MergeIterator::new(imms.into_iter().map(|imm| {
+            assert!(
+                imm.has_old_value(),
+                "local changelog iteration requires old values in imm for table {} epoch {}",
+                self.table_id,
+                current_epoch
+            );
+            imm.into_old_value_iter()
+        }));
+
+        BaseChangeLogIterator::new(
+            (current_epoch, current_epoch),
+            (Bound::Unbounded, Bound::Unbounded),
+            new_value_iter,
+            old_value_iter,
+            self.table_id,
+            IterLocalMetricsGuard::new(
+                self.hummock_version_reader.stats().clone(),
+                self.table_id,
+                StoreLocalStatistic::default(),
+            ),
+        )
+        .await
+        .map_err(Into::into)
+    }
+}
+
 impl StateStoreWriteEpochControl for LocalHummockStorage {
     async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
@@ -803,6 +864,10 @@ impl LocalHummockStorage {
 
 pub type StagingDataIterator = MergeIterator<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
+>;
+pub type LocalHummockStorageChangeLogIterator = BaseChangeLogIterator<
+    MergeIterator<SharedBufferBatchIterator<Forward>>,
+    MergeIterator<SharedBufferBatchIterator<Forward, false>>,
 >;
 pub type StagingDataRevIterator = MergeIterator<
     HummockIteratorUnion<Backward, SharedBufferBatchIterator<Backward>, BackwardSstableIterator>,
