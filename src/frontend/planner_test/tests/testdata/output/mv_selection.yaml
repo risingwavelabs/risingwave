@@ -275,3 +275,69 @@
     └─BatchSortAgg { group_key: [mv_rollup_dup.a], aggs: [sum0(mv_rollup_dup.s1)] }
       └─BatchExchange { order: [mv_rollup_dup.a ASC], dist: HashShard(mv_rollup_dup.a) }
         └─BatchScan { table: mv_rollup_dup, columns: [mv_rollup_dup.a, mv_rollup_dup.s1], distribution: SomeShard }
+- id: inner_join_selection
+  sql: |
+    create table depts (deptno int, deptname varchar);
+    create table emps (empid int, deptno int, empname varchar);
+    create materialized view mv_join as
+      select empid
+      from emps
+      join depts using (deptno);
+    set enable_mv_selection = true;
+    select empid
+    from depts
+    join (
+      select empid, deptno
+      from emps
+      where empid = 1
+    ) as subq
+    on depts.deptno = subq.deptno;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (mv_join.empid = 1:Int32) }
+      └─BatchScan { table: mv_join, columns: [mv_join.empid], distribution: SomeShard }
+- id: multi_inner_join_selection
+  sql: |
+    create table t1_multi (a int, b int);
+    create table t2_multi (b int, c int);
+    create table t3_multi (c int, d int);
+    create materialized view mv_multi_join as
+      select a
+      from t1_multi
+      join t2_multi using (b)
+      join t3_multi using (c);
+    set enable_mv_selection = true;
+    select a
+    from t3_multi
+    join t2_multi using (c)
+    join (
+      select a, b
+      from t1_multi
+      where a = 1
+    ) as subq
+    using (b);
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (mv_multi_join.a = 1:Int32) }
+      └─BatchScan { table: mv_multi_join, columns: [mv_multi_join.a], distribution: SomeShard }
+- id: inner_join_self_join_selection
+  sql: |
+    create table t_self (a int, b int);
+    create materialized view mv_self_join as
+      select l.a
+      from t_self as l
+      join t_self as r
+      on l.b = r.b;
+    set enable_mv_selection = true;
+    select l.a
+    from t_self as r
+    join (
+      select a, b
+      from t_self
+      where a = 1
+    ) as l
+    on r.b = l.b;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (mv_self_join.a = 1:Int32) }
+      └─BatchScan { table: mv_self_join, columns: [mv_self_join.a], distribution: SomeShard }

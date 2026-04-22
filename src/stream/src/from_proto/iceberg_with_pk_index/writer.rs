@@ -12,13 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[allow(clippy::duplicate_mod)]
-#[path = "./arrow_impl.rs"]
-mod arrow_impl;
-type ArrowIntervalType = arrow_buffer::IntervalMonthDayNano;
-#[allow(unused_imports)]
-pub use arrow_impl::{FromArrow, ToArrow, is_parquet_schema_match_source_schema};
-pub use {
-    arrow_57_array as arrow_array, arrow_57_buffer as arrow_buffer, arrow_57_cast as arrow_cast,
-    arrow_57_schema as arrow_schema,
-};
+use risingwave_pb::stream_plan::IcebergWithPkIndexWriterNode;
+use risingwave_storage::StateStore;
+
+use crate::error::StreamResult;
+use crate::executor::Executor;
+use crate::from_proto::ExecutorBuilder;
+use crate::task::ExecutorParams;
+
+pub struct IcebergWithPkIndexWriterExecutorBuilder;
+
+impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
+    type Node = IcebergWithPkIndexWriterNode;
+
+    async fn new_boxed_executor(
+        _params: ExecutorParams,
+        _node: &Self::Node,
+        _store: impl StateStore,
+    ) -> StreamResult<Executor> {
+        todo!()
+    }
+}
