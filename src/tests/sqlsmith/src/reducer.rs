@@ -109,7 +109,11 @@ fn shrink_statements(sql: &str) -> Result<String> {
 }
 
 /// Shrink function using path-based reduction
-async fn shrink_with_reducer(sql: &str, client: Client, restore_cmd: &str) -> Result<(String, Client)> {
+async fn shrink_with_reducer(
+    sql: &str,
+    client: Client,
+    restore_cmd: &str,
+) -> Result<(String, Client)> {
     let sql_statements = parse_sql(sql);
     let proceeding_stmts = sql_statements.split_last().unwrap().1.to_vec();
     let checker = Checker::new(client, proceeding_stmts, restore_cmd.to_owned());
