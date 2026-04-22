@@ -596,6 +596,12 @@ impl IcebergConfig {
             )));
         }
 
+        if config.trigger_snapshot_count == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.trigger_snapshot_count` must be greater than 0"
+            )));
+        }
+
         // Validate table identifier (e.g., database.name should not contain dots)
         config
             .table

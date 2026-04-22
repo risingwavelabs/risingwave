@@ -393,8 +393,8 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
         refresh_at,
         manager.config_refresh_interval(),
         PreparedSinkUpdate {
-            track_existed_at_check: true,
-            config_refresh: ScheduleConfigRefresh::Loaded(config),
+            allow_track_initialization: false,
+            loaded_config: Some(config),
         },
     );
 
@@ -473,8 +473,8 @@ async fn test_apply_sink_update_creates_missing_track() {
         now,
         manager.config_refresh_interval(),
         PreparedSinkUpdate {
-            track_existed_at_check: false,
-            config_refresh: ScheduleConfigRefresh::Loaded(config),
+            allow_track_initialization: true,
+            loaded_config: Some(config),
         },
     );
 
@@ -505,8 +505,8 @@ async fn test_apply_sink_update_does_not_resurrect_disappeared_track() {
         now,
         manager.config_refresh_interval(),
         PreparedSinkUpdate {
-            track_existed_at_check: true,
-            config_refresh: ScheduleConfigRefresh::Loaded(config),
+            allow_track_initialization: false,
+            loaded_config: Some(config),
         },
     );
 

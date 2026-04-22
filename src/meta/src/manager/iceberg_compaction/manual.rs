@@ -24,11 +24,22 @@ use super::*;
 use crate::hummock::sequence::next_compaction_task_id;
 
 impl IcebergCompactionManager {
-    fn register_manual_task_waiter(&self, task_id: u64) -> oneshot::Receiver<MetaResult<()>> {
+    fn register_manual_task_waiter(
+        &self,
+        task_id: u64,
+    ) -> MetaResult<oneshot::Receiver<MetaResult<()>>> {
         let (tx, rx) = oneshot::channel();
-        let previous = self.inner.write().manual_task_waiters.insert(task_id, tx);
-        debug_assert!(previous.is_none(), "manual waiter already registered");
-        rx
+        match self.inner.write().manual_task_waiters.entry(task_id) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(tx);
+                Ok(rx)
+            }
+            std::collections::hash_map::Entry::Occupied(_) => Err(anyhow!(
+                "manual iceberg compaction waiter already exists for task_id={}",
+                task_id
+            )
+            .into()),
+        }
     }
 
     fn clear_manual_task_waiter(&self, task_id: u64) {
@@ -78,7 +89,7 @@ impl IcebergCompactionManager {
 
         let task_id = next_compaction_task_id(&self.env).await?;
         let sink_param = self.get_sink_param(sink_id).await?;
-        let waiter = self.register_manual_task_waiter(task_id);
+        let waiter = self.register_manual_task_waiter(task_id)?;
 
         if let Err(error) =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {

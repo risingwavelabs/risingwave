@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -375,15 +376,15 @@ impl SinkUpdateKind {
     }
 }
 
-enum ScheduleConfigRefresh {
-    NotNeeded,
-    Loaded(IcebergConfig),
-    Failed,
-}
-
+/// Result of the read-only preparation step before applying a sink update.
+///
+/// `allow_track_initialization` stays `true` only when the sink had no track
+/// before the async config load. This lets the apply step initialize a new
+/// track for first-time updates, while preventing a stale update from
+/// resurrecting a track that disappeared during the async gap.
 struct PreparedSinkUpdate {
-    track_existed_at_check: bool,
-    config_refresh: ScheduleConfigRefresh,
+    allow_track_initialization: bool,
+    loaded_config: Option<IcebergConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -446,33 +447,33 @@ impl IcebergCompactionManager {
         now: Instant,
         refresh_interval: Duration,
     ) -> PreparedSinkUpdate {
-        let (track_existed_at_check, should_refresh_config) = {
+        let (allow_track_initialization, should_refresh_config) = {
             let guard = self.inner.read();
             match guard.sink_schedules.get(&sink_id) {
-                Some(track) => (true, track.should_refresh_config(now, refresh_interval)),
-                None => (false, true),
+                Some(track) => (false, track.should_refresh_config(now, refresh_interval)),
+                None => (true, true),
             }
         };
 
-        let config_refresh = if should_refresh_config {
+        let loaded_config = if should_refresh_config {
             match self.load_iceberg_config(sink_id).await {
-                Ok(config) => ScheduleConfigRefresh::Loaded(config),
+                Ok(config) => Some(config),
                 Err(e) => {
                     tracing::warn!(
                         error = ?e.as_report(),
                         "Failed to load iceberg config for sink {}",
                         sink_id
                     );
-                    ScheduleConfigRefresh::Failed
+                    None
                 }
             }
         } else {
-            ScheduleConfigRefresh::NotNeeded
+            None
         };
 
         PreparedSinkUpdate {
-            track_existed_at_check,
-            config_refresh,
+            allow_track_initialization,
+            loaded_config,
         }
     }
 
@@ -485,19 +486,24 @@ impl IcebergCompactionManager {
         refresh_interval: Duration,
         prepared_update: PreparedSinkUpdate,
     ) {
+        let PreparedSinkUpdate {
+            allow_track_initialization,
+            loaded_config,
+        } = prepared_update;
+
         match guard.sink_schedules.entry(sink_id) {
-            std::collections::hash_map::Entry::Occupied(entry) => {
+            Entry::Occupied(entry) => {
                 let track = entry.into_mut();
-                self.apply_sink_update_to_existing_track(
-                    track,
-                    sink_update,
-                    now,
-                    refresh_interval,
-                    prepared_update.config_refresh,
-                );
+                if track.should_refresh_config(now, refresh_interval)
+                    && let Some(config) = loaded_config.as_ref()
+                {
+                    self.refresh_schedule_config(track, config, now);
+                }
+
+                sink_update.apply_to_track(track, now);
             }
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                if prepared_update.track_existed_at_check {
+            Entry::Vacant(entry) => {
+                if !allow_track_initialization {
                     tracing::warn!(
                         sink_id = %sink_id,
                         "Ignoring iceberg compaction update because track disappeared before apply"
@@ -505,52 +511,18 @@ impl IcebergCompactionManager {
                     return;
                 }
 
-                self.apply_sink_update_to_missing_track(
-                    entry,
-                    sink_id,
-                    sink_update,
-                    now,
-                    prepared_update.config_refresh,
-                );
+                let Some(config) = loaded_config.as_ref() else {
+                    tracing::warn!(
+                        sink_id = %sink_id,
+                        "Ignoring iceberg compaction update because sink config is unavailable"
+                    );
+                    return;
+                };
+
+                let track = entry.insert(self.create_compaction_track(config, now));
+                sink_update.apply_to_track(track, now);
             }
         }
-    }
-
-    fn apply_sink_update_to_existing_track(
-        &self,
-        track: &mut CompactionTrack,
-        sink_update: SinkUpdateKind,
-        now: Instant,
-        refresh_interval: Duration,
-        config_refresh: ScheduleConfigRefresh,
-    ) {
-        if track.should_refresh_config(now, refresh_interval)
-            && let ScheduleConfigRefresh::Loaded(config) = config_refresh
-        {
-            self.refresh_schedule_config(track, &config, now);
-        }
-
-        sink_update.apply_to_track(track, now);
-    }
-
-    fn apply_sink_update_to_missing_track(
-        &self,
-        entry: std::collections::hash_map::VacantEntry<'_, SinkId, CompactionTrack>,
-        sink_id: SinkId,
-        sink_update: SinkUpdateKind,
-        now: Instant,
-        config_refresh: ScheduleConfigRefresh,
-    ) {
-        let ScheduleConfigRefresh::Loaded(config) = config_refresh else {
-            tracing::warn!(
-                sink_id = %sink_id,
-                "Ignoring iceberg compaction update because sink config is unavailable"
-            );
-            return;
-        };
-
-        let track = entry.insert(self.create_compaction_track(&config, now));
-        sink_update.apply_to_track(track, now);
     }
 
     fn create_compaction_track(
