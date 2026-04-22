@@ -1113,6 +1113,26 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     }
 }
 
+impl<R: RangeKv> LocalStateStoreReadLog for RangeKvLocalStateStore<R> {
+    type ChangeLogIter = RangeKvStateStoreChangeLogIter<R>;
+
+    async fn iter_uncommitted_log(&self) -> StorageResult<Self::ChangeLogIter> {
+        assert!(
+            !self.mem_table.is_dirty(),
+            "iter_uncommitted_log requires all writes to be flushed before reading the local changelog"
+        );
+        self.inner
+            .iter_log(
+                (self.epoch(), self.epoch()),
+                (Unbounded, Unbounded),
+                ReadLogOptions {
+                    table_id: self.table_id,
+                },
+            )
+            .await
+    }
+}
+
 impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
     async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
@@ -1837,5 +1857,42 @@ mod tests {
             }
             assert!(iter.try_next().await.unwrap().is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn test_iter_uncommitted_log_local_memory() {
+        let state_store = MemoryStateStore::new();
+        let table_id = TableId::new(233);
+        let mut local = state_store
+            .new_local(NewLocalOptions {
+                table_id,
+                fragment_id: FragmentId::default(),
+                op_consistency_level: OpConsistencyLevel::Inconsistent,
+                table_option: Default::default(),
+                is_replicated: false,
+                vnodes: Arc::new(Bitmap::from_bool_slice(&[true])),
+                upload_on_flush: true,
+            })
+            .await;
+        let epoch = EpochPair::new_test_epoch(test_epoch(1));
+        local.init(InitOptions::new(epoch)).await.unwrap();
+
+        let make_key = |i| TableKey(Bytes::from(iterator_test_table_key_of(i)));
+        let make_value = |i| Bytes::from(iterator_test_value_of(i));
+
+        LocalStateStore::insert(&mut local, make_key(1), make_value(1), None).unwrap();
+        LocalStateStore::insert(&mut local, make_key(2), make_value(2), None).unwrap();
+        local.flush().await.unwrap();
+
+        LocalStateStore::insert(&mut local, make_key(1), make_value(12), Some(make_value(1)))
+            .unwrap();
+        local.delete(make_key(2), make_value(2)).unwrap();
+        local.flush().await.unwrap();
+
+        let mut iter = local.iter_uncommitted_log().await.unwrap();
+        let (key, change) = iter.try_next().await.unwrap().unwrap();
+        assert_eq!(key, make_key(1).to_ref());
+        assert_eq!(change, ChangeLogValue::Insert(make_value(12).as_ref()));
+        assert!(iter.try_next().await.unwrap().is_none());
     }
 }

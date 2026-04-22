@@ -1086,6 +1086,10 @@ message UpstreamSinkUnionNode {
   repeated UpstreamSinkInfo init_upstreams = 1;
 }
 
+message ChangeBufferNode {
+  catalog.Table state_table = 1;
+}
+
 message LocalityProviderNode {
   // Column indices that define locality
   repeated uint32 locality_columns = 1;
@@ -1178,6 +1182,7 @@ message StreamNode {
     EowcGapFillNode eowc_gap_fill = 153;
     GapFillNode gap_fill = 154;
     VectorIndexLookupJoinNode vector_index_lookup_join = 155;
+    ChangeBufferNode change_buffer = 156;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

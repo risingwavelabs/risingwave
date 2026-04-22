@@ -208,6 +208,17 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
     }
 }
 
+impl<S: LocalStateStoreReadLog> LocalStateStoreReadLog for MonitoredTableStateStore<S> {
+    type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+    fn iter_uncommitted_log(&self) -> impl StorageFuture<'_, Self::ChangeLogIter> {
+        self.monitored_iter::<'_, _, _, StateStoreIterLogStats>(
+            self.table_id(),
+            self.inner.iter_uncommitted_log(),
+        )
+    }
+}
+
 impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<S> {
     fn nearest<'a, O: Send + 'a>(
         &'a self,

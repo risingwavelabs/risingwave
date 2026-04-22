@@ -124,7 +124,7 @@ impl ToBatch for LogicalLocalityProvider {
 
 impl ToStream for LogicalLocalityProvider {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
-        use super::StreamLocalityProvider;
+        use super::{StreamChangeBuffer, StreamLocalityProvider};
 
         let input = self.input().to_stream(ctx)?;
         // Use `shard_by_exact_key` instead of `shard_by_key`, because locality provider will change the `stream_key` to include locality columns.
@@ -146,7 +146,17 @@ impl ToStream for LogicalLocalityProvider {
             input
         };
         let stream_core = generic::LocalityProvider::new(input, self.locality_columns().to_vec());
-        Ok(StreamLocalityProvider::new(stream_core).into())
+        let locality_provider: StreamPlanRef = StreamLocalityProvider::new(stream_core).into();
+        if self
+            .ctx()
+            .session_ctx()
+            .config()
+            .enable_locality_sort_buffer()
+        {
+            Ok(StreamChangeBuffer::new(locality_provider).into())
+        } else {
+            Ok(locality_provider)
+        }
     }
 
     fn logical_rewrite_for_stream(
