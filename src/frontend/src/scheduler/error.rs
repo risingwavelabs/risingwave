@@ -44,7 +44,7 @@ pub enum SchedulerError {
     QueryCancelled(String),
 
     #[error(
-        "Reject query: the {0} query number reaches the limit: {1}. Use `SHOW PROCESSLIST` to check for hanging queries and cancel them if needed."
+        "Reject query: the {0} query number reaches the limit: {1}. Use `SHOW PROCESSLIST` to check for hanging queries and cancel them if needed.",
     )]
     QueryReachLimit(QueryMode, u64),
 
