@@ -35,7 +35,8 @@ sink-doris = []
 sink-starrocks = []
 
 [dependencies]
-# Rust ADBC crates (e.g., adbc_core 0.21) are built against the ADBC C/C++ core driver library version 0.19
+# Rust ADBC crate versions do not match the downloadable Snowflake driver version.
+# Keep them aligned to the same Arrow ADBC release train when bumping either side.
 adbc_core = { workspace = true, optional = true }
 adbc_snowflake = { workspace = true, optional = true, default-features = false }
 anyhow = "1"

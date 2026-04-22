@@ -4,16 +4,6 @@ version = 4
 
 [[package]]
 name = "adbc_core"
-version = "0.22.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8dbe031527c9856a1e2df5e82aa8e568ffaab3be897f70d874477fb42a783bb"
-dependencies = [
- "arrow-array 57.3.0",
- "arrow-schema 57.3.0",
-]
-
-[[package]]
-name = "adbc_core"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46b169525a7c41670fe95874103c7c6ce713ac699123f81a200bc31f9ad3b02e"
@@ -24,42 +14,44 @@ dependencies = [
 
 [[package]]
 name = "adbc_driver_manager"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5beaa87308b040adcf482fb760f64ced1cbcd9469fe86ddd5be221dabbbc544e"
+checksum = "12aa1ae565ec6d45cfe71c20b5c2b3cbd6ba5d7176ecd0c0a448e970a93c35e4"
 dependencies = [
- "adbc_core 0.22.0",
+ "adbc_core",
  "adbc_ffi",
- "arrow-array 57.3.0",
- "arrow-schema 57.3.0",
+ "arrow-array 58.1.0",
+ "arrow-schema 58.1.0",
  "libloading 0.8.9",
- "toml 0.9.12+spec-1.1.0",
+ "path-slash",
+ "regex",
+ "toml 1.1.2+spec-1.1.0",
  "windows-registry 0.6.1",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "adbc_ffi"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3600ae9aec2907516d088189e3b863029280f1953dd0eab903c7f4c862a0ce81"
+checksum = "e6851c2ab953511cf7a244aadcbc0586442fd3c67dfe371457369048880dd513"
 dependencies = [
- "adbc_core 0.22.0",
- "arrow-array 57.3.0",
- "arrow-schema 57.3.0",
+ "adbc_core",
+ "arrow-array 58.1.0",
+ "arrow-schema 58.1.0",
 ]
 
 [[package]]
 name = "adbc_snowflake"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64f06c5e828893c43998ba630b574c109d53ec4b98c6686e97fffeea4545d7ee"
+checksum = "51e808b220c5f825b2cc06945c6ffa99b0e2c093aae78502c3be439e5908d826"
 dependencies = [
- "adbc_core 0.22.0",
+ "adbc_core",
  "adbc_driver_manager",
  "adbc_ffi",
- "arrow-array 57.3.0",
- "arrow-schema 57.3.0",
+ "arrow-array 58.1.0",
+ "arrow-schema 58.1.0",
  "url",
 ]
 
@@ -9876,6 +9868,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "path-slash"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e91099d4268b0e11973f036e885d652fb0b21fedcf69738c627f94db6a44f42"
+
+[[package]]
 name = "pbjson"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11409,9 +11407,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.12.2"
+version = "1.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "843bc0191f75f3e22651ae5f1e72939ab2f72a4bc30fa80a066bd66edefc24d4"
+checksum = "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -11994,7 +11992,7 @@ dependencies = [
  "tinyvec",
  "tokio-retry",
  "tokio-util",
- "toml 1.0.3+spec-1.1.0",
+ "toml 1.1.2+spec-1.1.0",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -12253,7 +12251,7 @@ dependencies = [
 name = "risingwave_connector"
 version = "2.9.0-alpha"
 dependencies = [
- "adbc_core 0.23.0",
+ "adbc_core",
  "adbc_snowflake",
  "anyhow",
  "apache-avro 0.21.0 (git+https://github.com/risingwavelabs/avro-rs?rev=1f2723802d4fb77b97fa084f7bb81e3b60b9e03f)",
@@ -12707,7 +12705,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 1.0.3+spec-1.1.0",
+ "toml 1.1.2+spec-1.1.0",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -12942,7 +12940,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
- "toml 1.0.3+spec-1.1.0",
+ "toml 1.1.2+spec-1.1.0",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -13339,7 +13337,7 @@ dependencies = [
  "serde_with",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 1.0.3+spec-1.1.0",
+ "toml 1.1.2+spec-1.1.0",
  "tracing",
  "workspace-hack",
 ]
@@ -14572,9 +14570,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "1.0.4"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8bbf91e5a4d6315eee45e704372590b30e260ee83af6639d64557f51b067776"
+checksum = "6662b5879511e06e8999a8a235d848113e942c9124f211511b16466ee2995f26"
 dependencies = [
  "serde_core",
 ]
@@ -16116,7 +16114,7 @@ checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
 dependencies = [
  "indexmap 2.13.0",
  "serde_core",
- "serde_spanned 1.0.4",
+ "serde_spanned 1.1.1",
  "toml_datetime 0.7.5+spec-1.1.0",
  "toml_parser",
  "toml_writer",
@@ -16125,17 +16123,17 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.0.3+spec-1.1.0"
+version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7614eaf19ad818347db24addfa201729cf2a9b6fdfd9eb0ab870fcacc606c0c"
+checksum = "81f3d15e84cbcd896376e6730314d59fb5a87f31e4b038454184435cd57defee"
 dependencies = [
  "indexmap 2.13.0",
  "serde_core",
- "serde_spanned 1.0.4",
- "toml_datetime 1.0.0+spec-1.1.0",
+ "serde_spanned 1.1.1",
+ "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
  "toml_writer",
- "winnow 0.7.15",
+ "winnow 1.0.1",
 ]
 
 [[package]]
@@ -16158,9 +16156,9 @@ dependencies = [
 
 [[package]]
 name = "toml_datetime"
-version = "1.0.0+spec-1.1.0"
+version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32c2555c699578a4f59f0cc68e5116c8d7cabbd45e1409b989d4be085b53f13e"
+checksum = "3165f65f62e28e0115a00b2ebdd37eb6f3b641855f9d636d3cd4103767159ad7"
 dependencies = [
  "serde_core",
 ]
@@ -16203,18 +16201,18 @@ dependencies = [
 
 [[package]]
 name = "toml_parser"
-version = "1.0.9+spec-1.1.0"
+version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "702d4415e08923e7e1ef96cd5727c0dfed80b4d2fa25db9647fe5eb6f7c5a4c4"
+checksum = "a2abe9b86193656635d2411dc43050282ca48aa31c2451210f4202550afb7526"
 dependencies = [
- "winnow 0.7.15",
+ "winnow 1.0.1",
 ]
 
 [[package]]
 name = "toml_writer"
-version = "1.0.6+spec-1.1.0"
+version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab16f14aed21ee8bfd8ec22513f7287cd4a91aa92e44edfe2c17ddd004e92607"
+checksum = "756daf9b1013ebe47a8776667b466417e2d4c5679d441c26230efd9ef78692db"
 
 [[package]]
 name = "tonic"
@@ -16820,14 +16818,15 @@ checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
 
 [[package]]
 name = "url"
-version = "2.5.7"
+version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08bc136a29a3d1758e07a9cca267be308aeebf5cfd5a10f3f67ab2097683ef5b"
+checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
 dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

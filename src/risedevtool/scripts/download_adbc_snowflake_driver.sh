@@ -8,16 +8,16 @@ set -euo pipefail
 # - Docker image build (docker/Dockerfile)
 #
 # Inputs (env vars):
-# - ADBC_VERSION: ADBC release version (default: 21)
-# - ADBC_DRIVER_VERSION: driver version in wheel filename (default: 1.9.0)
+# - ADBC_VERSION: ADBC release version (default: 23)
+# - ADBC_DRIVER_VERSION: driver version in wheel filename (default: 1.11.0)
 # - DEST_DIR: where to place the extracted shared library (default: "${PWD}/.risingwave/bin/adbc")
 # - TMP_DIR: temp directory for the downloaded wheel (default: "${PWD}/.risingwave/tmp")
 #
 # Outputs:
 # - ${DEST_DIR}/libadbc_driver_snowflake.so (Linux) or .dylib (macOS)
 
-ADBC_VERSION="${ADBC_VERSION:-21}"
-ADBC_DRIVER_VERSION="${ADBC_DRIVER_VERSION:-1.9.0}"
+ADBC_VERSION="${ADBC_VERSION:-23}"
+ADBC_DRIVER_VERSION="${ADBC_DRIVER_VERSION:-1.11.0}"
 DEST_DIR="${DEST_DIR:-"${PWD}/.risingwave/bin/adbc"}"
 TMP_DIR="${TMP_DIR:-"${PWD}/.risingwave/tmp"}"
 
@@ -32,10 +32,10 @@ case "${OS_TYPE}" in
     LIB_SUFFIX="so"
     case "${ARCH_TYPE}" in
       x86_64)
-        WHEEL_SUFFIX="manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64"
+        WHEEL_SUFFIX="manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64"
         ;;
       aarch64)
-        WHEEL_SUFFIX="manylinux2014_aarch64.manylinux_2_17_aarch64"
+        WHEEL_SUFFIX="manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64"
         ;;
       *)
         echo "Error: Unsupported Linux architecture: ${ARCH_TYPE}" >&2
