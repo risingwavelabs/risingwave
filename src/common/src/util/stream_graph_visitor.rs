@@ -317,6 +317,10 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "MaterializedExprs");
             }
 
+            NodeBody::ChangeBuffer(node) => {
+                always!(node.state_table, "ChangeBuffer");
+            }
+
             // Vector Index Write
             NodeBody::VectorIndexWrite(node) if !internal_tables_only => {
                 always!(node.table, "StreamVectorIndexWrite");
@@ -385,4 +389,37 @@ where
     F: FnMut(&mut Table, &str),
 {
     visit_stream_node_tables(fragment.node.as_mut().unwrap(), f)
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::catalog::Table;
+    use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::{ChangeBufferNode, StreamNode};
+
+    use super::visit_internal_tables;
+
+    #[test]
+    fn test_visit_internal_tables_includes_change_buffer_state_table() {
+        let mut fragment = StreamFragment {
+            node: Some(StreamNode {
+                node_body: Some(NodeBody::ChangeBuffer(ChangeBufferNode {
+                    state_table: Some(Table {
+                        id: 42.into(),
+                        ..Default::default()
+                    }),
+                })),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let mut visited = Vec::new();
+        visit_internal_tables(&mut fragment, |table, name| {
+            visited.push((name.to_owned(), table.id));
+        });
+
+        assert_eq!(visited, vec![("ChangeBuffer".to_owned(), 42.into())]);
+    }
 }

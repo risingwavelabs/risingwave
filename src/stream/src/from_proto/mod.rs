@@ -20,6 +20,7 @@ mod asof_join;
 mod barrier_recv;
 mod batch_query;
 mod cdc_filter;
+mod change_buffer;
 mod changelog;
 mod dml;
 mod dynamic_filter;
@@ -80,6 +81,7 @@ use self::asof_join::AsOfJoinExecutorBuilder;
 use self::barrier_recv::*;
 use self::batch_query::*;
 use self::cdc_filter::CdcFilterExecutorBuilder;
+use self::change_buffer::ChangeBufferExecutorBuilder;
 use self::dml::*;
 use self::dynamic_filter::*;
 use self::eowc_gap_fill::EowcGapFillExecutorBuilder;
@@ -201,6 +203,7 @@ pub async fn create_executor(
         NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
         NodeBody::SourceBackfill => SourceBackfillExecutorBuilder,
         NodeBody::Changelog => ChangeLogExecutorBuilder,
+        NodeBody::ChangeBuffer => ChangeBufferExecutorBuilder,
         NodeBody::GlobalApproxPercentile => GlobalApproxPercentileExecutorBuilder,
         NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
         NodeBody::RowMerge => RowMergeExecutorBuilder,

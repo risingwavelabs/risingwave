@@ -464,6 +464,10 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     enable_locality_backfill: bool,
 
+    /// Insert a sort buffer after each locality provider in streaming plans. Defaults to false.
+    #[parameter(default = false)]
+    enable_locality_sort_buffer: bool,
+
     /// Duration in seconds before notifying the user that a long-running DDL operation (e.g., DROP TABLE, CANCEL JOBS)
     /// is still running. Set to 0 to disable notifications. Defaults to 30 seconds.
     #[parameter(default = 30u32)]

@@ -424,6 +424,14 @@ impl<S: StateStoreReadLog> StateStoreReadLog for TracedStateStore<S> {
     }
 }
 
+impl<S: LocalStateStoreReadLog> LocalStateStoreReadLog for TracedStateStore<S, TableSnapshot> {
+    type ChangeLogIter = S::ChangeLogIter;
+
+    fn iter_uncommitted_log(&self) -> impl StorageFuture<'_, Self::ChangeLogIter> {
+        self.inner.iter_uncommitted_log()
+    }
+}
+
 impl TracedStateStore<HummockStorage> {
     pub fn sstable_store(&self) -> SstableStoreRef {
         self.inner.sstable_store()

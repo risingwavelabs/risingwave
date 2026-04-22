@@ -1134,6 +1134,7 @@ mod logical_mysql_query;
 mod logical_vector_search;
 mod logical_vector_search_lookup_join;
 mod stream_cdc_table_scan;
+mod stream_change_buffer;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_upstream_sink_union;
@@ -1219,6 +1220,7 @@ pub use logical_vector_search_lookup_join::LogicalVectorSearchLookupJoin;
 use risingwave_pb::id::StreamNodeLocalOperatorId;
 pub use stream_asof_join::StreamAsOfJoin;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
+pub use stream_change_buffer::StreamChangeBuffer;
 pub use stream_changelog::StreamChangeLog;
 pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
@@ -1401,6 +1403,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, OverWindow }
             , { Stream, FsFetch }
             , { Stream, ChangeLog }
+            , { Stream, ChangeBuffer }
             , { Stream, GlobalApproxPercentile }
             , { Stream, LocalApproxPercentile }
             , { Stream, RowMerge }
