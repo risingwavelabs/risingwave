@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -29,9 +28,13 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{Map, Value, json};
 use thiserror_ext::AsReport;
 
+#[cfg(test)]
+use std::collections::{HashMap, HashSet};
+
 use super::{
-    CustomJsonType, DateHandlingMode, JsonbHandlingMode, KafkaConnectParams, KafkaConnectParamsRef,
-    Result, RowEncoder, SerTo, TimeHandlingMode, TimestampHandlingMode, TimestamptzHandlingMode,
+    CustomJsonType, DateHandlingMode, DorisJsonConfig, JsonbHandlingMode, KafkaConnectParams,
+    KafkaConnectParamsRef, Result, RowEncoder, SerTo, TimeHandlingMode, TimestampHandlingMode,
+    TimestamptzHandlingMode,
 };
 use crate::sink::SinkError;
 
@@ -97,14 +100,14 @@ impl JsonEncoder {
     pub fn new_with_doris(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
-        map: HashMap<String, u8>,
+        doris_config: DorisJsonConfig,
     ) -> Self {
         let config = JsonEncoderConfig {
             time_handling_mode: TimeHandlingMode::Milli,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
-            custom_json_type: CustomJsonType::Doris(map),
+            custom_json_type: CustomJsonType::Doris(doris_config),
             jsonb_handling_mode: JsonbHandlingMode::String,
         };
         Self {
@@ -136,6 +139,17 @@ impl JsonEncoder {
         Self {
             kafka_connect: Some(Arc::new(kafka_connect)),
             ..self
+        }
+    }
+}
+
+impl JsonEncoderConfig {
+    fn jsonb_handling_mode_for_field(&self, field_name: &str) -> JsonbHandlingMode {
+        match &self.custom_json_type {
+            CustomJsonType::Doris(config) if config.variant_columns.contains(field_name) => {
+                JsonbHandlingMode::Dynamic
+            }
+            _ => self.jsonb_handling_mode,
         }
     }
 }
@@ -234,8 +248,8 @@ fn datum_to_json_object(
         }
         // Doris/Starrocks will convert out-of-bounds decimal and -INF, INF, NAN to NULL
         (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match &config.custom_json_type {
-            CustomJsonType::Doris(map) => {
-                let s = map.get(&field.name).unwrap();
+            CustomJsonType::Doris(config) => {
+                let s = config.decimal_scale.get(&field.name).unwrap();
                 v.rescale(*s as u32);
                 json!(v.to_text())
             }
@@ -296,12 +310,14 @@ fn datum_to_json_object(
             json!(v.as_iso_8601())
         }
 
-        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => match config.jsonb_handling_mode {
-            JsonbHandlingMode::String => {
-                json!(jsonb_ref.to_string())
+        (DataType::Jsonb, ScalarRefImpl::Jsonb(jsonb_ref)) => {
+            match config.jsonb_handling_mode_for_field(&field.name) {
+                JsonbHandlingMode::String => {
+                    json!(jsonb_ref.to_string())
+                }
+                JsonbHandlingMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
             }
-            JsonbHandlingMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
-        },
+        }
         (DataType::List(lt), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
             let mut vec = Vec::with_capacity(elems.len());
@@ -621,14 +637,17 @@ mod tests {
         .unwrap();
         assert_eq!(interval_value, json!("P1Y1M2DT0H0M1S"));
 
-        let mut map = HashMap::default();
-        map.insert("aaa".to_owned(), 5_u8);
+        let mut decimal_scale = HashMap::default();
+        decimal_scale.insert("aaa".to_owned(), 5_u8);
         let doris_config = JsonEncoderConfig {
             time_handling_mode: TimeHandlingMode::String,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
-            custom_json_type: CustomJsonType::Doris(map),
+            custom_json_type: CustomJsonType::Doris(DorisJsonConfig {
+                decimal_scale,
+                variant_columns: HashSet::default(),
+            }),
             jsonb_handling_mode: JsonbHandlingMode::String,
         };
         let decimal = datum_to_json_object(
@@ -677,7 +696,10 @@ mod tests {
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
             timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
-            custom_json_type: CustomJsonType::Doris(HashMap::default()),
+            custom_json_type: CustomJsonType::Doris(DorisJsonConfig {
+                decimal_scale: HashMap::default(),
+                variant_columns: HashSet::default(),
+            }),
             jsonb_handling_mode: JsonbHandlingMode::String,
         };
         let date_value = datum_to_json_object(
@@ -730,6 +752,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(json_value, json!([1, 2, 3]));
+
+        let variant_json_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Jsonb,
+                name: "variant_col".into(),
+            },
+            Some(
+                ScalarImpl::Jsonb(JsonbVal::from(json!({"nested": [1, 2, 3]})))
+                    .as_scalar_ref_impl(),
+            ),
+            &JsonEncoderConfig {
+                time_handling_mode: TimeHandlingMode::String,
+                date_handling_mode: DateHandlingMode::String,
+                timestamp_handling_mode: TimestampHandlingMode::String,
+                timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+                custom_json_type: CustomJsonType::Doris(DorisJsonConfig {
+                    decimal_scale: HashMap::default(),
+                    variant_columns: HashSet::from(["variant_col".to_owned()]),
+                }),
+                jsonb_handling_mode: JsonbHandlingMode::String,
+            },
+        )
+        .unwrap();
+        assert_eq!(variant_json_value, json!({"nested": [1, 2, 3]}));
     }
 
     #[test]

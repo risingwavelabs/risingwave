@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -36,12 +36,15 @@ use super::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkWriterMetrics,
 };
 use crate::enforce_secret::EnforceSecret;
-use crate::sink::encoder::{JsonEncoder, RowEncoder};
-use crate::sink::starrocks::_default_stream_load_http_timeout_ms;
+use crate::sink::encoder::{DorisJsonConfig, JsonEncoder, RowEncoder};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{Sink, SinkParam, SinkWriterParam};
 
 pub const DORIS_SINK: &str = "doris";
+
+const fn default_stream_load_http_timeout_ms() -> u64 {
+    30 * 1000
+}
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct DorisCommon {
@@ -88,7 +91,7 @@ pub struct DorisConfig {
     /// The timeout in milliseconds for stream load http request, defaults to 10 seconds.
     #[serde(
         rename = "doris.stream_load.http.timeout.ms",
-        default = "_default_stream_load_http_timeout_ms"
+        default = "default_stream_load_http_timeout_ms"
     )]
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly)]
@@ -188,6 +191,7 @@ impl DorisSink {
         rw_data_type: &DataType,
         doris_data_type: String,
     ) -> Result<bool> {
+        let is_variant = doris_data_type.to_ascii_uppercase().contains("VARIANT");
         match rw_data_type {
             risingwave_common::types::DataType::Boolean => Ok(doris_data_type.contains("BOOLEAN")),
             risingwave_common::types::DataType::Int16 => Ok(doris_data_type.contains("SMALLINT")),
@@ -198,7 +202,11 @@ impl DorisSink {
             risingwave_common::types::DataType::Decimal => Ok(doris_data_type.contains("DECIMAL")),
             risingwave_common::types::DataType::Date => Ok(doris_data_type.contains("DATE")),
             risingwave_common::types::DataType::Varchar => {
-                Ok(doris_data_type.contains("STRING") | doris_data_type.contains("VARCHAR"))
+                Ok(
+                    doris_data_type.contains("STRING")
+                        | doris_data_type.contains("VARCHAR")
+                        | is_variant,
+                )
             }
             risingwave_common::types::DataType::Time => {
                 Err(SinkError::Doris("TIME is not supported for Doris sink. Please convert to VARCHAR or other supported types.".to_owned()))
@@ -217,7 +225,9 @@ impl DorisSink {
             risingwave_common::types::DataType::Bytea => {
                 Err(SinkError::Doris("BYTEA is not supported for Doris sink. Please convert to VARCHAR or other supported types.".to_owned()))
             }
-            risingwave_common::types::DataType::Jsonb => Ok(doris_data_type.contains("JSON")),
+            risingwave_common::types::DataType::Jsonb => {
+                Ok(doris_data_type.contains("JSON") || is_variant)
+            }
             risingwave_common::types::DataType::Serial => Ok(doris_data_type.contains("BIGINT")),
             risingwave_common::types::DataType::Int256 => {
                 Err(SinkError::Doris("INT256 is not supported for Doris sink.".to_owned()))
@@ -299,6 +309,7 @@ impl DorisSinkWriter {
         is_append_only: bool,
     ) -> Result<Self> {
         let mut decimal_map = HashMap::default();
+        let mut variant_columns = HashSet::default();
         let doris_schema = config
             .common
             .build_get_client()
@@ -307,6 +318,9 @@ impl DorisSinkWriter {
         for s in &doris_schema.properties {
             if let Some(v) = s.get_decimal_pre_scale()? {
                 decimal_map.insert(s.name.clone(), v);
+            }
+            if s.is_variant() {
+                variant_columns.insert(s.name.clone());
             }
         }
 
@@ -336,7 +350,14 @@ impl DorisSinkWriter {
             inserter_inner_builder: doris_insert_builder,
             is_append_only,
             client: None,
-            row_encoder: JsonEncoder::new_with_doris(schema, None, decimal_map),
+            row_encoder: JsonEncoder::new_with_doris(
+                schema,
+                None,
+                DorisJsonConfig {
+                    decimal_scale: decimal_map,
+                    variant_columns,
+                },
+            ),
         })
     }
 
@@ -534,6 +555,29 @@ impl DorisField {
         } else {
             Ok(None)
         }
+    }
+
+    pub fn is_variant(&self) -> bool {
+        self.r#type.to_ascii_uppercase().contains("VARIANT")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+
+    use super::DorisSink;
+
+    #[test]
+    fn test_jsonb_can_write_to_variant() {
+        assert!(DorisSink::check_and_correct_column_type(&DataType::Jsonb, "VARIANT".into())
+            .unwrap());
+    }
+
+    #[test]
+    fn test_varchar_can_write_to_variant() {
+        assert!(DorisSink::check_and_correct_column_type(&DataType::Varchar, "VARIANT".into())
+            .unwrap());
     }
 }
 
