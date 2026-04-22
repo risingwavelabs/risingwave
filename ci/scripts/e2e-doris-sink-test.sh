@@ -45,7 +45,7 @@ echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/doris_sink.slt'
 sleep 1
 mysql -uroot -P 9030 -h doris-server -e "select * from demo.demo_bhv_table" > ./query_result.csv
-mysql -uroot -P 9030 -h doris-server -N -B -e "select id, v from demo.demo_variant_table order by id" > ./variant_result.tsv
+mysql -uroot -P 9030 -h doris-server -N -B -e "select id, cast(v as string) from demo.demo_variant_table order by id" > ./variant_result.tsv
 
 
 if cat ./query_result.csv | sed '1d; s/\t/,/g' | awk -F "," '{
