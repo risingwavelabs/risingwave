@@ -1046,6 +1046,12 @@ impl UserInfoWriter for MockUserInfoWriter {
 
     async fn drop_user(&self, id: UserId) -> Result<()> {
         self.user_info.write().drop_user(id);
+        let user_id = id.as_raw_id();
+        self.role_memberships.write().retain(|membership| {
+            membership.role_id != user_id
+                && membership.member_id != user_id
+                && membership.granted_by != user_id
+        });
         Ok(())
     }
 

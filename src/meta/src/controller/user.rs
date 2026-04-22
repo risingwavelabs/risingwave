@@ -555,21 +555,15 @@ impl CatalogController {
             )));
         }
 
-        let membership_count = UserRoleMembership::find()
+        UserRoleMembership::delete_many()
             .filter(
                 Condition::any()
                     .add(user_role_membership::Column::RoleId.eq(user_id))
                     .add(user_role_membership::Column::MemberId.eq(user_id))
                     .add(user_role_membership::Column::GrantedBy.eq(user_id)),
             )
-            .count(&txn)
+            .exec(&txn)
             .await?;
-        if membership_count != 0 {
-            return Err(MetaError::permission_denied(format!(
-                "drop user {} is not allowed, because it still participates in {} role memberships",
-                user.name, membership_count
-            )));
-        }
 
         let res = User::delete_by_id(user_id).exec(&txn).await?;
         if res.rows_affected != 1 {
@@ -1590,6 +1584,34 @@ mod tests {
         assert_eq!(memberships.len(), 1);
         assert!(!memberships[0].inherit_option);
         assert!(memberships[0].set_option);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_drop_user_auto_revokes_role_memberships() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            TEST_ROOT_USER_ID,
+            None,
+            None,
+            None,
+        )
+        .await?;
+        assert_eq!(mgr.list_role_memberships(&[]).await?.len(), 1);
+
+        mgr.drop_user(role_a.user_id).await?;
+
+        assert!(mgr.get_user_by_name("role_a").await.is_err());
+        assert!(mgr.list_role_memberships(&[]).await?.is_empty());
 
         Ok(())
     }

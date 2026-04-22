@@ -84,6 +84,25 @@ async fn test_drop_role_aliases_drop_user_runtime() {
 }
 
 #[tokio::test]
+async fn test_drop_role_auto_revokes_memberships() {
+    let frontend = LocalFrontend::new(Default::default()).await;
+
+    frontend.run_sql("CREATE ROLE parent_role").await.unwrap();
+    frontend.run_sql("CREATE ROLE member_role").await.unwrap();
+    frontend
+        .run_sql("GRANT parent_role TO member_role")
+        .await
+        .unwrap();
+
+    assert_eq!(frontend.role_memberships().await.len(), 1);
+
+    frontend.run_sql("DROP ROLE parent_role").await.unwrap();
+
+    assert!(frontend.user_by_name("parent_role").is_none());
+    assert!(frontend.role_memberships().await.is_empty());
+}
+
+#[tokio::test]
 async fn test_grant_revoke_role_dispatches() {
     let frontend = LocalFrontend::new(Default::default()).await;
 
