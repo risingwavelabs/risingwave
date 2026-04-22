@@ -782,6 +782,13 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+  - name: enable_pk_index
+    field_type: bool
+    comments: |-
+      Whether to enable PK index for upsert sink. Default is false.
+      It's used for V3 upsert iceberg sink to generate delete vectors.
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: topic
