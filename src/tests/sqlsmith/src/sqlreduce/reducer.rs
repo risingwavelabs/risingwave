@@ -21,6 +21,7 @@
 use std::collections::HashSet;
 
 use anyhow::{Result, anyhow};
+use tokio_postgres::Client;
 
 use crate::parse_sql;
 use crate::sqlreduce::checker::Checker;
