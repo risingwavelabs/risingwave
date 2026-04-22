@@ -224,6 +224,18 @@ impl StagingVersion {
     pub fn is_empty(&self) -> bool {
         self.pending_imms.is_empty() && self.uploading_imms.is_empty() && self.sst.is_empty()
     }
+
+    /// Returns the staging SSTs that contain data for the given epoch.
+    ///
+    /// The iterator preserves the internal ordering where newer staging SSTs come first.
+    pub fn ssts_for_epoch(
+        &self,
+        epoch: HummockEpoch,
+    ) -> impl Iterator<Item = &Arc<StagingSstableInfo>> {
+        self.sst
+            .iter()
+            .filter(move |staging_sst| staging_sst.epochs().contains(&epoch))
+    }
 }
 
 /// A container of information required for reading from hummock.
@@ -609,6 +621,35 @@ impl HummockVersionReader {
 
     pub fn stats(&self) -> &Arc<HummockStateStoreMetrics> {
         &self.state_store_metrics
+    }
+
+    pub(crate) async fn open_sstable_iters<'a>(
+        &self,
+        sstable_infos: impl Iterator<Item = &'a SstableInfo>,
+        read_options: Arc<SstableIteratorReadOptions>,
+        local_stat: &mut StoreLocalStatistic,
+    ) -> HummockResult<Vec<SstableIterator>> {
+        let iters = try_join_all(sstable_infos.map(|sstable_info| {
+            let sstable_store = self.sstable_store.clone();
+            let read_options = read_options.clone();
+            async move {
+                let mut local_stat = StoreLocalStatistic::default();
+                let table_holder = sstable_store.sstable(sstable_info, &mut local_stat).await?;
+                Ok::<_, HummockError>((
+                    SstableIterator::new(table_holder, sstable_store, read_options, sstable_info),
+                    local_stat,
+                ))
+            }
+        }))
+        .await?;
+
+        Ok(iters
+            .into_iter()
+            .map(|(iter, stats)| {
+                local_stat.add(&stats);
+                iter
+            })
+            .collect())
     }
 }
 
@@ -1216,60 +1257,32 @@ impl HummockVersionReader {
             prefetch_for_large_query: false,
         });
 
-        async fn make_iter(
-            sstable_infos: impl Iterator<Item = &SstableInfo>,
-            sstable_store: &SstableStoreRef,
-            read_options: Arc<SstableIteratorReadOptions>,
-            local_stat: &mut StoreLocalStatistic,
-        ) -> HummockResult<MergeIterator<SstableIterator>> {
-            let iters = try_join_all(sstable_infos.map(|sstable_info| {
-                let sstable_store = sstable_store.clone();
-                let read_options = read_options.clone();
-                async move {
-                    let mut local_stat = StoreLocalStatistic::default();
-                    let table_holder = sstable_store.sstable(sstable_info, &mut local_stat).await?;
-                    Ok::<_, HummockError>((
-                        SstableIterator::new(
-                            table_holder,
-                            sstable_store,
-                            read_options,
-                            sstable_info,
-                        ),
-                        local_stat,
-                    ))
-                }
-            }))
-            .await?;
-            Ok::<_, HummockError>(MergeIterator::new(iters.into_iter().map(
-                |(iter, stats)| {
-                    local_stat.add(&stats);
-                    iter
-                },
-            )))
-        }
-
         let mut local_stat = StoreLocalStatistic::default();
 
-        let new_value_iter = make_iter(
-            change_log
-                .iter()
-                .flat_map(|log| log.new_value.iter())
-                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
-            &self.sstable_store,
-            read_options.clone(),
-            &mut local_stat,
-        )
-        .await?;
-        let old_value_iter = make_iter(
-            change_log
-                .iter()
-                .flat_map(|log| log.old_value.iter())
-                .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
-            &self.sstable_store,
-            read_options.clone(),
-            &mut local_stat,
-        )
-        .await?;
+        let new_value_iter = MergeIterator::new(
+            self.open_sstable_iters(
+                change_log
+                    .iter()
+                    .flat_map(|log| log.new_value.iter())
+                    .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+                read_options.clone(),
+                &mut local_stat,
+            )
+            .await?
+            .into_iter(),
+        );
+        let old_value_iter = MergeIterator::new(
+            self.open_sstable_iters(
+                change_log
+                    .iter()
+                    .flat_map(|log| log.old_value.iter())
+                    .filter(|sst| filter_single_sst(sst, options.table_id, &key_range)),
+                read_options.clone(),
+                &mut local_stat,
+            )
+            .await?
+            .into_iter(),
+        );
         ChangeLogIterator::new(
             epoch_range,
             key_range,
