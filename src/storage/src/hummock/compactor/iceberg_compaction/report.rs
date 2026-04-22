@@ -78,19 +78,11 @@ impl IcebergTaskTracker {
                     .unwrap_or_else(|| "All admitted iceberg compaction plans failed".to_owned()),
             )
         };
-        make_iceberg_task_report(task_id, self.sink_id, error_message)
+        build_iceberg_task_report(task_id, self.sink_id, error_message)
     }
 }
 
 pub(crate) fn build_iceberg_task_report(
-    task_id: u64,
-    sink_id: u32,
-    error_message: Option<String>,
-) -> IcebergTaskReport {
-    make_iceberg_task_report(task_id, sink_id, error_message)
-}
-
-fn make_iceberg_task_report(
     task_id: u64,
     sink_id: u32,
     error_message: Option<String>,
@@ -155,4 +147,53 @@ pub(crate) fn flush_pending_iceberg_task_reports(
         }
     }
     ReportSendResult::Sent
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request;
+
+    use super::*;
+
+    #[test]
+    fn test_send_iceberg_task_report_returns_payload_on_send_failure() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(rx);
+
+        let report = build_iceberg_task_report(7, 9, Some("send failure".to_owned()));
+        let failed_report = send_iceberg_task_report(&tx, report.clone()).unwrap_err();
+
+        assert_eq!(failed_report.task_id, report.task_id);
+        assert_eq!(failed_report.sink_id, report.sink_id);
+        assert_eq!(failed_report.error_message, report.error_message);
+    }
+
+    #[test]
+    fn test_build_iceberg_task_result_partial_enqueue_is_success_if_admitted_plan_succeeds() {
+        let mut tracker = IcebergTaskTracker::new(9, 1);
+        tracker.record_completion(None);
+
+        let report = tracker.into_report(7);
+
+        assert_eq!(
+            report.status,
+            subscribe_iceberg_compaction_event_request::report_task::Status::Success as i32
+        );
+        assert!(report.error_message.is_none());
+    }
+
+    #[test]
+    fn test_build_iceberg_task_result_fails_if_all_admitted_plans_fail() {
+        let mut tracker = IcebergTaskTracker::new(9, 2);
+        tracker.record_completion(Some("first failure".to_owned()));
+        tracker.record_completion(Some("second failure".to_owned()));
+
+        let report = tracker.into_report(7);
+
+        assert_eq!(
+            report.status,
+            subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32
+        );
+        assert_eq!(report.error_message.as_deref(), Some("first failure"));
+    }
 }
