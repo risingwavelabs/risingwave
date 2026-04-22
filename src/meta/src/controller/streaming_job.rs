@@ -3402,7 +3402,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
     pub tmp_sink_id: SinkId,
     pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
-    pub new_log_store_table: Option<PbTable>,
+    pub new_log_store_table: Option<Box<PbTable>>,
 }
 
 async fn update_connector_props_fragments<F>(

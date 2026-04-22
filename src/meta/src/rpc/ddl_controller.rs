@@ -1534,7 +1534,7 @@ impl DdlController {
                             .map(|col| col.name.clone())
                             .collect(),
                         new_fragment: new_sink_fragment,
-                        new_log_store_table,
+                        new_log_store_table: new_log_store_table.map(Box::new),
                         ctx: sink_ctx,
                     });
                 }
