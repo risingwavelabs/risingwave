@@ -79,7 +79,6 @@ impl Debug for IcebergSink {
             .finish()
     }
 }
-
 impl IcebergSink {
     pub async fn create_and_validate_table(&self) -> Result<Table> {
         create_and_validate_table_impl(&self.config, &self.param).await

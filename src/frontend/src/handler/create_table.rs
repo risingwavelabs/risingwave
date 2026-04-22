@@ -107,7 +107,7 @@ use risingwave_connector::sink::iceberg::{
     ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode, ORDER_KEY,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
     SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
-    parse_partition_by_exprs, validate_order_key_columns,
+    parse_partition_by_exprs, sync_iceberg_table_comments, validate_order_key_columns,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -2449,6 +2449,23 @@ pub async fn create_iceberg_engine_table(
                 );
             });
         res?
+    }
+
+    if table.description.is_some()
+        || table
+            .columns()
+            .iter()
+            .any(|column| column.column_desc.description.is_some())
+    {
+        let sink_param = SinkParam::try_from_sink_catalog(sink_catalog)?;
+        let iceberg_sink = IcebergSink::try_from(sink_param)?;
+        let columns = table
+            .columns_without_rw_timestamp()
+            .into_iter()
+            .map(|column| column.column_desc)
+            .collect_vec();
+        sync_iceberg_table_comments(&iceberg_sink.config, table.description.as_deref(), &columns)
+            .await?;
     }
 
     Ok(())
