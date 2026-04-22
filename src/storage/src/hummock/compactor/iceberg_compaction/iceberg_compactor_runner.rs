@@ -263,10 +263,10 @@ impl IcebergCompactionPlanRunner {
             .max_concurrent_closes(config.max_concurrent_closes)
             .build()
             .map_err(|e| {
-                HummockError::compaction_executor(anyhow::anyhow!(
-                    "failed to build iceberg compaction execution config: {}",
-                    e.as_report()
-                ))
+                HummockError::compaction_executor(
+                    anyhow::Error::new(e)
+                        .context("failed to build iceberg compaction execution config"),
+                )
             })?;
 
         tracing::info!(
