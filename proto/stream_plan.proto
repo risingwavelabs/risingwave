@@ -1029,6 +1029,9 @@ message EowcOverWindowNode {
   // Optional state table for persisting window function intermediate states.
   // Currently used for numbering functions (row_number/rank/dense_rank).
   optional catalog.Table intermediate_state_table = 5;
+  // Optional table tracking partition keys with unclosed session windows.
+  // Enables watermark-based session closure to survive restarts.
+  optional catalog.Table open_sessions_table = 6;
 }
 
 enum OverWindowCachePolicy {

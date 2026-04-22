@@ -12,8 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::ScalarImpl;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::aggregate::{AggArgs, PbAggKind};
-use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
+use risingwave_expr::window_function::{
+    Frame, FrameBound, FrameBounds, FrameExclusion, SessionFrameBounds, SessionFrameGap,
+    WindowFuncCall, WindowFuncKind,
+};
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::executor::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
 
@@ -81,6 +86,7 @@ async fn create_executor<S: StateStore>(
         state_table,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
         intermediate_state_table: None,
+        open_sessions_table: None,
     });
     (tx, executor.boxed().execute())
 }
@@ -177,6 +183,97 @@ async fn create_executor_with_intermediate_state_table<S: StateStore>(
         state_table,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
         intermediate_state_table: Some(intermediate_state_table),
+        open_sessions_table: None,
+    });
+    (tx, executor.boxed().execute())
+}
+
+/// Create an executor with open_sessions_table for testing session watermark closure.
+async fn create_executor_with_open_sessions_table<S: StateStore>(
+    calls: Vec<WindowFuncCall>,
+    store: S,
+) -> (MessageSender, BoxedMessageStream) {
+    let input_schema = Schema::new(vec![
+        Field::unnamed(DataType::Int64),   // order key
+        Field::unnamed(DataType::Varchar), // partition key
+        Field::unnamed(DataType::Int64),   // pk
+        Field::unnamed(DataType::Int32),   // x
+    ]);
+    let input_stream_key = vec![2];
+    let partition_key_indices = vec![1];
+    let order_key_index = 0;
+
+    let table_columns = vec![
+        ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // order key
+        ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // partition key
+        ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // pk
+        ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32), // x
+    ];
+    let table_pk_indices = vec![1, 0, 2];
+    let table_order_types = vec![
+        OrderType::ascending(),
+        OrderType::ascending(),
+        OrderType::ascending(),
+    ];
+
+    let output_schema = {
+        let mut fields = input_schema.fields.clone();
+        calls.iter().for_each(|call| {
+            fields.push(Field::unnamed(call.return_type.clone()));
+        });
+        Schema { fields }
+    };
+
+    let state_table = StateTable::from_table_catalog_inconsistent_op(
+        &gen_pbtable(
+            TableId::new(1),
+            table_columns,
+            table_order_types,
+            table_pk_indices,
+            0,
+        ),
+        store.clone(),
+        None,
+    )
+    .await;
+
+    // Create open_sessions_table: minimal_next_start (same type as order key) + partition_key (Varchar)
+    // PK = (mns ASC, partition_key ASC)
+    let open_sessions_columns = vec![
+        ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), /* minimal_next_start (same type as order key) */
+        ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // partition key
+    ];
+    let open_sessions_pk_indices = vec![0, 1];
+    let open_sessions_order_types = vec![OrderType::ascending(), OrderType::ascending()];
+
+    let open_sessions_table = StateTable::from_table_catalog_inconsistent_op(
+        &gen_pbtable(
+            TableId::new(3),
+            open_sessions_columns,
+            open_sessions_order_types,
+            open_sessions_pk_indices,
+            0, // read_prefix_len_hint = 0, only range scans
+        ),
+        store,
+        None,
+    )
+    .await;
+
+    let (tx, source) = MockSource::channel();
+    let source = source.into_executor(input_schema, input_stream_key.clone());
+    let executor = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
+        actor_ctx: ActorContext::for_test(123),
+
+        input: source,
+
+        schema: output_schema,
+        calls,
+        partition_key_indices,
+        order_key_index,
+        state_table,
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
+        intermediate_state_table: None,
+        open_sessions_table: Some(open_sessions_table),
     });
     (tx, executor.boxed().execute())
 }
@@ -734,6 +831,96 @@ async fn test_over_window_legacy_without_intermediate_state_table() {
             - input: !barrier 3
               output:
               - !barrier 3
+        "#]],
+        SnapshotOptions::default(),
+    )
+    .await;
+}
+
+/// Test that session windows are closed by watermark even when no new session starts.
+/// This is the fix for the bug where the last session in a partition was never emitted.
+#[tokio::test]
+async fn test_over_window_session_watermark_close() {
+    let store = MemoryStateStore::new();
+
+    let order_data_type = DataType::Int64;
+    let gap_data_type = DataType::Int64;
+
+    let calls = vec![
+        // count(*) over session window with gap=5
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::Count.into()),
+            return_type: DataType::Int64,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame {
+                bounds: FrameBounds::Session(SessionFrameBounds {
+                    order_data_type: order_data_type.clone(),
+                    order_type: OrderType::ascending(),
+                    gap_data_type: gap_data_type.clone(),
+                    gap: SessionFrameGap::new_for_test(
+                        ScalarImpl::Int64(5),
+                        &order_data_type,
+                        &gap_data_type,
+                    ),
+                }),
+                exclusion: FrameExclusion::NoOthers,
+            },
+        },
+    ];
+
+    check_with_script(
+        || create_executor_with_open_sessions_table(calls.clone(), store.clone()),
+        r###"
+- !barrier 1
+- !chunk |2
+      I T  I   i
+    + 1 p1 100 10
+    + 3 p1 101 20
+    + 4 p2 200 30
+# No new session starts for p1 or p2, so without watermark they would never emit.
+# Send watermark at 8 — this should close p1's session (last key=3, 3+5=8 <= 8).
+# p2's session (last key=4, 4+5=9) is NOT closed yet (8 < 9).
+- !watermark
+  col_idx: 0
+  val: '8'
+# Send watermark at 10 — this should close p2's session (last key=4, 4+5=9 <= 10).
+- !watermark
+  col_idx: 0
+  val: '10'
+- !barrier 2
+"###,
+        expect![[r#"
+            - input: !barrier 1
+              output:
+              - !barrier 1
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 3 | p1 | 101 | 20 |
+                | + | 4 | p2 | 200 | 30 |
+                +---+---+----+-----+----+
+              output: []
+            - input: !watermark
+                col_idx: 0
+                val: '8'
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 1 | p1 | 100 | 10 | 2 |
+                | + | 3 | p1 | 101 | 20 | 2 |
+                +---+---+----+-----+----+---+
+            - input: !watermark
+                col_idx: 0
+                val: '10'
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 4 | p2 | 200 | 30 | 1 |
+                +---+---+----+-----+----+---+
+            - input: !barrier 2
+              output:
+              - !barrier 2
         "#]],
         SnapshotOptions::default(),
     )

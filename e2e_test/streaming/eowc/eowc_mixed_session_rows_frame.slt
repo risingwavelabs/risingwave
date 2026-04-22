@@ -1,0 +1,189 @@
+# Test: mixed window frames (session + rows) with watermark-based closure.
+# Verifies that EOWC correctly handles multiple window functions with different
+# frame types (session frame and rows frame) over the same partition and order key.
+# Also verifies that the open_sessions internal table correctly tracks active sessions.
+#
+# Watermark = tm - 5 min, Session gap = 10 min.
+# Two window functions:
+#   - count(*) over session frame → counts rows in the session
+#   - count(*) over rows frame (unbounded preceding to current row) → running count
+#
+# Note: ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW has n_following=0,
+# so following_saturated is always true. Both frames become ready simultaneously.
+
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+create table t (
+    tm timestamp,
+    foo int,
+    bar int,
+    watermark for tm as tm - interval '5 minutes'
+) append only;
+
+statement ok
+create materialized view mv as
+select
+    tm, foo, bar,
+    count(*) over w_session as session_cnt,
+    count(*) over w_rows as running_cnt
+from t
+window
+    w_session as (partition by bar order by tm session with gap '10 minutes'),
+    w_rows as (partition by bar order by tm rows between unbounded preceding and current row)
+emit on window close;
+
+control substitution on
+
+# Discover the open sessions internal table.
+let open_sessions_table_id, open_sessions_table
+SELECT id, name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'mv'
+  AND name LIKE '%opensessions%'
+ORDER BY id
+LIMIT 1
+
+# ========================================
+# Phase A: Insert two rows into bar=1 (same session, gap < 10 min).
+# ========================================
+# Insert bar=1 at 10:00. Watermark = 9:55. Sort buffers.
+statement ok
+insert into t values ('2023-05-06 10:00:00', 1, 1);
+
+# Insert bar=1 at 10:03. Watermark = 9:58. Sort buffers.
+statement ok
+insert into t values ('2023-05-06 10:03:00', 2, 1);
+
+# No output yet — both rows still in Sort buffer.
+query I
+select count(*) from mv;
+----
+0
+
+# ========================================
+# Phase B: Trigger bar=1 session creation without closing.
+# ========================================
+# Insert bar=2 at 10:10. Watermark = 10:05.
+# Sort emits [10:00/bar=1, 10:03/bar=1] (both tm < 10:05).
+# Sort does NOT emit 10:10/bar=2 (10:10 > 10:05).
+# EOWC: bar=1 session opens with 2 rows, mns = 10:03 + 10min = 10:13.
+# EOWC receives watermark 10:05 < 10:13 => bar=1 session STAYS OPEN.
+statement ok
+insert into t values ('2023-05-06 10:10:00', 3, 2);
+
+# No output yet — session not closed.
+query I
+select count(*) from mv;
+----
+0
+
+# open_sessions: bar=1 entry visible (mns = 10:13), not yet closed.
+query TI retry 11 backoff 1s
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
+2023-05-06 10:13:00 1
+
+# ========================================
+# Phase C: Close bar=1 and bar=2 via watermark.
+# ========================================
+# Insert bar=3 at 10:25. Watermark = 10:20.
+# Sort emits [10:10/bar=2] (10:10 < 10:20).
+# Sort does NOT emit 10:25/bar=3 (10:25 > 10:20).
+# EOWC: bar=2 session opens with 1 row, mns = 10:10 + 10min = 10:20.
+# Watermark 10:20 >= 10:13 => bar=1 CLOSES.
+# Watermark 10:20 >= 10:20 => bar=2 CLOSES.
+# Both frames produce results (ROWS frame always ready with n_following=0):
+#   bar=1: session_cnt=2 (2 rows in session), running_cnt=1 and 2.
+#   bar=2: session_cnt=1, running_cnt=1.
+statement ok
+insert into t values ('2023-05-06 10:25:00', 4, 3);
+
+query TiiII rowsort retry 11 backoff 1s
+select * from mv;
+----
+2023-05-06 10:00:00  1  1  2  1
+2023-05-06 10:03:00  2  1  2  2
+2023-05-06 10:10:00  3  2  1  1
+
+# open_sessions: empty — both sessions closed.
+query TI retry 11 backoff 1s
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
+
+# ========================================
+# Phase D: Trigger bar=3 session without closing.
+# ========================================
+# Insert bar=4 at 10:33. Watermark = 10:28.
+# Sort emits [10:25/bar=3] (10:25 < 10:28).
+# Sort does NOT emit 10:33/bar=4 (10:33 > 10:28).
+# EOWC: bar=3 session opens with 1 row, mns = 10:25 + 10min = 10:35.
+# Watermark 10:28 < 10:35 => bar=3 STAYS OPEN.
+statement ok
+insert into t values ('2023-05-06 10:33:00', 5, 4);
+
+# No new output — bar=3 session not closed yet.
+query TiiII rowsort
+select * from mv;
+----
+2023-05-06 10:00:00  1  1  2  1
+2023-05-06 10:03:00  2  1  2  2
+2023-05-06 10:10:00  3  2  1  1
+
+# open_sessions: bar=3 entry visible (mns = 10:35), not yet closed.
+query TI retry 11 backoff 1s
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
+2023-05-06 10:35:00 3
+
+# ========================================
+# Phase E: Multi-row session (3 rows) for bar=5, close all remaining.
+# ========================================
+statement ok
+insert into t values ('2023-05-06 11:00:00', 10, 5);
+
+statement ok
+insert into t values ('2023-05-06 11:02:00', 20, 5);
+
+statement ok
+insert into t values ('2023-05-06 11:05:00', 30, 5);
+
+# Insert far-future row to flush and close everything.
+# After bar=5 at 11:00 (watermark=10:55): Sort emits bar=4, closes bar=3 and bar=4.
+# After far-future at 12:00 (watermark=11:55): Sort emits bar=5 rows, closes bar=5.
+statement ok
+insert into t values ('2023-05-06 12:00:00', 99, 99);
+
+# All sessions emitted.
+# bar=3: single row, session_cnt=1, running_cnt=1
+# bar=4: single row, session_cnt=1, running_cnt=1
+# bar=5: 3 rows in session, session_cnt=3, running_cnt=1/2/3
+query TiiII rowsort retry 11 backoff 1s
+select * from mv;
+----
+2023-05-06 10:00:00  1   1  2  1
+2023-05-06 10:03:00  2   1  2  2
+2023-05-06 10:10:00  3   2  1  1
+2023-05-06 10:25:00  4   3  1  1
+2023-05-06 10:33:00  5   4  1  1
+2023-05-06 11:00:00  10  5  3  1
+2023-05-06 11:02:00  20  5  3  2
+2023-05-06 11:05:00  30  5  3  3
+
+# All sessions closed.
+query TI retry 11 backoff 1s
+SELECT * FROM ${open_sessions_table} ORDER BY t_bar;
+----
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
+
+statement ok
+set streaming_parallelism = 0;

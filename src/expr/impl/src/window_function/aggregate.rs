@@ -19,6 +19,7 @@ use futures_util::FutureExt;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_common::{bail, must_match};
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
 use risingwave_expr::Result;
@@ -244,6 +245,14 @@ where
             AggImpl::Shortcut(..) => {}
         };
         Ok(self.slide_inner())
+    }
+
+    fn on_watermark(&mut self, watermark_encoded: &MemcmpEncoded) {
+        self.buffer.on_watermark(watermark_encoded);
+    }
+
+    fn minimal_next_start(&self) -> Option<&MemcmpEncoded> {
+        self.buffer.minimal_next_start()
     }
 }
 

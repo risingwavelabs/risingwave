@@ -16,6 +16,7 @@ use std::ops::{Deref, DerefMut};
 
 use itertools::Itertools;
 use risingwave_common::types::Datum;
+use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 
 use super::state::{StateEvictHint, StateKey, WindowState};
 use crate::Result;
@@ -85,6 +86,23 @@ impl WindowStates {
             state.slide_no_output()?;
         }
         Ok(())
+    }
+
+    /// Get the maximum `minimal_next_start` across all session window states.
+    /// Uses max so that a partition is only scanned when all states could be ready,
+    /// since `are_ready()` requires all windows to be ready before output.
+    pub fn minimal_next_start(&self) -> Option<MemcmpEncoded> {
+        self.0
+            .iter()
+            .filter_map(|s| s.minimal_next_start().cloned())
+            .max()
+    }
+
+    /// Notify all window states that the watermark has advanced.
+    pub fn on_watermark(&mut self, watermark_encoded: &MemcmpEncoded) {
+        for state in &mut self.0 {
+            state.on_watermark(watermark_encoded);
+        }
     }
 
     /// Slide all windows forward, until the current key is `curr_key`, ignoring the output and evict hints.

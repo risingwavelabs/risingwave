@@ -251,6 +251,7 @@ pub fn visit_stream_node_tables_inner<F>(
                     node.intermediate_state_table,
                     "EowcOverWindowIntermediateState"
                 );
+                optional!(node.open_sessions_table, "EowcOverWindowOpenSessions");
             }
 
             NodeBody::OverWindow(node) => {

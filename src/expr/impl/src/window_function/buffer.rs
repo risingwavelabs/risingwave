@@ -205,6 +205,14 @@ impl<W: WindowImpl> WindowBuffer<W> {
         };
         self.window_impl.recalculate_left_right(window, hint);
     }
+
+    pub fn on_watermark(&mut self, watermark_encoded: &MemcmpEncoded) {
+        self.window_impl.on_watermark(watermark_encoded);
+    }
+
+    pub fn minimal_next_start(&self) -> Option<&MemcmpEncoded> {
+        self.window_impl.minimal_next_start()
+    }
 }
 
 /// Wraps a reference to the buffer and some indices, to be used by [`WindowImpl`]s.
@@ -256,6 +264,17 @@ pub(super) trait WindowImpl {
     /// Shift the indices stored by the [`WindowImpl`] by `n` positions. This should be called
     /// after evicting rows from the buffer.
     fn shift_indices(&mut self, n: usize);
+
+    /// Notify the window implementation that the watermark has advanced to the given encoded value.
+    /// This is used by session windows to close the latest session when the watermark guarantees
+    /// no more rows can extend it.
+    fn on_watermark(&mut self, _watermark_encoded: &MemcmpEncoded) {}
+
+    /// Get the minimal next start of the latest session, if any.
+    /// Only meaningful for session window implementations.
+    fn minimal_next_start(&self) -> Option<&MemcmpEncoded> {
+        None
+    }
 }
 
 /// The sliding window implementation for `ROWS` frames.
@@ -476,6 +495,10 @@ pub(super) struct SessionWindow<V: Clone> {
     /// The first element, if any, should be the size of the "current session window". When sliding,
     /// the front should be popped.
     recognized_session_sizes: VecDeque<usize>,
+    /// The latest watermark value (memcmp-encoded). Used to determine if the latest session
+    /// can be closed: when `last_watermark >= latest_session.minimal_next_start`, no future
+    /// row can extend the session.
+    last_watermark: Option<MemcmpEncoded>,
     _phantom: std::marker::PhantomData<V>,
 }
 
@@ -495,6 +518,7 @@ impl<V: Clone> SessionWindow<V> {
             frame_bounds,
             latest_session: None,
             recognized_session_sizes: Default::default(),
+            last_watermark: None,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -517,12 +541,16 @@ impl<V: Clone> WindowImpl for SessionWindow<V> {
             assert!(window.left_idx <= window.curr_idx);
             assert!(window.curr_idx < window.right_excl_idx);
 
-            // The following expression checks whether the current window is the latest session.
-            // If it is, we don't think it's saturated because the next row may be still in the
-            // same session. Otherwise, we can safely say it's saturated.
-            self.latest_session
-                .as_ref()
-                .is_some_and(|LatestSession { start_idx, .. }| window.left_idx < *start_idx)
+            self.latest_session.as_ref().is_some_and(|s| {
+                // Either the current window is a previous session (not the latest),
+                // or the watermark has advanced past the session gap, guaranteeing no
+                // future row can extend the latest session.
+                window.left_idx < s.start_idx
+                    || self
+                        .last_watermark
+                        .as_ref()
+                        .is_some_and(|w| w >= &s.minimal_next_start)
+            })
         }
     }
 
@@ -642,6 +670,14 @@ impl<V: Clone> WindowImpl for SessionWindow<V> {
         if let Some(LatestSession { start_idx, .. }) = self.latest_session.as_mut() {
             *start_idx -= n;
         }
+    }
+
+    fn minimal_next_start(&self) -> Option<&MemcmpEncoded> {
+        self.latest_session.as_ref().map(|s| &s.minimal_next_start)
+    }
+
+    fn on_watermark(&mut self, watermark_encoded: &MemcmpEncoded) {
+        self.last_watermark = Some(watermark_encoded.clone());
     }
 }
 
@@ -1061,5 +1097,71 @@ mod tests {
                 .collect_vec()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn test_session_frame_watermark_close() {
+        let order_data_type = DataType::Int64;
+        let order_type = OrderType::ascending();
+        let gap_data_type = DataType::Int64;
+
+        let mut buffer = WindowBuffer::<SessionWindow<_>>::new(
+            SessionWindow::new(SessionFrameBounds {
+                order_data_type: order_data_type.clone(),
+                order_type,
+                gap_data_type: gap_data_type.clone(),
+                gap: SessionFrameGap::new_for_test(
+                    ScalarImpl::Int64(5),
+                    &order_data_type,
+                    &gap_data_type,
+                ),
+            }),
+            FrameExclusion::NoOthers,
+            false,
+        );
+
+        let key = |key: i64| -> StateKey {
+            StateKey {
+                order_key: memcmp_encoding::encode_value(Some(ScalarImpl::from(key)), order_type)
+                    .unwrap(),
+                pk: OwnedRow::empty().into(),
+            }
+        };
+        let watermark_enc = |val: i64| -> MemcmpEncoded {
+            memcmp_encoding::encode_value(Some(ScalarImpl::from(val)), order_type).unwrap()
+        };
+
+        // Add rows in the same session (gap=5, keys 1 and 3 are within gap).
+        buffer.append(key(1), "hello");
+        buffer.append(key(3), "world");
+
+        // Without watermark, the latest session is not saturated.
+        let window = buffer.curr_window();
+        assert!(!window.following_saturated);
+
+        // Watermark at 7 — minimal_next_start for key(3) with gap=5 is 8. Not enough.
+        buffer.on_watermark(&watermark_enc(7));
+        let window = buffer.curr_window();
+        assert!(!window.following_saturated);
+
+        // Watermark at 8 — now >= minimal_next_start (3+5=8). Session is closed.
+        buffer.on_watermark(&watermark_enc(8));
+        let window = buffer.curr_window();
+        assert!(window.following_saturated);
+
+        // Slide through all rows in the closed session.
+        assert_eq!(
+            buffer.curr_window_values().cloned().collect_vec(),
+            vec!["hello", "world"]
+        );
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
+        assert!(removed_keys.is_empty());
+        let window = buffer.curr_window();
+        assert_eq!(window.key, Some(&key(3)));
+        assert!(window.following_saturated);
+
+        let removed_keys = buffer.slide().map(|(k, _)| k).collect_vec();
+        assert_eq!(removed_keys, vec![key(1), key(3)]);
+        assert!(buffer.curr_key().is_none());
     }
 }
