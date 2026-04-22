@@ -232,7 +232,7 @@ fn has_privilege_impl(
             format!("User {} not found", user_name).as_str(),
         ))?;
     let memberships = load_role_memberships_blocking(meta_client.clone())
-        .map_err(|error| ExprError::Internal(anyhow!(error.to_string())))?;
+        .map_err(|error| ExprError::Internal(anyhow!(error.to_report_string())))?;
     Ok(actions.iter().all(|(action, require_grant_option)| {
         if *require_grant_option {
             user_catalog.check_privilege_with_grant_option(&object.object, &vec![(*action, true)])

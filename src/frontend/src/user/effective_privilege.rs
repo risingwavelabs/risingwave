@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::acl::AclMode;
 use risingwave_pb::user::RoleMembership;
+use thiserror_ext::AsReport;
 
 use crate::error::{ErrorCode, Result, RwError};
 use crate::meta_client::FrontendMetaClient;
@@ -149,12 +150,12 @@ pub fn load_role_memberships_blocking(
     meta_client: Arc<dyn FrontendMetaClient>,
 ) -> Result<Vec<RoleMembership>> {
     let handle = tokio::runtime::Handle::try_current()
-        .map_err(|error| RwError::from(ErrorCode::InternalError(error.to_string())))?;
+        .map_err(|error| RwError::from(ErrorCode::InternalError(error.to_report_string())))?;
     match handle.runtime_flavor() {
         tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(|| {
             handle.block_on(meta_client.list_role_memberships(vec![]))
         }),
         _ => futures::executor::block_on(meta_client.list_role_memberships(vec![])),
     }
-    .map_err(|error| RwError::from(ErrorCode::InternalError(error.to_string())))
+    .map_err(|error| RwError::from(ErrorCode::InternalError(error.to_report_string())))
 }
