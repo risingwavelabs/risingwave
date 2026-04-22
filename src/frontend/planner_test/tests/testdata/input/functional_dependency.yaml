@@ -26,6 +26,8 @@
     - logical_plan
     - stream_plan
     - batch_plan
+    - batch_local_plan
+    - batch_distributed_plan
 # Order key should not be pruned for index,
 # since it uses it as distribution key as well.
 - name: test functional dependency for order key pruning (index)
