@@ -6652,6 +6652,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
+
+[[package]]
 name = "hashlink"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7113,7 +7124,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef#fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef"
+source = "git+https://github.com/risingwavelabs//iceberg-rust.git?rev=15a8c12ce2e503b66b85f1eece81fe13dfc539bb#15a8c12ce2e503b66b85f1eece81fe13dfc539bb"
 dependencies = [
  "anyhow",
  "apache-avro 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -7141,6 +7152,7 @@ dependencies = [
  "flate2",
  "fnv",
  "futures",
+ "hashbrown 0.17.0",
  "itertools 0.13.0",
  "moka",
  "murmur3",
@@ -7237,7 +7249,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef#fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef"
+source = "git+https://github.com/risingwavelabs//iceberg-rust.git?rev=15a8c12ce2e503b66b85f1eece81fe13dfc539bb#15a8c12ce2e503b66b85f1eece81fe13dfc539bb"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -13415,6 +13427,7 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "await-tree",
+ "bincode 2.0.1",
  "bytes",
  "cfg-if",
  "criterion",
@@ -13429,6 +13442,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "glob",
+ "hashbrown 0.16.1",
  "hytra",
  "iceberg",
  "indexmap 2.13.0",
@@ -13476,6 +13490,7 @@ dependencies = [
  "tracing-subscriber",
  "tracing-test",
  "url",
+ "uuid",
  "workspace-hack",
 ]
 

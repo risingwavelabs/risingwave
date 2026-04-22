@@ -1644,14 +1644,17 @@ impl DdlService for DdlServiceImpl {
         // Mark sink as background creation, so that it won't block source creation.
         sink.create_type = PbCreateType::Background as _;
 
-        // TODO: Iceberg with pk index doesn't support auto schema change
-        if !sink
+        let enable_pk_index = sink
             .properties
             .get(ENABLE_PK_INDEX)
-            .is_some_and(|v| v.eq_ignore_ascii_case("true"))
-        {
-            sink.auto_refresh_schema_from_table = Some(table_catalog.id);
-        }
+            .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+        // The internal iceberg sink is planned before the table catalog exists, so this field
+        // still carries a placeholder table id when the request reaches meta.
+        sink.auto_refresh_schema_from_table = if enable_pk_index {
+            None
+        } else {
+            Some(table_catalog.id)
+        };
 
         let mut fragment_graph = fragment_graph.unwrap();
 

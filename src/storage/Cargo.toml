@@ -85,7 +85,7 @@ criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 risingwave_hummock_sdk = { workspace = true, features = ["test"] }
 risingwave_test_runner = { workspace = true }
-uuid = { version = "1", features = ["v4"] }
+uuid = { workspace = true }
 
 [[bench]]
 name = "bench_block_iter"

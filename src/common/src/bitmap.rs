@@ -36,6 +36,7 @@
 // allow `zip` for performance reasons
 #![allow(clippy::disallowed_methods)]
 
+use std::borrow::Borrow;
 use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, Range, RangeInclusive};
 
@@ -279,10 +280,15 @@ impl Bitmap {
     }
 
     /// Creates a new bitmap from the indices of bits set to 1.
-    pub fn from_indices(num_bits: usize, ones: &[usize]) -> Self {
+    pub fn from_indices<I, T>(num_bits: usize, ones: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Borrow<usize>,
+    {
         let mut builder = BitmapBuilder::zeroed(num_bits);
 
-        for &idx in ones {
+        for idx in ones {
+            let idx = *idx.borrow();
             debug_assert!(idx < num_bits);
             builder.set(idx, true);
         }
@@ -1165,7 +1171,7 @@ mod tests {
 
     #[test]
     fn from_indices_creates_correct_bitmap() {
-        let bitmap = Bitmap::from_indices(10, &[1, 3, 5, 7, 9]);
+        let bitmap = Bitmap::from_indices(10, [1, 3, 5, 7, 9]);
         assert_eq!(bitmap.len(), 10);
         for i in [1, 3, 5, 7, 9] {
             assert!(bitmap.is_set(i));
@@ -1178,7 +1184,7 @@ mod tests {
 
     #[test]
     fn from_indices_empty_indices_creates_zeroed_bitmap() {
-        let bitmap = Bitmap::from_indices(10, &[]);
+        let bitmap = Bitmap::from_indices(10, []);
         assert_eq!(bitmap.len(), 10);
         assert!(!bitmap.any());
     }
@@ -1186,14 +1192,14 @@ mod tests {
     #[test]
     fn from_indices_out_of_bounds_panics() {
         let result = std::panic::catch_unwind(|| {
-            Bitmap::from_indices(5, &[0, 6]);
+            Bitmap::from_indices(5, [0, 6]);
         });
         assert!(result.is_err());
     }
 
     #[test]
     fn from_indices_all_indices_set_creates_filled_bitmap() {
-        let bitmap = Bitmap::from_indices(5, &[0, 1, 2, 3, 4]);
+        let bitmap = Bitmap::from_indices(5, [0, 1, 2, 3, 4]);
         assert_eq!(bitmap.len(), 5);
         assert!(bitmap.all());
     }

@@ -304,6 +304,7 @@ toml = "1.0"
 tonic = { package = "madsim-tonic", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646", features = ["zstd"] }
 tonic-build = { package = "madsim-tonic-build", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
 tracing-opentelemetry = "=0.32.0"
+uuid = { version = "1", features = ["v4", "v7", "fast-rng"] }
 
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`
@@ -458,3 +459,8 @@ prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost"
 prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "040a192409e45069158300baec4f402ad1fe101a" }
+
+# patch for test, need to be removed later
+[patch."https://github.com/risingwavelabs/iceberg-rust.git"]
+iceberg = { git = "https://github.com/risingwavelabs//iceberg-rust.git", rev = "15a8c12ce2e503b66b85f1eece81fe13dfc539bb" }
+iceberg-datafusion = { git = "https://github.com/risingwavelabs//iceberg-rust.git", rev = "15a8c12ce2e503b66b85f1eece81fe13dfc539bb" }

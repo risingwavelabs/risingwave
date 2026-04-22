@@ -24,7 +24,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{SinkCommittedEpochSubscriber, SinkError, SinkParam};
-use risingwave_pb::connector_service::coordinate_request::Msg;
+use risingwave_pb::connector_service::coordinate_request::{CoordinationRole, Msg};
 use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse, coordinate_request};
 use rw_futures_util::pending_on_none;
 use sea_orm::DatabaseConnection;
@@ -144,14 +144,21 @@ impl SinkCoordinatorManager {
         &self,
         mut request_stream: SinkWriterRequestStream,
     ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>> + use<>, Status> {
-        let (param, vnode_bitmap) = match request_stream.try_next().await? {
+        let (param, vnode_bitmap, role) = match request_stream.try_next().await? {
             Some(CoordinateRequest {
                 msg:
                     Some(Msg::StartRequest(coordinate_request::StartCoordinationRequest {
                         param: Some(param),
                         vnode_bitmap: Some(vnode_bitmap),
+                        role,
                     })),
-            }) => (SinkParam::from_proto(param), Bitmap::from(&vnode_bitmap)),
+            }) => (
+                SinkParam::from_proto(param),
+                Bitmap::from(&vnode_bitmap),
+                CoordinationRole::try_from(role).map_err(|_| {
+                    Status::invalid_argument(format!("invalid coordination role: {role}"))
+                })?,
+            ),
             msg => {
                 return Err(Status::invalid_argument(format!(
                     "expected CoordinateRequest::StartRequest in the first request, get {:?}",
@@ -162,7 +169,13 @@ impl SinkCoordinatorManager {
         let (response_tx, response_rx) = mpsc::unbounded_channel();
         self.request_tx
             .send(ManagerRequest::NewSinkWriter(
-                SinkWriterCoordinationHandle::new(request_stream, response_tx, param, vnode_bitmap),
+                SinkWriterCoordinationHandle::new(
+                    request_stream,
+                    response_tx,
+                    param,
+                    vnode_bitmap,
+                    role,
+                ),
             ))
             .await
             .map_err(|_| {
@@ -340,13 +353,21 @@ impl ManagerWorker {
     }
 
     fn handle_coordinator_finished(&mut self, sink_id: SinkId, join_result: Result<(), JoinError>) {
-        let worker_handle = self
-            .running_coordinator_worker
-            .remove(&sink_id)
-            .expect("finished coordinator should have an associated worker handle");
-        for finish_notifier in worker_handle.finish_notifiers {
-            send_with_err_check!(finish_notifier, ());
+        // Only remove the entry if the coordinator it refers to has actually finished
+        // (sender closed). A new coordinator may have already been spawned by
+        // handle_new_sink_writer, so we must not remove its live entry.
+        if let Some(worker_handle) = self.running_coordinator_worker.get(&sink_id)
+            && worker_handle
+                .request_sender
+                .as_ref()
+                .is_none_or(|s| s.is_closed())
+        {
+            let worker_handle = self.running_coordinator_worker.remove(&sink_id).unwrap();
+            for finish_notifier in worker_handle.finish_notifiers {
+                send_with_err_check!(finish_notifier, ());
+            }
         }
+
         match join_result {
             Ok(()) => {
                 info!(
@@ -371,6 +392,20 @@ impl ManagerWorker {
     ) {
         let param = new_writer.param();
         let sink_id = param.sink_id;
+
+        // If the previous coordinator has exited (sender channel closed), remove the stale
+        // entry so a fresh coordinator will be spawned below.
+        if self
+            .running_coordinator_worker
+            .get(&sink_id)
+            .is_some_and(|h| h.request_sender.as_ref().is_none_or(|s| s.is_closed()))
+        {
+            info!(
+                id = %sink_id,
+                "removing stale coordinator entry, will spawn a new coordinator",
+            );
+            self.running_coordinator_worker.remove(&sink_id);
+        }
 
         let handle = self
             .running_coordinator_worker
@@ -425,6 +460,7 @@ mod tests {
     };
     use risingwave_meta_model::SinkSchemachange;
     use risingwave_pb::connector_service::SinkMetadata;
+    use risingwave_pb::connector_service::coordinate_request::CoordinationRole;
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
     use risingwave_pb::data::PbDataType;
     use risingwave_pb::data::data_type::PbTypeName;
@@ -599,15 +635,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -803,15 +844,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -923,15 +969,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -1032,15 +1083,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -1197,15 +1253,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
         };
 
@@ -1662,15 +1723,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -1789,15 +1855,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -1949,15 +2020,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -2091,15 +2167,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -2267,15 +2348,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                CoordinationRole::Unspecified,
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
         };
 

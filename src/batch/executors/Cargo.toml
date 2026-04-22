@@ -40,7 +40,7 @@ rw_futures_util = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
 tokio-postgres = "0.7"
 tracing = "0.1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }

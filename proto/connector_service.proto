@@ -226,11 +226,17 @@ service ConnectorService {
 }
 
 message CoordinateRequest {
+  enum CoordinationRole {
+    UNSPECIFIED = 0;
+    DV_MERGER = 1;
+  }
+
   // The first request that starts a coordination between sink writer and coordinator.
   // The service will respond after sink writers of all vnodes have sent the request.
   message StartCoordinationRequest {
     common.Buffer vnode_bitmap = 1;
     SinkParam param = 2;
+    CoordinationRole role = 3;
   }
 
   message CommitRequest {

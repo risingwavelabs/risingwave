@@ -43,7 +43,7 @@ thiserror-ext = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
 tonic = { workspace = true }
 tracing = "0.1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

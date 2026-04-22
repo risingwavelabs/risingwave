@@ -17,7 +17,7 @@ use iceberg::spec::{DataFile, PartitionKey};
 use iceberg::writer::function_writer::fanout_partition_writer::{
     FanoutPartitionWriter, FanoutPartitionWriterBuilder,
 };
-use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
+use iceberg::writer::{IcebergWriter, IcebergWriterBuilder, PositionDeleteInput};
 use risingwave_common::array::arrow::arrow_array_iceberg;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
@@ -75,6 +75,15 @@ impl<B: IcebergWriterBuilder> IcebergWriter for MonitoredFanoutPartitionedWriter
         self.inner.write(batch).await?;
         self.update_metrics();
         Ok(())
+    }
+
+    async fn write_with_position(
+        &mut self,
+        batch: arrow_array_iceberg::RecordBatch,
+    ) -> Result<Vec<PositionDeleteInput>> {
+        let res = self.inner.write_with_position(batch).await?;
+        self.update_metrics();
+        Ok(res)
     }
 
     async fn close(&mut self) -> Result<Vec<DataFile>> {
