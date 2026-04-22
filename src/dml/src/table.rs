@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 
-use futures::future::BoxFuture;
 use futures_async_stream::try_stream;
 use parking_lot::RwLock;
 use risingwave_common::array::StreamChunk;
@@ -197,23 +197,17 @@ impl WriteHandle {
 
     /// Like `end`, but waits until the data has been durably persisted before returning.
     /// The `DmlExecutor` fires the persistence signal after `try_wait_epoch` succeeds.
-    pub async fn end_wait_persistence(self) -> Result<()> {
-        self.end_wait_persistence_future()?.await
-    }
-
-    /// Like `end`, but returns a future so the caller can await the persistence ack separately
-    /// from issuing the end message.
-    pub fn end_wait_persistence_future(mut self) -> Result<BoxFuture<'static, Result<()>>> {
+    pub fn end_wait_persistence(mut self) -> Result<impl Future<Output = Result<()>> + 'static> {
         assert_eq!(self.txn_state, TxnState::Begin);
         self.txn_state = TxnState::Committed;
         let (persistence_tx, persistence_rx) = oneshot::channel();
         let notifier =
             self.write_txn_control_msg(TxnMsg::End(self.txn_id, Some(persistence_tx)))?;
-        Ok(Box::pin(async move {
+        Ok(async move {
             notifier.await.map_err(|_| DmlError::ReaderClosed)?;
             persistence_rx.await.map_err(|_| DmlError::ReaderClosed)?;
             Ok(())
-        }))
+        })
     }
 
     pub fn rollback(mut self) -> Result<oneshot::Receiver<usize>> {
@@ -408,7 +402,7 @@ mod tests {
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
 
         let handle = tokio::spawn(async move {
-            write_handle.end_wait_persistence().await.unwrap();
+            write_handle.end_wait_persistence().unwrap().await.unwrap();
         });
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, Some(persistence_notifier)) => {

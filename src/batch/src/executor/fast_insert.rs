@@ -22,7 +22,7 @@ use risingwave_common::types::DataType;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_pb::task_service::FastInsertRequest;
 
-use crate::error::Result;
+use crate::error::{BatchError, Result};
 
 /// A fast insert executor spacially designed for non-pgwire inserts such as websockets and webhooks.
 pub struct FastInsertExecutor {
@@ -142,8 +142,9 @@ impl FastInsertExecutor {
         if wait_for_persistence {
             write_handle
                 .end_wait_persistence()
+                .map_err(BatchError::from)?
                 .await
-                .map_err(Into::into)
+                .map_err(BatchError::from)
         } else {
             write_handle.end().await.map_err(Into::into)
         }

@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::mem;
 
 use either::Either;
-use futures::future::{BoxFuture, Either as FutureEither, select};
+use futures::future::{Either as FutureEither, select};
 use futures::stream::FuturesOrdered;
 use futures::{StreamExt, TryStreamExt};
 use risingwave_common::catalog::{ColumnDesc, TableId, TableVersionId};
@@ -76,7 +77,7 @@ struct TxnBuffer {
     overflow: bool,
 }
 
-impl<S: StateStore + Clone> DmlExecutor<S> {
+impl<S: StateStore> DmlExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
@@ -162,8 +163,7 @@ impl<S: StateStore + Clone> DmlExecutor<S> {
 
         // In-flight persistence waits, one future per closed epoch that had pending notifiers.
         // Polled concurrently with the input stream via next_input_driving_persistence.
-        let mut persistence_futures: FuturesOrdered<BoxFuture<'static, StreamExecutorResult<()>>> =
-            FuturesOrdered::new();
+        let mut persistence_futures = FuturesOrdered::new();
 
         while let Some(input_msg) =
             next_input_driving_persistence(&mut stream, &mut persistence_futures).await?
@@ -178,7 +178,7 @@ impl<S: StateStore + Clone> DmlExecutor<S> {
                             let closing_epoch = barrier.epoch.prev;
                             let store = self.state_store.clone();
                             let table_id = self.table_id;
-                            persistence_futures.push_back(Box::pin(async move {
+                            persistence_futures.push_back(async move {
                                 store
                                     .try_wait_epoch(
                                         HummockReadEpoch::Committed(closing_epoch),
@@ -190,7 +190,7 @@ impl<S: StateStore + Clone> DmlExecutor<S> {
                                     let _ = tx.send(());
                                 }
                                 Ok(())
-                            }));
+                            });
                         }
 
                         // We should handle barrier messages here to pause or resume the data from
@@ -354,7 +354,7 @@ impl<S: StateStore + Clone> DmlExecutor<S> {
     }
 }
 
-impl<S: StateStore + Clone> Execute for DmlExecutor<S> {
+impl<S: StateStore> Execute for DmlExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -365,7 +365,7 @@ impl<S: StateStore + Clone> Execute for DmlExecutor<S> {
 /// (and thus the actor) to fail and trigger recovery.
 async fn next_input_driving_persistence(
     stream: &mut StreamReaderWithPause<false, TxnMsg>,
-    persistence_futures: &mut FuturesOrdered<BoxFuture<'static, StreamExecutorResult<()>>>,
+    persistence_futures: &mut FuturesOrdered<impl Future<Output = StreamExecutorResult<()>>>,
 ) -> StreamExecutorResult<Option<Either<Message, TxnMsg>>> {
     loop {
         if persistence_futures.is_empty() {
@@ -445,17 +445,16 @@ async fn apply_dml_rate_limit(
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use futures::FutureExt;
     use risingwave_common::catalog::{ColumnId, Field, INITIAL_TABLE_VERSION_ID};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_dml::dml_manager::DmlManager;
-    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_sdk::key::TableKeyRange;
     use risingwave_storage::error::StorageResult;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::panic_store::{PanicStateStore, PanicStateStoreIter};
     use risingwave_storage::store::*;
-    use tokio::sync::oneshot;
 
     use super::*;
     use crate::executor::test_utils::MockSource;
@@ -695,12 +694,6 @@ mod tests {
         let msg = dml_executor.next().await.unwrap().unwrap();
         assert!(matches!(msg, Message::Barrier(_)));
 
-        let drain_handle = tokio::spawn(async move {
-            while let Some(msg) = dml_executor.next().await {
-                let _ = msg.unwrap();
-            }
-        });
-
         let table_dml_handle = dml_manager
             .table_dml_handle(table_id, INITIAL_TABLE_VERSION_ID)
             .unwrap();
@@ -716,8 +709,16 @@ mod tests {
             .await
             .unwrap();
 
-        let persist_handle = tokio::spawn(async move {
-            write_handle.end_wait_persistence().await.unwrap();
+        let mut persistence_future = Box::pin(write_handle.end_wait_persistence().unwrap());
+
+        // Drive the executor until all queued DML messages are consumed. The transaction is smaller
+        // than `chunk_size`, so it is buffered and no output is produced before the next barrier.
+        assert!(dml_executor.next().now_or_never().is_none());
+
+        let drain_handle = tokio::spawn(async move {
+            while let Some(msg) = dml_executor.next().await {
+                let _ = msg.unwrap();
+            }
         });
 
         tx.push_barrier_with_prev_epoch_for_test(test_epoch(11), test_epoch(10), false);
@@ -728,10 +729,10 @@ mod tests {
             HummockReadEpoch::Committed(epoch) if epoch == test_epoch(10)
         ));
         assert_eq!(options.table_id, table_id);
-        assert!(!persist_handle.is_finished());
+        assert!(persistence_future.as_mut().now_or_never().is_none());
 
         wait_epoch_release_tx.send(()).unwrap();
-        persist_handle.await.unwrap();
+        persistence_future.await.unwrap();
 
         drain_handle.abort();
     }
