@@ -27,7 +27,7 @@ use risingwave_frontend_macro::system_catalog;
     "SELECT id AS oid,
         name AS rolname,
         is_super AS rolsuper,
-        true AS rolinherit,
+        can_inherit AS rolinherit,
         create_user AS rolcreaterole,
         create_db AS rolcreatedb,
         can_login AS rolcanlogin,

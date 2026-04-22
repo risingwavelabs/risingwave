@@ -45,6 +45,7 @@ pub async fn handle_create_user(
         name: user_name.clone(),
         // the LOGIN option is implied if it is not explicitly specified.
         can_login: true,
+        can_inherit: true,
         ..Default::default()
     };
     let mut notices = vec![];
@@ -108,7 +109,8 @@ pub async fn handle_create_user(
                 UserOption::NoCreateRole | UserOption::NoCreateUser => {
                     user_info.can_create_user = false
                 }
-                UserOption::Inherit | UserOption::NoInherit => {}
+                UserOption::Inherit => user_info.can_inherit = true,
+                UserOption::NoInherit => user_info.can_inherit = false,
                 UserOption::Login => user_info.can_login = true,
                 UserOption::NoLogin => user_info.can_login = false,
                 UserOption::Admin => user_info.is_admin = true,

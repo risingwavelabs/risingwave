@@ -1059,6 +1059,7 @@ impl MetaClient {
         revoke_admin_option: bool,
         revoke_inherit_option: bool,
         revoke_set_option: bool,
+        cascade: bool,
     ) -> Result<u64> {
         let request = RevokeRoleRequest {
             role_ids: role_ids.into_iter().map(|id| id.as_raw_id()).collect(),
@@ -1068,9 +1069,21 @@ impl MetaClient {
             revoke_admin_option,
             revoke_inherit_option,
             revoke_set_option,
+            cascade,
         };
         let resp = self.inner.revoke_role(request).await?;
         Ok(resp.version)
+    }
+
+    pub async fn list_role_memberships(
+        &self,
+        member_ids: Vec<UserId>,
+    ) -> Result<Vec<RoleMembership>> {
+        let request = ListRoleMembershipsRequest {
+            member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
+        };
+        let resp = self.inner.list_role_memberships(request).await?;
+        Ok(resp.memberships)
     }
 
     pub async fn alter_default_privilege(
@@ -2797,6 +2810,7 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
             ,{ user_client, grant_role, GrantRoleRequest, GrantRoleResponse }
             ,{ user_client, revoke_role, RevokeRoleRequest, RevokeRoleResponse }
+            ,{ user_client, list_role_memberships, ListRoleMembershipsRequest, ListRoleMembershipsResponse }
             ,{ user_client, alter_default_privilege, AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }

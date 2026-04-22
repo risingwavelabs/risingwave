@@ -190,6 +190,7 @@ impl UserService for UserServiceImpl {
                 req.revoke_admin_option,
                 req.revoke_inherit_option,
                 req.revoke_set_option,
+                req.cascade,
             )
             .await?;
 

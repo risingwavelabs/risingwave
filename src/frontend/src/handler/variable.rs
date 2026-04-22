@@ -17,15 +17,17 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::not_implemented;
 use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::Fields;
-use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
+use risingwave_sqlparser::ast::{
+    Ident, RoleContextModifier, SetRoleSpec, SetTimeZoneValue, SetVariableValue, Value,
+};
 
 use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
+use crate::user::effective_privilege::{can_set_role, load_role_memberships_blocking};
 
 /// convert `SetVariableValue` to string while remove the quotes on literals.
 pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
@@ -110,18 +112,62 @@ pub(super) fn handle_set_time_zone(
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
 
-pub(super) fn handle_set_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
-    Err(not_implemented!(
-        "SET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
-    )
-    .into())
+pub(super) fn handle_set_role(
+    handler_args: HandlerArgs,
+    context_modifier: Option<RoleContextModifier>,
+    role_name: SetRoleSpec,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    match role_name {
+        SetRoleSpec::None => {
+            if matches!(context_modifier, Some(RoleContextModifier::Local)) {
+                session
+                    .set_local_current_user(session.session_user_name(), session.session_user_id());
+            } else {
+                session.clear_local_current_user();
+                session.reset_current_user();
+            }
+        }
+        SetRoleSpec::Name(role_name) => {
+            let user_reader = session.env().user_info_reader();
+            let reader = user_reader.read_guard();
+            let role = reader
+                .get_user_by_name(&role_name.real_value())
+                .cloned()
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "Role \"{}\" does not exist",
+                        role_name.real_value()
+                    ))
+                })?;
+            drop(reader);
+
+            let memberships = load_role_memberships_blocking(session.env().meta_client_ref())?;
+            if !session.is_super_user()
+                && !can_set_role(session.session_user_id(), role.id, &memberships)
+            {
+                return Err(ErrorCode::PermissionDenied(format!(
+                    "permission denied to set role \"{}\"",
+                    role.name
+                ))
+                .into());
+            }
+            if matches!(context_modifier, Some(RoleContextModifier::Local)) {
+                session.set_local_current_user(role.name.clone(), role.id);
+            } else {
+                session.clear_local_current_user();
+                session.set_current_user(role.name.clone(), role.id);
+            }
+        }
+    }
+
+    Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
 
-pub(super) fn handle_reset_role(_handler_args: HandlerArgs) -> Result<RwPgResponse> {
-    Err(not_implemented!(
-        "RESET ROLE is parsed and dispatched, but active-role session semantics are not implemented yet"
-    )
-    .into())
+pub(super) fn handle_reset_role(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    handler_args.session.clear_local_current_user();
+    handler_args.session.reset_current_user();
+    Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
 
 pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {

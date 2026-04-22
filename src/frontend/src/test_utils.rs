@@ -75,7 +75,7 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
-use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_pb::user::{GrantPrivilege, RoleMembership, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use tempfile::{Builder, NamedTempFile};
 
@@ -89,6 +89,7 @@ use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::UserId;
+use crate::user::user_catalog::UserCatalog;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 
@@ -226,6 +227,22 @@ impl LocalFrontend {
             .into(),
             Default::default(),
         ))
+    }
+
+    pub fn user_by_name(&self, user_name: &str) -> Option<UserCatalog> {
+        self.env
+            .user_info_reader()
+            .read_guard()
+            .get_user_by_name(user_name)
+            .cloned()
+    }
+
+    pub async fn role_memberships(&self) -> Vec<RoleMembership> {
+        self.env
+            .meta_client()
+            .list_role_memberships(vec![])
+            .await
+            .unwrap()
     }
 }
 
@@ -1015,6 +1032,7 @@ impl MockCatalogWriter {
 pub struct MockUserInfoWriter {
     id: AtomicU32,
     user_info: Arc<RwLock<UserInfoManager>>,
+    role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
 }
 
 #[async_trait::async_trait]
@@ -1050,6 +1068,7 @@ impl UserInfoWriter for MockUserInfoWriter {
             UpdateField::AuthInfo => user_info.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => user_info.name.clone_from(&update_user.name),
             UpdateField::Admin => user_info.is_admin = update_user.is_admin,
+            UpdateField::Inherit => user_info.can_inherit = update_user.can_inherit,
             UpdateField::Unspecified => unreachable!(),
         });
         lock.update_user(update_user);
@@ -1103,26 +1122,92 @@ impl UserInfoWriter for MockUserInfoWriter {
 
     async fn grant_role(
         &self,
-        _role_ids: Vec<UserId>,
-        _member_ids: Vec<UserId>,
-        _granted_by: UserId,
-        _admin_option: Option<bool>,
-        _inherit_option: Option<bool>,
-        _set_option: Option<bool>,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        admin_option: Option<bool>,
+        inherit_option: Option<bool>,
+        set_option: Option<bool>,
     ) -> Result<()> {
+        let admin_option = admin_option.unwrap_or(false);
+        let inherit_option = inherit_option.unwrap_or(true);
+        let set_option = set_option.unwrap_or(true);
+        let granted_by = granted_by.as_raw_id();
+        let mut memberships = self.role_memberships.write();
+
+        for role_id in role_ids {
+            for member_id in &member_ids {
+                let role_id = role_id.as_raw_id();
+                let member_id = member_id.as_raw_id();
+                if let Some(existing) = memberships.iter_mut().find(|membership| {
+                    membership.role_id == role_id
+                        && membership.member_id == member_id
+                        && membership.granted_by == granted_by
+                }) {
+                    existing.admin_option |= admin_option;
+                    existing.inherit_option |= inherit_option;
+                    existing.set_option |= set_option;
+                } else {
+                    memberships.push(RoleMembership {
+                        role_id,
+                        member_id,
+                        granted_by,
+                        admin_option,
+                        inherit_option,
+                        set_option,
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
     async fn revoke_role(
         &self,
-        _role_ids: Vec<UserId>,
-        _member_ids: Vec<UserId>,
-        _granted_by: UserId,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
         _revoked_by: UserId,
-        _revoke_admin_option: bool,
-        _revoke_inherit_option: bool,
-        _revoke_set_option: bool,
+        revoke_admin_option: bool,
+        revoke_inherit_option: bool,
+        revoke_set_option: bool,
+        _cascade: bool,
     ) -> Result<()> {
+        let role_ids = role_ids
+            .into_iter()
+            .map(|id| id.as_raw_id())
+            .collect::<HashSet<_>>();
+        let member_ids = member_ids
+            .into_iter()
+            .map(|id| id.as_raw_id())
+            .collect::<HashSet<_>>();
+        let granted_by = granted_by.as_raw_id();
+        let option_only = revoke_admin_option || revoke_inherit_option || revoke_set_option;
+        let mut memberships = self.role_memberships.write();
+
+        if option_only {
+            for membership in memberships.iter_mut().filter(|membership| {
+                membership.granted_by == granted_by
+                    && role_ids.contains(&membership.role_id)
+                    && member_ids.contains(&membership.member_id)
+            }) {
+                if revoke_admin_option {
+                    membership.admin_option = false;
+                }
+                if revoke_inherit_option {
+                    membership.inherit_option = false;
+                }
+                if revoke_set_option {
+                    membership.set_option = false;
+                }
+            }
+        } else {
+            memberships.retain(|membership| {
+                membership.granted_by != granted_by
+                    || !role_ids.contains(&membership.role_id)
+                    || !member_ids.contains(&membership.member_id)
+            });
+        }
         Ok(())
     }
 
@@ -1139,7 +1224,10 @@ impl UserInfoWriter for MockUserInfoWriter {
 }
 
 impl MockUserInfoWriter {
-    pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
+    pub fn new(
+        user_info: Arc<RwLock<UserInfoManager>>,
+        role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
+    ) -> Self {
         user_info.write().create_user(UserInfo {
             id: DEFAULT_SUPER_USER_ID,
             name: DEFAULT_SUPER_USER.to_owned(),
@@ -1147,6 +1235,7 @@ impl MockUserInfoWriter {
             can_create_db: true,
             can_create_user: true,
             can_login: true,
+            can_inherit: true,
             ..Default::default()
         });
         user_info.write().create_user(UserInfo {
@@ -1157,11 +1246,13 @@ impl MockUserInfoWriter {
             can_create_user: true,
             can_login: true,
             is_admin: true,
+            can_inherit: true,
             ..Default::default()
         });
         Self {
             user_info,
             id: AtomicU32::new(NON_RESERVED_USER_ID.as_raw_id()),
+            role_memberships,
         }
     }
 
@@ -1170,7 +1261,15 @@ impl MockUserInfoWriter {
     }
 }
 
-pub struct MockFrontendMetaClient {}
+pub struct MockFrontendMetaClient {
+    role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
+}
+
+impl MockFrontendMetaClient {
+    pub fn new(role_memberships: Arc<RwLock<Vec<RoleMembership>>>) -> Self {
+        Self { role_memberships }
+    }
+}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
@@ -1406,6 +1505,26 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
+    }
+
+    async fn list_role_memberships(
+        &self,
+        member_ids: Vec<UserId>,
+    ) -> RpcResult<Vec<RoleMembership>> {
+        let memberships = self.role_memberships.read();
+        if member_ids.is_empty() {
+            return Ok(memberships.clone());
+        }
+
+        let member_ids = member_ids
+            .into_iter()
+            .map(|id| id.as_raw_id())
+            .collect::<HashSet<_>>();
+        Ok(memberships
+            .iter()
+            .filter(|membership| member_ids.contains(&membership.member_id))
+            .cloned()
+            .collect())
     }
 
     async fn list_iceberg_compaction_status(&self) -> RpcResult<Vec<IcebergCompactionStatus>> {

@@ -21,6 +21,7 @@ use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
 use crate::session::SessionImpl;
 use crate::user::UserId;
+use crate::user::effective_privilege::{load_role_memberships_blocking, session_has_privilege};
 
 #[derive(Debug)]
 pub struct ObjectCheckItem {
@@ -69,21 +70,25 @@ impl SessionImpl {
         let user_reader = self.env().user_info_reader();
         let reader = user_reader.read_guard();
 
-        if let Some(user) = reader.get_user_by_name(&self.user_name()) {
-            if user.is_super {
-                return Ok(());
-            }
-            for item in items {
-                if item.owner == user.id {
-                    continue;
-                }
-                let has_privilege = user.has_privilege(item.object, item.mode);
-                if !has_privilege {
-                    return Err(PermissionDenied(item.error_message()).into());
-                }
-            }
-        } else {
+        if reader.get_user_by_name(&self.user_name()).is_none() {
             return Err(PermissionDenied("Session user is invalid".to_owned()).into());
+        }
+        drop(reader);
+
+        let auth_context = self.auth_context();
+        let memberships = load_role_memberships_blocking(self.env().meta_client_ref())?;
+        for item in items {
+            let has_privilege = session_has_privilege(
+                user_reader,
+                &auth_context,
+                &memberships,
+                item.owner,
+                item.object,
+                item.mode,
+            );
+            if !has_privilege {
+                return Err(PermissionDenied(item.error_message()).into());
+            }
         }
 
         Ok(())
@@ -212,5 +217,144 @@ mod tests {
             .await
             .unwrap();
         assert!(&session.check_privileges(&check_items).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_check_privileges_respects_active_role() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+        frontend.run_sql("CREATE SCHEMA role_schema").await.unwrap();
+
+        let schema = catalog_reader
+            .read_guard()
+            .get_schema_by_name(DEFAULT_DATABASE_NAME, "role_schema")
+            .unwrap()
+            .clone();
+        let check_items = vec![ObjectCheckItem::new(
+            DEFAULT_SUPER_USER_ID,
+            AclMode::Create,
+            "role_schema".to_owned(),
+            schema.id(),
+        )];
+
+        frontend.run_sql("CREATE ROLE role_a").await.unwrap();
+        frontend.run_sql("CREATE ROLE role_b").await.unwrap();
+        frontend
+            .run_sql(
+                "CREATE USER role_member WITH NOSUPERUSER PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
+            )
+            .await
+            .unwrap();
+        frontend
+            .run_sql("GRANT CREATE ON SCHEMA role_schema TO role_a")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("GRANT role_a TO role_member")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("GRANT role_b TO role_member")
+            .await
+            .unwrap();
+
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("role_member")
+                .unwrap()
+                .id
+        };
+        let member_session = frontend.session_user_ref(
+            DEFAULT_DATABASE_NAME.to_owned(),
+            "role_member".to_owned(),
+            user_id,
+        );
+
+        assert!(member_session.check_privileges(&check_items).is_ok());
+
+        frontend
+            .run_sql_with_session(member_session.clone(), "SET ROLE role_b")
+            .await
+            .unwrap();
+        assert!(member_session.check_privileges(&check_items).is_err());
+
+        frontend
+            .run_sql_with_session(member_session.clone(), "RESET ROLE")
+            .await
+            .unwrap();
+        assert!(member_session.check_privileges(&check_items).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_check_privileges_respects_noinherit_role() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+        frontend
+            .run_sql("CREATE SCHEMA noinherit_schema")
+            .await
+            .unwrap();
+
+        let schema = catalog_reader
+            .read_guard()
+            .get_schema_by_name(DEFAULT_DATABASE_NAME, "noinherit_schema")
+            .unwrap()
+            .clone();
+        let check_items = vec![ObjectCheckItem::new(
+            DEFAULT_SUPER_USER_ID,
+            AclMode::Create,
+            "noinherit_schema".to_owned(),
+            schema.id(),
+        )];
+
+        frontend
+            .run_sql("CREATE ROLE noinherit_role WITH NOINHERIT")
+            .await
+            .unwrap();
+        frontend
+            .run_sql(
+                "CREATE USER noinherit_member WITH NOSUPERUSER NOINHERIT PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
+            )
+            .await
+            .unwrap();
+        frontend
+            .run_sql("GRANT CREATE ON SCHEMA noinherit_schema TO noinherit_role")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("GRANT noinherit_role TO noinherit_member")
+            .await
+            .unwrap();
+
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("noinherit_member")
+                .unwrap()
+                .id
+        };
+        let member_session = frontend.session_user_ref(
+            DEFAULT_DATABASE_NAME.to_owned(),
+            "noinherit_member".to_owned(),
+            user_id,
+        );
+
+        assert!(member_session.check_privileges(&check_items).is_err());
+
+        frontend
+            .run_sql_with_session(member_session.clone(), "SET ROLE noinherit_role")
+            .await
+            .unwrap();
+        assert!(member_session.check_privileges(&check_items).is_ok());
+
+        frontend
+            .run_sql_with_session(member_session.clone(), "RESET ROLE")
+            .await
+            .unwrap();
+        assert!(member_session.check_privileges(&check_items).is_err());
     }
 }

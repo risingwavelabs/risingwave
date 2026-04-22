@@ -221,7 +221,8 @@ impl FrontendEnv {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
-        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let role_memberships = Arc::new(RwLock::new(vec![]));
+        let meta_client = Arc::new(MockFrontendMetaClient::new(role_memberships.clone()));
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(
             catalog.clone(),
@@ -229,7 +230,10 @@ impl FrontendEnv {
         ));
         let catalog_reader = CatalogReader::new(catalog);
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
-        let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
+        let user_info_writer = Arc::new(MockUserInfoWriter::new(
+            user_info_manager.clone(),
+            role_memberships,
+        ));
         let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
@@ -778,6 +782,16 @@ impl AuthContext {
     pub fn current_user_id(&self) -> UserId {
         self.user_id
     }
+
+    pub fn set_current_user(&mut self, current_user_name: String, current_user_id: UserId) {
+        self.user_name = current_user_name;
+        self.user_id = current_user_id;
+    }
+
+    pub fn reset_current_user(&mut self) {
+        self.user_name = self.session_user_name.clone();
+        self.user_id = self.session_user_id;
+    }
 }
 pub struct SessionImpl {
     env: FrontendEnv,
@@ -1009,6 +1023,16 @@ impl SessionImpl {
 
     pub fn update_database(&self, database: String) {
         self.auth_context.write().database = database;
+    }
+
+    pub fn set_current_user(&self, current_user_name: String, current_user_id: UserId) {
+        self.auth_context
+            .write()
+            .set_current_user(current_user_name, current_user_id);
+    }
+
+    pub fn reset_current_user(&self) {
+        self.auth_context.write().reset_current_user();
     }
 
     pub fn shared_config(&self) -> Arc<RwLock<SessionConfig>> {
@@ -2083,9 +2107,9 @@ mod tests {
         let ctx = AuthContext::new_with_current(
             "dev".to_owned(),
             "login_role".to_owned(),
-            1,
+            1.into(),
             "active_role".to_owned(),
-            2,
+            2.into(),
         );
 
         assert_eq!(ctx.session_user_name(), "login_role");

@@ -103,7 +103,14 @@ fn alter_prost_user_info(
                 user_info.can_create_user = false;
                 update_fields.insert(UpdateField::CreateUser);
             }
-            UserOption::Inherit | UserOption::NoInherit => {}
+            UserOption::Inherit => {
+                user_info.can_inherit = true;
+                update_fields.insert(UpdateField::Inherit);
+            }
+            UserOption::NoInherit => {
+                user_info.can_inherit = false;
+                update_fields.insert(UpdateField::Inherit);
+            }
             UserOption::Login => {
                 user_info.can_login = true;
                 update_fields.insert(UpdateField::Login);

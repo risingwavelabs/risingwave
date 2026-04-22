@@ -29,6 +29,7 @@ struct RwUser {
     create_user: bool,
     can_login: bool,
     is_admin: bool,
+    can_inherit: bool,
 }
 
 #[system_catalog(table, "rw_catalog.rw_users")]
@@ -46,6 +47,7 @@ fn read_rw_user_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUser>> {
             create_user: user.can_create_user,
             can_login: user.can_login,
             is_admin: user.is_admin,
+            can_inherit: user.can_inherit,
         })
         .collect())
 }

@@ -331,6 +331,7 @@ impl StatementType {
                 risingwave_sqlparser::ast::ObjectType::Source => Ok(StatementType::DROP_SOURCE),
                 risingwave_sqlparser::ast::ObjectType::Sink => Ok(StatementType::DROP_SINK),
                 risingwave_sqlparser::ast::ObjectType::Database => Ok(StatementType::DROP_DATABASE),
+                risingwave_sqlparser::ast::ObjectType::Role => Ok(StatementType::DROP_USER),
                 risingwave_sqlparser::ast::ObjectType::User => Ok(StatementType::DROP_USER),
                 risingwave_sqlparser::ast::ObjectType::Connection => {
                     Ok(StatementType::DROP_CONNECTION)

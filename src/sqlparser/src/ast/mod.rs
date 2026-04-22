@@ -1637,7 +1637,8 @@ pub enum Statement {
     GrantRole {
         roles: Vec<Ident>,
         grantees: Vec<Ident>,
-        with_admin_option: bool,
+        role_options: Vec<RoleOptionSpec>,
+        granted_by: Option<Ident>,
     },
     /// REVOKE privileges ON objects FROM grantees
     Revoke {
@@ -1652,7 +1653,8 @@ pub enum Statement {
     RevokeRole {
         roles: Vec<Ident>,
         grantees: Vec<Ident>,
-        revoke_admin_option: bool,
+        revoke_role_option: Option<RoleOptionKind>,
+        granted_by: Option<Ident>,
         cascade: bool,
     },
     /// `DEALLOCATE [ PREPARE ] { name | ALL }`
@@ -2404,12 +2406,16 @@ impl Statement {
             Statement::GrantRole {
                 roles,
                 grantees,
-                with_admin_option,
+                role_options,
+                granted_by,
             } => {
                 write!(f, "GRANT {} ", display_comma_separated(roles))?;
                 write!(f, "TO {}", display_comma_separated(grantees))?;
-                if *with_admin_option {
-                    write!(f, " WITH ADMIN OPTION")?;
+                if !role_options.is_empty() {
+                    write!(f, " WITH {}", display_comma_separated(role_options))?;
+                }
+                if let Some(grantor) = granted_by {
+                    write!(f, " GRANTED BY {}", grantor)?;
                 }
                 Ok(())
             }
@@ -2442,21 +2448,24 @@ impl Statement {
             Statement::RevokeRole {
                 roles,
                 grantees,
-                revoke_admin_option,
+                revoke_role_option,
+                granted_by,
                 cascade,
             } => {
                 write!(
                     f,
-                    "REVOKE {}{} FROM {} {}",
-                    if *revoke_admin_option {
-                        "ADMIN OPTION FOR "
-                    } else {
-                        ""
-                    },
+                    "REVOKE {}{} FROM {}",
+                    revoke_role_option
+                        .as_ref()
+                        .map(|opt| format!("{opt} OPTION FOR "))
+                        .unwrap_or_default(),
                     display_comma_separated(roles),
                     display_comma_separated(grantees),
-                    if *cascade { "CASCADE" } else { "RESTRICT" }
-                )
+                )?;
+                if let Some(grantor) = granted_by {
+                    write!(f, " GRANTED BY {}", grantor)?;
+                }
+                write!(f, " {}", if *cascade { "CASCADE" } else { "RESTRICT" })
             }
             Statement::Deallocate { name, prepare } => {
                 if let Some(name) = name {
@@ -3274,6 +3283,7 @@ pub enum ObjectType {
     Source,
     Sink,
     Database,
+    Role,
     User,
     Connection,
     Secret,
@@ -3291,6 +3301,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Source => "SOURCE",
             ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
+            ObjectType::Role => "ROLE",
             ObjectType::User => "USER",
             ObjectType::Secret => "SECRET",
             ObjectType::Connection => "CONNECTION",
@@ -3317,6 +3328,8 @@ impl ParseTo for ObjectType {
             ObjectType::Schema
         } else if parser.parse_keyword(Keyword::DATABASE) {
             ObjectType::Database
+        } else if parser.parse_keyword(Keyword::ROLE) {
+            ObjectType::Role
         } else if parser.parse_keyword(Keyword::USER) {
             ObjectType::User
         } else if parser.parse_keyword(Keyword::CONNECTION) {
@@ -3327,7 +3340,7 @@ impl ParseTo for ObjectType {
             ObjectType::Subscription
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER, SECRET or CONNECTION after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, ROLE, USER, SECRET or CONNECTION after DROP",
             );
         };
         Ok(object_type)

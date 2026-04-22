@@ -1053,6 +1053,39 @@ impl fmt::Display for SetRoleSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RoleOptionKind {
+    Admin,
+    Inherit,
+    Set,
+}
+
+impl fmt::Display for RoleOptionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RoleOptionKind::Admin => write!(f, "ADMIN"),
+            RoleOptionKind::Inherit => write!(f, "INHERIT"),
+            RoleOptionKind::Set => write!(f, "SET"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RoleOptionSpec {
+    pub kind: RoleOptionKind,
+    pub value: bool,
+}
+
+impl fmt::Display for RoleOptionSpec {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (&self.kind, self.value) {
+            (RoleOptionKind::Admin, true) => write!(f, "ADMIN OPTION"),
+            (_, true) => write!(f, "{} TRUE", self.kind),
+            (_, false) => write!(f, "{} FALSE", self.kind),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UserOption {
     SuperUser,
     NoSuperUser,

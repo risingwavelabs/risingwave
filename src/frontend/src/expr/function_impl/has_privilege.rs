@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::id::{FunctionId, ObjectId};
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{ExprError, Result, capture_context, function};
@@ -22,11 +24,14 @@ use risingwave_pb::user::Action;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
-use super::context::{AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER};
+use super::context::{
+    AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
+};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::system_catalog::is_system_catalog;
 use crate::catalog::{CatalogReader, DatabaseId, OwnedGrantObject, SchemaId};
 use crate::session::AuthContext;
+use crate::user::effective_privilege::{load_role_memberships_blocking, principal_has_privilege};
 use crate::user::user_service::UserInfoReader;
 use crate::{Binder, bind_data_type};
 
@@ -212,9 +217,10 @@ fn has_function_privilege_3(user_id: i32, function_name: &str, privileges: &str)
     has_function_privilege_impl(user_name.as_str(), function_oid, privileges)
 }
 
-#[capture_context(USER_INFO_READER)]
+#[capture_context(USER_INFO_READER, META_CLIENT)]
 fn has_privilege_impl(
     user_info_reader: &UserInfoReader,
+    meta_client: &Arc<dyn crate::meta_client::FrontendMetaClient>,
     user_name: &str,
     object: &OwnedGrantObject,
     actions: &Vec<(Action, bool)>,
@@ -225,11 +231,22 @@ fn has_privilege_impl(
         .ok_or(user_not_found_err(
             format!("User {} not found", user_name).as_str(),
         ))?;
-    if user_catalog.id == object.owner {
-        // if the user is the owner of the object, they have all privileges
-        return Ok(true);
-    }
-    Ok(user_catalog.check_privilege_with_grant_option(&object.object, actions))
+    let memberships = load_role_memberships_blocking(meta_client.clone())
+        .map_err(|error| ExprError::Internal(anyhow!(error.to_string())))?;
+    Ok(actions.iter().all(|(action, require_grant_option)| {
+        if *require_grant_option {
+            user_catalog.check_privilege_with_grant_option(&object.object, &vec![(*action, true)])
+        } else {
+            principal_has_privilege(
+                user_info_reader,
+                &memberships,
+                user_catalog,
+                object.owner,
+                object.object,
+                (*action).into(),
+            )
+        }
+    }))
 }
 
 #[capture_context(USER_INFO_READER)]

@@ -27,8 +27,16 @@
   formatted_sql: GRANT analyst TO login_role
 - input: GRANT analyst TO login_role WITH ADMIN OPTION
   formatted_sql: GRANT analyst TO login_role WITH ADMIN OPTION
+- input: GRANT analyst TO login_role WITH INHERIT FALSE, SET FALSE
+  formatted_sql: GRANT analyst TO login_role WITH INHERIT FALSE, SET FALSE
+- input: GRANT analyst TO login_role GRANTED BY current_user
+  formatted_sql: GRANT analyst TO login_role GRANTED BY current_user
 - input: REVOKE analyst FROM login_role
-  formatted_sql: REVOKE analyst FROM login_role
+  formatted_sql: REVOKE analyst FROM login_role RESTRICT
+- input: REVOKE SET OPTION FOR analyst FROM login_role
+  formatted_sql: REVOKE SET OPTION FOR analyst FROM login_role RESTRICT
+- input: REVOKE analyst FROM login_role GRANTED BY current_user
+  formatted_sql: REVOKE analyst FROM login_role GRANTED BY current_user RESTRICT
 - input: SET ROLE analyst
   formatted_sql: SET ROLE analyst
 - input: SET ROLE NONE
@@ -39,9 +47,9 @@
   error_msg: |-
     sql parser error: conflicting or redundant options
     LINE 1: CREATE ROLE conflicting_role WITH LOGIN NOLOGIN
-                                                       ^
+                                                           ^
 - input: CREATE ROLE conflicting_role WITH INHERIT NOINHERIT
   error_msg: |-
     sql parser error: conflicting or redundant options
     LINE 1: CREATE ROLE conflicting_role WITH INHERIT NOINHERIT
-                                                         ^
+                                                               ^

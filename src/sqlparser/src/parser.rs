@@ -5613,12 +5613,19 @@ impl Parser<'_> {
             let roles = self.parse_comma_separated(Parser::parse_identifier)?;
             self.expect_keyword(Keyword::TO)?;
             let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
-            let with_admin_option =
-                self.parse_keywords(&[Keyword::WITH, Keyword::ADMIN, Keyword::OPTION]);
+            let role_options = if self.parse_keyword(Keyword::WITH) {
+                self.parse_comma_separated(Parser::parse_role_option_spec)?
+            } else {
+                vec![]
+            };
+            let granted_by = self
+                .parse_keywords(&[Keyword::GRANTED, Keyword::BY])
+                .then(|| self.parse_identifier().unwrap());
             return Ok(Statement::GrantRole {
                 roles,
                 grantees,
-                with_admin_option,
+                role_options,
+                granted_by,
             });
         }
 
@@ -5835,13 +5842,13 @@ impl Parser<'_> {
     pub fn parse_revoke(&mut self) -> ModalResult<Statement> {
         let revoke_grant_option =
             self.parse_keywords(&[Keyword::GRANT, Keyword::OPTION, Keyword::FOR]);
-        let revoke_admin_option = if !revoke_grant_option {
-            self.parse_keywords(&[Keyword::ADMIN, Keyword::OPTION, Keyword::FOR])
+        let revoke_role_option = if !revoke_grant_option {
+            self.parse_role_option_for_clause()?
         } else {
-            false
+            None
         };
 
-        if revoke_admin_option
+        if revoke_role_option.is_some()
             || !self.peek_nth_any_of_keywords(
                 0,
                 &[
@@ -5864,6 +5871,9 @@ impl Parser<'_> {
             let roles = self.parse_comma_separated(Parser::parse_identifier)?;
             self.expect_keyword(Keyword::FROM)?;
             let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
+            let granted_by = self
+                .parse_keywords(&[Keyword::GRANTED, Keyword::BY])
+                .then(|| self.parse_identifier().unwrap());
 
             let cascade = self.parse_keyword(Keyword::CASCADE);
             let restrict = self.parse_keyword(Keyword::RESTRICT);
@@ -5874,7 +5884,8 @@ impl Parser<'_> {
             return Ok(Statement::RevokeRole {
                 roles,
                 grantees,
-                revoke_admin_option,
+                revoke_role_option,
+                granted_by,
                 cascade,
             });
         }
@@ -5902,6 +5913,42 @@ impl Parser<'_> {
             revoke_grant_option,
             cascade,
         })
+    }
+
+    fn parse_role_option_for_clause(&mut self) -> ModalResult<Option<RoleOptionKind>> {
+        let kind = match &self.peek_token().token {
+            Token::Word(word) => match word.value.to_ascii_lowercase().as_str() {
+                "admin" => Some(RoleOptionKind::Admin),
+                "inherit" => Some(RoleOptionKind::Inherit),
+                "set" => Some(RoleOptionKind::Set),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(kind) = kind else {
+            return Ok(None);
+        };
+        self.next_token();
+        self.expect_keyword(Keyword::OPTION)?;
+        self.expect_keyword(Keyword::FOR)?;
+        Ok(Some(kind))
+    }
+
+    fn parse_role_option_spec(&mut self) -> ModalResult<RoleOptionSpec> {
+        let option = self.parse_identifier()?;
+        let kind = match option.real_value().as_str() {
+            "admin" => RoleOptionKind::Admin,
+            "inherit" => RoleOptionKind::Inherit,
+            "set" => RoleOptionKind::Set,
+            _ => parser_err!("expected ADMIN, INHERIT or SET, found {}", option),
+        };
+        let value = if matches!(kind, RoleOptionKind::Admin) && self.parse_keyword(Keyword::OPTION)
+        {
+            true
+        } else {
+            self.parse_boolean()?
+        };
+        Ok(RoleOptionSpec { kind, value })
     }
 
     fn parse_privilege_object_types(&mut self) -> ModalResult<PrivilegeObjectType> {

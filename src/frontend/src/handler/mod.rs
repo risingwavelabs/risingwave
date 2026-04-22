@@ -543,7 +543,7 @@ pub async fn handle(
                     | ObjectType::Schema
                     | ObjectType::Connection
                     | ObjectType::Secret => true,
-                    ObjectType::Database | ObjectType::User => {
+                    ObjectType::Database | ObjectType::Role | ObjectType::User => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 }
@@ -585,7 +585,7 @@ pub async fn handle(
                     drop_schema::handle_drop_schema(handler_args, object_name, if_exists, cascade)
                         .await
                 }
-                ObjectType::User => {
+                ObjectType::Role | ObjectType::User => {
                     drop_user::handle_drop_user(handler_args, object_name, if_exists).await
                 }
                 ObjectType::View => {
@@ -696,7 +696,10 @@ pub async fn handle(
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
-        Statement::SetRole { .. } => variable::handle_set_role(handler_args),
+        Statement::SetRole {
+            context_modifier,
+            role_name,
+        } => variable::handle_set_role(handler_args, context_modifier, role_name),
         Statement::ResetRole => variable::handle_reset_role(handler_args),
         Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {

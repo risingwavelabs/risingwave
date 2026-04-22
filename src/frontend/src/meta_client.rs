@@ -46,10 +46,12 @@ use risingwave_pb::meta::{
     RefreshRequest, RefreshResponse, list_sink_log_store_tables_response,
 };
 use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::user::RoleMembership as PbRoleMembership;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
 use crate::catalog::{DatabaseId, FragmentId, SinkId};
+use crate::user::UserId;
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
@@ -209,6 +211,9 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<()>;
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
+
+    async fn list_role_memberships(&self, member_ids: Vec<UserId>)
+    -> Result<Vec<PbRoleMembership>>;
 
     async fn get_fragment_by_id(
         &self,
@@ -541,6 +546,13 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         self.0.list_hosted_iceberg_tables().await
+    }
+
+    async fn list_role_memberships(
+        &self,
+        member_ids: Vec<UserId>,
+    ) -> Result<Vec<PbRoleMembership>> {
+        self.0.list_role_memberships(member_ids).await
     }
 
     async fn get_fragment_by_id(

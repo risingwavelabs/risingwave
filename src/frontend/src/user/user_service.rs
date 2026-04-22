@@ -88,6 +88,7 @@ pub trait UserInfoWriter: Send + Sync {
         revoke_admin_option: bool,
         revoke_inherit_option: bool,
         revoke_set_option: bool,
+        cascade: bool,
     ) -> Result<()>;
 
     async fn alter_default_privilege(
@@ -192,6 +193,7 @@ impl UserInfoWriter for UserInfoWriterImpl {
         revoke_admin_option: bool,
         revoke_inherit_option: bool,
         revoke_set_option: bool,
+        cascade: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
@@ -203,6 +205,7 @@ impl UserInfoWriter for UserInfoWriterImpl {
                 revoke_admin_option,
                 revoke_inherit_option,
                 revoke_set_option,
+                cascade,
             )
             .await?;
         self.wait_version(version).await

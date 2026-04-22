@@ -35,6 +35,7 @@ message UserInfo {
   repeated GrantPrivilege grant_privileges = 8;
 
   bool is_admin = 9;
+  bool can_inherit = 10;
 }
 
 enum Action {
@@ -100,6 +101,7 @@ message UpdateUserRequest {
     RENAME = 5;
     CREATE_USER = 6;
     ADMIN = 7;
+    INHERIT = 8;
   }
   UserInfo user = 1;
   repeated UpdateField update_fields = 2;
@@ -168,6 +170,7 @@ message RevokeRoleRequest {
   bool revoke_admin_option = 5;
   bool revoke_inherit_option = 6;
   bool revoke_set_option = 7;
+  bool cascade = 8;
 }
 
 message RevokeRoleResponse {
