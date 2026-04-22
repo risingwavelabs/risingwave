@@ -426,7 +426,7 @@ impl Reducer {
                     continue;
                 }
 
-                tracing::info!("â Valid reduction found! SQL len {} â {}", sql_len, new_len);
+                tracing::info!("Valid reduction found: SQL len {} -> {}", sql_len, new_len);
                 tracing::info!("Applying candidate and continuing to next iteration");
                 ast_node = new_ast;
                 sql_len = new_len;
