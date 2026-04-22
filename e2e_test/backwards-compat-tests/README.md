@@ -16,3 +16,4 @@ We currently cover the following:
 2. Nexmark (on rw table not nexmark source)
 3. TPC-H
 4. Kafka Source
+5. AsOf join
