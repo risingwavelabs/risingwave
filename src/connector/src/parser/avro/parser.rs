@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use apache_avro::types::Value;
-use apache_avro::{Reader, Schema, from_avro_datum};
+use apache_avro::{Schema, from_avro_datum};
 use risingwave_common::catalog::Field;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector_codec::decoder::avro::{
@@ -42,6 +42,7 @@ pub struct AvroAccessBuilder {
     schema: Arc<ResolvedAvroSchema>,
     /// Refer to [`AvroParserConfig::writer_schema_cache`].
     writer_schema_cache: WriterSchemaCache,
+    parse_options: AvroParseOptions,
     value: Option<Value>,
 }
 
@@ -54,7 +55,7 @@ impl AccessBuilder for AvroAccessBuilder {
         self.value = self.parse_avro_value(&payload, source_meta).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
-            AvroParseOptions::create(&self.schema.original_schema),
+            &self.parse_options,
         )))
     }
 }
@@ -66,9 +67,11 @@ impl AvroAccessBuilder {
             writer_schema_cache,
             ..
         } = config;
+        let parse_options = AvroParseOptions::create_from_arc(schema.original_schema.clone());
         Ok(Self {
             schema,
             writer_schema_cache,
+            parse_options,
             value: None,
         })
     }
@@ -111,13 +114,12 @@ impl AvroAccessBuilder {
                 )?))
             }
             WriterSchemaCache::File => {
-                // FIXME: we should not use `Reader` (file header) here. See comment above and https://github.com/risingwavelabs/risingwave/issues/12871
-                let mut reader = Reader::with_schema(&self.schema.original_schema, payload)?;
-                match reader.next() {
-                    Some(Ok(v)) => Ok(Some(v)),
-                    Some(Err(e)) => Err(e)?,
-                    None => bail!("avro parse unexpected eof"),
-                }
+                let mut raw_payload = payload;
+                Ok(Some(from_avro_datum(
+                    &self.schema.original_schema,
+                    &mut raw_payload,
+                    None,
+                )?))
             }
             WriterSchemaCache::Glue(resolver) => {
                 // <https://github.com/awslabs/aws-glue-schema-registry/blob/v1.1.20/common/src/main/java/com/amazonaws/services/schemaregistry/utils/AWSSchemaRegistryConstants.java#L59-L61>
@@ -246,10 +248,14 @@ impl AvroParserConfig {
 mod test {
     use std::env;
 
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
     use url::Url;
 
     use super::*;
     use crate::connector_common::AwsAuthProps;
+    use crate::parser::unified::{Access, AccessImpl};
+    use crate::parser::{AccessBuilder, AvroProperties, EncodingProperties, SchemaLocation};
+    use crate::source::SourceMeta;
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -291,5 +297,58 @@ mod test {
         let schema = Schema::parse_reader(&mut schema_content.unwrap().as_slice());
         assert!(schema.is_ok());
         println!("schema = {:?}", schema.unwrap());
+    }
+
+    fn decode_hex(hex: &str) -> Vec<u8> {
+        assert_eq!(hex.len() % 2, 0);
+        let mut bytes = Vec::with_capacity(hex.len() / 2);
+        for chunk in hex.as_bytes().chunks_exact(2) {
+            let hi = (chunk[0] as char).to_digit(16).unwrap();
+            let lo = (chunk[1] as char).to_digit(16).unwrap();
+            bytes.push(((hi << 4) | lo) as u8);
+        }
+        bytes
+    }
+
+    #[tokio::test]
+    async fn test_parse_raw_avro_datum_from_local_schema() {
+        let config = EncodingProperties::Avro(AvroProperties {
+            schema_location: SchemaLocation::File {
+                url: format!("file://{}", test_data_path("simple-schema.avsc")),
+                aws_auth_props: None,
+            },
+            record_name: None,
+            key_record_name: None,
+            map_handling: None,
+        });
+        let parser_config = AvroParserConfig::new(config).await.unwrap();
+        let mut builder = AvroAccessBuilder::new(parser_config).unwrap();
+        let payload = decode_hex(
+            "40800102127374725f76616c7565000000420000000000005040010000000100000001000000e80300000a0102030405",
+        );
+
+        let accessor = builder
+            .generate_accessor(payload, &SourceMeta::Empty)
+            .await
+            .unwrap();
+
+        let AccessImpl::Avro(accessor) = accessor else {
+            panic!("expected avro accessor");
+        };
+
+        assert_eq!(
+            accessor
+                .access(&["id"], &DataType::Int32)
+                .unwrap()
+                .to_owned_datum(),
+            Some(ScalarImpl::Int32(32))
+        );
+        assert_eq!(
+            accessor
+                .access(&["sequence_id"], &DataType::Int64)
+                .unwrap()
+                .to_owned_datum(),
+            Some(ScalarImpl::Int64(64))
+        );
     }
 }

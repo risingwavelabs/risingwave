@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Context;
 use prost_reflect::{DescriptorPool, DynamicMessage, FileDescriptor, MessageDescriptor};
@@ -34,6 +34,7 @@ use crate::schema::{
 pub struct ProtobufAccessBuilder {
     wire_type: WireType,
     message_descriptor: MessageDescriptor,
+    fields_by_name: HashMap<String, prost_reflect::FieldDescriptor>,
 
     // A HashSet containing protobuf message type full names (e.g. "google.protobuf.Any")
     // that should be mapped to JSONB type when storing in RisingWave
@@ -58,6 +59,7 @@ impl AccessBuilder for ProtobufAccessBuilder {
         Ok(AccessImpl::Protobuf(ProtobufAccess::new(
             message,
             &self.messages_as_jsonb,
+            &self.fields_by_name,
         )))
     }
 }
@@ -69,10 +71,15 @@ impl ProtobufAccessBuilder {
             message_descriptor,
             messages_as_jsonb,
         } = config;
+        let fields_by_name = message_descriptor
+            .fields()
+            .map(|field| (field.name().to_owned(), field))
+            .collect();
 
         Ok(Self {
             wire_type,
             message_descriptor,
+            fields_by_name,
             messages_as_jsonb,
         })
     }
