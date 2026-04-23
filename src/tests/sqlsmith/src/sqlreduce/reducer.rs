@@ -94,6 +94,8 @@ impl Reducer {
 
         tracing::info!("Reduction complete");
 
+        let explain_trace = self.get_explain_trace(&reduced_sql).await;
+
         let mut reduced_sqls = String::new();
         for s in proceeding_stmts {
             reduced_sqls.push_str(&s.to_string());
@@ -102,10 +104,63 @@ impl Reducer {
         reduced_sqls.push_str(&reduced_sql);
         reduced_sqls.push_str(";\n");
 
+        if let Some(trace) = explain_trace {
+            reduced_sqls.push_str("\n-- EXPLAIN TRACE for the failing query:\n");
+            for line in trace.lines() {
+                reduced_sqls.push_str("-- ");
+                reduced_sqls.push_str(line);
+                reduced_sqls.push('\n');
+            }
+        }
+
         // Drop the schema after the reduction is complete.
         self.checker.drop_schema().await;
 
         Ok(reduced_sqls)
+    }
+
+    /// Attempts to get the explain trace for a failing query.
+    ///
+    /// This tries different levels of EXPLAIN to find one that succeeds:
+    /// 1. EXPLAIN (LOGICAL, TRACE) - Just the logical plan with trace
+    /// 2. EXPLAIN (TRACE) - Full trace if logical works
+    ///
+    /// Returns None if all explain attempts fail.
+    async fn get_explain_trace(&mut self, failing_query: &str) -> Option<String> {
+        let explain_variants = [
+            ("EXPLAIN (LOGICAL, TRACE)", "Logical plan with trace"),
+            ("EXPLAIN (TRACE)", "Full trace"),
+        ];
+
+        for (explain_prefix, description) in explain_variants {
+            let explain_sql = format!("{} {}", explain_prefix, failing_query);
+            tracing::info!("Attempting to get explain trace: {} for query", description);
+
+            match self.checker.client.simple_query(&explain_sql).await {
+                Ok(rows) => {
+                    let mut result = String::new();
+                    result.push_str(&format!("-- {} --\n", description));
+                    for row in rows {
+                        if let tokio_postgres::SimpleQueryMessage::Row(r) = row
+                            && let Some(val) = r.get(0)
+                        {
+                            result.push_str(val);
+                            result.push('\n');
+                        }
+                    }
+                    if !result.is_empty() {
+                        tracing::info!("Successfully obtained explain trace: {}", description);
+                        return Some(result);
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to get {}: {}", description, e);
+                }
+            }
+        }
+
+        tracing::info!("Could not obtain any explain trace for the failing query");
+        None
     }
 
     /// Path-based reduction approach using systematic AST traversal.
