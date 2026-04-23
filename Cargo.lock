@@ -2378,7 +2378,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -11982,7 +11982,7 @@ dependencies = [
  "tinyvec",
  "tokio-retry",
  "tokio-util",
- "toml 1.0.3+spec-1.1.0",
+ "toml 1.0.6+spec-1.1.0",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -12695,7 +12695,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 1.0.3+spec-1.1.0",
+ "toml 1.0.6+spec-1.1.0",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -12930,7 +12930,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
- "toml 1.0.3+spec-1.1.0",
+ "toml 1.0.6+spec-1.1.0",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -13327,7 +13327,7 @@ dependencies = [
  "serde_with",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 1.0.3+spec-1.1.0",
+ "toml 1.0.6+spec-1.1.0",
  "tracing",
  "workspace-hack",
 ]
@@ -16113,9 +16113,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.0.3+spec-1.1.0"
+version = "1.0.6+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7614eaf19ad818347db24addfa201729cf2a9b6fdfd9eb0ab870fcacc606c0c"
+checksum = "399b1124a3c9e16766831c6bba21e50192572cdd98706ea114f9502509686ffc"
 dependencies = [
  "indexmap 2.13.0",
  "serde_core",
