@@ -2689,7 +2689,7 @@ dependencies = [
  "cap-primitives",
  "cap-std",
  "io-lifetimes",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2705,7 +2705,7 @@ dependencies = [
  "ipnet",
  "maybe-owned",
  "rustix 0.38.41",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
  "winx",
 ]
 
@@ -5442,7 +5442,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7437,7 +7437,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2285ddfe3054097ef4b2fe909ef8c3bcd1ea52a8f0d274416caebeef39f04a65"
 dependencies = [
  "io-lifetimes",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7581,16 +7581,6 @@ checksum = "90003f2fd9c52f212c21d8520f1128da0080bad6fff16b68fe6e7f2f0c3780c2"
 dependencies = [
  "glob",
  "lazy_static",
-]
-
-[[package]]
-name = "jiff"
-version = "0.1.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db69f08d4fb10524cacdb074c10b296299d71274ddbc830a8ee65666867002e9"
-dependencies = [
- "jiff-tzdb-platform",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9316,7 +9306,7 @@ dependencies = [
  "getrandom 0.2.11",
  "http 1.4.0",
  "http-body 1.0.1",
- "jiff 0.2.22",
+ "jiff",
  "log",
  "md-5",
  "percent-encoding",
@@ -11089,7 +11079,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11923,7 +11913,7 @@ dependencies = [
  "ipnet",
  "itertools 0.14.0",
  "itoa",
- "jiff 0.1.15",
+ "jiff",
  "jni",
  "jsonbb",
  "linkme",
