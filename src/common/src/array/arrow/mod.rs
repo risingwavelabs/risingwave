@@ -38,6 +38,11 @@ mod reexport {
         arrow_buffer as arrow_buffer_57, arrow_cast as arrow_cast_57,
         arrow_schema as arrow_schema_57,
     };
+    pub use super::arrow_58::{
+        FromArrow as Arrow58FromArrow, ToArrow as Arrow58ToArrow, arrow_array as arrow_array_58,
+        arrow_buffer as arrow_buffer_58, arrow_cast as arrow_cast_58,
+        arrow_schema as arrow_schema_58,
+    };
     pub use super::arrow_deltalake::{
         FromArrow as DeltaLakeFromArrow, ToArrow as DeltaLakeToArrow,
         arrow_array as arrow_array_deltalake, arrow_buffer as arrow_buffer_deltalake,
