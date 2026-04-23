@@ -1064,7 +1064,7 @@ impl DdlController {
             }
         };
         let job_id = streaming_job.id();
-        tracing::debug!(
+        tracing::info!(
             id = %job_id,
             definition = streaming_job.definition(),
             create_type = streaming_job.create_type().as_str_name(),
