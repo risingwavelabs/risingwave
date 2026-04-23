@@ -33,12 +33,14 @@ use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo, SyncResult};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::{CommitEpochInfo, MockHummockMetaClient};
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::iterator::change_log::test_utils::{
     apply_test_log_data, gen_test_data,
 };
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
+use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
@@ -1442,7 +1444,7 @@ async fn test_replicated_local_hummock_storage() {
 }
 
 #[tokio::test]
-async fn test_iter_uncommitted_log_reads_staging_ssts() {
+async fn test_iter_uncommitted_log() {
     let table_id = TableId::new(233);
     let sstable_store = mock_sstable_store().await;
     let mut hummock_options = default_opts_for_test();
@@ -1475,44 +1477,97 @@ async fn test_iter_uncommitted_log_reads_staging_ssts() {
         &[table_id],
     )
     .await;
+    let in_memory_state_store = MemoryStateStore::new();
+    let new_local_options = NewLocalOptions {
+        table_id,
+        fragment_id: FragmentId::default(),
+        op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
+            check_old_value: CHECK_BYTES_EQUAL.clone(),
+            is_log_store: true,
+        },
+        table_option: Default::default(),
+        is_replicated: false,
+        vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
+        upload_on_flush: true,
+    };
 
-    let mut local = hummock_storage
-        .new_local(NewLocalOptions {
-            table_id,
-            fragment_id: FragmentId::default(),
-            op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
-                check_old_value: CHECK_BYTES_EQUAL.clone(),
-                is_log_store: true,
-            },
-            table_option: Default::default(),
-            is_replicated: false,
-            vnodes: Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into(),
-            upload_on_flush: true,
-        })
+    let mut memory_local = in_memory_state_store
+        .new_local(new_local_options.clone())
         .await;
+    let mut hummock_local = hummock_storage.new_local(new_local_options).await;
 
-    let epoch = test_epoch(1);
-    hummock_storage.start_epoch(epoch, HashSet::from_iter([table_id]));
-    local.init_for_test(epoch).await.unwrap();
+    fn apply_key_op(
+        local: &mut impl LocalStateStore,
+        key: &TableKey<Bytes>,
+        op: &KeyOp,
+    ) -> StorageResult<()> {
+        match op {
+            KeyOp::Insert(value) => local.insert(key.clone(), value.clone(), None),
+            KeyOp::Delete(old_value) => local.delete(key.clone(), old_value.clone()),
+            KeyOp::Update((old_value, new_value)) => {
+                local.insert(key.clone(), new_value.clone(), Some(old_value.clone()))
+            }
+        }
+    }
 
-    let key1 = gen_key_from_str(VirtualNode::ZERO, "key1");
-    let key2 = gen_key_from_str(VirtualNode::ZERO, "key2");
-    let key3 = gen_key_from_str(VirtualNode::ZERO, "key3");
-    let value1 = Bytes::from_static(b"value1");
-    let value2 = Bytes::from_static(b"value2");
-    let value10 = Bytes::from_static(b"value10");
-    let value3 = Bytes::from_static(b"value3");
+    async fn apply_ops(local: &mut impl LocalStateStore, ops: &[(TableKey<Bytes>, KeyOp)]) {
+        for (key, op) in ops {
+            apply_key_op(local, key, op).unwrap();
+        }
+        local.flush().await.unwrap();
+    }
 
-    LocalStateStore::insert(&mut local, key1.clone(), value1.clone(), None).unwrap();
-    LocalStateStore::insert(&mut local, key2.clone(), value2.clone(), None).unwrap();
-    local.flush().await.unwrap();
+    let epoch_count = 8;
+    let key_count = 256;
+    let log_data = gen_test_data(epoch_count, key_count, 0.3, 0.2);
+    let split_epoch_idx = log_data.len() / 2;
+    let (baseline_logs, current_logs) = log_data.split_at(split_epoch_idx);
+    assert!(!baseline_logs.is_empty());
+    assert!(!current_logs.is_empty());
+
+    let current_epoch = baseline_logs.last().unwrap().0.next_epoch();
+    let current_ops = current_logs
+        .iter()
+        .flat_map(|(_, epoch_logs)| epoch_logs.iter().cloned())
+        .collect_vec();
+    assert!(current_ops.len() > 1);
+
+    let table_id_set = HashSet::from_iter([table_id]);
+    let first_epoch = baseline_logs[0].0;
+    hummock_storage.start_epoch(first_epoch, table_id_set.clone());
+    memory_local.init_for_test(first_epoch).await.unwrap();
+    hummock_local.init_for_test(first_epoch).await.unwrap();
+
+    for (idx, (_, epoch_logs)) in baseline_logs.iter().enumerate() {
+        apply_ops(&mut memory_local, epoch_logs).await;
+        apply_ops(&mut hummock_local, epoch_logs).await;
+
+        let next_epoch = baseline_logs
+            .get(idx + 1)
+            .map_or(current_epoch, |(epoch, _)| *epoch);
+        hummock_storage.start_epoch(next_epoch, table_id_set.clone());
+        memory_local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+        hummock_local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+    }
+
+    let staging_split = current_ops.len() / 2;
+    let (first_current_ops, second_current_ops) = current_ops.split_at(staging_split);
+    assert!(!first_current_ops.is_empty());
+    assert!(!second_current_ops.is_empty());
+
+    apply_ops(&mut memory_local, first_current_ops).await;
+    apply_ops(&mut hummock_local, first_current_ops).await;
 
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let has_staging_sst = {
-            let read_version = local.read_version();
+            let read_version = hummock_local.read_version();
             let staging = read_version.read();
-            !staging.staging().sst.is_empty()
+            staging
+                .staging()
+                .ssts_for_epoch(current_epoch)
+                .next()
+                .is_some()
         };
         if has_staging_sst {
             break;
@@ -1525,42 +1580,29 @@ async fn test_iter_uncommitted_log_reads_staging_ssts() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    LocalStateStore::insert(
-        &mut local,
-        key1.clone(),
-        value10.clone(),
-        Some(value1.clone()),
-    )
-    .unwrap();
-    local.delete(key2.clone(), value2.clone()).unwrap();
-    LocalStateStore::insert(&mut local, key3.clone(), value3.clone(), None).unwrap();
-    local.flush().await.unwrap();
+    apply_ops(&mut memory_local, second_current_ops).await;
+    apply_ops(&mut hummock_local, second_current_ops).await;
 
-    let mut iter = tokio::time::timeout(Duration::from_secs(5), local.iter_uncommitted_log())
-        .await
-        .expect("timed out creating iter_uncommitted_log iterator")
-        .unwrap();
-    let mut actual = Vec::new();
+    let verify_local = VerifyStateStore {
+        actual: hummock_local,
+        expected: Some(memory_local),
+        _phantom: Default::default(),
+    };
+
+    let mut iter =
+        tokio::time::timeout(Duration::from_secs(5), verify_local.iter_uncommitted_log())
+            .await
+            .expect("timed out creating iter_uncommitted_log iterator")
+            .unwrap();
+    let mut count = 0;
     tokio::time::timeout(Duration::from_secs(5), async {
-        while let Some((key, change)) = iter.try_next().await.unwrap() {
-            actual.push((
-                TableKey(Bytes::copy_from_slice(key.as_ref())),
-                change
-                    .try_map(|value| Ok(Bytes::copy_from_slice(value)))
-                    .unwrap(),
-            ));
+        while iter.try_next().await.unwrap().is_some() {
+            count += 1;
         }
     })
     .await
     .expect("timed out consuming iter_uncommitted_log iterator");
-
-    assert_eq!(
-        actual,
-        vec![
-            (key1, ChangeLogValue::Insert(value10)),
-            (key3, ChangeLogValue::Insert(value3)),
-        ]
-    );
+    assert!(count > 0);
 }
 
 #[tokio::test]
