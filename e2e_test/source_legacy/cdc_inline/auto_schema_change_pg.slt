@@ -13,13 +13,13 @@ psql -c "
         v4 boolean DEFAULT false,
         v5 date DEFAULT '2020-01-01',
         v6 time DEFAULT '12:34:56',
-        v7 timestamp DEFAULT '2020-01-01 12:34:56',
+        v7 timestamp DEFAULT now(),
         v8 timestamptz DEFAULT '2020-01-01 12:34:56+00',
         v9 interval DEFAULT '1 day',
         v10 jsonb DEFAULT '{}',
         PRIMARY KEY (id)
     );
-    INSERT INTO test_schema_change(id,name,age) VALUES (1, 'name1', 20), (2, 'name2', 21), (3, 'name3', 22);
+    INSERT INTO test_schema_change(id,name,age,v7) VALUES (1, 'name1', 20, '2020-01-01 12:34:56'), (2, 'name2', 21, '2020-01-01 12:34:56'), (3, 'name3', 22, '2020-01-01 12:34:56');
     "
 
 statement ok
