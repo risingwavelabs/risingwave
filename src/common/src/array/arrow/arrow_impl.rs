@@ -287,15 +287,20 @@ pub trait ToArrow {
         let arrow_schema::DataType::Struct(fields) = data_type else {
             return Err(ArrayError::to_arrow("Invalid struct type"));
         };
-        Ok(Arc::new(arrow_array::StructArray::new(
-            fields.clone(),
-            array
-                .fields()
-                .zip_eq_fast(fields)
-                .map(|(arr, field)| self.to_array(field.data_type(), arr))
-                .try_collect::<_, _, ArrayError>()?,
-            Some(array.null_bitmap().into()),
-        )))
+        // Use `try_new_with_length` so that empty-field structs keep their row count;
+        // `StructArray::new` panics for empty `fields` because it derives length from
+        // the child arrays.
+        let len = array.len();
+        let child_arrays = array
+            .fields()
+            .zip_eq_fast(fields)
+            .map(|(arr, field)| self.to_array(field.data_type(), arr))
+            .try_collect::<_, _, ArrayError>()?;
+        let nulls = Some(array.null_bitmap().into());
+        Ok(Arc::new(
+            arrow_array::StructArray::try_new_with_length(fields.clone(), child_arrays, nulls, len)
+                .map_err(ArrayError::from_arrow)?,
+        ))
     }
 
     #[inline]
