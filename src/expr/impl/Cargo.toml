@@ -28,7 +28,7 @@ chrono = { workspace = true, features = [
     "std",
 ] }
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
-constant_time_eq = "0.4"
+constant_time_eq = "0.5"
 crc32c = "0.6"
 crc32fast = "1"
 educe = "0.6"
