@@ -29,8 +29,8 @@ use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitId, SplitImpl,
-    SplitMetaData,
+    AnySplitEnumerator, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
+    SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
@@ -387,9 +387,7 @@ impl SourceManager {
                 .await
                 .context("failed to create SplitEnumerator")?;
 
-            let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
-                .await
-                .context("failed to list splits")??;
+            validate_enumerator_once(&mut *enumerator).await?;
         }
         Ok(())
     }
@@ -678,6 +676,13 @@ impl SourceManager {
     }
 }
 
+async fn validate_enumerator_once(enumerator: &mut dyn AnySplitEnumerator) -> MetaResult<()> {
+    let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
+        .await
+        .context("failed to list splits")??;
+    Ok(())
+}
+
 #[derive(strum::Display, Debug)]
 pub enum SourceChange {
     /// `CREATE SOURCE` (shared), or `CREATE MV`.
@@ -743,4 +748,49 @@ pub fn build_actor_split_impls(
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_connector::source::AnySplitEnumerator;
+    use risingwave_connector::source::pulsar::make_retryable_pulsar_connector_error;
+
+    use super::*;
+
+    struct FailingEnumerator;
+
+    #[async_trait::async_trait]
+    impl AnySplitEnumerator for FailingEnumerator {
+        async fn list_splits(&mut self) -> ConnectorResult<Vec<SplitImpl>> {
+            Err(make_retryable_pulsar_connector_error(
+                "retryable pulsar enumerator test error",
+            ))
+        }
+
+        async fn on_drop_fragments(
+            &mut self,
+            _fragment_ids: Vec<FragmentId>,
+        ) -> ConnectorResult<()> {
+            Ok(())
+        }
+
+        async fn on_finish_backfill(
+            &mut self,
+            _fragment_ids: Vec<FragmentId>,
+        ) -> ConnectorResult<()> {
+            Ok(())
+        }
+
+        async fn on_tick(&mut self) -> ConnectorResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_validate_enumerator_once_surfaces_retryable_pulsar_error_cleanly() {
+        let mut enumerator = FailingEnumerator;
+        let err = validate_enumerator_once(&mut enumerator).await.unwrap_err();
+
+        assert!(err.to_string().contains("Pulsar error"));
+    }
 }

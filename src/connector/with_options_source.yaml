@@ -1370,6 +1370,18 @@ PulsarProperties:
     field_type: Duration
     required: false
     default: Default::default
+  - name: pulsar.operation.retry.max.retries
+    field_type: u32
+    required: false
+    default: Default::default
+  - name: pulsar.operation.retry.delay
+    field_type: Duration
+    comments: |-
+      This controls Pulsar client operation retry delay for the source.
+      It is distinct from `subscription.unacked.resend.delay`, which only affects
+      unacked message redelivery, and from sink-side `properties.retry.*` settings.
+    required: false
+    default: Default::default
   - name: pulsar.read_compacted
     field_type: bool
     required: false

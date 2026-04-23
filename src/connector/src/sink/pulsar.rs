@@ -227,7 +227,8 @@ impl Sink for PulsarSink {
         let pulsar = self
             .config
             .common
-            .build_client(&self.config.oauth, &self.config.aws_auth_props)
+            // Source-side Pulsar client retry overrides are intentionally not applied to sinks.
+            .build_client(&self.config.oauth, &self.config.aws_auth_props, None)
             .await?;
         build_pulsar_producer(&pulsar, &self.config).await?;
 
@@ -285,7 +286,8 @@ impl PulsarSinkWriter {
         .await?;
         let pulsar = config
             .common
-            .build_client(&config.oauth, &config.aws_auth_props)
+            // Source-side Pulsar client retry overrides are intentionally not applied to sinks.
+            .build_client(&config.oauth, &config.aws_auth_props, None)
             .await?;
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {

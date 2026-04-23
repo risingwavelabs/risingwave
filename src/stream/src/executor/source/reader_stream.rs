@@ -364,3 +364,82 @@ impl StreamReaderBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use futures::{StreamExt, pin_mut, stream};
+    use maplit::btreemap;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::id::SourceId;
+    use risingwave_common::types::DataType;
+    use risingwave_connector::source::datagen::DatagenSplit;
+    use risingwave_connector::source::pulsar::make_retryable_pulsar_connector_error;
+    use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
+    use risingwave_connector::source::{ConnectorState, SplitImpl};
+    use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::plan_common::PbRowFormatType;
+
+    use super::*;
+
+    fn make_retryable_pulsar_error() -> risingwave_connector::error::ConnectorError {
+        make_retryable_pulsar_connector_error("retryable pulsar test error")
+    }
+
+    #[tokio::test]
+    async fn test_into_retry_stream_rebuilds_after_pulsar_retryable_error() {
+        let schema = Schema {
+            fields: vec![Field::with_name(DataType::Int32, "sequence_int")],
+        };
+        let source_info = StreamSourceInfo {
+            row_format: PbRowFormatType::Native as i32,
+            ..Default::default()
+        };
+        let properties = btreemap!(
+            "connector".to_owned() => "datagen".to_owned(),
+            "datagen.rows.per.second".to_owned() => "3".to_owned(),
+            "fields.sequence_int.kind".to_owned() => "sequence".to_owned(),
+            "fields.sequence_int.start".to_owned() => "11".to_owned(),
+            "fields.sequence_int.end".to_owned() => "11111".to_owned(),
+        );
+        let source_desc =
+            create_source_desc_builder(&schema, None, source_info, properties, vec![])
+                .build()
+                .unwrap();
+        let initial_reader_stream = stream::iter([Err(make_retryable_pulsar_error())]).boxed();
+        let builder = StreamReaderBuilder {
+            source_desc,
+            rate_limit: None,
+            source_id: SourceId::new(0),
+            source_name: "pulsar-retry-reader-test".to_owned(),
+            reader_stream: Some(initial_reader_stream),
+            is_auto_schema_change_enable: false,
+            actor_ctx: ActorContext::for_test(0),
+        };
+        let state: ConnectorState = Some(vec![SplitImpl::Datagen(DatagenSplit {
+            split_index: 0,
+            split_num: 1,
+            start_offset: None,
+        })]);
+
+        let retry_stream = builder.into_retry_stream(state, false);
+        pin_mut!(retry_stream);
+
+        let data_chunk = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match retry_stream.next().await.unwrap().unwrap() {
+                    SourceReaderEventWithState::Data((chunk, _)) if chunk.cardinality() > 0 => {
+                        break chunk;
+                    }
+                    SourceReaderEventWithState::Data(_)
+                    | SourceReaderEventWithState::Progress(_) => {}
+                }
+            }
+        })
+        .await
+        .expect("reader retry stream should rebuild and produce data");
+
+        assert!(data_chunk.cardinality() > 0);
+    }
+}
