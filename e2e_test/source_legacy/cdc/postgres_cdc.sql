@@ -38,6 +38,54 @@ insert into abs.t1 values (1, 1.1, 'aaa', '5431.1234');
 
 CREATE TYPE mood AS ENUM ('sad', 'ok', 'happy');
 
+DROP TABLE IF EXISTS order_ledger_entries_composite;
+DROP TYPE IF EXISTS outer_type;
+DROP TYPE IF EXISTS inner_type;
+DROP TYPE IF EXISTS money_type;
+
+CREATE TYPE money_type AS (
+    currency varchar,
+    amount decimal
+);
+
+CREATE TYPE inner_type AS (
+    n int,
+    flag boolean,
+    note text
+);
+
+CREATE TYPE outer_type AS (
+    name text,
+    payload inner_type
+);
+
+CREATE TABLE order_ledger_entries_composite (
+    id int PRIMARY KEY,
+    note_varchar varchar,
+    total money_type,
+    listed_price money_type,
+    listed_discount money_type,
+    complex_col outer_type
+);
+
+INSERT INTO order_ledger_entries_composite VALUES
+    (
+        1,
+        'plain_text_1',
+        ROW('USD', 12.34)::money_type,
+        ROW('USD', 20.00)::money_type,
+        ROW('USD', 7.66)::money_type,
+        ROW('foo', ROW(1, false, 'hello')::inner_type)::outer_type
+    ),
+    (
+        2,
+        'KEEp',
+        ROW('EUR', 88.80)::money_type,
+        ROW('EUR', 99.90)::money_type,
+        ROW('EUR', 11.10)::money_type,
+        ROW('bar', ROW(2, true, 'world')::inner_type)::outer_type
+    );
+
 CREATE TABLE IF NOT EXISTS postgres_all_types(
      c_boolean boolean,
      c_smallint smallint,
@@ -176,5 +224,4 @@ VALUES
   (2, '{}', '{}', ARRAY['{}'::json], ARRAY['{}'::jsonb]),
   (3, '{}', '{}', array[]::json[], array[]::jsonb[]),
   (4, NULL, NULL, NULL, NULL);
-
 
