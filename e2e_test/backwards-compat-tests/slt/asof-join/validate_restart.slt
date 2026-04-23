@@ -1,0 +1,57 @@
+# Rerun original validation after upgrade
+query IIIIII rowsort
+SELECT * FROM asof_inner_mv;
+----
+1 15 1 1 10 100
+1 25 2 1 20 200
+1 35 3 1 30 300
+
+query IIIIII rowsort
+SELECT * FROM asof_left_outer_mv;
+----
+1 15 1 1 10 100
+1 25 2 1 20 200
+1 35 3 1 30 300
+2 10 4 NULL NULL NULL
+
+# Test updates after upgrade
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+INSERT INTO asof_right VALUES (2, 5, 500);
+
+query IIIIII rowsort
+SELECT * FROM asof_inner_mv;
+----
+1 15 1 1 10 100
+1 25 2 1 20 200
+1 35 3 1 30 300
+2 10 4 2 5 500
+
+query IIIIII rowsort
+SELECT * FROM asof_left_outer_mv;
+----
+1 15 1 1 10 100
+1 25 2 1 20 200
+1 35 3 1 30 300
+2 10 4 2 5 500
+
+statement ok
+DELETE FROM asof_right WHERE ts = 30;
+
+query IIIIII rowsort
+SELECT * FROM asof_inner_mv;
+----
+1 15 1 1 10 100
+1 25 2 1 20 200
+1 35 3 1 20 200
+2 10 4 2 5 500
+
+query IIIIII rowsort
+SELECT * FROM asof_left_outer_mv;
+----
+1 15 1 1 10 100
+1 25 2 1 20 200
+1 35 3 1 20 200
+2 10 4 2 5 500

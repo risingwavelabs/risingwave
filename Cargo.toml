@@ -160,15 +160,15 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
     "nightly",
 ] }
 hytra = "0.1"
-# aligned with iceberg-compaction-core
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "97c5387dfc1c83781797309f64f5c4de25639217", features = [
+# branch dev_rebase_main_20251111
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "97c5387dfc1c83781797309f64f5c4de25639217" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "97c5387dfc1c83781797309f64f5c4de25639217" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef" }
 
 adbc_core = { version = "0.22" }
 adbc_snowflake = { version = "0.22", default-features = false }
@@ -195,7 +195,7 @@ parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
 ] }
-parquet = { version = "56", features = ["async"] }
+parquet = { version = "58", features = ["async"] }
 pin-project-lite = "0.2"
 prost = { version = "=0.14.3" }
 prost-build = { version = "=0.14.3" }
