@@ -226,6 +226,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
             join_constraint: JoinConstraint::On,
             schema: Arc::new(join_schema),
             null_equality,
+            null_aware: false,
         };
         if plan.output_indices_are_trivial() {
             return Ok(Arc::new(LogicalPlan::Join(join)));

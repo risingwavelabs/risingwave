@@ -26,8 +26,9 @@ use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
 use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::iceberg::{
     COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, IcebergConfig, IcebergOrderKeyField,
+    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, CompactionType, ENABLE_COMPACTION,
+    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB,
+    ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig, IcebergOrderKeyField,
     IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
     SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_order_key_exprs, validate_order_key_columns,
@@ -335,6 +336,8 @@ fn test_parse_iceberg_config() {
             compaction_type: None,
             write_parquet_compression: None,
             write_parquet_max_row_group_rows: None,
+            write_parquet_max_row_group_bytes: None,
+            enable_pk_index: false,
         };
 
     assert_eq!(iceberg_config, expected_iceberg_config);
@@ -725,6 +728,10 @@ fn test_config_constants_consistency() {
         "snapshot_expiration_clear_expired_meta_data"
     );
     assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
+    assert_eq!(
+        COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
+        "compaction.write_parquet_max_row_group_bytes"
+    );
     assert_eq!(ORDER_KEY, "order_key");
 }
 
@@ -754,6 +761,7 @@ fn test_parse_compaction_config() {
         ("compaction.type", "full"),
         ("compaction.write_parquet_compression", "zstd"),
         ("compaction.write_parquet_max_row_group_rows", "50000"),
+        ("compaction.write_parquet_max_row_group_bytes", "67108864"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -769,7 +777,8 @@ fn test_parse_compaction_config() {
     assert_eq!(config.compaction_type, Some(CompactionType::Full));
     assert_eq!(config.target_file_size_mb(), 256);
     assert_eq!(config.write_parquet_compression(), "zstd");
-    assert_eq!(config.write_parquet_max_row_group_rows(), 50000);
+    assert_eq!(config.write_parquet_max_row_group_rows(), Some(50000));
+    assert_eq!(config.write_parquet_max_row_group_bytes(), Some(67_108_864));
 
     // Test default values (no compaction configs specified)
     let values: BTreeMap<String, String> = [
@@ -789,7 +798,11 @@ fn test_parse_compaction_config() {
     let config = IcebergConfig::from_btreemap(values).unwrap();
     assert_eq!(config.target_file_size_mb(), 1024); // Default
     assert_eq!(config.write_parquet_compression(), "zstd"); // Default
-    assert_eq!(config.write_parquet_max_row_group_rows(), 122880); // Default
+    assert_eq!(config.write_parquet_max_row_group_rows(), None); // Default
+    assert_eq!(
+        config.write_parquet_max_row_group_bytes(),
+        Some(ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
+    );
 }
 
 /// Test parquet compression parsing.

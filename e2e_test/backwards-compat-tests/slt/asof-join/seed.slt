@@ -1,0 +1,36 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE asof_left (
+    id INT,
+    ts INT,
+    v INT
+);
+
+statement ok
+CREATE TABLE asof_right (
+    id INT,
+    ts INT,
+    v INT
+);
+
+statement ok
+CREATE MATERIALIZED VIEW asof_inner_mv AS
+SELECT l.id AS l_id, l.ts AS l_ts, l.v AS l_v, r.id AS r_id, r.ts AS r_ts, r.v AS r_v
+FROM asof_left l
+ASOF JOIN asof_right r
+ON l.id = r.id AND l.ts >= r.ts;
+
+statement ok
+CREATE MATERIALIZED VIEW asof_left_outer_mv AS
+SELECT l.id AS l_id, l.ts AS l_ts, l.v AS l_v, r.id AS r_id, r.ts AS r_ts, r.v AS r_v
+FROM asof_left l
+ASOF LEFT JOIN asof_right r
+ON l.id = r.id AND l.ts >= r.ts;
+
+statement ok
+INSERT INTO asof_right VALUES (1, 10, 100), (1, 20, 200), (1, 30, 300);
+
+statement ok
+INSERT INTO asof_left VALUES (1, 15, 1), (1, 25, 2), (1, 35, 3), (2, 10, 4);

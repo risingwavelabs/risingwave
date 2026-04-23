@@ -249,12 +249,80 @@ pub(super) async fn drop_mview_table(mview: &Table, client: &Client) {
         .unwrap();
 }
 
-/// Drops mview tables and seed tables
-pub(super) async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
+/// Drops mview tables and seed tables.
+/// Queries the system catalog to find all existing MVs (catching any that were
+/// created server-side after a client-side timeout). Drops leaf MVs (those with
+/// no dependents) each iteration without CASCADE, so genuine dependency bugs
+/// surface as real errors rather than being silently swallowed.
+pub(super) async fn drop_tables(testdata: &str, client: &Client) {
     tracing::info!("Cleaning tables");
 
-    for mview in mviews.iter().rev() {
-        drop_mview_table(mview, client).await;
+    // Drop MVs in the public schema using leaf-node iteration: each pass drops
+    // only MVs that no other object currently depends on. This handles inter-MV
+    // dependencies in the correct order without needing CASCADE.
+    loop {
+        let rows = client
+            .simple_query(
+                "SELECT mv.name \
+                 FROM rw_catalog.rw_materialized_views mv \
+                 JOIN rw_catalog.rw_schemas s ON mv.schema_id = s.id \
+                 WHERE s.name = 'public' \
+                   AND NOT EXISTS ( \
+                         SELECT 1 FROM rw_catalog.rw_depend d WHERE d.refobjid = mv.id \
+                       ) \
+                 ORDER BY mv.name",
+            )
+            .await
+            .unwrap();
+        let names: Vec<String> = rows
+            .into_iter()
+            .filter_map(|msg| {
+                if let SimpleQueryMessage::Row(row) = msg {
+                    row.get(0).map(|s| s.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if names.is_empty() {
+            // No leaf MVs remain — verify no MVs at all are left.
+            let remaining = client
+                .simple_query(
+                    "SELECT mv.name \
+                     FROM rw_catalog.rw_materialized_views mv \
+                     JOIN rw_catalog.rw_schemas s ON mv.schema_id = s.id \
+                     WHERE s.name = 'public'",
+                )
+                .await
+                .unwrap();
+            let remaining_names: Vec<String> = remaining
+                .into_iter()
+                .filter_map(|msg| {
+                    if let SimpleQueryMessage::Row(row) = msg {
+                        row.get(0).map(|s| s.to_owned())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !remaining_names.is_empty() {
+                panic!(
+                    "MV cleanup stalled: no leaf MVs but these still exist: {:?}. \
+                     This indicates an unexpected dependency on a non-MV object.",
+                    remaining_names
+                );
+            }
+            break;
+        }
+
+        for name in &names {
+            tracing::info!("Dropping materialized view: {}", name);
+            client
+                .simple_query(&format!("DROP MATERIALIZED VIEW {name}"))
+                .await
+                .unwrap();
+        }
     }
 
     let seed_files = ["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
