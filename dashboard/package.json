@@ -48,7 +48,7 @@
     "reflect-metadata": "^0.2.2",
     "styled-components": "5.3.0",
     "ts-proto": "^1.169.1",
-    "uuid": "^11.0.5"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^5.16.2",
