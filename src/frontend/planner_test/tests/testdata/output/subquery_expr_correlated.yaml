@@ -917,8 +917,8 @@
       ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
       │ └─BatchScan { table: t1, columns: [t1.v1, t1.k1], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(t2.v2) }
-        └─BatchTopN { order: [t2.v2 ASC], limit: 1, offset: 0 }
-          └─BatchExchange { order: [], dist: Single }
+        └─BatchLimit { limit: 1, offset: 0 }
+          └─BatchExchange { order: [t2.v2 ASC], dist: Single }
             └─BatchTopN { order: [t2.v2 ASC], limit: 1, offset: 0 }
               └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
   stream_plan: |-

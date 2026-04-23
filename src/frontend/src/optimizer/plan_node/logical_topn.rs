@@ -172,12 +172,6 @@ impl LogicalTopN {
         Ok(project.into())
     }
 
-    pub fn clone_with_input_and_prefix(&self, input: PlanRef, prefix: Order) -> Self {
-        let mut core = self.core.clone();
-        core.input = input;
-        core.order = prefix.concat(core.order);
-        core.into()
-    }
 }
 
 impl PlanTreeNodeUnary<Logical> for LogicalTopN {

@@ -13,8 +13,8 @@
     CREATE MATERIALIZED VIEW t1_mv AS SELECT * from t1;
     SELECT * FROM t1_mv ORDER BY a DESC LIMIT 50 OFFSET 50;
   batch_plan: |-
-    BatchTopN { order: [t1_mv.a DESC], limit: 50, offset: 50 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 50, offset: 50 }
+    └─BatchExchange { order: [t1_mv.a DESC], dist: Single }
       └─BatchTopN { order: [t1_mv.a DESC], limit: 100, offset: 0 }
         └─BatchScan { table: t1_mv, columns: [t1_mv.pk, t1_mv.a, t1_mv.b, t1_mv.c, t1_mv.d], distribution: SomeShard }
 - sql: |
@@ -22,8 +22,8 @@
     CREATE MATERIALIZED VIEW t1_mv AS SELECT * from t1 order by a desc;
     SELECT * FROM t1_mv ORDER BY a DESC LIMIT 50 OFFSET 50;
   batch_plan: |-
-    BatchTopN { order: [t1_mv.a DESC], limit: 50, offset: 50 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 50, offset: 50 }
+    └─BatchExchange { order: [t1_mv.a DESC], dist: Single }
       └─BatchLimit { limit: 100, offset: 0 }
         └─BatchScan { table: t1_mv, columns: [t1_mv.pk, t1_mv.a, t1_mv.b, t1_mv.c, t1_mv.d], limit: 100, distribution: SomeShard }
 - sql: |

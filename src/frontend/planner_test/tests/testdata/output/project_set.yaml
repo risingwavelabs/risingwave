@@ -91,8 +91,8 @@
     select unnest(x) as unnest from t order by unnest limit 1;
   batch_plan: |-
     BatchProject { exprs: [Unnest($0)] }
-    └─BatchTopN { order: [_rw_projected_row_id ASC], limit: 1, offset: 0 }
-      └─BatchExchange { order: [], dist: Single }
+    └─BatchLimit { limit: 1, offset: 0 }
+      └─BatchExchange { order: [_rw_projected_row_id ASC], dist: Single }
         └─BatchTopN { order: [_rw_projected_row_id ASC], limit: 1, offset: 0 }
           └─BatchProjectSet { select_list: [Unnest($0)] }
             └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
