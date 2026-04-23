@@ -143,7 +143,13 @@ impl CipherConfig {
         input: &[u8],
         operation: CipherMode,
     ) -> std::result::Result<Box<[u8]>, ErrorStack> {
-        let mut decrypter = Crypter::new(self.cipher, operation, self.crypt_key.as_ref(), None)?;
+        let iv = matches!(self.mode, Mode::Cbc).then(|| vec![0; self.cipher.block_size()]);
+        let mut decrypter = Crypter::new(
+            self.cipher,
+            operation,
+            self.crypt_key.as_ref(),
+            iv.as_deref(),
+        )?;
         let enable_padding = match self.padding {
             Padding::Pkcs => true,
             Padding::None => false,
@@ -206,6 +212,22 @@ mod test {
 
         let decrypted = decrypt(&encrypted, &config).unwrap();
         assert_eq!(decrypted, (*data).into());
+    }
+
+    #[test]
+    fn test_default_cbc_uses_zero_iv() {
+        let data = b"\x00\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff";
+        let key =
+            b"\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\
+\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f";
+        let config = CipherConfig::parse_cipher_config(key, "aes-cbc/pad:none").unwrap();
+
+        let encrypted = encrypt(data, &config).unwrap();
+
+        assert_eq!(
+            encrypted.as_ref(),
+            b"\x8e\xa2\xb7\xca\x51\x67\x45\xbf\xea\xfc\x49\x90\x4b\x49\x60\x89"
+        );
     }
 
     #[test]
