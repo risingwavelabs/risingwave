@@ -149,13 +149,30 @@ fn has_privilege_for_catalog_user(
 pub fn load_role_memberships_blocking(
     meta_client: Arc<dyn FrontendMetaClient>,
 ) -> Result<Vec<RoleMembership>> {
-    let handle = tokio::runtime::Handle::try_current()
-        .map_err(|error| RwError::from(ErrorCode::InternalError(error.to_report_string())))?;
+    load_role_memberships_blocking_impl(meta_client)
+        .map_err(|error| RwError::from(ErrorCode::InternalError(error.to_report_string())))
+}
+
+#[cfg(not(madsim))]
+fn load_role_memberships_blocking_impl(
+    meta_client: Arc<dyn FrontendMetaClient>,
+) -> risingwave_rpc_client::error::Result<Vec<RoleMembership>> {
+    let handle = tokio::runtime::Handle::try_current().map_err(|_| {
+        risingwave_rpc_client::error::RpcError::Internal(anyhow::anyhow!(
+            "role membership loading requires a Tokio runtime"
+        ))
+    })?;
     match handle.runtime_flavor() {
         tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(|| {
             handle.block_on(meta_client.list_role_memberships(vec![]))
         }),
         _ => futures::executor::block_on(meta_client.list_role_memberships(vec![])),
     }
-    .map_err(|error| RwError::from(ErrorCode::InternalError(error.to_report_string())))
+}
+
+#[cfg(madsim)]
+fn load_role_memberships_blocking_impl(
+    meta_client: Arc<dyn FrontendMetaClient>,
+) -> risingwave_rpc_client::error::Result<Vec<RoleMembership>> {
+    futures::executor::block_on(meta_client.list_role_memberships(vec![]))
 }
