@@ -46,7 +46,7 @@ uuid = { version = "1", features = ["v4"] }
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
-allocator-api2 = "0.2"
+allocator-api2 = "0.4"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = { workspace = true }
 risingwave_expr_impl = { workspace = true }
