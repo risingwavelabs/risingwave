@@ -23,8 +23,8 @@ use deltalake::aws::storage::s3_constants::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
 };
-use deltalake::kernel::transaction::CommitBuilder;
-use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType};
+use deltalake::kernel::transaction::{CommitBuilder, CommitProperties};
+use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, Transaction};
 use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
 use phf::{Set, phf_set};
@@ -51,7 +51,7 @@ use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
     SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
-    SinkWriterParam,
+    SinkWriterParam, TwoPhaseCommitCoordinator,
 };
 
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -198,6 +198,10 @@ pub struct DeltaLakeConfig {
     pub common: DeltaLakeCommon,
 
     pub r#type: String,
+
+    /// Whether to use the Delta transaction log to deduplicate replayed epoch commits.
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub is_exactly_once: Option<bool>,
 }
 
 impl EnforceSecret for DeltaLakeConfig {
@@ -426,8 +430,14 @@ impl Sink for DeltaLakeSink {
     ) -> Result<SinkCommitCoordinator> {
         let coordinator = DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
+            app_id: format!("risingwave-deltalake-{}", self.param.sink_id),
+            exactly_once: self.config.is_exactly_once.unwrap_or_default(),
         };
-        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
+        if coordinator.exactly_once {
+            Ok(SinkCommitCoordinator::TwoPhase(Box::new(coordinator)))
+        } else {
+            Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
+        }
     }
 }
 
@@ -512,31 +522,48 @@ impl SinkWriter for DeltaLakeSinkWriter {
 
 pub struct DeltaLakeSinkCommitter {
     table: DeltaTable,
+    app_id: String,
+    exactly_once: bool,
 }
 
-#[async_trait::async_trait]
-impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self) -> Result<()> {
-        tracing::info!("DeltaLake commit coordinator inited.");
-        Ok(())
-    }
-
-    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
-        tracing::debug!("Starting DeltaLake commit in epoch {epoch}.");
-
-        let deltalake_write_result = metadata
+impl DeltaLakeSinkCommitter {
+    fn collect_write_adds(metadata: &[SinkMetadata]) -> Result<Vec<Add>> {
+        Ok(metadata
             .iter()
             .map(DeltaLakeWriteResult::try_from)
-            .collect::<Result<Vec<DeltaLakeWriteResult>>>()?;
-        let write_adds: Vec<Action> = deltalake_write_result
+            .collect::<Result<Vec<_>>>()?
             .into_iter()
             .flat_map(|v| v.adds.into_iter())
-            .map(Action::Add)
-            .collect();
+            .collect())
+    }
 
-        if write_adds.is_empty() {
+    fn delta_txn_version(epoch: u64) -> Result<i64> {
+        Ok(i64::try_from(epoch).context("delta lake epoch exceeds i64 range")?)
+    }
+
+    async fn commit_actions(
+        &mut self,
+        epoch: u64,
+        adds: Vec<Add>,
+        txn_identity: Option<&DeltaLakeTxnIdentity>,
+    ) -> Result<()> {
+        if adds.is_empty() {
             return Ok(());
         }
+
+        if let Some(txn_identity) = txn_identity
+            && self.is_txn_committed(txn_identity).await?
+        {
+            tracing::info!(
+                "DeltaLake epoch {epoch} already committed for app id {}, txn version {}, skip committing again.",
+                txn_identity.app_id,
+                txn_identity.version
+            );
+            return Ok(());
+        }
+
+        let write_adds = adds.into_iter().map(Action::Add).collect();
+
         let partition_cols = self
             .table
             .snapshot()?
@@ -553,7 +580,18 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
             partition_by,
             predicate: None,
         };
-        let version = CommitBuilder::default()
+        let commit_builder = if let Some(txn_identity) = txn_identity {
+            let commit_builder: CommitBuilder = CommitProperties::default()
+                .with_application_transaction(Transaction::new(
+                    &txn_identity.app_id,
+                    txn_identity.version,
+                ))
+                .into();
+            commit_builder
+        } else {
+            CommitBuilder::default()
+        };
+        let version = commit_builder
             .with_actions(write_adds)
             .build(
                 Some(self.table.snapshot()?),
@@ -568,11 +606,110 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
         );
         Ok(())
     }
+
+    async fn is_txn_committed(&mut self, txn_identity: &DeltaLakeTxnIdentity) -> Result<bool> {
+        self.table.update_state().await?;
+        let log_store = self.table.log_store();
+        let committed_version = self
+            .table
+            .snapshot()?
+            .transaction_version(log_store.as_ref(), &txn_identity.app_id)
+            .await?;
+        Ok(committed_version.is_some_and(|version| version >= txn_identity.version))
+    }
+}
+
+#[async_trait::async_trait]
+impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        tracing::info!("DeltaLake commit coordinator inited.");
+        Ok(())
+    }
+
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+        tracing::debug!("Starting DeltaLake commit in epoch {epoch}.");
+
+        let adds = Self::collect_write_adds(&metadata)?;
+        self.commit_actions(epoch, adds, None).await
+    }
+}
+
+#[async_trait::async_trait]
+impl TwoPhaseCommitCoordinator for DeltaLakeSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
+        tracing::info!("DeltaLake commit coordinator inited.");
+        Ok(())
+    }
+
+    async fn pre_commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        _schema_change: Option<risingwave_pb::stream_plan::PbSinkSchemaChange>,
+    ) -> Result<Option<Vec<u8>>> {
+        tracing::debug!("Starting DeltaLake pre commit in epoch {epoch}.");
+
+        let adds = Self::collect_write_adds(&metadata)?;
+        if adds.is_empty() {
+            return Ok(None);
+        }
+
+        let txn_identity = DeltaLakeTxnIdentity {
+            app_id: self.app_id.clone(),
+            version: Self::delta_txn_version(epoch)?,
+        };
+        Ok(Some(
+            DeltaLakePreCommitMetadata { adds, txn_identity }.try_into_bytes()?,
+        ))
+    }
+
+    async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()> {
+        tracing::debug!("Starting DeltaLake exactly-once commit in epoch {epoch}.");
+
+        if commit_metadata.is_empty() {
+            return Ok(());
+        }
+
+        let pre_commit_metadata = DeltaLakePreCommitMetadata::try_from_bytes(&commit_metadata)?;
+        self.commit_actions(
+            epoch,
+            pre_commit_metadata.adds,
+            Some(&pre_commit_metadata.txn_identity),
+        )
+        .await
+    }
+
+    async fn abort(&mut self, epoch: u64, _commit_metadata: Vec<u8>) {
+        tracing::debug!("Abort not implemented yet for DeltaLake epoch {epoch}");
+    }
 }
 
 #[derive(Serialize, Deserialize)]
 struct DeltaLakeWriteResult {
     adds: Vec<Add>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct DeltaLakePreCommitMetadata {
+    adds: Vec<Add>,
+    txn_identity: DeltaLakeTxnIdentity,
+}
+
+#[derive(Serialize, Deserialize)]
+struct DeltaLakeTxnIdentity {
+    app_id: String,
+    version: i64,
+}
+
+impl DeltaLakePreCommitMetadata {
+    fn try_into_bytes(self) -> Result<Vec<u8>> {
+        Ok(serde_json::to_vec(&self).context("cannot serialize deltalake pre commit metadata")?)
+    }
+
+    fn try_from_bytes(value: &[u8]) -> Result<Self> {
+        Ok(serde_json::from_slice(value)
+            .context("cannot deserialize deltalake pre commit metadata")?)
+    }
 }
 
 impl<'a> TryFrom<&'a DeltaLakeWriteResult> for SinkMetadata {
@@ -615,8 +752,8 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::{DeltaLakeConfig, DeltaLakeSinkCommitter, DeltaLakeSinkWriter};
-    use crate::sink::SinglePhaseCommitCoordinator;
     use crate::sink::writer::SinkWriter;
+    use crate::sink::{SinglePhaseCommitCoordinator, TwoPhaseCommitCoordinator};
 
     #[tokio::test]
     async fn test_deltalake() {
@@ -677,10 +814,114 @@ mod tests {
         deltalake_writer.write(chunk).await.unwrap();
         let mut committer = DeltaLakeSinkCommitter {
             table: deltalake_table,
+            app_id: "test-single-phase".to_owned(),
+            exactly_once: false,
         };
         let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
-        committer.commit_data(1, vec![metadata]).await.unwrap();
+        SinglePhaseCommitCoordinator::commit_data(&mut committer, 1, vec![metadata])
+            .await
+            .unwrap();
         let snapshot = committer.table.snapshot().unwrap();
         assert_eq!(1, snapshot.log_data().num_files());
+    }
+
+    #[tokio::test]
+    async fn test_deltalake_exactly_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        CreateBuilder::new()
+            .with_location(path)
+            .with_column(
+                "id",
+                SchemaDataType::Primitive(deltalake::kernel::PrimitiveType::Integer),
+                false,
+                Default::default(),
+            )
+            .with_column(
+                "name",
+                SchemaDataType::Primitive(deltalake::kernel::PrimitiveType::String),
+                false,
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+        let properties = btreemap! {
+            "connector".to_owned() => "deltalake".to_owned(),
+            "force_append_only".to_owned() => "true".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
+            "location".to_owned() => format!("file://{}", path),
+            "is_exactly_once".to_owned() => "true".to_owned(),
+        };
+
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".into(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "name".into(),
+            },
+        ]);
+
+        let deltalake_config = DeltaLakeConfig::from_btreemap(properties).unwrap();
+        let deltalake_table = deltalake_config
+            .common
+            .create_deltalake_client()
+            .await
+            .unwrap();
+
+        let mut deltalake_writer = DeltaLakeSinkWriter::new(deltalake_config, schema, vec![0])
+            .await
+            .unwrap();
+        let chunk = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![
+                I32Array::from_iter(vec![1, 2, 3]).into_ref(),
+                Utf8Array::from_iter(vec!["Alice", "Bob", "Clare"]).into_ref(),
+            ],
+        );
+        deltalake_writer.write(chunk).await.unwrap();
+
+        let mut committer = DeltaLakeSinkCommitter {
+            table: deltalake_table,
+            app_id: "test-exactly-once".to_owned(),
+            exactly_once: true,
+        };
+        let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
+        let pre_commit_metadata =
+            TwoPhaseCommitCoordinator::pre_commit(&mut committer, 1, vec![metadata], None)
+                .await
+                .unwrap()
+                .unwrap();
+
+        TwoPhaseCommitCoordinator::commit_data(&mut committer, 1, pre_commit_metadata.clone())
+            .await
+            .unwrap();
+        assert_eq!(committer.table.version(), Some(1));
+        assert_eq!(
+            committer.table.snapshot().unwrap().log_data().num_files(),
+            1
+        );
+
+        let log_store = committer.table.log_store();
+        let txn_version = committer
+            .table
+            .snapshot()
+            .unwrap()
+            .transaction_version(log_store.as_ref(), &committer.app_id)
+            .await
+            .unwrap();
+        assert_eq!(txn_version, Some(1));
+
+        TwoPhaseCommitCoordinator::commit_data(&mut committer, 1, pre_commit_metadata)
+            .await
+            .unwrap();
+        assert_eq!(committer.table.version(), Some(1));
+        assert_eq!(
+            committer.table.snapshot().unwrap().log_data().num_files(),
+            1
+        );
     }
 }

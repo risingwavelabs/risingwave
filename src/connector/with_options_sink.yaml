@@ -213,6 +213,10 @@ DeltaLakeConfig:
   - name: r#type
     field_type: String
     required: true
+  - name: is_exactly_once
+    field_type: bool
+    comments: Whether to use the Delta transaction log to deduplicate replayed epoch commits.
+    required: false
 DorisConfig:
   fields:
   - name: doris.url
@@ -782,18 +786,33 @@ IcebergConfig:
     comments: |-
       Parquet compression codec
       Supported values: uncompressed, snappy, gzip, lzo, brotli, lz4, zstd
-      Default is snappy
+      Default is zstd
     required: false
     default: Default::default
     allow_alter_on_fly: true
   - name: compaction.write_parquet_max_row_group_rows
     field_type: usize
     comments: |-
-      Maximum number of rows in a Parquet row group
-      Default is 122880 (from developer config)
+      Deprecated: maximum number of rows in a Parquet row group.
+      Accepted for backward compatibility, but ignored by the writer.
     required: false
     default: Default::default
     allow_alter_on_fly: true
+  - name: compaction.write_parquet_max_row_group_bytes
+    field_type: usize
+    comments: |-
+      Maximum size of a Parquet row group in bytes
+      Default is 128 `MiB`, matching Iceberg defaults.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: enable_pk_index
+    field_type: bool
+    comments: |-
+      Whether to enable PK index for upsert sink. Default is false.
+      It's used for V3 upsert iceberg sink to generate delete vectors.
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: topic

@@ -520,7 +520,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     degree_state_l,
                     null_matched.clone(),
                     pk_contained_in_jk_l,
-                    None,
                     metrics.clone(),
                     ctx.id,
                     ctx.fragment_id,
@@ -548,7 +547,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     degree_state_r,
                     null_matched,
                     pk_contained_in_jk_r,
-                    None,
                     metrics.clone(),
                     ctx.id,
                     ctx.fragment_id,
@@ -1175,7 +1173,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     // cache refill
                     if entry_state_count <= entry_state_max_rows {
                         let row_ref = entry_state
-                            .insert(encoded_pk, E::encode(&matched_row), None) // TODO(kwannoel): handle ineq key for asof join.
+                            .insert(encoded_pk, E::encode(&matched_row))
                             .with_context(|| format!("row: {}", row.display(),))?;
                         matched_row_ref = Some(row_ref);
                         entry_state_count += 1;
