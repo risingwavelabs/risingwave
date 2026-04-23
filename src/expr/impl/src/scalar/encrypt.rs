@@ -143,7 +143,7 @@ impl CipherConfig {
         input: &[u8],
         operation: CipherMode,
     ) -> std::result::Result<Box<[u8]>, ErrorStack> {
-        let iv = matches!(self.mode, Mode::Cbc).then(|| vec![0; self.cipher.block_size()]);
+        let iv = matches!(self.mode, Mode::Cbc).then_some(vec![0; self.cipher.block_size()]);
         let mut decrypter = Crypter::new(
             self.cipher,
             operation,
