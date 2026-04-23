@@ -15,7 +15,6 @@
 // These mods imports arrow_impl.rs to provide FromArrow, ToArrow traits for corresponding arrow versions,
 // and the default From/To implementations.
 
-mod arrow_54;
 mod arrow_57;
 mod arrow_58;
 // These mods import mods above and may override some methods.
