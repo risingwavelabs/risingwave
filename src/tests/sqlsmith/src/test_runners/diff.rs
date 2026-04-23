@@ -54,7 +54,7 @@ pub async fn run_differential_testing(
     .await;
     tracing::info!("Populated base tables");
 
-    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
+    let (tables, _mviews) = create_mviews(&mut rng, base_tables.clone(), client, config)
         .await
         .unwrap();
     tracing::info!("Created tables");
@@ -67,7 +67,7 @@ pub async fn run_differential_testing(
         diff_stream_and_batch(&mut rng, tables.clone(), client, i, config).await?
     }
 
-    drop_tables(&mviews, testdata, client).await;
+    drop_tables(testdata, client).await;
     tracing::info!("[EXECUTION SUCCESS]");
     Ok(())
 }
