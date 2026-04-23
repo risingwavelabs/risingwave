@@ -216,6 +216,10 @@ impl WithOptions {
             && self.inner.get(UPSTREAM_SOURCE_KEY).unwrap() != WEBHOOK_CONNECTOR
     }
 
+    pub fn is_webhook_connector(&self) -> bool {
+        self.inner.get(UPSTREAM_SOURCE_KEY).map(|v| v.as_str()) == Some(WEBHOOK_CONNECTOR)
+    }
+
     pub fn backfill_order_strategy(&self) -> BackfillOrderStrategy {
         self.backfill_order_strategy.clone()
     }

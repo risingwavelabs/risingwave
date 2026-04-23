@@ -78,3 +78,33 @@ github hmac_sha1
 github hmac_sha1
 github hmac_sha1
 github hmac_sha1
+
+query TTT
+select data ->> 'source', event_type, event_timestamp from with_include_header order by data ->> 'source';
+----
+include_header_missing_test NULL NULL
+include_header_missing_test NULL NULL
+include_header_missing_test NULL NULL
+include_header_test order.created 2024-01-15T10:30:00Z
+include_header_test order.created 2024-01-15T10:30:00Z
+include_header_test order.created 2024-01-15T10:30:00Z
+
+query TT
+select data ->> 'source', source_id from include_with_validate;
+----
+include_validate_test src-42
+include_validate_test src-42
+include_validate_test src-42
+
+query TT
+select data ->> 'source', batch_id from batched_include;
+----
+batched_include_test batch-001
+batched_include_test batch-001
+batched_include_test batch-001
+batched_include_test batch-001
+batched_include_test batch-001
+batched_include_test batch-001
+batched_include_test batch-001
+batched_include_test batch-001
+batched_include_test batch-001

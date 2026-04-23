@@ -1,4 +1,5 @@
 import argparse
+import copy
 import requests
 import json
 import sys
@@ -175,6 +176,69 @@ def send_batched(secret):
     }
     send_webhook(url, headers, payload_jsonl)
 
+
+def send_with_include_header():
+    payload = copy.deepcopy(message)
+    payload['source'] = "include_header_test"
+    payload['auth_algo'] = "none"
+    url = SERVER_URL + "with_include_header"
+
+    payload_json = json.dumps(payload)
+    headers = {
+        "Content-Type": "application/json",
+        "x-event-type": "order.created",
+        "x-event-timestamp": "2024-01-15T10:30:00Z",
+    }
+    send_webhook(url, headers, payload_json)
+
+
+def send_with_include_header_missing():
+    """Send a request that omits declared INCLUDE headers — columns should be NULL."""
+    payload = copy.deepcopy(message)
+    payload['source'] = "include_header_missing_test"
+    payload['auth_algo'] = "none"
+    url = SERVER_URL + "with_include_header"
+
+    payload_json = json.dumps(payload)
+    headers = {
+        "Content-Type": "application/json",
+        # intentionally omitting x-event-type and x-event-timestamp
+    }
+    send_webhook(url, headers, payload_json)
+
+
+def send_include_with_validate(secret):
+    """INCLUDE header combined with VALIDATE SECRET."""
+    payload = copy.deepcopy(message)
+    payload['source'] = "include_validate_test"
+    payload['auth_algo'] = "hmac_sha1"
+    url = SERVER_URL + "include_with_validate"
+
+    payload_json = json.dumps(payload)
+    signature = generate_signature_hmac(secret, payload_json, 'sha1', "sha1=")
+    headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature": signature,
+        "x-source-id": "src-42",
+    }
+    send_webhook(url, headers, payload_json)
+
+
+def send_batched_include():
+    """Batched webhook with INCLUDE header columns — header replicated across rows."""
+    payload = copy.deepcopy(message)
+    payload['source'] = "batched_include_test"
+    payload['auth_algo'] = "none"
+    url = SERVER_URL + "batched_include"
+
+    payload_jsonl = '\n'.join([json.dumps(payload) for _ in range(3)])
+    headers = {
+        "Content-Type": "application/json",
+        "x-batch-id": "batch-001",
+    }
+    send_webhook(url, headers, payload_jsonl)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simulate sending Webhook messages")
     parser.add_argument("--secret", required=True, help="Secret key for generating signature")
@@ -197,3 +261,11 @@ if __name__ == "__main__":
     send_validate_raw_string(secret)
     # batch multiple rows per request
     send_batched(secret)
+    # INCLUDE header test (no secret needed)
+    send_with_include_header()
+    # INCLUDE header with missing headers (should produce NULLs)
+    send_with_include_header_missing()
+    # INCLUDE header combined with VALIDATE SECRET
+    send_include_with_validate(secret)
+    # Batched webhook with INCLUDE header columns
+    send_batched_include()

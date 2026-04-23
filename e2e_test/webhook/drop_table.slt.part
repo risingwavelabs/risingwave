@@ -21,3 +21,12 @@ DROP TABLE rudderstack;
 
 statement ok
 DROP TABLE batched;
+
+statement ok
+DROP TABLE with_include_header;
+
+statement ok
+DROP TABLE include_with_validate;
+
+statement ok
+DROP TABLE batched_include;
