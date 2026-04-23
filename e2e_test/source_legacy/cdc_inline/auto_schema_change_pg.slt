@@ -19,7 +19,7 @@ psql -c "
         v10 jsonb DEFAULT '{}',
         PRIMARY KEY (id)
     );
-    INSERT INTO test_schema_change(id,name,age,v7) VALUES (1, 'name1', 20, '2020-01-01 12:34:56'), (2, 'name2', 21, '2020-01-01 12:34:56'), (3, 'name3', 22, '2020-01-01 12:34:56');
+    INSERT INTO test_schema_change(id,name,age) VALUES (1, 'name1', 20), (2, 'name2', 21), (3, 'name3', 22);
     "
 
 statement ok
@@ -61,12 +61,15 @@ distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
 
-query TTTTTTTTTTTTT retry 4 backoff 1s
-SELECT * from rw_test_schema_change order by id;
+# Exclude v7 from the assertion: its upstream default is `now()`, so the
+# exact value is non-deterministic. The goal here is to verify data flows
+# through CDC, not to pin down v7's value.
+query TTTTTTTTTTTT retry 4 backoff 1s
+SELECT id, name, age, v1, v2, v3, v4, v5, v6, v8, v9, v10 from rw_test_schema_change order by id;
 ----
-1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
-2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
-3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
+1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
+2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
+3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {}
 
 sleep 3s
 
@@ -105,13 +108,17 @@ distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
 
-query TTTTTTTTTTTTTTT retry 4 backoff 1s
-SELECT * from rw_test_schema_change order by id;
+# Exclude v7 (its default is `now()` — non-deterministic). The point of
+# this assertion is that the newly added columns v11/v12 are reflected in
+# both existing rows and the new row (11), i.e. auto schema change
+# succeeded despite v7 having a non-constant default.
+query TTTTTTTTTTTTTT retry 4 backoff 1s
+SELECT id, name, age, v1, v2, v3, v4, v5, v6, v8, v9, v10, v11, v12 from rw_test_schema_change order by id;
 ----
-1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-11 aaa 11 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+1 name1 20 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+2 name2 21 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+3 name3 22 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+11 aaa 11 1.1 2.2 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
 
 
 system ok
@@ -150,14 +157,15 @@ distribution key id NULL NULL
 table description rw_test_schema_change NULL NULL
 
 
-query TTTTTTTTTTTTTTT retry 4 backoff 1s
-SELECT * from rw_test_schema_change order by id;
+# Exclude v7 (default `now()`, non-deterministic). v1/v2 are already dropped.
+query TTTTTTTTTTTT retry 4 backoff 1s
+SELECT id, name, age, v3, v4, v5, v6, v8, v9, v10, v11, v12 from rw_test_schema_change order by id;
 ----
-1 name1 20 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-2 name2 21 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-3 name3 22 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-11 aaa 11 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
-12 bbb 12 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+1 name1 20 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+2 name2 21 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+3 name3 22 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+11 aaa 11 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
+12 bbb 12 3.3 f 2020-01-01 12:34:56 2020-01-01 12:34:56+00:00 1 day {} hello 1.2345
 
 
 statement ok
