@@ -243,6 +243,38 @@ impl IcebergTaskQueue {
         self.notify_schedulable();
         true
     }
+
+    /// Cancel all waiting plans belonging to the given task.
+    ///
+    /// Returns the number of waiting plans removed from the queue.
+    pub fn cancel_waiting_task(&mut self, task_id: u64) -> usize {
+        let mut retained = VecDeque::with_capacity(self.inner.deque.len());
+        let mut cancelled_parallelism = 0;
+        let mut cancelled_count = 0;
+
+        while let Some(meta) = self.inner.deque.pop_front() {
+            if meta.task_id == task_id {
+                cancelled_parallelism += meta.required_parallelism;
+                cancelled_count += 1;
+                self.inner.id_map.remove(&meta.key());
+                self.inner.runners.remove(&meta.key());
+            } else {
+                retained.push_back(meta);
+            }
+        }
+
+        self.inner.deque = retained;
+        self.inner.waiting_parallelism_sum = self
+            .inner
+            .waiting_parallelism_sum
+            .saturating_sub(cancelled_parallelism);
+
+        if cancelled_count > 0 {
+            self.notify_schedulable();
+        }
+
+        cancelled_count
+    }
 }
 
 #[cfg(test)]
@@ -413,6 +445,31 @@ mod tests {
         assert!(q.finish_running((task_id, 0)));
         assert!(q.finish_running((task_id, 2)));
         assert_eq!(q.running_parallelism_sum(), 0);
+    }
+
+    #[test]
+    fn test_cancel_waiting_task_only_removes_waiting_plans() {
+        let mut q = IcebergTaskQueue::new(10, 30);
+        let task_id = 1u64;
+
+        assert_eq!(q.push(mk_meta(task_id, 0, 3), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(task_id, 1, 4), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(2, 0, 2), None), PushResult::Added);
+
+        let popped = q.pop().unwrap();
+        assert_eq!(popped.meta.task_id, task_id);
+        assert_eq!(popped.meta.plan_index, 0);
+        assert_eq!(q.running_parallelism_sum(), 3);
+        assert_eq!(q.waiting_parallelism_sum(), 6);
+
+        assert_eq!(q.cancel_waiting_task(task_id), 1);
+        assert_eq!(q.running_parallelism_sum(), 3);
+        assert_eq!(q.waiting_parallelism_sum(), 2);
+
+        assert!(q.finish_running((task_id, 0)));
+        let next = q.pop().unwrap();
+        assert_eq!(next.meta.task_id, 2);
+        assert_eq!(next.meta.plan_index, 0);
     }
 
     #[test]

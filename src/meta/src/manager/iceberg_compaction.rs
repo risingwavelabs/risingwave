@@ -258,6 +258,51 @@ impl Drop for IcebergCompactionHandle {
     }
 }
 
+struct ManualCompactionCancelGuard {
+    compactor: Arc<IcebergCompactor>,
+    sink_id: SinkId,
+    task_id: u64,
+    armed: bool,
+}
+
+impl ManualCompactionCancelGuard {
+    fn new(compactor: Arc<IcebergCompactor>, sink_id: SinkId, task_id: u64) -> Self {
+        Self {
+            compactor,
+            sink_id,
+            task_id,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ManualCompactionCancelGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+
+        tracing::info!(
+            sink_id = %self.sink_id,
+            task_id = self.task_id,
+            "Cancelling manual iceberg compaction task",
+        );
+
+        if let Err(e) = self.compactor.cancel_task(self.task_id) {
+            tracing::warn!(
+                error = %e.as_report(),
+                sink_id = %self.sink_id,
+                task_id = self.task_id,
+                "Failed to cancel manual iceberg compaction task",
+            );
+        }
+    }
+}
+
 struct IcebergCompactionManagerInner {
     pub sink_schedules: HashMap<SinkId, CompactionTrack>,
 }
@@ -707,6 +752,11 @@ impl IcebergCompactionManager {
             task_type: TaskType::Full as i32, // default to full compaction
         }))?;
 
+        // If this method exits before `disarm()` is called, dropping this guard sends a
+        // best-effort cancel event to the assigned compactor. This covers frontend query
+        // cancellation as well as other early-return paths after the task has been assigned.
+        let mut cancel_guard = ManualCompactionCancelGuard::new(compactor, sink_id, task_id);
+
         tracing::info!(
             "Manual compaction triggered for sink {} with task ID {}, waiting for completion...",
             sink_id,
@@ -721,6 +771,8 @@ impl IcebergCompactionManager {
             task_id,
         )
         .await?;
+
+        cancel_guard.disarm();
 
         Ok(task_id)
     }
