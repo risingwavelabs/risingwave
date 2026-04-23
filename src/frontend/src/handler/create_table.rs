@@ -100,13 +100,14 @@ use risingwave_connector::sink::iceberg::{
     COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_DELETE_FILES_COUNT_THRESHOLD,
     COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, COMPACTION_SMALL_FILES_THRESHOLD_MB,
     COMPACTION_TARGET_FILE_SIZE_MB, COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE,
-    COMPACTION_WRITE_PARQUET_COMPRESSION, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
-    CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
+    COMPACTION_WRITE_PARQUET_COMPRESSION, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
+    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, CompactionType, ENABLE_COMPACTION,
+    ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
     ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
-    ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode,
+    ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode, ORDER_KEY,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
     SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
-    parse_partition_by_exprs,
+    parse_partition_by_exprs, validate_order_key_columns,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -1762,7 +1763,15 @@ pub async fn create_iceberg_engine_table(
     let mut sink_handler_args = handler_args.clone();
 
     let mut sink_with = with_common.clone();
-    sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
+
+    // TODO: Iceberg with pk index doesn't support auto schema change
+    if !handler_args
+        .with_options
+        .get(ENABLE_COMPACTION)
+        .is_some_and(|val| val.eq_ignore_ascii_case("true"))
+    {
+        sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
+    }
 
     if table.append_only {
         sink_with.insert("type".to_owned(), "append-only".to_owned());
@@ -2249,6 +2258,34 @@ pub async fn create_iceberg_engine_table(
         });
     }
 
+    if let Some(write_parquet_max_row_group_bytes) = handler_args
+        .with_options
+        .get(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
+    {
+        let write_parquet_max_row_group_bytes = write_parquet_max_row_group_bytes
+            .parse::<usize>()
+            .map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "{} must be a positive integer: {}",
+                    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, write_parquet_max_row_group_bytes
+                ))
+            })?;
+        if write_parquet_max_row_group_bytes == 0 {
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES
+            ));
+        }
+        sink_with.insert(
+            COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES.to_owned(),
+            write_parquet_max_row_group_bytes.to_string(),
+        );
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
+        });
+    }
+
     let partition_by = handler_args
         .with_options
         .get("partition_by")
@@ -2285,6 +2322,19 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove("partition_by"));
+    }
+
+    let order_key = handler_args
+        .with_options
+        .get(ORDER_KEY)
+        .map(|v| v.to_owned());
+    if let Some(order_key) = &order_key {
+        validate_order_key_columns(order_key, table.columns().iter().map(|col| col.name()))
+            .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_report_string()))?;
+
+        sink_with.insert(ORDER_KEY.to_owned(), order_key.to_owned());
+
+        source.as_mut().map(|x| x.with_properties.remove(ORDER_KEY));
     }
 
     sink_handler_args.with_options =

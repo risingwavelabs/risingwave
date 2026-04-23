@@ -23,7 +23,7 @@ use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
 use risingwave_connector::sink::SinkParam;
-use risingwave_connector::sink::log_store::LogStoreFactory;
+use risingwave_connector::sink::log_store::{LogStoreFactory, TruncateBarrierLogReader};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel};
@@ -553,7 +553,9 @@ impl<S: StateStore> KvLogStoreFactory<S> {
 }
 
 impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
-    type Reader = KvLogStoreReader<<S::Local as LocalStateStore>::FlushedSnapshotReader>;
+    type Reader = TruncateBarrierLogReader<
+        KvLogStoreReader<<S::Local as LocalStateStore>::FlushedSnapshotReader>,
+    >;
     type Writer = KvLogStoreWriter<S::Local>;
 
     const ALLOW_REWIND: bool = true;
@@ -611,7 +613,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             self.identity,
         );
 
-        (reader, writer)
+        (TruncateBarrierLogReader::new(reader), writer)
     }
 }
 

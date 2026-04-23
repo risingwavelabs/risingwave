@@ -799,6 +799,9 @@ profile:
       - use: frontend
       - use: compactor
       - use: pubsub
+        user-managed: true
+        address: localhost
+        port: 8900
         persist-data: true
       - use: kafka
         persist-data: true
@@ -916,6 +919,9 @@ profile:
       - use: frontend
       - use: compactor
       - use: pubsub
+        user-managed: true
+        address: pubsub-emulator
+        port: 8900
         persist-data: true
 
   ci-sink-kafka-test:
