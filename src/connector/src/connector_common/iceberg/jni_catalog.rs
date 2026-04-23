@@ -21,7 +21,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
@@ -448,56 +447,13 @@ impl Catalog for JniCatalog {
 
     /// Update a table to the catalog.
     async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
-        execute_with_jni_env(self.jvm, |env| {
-            let requirements = commit.take_requirements();
-            let updates = commit.take_updates();
-            let request = CommitTableRequest {
-                identifier: commit.identifier().clone(),
-                requirements,
-                updates,
-            };
-            let request_str = serde_json::to_string(&request)?;
-
-            let request_jni_str = env.new_string(&request_str).with_context(|| {
-                format!("Failed to create jni string from request json: {request_str}.")
-            })?;
-
-            let result_json =
-                call_method!(env, self.java_catalog.as_obj(), {String updateTable(String)},
-                &request_jni_str)
-                .with_context(|| {
-                    format!("Failed to update iceberg table: {}", commit.identifier())
-                })?;
-
-            let rust_json_str = jobj_to_str(env, result_json)?;
-
-            let response: CommitTableResponse = serde_json::from_str(&rust_json_str)?;
-
-            tracing::info!(
-                "Table metadata location of {} is {}",
-                commit.identifier(),
-                response.metadata_location
-            );
-
-            let table_metadata = response.metadata;
-
-            let file_io = FileIO::from_path(&response.metadata_location)?
-                .with_props(self.file_io_props.iter())
-                .build()?;
-
-            Ok(Table::builder()
-                .file_io(file_io)
-                .identifier(commit.identifier().clone())
-                .metadata(table_metadata)
-                .build()?)
-        })
-        .map_err(|e| {
-            iceberg::Error::new(
-                iceberg::ErrorKind::Unexpected,
-                "Failed to update iceberg table.",
-            )
-            .with_source(e)
-        })
+        let table_ident = commit.identifier().clone();
+        self.update_table_with_updates(
+            table_ident,
+            commit.take_requirements(),
+            commit.take_updates(),
+        )
+        .await
     }
 }
 
@@ -515,7 +471,7 @@ impl Drop for JniCatalog {
 }
 
 impl JniCatalog {
-    fn build(
+    pub(crate) fn build(
         file_io_props: HashMap<String, String>,
         name: impl ToString,
         catalog_impl: impl ToString,
@@ -560,13 +516,54 @@ impl JniCatalog {
             .map_err(Into::into)
     }
 
-    pub fn build_catalog(
-        file_io_props: HashMap<String, String>,
-        name: impl ToString,
-        catalog_impl: impl ToString,
-        java_catalog_props: HashMap<String, String>,
-    ) -> ConnectorResult<Arc<dyn Catalog>> {
-        let catalog = Self::build(file_io_props, name, catalog_impl, java_catalog_props)?;
-        Ok(Arc::new(catalog) as Arc<dyn Catalog>)
+    pub async fn update_table_with_updates(
+        &self,
+        table_ident: TableIdent,
+        requirements: Vec<TableRequirement>,
+        updates: Vec<TableUpdate>,
+    ) -> iceberg::Result<Table> {
+        execute_with_jni_env(self.jvm, |env| {
+            let request = CommitTableRequest {
+                identifier: table_ident.clone(),
+                requirements,
+                updates,
+            };
+            let request_str = serde_json::to_string(&request)?;
+
+            let request_jni_str = env.new_string(&request_str).with_context(|| {
+                format!("Failed to create jni string from request json: {request_str}.")
+            })?;
+
+            let result_json =
+                call_method!(env, self.java_catalog.as_obj(), {String updateTable(String)},
+                &request_jni_str)
+                .with_context(|| format!("Failed to update iceberg table: {table_ident}"))?;
+
+            let rust_json_str = jobj_to_str(env, result_json)?;
+            let response: CommitTableResponse = serde_json::from_str(&rust_json_str)?;
+
+            tracing::info!(
+                "Table metadata location of {} is {}",
+                table_ident,
+                response.metadata_location
+            );
+
+            let file_io = FileIO::from_path(&response.metadata_location)?
+                .with_props(self.file_io_props.iter())
+                .build()?;
+
+            Ok(Table::builder()
+                .file_io(file_io)
+                .identifier(table_ident)
+                .metadata(response.metadata)
+                .build()?)
+        })
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to update iceberg table.",
+            )
+            .with_source(e)
+        })
     }
 }

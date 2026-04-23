@@ -31,7 +31,7 @@ use iceberg::spec::{TableMetadata, TableMetadataBuilder, TableProperties};
 use iceberg::table::Table;
 use iceberg::{
     Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
-    TableIdent,
+    TableIdent, TableRequirement, TableUpdate,
 };
 use thiserror_ext::AsReport;
 use typed_builder::TypedBuilder;
@@ -221,6 +221,33 @@ impl StorageCatalog {
 
         Ok(())
     }
+
+    pub async fn update_table_with_updates(
+        &self,
+        table_ident: &TableIdent,
+        requirements: Vec<TableRequirement>,
+        updates: Vec<TableUpdate>,
+    ) -> Result<Table> {
+        let table = self.load_table(table_ident).await?;
+        let metadata = table.metadata().clone();
+
+        for requirement in requirements {
+            requirement.check(Some(&metadata))?;
+        }
+
+        let mut metadata_builder = metadata.into_builder(None);
+        for update in updates {
+            metadata_builder = update.apply(metadata_builder)?;
+        }
+
+        self.commit_table(
+            &self.table_path(table.identifier()),
+            metadata_builder.build()?.metadata,
+        )
+        .await?;
+
+        self.load_table(table_ident).await
+    }
 }
 
 #[async_trait]
@@ -364,27 +391,13 @@ impl Catalog for StorageCatalog {
 
     /// Update a table to the catalog.
     async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
-        let table = self.load_table(commit.identifier()).await?;
-        let requirements = commit.take_requirements();
-        let updates = commit.take_updates();
-
-        let metadata = table.metadata().clone();
-        for requirement in requirements {
-            requirement.check(Some(&metadata))?;
-        }
-
-        let mut metadata_builder = metadata.into_builder(None);
-        for update in updates {
-            metadata_builder = update.apply(metadata_builder)?;
-        }
-
-        self.commit_table(
-            &self.table_path(table.identifier()),
-            metadata_builder.build()?.metadata,
+        let table_ident = commit.identifier().clone();
+        self.update_table_with_updates(
+            &table_ident,
+            commit.take_requirements(),
+            commit.take_updates(),
         )
-        .await?;
-
-        self.load_table(commit.identifier()).await
+        .await
     }
 
     async fn register_table(

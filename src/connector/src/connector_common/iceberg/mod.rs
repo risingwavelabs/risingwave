@@ -24,7 +24,7 @@ use ::iceberg::io::{
     S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use ::iceberg::table::Table;
-use ::iceberg::{Catalog, CatalogBuilder, TableIdent};
+use ::iceberg::{Catalog, CatalogBuilder, TableIdent, TableRequirement, TableUpdate};
 use anyhow::{Context, anyhow};
 use iceberg::io::object_cache::ObjectCache;
 use iceberg::io::{
@@ -689,53 +689,78 @@ impl IcebergCommon {
 }
 
 impl IcebergCommon {
+    fn build_storage_catalog(&self) -> ConnectorResult<storage_catalog::StorageCatalog> {
+        let warehouse = self
+            .warehouse_path
+            .clone()
+            .ok_or_else(|| anyhow!("`warehouse.path` must be set in storage catalog"))?;
+        let url = Url::parse(warehouse.as_ref())
+            .map_err(|_| anyhow!("Invalid warehouse path: {}", warehouse))?;
+
+        let config = match url.scheme() {
+            "s3" | "s3a" => StorageCatalogConfig::S3(
+                storage_catalog::StorageCatalogS3Config::builder()
+                    .warehouse(warehouse)
+                    .access_key(self.s3_access_key.clone())
+                    .secret_key(self.s3_secret_key.clone())
+                    .region(self.s3_region.clone())
+                    .endpoint(self.s3_endpoint.clone())
+                    .path_style_access(self.s3_path_style_access)
+                    .enable_config_load(Some(self.enable_config_load()))
+                    .build(),
+            ),
+            "gs" | "gcs" => StorageCatalogConfig::Gcs(
+                storage_catalog::StorageCatalogGcsConfig::builder()
+                    .warehouse(warehouse)
+                    .credential(self.gcs_credential.clone())
+                    .enable_config_load(Some(self.enable_config_load()))
+                    .build(),
+            ),
+            "azblob" => StorageCatalogConfig::Azblob(
+                storage_catalog::StorageCatalogAzblobConfig::builder()
+                    .warehouse(warehouse)
+                    .account_name(self.azblob_account_name.clone())
+                    .account_key(self.azblob_account_key.clone())
+                    .endpoint(self.azblob_endpoint_url.clone())
+                    .build(),
+            ),
+            scheme => bail!("Unsupported warehouse scheme: {}", scheme),
+        };
+
+        Ok(storage_catalog::StorageCatalog::new(config)?)
+    }
+
+    fn build_jni_catalog(
+        &self,
+        java_catalog_props: &HashMap<String, String>,
+    ) -> ConnectorResult<jni_catalog::JniCatalog> {
+        let catalog_type = self.catalog_type();
+        let (file_io_props, java_catalog_props) =
+            self.build_jni_catalog_configs(java_catalog_props)?;
+        let catalog_impl = match catalog_type {
+            "hive" => "org.apache.iceberg.hive.HiveCatalog",
+            "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
+            "snowflake" => "org.apache.iceberg.snowflake.SnowflakeCatalog",
+            "rest" => "org.apache.iceberg.rest.RESTCatalog",
+            "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
+            _ => bail!("Unsupported JNI iceberg catalog type: {}", catalog_type),
+        };
+
+        jni_catalog::JniCatalog::build(
+            file_io_props,
+            self.catalog_name(),
+            catalog_impl,
+            java_catalog_props,
+        )
+    }
+
     /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
     pub async fn create_catalog(
         &self,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<Arc<dyn Catalog>> {
         match self.catalog_type() {
-            "storage" => {
-                let warehouse = self
-                    .warehouse_path
-                    .clone()
-                    .ok_or_else(|| anyhow!("`warehouse.path` must be set in storage catalog"))?;
-                let url = Url::parse(warehouse.as_ref())
-                    .map_err(|_| anyhow!("Invalid warehouse path: {}", warehouse))?;
-
-                let config = match url.scheme() {
-                    "s3" | "s3a" => StorageCatalogConfig::S3(
-                        storage_catalog::StorageCatalogS3Config::builder()
-                            .warehouse(warehouse)
-                            .access_key(self.s3_access_key.clone())
-                            .secret_key(self.s3_secret_key.clone())
-                            .region(self.s3_region.clone())
-                            .endpoint(self.s3_endpoint.clone())
-                            .path_style_access(self.s3_path_style_access)
-                            .enable_config_load(Some(self.enable_config_load()))
-                            .build(),
-                    ),
-                    "gs" | "gcs" => StorageCatalogConfig::Gcs(
-                        storage_catalog::StorageCatalogGcsConfig::builder()
-                            .warehouse(warehouse)
-                            .credential(self.gcs_credential.clone())
-                            .enable_config_load(Some(self.enable_config_load()))
-                            .build(),
-                    ),
-                    "azblob" => StorageCatalogConfig::Azblob(
-                        storage_catalog::StorageCatalogAzblobConfig::builder()
-                            .warehouse(warehouse)
-                            .account_name(self.azblob_account_name.clone())
-                            .account_key(self.azblob_account_key.clone())
-                            .endpoint(self.azblob_endpoint_url.clone())
-                            .build(),
-                    ),
-                    scheme => bail!("Unsupported warehouse scheme: {}", scheme),
-                };
-
-                let catalog = storage_catalog::StorageCatalog::new(config)?;
-                Ok(Arc::new(catalog))
-            }
+            "storage" => Ok(Arc::new(self.build_storage_catalog()?)),
             "rest_rust" => {
                 let mut iceberg_configs = HashMap::new();
 
@@ -859,24 +884,7 @@ impl IcebergCommon {
                     || catalog_type == "rest"
                     || catalog_type == "glue" =>
             {
-                // Create java catalog
-                let (file_io_props, java_catalog_props) =
-                    self.build_jni_catalog_configs(java_catalog_props)?;
-                let catalog_impl = match catalog_type {
-                    "hive" => "org.apache.iceberg.hive.HiveCatalog",
-                    "jdbc" => "org.apache.iceberg.jdbc.JdbcCatalog",
-                    "snowflake" => "org.apache.iceberg.snowflake.SnowflakeCatalog",
-                    "rest" => "org.apache.iceberg.rest.RESTCatalog",
-                    "glue" => "org.apache.iceberg.aws.glue.GlueCatalog",
-                    _ => unreachable!(),
-                };
-
-                jni_catalog::JniCatalog::build_catalog(
-                    file_io_props,
-                    self.catalog_name(),
-                    catalog_impl,
-                    java_catalog_props,
-                )
+                Ok(Arc::new(self.build_jni_catalog(java_catalog_props)?))
             }
             "mock" => Ok(Arc::new(mock_catalog::MockCatalog {})),
             _ => {
@@ -905,6 +913,51 @@ impl IcebergCommon {
 
         let table = catalog.load_table(&table_id).await?;
         Ok(rebuild_table_with_shared_cache(table).await)
+    }
+
+    pub async fn update_table_with_updates(
+        &self,
+        table_ident: &TableIdent,
+        java_catalog_props: &HashMap<String, String>,
+        requirements: Vec<TableRequirement>,
+        updates: Vec<TableUpdate>,
+    ) -> ConnectorResult<Table> {
+        let updated_table = match self.catalog_type() {
+            "storage" => self
+                .build_storage_catalog()?
+                .update_table_with_updates(table_ident, requirements, updates)
+                .await
+                .map_err(|e| anyhow!(IcebergError::from(e)))?,
+            catalog_type
+                if catalog_type == "hive"
+                    || catalog_type == "snowflake"
+                    || catalog_type == "jdbc"
+                    || catalog_type == "rest"
+                    || catalog_type == "glue" =>
+            {
+                self.build_jni_catalog(java_catalog_props)?
+                    .update_table_with_updates(table_ident.clone(), requirements, updates)
+                    .await
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?
+            }
+            "rest_rust" | "glue_rust" => {
+                bail!(
+                    "Iceberg sink drop-column schema change is not supported for catalog type `{}` until upstream iceberg-rust exposes schema drop updates",
+                    self.catalog_type()
+                )
+            }
+            "mock" => {
+                bail!("Iceberg sink drop-column schema change is not supported for mock catalog")
+            }
+            _ => {
+                bail!(
+                    "Unsupported catalog type: {}, only support `storage`, `rest`, `hive`, `jdbc`, `glue`, `snowflake`",
+                    self.catalog_type()
+                )
+            }
+        };
+
+        Ok(rebuild_table_with_shared_cache(updated_table).await)
     }
 }
 
