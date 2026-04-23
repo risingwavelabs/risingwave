@@ -47,24 +47,14 @@ const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     ORDER BY array_position(i.indkey, a.attnum)
 "#;
 
-/// Discover PostgreSQL formatted type names (e.g. `vector(768)`) for each column.
-/// We use this to keep user-defined type modifiers that are not preserved by sea-schema.
-const DISCOVER_FORMATTED_TYPE_QUERY: &str = r#"
-    SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) as formatted_type
-    FROM pg_attribute a
-    JOIN pg_class c ON c.oid = a.attrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = $1
-      AND c.relname = $2
-      AND a.attnum > 0
-      AND NOT a.attisdropped
-    ORDER BY a.attnum
-"#;
-
-/// Discover pgvector dimensions from PostgreSQL system tables.
+/// Discover pgvector columns with both `atttypmod` (dimension) and `format_type` text.
 /// `vector(n)` is stored as `atttypmod = n`, while dimension-less `vector` uses `-1`.
-const DISCOVER_VECTOR_TYPEMOD_QUERY: &str = r#"
-    SELECT a.attname as column_name, a.atttypmod as atttypmod
+/// We rely on this to keep user-defined type modifiers that are not preserved by sea-schema.
+const DISCOVER_PGVECTOR_COLUMNS_QUERY: &str = r#"
+    SELECT
+      a.attname as column_name,
+      a.atttypmod as atttypmod,
+      format_type(a.atttypid, a.atttypmod) as formatted_type
     FROM pg_attribute a
     JOIN pg_class c ON c.oid = a.attrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -141,7 +131,7 @@ pub async fn discover_pgvector_dimensions(
     table: &str,
 ) -> ConnectorResult<HashMap<String, usize>> {
     let rows = client
-        .query(DISCOVER_VECTOR_TYPEMOD_QUERY, &[&schema, &table])
+        .query(DISCOVER_PGVECTOR_COLUMNS_QUERY, &[&schema, &table])
         .await?;
 
     let mut dims = HashMap::new();
@@ -252,13 +242,13 @@ impl PostgresExternalTable {
             )
             .await?;
 
-        let formatted_types = sqlx::query(DISCOVER_FORMATTED_TYPE_QUERY)
+        let pgvector_columns = sqlx::query(DISCOVER_PGVECTOR_COLUMNS_QUERY)
             .bind(schema)
             .bind(table)
             .fetch_all(&connection)
             .await
-            .context("Failed to discover PostgreSQL formatted column types")?;
-        let formatted_type_by_column: HashMap<String, String> = formatted_types
+            .context("Failed to discover PostgreSQL pgvector columns")?;
+        let formatted_type_by_column: HashMap<String, String> = pgvector_columns
             .into_iter()
             .map(|row| {
                 (
