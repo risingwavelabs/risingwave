@@ -31,11 +31,14 @@ use risingwave_pb::hummock::{HummockVersionDeltas, HummockVersionStats};
 use risingwave_pb::meta::object::{ObjectInfo, PbObjectInfo};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::user::RoleMembership;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::watch::Sender;
+use tracing::warn;
 
 use crate::catalog::FragmentId;
 use crate::catalog::root_catalog::Catalog;
+use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 
@@ -45,6 +48,8 @@ pub struct FrontendObserverNode {
     catalog_updated_tx: Sender<CatalogVersion>,
     catalog: Arc<RwLock<Catalog>>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
+    role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
+    meta_client: Arc<dyn FrontendMetaClient>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
     session_params: Arc<RwLock<SessionConfig>>,
@@ -211,15 +216,35 @@ impl ObserverState for FrontendObserverNode {
             serde_json::from_str(&session_params.unwrap().params).unwrap();
         LocalSecretManager::global().init_secrets(secrets);
         LicenseManager::get().update_cluster_resource(cluster_resource.unwrap());
+        self.refresh_role_memberships_cache(
+            "failed to refresh cached role memberships after observer initialization",
+        );
     }
 }
 
 impl FrontendObserverNode {
+    fn refresh_role_memberships_cache(&self, failure_context: &'static str) {
+        let role_memberships = self.role_memberships.clone();
+        let meta_client = self.meta_client.clone();
+        tokio::spawn(async move {
+            match meta_client.list_role_memberships(vec![]).await {
+                Ok(memberships) => {
+                    *role_memberships.write() = memberships;
+                }
+                Err(error) => {
+                    warn!(error = %error, failure_context, "failed to refresh cached role memberships");
+                }
+            }
+        });
+    }
+
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
+        role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
+        meta_client: Arc<dyn FrontendMetaClient>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
         session_params: Arc<RwLock<SessionConfig>>,
@@ -231,6 +256,8 @@ impl FrontendObserverNode {
             catalog,
             catalog_updated_tx,
             user_info_manager,
+            role_memberships,
+            meta_client,
             hummock_snapshot_manager,
             system_params_manager,
             session_params,
@@ -461,6 +488,9 @@ impl FrontendObserverNode {
         );
         self.version = resp.version;
         self.catalog_updated_tx.send(resp.version).unwrap();
+        self.refresh_role_memberships_cache(
+            "failed to refresh cached role memberships after user notification",
+        );
     }
 
     fn handle_fragment_mapping_notification(&mut self, resp: SubscribeResponse) {

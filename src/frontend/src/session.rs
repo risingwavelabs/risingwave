@@ -133,7 +133,9 @@ use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::UserId;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
-use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
+use crate::user::user_service::{
+    RoleMembershipInfoReader, UserInfoReader, UserInfoWriter, UserInfoWriterImpl,
+};
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub(crate) mod current;
@@ -150,6 +152,7 @@ pub(crate) struct FrontendEnv {
     catalog_reader: CatalogReader,
     user_info_writer: Arc<dyn UserInfoWriter>,
     user_info_reader: UserInfoReader,
+    role_membership_info_reader: RoleMembershipInfoReader,
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -232,9 +235,10 @@ impl FrontendEnv {
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let user_info_writer = Arc::new(MockUserInfoWriter::new(
             user_info_manager.clone(),
-            role_memberships,
+            role_memberships.clone(),
         ));
         let user_info_reader = UserInfoReader::new(user_info_manager);
+        let role_membership_info_reader = RoleMembershipInfoReader::new(role_memberships);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
@@ -274,6 +278,7 @@ impl FrontendEnv {
             catalog_reader,
             user_info_writer,
             user_info_reader,
+            role_membership_info_reader,
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
@@ -389,10 +394,15 @@ impl FrontendEnv {
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let user_info_reader = UserInfoReader::new(user_info_manager.clone());
+        let role_memberships = Arc::new(RwLock::new(
+            meta_client.list_role_memberships(vec![]).await?,
+        ));
         let user_info_writer = Arc::new(UserInfoWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx,
+            role_memberships.clone(),
         ));
+        let role_membership_info_reader = RoleMembershipInfoReader::new(role_memberships.clone());
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
@@ -413,6 +423,8 @@ impl FrontendEnv {
             catalog,
             catalog_updated_tx,
             user_info_manager,
+            role_memberships,
+            frontend_meta_client.clone(),
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
             session_params.clone(),
@@ -561,6 +573,7 @@ impl FrontendEnv {
                 catalog_writer,
                 user_info_reader,
                 user_info_writer,
+                role_membership_info_reader,
                 worker_node_manager,
                 meta_client: frontend_meta_client,
                 query_manager,
@@ -619,6 +632,10 @@ impl FrontendEnv {
     /// Get a reference to the frontend env's user info reader.
     pub fn user_info_reader(&self) -> &UserInfoReader {
         &self.user_info_reader
+    }
+
+    pub fn role_membership_info_reader(&self) -> &RoleMembershipInfoReader {
+        &self.role_membership_info_reader
     }
 
     pub fn worker_node_manager_ref(&self) -> WorkerNodeManagerRef {

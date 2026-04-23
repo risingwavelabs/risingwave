@@ -34,8 +34,8 @@ use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbRoleMembership, PbUserIn
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{OnConflict, SimpleExpr, Value};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, EntityTrait, IntoActiveModel, PaginatorTrait,
-    QueryFilter, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, IntoActiveModel,
+    PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
@@ -182,6 +182,10 @@ fn compute_cascading_role_memberships(
 }
 
 impl CatalogController {
+    async fn user_controller_db(&self) -> DatabaseConnection {
+        self.inner.read().await.db.clone()
+    }
+
     pub(crate) async fn notify_users_update(
         &self,
         user_infos: Vec<PbUserInfo>,
@@ -196,8 +200,8 @@ impl CatalogController {
     }
 
     pub async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         check_user_name_duplicate(&pb_user.name, &txn).await?;
 
         let grant_privileges = pb_user.grant_privileges.clone();
@@ -240,14 +244,14 @@ impl CatalogController {
         update_user: PbUserInfo,
         update_fields: &[PbUpdateField],
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let db = self.user_controller_db().await;
         let rename_flag = update_fields.contains(&PbUpdateField::Rename);
         if rename_flag {
-            check_user_name_duplicate(&update_user.name, &inner.db).await?;
+            check_user_name_duplicate(&update_user.name, &db).await?;
         }
 
         let user = User::find_by_id(update_user.id as UserId)
-            .one(&inner.db)
+            .one(&db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", update_user.id))?;
         let mut user = user.into_active_model();
@@ -265,9 +269,9 @@ impl CatalogController {
             PbUpdateField::Inherit => user.can_inherit = Set(update_user.can_inherit),
         });
 
-        let user = user.update(&inner.db).await?;
+        let user = user.update(&db).await?;
         let mut user_info: PbUserInfo = user.into();
-        user_info.grant_privileges = get_user_privilege(user_info.id as _, &inner.db).await?;
+        user_info.grant_privileges = get_user_privilege(user_info.id as _, &db).await?;
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
@@ -282,13 +286,13 @@ impl CatalogController {
         &self,
         member_ids: &[UserId],
     ) -> MetaResult<Vec<PbRoleMembership>> {
-        let inner = self.inner.read().await;
+        let db = self.user_controller_db().await;
         let memberships = if member_ids.is_empty() {
-            UserRoleMembership::find().all(&inner.db).await?
+            UserRoleMembership::find().all(&db).await?
         } else {
             UserRoleMembership::find()
                 .filter(user_role_membership::Column::MemberId.is_in(member_ids.iter().copied()))
-                .all(&inner.db)
+                .all(&db)
                 .await?
         };
         Ok(memberships.into_iter().map(Into::into).collect())
@@ -307,8 +311,8 @@ impl CatalogController {
             return Ok((IGNORED_NOTIFICATION_VERSION, vec![]));
         }
 
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for role_id in &role_ids {
             ensure_user_id(*role_id, &txn).await?;
         }
@@ -403,9 +407,20 @@ impl CatalogController {
             .into_iter()
             .map(Into::into)
             .collect();
+        let affected_user_infos = list_user_info_by_ids(
+            role_ids
+                .iter()
+                .chain(member_ids.iter())
+                .copied()
+                .unique()
+                .collect_vec(),
+            &txn,
+        )
+        .await?;
         txn.commit().await?;
 
-        Ok((IGNORED_NOTIFICATION_VERSION, memberships))
+        let version = self.notify_users_update(affected_user_infos).await;
+        Ok((version, memberships))
     }
 
     pub async fn revoke_role(
@@ -423,8 +438,8 @@ impl CatalogController {
             return Ok((IGNORED_NOTIFICATION_VERSION, vec![]));
         }
 
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for role_id in &role_ids {
             ensure_user_id(*role_id, &txn).await?;
         }
@@ -491,16 +506,27 @@ impl CatalogController {
             .into_iter()
             .map(Into::into)
             .collect();
+        let affected_user_infos = list_user_info_by_ids(
+            role_ids
+                .iter()
+                .chain(member_ids.iter())
+                .copied()
+                .unique()
+                .collect_vec(),
+            &txn,
+        )
+        .await?;
         txn.commit().await?;
 
-        Ok((IGNORED_NOTIFICATION_VERSION, memberships))
+        let version = self.notify_users_update(affected_user_infos).await;
+        Ok((version, memberships))
     }
 
     #[cfg(test)]
     pub async fn get_user(&self, id: UserId) -> MetaResult<user::Model> {
-        let inner = self.inner.read().await;
+        let db = self.user_controller_db().await;
         let user = User::find_by_id(id)
-            .one(&inner.db)
+            .one(&db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", id))?;
         Ok(user)
@@ -508,18 +534,18 @@ impl CatalogController {
 
     #[cfg(test)]
     pub async fn get_user_by_name(&self, name: &str) -> MetaResult<user::Model> {
-        let inner = self.inner.read().await;
+        let db = self.user_controller_db().await;
         let user = User::find()
             .filter(user::Column::Name.eq(name))
-            .one(&inner.db)
+            .one(&db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("user {name} not found"))?;
         Ok(user)
     }
 
     pub async fn drop_user(&self, user_id: UserId) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         let user = User::find_by_id(user_id)
             .one(&txn)
             .await?
@@ -591,8 +617,8 @@ impl CatalogController {
         grantor: UserId,
         with_grant_option: bool,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -728,8 +754,8 @@ impl CatalogController {
         revoke_grant_option: bool,
         cascade: bool,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -920,8 +946,8 @@ impl CatalogController {
             with_grant_option,
             "grant default privileges",
         );
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -1073,8 +1099,8 @@ impl CatalogController {
         grantees: Vec<UserId>,
         revoke_grant_option: bool,
     ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }

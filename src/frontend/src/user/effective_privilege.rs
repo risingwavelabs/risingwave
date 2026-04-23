@@ -13,18 +13,14 @@
 // limitations under the License.
 
 use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
 
 use risingwave_common::acl::AclMode;
 use risingwave_pb::user::RoleMembership;
-use thiserror_ext::AsReport;
 
-use crate::error::{ErrorCode, Result, RwError};
-use crate::meta_client::FrontendMetaClient;
 use crate::session::AuthContext;
 use crate::user::UserId;
 use crate::user::user_catalog::UserCatalog;
-use crate::user::user_service::UserInfoReader;
+use crate::user::user_service::{RoleMembershipInfoReader, UserInfoReader};
 
 fn reachable_role_ids(
     start_ids: impl IntoIterator<Item = UserId>,
@@ -146,33 +142,8 @@ fn has_privilege_for_catalog_user(
     user.is_super || user.id == owner || user.has_privilege(object, mode)
 }
 
-pub fn load_role_memberships_blocking(
-    meta_client: Arc<dyn FrontendMetaClient>,
-) -> Result<Vec<RoleMembership>> {
-    load_role_memberships_blocking_impl(meta_client)
-        .map_err(|error| RwError::from(ErrorCode::InternalError(error.to_report_string())))
-}
-
-#[cfg(not(madsim))]
-fn load_role_memberships_blocking_impl(
-    meta_client: Arc<dyn FrontendMetaClient>,
-) -> risingwave_rpc_client::error::Result<Vec<RoleMembership>> {
-    let handle = tokio::runtime::Handle::try_current().map_err(|_| {
-        risingwave_rpc_client::error::RpcError::Internal(anyhow::anyhow!(
-            "role membership loading requires a Tokio runtime"
-        ))
-    })?;
-    match handle.runtime_flavor() {
-        tokio::runtime::RuntimeFlavor::MultiThread => tokio::task::block_in_place(|| {
-            handle.block_on(meta_client.list_role_memberships(vec![]))
-        }),
-        _ => futures::executor::block_on(meta_client.list_role_memberships(vec![])),
-    }
-}
-
-#[cfg(madsim)]
-fn load_role_memberships_blocking_impl(
-    meta_client: Arc<dyn FrontendMetaClient>,
-) -> risingwave_rpc_client::error::Result<Vec<RoleMembership>> {
-    futures::executor::block_on(meta_client.list_role_memberships(vec![]))
+pub fn role_memberships_snapshot(
+    role_membership_reader: &RoleMembershipInfoReader,
+) -> Vec<RoleMembership> {
+    role_membership_reader.read_guard().clone()
 }

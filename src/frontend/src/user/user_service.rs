@@ -19,7 +19,7 @@ use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
-use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_pb::user::{GrantPrivilege, RoleMembership, UserInfo};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
@@ -29,6 +29,7 @@ use crate::user::user_manager::UserInfoManager;
 use crate::user::{UserId, UserInfoVersion};
 
 pub type UserInfoReadGuard = ArcRwLockReadGuard<RawRwLock, UserInfoManager>;
+pub type RoleMembershipInfoReadGuard = ArcRwLockReadGuard<RawRwLock, Vec<RoleMembership>>;
 
 #[derive(Clone)]
 pub struct UserInfoReader(Arc<RwLock<UserInfoManager>>);
@@ -39,6 +40,19 @@ impl UserInfoReader {
 
     pub fn read_guard(&self) -> UserInfoReadGuard {
         // Make this recursive so that one can get this guard in the same thread without fear.
+        self.0.read_arc_recursive()
+    }
+}
+
+#[derive(Clone)]
+pub struct RoleMembershipInfoReader(Arc<RwLock<Vec<RoleMembership>>>);
+
+impl RoleMembershipInfoReader {
+    pub fn new(inner: Arc<RwLock<Vec<RoleMembership>>>) -> Self {
+        Self(inner)
+    }
+
+    pub fn read_guard(&self) -> RoleMembershipInfoReadGuard {
         self.0.read_arc_recursive()
     }
 }
@@ -105,6 +119,7 @@ pub trait UserInfoWriter: Send + Sync {
 pub struct UserInfoWriterImpl {
     meta_client: MetaClient,
     user_updated_rx: Receiver<UserInfoVersion>,
+    role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
 }
 
 #[async_trait::async_trait]
@@ -116,7 +131,8 @@ impl UserInfoWriter for UserInfoWriterImpl {
 
     async fn drop_user(&self, id: UserId) -> Result<()> {
         let version = self.meta_client.drop_user(id).await?;
-        self.wait_version(version).await
+        self.wait_version(version).await?;
+        self.refresh_role_memberships().await
     }
 
     async fn update_user(&self, user: UserInfo, update_fields: Vec<UpdateField>) -> Result<()> {
@@ -170,18 +186,19 @@ impl UserInfoWriter for UserInfoWriterImpl {
         inherit_option: Option<bool>,
         set_option: Option<bool>,
     ) -> Result<()> {
-        let version = self
+        let (version, _memberships) = self
             .meta_client
             .grant_role(
-                role_ids,
-                member_ids,
+                role_ids.clone(),
+                member_ids.clone(),
                 granted_by,
                 admin_option,
                 inherit_option,
                 set_option,
             )
             .await?;
-        self.wait_version(version).await
+        self.wait_version(version).await?;
+        self.refresh_role_memberships().await
     }
 
     async fn revoke_role(
@@ -195,11 +212,11 @@ impl UserInfoWriter for UserInfoWriterImpl {
         revoke_set_option: bool,
         cascade: bool,
     ) -> Result<()> {
-        let version = self
+        let (version, _memberships) = self
             .meta_client
             .revoke_role(
-                role_ids,
-                member_ids,
+                role_ids.clone(),
+                member_ids.clone(),
                 granted_by,
                 revoked_by,
                 revoke_admin_option,
@@ -208,7 +225,8 @@ impl UserInfoWriter for UserInfoWriterImpl {
                 cascade,
             )
             .await?;
-        self.wait_version(version).await
+        self.wait_version(version).await?;
+        self.refresh_role_memberships().await
     }
 
     async fn alter_default_privilege(
@@ -227,10 +245,15 @@ impl UserInfoWriter for UserInfoWriterImpl {
 }
 
 impl UserInfoWriterImpl {
-    pub fn new(meta_client: MetaClient, user_updated_rx: Receiver<UserInfoVersion>) -> Self {
+    pub fn new(
+        meta_client: MetaClient,
+        user_updated_rx: Receiver<UserInfoVersion>,
+        role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
+    ) -> Self {
         UserInfoWriterImpl {
             meta_client,
             user_updated_rx,
+            role_memberships,
         }
     }
 
@@ -239,6 +262,11 @@ impl UserInfoWriterImpl {
         while *rx.borrow_and_update() < version {
             rx.changed().await.map_err(|e| anyhow!(e))?;
         }
+        Ok(())
+    }
+
+    async fn refresh_role_memberships(&self) -> Result<()> {
+        *self.role_memberships.write() = self.meta_client.list_role_memberships(vec![]).await?;
         Ok(())
     }
 }

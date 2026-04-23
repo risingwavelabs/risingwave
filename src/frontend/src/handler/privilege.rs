@@ -21,7 +21,7 @@ use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
 use crate::session::SessionImpl;
 use crate::user::UserId;
-use crate::user::effective_privilege::{load_role_memberships_blocking, session_has_privilege};
+use crate::user::effective_privilege::{role_memberships_snapshot, session_has_privilege};
 
 #[derive(Debug)]
 pub struct ObjectCheckItem {
@@ -76,7 +76,7 @@ impl SessionImpl {
         drop(reader);
 
         let auth_context = self.auth_context();
-        let memberships = load_role_memberships_blocking(self.env().meta_client_ref())?;
+        let memberships = role_memberships_snapshot(self.env().role_membership_info_reader());
         for item in items {
             let has_privilege = session_has_privilege(
                 user_reader,

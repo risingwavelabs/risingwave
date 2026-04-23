@@ -1037,7 +1037,7 @@ impl MetaClient {
         admin_option: Option<bool>,
         inherit_option: Option<bool>,
         set_option: Option<bool>,
-    ) -> Result<u64> {
+    ) -> Result<(u64, Vec<RoleMembership>)> {
         let request = GrantRoleRequest {
             role_ids: role_ids.into_iter().map(|id| id.as_raw_id()).collect(),
             member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
@@ -1047,7 +1047,7 @@ impl MetaClient {
             set_option,
         };
         let resp = self.inner.grant_role(request).await?;
-        Ok(resp.version)
+        Ok((resp.version, resp.memberships))
     }
 
     pub async fn revoke_role(
@@ -1060,7 +1060,7 @@ impl MetaClient {
         revoke_inherit_option: bool,
         revoke_set_option: bool,
         cascade: bool,
-    ) -> Result<u64> {
+    ) -> Result<(u64, Vec<RoleMembership>)> {
         let request = RevokeRoleRequest {
             role_ids: role_ids.into_iter().map(|id| id.as_raw_id()).collect(),
             member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
@@ -1072,7 +1072,7 @@ impl MetaClient {
             cascade,
         };
         let resp = self.inner.revoke_role(request).await?;
-        Ok(resp.version)
+        Ok((resp.version, resp.memberships))
     }
 
     pub async fn list_role_memberships(

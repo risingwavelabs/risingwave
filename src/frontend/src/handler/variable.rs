@@ -27,7 +27,7 @@ use risingwave_sqlparser::ast::{
 use super::{RwPgResponse, RwPgResponseBuilderExt, fields_to_descriptors};
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
-use crate::user::effective_privilege::{can_set_role, load_role_memberships_blocking};
+use crate::user::effective_privilege::{can_set_role, role_memberships_snapshot};
 
 /// convert `SetVariableValue` to string while remove the quotes on literals.
 pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
@@ -142,7 +142,8 @@ pub(super) fn handle_set_role(
                 })?;
             drop(reader);
 
-            let memberships = load_role_memberships_blocking(session.env().meta_client_ref())?;
+            let memberships =
+                role_memberships_snapshot(session.env().role_membership_info_reader());
             if !session.is_super_user()
                 && !can_set_role(session.session_user_id(), role.id, &memberships)
             {
