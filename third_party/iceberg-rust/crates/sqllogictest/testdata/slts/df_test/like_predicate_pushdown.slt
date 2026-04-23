@@ -1,0 +1,109 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Test LIKE predicate pushdown for StartsWith patterns
+# This validates that LIKE 'prefix%' patterns are converted to StartsWith operator
+# Note: Iceberg's StartsWith operator is case-sensitive
+
+# Note: test_unpartitioned_table already contains data from insert_into.slt:
+# (1, 'Alice'), (2, 'Bob'), (3, 'Charlie'), (4, NULL)
+# We'll insert additional test data for LIKE testing
+query I
+INSERT INTO default.default.test_unpartitioned_table VALUES (5, 'alice'), (6, 'Albert'), (7, 'Bobby'), (8, 'Carol')
+----
+4
+
+# Test basic LIKE prefix pattern pushdown - verify predicate is pushed to IcebergTableScan
+query TT
+EXPLAIN SELECT * FROM default.default.test_unpartitioned_table WHERE name LIKE 'Al%'
+----
+logical_plan
+01)Filter: default.default.test_unpartitioned_table.name LIKE Utf8("Al%")
+02)--TableScan: default.default.test_unpartitioned_table projection=[id, name], partial_filters=[default.default.test_unpartitioned_table.name LIKE Utf8("Al%")]
+physical_plan
+01)FilterExec: name@1 LIKE Al%
+02)--RepartitionExec: partitioning=RoundRobinBatch(4), input_partitions=1
+03)----IcebergTableScan projection:[id,name] predicate:[name STARTS WITH "Al"]
+
+# Test LIKE filtering with case-sensitive match
+query IT rowsort
+SELECT * FROM default.default.test_unpartitioned_table WHERE name LIKE 'Al%'
+----
+1 Alice
+6 Albert
+
+# Test NOT LIKE prefix pattern pushdown
+query TT
+EXPLAIN SELECT * FROM default.default.test_unpartitioned_table WHERE name NOT LIKE 'Al%'
+----
+logical_plan
+01)Filter: default.default.test_unpartitioned_table.name NOT LIKE Utf8("Al%")
+02)--TableScan: default.default.test_unpartitioned_table projection=[id, name], partial_filters=[default.default.test_unpartitioned_table.name NOT LIKE Utf8("Al%")]
+physical_plan
+01)FilterExec: name@1 NOT LIKE Al%
+02)--RepartitionExec: partitioning=RoundRobinBatch(4), input_partitions=1
+03)----IcebergTableScan projection:[id,name] predicate:[name NOT STARTS WITH "Al"]
+
+# Test NOT LIKE filtering
+query IT rowsort
+SELECT * FROM default.default.test_unpartitioned_table WHERE name NOT LIKE 'Al%'
+----
+2 Bob
+3 Charlie
+5 alice
+7 Bobby
+8 Carol
+
+# Test case sensitivity - lowercase 'al%' should not match 'Alice' or 'Albert'
+query IT rowsort
+SELECT * FROM default.default.test_unpartitioned_table WHERE name LIKE 'al%'
+----
+5 alice
+
+# Test LIKE with empty prefix (matches everything except NULL)
+query IT rowsort
+SELECT * FROM default.default.test_unpartitioned_table WHERE name LIKE '%'
+----
+1 Alice
+2 Bob
+3 Charlie
+5 alice
+6 Albert
+7 Bobby
+8 Carol
+
+# Test LIKE with single character prefix
+query IT rowsort
+SELECT * FROM default.default.test_unpartitioned_table WHERE name LIKE 'B%'
+----
+2 Bob
+7 Bobby
+
+# Test LIKE combined with other predicates
+query IT rowsort
+SELECT * FROM default.default.test_unpartitioned_table WHERE name LIKE 'Al%' AND id > 1
+----
+6 Albert
+
+# Test LIKE in OR expression
+query IT rowsort
+SELECT * FROM default.default.test_unpartitioned_table WHERE name LIKE 'Al%' OR name LIKE 'Bo%'
+----
+1 Alice
+2 Bob
+6 Albert
+7 Bobby

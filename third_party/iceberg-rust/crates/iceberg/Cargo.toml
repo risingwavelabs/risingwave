@@ -1,0 +1,109 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+[package]
+edition = { workspace = true }
+homepage = { workspace = true }
+name = "iceberg"
+rust-version = { workspace = true }
+version = { workspace = true }
+
+categories = ["database"]
+description = "Apache Iceberg Rust implementation"
+keywords = ["iceberg"]
+license = { workspace = true }
+repository = { workspace = true }
+
+[features]
+default = ["storage-memory", "storage-fs", "storage-s3"]
+storage-all = ["storage-memory", "storage-fs", "storage-s3", "storage-gcs", "storage-azblob"]
+
+storage-azdls = ["opendal/services-azdls"]
+storage-fs = ["opendal/services-fs"]
+storage-gcs = ["opendal/services-gcs"]
+storage-memory = ["opendal/services-memory"]
+storage-oss = ["opendal/services-oss"]
+storage-s3 = ["opendal/services-s3", "reqsign"]
+storage-azblob = ["opendal/services-azblob"]
+
+
+[dependencies]
+anyhow = { workspace = true }
+apache-avro = { workspace = true }
+array-init = { workspace = true }
+arrow-arith = { workspace = true }
+arrow-array = { workspace = true }
+arrow-buffer = { workspace = true }
+arrow-cast = { workspace = true }
+arrow-ord = { workspace = true }
+arrow-row = { workspace = true }
+arrow-schema = { workspace = true }
+arrow-select = { workspace = true }
+arrow-string = { workspace = true }
+as-any = { workspace = true }
+async-trait = { workspace = true }
+backon = { workspace = true }
+base64 = { workspace = true }
+bimap = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+crc32fast = { workspace = true }
+derive_builder = { workspace = true }
+expect-test = { workspace = true }
+flate2 = { workspace = true }
+fnv = { workspace = true }
+futures = { workspace = true }
+itertools = { workspace = true }
+moka = { version = "0.12.10", features = ["future"] }
+murmur3 = { workspace = true }
+once_cell = { workspace = true }
+opendal = { workspace = true }
+ordered-float = { workspace = true }
+parquet = { workspace = true, features = ["async"] }
+rand = { workspace = true }
+reqsign = { version = "0.16.3", optional = true, default-features = false }
+reqwest = { workspace = true }
+roaring = { workspace = true }
+fastnum = { workspace = true }
+serde = { workspace = true }
+serde_bytes = { workspace = true }
+serde_derive = { workspace = true }
+serde_json = { workspace = true }
+serde_repr = { workspace = true }
+serde_with = { workspace = true }
+strum = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, optional = false, features = ["sync"] }
+tracing = { workspace = true }
+typed-builder = { workspace = true }
+typetag = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+zstd = { workspace = true }
+
+[dev-dependencies]
+expect-test = { workspace = true }
+iceberg_test_utils = { path = "../test_utils", features = ["tests"] }
+mockall = { workspace = true }
+pretty_assertions = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
+tempfile = { workspace = true }
+minijinja = { workspace = true }
+
+[package.metadata.cargo-machete]
+# These dependencies are added to ensure minimal dependency version
+ignored = ["tap"]

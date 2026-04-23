@@ -7113,7 +7113,6 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef#fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef"
 dependencies = [
  "anyhow",
  "apache-avro 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -7171,7 +7170,6 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef#fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7186,7 +7184,6 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef#fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

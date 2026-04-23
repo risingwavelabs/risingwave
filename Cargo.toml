@@ -75,6 +75,7 @@ exclude = [
     "e2e_test/source_inline/pubsub",
     "e2e_test/udf/embedded_wasm",
     "lints",
+    "third_party/iceberg-rust",
 ]
 resolver = "2"
 
@@ -458,3 +459,8 @@ prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost"
 prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "040a192409e45069158300baec4f402ad1fe101a" }
+
+[patch."https://github.com/risingwavelabs/iceberg-rust.git"]
+iceberg = { path = "third_party/iceberg-rust/crates/iceberg" }
+iceberg-catalog-glue = { path = "third_party/iceberg-rust/crates/catalog/glue" }
+iceberg-catalog-rest = { path = "third_party/iceberg-rust/crates/catalog/rest" }

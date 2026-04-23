@@ -1,0 +1,58 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+name: "Close Stale Issues and PRs"
+on:
+  schedule:
+    - cron: '0 0 * * *'
+
+permissions:
+  # All other permissions are set to none
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    if: github.repository_owner == 'apache'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/stale@v10.2.0
+        with:
+          # stale issues
+          stale-issue-label: 'stale,security'
+          exempt-issue-labels: 'not-stale'
+          days-before-issue-stale: 180
+          days-before-issue-close: 14
+          stale-issue-message: >
+            This issue has been automatically marked as stale because it has been open for 180 days
+            with no activity. It will be closed in next 14 days if no further activity occurs. To
+            permanently prevent this issue from being considered stale, add the label 'not-stale',
+            but commenting on the issue is preferred when possible.
+          close-issue-message: >
+            This issue has been closed because it has not received any activity in the last 14 days
+            since being marked as 'stale'
+          # stale PRs
+          stale-pr-label: 'stale'
+          exempt-pr-labels: 'not-stale,security'
+          stale-pr-message: 'This pull request has been marked as stale due to 30 days of inactivity. It will be closed in 1 week if no further activity occurs. If you think that’s incorrect or this pull request requires a review, please simply write any comment. If closed, you can revive the PR at any time and @mention a reviewer or discuss it on the dev@iceberg.apache.org list. Thank you for your contributions.'
+          close-pr-message: 'This pull request has been closed due to lack of activity. This is not a judgement on the merit of the PR in any way. It is just a way of keeping the PR queue manageable. If you think that is incorrect, or the pull request requires review, you can revive the PR at any time.'
+          days-before-pr-stale: 30
+          days-before-pr-close: 7
+          ascending: true
+          operations-per-run: 200

@@ -1,0 +1,124 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Create test table with boolean column
+statement ok
+CREATE TABLE default.default.test_boolean_table (id INT NOT NULL, is_active BOOLEAN, description STRING)
+
+# Insert test data into test_boolean_table
+statement ok
+INSERT INTO default.default.test_boolean_table VALUES
+  (1, true, 'Active user'),
+  (2, false, 'Inactive user'),
+  (3, true, 'Premium member'),
+  (4, false, 'Trial expired'),
+  (5, true, 'Verified account'),
+  (6, NULL, 'Pending verification')
+
+# Verify boolean equality predicate is pushed down to IcebergTableScan
+query TT
+EXPLAIN SELECT * FROM default.default.test_boolean_table WHERE is_active = true
+----
+logical_plan
+01)Filter: default.default.test_boolean_table.is_active
+02)--TableScan: default.default.test_boolean_table projection=[id, is_active, description], partial_filters=[default.default.test_boolean_table.is_active]
+physical_plan
+01)FilterExec: is_active@1
+02)--RepartitionExec: partitioning=RoundRobinBatch(4), input_partitions=1
+03)----IcebergTableScan projection:[id,is_active,description] predicate:[is_active = true]
+
+# Query with is_active = true
+query ITT rowsort
+SELECT * FROM default.default.test_boolean_table WHERE is_active = true
+----
+1 true Active user
+3 true Premium member
+5 true Verified account
+
+# Verify boolean false predicate is pushed down to IcebergTableScan
+query TT
+EXPLAIN SELECT * FROM default.default.test_boolean_table WHERE is_active = false
+----
+logical_plan
+01)Filter: NOT default.default.test_boolean_table.is_active
+02)--TableScan: default.default.test_boolean_table projection=[id, is_active, description], partial_filters=[NOT default.default.test_boolean_table.is_active]
+physical_plan
+01)FilterExec: NOT is_active@1
+02)--RepartitionExec: partitioning=RoundRobinBatch(4), input_partitions=1
+03)----IcebergTableScan projection:[id,is_active,description] predicate:[is_active = false]
+
+# Query with is_active = false
+query ITT rowsort
+SELECT * FROM default.default.test_boolean_table WHERE is_active = false
+----
+2 false Inactive user
+4 false Trial expired
+
+# Verify boolean NOT EQUAL predicate is pushed down
+query TT
+EXPLAIN SELECT * FROM default.default.test_boolean_table WHERE is_active != true
+----
+logical_plan
+01)Filter: NOT default.default.test_boolean_table.is_active
+02)--TableScan: default.default.test_boolean_table projection=[id, is_active, description], partial_filters=[NOT default.default.test_boolean_table.is_active]
+physical_plan
+01)FilterExec: NOT is_active@1
+02)--RepartitionExec: partitioning=RoundRobinBatch(4), input_partitions=1
+03)----IcebergTableScan projection:[id,is_active,description] predicate:[is_active = false]
+
+# Query with is_active != true (includes false and NULL)
+query ITT rowsort
+SELECT * FROM default.default.test_boolean_table WHERE is_active != true
+----
+2 false Inactive user
+4 false Trial expired
+
+# Test combined boolean predicates with AND
+query ITT rowsort
+SELECT * FROM default.default.test_boolean_table WHERE is_active = true AND id > 2
+----
+3 true Premium member
+5 true Verified account
+
+# Test combined boolean predicates with OR
+query ITT rowsort
+SELECT * FROM default.default.test_boolean_table WHERE is_active = true OR id = 2
+----
+1 true Active user
+2 false Inactive user
+3 true Premium member
+5 true Verified account
+
+# Test IS NULL on boolean column
+query ITT
+SELECT * FROM default.default.test_boolean_table WHERE is_active IS NULL
+----
+6 NULL Pending verification
+
+# Test IS NOT NULL on boolean column
+query ITT rowsort
+SELECT * FROM default.default.test_boolean_table WHERE is_active IS NOT NULL
+----
+1 true Active user
+2 false Inactive user
+3 true Premium member
+4 false Trial expired
+5 true Verified account
+
+# Clean up: Drop the test table
+statement ok
+DROP TABLE default.default.test_boolean_table

@@ -1,0 +1,212 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Test basic SELECT queries with ORDER BY, LIMIT, and various clauses
+# This covers the functionality from the original datafusion.rs integration test
+
+# Create a test table with multiple columns for query testing
+statement ok
+CREATE TABLE default.default.query_test_table (
+    id INT NOT NULL,
+    name STRING,
+    score DOUBLE,
+    category STRING
+)
+
+# Insert test data
+query I
+INSERT INTO default.default.query_test_table VALUES
+    (1, 'Alice', 95.5, 'A'),
+    (2, 'Bob', 87.0, 'B'),
+    (3, 'Charlie', 92.5, 'A'),
+    (4, 'Diana', 78.5, 'C'),
+    (5, 'Eve', 88.0, 'B'),
+    (6, 'Frank', 91.0, 'A'),
+    (7, 'Grace', 85.5, 'B'),
+    (8, 'Henry', 79.0, 'C'),
+    (9, 'Ivy', 96.5, 'A'),
+    (10, 'Jack', 82.0, 'C')
+----
+10
+
+# Test SELECT * with ORDER BY and LIMIT
+query ITRT
+SELECT * FROM default.default.query_test_table ORDER BY id LIMIT 3
+----
+1 Alice 95.5 A
+2 Bob 87 B
+3 Charlie 92.5 A
+
+# Test ORDER BY DESC with LIMIT
+query ITRT
+SELECT * FROM default.default.query_test_table ORDER BY score DESC LIMIT 5
+----
+9 Ivy 96.5 A
+1 Alice 95.5 A
+3 Charlie 92.5 A
+6 Frank 91 A
+5 Eve 88 B
+
+# Test ORDER BY with multiple columns
+query ITR
+SELECT id, name, score FROM default.default.query_test_table ORDER BY category, score DESC
+----
+9 Ivy 96.5
+1 Alice 95.5
+3 Charlie 92.5
+6 Frank 91
+5 Eve 88
+2 Bob 87
+7 Grace 85.5
+10 Jack 82
+8 Henry 79
+4 Diana 78.5
+
+# Test LIMIT with OFFSET
+query IT
+SELECT id, name FROM default.default.query_test_table ORDER BY id LIMIT 3 OFFSET 5
+----
+6 Frank
+7 Grace
+8 Henry
+
+# Test WHERE clause with ORDER BY
+query ITR
+SELECT id, name, score FROM default.default.query_test_table WHERE score > 90 ORDER BY score DESC
+----
+9 Ivy 96.5
+1 Alice 95.5
+3 Charlie 92.5
+6 Frank 91
+
+# Test WHERE clause with string comparison
+query ITT rowsort
+SELECT id, name, category FROM default.default.query_test_table WHERE category = 'A'
+----
+1 Alice A
+3 Charlie A
+6 Frank A
+9 Ivy A
+
+# Test aggregation with GROUP BY
+query TIR rowsort
+SELECT category, COUNT(*), AVG(score) FROM default.default.query_test_table GROUP BY category
+----
+A 4 93.875
+B 3 86.833333333333
+C 3 79.833333333333
+
+# Test aggregation with HAVING clause
+query TI rowsort
+SELECT category, COUNT(*) as cnt FROM default.default.query_test_table GROUP BY category HAVING COUNT(*) >= 4
+----
+A 4
+
+# Test DISTINCT
+query T rowsort
+SELECT DISTINCT category FROM default.default.query_test_table
+----
+A
+B
+C
+
+# Test COUNT with DISTINCT
+query I
+SELECT COUNT(DISTINCT category) FROM default.default.query_test_table
+----
+3
+
+# Test MIN and MAX
+query RR
+SELECT MIN(score), MAX(score) FROM default.default.query_test_table
+----
+78.5 96.5
+
+# Test SUM
+query R
+SELECT SUM(score) FROM default.default.query_test_table
+----
+875.5
+
+# Test combined WHERE, ORDER BY, and LIMIT
+query ITR
+SELECT id, name, score FROM default.default.query_test_table
+WHERE category IN ('A', 'B') AND score > 85
+ORDER BY score DESC
+LIMIT 4
+----
+9 Ivy 96.5
+1 Alice 95.5
+3 Charlie 92.5
+6 Frank 91
+
+# Test aliasing
+query IT
+SELECT id AS user_id, name AS user_name FROM default.default.query_test_table ORDER BY user_id LIMIT 2
+----
+1 Alice
+2 Bob
+
+# Test expression in SELECT
+query ITR
+SELECT id, name, score * 1.1 AS adjusted_score FROM default.default.query_test_table ORDER BY id LIMIT 3
+----
+1 Alice 105.05
+2 Bob 95.7
+3 Charlie 101.75
+
+# Test BETWEEN
+query IT rowsort
+SELECT id, name FROM default.default.query_test_table WHERE score BETWEEN 85 AND 92
+----
+2 Bob
+5 Eve
+6 Frank
+7 Grace
+
+# Test NOT IN
+query IT rowsort
+SELECT id, name FROM default.default.query_test_table WHERE category NOT IN ('A')
+----
+10 Jack
+2 Bob
+4 Diana
+5 Eve
+7 Grace
+8 Henry
+
+# Test LIKE pattern matching
+query IT rowsort
+SELECT id, name FROM default.default.query_test_table WHERE name LIKE 'A%'
+----
+1 Alice
+
+# Test OR condition
+query ITT rowsort
+SELECT id, name, category FROM default.default.query_test_table WHERE category = 'A' OR score > 90
+----
+1 Alice A
+3 Charlie A
+6 Frank A
+9 Ivy A
+
+# Test AND condition
+query ITR rowsort
+SELECT id, name, score FROM default.default.query_test_table WHERE category = 'A' AND score > 93
+----
+1 Alice 95.5
+9 Ivy 96.5

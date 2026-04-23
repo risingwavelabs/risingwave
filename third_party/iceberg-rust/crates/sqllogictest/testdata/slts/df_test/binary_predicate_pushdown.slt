@@ -1,0 +1,67 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Test that binary predicates are pushed down to IcebergTableScan
+# This validates that ScalarValue::Binary is correctly converted to Datum::binary
+
+# Verify EXPLAIN shows binary predicate is pushed down to IcebergTableScan
+query TT
+EXPLAIN SELECT * FROM default.default.test_binary_table WHERE data = X'0102'
+----
+logical_plan
+01)Filter: default.default.test_binary_table.data = LargeBinary("1,2")
+02)--TableScan: default.default.test_binary_table projection=[id, data], partial_filters=[default.default.test_binary_table.data = LargeBinary("1,2")]
+physical_plan
+01)FilterExec: data@1 = 0102
+02)--RepartitionExec: partitioning=RoundRobinBatch(4), input_partitions=1
+03)----IcebergTableScan projection:[id,data] predicate:[data = 0102]
+
+# Verify empty result from empty table
+query I?
+SELECT * FROM default.default.test_binary_table WHERE data = X'0102'
+----
+
+# Insert test data
+query I
+INSERT INTO default.default.test_binary_table VALUES (1, X'0102')
+----
+1
+
+# Verify binary predicate filtering works
+query I?
+SELECT * FROM default.default.test_binary_table WHERE data = X'0102'
+----
+1 0102
+
+# Insert more rows with different binary values
+query I
+INSERT INTO default.default.test_binary_table VALUES (2, X'0304'), (3, X'0102'), (4, X'0506')
+----
+3
+
+# Verify binary predicate filters correctly
+query I? rowsort
+SELECT * FROM default.default.test_binary_table WHERE data = X'0102'
+----
+1 0102
+3 0102
+
+# Verify different binary value
+query I?
+SELECT * FROM default.default.test_binary_table WHERE data = X'0506'
+----
+4 0506

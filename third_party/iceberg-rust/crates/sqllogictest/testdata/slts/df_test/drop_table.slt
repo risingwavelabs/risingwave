@@ -1,0 +1,63 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Test DROP TABLE functionality
+
+# Create a table to drop
+statement ok
+CREATE TABLE default.default.table_to_drop (id INT NOT NULL, name STRING)
+
+# Verify the table exists
+query IT rowsort
+SELECT * FROM default.default.table_to_drop
+----
+
+# Insert some data
+query I
+INSERT INTO default.default.table_to_drop VALUES (1, 'Test')
+----
+1
+
+# Verify data exists
+query IT rowsort
+SELECT * FROM default.default.table_to_drop
+----
+1 Test
+
+# Drop the table
+statement ok
+DROP TABLE default.default.table_to_drop
+
+# Verify the table no longer exists (should error)
+statement error
+SELECT * FROM default.default.table_to_drop
+
+# Test DROP TABLE IF EXISTS on non-existent table (should not error)
+statement ok
+DROP TABLE IF EXISTS default.default.nonexistent_table
+
+# Create another table for IF EXISTS test
+statement ok
+CREATE TABLE default.default.another_table (id INT NOT NULL)
+
+# Drop with IF EXISTS
+statement ok
+DROP TABLE IF EXISTS default.default.another_table
+
+# Verify it's gone
+statement error
+SELECT * FROM default.default.another_table

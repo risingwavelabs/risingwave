@@ -1,0 +1,209 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Unified Docker Compose for all integration tests.
+# This file combines services needed for REST, HMS, Glue, S3, and GCS tests.
+# Start once with: docker compose -f dev/docker-compose.yaml up -d --wait
+# Stop with: docker compose -f dev/docker-compose.yaml down -v
+
+networks:
+  iceberg_test:
+
+services:
+  # =============================================================================
+  # MinIO - S3-compatible storage (shared by all tests)
+  # =============================================================================
+  minio:
+    image: minio/minio:RELEASE.2025-05-24T17-08-30Z
+    environment:
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=password
+      - MINIO_DOMAIN=minio
+    hostname: minio
+    networks:
+      iceberg_test:
+        # Add aliases for virtual-hosted style bucket access
+        aliases:
+          - icebergdata.minio
+          - warehouse.minio
+          - bucket1.minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: ["server", "/data", "--console-address", ":9001"]
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MinIO client - creates buckets for tests
+  mc:
+    depends_on:
+      minio:
+        condition: service_healthy
+    image: minio/mc:RELEASE.2025-05-21T01-59-54Z
+    environment:
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=password
+      - AWS_REGION=us-east-1
+    entrypoint: >
+      /bin/sh -c "
+        /usr/bin/mc alias set minio http://minio:9000 admin password;
+        /usr/bin/mc mb --ignore-existing minio/icebergdata;
+        /usr/bin/mc mb --ignore-existing minio/warehouse;
+        /usr/bin/mc mb --ignore-existing minio/bucket1;
+        /usr/bin/mc policy set public minio/icebergdata;
+        /usr/bin/mc policy set public minio/warehouse;
+        /usr/bin/mc policy set public minio/bucket1;
+        echo 'Buckets created successfully';
+        tail -f /dev/null
+      "
+    networks:
+      iceberg_test:
+
+  # =============================================================================
+  # REST Catalog - Apache Iceberg REST Catalog
+  # =============================================================================
+  rest:
+    image: apache/iceberg-rest-fixture:1.10.0
+    environment:
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=password
+      - AWS_REGION=us-east-1
+      - CATALOG_CATALOG__IMPL=org.apache.iceberg.jdbc.JdbcCatalog
+      - CATALOG_URI=jdbc:sqlite:file:/tmp/iceberg_rest_mode=memory
+      - CATALOG_WAREHOUSE=s3://icebergdata/demo
+      - CATALOG_IO__IMPL=org.apache.iceberg.aws.s3.S3FileIO
+      - CATALOG_S3_ENDPOINT=http://minio:9000
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      iceberg_test:
+    ports:
+      - "8181:8181"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8181/v1/config"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # =============================================================================
+  # Hive Metastore - HMS Catalog
+  # =============================================================================
+  hive-metastore:
+    build:
+      context: ./hms
+      dockerfile: Dockerfile
+    platform: ${DOCKER_DEFAULT_PLATFORM:-linux/amd64}
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      iceberg_test:
+    ports:
+      - "9083:9083"
+    environment:
+      SERVICE_NAME: "metastore"
+      SERVICE_OPTS: "-Dmetastore.warehouse.dir=s3a://warehouse/hive/"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "cat < /dev/null > /dev/tcp/localhost/9083"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  # =============================================================================
+  # Moto - AWS Glue Mock for Glue Catalog tests
+  # =============================================================================
+  moto:
+    image: motoserver/moto:5.0.3
+    networks:
+      iceberg_test:
+    ports:
+      - "5001:5001"
+    environment:
+      # Use port 5001 instead of default 5000 to avoid conflict with macOS AirPlay Receiver.
+      - MOTO_PORT=5001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/moto-api/"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # =============================================================================
+  # Fake GCS Server - GCS emulator for GCS tests
+  # =============================================================================
+  gcs-server:
+    image: fsouza/fake-gcs-server@sha256:36b0116fae5236e8def76ccb07761a9ca323e476f366a5f4bf449cac19deaf2d
+    networks:
+      iceberg_test:
+    ports:
+      - "4443:4443"
+    command: --scheme http
+
+  # =============================================================================
+  # Spark - Spark with Iceberg for integration tests
+  # =============================================================================
+  spark-iceberg:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    networks:
+      iceberg_test:
+    depends_on:
+      rest:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=password
+      - AWS_REGION=us-east-1
+    ports:
+      - "15002:15002"
+      - "4040:4040"
+    healthcheck:
+      test: ["CMD", "sh", "-c", "netstat -an | grep 15002 | grep LISTEN"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # Provision service - creates test data via Spark
+  provision:
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    networks:
+      iceberg_test:
+    depends_on:
+      spark-iceberg:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c", "uv run /opt/spark/provision.py && touch /tmp/provision_complete && tail -f /dev/null"]
+    volumes:
+      - ./spark/provision.py:/opt/spark/provision.py:ro
+      - uv-cache:/root/.cache/uv
+    healthcheck:
+      test: ["CMD-SHELL", "[ -f /tmp/provision_complete ]"]
+      interval: 2s
+      timeout: 2s
+      retries: 90
+      start_period: 20s
+
+volumes:
+  uv-cache:

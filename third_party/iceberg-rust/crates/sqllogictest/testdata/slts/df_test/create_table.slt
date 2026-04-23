@@ -1,0 +1,90 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+# Test CREATE TABLE with explicit schema
+statement ok
+CREATE TABLE default.default.empty_table (id INT NOT NULL, name STRING)
+
+# Verify the empty table exists and has correct schema
+query IT rowsort
+SELECT * FROM default.default.empty_table
+----
+
+# Insert data into the created table
+query I
+INSERT INTO default.default.empty_table VALUES (1, 'Alice')
+----
+1
+
+# Verify the inserted data
+query IT rowsort
+SELECT * FROM default.default.empty_table
+----
+1 Alice
+
+# Insert multiple rows
+query I
+INSERT INTO default.default.empty_table VALUES (2, 'Bob'), (3, 'Charlie')
+----
+2
+
+# Verify all rows
+query IT rowsort
+SELECT * FROM default.default.empty_table
+----
+1 Alice
+2 Bob
+3 Charlie
+
+# Test CREATE TABLE with different column types
+statement ok
+CREATE TABLE default.default.typed_table (id BIGINT NOT NULL, value DOUBLE, flag BOOLEAN)
+
+# Verify the typed table exists
+query IDT rowsort
+SELECT * FROM default.default.typed_table
+----
+
+# Insert data with different types
+query I
+INSERT INTO default.default.typed_table VALUES (100, 3.14, true), (200, 2.71, false)
+----
+2
+
+# Verify typed data
+query IDT rowsort
+SELECT * FROM default.default.typed_table
+----
+100 3.14 true
+200 2.71 false
+
+# Test CREATE TABLE with nullable columns
+statement ok
+CREATE TABLE default.default.nullable_table (id INT NOT NULL, optional_name STRING)
+
+# Insert with NULL value
+query I
+INSERT INTO default.default.nullable_table VALUES (1, 'Value'), (2, NULL)
+----
+2
+
+# Verify NULL handling
+query IT rowsort
+SELECT * FROM default.default.nullable_table
+----
+1 Value
+2 NULL

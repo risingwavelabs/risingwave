@@ -1,0 +1,104 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+DROP SOURCE IF EXISTS iceberg_src_schema_change_drop;
+
+statement ok
+DROP SINK IF EXISTS s_schema_change_drop;
+
+statement ok
+DROP TABLE IF EXISTS t_schema_change_drop;
+
+statement ok
+CREATE TABLE t_schema_change_drop (
+    id bigint primary key,
+    v1 int,
+    v2 varchar,
+    v3 bigint
+);
+
+statement ok
+CREATE SINK s_schema_change_drop FROM t_schema_change_drop WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    auto.schema.change = 'true',
+    database.name = 'demo_db',
+    table.name = 'sink_auto_schema_change_drop_column',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+statement ok
+INSERT INTO t_schema_change_drop VALUES
+    (1, 10, 'a', 100),
+    (2, 20, 'b', 200);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+statement ok
+ALTER TABLE t_schema_change_drop DROP COLUMN v2;
+
+statement ok
+INSERT INTO t_schema_change_drop VALUES
+    (3, 30, 300);
+
+statement ok
+FLUSH;
+
+sleep 8s
+
+statement ok
+CREATE SOURCE iceberg_src_schema_change_drop WITH (
+    connector = 'iceberg',
+    database.name = 'demo_db',
+    table.name = 'sink_auto_schema_change_drop_column',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+query TTTT retry 10 backoff 2s
+describe iceberg_src_schema_change_drop;
+----
+id bigint false NULL
+v1 integer false NULL
+v3 bigint false NULL
+_iceberg_sequence_number bigint true NULL
+_iceberg_file_path character varying true NULL
+_iceberg_file_pos bigint true NULL
+_row_id serial true NULL
+primary key _row_id NULL NULL
+table description iceberg_src_schema_change_drop NULL NULL
+
+query III rowsort retry 10 backoff 2s
+select id, v1, v3 from iceberg_src_schema_change_drop;
+----
+1 10 100
+2 20 200
+3 30 300
+
+statement ok
+DROP SOURCE iceberg_src_schema_change_drop;
+
+statement ok
+DROP SINK s_schema_change_drop;
+
+statement ok
+DROP TABLE t_schema_change_drop;

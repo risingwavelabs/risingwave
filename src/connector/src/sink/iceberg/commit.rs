@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,6 +33,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
+use risingwave_pb::stream_plan::sink_schema_change::Op as SinkSchemaChangeOp;
 use serde_json::from_value;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
@@ -300,6 +302,12 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         epoch: u64,
         schema_change: PbSinkSchemaChange,
     ) -> Result<()> {
+        self.table = self.config.load_table().await?;
+        if self.check_schema_change_applied(&schema_change)? {
+            tracing::info!("Schema change already committed in epoch {}, skip", epoch);
+            return Ok(());
+        }
+
         tracing::info!(
             "Committing schema change {:?} in epoch {}",
             schema_change,
@@ -406,6 +414,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         epoch: u64,
         schema_change: PbSinkSchemaChange,
     ) -> Result<()> {
+        self.table = self.config.load_table().await?;
         let schema_updated = self.check_schema_change_applied(&schema_change)?;
         if schema_updated {
             tracing::info!("Schema change already committed in epoch {}, skip", epoch);
@@ -691,107 +700,126 @@ impl IcebergSinkCommitter {
             return Ok(false);
         }
 
-        // We only support add_columns for now.
-        let Some(risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(add_columns_op)) =
-            schema_change.op.as_ref()
-        else {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Unsupported sink schema change op in iceberg sink: {:?}",
-                schema_change.op
-            )));
+        let expected_after_change = match schema_change.op.as_ref() {
+            Some(SinkSchemaChangeOp::AddColumns(add_columns_op)) => {
+                let add_arrow_fields: Vec<ArrowField> = add_columns_op
+                    .fields
+                    .iter()
+                    .map(|pb_field| {
+                        let field = Field::from(pb_field);
+                        iceberg_arrow_convert
+                            .to_arrow_field(&field.name, &field.data_type)
+                            .context("Failed to convert field to arrow")
+                            .map_err(SinkError::Iceberg)
+                    })
+                    .collect::<Result<_>>()?;
+
+                let mut expected_after_change = original_arrow_fields;
+                expected_after_change.extend(add_arrow_fields);
+                expected_after_change
+            }
+            Some(SinkSchemaChangeOp::DropColumns(drop_columns_op)) => {
+                let dropped_column_names: HashSet<_> = drop_columns_op
+                    .column_names
+                    .iter()
+                    .map(String::as_str)
+                    .collect();
+                original_arrow_fields
+                    .into_iter()
+                    .filter(|field| !dropped_column_names.contains(field.name().as_str()))
+                    .collect()
+            }
+            None => {
+                return Err(SinkError::Iceberg(anyhow!(
+                    "Missing sink schema change op in iceberg sink"
+                )));
+            }
         };
 
-        let add_arrow_fields: Vec<ArrowField> = add_columns_op
-            .fields
-            .iter()
-            .map(|pb_field| {
-                let field = Field::from(pb_field);
-                iceberg_arrow_convert
-                    .to_arrow_field(&field.name, &field.data_type)
-                    .context("Failed to convert field to arrow")
-                    .map_err(SinkError::Iceberg)
-            })
-            .collect::<Result<_>>()?;
-
-        let mut expected_after_change = original_arrow_fields;
-        expected_after_change.extend(add_arrow_fields);
-
-        // If current schema equals original_schema + add_columns, then schema change is applied.
+        // If current schema equals the expected schema after the change, then schema change is applied.
         if schema_matches(&expected_after_change) {
             tracing::debug!(
-                "Current iceberg schema matches original_schema + add_columns ({} columns); schema change already applied",
+                "Current iceberg schema matches schema after change ({} columns); schema change already applied",
                 expected_after_change.len()
             );
             return Ok(true);
         }
 
         Err(SinkError::Iceberg(anyhow!(
-            "Current iceberg schema does not match either original_schema ({} cols) or original_schema + add_columns; cannot determine whether schema change is applied",
+            "Current iceberg schema does not match either original_schema ({} cols) or the expected schema after change; cannot determine whether schema change is applied",
             schema_change.original_schema.len()
         )))
     }
 
-    /// Commit schema changes (e.g., add columns) to the iceberg table.
+    /// Commit schema changes (e.g., add or drop columns) to the iceberg table.
     /// This function uses Transaction API to atomically update the table schema
     /// with optimistic locking to prevent concurrent conflicts.
     async fn commit_schema_change_impl(&mut self, schema_change: PbSinkSchemaChange) -> Result<()> {
         use iceberg::spec::NestedField;
 
-        let Some(risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(add_columns_op)) =
-            schema_change.op.as_ref()
-        else {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Unsupported sink schema change op in iceberg sink: {:?}",
-                schema_change.op
-            )));
-        };
-
-        let add_columns = add_columns_op.fields.iter().map(Field::from).collect_vec();
-
-        // Step 1: Get current table metadata
-        let metadata = self.table.metadata();
-        let mut next_field_id = metadata.last_column_id() + 1;
-        tracing::debug!("Starting schema change, next_field_id: {}", next_field_id);
-
-        // Step 2: Build new fields to add
-        let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
-        let mut new_fields = Vec::new();
-
-        for field in &add_columns {
-            // Convert RisingWave Field to Arrow Field using IcebergCreateTableArrowConvert
-            let arrow_field = iceberg_create_table_arrow_convert
-                .to_arrow_field(&field.name, &field.data_type)
-                .with_context(|| format!("Failed to convert field '{}' to arrow", field.name))
-                .map_err(SinkError::Iceberg)?;
-
-            // Convert Arrow DataType to Iceberg Type
-            let iceberg_type = iceberg::arrow::arrow_type_to_type(arrow_field.data_type())
-                .map_err(|err| {
-                    SinkError::Iceberg(
-                        anyhow!(err).context("Failed to convert Arrow type to Iceberg type"),
-                    )
-                })?;
-
-            // Create NestedField with the next available field ID
-            let nested_field = Arc::new(NestedField::optional(
-                next_field_id,
-                &field.name,
-                iceberg_type,
-            ));
-
-            new_fields.push(nested_field);
-            tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
-            next_field_id += 1;
-        }
-
-        // Step 3: Create Transaction with UpdateSchemaAction
         tracing::info!(
             "Committing schema change to catalog for table {}",
             self.table.identifier()
         );
 
         let txn = Transaction::new(&self.table);
-        let action = txn.update_schema().add_fields(new_fields);
+        let action = match schema_change.op.as_ref() {
+            Some(SinkSchemaChangeOp::AddColumns(add_columns_op)) => {
+                let add_columns = add_columns_op.fields.iter().map(Field::from).collect_vec();
+
+                let metadata = self.table.metadata();
+                let mut next_field_id = metadata.last_column_id() + 1;
+                tracing::debug!(
+                    "Starting add-column schema change, next_field_id: {}",
+                    next_field_id
+                );
+
+                let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+                let mut new_fields = Vec::new();
+
+                for field in &add_columns {
+                    let arrow_field = iceberg_create_table_arrow_convert
+                        .to_arrow_field(&field.name, &field.data_type)
+                        .with_context(|| {
+                            format!("Failed to convert field '{}' to arrow", field.name)
+                        })
+                        .map_err(SinkError::Iceberg)?;
+
+                    let iceberg_type = iceberg::arrow::arrow_type_to_type(arrow_field.data_type())
+                        .map_err(|err| {
+                            SinkError::Iceberg(
+                                anyhow!(err)
+                                    .context("Failed to convert Arrow type to Iceberg type"),
+                            )
+                        })?;
+
+                    let nested_field = Arc::new(NestedField::optional(
+                        next_field_id,
+                        &field.name,
+                        iceberg_type,
+                    ));
+
+                    new_fields.push(nested_field);
+                    tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
+                    next_field_id += 1;
+                }
+
+                txn.update_schema().add_fields(new_fields)
+            }
+            Some(SinkSchemaChangeOp::DropColumns(drop_columns_op)) => {
+                tracing::debug!(
+                    "Starting drop-column schema change for columns {:?}",
+                    drop_columns_op.column_names
+                );
+                txn.update_schema()
+                    .drop_fields(drop_columns_op.column_names.iter().cloned())
+            }
+            None => {
+                return Err(SinkError::Iceberg(anyhow!(
+                    "Missing sink schema change op in iceberg sink"
+                )));
+            }
+        };
 
         let updated_table = action
             .apply(txn)
@@ -804,10 +832,7 @@ impl IcebergSinkCommitter {
 
         self.table = updated_table;
 
-        tracing::info!(
-            "Successfully committed schema change, added {} columns to iceberg table",
-            add_columns.len()
-        );
+        tracing::info!("Successfully committed schema change to iceberg table");
 
         Ok(())
     }

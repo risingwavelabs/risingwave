@@ -1,0 +1,35 @@
+{
+  "format-version": 1,
+  "table-uuid": "d20125c8-7284-442c-9aea-15fee620737c",
+  "location": "{{ table_location }}",
+  "last-updated-ms": 1602638573874,
+  "last-column-id": 3,
+  "schema": {
+    "type": "struct",
+    "fields": [
+      {"id": 1, "name": "x", "required": true, "type": "long"}
+    ]
+  },
+  "partition-spec": [
+    {
+      "name": "x",
+      "transform": "identity",
+      "source-id": 1,
+      "field-id": 1000
+    }
+  ],
+  "properties": {},
+  "current-snapshot-id": 3051729675574597004,
+  "snapshots": [
+    {
+      "snapshot-id": 3051729675574597004,
+      "timestamp-ms": 1515100955770,
+      "summary": {"operation": "append"},
+      "manifest-list": "{{ manifest_list_location }}"
+    }
+  ],
+  "snapshot-log": [
+    {"snapshot-id": 3051729675574597004, "timestamp-ms": 1515100955770}
+  ],
+  "metadata-log": [{"metadata-file": "{{ table_metadata_location }}", "timestamp-ms": 1515100}]
+}
