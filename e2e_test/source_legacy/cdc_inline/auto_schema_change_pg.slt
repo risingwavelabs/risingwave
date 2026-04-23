@@ -163,6 +163,70 @@ SELECT * from rw_test_schema_change order by id;
 statement ok
 drop source pg_source cascade;
 
+# Test auto schema change with composite type column
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_composite_schema_change;
+    CREATE TABLE IF NOT EXISTS test_composite_schema_change(
+        id int PRIMARY KEY,
+        name varchar(255)
+    );
+    INSERT INTO test_composite_schema_change(id, name) VALUES (1, 'alice'), (2, 'bob');
+    "
+
+statement ok
+create source pg_source_composite with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'pg_slot_composite',
+ auto.schema.change = 'true',
+ debezium.include.unknown.datatypes = 'true'
+);
+
+statement ok
+create table rw_test_composite_schema_change (*) from pg_source_composite table 'public.test_composite_schema_change';
+
+query IT retry 4 backoff 1s
+SELECT * from rw_test_composite_schema_change order by id;
+----
+1 alice
+2 bob
+
+sleep 3s
+
+# Add a composite type column via ALTER TABLE
+system ok
+psql -c "
+    ALTER TABLE test_composite_schema_change ADD COLUMN price money_type;
+    INSERT INTO test_composite_schema_change (id, name, price) VALUES (3, 'charlie', ROW('USD', 9.99)::money_type);
+"
+
+# Verify the composite column is added as varchar
+query TTTT retry 4 backoff 1s
+describe rw_test_composite_schema_change;
+----
+id integer false NULL
+name character varying false NULL
+price character varying false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_test_composite_schema_change NULL NULL
+
+query ITT retry 4 backoff 1s
+SELECT * from rw_test_composite_schema_change order by id;
+----
+1 alice NULL
+2 bob NULL
+3 charlie (USD,9.99)
+
+statement ok
+drop source pg_source_composite cascade;
+
 # Test INCLUDE timestamp with auto schema change
 system ok
 psql -c "
