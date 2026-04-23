@@ -138,6 +138,7 @@ pub struct MetaOpts {
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
+    pub hummock_time_travel_delta_fetch_batch_size: usize,
     pub hummock_gc_history_insert_batch_size: usize,
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
     pub hummock_time_travel_filter_out_objects_v1: bool,
@@ -201,7 +202,7 @@ pub struct MetaOpts {
 
     /// Schedule the regular compaction-group split job for all compaction groups with this interval.
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
-    /// Whether to enable overlap normalization before the regular split and merge schedulers.
+    /// Whether to enable overlap normalization before the regular merge scheduler.
     pub enable_compaction_group_normalize: bool,
     /// Maximum normalize splits in one scheduler round. Must be greater than 0.
     pub max_normalize_splits_per_round: u64,
@@ -336,6 +337,7 @@ impl MetaOpts {
             hummock_time_travel_sst_info_fetch_batch_size: 10_000,
             hummock_time_travel_sst_info_insert_batch_size: 10,
             hummock_time_travel_epoch_version_insert_batch_size: 1000,
+            hummock_time_travel_delta_fetch_batch_size: 1000,
             hummock_gc_history_insert_batch_size: 1000,
             hummock_time_travel_filter_out_objects_batch_size: 1000,
             hummock_time_travel_filter_out_objects_v1: false,

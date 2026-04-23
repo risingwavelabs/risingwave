@@ -11,7 +11,7 @@ repository = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_hummock_test = { workspace = true, features = ["test"] }
 risingwave_stream = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio" }
+tokio = { workspace = true }
 
 [dev-dependencies]
 risingwave_hummock_sdk = { workspace = true }

@@ -31,6 +31,7 @@ use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation
 mod debezium_sql_types {
     pub const STRUCT: i32 = 2002;
 }
+use crate::connector_common::{create_pg_client_from_properties, discover_pgvector_dimensions};
 use crate::parser::TransactionControl;
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::schema_change::TableChangeType;
@@ -64,6 +65,76 @@ fn is_bigserial_default(default_value_expression: &str) -> bool {
 
     // Return true if it is a `nextval()` function (bigserial default).
     expr.starts_with("nextval(")
+}
+
+/// Parse Debezium `tableChanges[].id` into `(schema_name, table_name)`.
+///
+/// Input examples observed in Debezium schema-change events:
+/// - `"public"."orders"` (quoted format)
+/// - `public.orders` (plain dotted format)
+/// - `db.public.orders` (database-prefixed dotted format)
+///
+/// Why two parsing branches:
+/// - Different Debezium versions/connectors may emit quoted or plain identifiers.
+/// - We normalize both forms so downstream lookup can consistently query upstream catalogs.
+///
+/// Output:
+/// - `Some((schema, table))` when both schema and table are successfully extracted.
+/// - `None` when the id is malformed or does not contain enough segments.
+fn parse_schema_table_from_debezium_id(id: &str) -> Option<(String, String)> {
+    let trimmed = id.trim();
+    if trimmed.contains("\".\"") {
+        let parts = trimmed
+            .split("\".\"")
+            .map(|s| s.trim_matches('"').trim())
+            .collect_vec();
+        if parts.len() >= 2 {
+            let schema = parts[parts.len() - 2].to_owned();
+            let table = parts[parts.len() - 1].to_owned();
+            if !schema.is_empty() && !table.is_empty() {
+                return Some((schema, table));
+            }
+        }
+    }
+
+    let cleaned = trimmed.trim_matches('"');
+    let parts = cleaned.split('.').collect_vec();
+    if parts.len() >= 2 {
+        let schema = parts[parts.len() - 2].trim().to_owned();
+        let table = parts[parts.len() - 1].trim().to_owned();
+        if !schema.is_empty() && !table.is_empty() {
+            return Some((schema, table));
+        }
+    }
+    None
+}
+
+async fn fetch_pgvector_dimensions_for_table(
+    connector_props: &ConnectorProperties,
+    schema: &str,
+    table: &str,
+) -> AccessResult<std::collections::HashMap<String, usize>> {
+    let ConnectorProperties::PostgresCdc(cdc_props) = connector_props else {
+        return Ok(std::collections::HashMap::new());
+    };
+
+    let client = create_pg_client_from_properties(&cdc_props.properties, None)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to connect upstream postgres for schema change lookup: {}",
+                err.as_report()
+            ),
+        })?;
+
+    discover_pgvector_dimensions(&client, schema, table)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to query upstream postgres schema for {schema}.{table}: {}",
+                err.as_report()
+            ),
+        })
 }
 
 // Example of Debezium JSON value:
@@ -194,13 +265,17 @@ macro_rules! jsonb_access_field {
 /// Parse the schema change message from Debezium.
 /// The layout of MySQL schema change message can refer to
 /// <https://debezium.io/documentation/reference/2.6/connectors/mysql.html#mysql-schema-change-topic>
-pub fn parse_schema_change(
+pub async fn parse_schema_change(
     accessor: &impl Access,
     source_id: SourceId,
     source_name: &str,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
+    let mut pgvector_dims_cache: std::collections::HashMap<
+        (String, String),
+        std::collections::HashMap<String, usize>,
+    > = std::collections::HashMap::new();
 
     let upstream_ddl: String = accessor
         .access(&[UPSTREAM_DDL], &DataType::Varchar)?
@@ -257,6 +332,44 @@ pub fn parse_schema_change(
                                     type_name,
                                     if is_composite { "composite" } else { "enum" });
                                 DataType::Varchar
+                            } else if type_name.eq_ignore_ascii_case("vector") {
+                                let Some((schema_name, table_name_only)) =
+                                    parse_schema_table_from_debezium_id(id.as_str())
+                                else {
+                                    return Err(AccessError::CdcAutoSchemaChangeError {
+                                        ty: type_name,
+                                        table_name: format!("{}.{}", source_name, table_name),
+                                    });
+                                };
+
+                                // Cache by normalized `(schema, table)` tuple to avoid split/join churn on id text.
+                                let cache_key = (schema_name, table_name_only);
+                                if !pgvector_dims_cache.contains_key(&cache_key) {
+                                    let fetched = fetch_pgvector_dimensions_for_table(
+                                        connector_props,
+                                        &cache_key.0,
+                                        &cache_key.1,
+                                    )
+                                    .await?;
+                                    pgvector_dims_cache.insert(cache_key.clone(), fetched);
+                                }
+
+                                match pgvector_dims_cache
+                                    .get(&cache_key)
+                                    .and_then(|m| m.get(name.as_str()).copied())
+                                {
+                                    Some(dim) if (1..=DataType::VEC_MAX_SIZE).contains(&dim) => {
+                                        DataType::Vector(dim)
+                                    }
+                                    _ => {
+                                        // No fallback to VARCHAR: a dimension-less vector cannot be mapped to
+                                        // RW's required `vector(n)` type safely.
+                                        return Err(AccessError::CdcAutoSchemaChangeError {
+                                            ty: type_name,
+                                            table_name: format!("{}.{}", source_name, table_name),
+                                        });
+                                    }
+                                }
                             } else {
                                 let ty = type_name_to_pg_type(type_name.as_str());
                                 match ty {

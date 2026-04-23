@@ -405,7 +405,7 @@ pub struct MetaConfig {
     pub compact_task_table_size_partition_threshold_high: u64,
 
     /// The interval of the regular periodic compaction group split job.
-    /// This does not disable normalize-triggered splits when
+    /// This does not disable merge-triggered normalize splits when
     /// `enable_compaction_group_normalize` is enabled.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
@@ -413,7 +413,7 @@ pub struct MetaConfig {
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
-    /// Whether to normalize overlapping compaction groups before the regular split/merge scheduling.
+    /// Whether to normalize overlapping compaction groups before the regular merge scheduling.
     #[serde(default = "default::meta::enable_compaction_group_normalize")]
     pub enable_compaction_group_normalize: bool,
 
@@ -542,6 +542,10 @@ pub struct MetaDeveloperConfig {
     /// Max number of epoch-to-version inserted into meta store per INSERT, during time travel metadata writing.
     #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
+
+    /// Max number of version deltas fetched from meta store per SELECT, during time travel metadata vacuum.
+    #[serde(default = "default::developer::hummock_time_travel_delta_fetch_batch_size")]
+    pub hummock_time_travel_delta_fetch_batch_size: usize,
 
     #[serde(default = "default::developer::hummock_gc_history_insert_batch_size")]
     pub hummock_gc_history_insert_batch_size: usize,
@@ -850,7 +854,7 @@ pub mod default {
         }
 
         pub fn enable_compaction_group_normalize() -> bool {
-            false
+            true
         }
 
         pub fn max_normalize_splits_per_round() -> u64 {

@@ -23,6 +23,7 @@ use crate::catalog::subscription_catalog::{
     SubscriptionCatalog, SubscriptionId, SubscriptionState,
 };
 use crate::error::Result;
+use crate::handler::util::reject_internal_table_dependency;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::{Binder, OptimizerContext, OptimizerContextRef};
@@ -42,13 +43,13 @@ pub fn create_subscription_catalog(
     let (subscription_database_id, subscription_schema_id) =
         session.get_database_and_schema_id_for_create(subscription_schema_name)?;
     let definition = context.normalized_sql().to_owned();
-    let dependent_table_id = session
-        .get_table_by_name(
-            &subscription_from_table_name,
-            table_database_id,
-            table_schema_id,
-        )?
-        .id;
+    let dependent_table = session.get_table_by_name(
+        &subscription_from_table_name,
+        table_database_id,
+        table_schema_id,
+    )?;
+    reject_internal_table_dependency(dependent_table.as_ref(), "CREATE SUBSCRIPTION")?;
+    let dependent_table_id = dependent_table.id;
 
     let mut subscription_catalog = SubscriptionCatalog {
         id: SubscriptionId::placeholder(),

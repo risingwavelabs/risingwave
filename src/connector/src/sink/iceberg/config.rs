@@ -123,8 +123,13 @@ pub const COMPACTION_TYPE: &str = "compaction.type";
 pub const COMPACTION_WRITE_PARQUET_COMPRESSION: &str = "compaction.write_parquet_compression";
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
     "compaction.write_parquet_max_row_group_rows";
+pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
+    "compaction.write_parquet_max_row_group_bytes";
 pub const COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: &str = "commit_checkpoint_size_threshold_mb";
+pub const ORDER_KEY: &str = "order_key";
 pub const ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: u64 = 128;
+pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
+pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
 pub(super) const PARQUET_CREATED_BY: &str =
     concat!("risingwave version ", env!("CARGO_PKG_VERSION"));
@@ -309,6 +314,9 @@ pub struct IcebergConfig {
     #[serde(default)]
     pub partition_by: Option<String>,
 
+    #[serde(default)]
+    pub order_key: Option<String>,
+
     /// Commit every n(>0) checkpoints, default is 60.
     #[serde(default = "iceberg_default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
@@ -436,17 +444,33 @@ pub struct IcebergConfig {
 
     /// Parquet compression codec
     /// Supported values: uncompressed, snappy, gzip, lzo, brotli, lz4, zstd
-    /// Default is snappy
+    /// Default is zstd
     #[serde(rename = "compaction.write_parquet_compression", default)]
     #[with_option(allow_alter_on_fly)]
     pub write_parquet_compression: Option<String>,
 
-    /// Maximum number of rows in a Parquet row group
-    /// Default is 122880 (from developer config)
+    /// Deprecated: maximum number of rows in a Parquet row group.
+    /// Accepted for backward compatibility, but ignored by the writer.
     #[serde(rename = "compaction.write_parquet_max_row_group_rows", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub write_parquet_max_row_group_rows: Option<usize>,
+
+    /// Maximum size of a Parquet row group in bytes
+    /// Default is 128 `MiB`, matching Iceberg defaults.
+    #[serde(rename = "compaction.write_parquet_max_row_group_bytes", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub write_parquet_max_row_group_bytes: Option<usize>,
+
+    /// Whether to enable PK index for upsert sink. Default is false.
+    /// It's used for V3 upsert iceberg sink to generate delete vectors.
+    #[serde(
+        rename = "enable_pk_index",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    pub enable_pk_index: bool,
 }
 
 impl EnforceSecret for IcebergConfig {
@@ -477,6 +501,38 @@ impl IcebergConfig {
                  Please use 'merge-on-read' instead, which is strictly better for append-only workloads."
             )));
         }
+        Ok(())
+    }
+
+    pub(crate) fn validate_enable_pk_index(&self) -> Result<()> {
+        if !self.enable_pk_index {
+            return Ok(());
+        }
+
+        if self.r#type != SINK_TYPE_UPSERT {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` is only supported for upsert iceberg sink"
+            )));
+        }
+
+        if self.write_mode != IcebergWriteMode::MergeOnRead {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` is only supported for upsert iceberg sink with merge-on-read mode"
+            )));
+        }
+
+        if self.format_version < FormatVersion::V3 {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` is only supported for upsert iceberg sink with format version >= 3"
+            )));
+        }
+
+        if self.force_append_only {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` cannot be true when `force_append_only` is true"
+            )));
+        }
+
         Ok(())
     }
 
@@ -512,6 +568,7 @@ impl IcebergConfig {
 
         // Enforce merge-on-read for append-only sinks
         Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
+        config.validate_enable_pk_index()?;
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = values
@@ -543,6 +600,12 @@ impl IcebergConfig {
             .table
             .validate()
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+        if config.write_parquet_max_row_group_rows.is_some() {
+            tracing::warn!(
+                "`compaction.write_parquet_max_row_group_rows` is deprecated and ignored; use `compaction.write_parquet_max_row_group_bytes` instead"
+            );
+        }
 
         Ok(config)
     }
@@ -622,14 +685,19 @@ impl IcebergConfig {
         self.write_parquet_compression.as_deref().unwrap_or("zstd")
     }
 
-    /// Get the maximum number of rows in a Parquet row group
-    /// Default is 122880 (from developer config default)
-    pub fn write_parquet_max_row_group_rows(&self) -> usize {
-        self.write_parquet_max_row_group_rows.unwrap_or(122880)
+    /// Get the maximum number of rows in a Parquet row group.
+    pub fn write_parquet_max_row_group_rows(&self) -> Option<usize> {
+        self.write_parquet_max_row_group_rows
     }
 
-    /// Parse the compression codec string into Parquet Compression enum
-    /// Returns SNAPPY as default if parsing fails or not specified
+    /// Get the maximum size in bytes of a Parquet row group.
+    pub fn write_parquet_max_row_group_bytes(&self) -> Option<usize> {
+        self.write_parquet_max_row_group_bytes
+            .or(Some(ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES))
+    }
+
+    /// Parse the compression codec string into Parquet Compression enum.
+    /// Invalid values fall back to SNAPPY.
     pub fn get_parquet_compression(&self) -> Compression {
         parse_parquet_compression(self.write_parquet_compression())
     }

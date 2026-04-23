@@ -20,7 +20,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     FlushCurrentEpochOptions, LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult,
-    LogWriter, LogWriterPostFlushCurrentEpoch, TruncateOffset,
+    LogWriter, LogWriterPostFlushCurrentEpoch, TruncateBarrierLogReader, TruncateOffset,
 };
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -121,7 +121,7 @@ impl BoundedInMemLogStoreFactory {
 }
 
 impl LogStoreFactory for BoundedInMemLogStoreFactory {
-    type Reader = BoundedInMemLogStoreReader;
+    type Reader = TruncateBarrierLogReader<BoundedInMemLogStoreReader>;
     type Writer = BoundedInMemLogStoreWriter;
 
     const ALLOW_REWIND: bool = false;
@@ -146,7 +146,7 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
             truncated_epoch_rx,
             wait_init_epoch: Some(self.wait_init_epoch),
         };
-        (reader, writer)
+        (TruncateBarrierLogReader::new(reader), writer)
     }
 }
 
