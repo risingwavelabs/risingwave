@@ -38,6 +38,7 @@ rpk topic create test-rw-sink-debezium
 rpk topic create test-rw-sink-without-snapshot
 rpk topic create test-rw-sink-text-key-id
 rpk topic create test-rw-sink-bytes-key-id
+rpk topic create test-rw-sink-alter-connector-props
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
 sleep 2
@@ -168,9 +169,11 @@ else
 fi
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/drop_sink.slt'
+risedev slt 'e2e_test/sink/kafka/alter_kafka_sink_props.slt'
 rpk topic delete test-rw-sink-append-only
 rpk topic delete test-rw-sink-upsert
 rpk topic delete test-rw-sink-debezium
+rpk topic delete test-rw-sink-alter-connector-props
 
 # test different encoding
 echo "preparing confluent schema registry"

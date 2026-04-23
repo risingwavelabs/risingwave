@@ -23,6 +23,20 @@ FROM
     primary_key = 'v1'
 );
 
+# verify commit_checkpoint_interval can be altered.
+statement ok
+ALTER SINK s6 CONNECTOR WITH (
+    commit_checkpoint_interval = '1'
+);
+
+query I
+select count(*)
+from rw_sinks
+where name = 's6'
+  and definition ILIKE '%commit_checkpoint_interval = ''1''%';
+----
+1
+
 statement ok
 INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01' , false, '{"v101":100}',1.12345678910);
 
