@@ -16,7 +16,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
 jsonwebtoken = { workspace = true }
 ldap3 = { version = "0.12.1", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
-openssl = "0.10.72"
+openssl = "0.10.78"
 panic-message = "0.3"
 parking_lot = { workspace = true }
 peekable = { version = "0.4", features = ["tokio"] }
