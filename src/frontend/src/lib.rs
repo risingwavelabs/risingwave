@@ -238,6 +238,7 @@ pub fn start(
         let webhook_listen_addr = opts.webhook_listen_addr.parse().unwrap();
         let tcp_keepalive =
             TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
+        let tls_config = TlsConfig::new_default().unwrap();
 
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
         SESSION_MANAGER.get_or_init(|| session_mgr.clone());
@@ -257,14 +258,15 @@ pub fn start(
             frontend_config.max_single_query_size_bytes,
         ));
 
-        let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);
+        let webhook_service =
+            crate::webhook::WebhookService::new(webhook_listen_addr, tls_config.clone());
         let _task = tokio::spawn(webhook_service.serve());
         pg_serve(
             &listen_addr,
             tcp_keepalive,
             session_mgr.clone(),
             ConnectionContext {
-                tls_config: TlsConfig::new_default(),
+                tls_config,
                 redact_sql_option_keywords: Some(redact_sql_option_keywords),
                 message_memory_manager,
             },
