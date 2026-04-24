@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "batch_plan.proto";
 import "catalog.proto";
 import "common.proto";
 import "data.proto";
@@ -835,6 +836,9 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 
   optional uint64 snapshot_backfill_epoch = 11;
+
+  // Full scan range pushdown (eq_conds + range bounds on PK).
+  batch_plan.ScanRange pk_scan_range = 13;
 }
 
 // Config options for CDC backfill

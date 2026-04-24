@@ -20,6 +20,8 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
@@ -45,6 +47,7 @@ pub struct StreamTableScan {
     core: generic::TableScan,
     batch_plan_id: PlanNodeId,
     stream_scan_type: StreamScanType,
+    pk_scan_range: Option<ScanRange>,
 }
 
 impl StreamTableScan {
@@ -57,6 +60,14 @@ impl StreamTableScan {
     pub fn new_with_stream_scan_type(
         core: generic::TableScan,
         stream_scan_type: StreamScanType,
+    ) -> Self {
+        Self::new_with_scan_range(core, stream_scan_type, None)
+    }
+
+    pub fn new_with_scan_range(
+        core: generic::TableScan,
+        stream_scan_type: StreamScanType,
+        pk_scan_range: Option<ScanRange>,
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
 
@@ -98,6 +109,7 @@ impl StreamTableScan {
             core,
             batch_plan_id,
             stream_scan_type,
+            pk_scan_range,
         }
     }
 
@@ -129,6 +141,10 @@ impl StreamTableScan {
 
     pub fn stream_scan_type(&self) -> StreamScanType {
         self.stream_scan_type
+    }
+
+    pub fn pk_scan_range(&self) -> Option<&ScanRange> {
+        self.pk_scan_range.as_ref()
     }
 
     // TODO: Add note to reviewer about safety, because of `generic::TableScan` limitation.
@@ -268,6 +284,49 @@ impl Distill for StreamTableScan {
         let mut vec = Vec::with_capacity(4);
         vec.push(("table", Pretty::from(self.core.table_name().to_owned())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
+        if let Some(scan_range) = &self.pk_scan_range {
+            let mut parts = Vec::new();
+            let pk_cols = self.core.primary_key();
+            // Display eq_conds
+            for (pk, datum) in pk_cols
+                .iter()
+                .take(scan_range.eq_conds.len())
+                .zip_eq_fast(scan_range.eq_conds.iter())
+            {
+                let field = &self.core.table_catalog.columns()[pk.column_index];
+                parts.push(format!("{} = {:?}", field.name(), datum));
+            }
+            // Display range bounds on the next column
+            let range_col_idx = scan_range.eq_conds.len();
+            if range_col_idx < pk_cols.len() {
+                use std::ops::Bound;
+                let field = &self.core.table_catalog.columns()[pk_cols[range_col_idx].column_index];
+                let fmt_bound_val = |v: &Vec<risingwave_common::types::Datum>| -> String {
+                    v.first().map_or("NULL".to_owned(), |d| format!("{:?}", d))
+                };
+                match &scan_range.range.0 {
+                    Bound::Included(v) => {
+                        parts.push(format!("{} >= {}", field.name(), fmt_bound_val(v)))
+                    }
+                    Bound::Excluded(v) => {
+                        parts.push(format!("{} > {}", field.name(), fmt_bound_val(v)))
+                    }
+                    Bound::Unbounded => {}
+                }
+                match &scan_range.range.1 {
+                    Bound::Included(v) => {
+                        parts.push(format!("{} <= {}", field.name(), fmt_bound_val(v)))
+                    }
+                    Bound::Excluded(v) => {
+                        parts.push(format!("{} < {}", field.name(), fmt_bound_val(v)))
+                    }
+                    Bound::Unbounded => {}
+                }
+            }
+            if !parts.is_empty() {
+                vec.push(("pk_scan_range", Pretty::from(parts.join(" AND "))));
+            }
+        }
 
         if verbose {
             vec.push(("stream_scan_type", Pretty::debug(&self.stream_scan_type)));
@@ -420,6 +479,7 @@ impl StreamTableScan {
             state_table: Some(catalog),
             arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
+            pk_scan_range: self.pk_scan_range.as_ref().map(|sr| sr.to_protobuf()),
             ..Default::default()
         }));
 
@@ -443,7 +503,7 @@ impl ExprRewritable<Stream> for StreamTableScan {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new_with_stream_scan_type(core, self.stream_scan_type).into()
+        Self::new_with_scan_range(core, self.stream_scan_type, self.pk_scan_range.clone()).into()
     }
 }
 

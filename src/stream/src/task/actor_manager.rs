@@ -26,7 +26,6 @@ use risingwave_common::config::{MetricLevel, StreamingConfig, merge_streaming_co
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::id::{ExecutorId, GlobalOperatorId};
-use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{self, StreamNode, StreamScanNode, StreamScanType};
 use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
@@ -139,7 +138,7 @@ impl StreamActorManager {
         )
         .await?;
 
-        let table_desc: &StorageTableDesc = node.get_table_desc()?;
+        let table_desc = node.get_table_desc()?;
 
         let output_indices = node
             .output_indices
@@ -171,6 +170,7 @@ impl StreamActorManager {
             upstream_table,
             state_table,
             upstream,
+            node.pk_scan_range.as_ref(),
             output_indices,
             actor_context.clone(),
             progress,
@@ -179,7 +179,7 @@ impl StreamActorManager {
             barrier_rx,
             self.streaming_metrics.clone(),
             node.snapshot_backfill_epoch,
-        )
+        )?
         .boxed();
 
         let info = Self::get_executor_info(

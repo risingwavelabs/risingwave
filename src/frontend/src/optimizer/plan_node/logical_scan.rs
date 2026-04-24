@@ -25,8 +25,8 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
     BackfillType, BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
-    LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamTableScan, ToBatch,
-    ToStream, generic,
+    LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamFilter,
+    StreamProject, StreamTableScan, ToBatch, ToStream, generic,
 };
 use crate::TableCatalog;
 use crate::binder::BoundBaseTable;
@@ -633,6 +633,29 @@ impl ToStream for LogicalScan {
             )
             .into())
         } else {
+            if ctx.backfill_type() == BackfillType::SnapshotBackfill {
+                let (scan_ranges, _residual) = self.predicate().clone().split_to_scan_ranges(
+                    self.table(),
+                    self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
+                )?;
+
+                if scan_ranges.len() == 1 && !scan_ranges[0].is_full_table_scan() {
+                    let (core, predicate, project_expr) = self.predicate_pull_up();
+                    let scan = StreamTableScan::new_with_scan_range(
+                        core,
+                        ctx.backfill_type().to_stream_scan_type(),
+                        Some(scan_ranges.into_iter().next().unwrap()),
+                    );
+
+                    let mut plan: crate::optimizer::plan_node::StreamPlanRef =
+                        StreamFilter::new(generic::Filter::new(predicate, scan.into())).into();
+                    if let Some(exprs) = project_expr {
+                        plan = StreamProject::new(generic::Project::new(exprs, plan)).into();
+                    }
+                    return Ok(plan);
+                }
+            }
+
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);
             if let Some(exprs) = project_expr {
