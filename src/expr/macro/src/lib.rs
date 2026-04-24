@@ -276,6 +276,8 @@ mod utils;
 /// - For `bytea`: `&mut impl std::io::Write`
 /// - For `jsonb`: `&mut jsonbb::Builder`
 /// - For `anyarray`: `&mut impl risingwave_common::array::ListWrite`
+/// - For `anymap`: `&mut impl risingwave_common::array::MapWrite`
+/// - For `vector`:   `&mut impl risingwave_common::array::VectorWrite`
 ///
 /// Note: Use fully-qualified trait paths (for example, `impl std::fmt::Write`).
 /// Partial or relative paths (such as `impl Write` or `impl ::std::fmt::Write`) are not recognized.
@@ -621,6 +623,8 @@ enum WriterTypeKind {
     IoWrite,       // std::io::Write
     JsonbbBuilder, // jsonbb::Builder
     ListWrite,     // risingwave_common::array::ListWrite
+    MapWrite,      // risingwave_common::array::MapWrite
+    VectorWrite,   // risingwave_common::array::VectorWrite
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
