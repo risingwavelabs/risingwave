@@ -1,0 +1,391 @@
+statement ok
+DROP ROLE IF EXISTS rw_role_member_test;
+
+statement ok
+DROP ROLE IF EXISTS rw_role_catalog_test;
+
+statement ok
+CREATE ROLE rw_role_catalog_test;
+
+statement ok
+CREATE ROLE rw_role_member_test WITH LOGIN;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+postgres postgres postgres
+
+statement ok
+GRANT rw_role_catalog_test TO rw_role_member_test WITH ADMIN OPTION;
+
+statement ok
+CREATE SCHEMA rw_role_owned_schema;
+
+statement ok
+ALTER SCHEMA rw_role_owned_schema OWNER TO rw_role_catalog_test;
+
+query TTTTT
+SELECT rolname,
+       rolcanlogin::text,
+       rolsuper::text,
+       rolcreatedb::text,
+       rolcreaterole::text
+FROM pg_catalog.pg_roles
+WHERE rolname IN ('rw_role_catalog_test', 'rw_role_member_test')
+ORDER BY 1;
+----
+rw_role_catalog_test false false false false
+rw_role_member_test true false false false
+
+query TTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       admin_option::text
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+WHERE role_role.rolname = 'rw_role_catalog_test'
+  AND member_role.rolname = 'rw_role_member_test'
+ORDER BY 1, 2;
+----
+rw_role_catalog_test rw_role_member_test true
+
+statement ok
+SET ROLE rw_role_catalog_test;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+postgres rw_role_catalog_test rw_role_catalog_test
+
+statement ok
+CREATE TABLE rw_role_owned_schema.owned_by_active_role(v int);
+
+statement ok
+RESET ROLE;
+
+query T
+SELECT owner_role.rolname
+FROM pg_catalog.pg_class cls
+JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = cls.relowner
+WHERE cls.relname = 'owned_by_active_role';
+----
+rw_role_catalog_test
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+postgres postgres postgres
+
+statement ok
+SET ROLE NONE;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+postgres postgres postgres
+
+statement ok
+START TRANSACTION READ ONLY;
+
+statement ok
+SET LOCAL ROLE rw_role_catalog_test;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+postgres rw_role_catalog_test rw_role_catalog_test
+
+statement ok
+COMMIT;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+postgres postgres postgres
+
+statement ok
+REVOKE rw_role_catalog_test FROM rw_role_member_test;
+
+query
+SELECT role_role.rolname,
+       member_role.rolname,
+       admin_option::text
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+WHERE role_role.rolname = 'rw_role_catalog_test'
+  AND member_role.rolname = 'rw_role_member_test'
+ORDER BY 1, 2;
+----
+
+statement ok
+CREATE ROLE rw_role_option_test;
+
+statement ok
+GRANT rw_role_option_test TO rw_role_member_test WITH INHERIT FALSE, SET FALSE;
+
+query TTTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       inherit_option::text,
+       set_option::text
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+WHERE role_role.rolname = 'rw_role_option_test'
+  AND member_role.rolname = 'rw_role_member_test'
+ORDER BY 1, 2;
+----
+rw_role_option_test rw_role_member_test false false
+
+statement ok
+REVOKE rw_role_option_test FROM rw_role_member_test;
+
+statement ok
+DROP ROLE rw_role_option_test;
+
+statement ok
+CREATE ROLE rw_role_revoke_option_test;
+
+statement ok
+GRANT rw_role_revoke_option_test TO rw_role_member_test;
+
+statement ok
+REVOKE SET OPTION FOR rw_role_revoke_option_test FROM rw_role_member_test;
+
+query TTTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       inherit_option::text,
+       set_option::text
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+WHERE role_role.rolname = 'rw_role_revoke_option_test'
+  AND member_role.rolname = 'rw_role_member_test'
+ORDER BY 1, 2;
+----
+rw_role_revoke_option_test rw_role_member_test true false
+
+statement ok
+REVOKE INHERIT OPTION FOR rw_role_revoke_option_test FROM rw_role_member_test;
+
+query TTTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       inherit_option::text,
+       set_option::text
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+WHERE role_role.rolname = 'rw_role_revoke_option_test'
+  AND member_role.rolname = 'rw_role_member_test'
+ORDER BY 1, 2;
+----
+rw_role_revoke_option_test rw_role_member_test false false
+
+statement ok
+REVOKE rw_role_revoke_option_test FROM rw_role_member_test;
+
+statement ok
+DROP ROLE rw_role_revoke_option_test;
+
+statement ok
+CREATE ROLE rw_role_grantor_test;
+
+statement ok
+GRANT rw_role_grantor_test TO rw_role_member_test GRANTED BY current_user;
+
+query TTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       grantor_role.rolname
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+JOIN pg_catalog.pg_roles grantor_role ON grantor_role.oid = grantor
+WHERE role_role.rolname = 'rw_role_grantor_test'
+  AND member_role.rolname = 'rw_role_member_test'
+ORDER BY 1, 2, 3;
+----
+rw_role_grantor_test rw_role_member_test postgres
+
+statement ok
+REVOKE rw_role_grantor_test FROM rw_role_member_test GRANTED BY current_user;
+
+query
+SELECT role_role.rolname,
+       member_role.rolname,
+       grantor_role.rolname
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+JOIN pg_catalog.pg_roles grantor_role ON grantor_role.oid = grantor
+WHERE role_role.rolname = 'rw_role_grantor_test'
+  AND member_role.rolname = 'rw_role_member_test'
+ORDER BY 1, 2, 3;
+----
+
+statement ok
+DROP ROLE rw_role_grantor_test;
+
+statement ok
+CREATE ROLE rw_role_current_role_parent;
+
+statement ok
+CREATE ROLE rw_role_current_role_grantor;
+
+statement ok
+CREATE ROLE rw_role_current_role_grantee;
+
+statement ok
+GRANT rw_role_current_role_parent TO rw_role_current_role_grantor WITH ADMIN OPTION;
+
+statement ok
+SET ROLE rw_role_current_role_grantor;
+
+statement ok
+GRANT rw_role_current_role_parent TO rw_role_current_role_grantee GRANTED BY current_role;
+
+statement error
+REVOKE rw_role_current_role_parent FROM rw_role_current_role_grantee GRANTED BY session_user;
+
+query TTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       grantor_role.rolname
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+JOIN pg_catalog.pg_roles grantor_role ON grantor_role.oid = grantor
+WHERE role_role.rolname = 'rw_role_current_role_parent'
+  AND member_role.rolname = 'rw_role_current_role_grantee'
+ORDER BY 1, 2, 3;
+----
+rw_role_current_role_parent rw_role_current_role_grantee rw_role_current_role_grantor
+
+statement ok
+REVOKE rw_role_current_role_parent FROM rw_role_current_role_grantee GRANTED BY current_role;
+
+statement ok
+RESET ROLE;
+
+statement ok
+REVOKE rw_role_current_role_parent FROM rw_role_current_role_grantor;
+
+statement ok
+DROP ROLE rw_role_current_role_grantee;
+
+statement ok
+DROP ROLE rw_role_current_role_grantor;
+
+statement ok
+DROP ROLE rw_role_current_role_parent;
+
+statement ok
+CREATE ROLE rw_role_default_inherit_test;
+
+statement ok
+CREATE ROLE rw_role_noinherit_member WITH LOGIN NOINHERIT;
+
+statement ok
+GRANT rw_role_default_inherit_test TO rw_role_noinherit_member;
+
+query TTTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       inherit_option::text,
+       set_option::text
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+WHERE role_role.rolname = 'rw_role_default_inherit_test'
+  AND member_role.rolname = 'rw_role_noinherit_member'
+ORDER BY 1, 2;
+----
+rw_role_default_inherit_test rw_role_noinherit_member false true
+
+statement ok
+REVOKE rw_role_default_inherit_test FROM rw_role_noinherit_member;
+
+statement ok
+DROP ROLE rw_role_noinherit_member;
+
+statement ok
+DROP ROLE rw_role_default_inherit_test;
+
+statement ok
+CREATE ROLE rw_role_cascade_parent;
+
+statement ok
+CREATE ROLE rw_role_cascade_grantor;
+
+statement ok
+CREATE ROLE rw_role_cascade_member1;
+
+statement ok
+CREATE ROLE rw_role_cascade_member2;
+
+statement ok
+GRANT rw_role_cascade_parent TO rw_role_cascade_grantor WITH ADMIN OPTION;
+
+statement ok
+SET ROLE rw_role_cascade_grantor;
+
+statement ok
+GRANT rw_role_cascade_parent TO rw_role_cascade_member1 WITH ADMIN OPTION;
+
+statement ok
+RESET ROLE;
+
+statement ok
+SET ROLE rw_role_cascade_member1;
+
+statement ok
+GRANT rw_role_cascade_parent TO rw_role_cascade_member2;
+
+statement ok
+RESET ROLE;
+
+statement error
+REVOKE ADMIN OPTION FOR rw_role_cascade_parent FROM rw_role_cascade_grantor RESTRICT;
+
+statement ok
+REVOKE ADMIN OPTION FOR rw_role_cascade_parent FROM rw_role_cascade_grantor CASCADE;
+
+query TTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       admin_option::text
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+WHERE role_role.rolname = 'rw_role_cascade_parent'
+ORDER BY 1, 2, 3;
+----
+rw_role_cascade_parent rw_role_cascade_grantor false
+
+statement ok
+REVOKE rw_role_cascade_parent FROM rw_role_cascade_grantor;
+
+statement ok
+DROP ROLE rw_role_cascade_member2;
+
+statement ok
+DROP ROLE rw_role_cascade_member1;
+
+statement ok
+DROP ROLE rw_role_cascade_grantor;
+
+statement ok
+DROP ROLE rw_role_cascade_parent;
+
+statement ok
+DROP SCHEMA rw_role_owned_schema CASCADE;
+
+statement ok
+DROP ROLE rw_role_member_test;
+
+statement ok
+DROP ROLE rw_role_catalog_test;

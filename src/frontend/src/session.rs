@@ -133,7 +133,9 @@ use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::UserId;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
-use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
+use crate::user::user_service::{
+    RoleMembershipInfoReader, UserInfoReader, UserInfoWriter, UserInfoWriterImpl,
+};
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 pub(crate) mod current;
@@ -150,6 +152,7 @@ pub(crate) struct FrontendEnv {
     catalog_reader: CatalogReader,
     user_info_writer: Arc<dyn UserInfoWriter>,
     user_info_reader: UserInfoReader,
+    role_membership_info_reader: RoleMembershipInfoReader,
     worker_node_manager: WorkerNodeManagerRef,
     query_manager: QueryManager,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
@@ -221,7 +224,8 @@ impl FrontendEnv {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
-        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let role_memberships = Arc::new(RwLock::new(vec![]));
+        let meta_client = Arc::new(MockFrontendMetaClient::new(role_memberships.clone()));
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(
             catalog.clone(),
@@ -229,8 +233,12 @@ impl FrontendEnv {
         ));
         let catalog_reader = CatalogReader::new(catalog);
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
-        let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
+        let user_info_writer = Arc::new(MockUserInfoWriter::new(
+            user_info_manager.clone(),
+            role_memberships.clone(),
+        ));
         let user_info_reader = UserInfoReader::new(user_info_manager);
+        let role_membership_info_reader = RoleMembershipInfoReader::new(role_memberships);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
@@ -270,6 +278,7 @@ impl FrontendEnv {
             catalog_reader,
             user_info_writer,
             user_info_reader,
+            role_membership_info_reader,
             worker_node_manager,
             query_manager,
             hummock_snapshot_manager,
@@ -385,10 +394,15 @@ impl FrontendEnv {
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let user_info_reader = UserInfoReader::new(user_info_manager.clone());
+        let role_memberships = Arc::new(RwLock::new(
+            meta_client.list_role_memberships(vec![]).await?,
+        ));
         let user_info_writer = Arc::new(UserInfoWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx,
+            role_memberships.clone(),
         ));
+        let role_membership_info_reader = RoleMembershipInfoReader::new(role_memberships.clone());
 
         let system_params_manager =
             Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
@@ -409,6 +423,8 @@ impl FrontendEnv {
             catalog,
             catalog_updated_tx,
             user_info_manager,
+            role_memberships,
+            frontend_meta_client.clone(),
             hummock_snapshot_manager.clone(),
             system_params_manager.clone(),
             session_params.clone(),
@@ -557,6 +573,7 @@ impl FrontendEnv {
                 catalog_writer,
                 user_info_reader,
                 user_info_writer,
+                role_membership_info_reader,
                 worker_node_manager,
                 meta_client: frontend_meta_client,
                 query_manager,
@@ -615,6 +632,10 @@ impl FrontendEnv {
     /// Get a reference to the frontend env's user info reader.
     pub fn user_info_reader(&self) -> &UserInfoReader {
         &self.user_info_reader
+    }
+
+    pub fn role_membership_info_reader(&self) -> &RoleMembershipInfoReader {
+        &self.role_membership_info_reader
     }
 
     pub fn worker_node_manager_ref(&self) -> WorkerNodeManagerRef {
@@ -736,17 +757,57 @@ impl FrontendEnv {
 #[derive(Clone)]
 pub struct AuthContext {
     pub database: String,
+    pub session_user_name: String,
+    pub session_user_id: UserId,
     pub user_name: String,
     pub user_id: UserId,
 }
 
 impl AuthContext {
     pub fn new(database: String, user_name: String, user_id: UserId) -> Self {
+        Self::new_with_current(database, user_name.clone(), user_id, user_name, user_id)
+    }
+
+    pub fn new_with_current(
+        database: String,
+        session_user_name: String,
+        session_user_id: UserId,
+        current_user_name: String,
+        current_user_id: UserId,
+    ) -> Self {
         Self {
             database,
-            user_name,
-            user_id,
+            session_user_name,
+            session_user_id,
+            user_name: current_user_name,
+            user_id: current_user_id,
         }
+    }
+
+    pub fn session_user_name(&self) -> &str {
+        &self.session_user_name
+    }
+
+    pub fn session_user_id(&self) -> UserId {
+        self.session_user_id
+    }
+
+    pub fn current_user_name(&self) -> &str {
+        &self.user_name
+    }
+
+    pub fn current_user_id(&self) -> UserId {
+        self.user_id
+    }
+
+    pub fn set_current_user(&mut self, current_user_name: String, current_user_id: UserId) {
+        self.user_name = current_user_name;
+        self.user_id = current_user_id;
+    }
+
+    pub fn reset_current_user(&mut self) {
+        self.user_name = self.session_user_name.clone();
+        self.user_id = self.session_user_id;
     }
 }
 pub struct SessionImpl {
@@ -962,15 +1023,33 @@ impl SessionImpl {
     }
 
     pub fn user_name(&self) -> String {
-        self.auth_context.read().user_name.clone()
+        self.auth_context.read().current_user_name().to_owned()
     }
 
     pub fn user_id(&self) -> UserId {
-        self.auth_context.read().user_id
+        self.auth_context.read().current_user_id()
+    }
+
+    pub fn session_user_name(&self) -> String {
+        self.auth_context.read().session_user_name().to_owned()
+    }
+
+    pub fn session_user_id(&self) -> UserId {
+        self.auth_context.read().session_user_id()
     }
 
     pub fn update_database(&self, database: String) {
         self.auth_context.write().database = database;
+    }
+
+    pub fn set_current_user(&self, current_user_name: String, current_user_id: UserId) {
+        self.auth_context
+            .write()
+            .set_current_user(current_user_name, current_user_id);
+    }
+
+    pub fn reset_current_user(&self) {
+        self.auth_context.write().reset_current_user();
     }
 
     pub fn shared_config(&self) -> Arc<RwLock<SessionConfig>> {
@@ -2033,5 +2112,26 @@ pub fn cancel_creating_jobs_in_session(session_id: SessionId, sessions_map: Sess
     } else {
         info!("Current session finished, ignoring cancel creating request");
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthContext;
+
+    #[test]
+    fn auth_context_tracks_session_and_current_user_separately() {
+        let ctx = AuthContext::new_with_current(
+            "dev".to_owned(),
+            "login_role".to_owned(),
+            1.into(),
+            "active_role".to_owned(),
+            2.into(),
+        );
+
+        assert_eq!(ctx.session_user_name(), "login_role");
+        assert_eq!(ctx.session_user_id(), 1);
+        assert_eq!(ctx.current_user_name(), "active_role");
+        assert_eq!(ctx.current_user_id(), 2);
     }
 }

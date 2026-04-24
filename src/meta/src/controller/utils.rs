@@ -40,7 +40,7 @@ use risingwave_meta_model::{
     JobStatus, ObjectId, PrivilegeId, SchemaId, SinkId, SourceId, StreamNode, StreamSourceInfo,
     TableId, TableIdArray, UserId, WorkerId, connection, database, fragment, fragment_relation,
     function, index, object, object_dependency, schema, secret, sink, source, streaming_job,
-    subscription, table, user, user_default_privilege, user_privilege, view,
+    subscription, table, user, user_default_privilege, user_privilege, user_role_membership, view,
 };
 use risingwave_meta_model_migration::WithQuery;
 use risingwave_pb::catalog::{
@@ -58,7 +58,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
 use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject as PbGrantObject};
-use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
+use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbRoleMembership, PbUserInfo};
 use risingwave_sqlparser::ast::Statement as SqlStatement;
 use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
@@ -997,6 +997,27 @@ where
         user_infos.push(user_info);
     }
     Ok(user_infos)
+}
+
+pub async fn list_role_memberships<C>(
+    member_ids: impl IntoIterator<Item = UserId>,
+    db: &C,
+) -> MetaResult<Vec<PbRoleMembership>>
+where
+    C: ConnectionTrait,
+{
+    let member_ids = member_ids.into_iter().collect_vec();
+    if member_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    Ok(UserRoleMembership::find()
+        .filter(user_role_membership::Column::MemberId.is_in(member_ids))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect())
 }
 
 /// `get_object_owner` returns the owner of the given object.

@@ -9,3 +9,26 @@ WHERE r.rolname = 'root'
 ORDER BY 1;
 ----
 root t t t t t -1 NULL t t
+
+statement ok
+CREATE ROLE role_inherit_catalog_test WITH NOINHERIT;
+
+query TT
+SELECT rolname, rolinherit::text
+FROM pg_catalog.pg_roles
+WHERE rolname = 'role_inherit_catalog_test';
+----
+role_inherit_catalog_test false
+
+statement ok
+ALTER ROLE role_inherit_catalog_test WITH INHERIT;
+
+query TT
+SELECT rolname, rolinherit::text
+FROM pg_catalog.pg_roles
+WHERE rolname = 'role_inherit_catalog_test';
+----
+role_inherit_catalog_test true
+
+statement ok
+DROP ROLE role_inherit_catalog_test;

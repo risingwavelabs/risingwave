@@ -194,7 +194,7 @@ impl Binder {
                     // So we should always use current database here.
                     assert!(db_name.is_none());
                     let db_name = self.db_name.clone();
-                    let user_name = self.auth_context.user_name.clone();
+                    let user_name = self.auth_context.current_user_name().to_owned();
 
                     for path in self.search_path.path() {
                         if is_system_schema(path)
@@ -298,7 +298,10 @@ impl Binder {
                     ))
                     .into());
                 }
-                if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
+                if let Some(user) = self
+                    .user
+                    .get_user_by_name(self.auth_context.current_user_name())
+                {
                     if user.is_super || user.id == item.owner {
                         return Ok(());
                     }

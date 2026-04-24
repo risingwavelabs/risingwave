@@ -2,3 +2,16 @@ query ITTTTTTT
 select * from pg_shadow where usename = 'root';
 ----
 root 1 t t f f NULL NULL NULL
+
+statement ok
+CREATE ROLE pg_shadow_nologin_probe NOLOGIN;
+
+query I
+SELECT count(*)
+FROM pg_catalog.pg_shadow
+WHERE usename = 'pg_shadow_nologin_probe';
+----
+0
+
+statement ok
+DROP ROLE pg_shadow_nologin_probe;

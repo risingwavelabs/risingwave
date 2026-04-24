@@ -16,6 +16,10 @@
   formatted_sql: DROP USER user
 - input: DROP USER IF EXISTS user
   formatted_sql: DROP USER IF EXISTS user
+- input: DROP ROLE role_a
+  formatted_sql: DROP ROLE role_a
+- input: DROP ROLE IF EXISTS role_a
+  formatted_sql: DROP ROLE IF EXISTS role_a
 - input: DROP SECRET secret
   formatted_sql: DROP SECRET secret
 - input: DROP SECRET IF EXISTS secret

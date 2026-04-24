@@ -35,6 +35,7 @@ message UserInfo {
   repeated GrantPrivilege grant_privileges = 8;
 
   bool is_admin = 9;
+  bool can_inherit = 10;
 }
 
 enum Action {
@@ -100,6 +101,7 @@ message UpdateUserRequest {
     RENAME = 5;
     CREATE_USER = 6;
     ADMIN = 7;
+    INHERIT = 8;
   }
   UserInfo user = 1;
   repeated UpdateField update_fields = 2;
@@ -134,6 +136,55 @@ message RevokePrivilegeRequest {
 message RevokePrivilegeResponse {
   common.Status status = 1;
   uint64 version = 2;
+}
+
+message RoleMembership {
+  uint32 role_id = 1;
+  uint32 member_id = 2;
+  uint32 granted_by = 3;
+  bool admin_option = 4;
+  bool inherit_option = 5;
+  bool set_option = 6;
+}
+
+message GrantRoleRequest {
+  repeated uint32 role_ids = 1;
+  repeated uint32 member_ids = 2;
+  uint32 granted_by = 3;
+  optional bool admin_option = 4;
+  optional bool inherit_option = 5;
+  optional bool set_option = 6;
+}
+
+message GrantRoleResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+  repeated RoleMembership memberships = 3;
+}
+
+message RevokeRoleRequest {
+  repeated uint32 role_ids = 1;
+  repeated uint32 member_ids = 2;
+  uint32 granted_by = 3;
+  uint32 revoked_by = 4;
+  bool revoke_admin_option = 5;
+  bool revoke_inherit_option = 6;
+  bool revoke_set_option = 7;
+  bool cascade = 8;
+}
+
+message RevokeRoleResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+  repeated RoleMembership memberships = 3;
+}
+
+message ListRoleMembershipsRequest {
+  repeated uint32 member_ids = 1;
+}
+
+message ListRoleMembershipsResponse {
+  repeated RoleMembership memberships = 1;
 }
 
 message AlterDefaultPrivilegeRequest {
@@ -175,4 +226,10 @@ service UserService {
   rpc RevokePrivilege(RevokePrivilegeRequest) returns (RevokePrivilegeResponse);
   // AlterDefaultPrivilege alters the default privileges.
   rpc AlterDefaultPrivilege(AlterDefaultPrivilegeRequest) returns (AlterDefaultPrivilegeResponse);
+  // GrantRole persists direct role membership edges and membership options.
+  rpc GrantRole(GrantRoleRequest) returns (GrantRoleResponse);
+  // RevokeRole revokes direct role membership edges or membership options.
+  rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse);
+  // ListRoleMemberships lists direct role memberships for the requested members.
+  rpc ListRoleMemberships(ListRoleMembershipsRequest) returns (ListRoleMembershipsResponse);
 }

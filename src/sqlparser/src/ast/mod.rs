@@ -1633,6 +1633,13 @@ pub enum Statement {
         with_grant_option: bool,
         granted_by: Option<Ident>,
     },
+    /// GRANT roles TO grantees
+    GrantRole {
+        roles: Vec<Ident>,
+        grantees: Vec<Ident>,
+        role_options: Vec<RoleOptionSpec>,
+        granted_by: Option<Ident>,
+    },
     /// REVOKE privileges ON objects FROM grantees
     Revoke {
         privileges: Privileges,
@@ -1640,6 +1647,14 @@ pub enum Statement {
         grantees: Vec<Ident>,
         granted_by: Option<Ident>,
         revoke_grant_option: bool,
+        cascade: bool,
+    },
+    /// REVOKE roles FROM grantees
+    RevokeRole {
+        roles: Vec<Ident>,
+        grantees: Vec<Ident>,
+        revoke_role_option: Option<RoleOptionKind>,
+        granted_by: Option<Ident>,
         cascade: bool,
     },
     /// `DEALLOCATE [ PREPARE ] { name | ALL }`
@@ -1683,8 +1698,19 @@ pub enum Statement {
     },
     /// CREATE USER
     CreateUser(CreateUserStatement),
+    /// CREATE ROLE
+    CreateRole(CreateUserStatement),
     /// ALTER USER
     AlterUser(AlterUserStatement),
+    /// ALTER ROLE
+    AlterRole(AlterUserStatement),
+    /// `SET [ SESSION | LOCAL ] ROLE <role_name | NONE>`
+    SetRole {
+        context_modifier: Option<RoleContextModifier>,
+        role_name: SetRoleSpec,
+    },
+    /// `RESET ROLE`
+    ResetRole,
     /// ALTER SYSTEM SET configuration_parameter { TO | = } { value | 'value' | DEFAULT }
     AlterSystem {
         param: Ident,
@@ -2377,6 +2403,22 @@ impl Statement {
                 }
                 Ok(())
             }
+            Statement::GrantRole {
+                roles,
+                grantees,
+                role_options,
+                granted_by,
+            } => {
+                write!(f, "GRANT {} ", display_comma_separated(roles))?;
+                write!(f, "TO {}", display_comma_separated(grantees))?;
+                if !role_options.is_empty() {
+                    write!(f, " WITH {}", display_comma_separated(role_options))?;
+                }
+                if let Some(grantor) = granted_by {
+                    write!(f, " GRANTED BY {}", grantor)?;
+                }
+                Ok(())
+            }
             Statement::Revoke {
                 privileges,
                 objects,
@@ -2402,6 +2444,28 @@ impl Statement {
                 }
                 write!(f, " {}", if *cascade { "CASCADE" } else { "RESTRICT" })?;
                 Ok(())
+            }
+            Statement::RevokeRole {
+                roles,
+                grantees,
+                revoke_role_option,
+                granted_by,
+                cascade,
+            } => {
+                write!(
+                    f,
+                    "REVOKE {}{} FROM {}",
+                    revoke_role_option
+                        .as_ref()
+                        .map(|opt| format!("{opt} OPTION FOR "))
+                        .unwrap_or_default(),
+                    display_comma_separated(roles),
+                    display_comma_separated(grantees),
+                )?;
+                if let Some(grantor) = granted_by {
+                    write!(f, " GRANTED BY {}", grantor)?;
+                }
+                write!(f, " {}", if *cascade { "CASCADE" } else { "RESTRICT" })
             }
             Statement::Deallocate { name, prepare } => {
                 if let Some(name) = name {
@@ -2453,9 +2517,26 @@ impl Statement {
             Statement::CreateUser(statement) => {
                 write!(f, "CREATE USER {}", statement)
             }
+            Statement::CreateRole(statement) => {
+                write!(f, "CREATE ROLE {}", statement)
+            }
             Statement::AlterUser(statement) => {
                 write!(f, "ALTER USER {}", statement)
             }
+            Statement::AlterRole(statement) => {
+                write!(f, "ALTER ROLE {}", statement)
+            }
+            Statement::SetRole {
+                context_modifier,
+                role_name,
+            } => {
+                write!(f, "SET ")?;
+                if let Some(modifier) = context_modifier {
+                    write!(f, "{} ", modifier)?;
+                }
+                write!(f, "ROLE {}", role_name)
+            }
+            Statement::ResetRole => write!(f, "RESET ROLE"),
             Statement::AlterSystem { param, value } => {
                 f.write_str("ALTER SYSTEM SET ")?;
                 write!(f, "{param} = {value}",)
@@ -2546,6 +2627,7 @@ impl Statement {
                 | Statement::CreateConnection { .. }
                 | Statement::CreateSecret { .. }
                 | Statement::CreateUser { .. }
+                | Statement::CreateRole { .. }
                 | Statement::CreateDatabase { .. }
                 | Statement::CreateFunction { .. }
                 | Statement::CreateAggregate { .. }
@@ -3201,6 +3283,7 @@ pub enum ObjectType {
     Source,
     Sink,
     Database,
+    Role,
     User,
     Connection,
     Secret,
@@ -3218,6 +3301,7 @@ impl fmt::Display for ObjectType {
             ObjectType::Source => "SOURCE",
             ObjectType::Sink => "SINK",
             ObjectType::Database => "DATABASE",
+            ObjectType::Role => "ROLE",
             ObjectType::User => "USER",
             ObjectType::Secret => "SECRET",
             ObjectType::Connection => "CONNECTION",
@@ -3244,6 +3328,8 @@ impl ParseTo for ObjectType {
             ObjectType::Schema
         } else if parser.parse_keyword(Keyword::DATABASE) {
             ObjectType::Database
+        } else if parser.parse_keyword(Keyword::ROLE) {
+            ObjectType::Role
         } else if parser.parse_keyword(Keyword::USER) {
             ObjectType::User
         } else if parser.parse_keyword(Keyword::CONNECTION) {
@@ -3254,7 +3340,7 @@ impl ParseTo for ObjectType {
             ObjectType::Subscription
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, USER, SECRET or CONNECTION after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, SINK, SUBSCRIPTION, SCHEMA, DATABASE, ROLE, USER, SECRET or CONNECTION after DROP",
             );
         };
         Ok(object_type)

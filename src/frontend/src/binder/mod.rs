@@ -430,12 +430,16 @@ impl Binder {
         self.catalog.first_valid_schema(
             &self.db_name,
             &self.search_path,
-            &self.auth_context.user_name,
+            self.auth_context.current_user_name(),
         )
     }
 
     fn bind_schema_path<'a>(&'a self, schema_name: Option<&'a str>) -> SchemaPath<'a> {
-        SchemaPath::new(schema_name, &self.search_path, &self.auth_context.user_name)
+        SchemaPath::new(
+            schema_name,
+            &self.search_path,
+            self.auth_context.current_user_name(),
+        )
     }
 
     pub fn set_clause(&mut self, clause: Option<Clause>) {

@@ -23,6 +23,7 @@ use super::SessionImpl;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::error::{ErrorCode, Result};
 use crate::scheduler::ReadSnapshot;
+use crate::user::UserId;
 use crate::user::user_service::UserInfoWriter;
 
 /// Globally unique transaction id in this frontend instance.
@@ -66,6 +67,10 @@ pub struct Context {
     /// The snapshot of the transaction, acquired lazily at the first read operation in the
     /// transaction.
     snapshot: Option<ReadSnapshot>,
+
+    /// Restores the effective current role when a `SET LOCAL ROLE` override expires at the end of
+    /// the transaction.
+    local_role_restore: Option<(String, crate::user::UserId)>,
 }
 
 /// Transaction state.
@@ -92,13 +97,21 @@ pub enum State {
 /// A guard that auto commits an implicit transaction when dropped. Do nothing if an explicit
 /// transaction is in progress.
 #[must_use]
-pub struct ImplicitAutoCommitGuard(Weak<Mutex<State>>);
+pub struct ImplicitAutoCommitGuard {
+    txn: Weak<Mutex<State>>,
+    auth_context: Weak<parking_lot::RwLock<super::AuthContext>>,
+}
 
 impl Drop for ImplicitAutoCommitGuard {
     fn drop(&mut self) {
-        if let Some(txn) = self.0.upgrade() {
+        if let Some(txn) = self.txn.upgrade() {
             let mut txn = txn.lock();
-            if let State::Implicit(_) = &*txn {
+            if let State::Implicit(ctx) = &mut *txn {
+                if let Some((user_name, user_id)) = ctx.local_role_restore.take()
+                    && let Some(auth_context) = self.auth_context.upgrade()
+                {
+                    auth_context.write().set_current_user(user_name, user_id);
+                }
                 *txn = State::Initial;
             }
         }
@@ -119,6 +132,7 @@ impl SessionImpl {
                     id: Id::new(),
                     access_mode: AccessMode::ReadWrite,
                     snapshot: Default::default(),
+                    local_role_restore: None,
                 })
             }
             State::Implicit(_) => unreachable!("implicit transaction is already in progress"),
@@ -126,7 +140,10 @@ impl SessionImpl {
                                       * progress */
         }
 
-        ImplicitAutoCommitGuard(Arc::downgrade(&self.txn))
+        ImplicitAutoCommitGuard {
+            txn: Arc::downgrade(&self.txn),
+            auth_context: Arc::downgrade(&self.auth_context),
+        }
     }
 
     /// Starts an explicit transaction with the specified access mode from `START TRANSACTION`.
@@ -147,6 +164,7 @@ impl SessionImpl {
                     id: ctx.id,
                     access_mode,
                     snapshot: ctx.snapshot.clone(),
+                    local_role_restore: None,
                 })
             }
             State::Explicit(_) => {
@@ -161,16 +179,21 @@ impl SessionImpl {
     pub fn txn_commit_explicit(&self) {
         let mut txn = self.txn.lock();
 
-        match &*txn {
+        match &mut *txn {
             State::Initial => unreachable!("no transaction in progress"),
             State::Implicit(_) => {
                 // TODO: should be warning
                 self.notice_to_user("there is no transaction in progress")
             }
-            State::Explicit(ctx) => match ctx.access_mode {
-                AccessMode::ReadWrite => unimplemented!(),
-                AccessMode::ReadOnly => *txn = State::Initial,
-            },
+            State::Explicit(ctx) => {
+                if let Some((user_name, user_id)) = ctx.local_role_restore.take() {
+                    self.set_current_user(user_name, user_id);
+                }
+                match ctx.access_mode {
+                    AccessMode::ReadWrite => unimplemented!(),
+                    AccessMode::ReadOnly => *txn = State::Initial,
+                }
+            }
         }
     }
 
@@ -179,16 +202,61 @@ impl SessionImpl {
     pub fn txn_rollback_explicit(&self) {
         let mut txn = self.txn.lock();
 
-        match &*txn {
+        match &mut *txn {
             State::Initial => unreachable!("no transaction in progress"),
             State::Implicit(_) => {
                 // TODO: should be warning
                 self.notice_to_user("there is no transaction in progress")
             }
-            State::Explicit(ctx) => match ctx.access_mode {
-                AccessMode::ReadWrite => unimplemented!(),
-                AccessMode::ReadOnly => *txn = State::Initial,
-            },
+            State::Explicit(ctx) => {
+                if let Some((user_name, user_id)) = ctx.local_role_restore.take() {
+                    self.set_current_user(user_name, user_id);
+                }
+                match ctx.access_mode {
+                    AccessMode::ReadWrite => unimplemented!(),
+                    AccessMode::ReadOnly => *txn = State::Initial,
+                }
+            }
+        }
+    }
+
+    pub fn set_local_current_user(
+        &self,
+        current_user_name: String,
+        current_user_id: UserId,
+    ) -> bool {
+        let previous = {
+            let auth_context = self.auth_context.read();
+            (
+                auth_context.current_user_name().to_owned(),
+                auth_context.current_user_id(),
+            )
+        };
+
+        let mut txn = self.txn.lock();
+        match &mut *txn {
+            State::Explicit(ctx) => {
+                ctx.local_role_restore.get_or_insert(previous);
+                drop(txn);
+                self.set_current_user(current_user_name, current_user_id);
+                true
+            }
+            State::Initial | State::Implicit(_) => {
+                self.notice_to_user(
+                    "SET LOCAL ROLE can only be used in transaction blocks; statement has no effect.",
+                );
+                false
+            }
+        }
+    }
+
+    pub fn clear_local_current_user(&self) {
+        let mut txn = self.txn.lock();
+        match &mut *txn {
+            State::Initial | State::Implicit(_) => {}
+            State::Explicit(ctx) => {
+                ctx.local_role_restore = None;
+            }
         }
     }
 

@@ -9,6 +9,12 @@
     select session_user;
   batch_plan: 'BatchValues { rows: [[''root'':Varchar]] }'
 - sql: |
+    select current_user;
+  batch_plan: 'BatchValues { rows: [[''root'':Varchar]] }'
+- sql: |
+    select current_role;
+  batch_plan: 'BatchValues { rows: [[''root'':Varchar]] }'
+- sql: |
     select current_schemas(true);
   batch_plan: 'BatchValues { rows: [[ARRAY[pg_catalog, rw_catalog, public]:List(Varchar)]] }'
 - sql: |

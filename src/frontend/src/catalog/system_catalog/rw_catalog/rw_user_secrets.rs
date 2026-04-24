@@ -33,10 +33,10 @@ struct RwUserSecret {
 fn read_rw_user_secrets_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUserSecret>> {
     let user_info_reader = reader.user_info_reader.read_guard();
     // Since this catalog contains passwords, it must not be publicly readable.
-    match user_info_reader.get_user_by_name(&reader.auth_context.user_name) {
+    match user_info_reader.get_user_by_name(reader.auth_context.current_user_name()) {
         None => {
             return Err(ErrorCode::CatalogError(
-                format!("user {} not found", reader.auth_context.user_name).into(),
+                format!("user {} not found", reader.auth_context.current_user_name()).into(),
             )
             .into());
         }

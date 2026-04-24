@@ -26,7 +26,8 @@ use risingwave_pb::user::alter_default_privilege_request::{
 use risingwave_pb::user::grant_privilege::ActionWithGrantOption;
 use risingwave_pb::user::{PbAction, PbGrantPrivilege};
 use risingwave_sqlparser::ast::{
-    DefaultPrivilegeOperation, GrantObjects, Ident, PrivilegeObjectType, Privileges, Statement,
+    DefaultPrivilegeOperation, GrantObjects, Ident, PrivilegeObjectType, Privileges,
+    RoleOptionKind, RoleOptionSpec, Statement,
 };
 
 use super::RwPgResponse;
@@ -524,6 +525,116 @@ pub async fn handle_revoke_privilege(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::REVOKE_PRIVILEGE))
+}
+
+pub async fn handle_grant_role(handler_args: HandlerArgs, stmt: Statement) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let Statement::GrantRole {
+        roles,
+        grantees,
+        role_options,
+        granted_by,
+    } = stmt
+    else {
+        return Err(ErrorCode::BindError("Invalid grant role statement".to_owned()).into());
+    };
+
+    let role_ids = bind_user_from_idents(&session, roles)?;
+    let member_ids = bind_user_from_idents(&session, grantees)?;
+    let granted_by = bind_granted_by(&session, granted_by)?;
+    let mut admin_option = None;
+    let mut inherit_option = None;
+    let mut set_option = None;
+    for RoleOptionSpec { kind, value } in role_options {
+        match kind {
+            RoleOptionKind::Admin => admin_option = Some(value),
+            RoleOptionKind::Inherit => inherit_option = Some(value),
+            RoleOptionKind::Set => set_option = Some(value),
+        }
+    }
+    let user_info_writer = session.user_info_writer()?;
+    user_info_writer
+        .grant_role(
+            role_ids,
+            member_ids,
+            granted_by,
+            admin_option,
+            inherit_option,
+            set_option,
+        )
+        .await?;
+
+    Ok(PgResponse::empty_result(StatementType::GRANT_PRIVILEGE))
+}
+
+pub async fn handle_revoke_role(
+    handler_args: HandlerArgs,
+    stmt: Statement,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let Statement::RevokeRole {
+        roles,
+        grantees,
+        revoke_role_option,
+        granted_by,
+        cascade,
+    } = stmt
+    else {
+        return Err(ErrorCode::BindError("Invalid revoke role statement".to_owned()).into());
+    };
+
+    let revoke_admin_option = matches!(revoke_role_option, Some(RoleOptionKind::Admin));
+    let revoke_inherit_option = matches!(revoke_role_option, Some(RoleOptionKind::Inherit));
+    let revoke_set_option = matches!(revoke_role_option, Some(RoleOptionKind::Set));
+    let role_ids = bind_user_from_idents(&session, roles)?;
+    let member_ids = bind_user_from_idents(&session, grantees)?;
+    let granted_by = bind_granted_by(&session, granted_by)?;
+    let user_info_writer = session.user_info_writer()?;
+    user_info_writer
+        .revoke_role(
+            role_ids,
+            member_ids,
+            granted_by,
+            session.user_id(),
+            revoke_admin_option,
+            revoke_inherit_option,
+            revoke_set_option,
+            cascade,
+        )
+        .await?;
+
+    Ok(PgResponse::empty_result(StatementType::REVOKE_PRIVILEGE))
+}
+
+fn bind_granted_by(session: &SessionImpl, granted_by: Option<Ident>) -> Result<UserId> {
+    let Some(granted_by) = granted_by else {
+        return Ok(session.user_id());
+    };
+    let granted_by_name = granted_by.real_value();
+    let resolved_grantor = if granted_by_name.eq_ignore_ascii_case("current_user")
+        || granted_by_name.eq_ignore_ascii_case("current_role")
+    {
+        session.user_name()
+    } else if granted_by_name.eq_ignore_ascii_case("session_user") {
+        session.session_user_name()
+    } else {
+        granted_by_name
+    };
+
+    if !resolved_grantor.eq_ignore_ascii_case(&session.user_name()) {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "GRANTED BY must specify the current user \"{}\"",
+            session.user_name()
+        ))
+        .into());
+    }
+
+    let user_reader = session.env().user_info_reader();
+    let reader = user_reader.read_guard();
+    let user = reader.get_user_by_name(&resolved_grantor).ok_or_else(|| {
+        ErrorCode::InvalidInputSyntax(format!("User \"{}\" does not exist", resolved_grantor))
+    })?;
+    Ok(user.id)
 }
 
 pub async fn handle_alter_default_privileges(

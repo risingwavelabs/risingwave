@@ -78,7 +78,11 @@ fn resolve_regclass_inner(
     let obj = Parser::parse_object_name_str(class_name)?;
 
     let (schema_name, class_name) = Binder::resolve_schema_qualified_name(db_name, &obj)?;
-    let schema_path = SchemaPath::new(schema_name.as_deref(), search_path, &auth_context.user_name);
+    let schema_path = SchemaPath::new(
+        schema_name.as_deref(),
+        search_path,
+        auth_context.current_user_name(),
+    );
     Ok(catalog
         .read_guard()
         .get_id_by_class_name(db_name, schema_path, &class_name)?)

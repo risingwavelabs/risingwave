@@ -25,3 +25,7 @@
     sql parser error: expected parameter list value, found: default
     LINE 1: set search_path to 'my_path', default;
                                           ^
+- input: SET ROLE analytics
+  formatted_sql: SET ROLE analytics
+- input: RESET ROLE
+  formatted_sql: RESET ROLE

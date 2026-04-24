@@ -3509,6 +3509,32 @@ fn parse_drop_view() {
 }
 
 #[test]
+fn parse_drop_role() {
+    let sql = "DROP ROLE analytics";
+    match verified_stmt(sql) {
+        Statement::Drop(stmt) => {
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("analytics")]),
+                stmt.object_name
+            );
+            assert_eq!(ObjectType::Role, stmt.object_type);
+            assert!(!stmt.if_exists);
+            assert_eq!(stmt.drop_mode, AstOption::None);
+        }
+        _ => unreachable!(),
+    }
+
+    let sql = "DROP ROLE IF EXISTS analytics";
+    match verified_stmt(sql) {
+        Statement::Drop(stmt) => {
+            assert_eq!(ObjectType::Role, stmt.object_type);
+            assert!(stmt.if_exists);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn parse_materialized_drop_view() {
     let sql = "DROP MATERIALIZED VIEW mymview";
     match verified_stmt(sql) {
@@ -3542,6 +3568,47 @@ fn parse_create_user() {
                         "md5827ccb0eea8a706c4c34a16891f84e7b".into()
                     ))),
                 ]
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_create_role() {
+    let sql = "CREATE ROLE analytics WITH CREATEDB CREATEROLE INHERIT NOLOGIN";
+    match verified_stmt(sql) {
+        Statement::CreateRole(stmt) => {
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("analytics")]),
+                stmt.user_name
+            );
+            assert_eq!(
+                stmt.with_options.0,
+                vec![
+                    UserOption::CreateDB,
+                    UserOption::CreateRole,
+                    UserOption::Inherit,
+                    UserOption::NoLogin,
+                ]
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_alter_role() {
+    let sql = "ALTER ROLE analytics RENAME TO reporting";
+    match verified_stmt(sql) {
+        Statement::AlterRole(stmt) => {
+            assert_eq!(
+                ObjectName(vec![Ident::new_unchecked("analytics")]),
+                stmt.user_name
+            );
+            assert_eq!(
+                stmt.mode,
+                AlterUserMode::Rename(ObjectName(vec![Ident::new_unchecked("reporting")]))
             );
         }
         _ => unreachable!(),
@@ -4078,6 +4145,43 @@ fn parse_grant() {
 }
 
 #[test]
+fn parse_grant_role() {
+    let sql = "GRANT role_a, role_b TO user_a, user_b WITH ADMIN OPTION";
+    match verified_stmt(sql) {
+        Statement::GrantRole {
+            roles,
+            grantees,
+            role_options,
+            granted_by,
+        } => {
+            assert_eq!(
+                roles,
+                vec![
+                    Ident::new_unchecked("role_a"),
+                    Ident::new_unchecked("role_b")
+                ]
+            );
+            assert_eq!(
+                grantees,
+                vec![
+                    Ident::new_unchecked("user_a"),
+                    Ident::new_unchecked("user_b")
+                ]
+            );
+            assert_eq!(
+                role_options,
+                vec![RoleOptionSpec {
+                    kind: RoleOptionKind::Admin,
+                    value: true
+                }]
+            );
+            assert_eq!(granted_by, None);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn test_revoke() {
     let sql = "REVOKE ALL PRIVILEGES ON users, auth FROM analyst CASCADE";
     match verified_stmt(sql) {
@@ -4107,6 +4211,128 @@ fn test_revoke() {
             assert!(!revoke_grant_option);
             assert_eq!(None, granted_by);
         }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_revoke_role() {
+    let sql = "REVOKE ADMIN OPTION FOR role_a FROM user_a CASCADE";
+    match verified_stmt(sql) {
+        Statement::RevokeRole {
+            roles,
+            grantees,
+            revoke_role_option,
+            granted_by,
+            cascade,
+        } => {
+            assert_eq!(roles, vec![Ident::new_unchecked("role_a")]);
+            assert_eq!(grantees, vec![Ident::new_unchecked("user_a")]);
+            assert_eq!(revoke_role_option, Some(RoleOptionKind::Admin));
+            assert_eq!(granted_by, None);
+            assert!(cascade);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_grant_role_membership_options() {
+    let sql = "GRANT role_a TO user_a WITH INHERIT FALSE, SET FALSE";
+    match verified_stmt(sql) {
+        Statement::GrantRole {
+            roles,
+            grantees,
+            role_options,
+            granted_by,
+        } => {
+            assert_eq!(roles, vec![Ident::new_unchecked("role_a")]);
+            assert_eq!(grantees, vec![Ident::new_unchecked("user_a")]);
+            assert_eq!(
+                role_options,
+                vec![
+                    RoleOptionSpec {
+                        kind: RoleOptionKind::Inherit,
+                        value: false
+                    },
+                    RoleOptionSpec {
+                        kind: RoleOptionKind::Set,
+                        value: false
+                    }
+                ]
+            );
+            assert_eq!(granted_by, None);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_revoke_set_option_for_role() {
+    let sql = "REVOKE SET OPTION FOR role_a FROM user_a RESTRICT";
+    match verified_stmt(sql) {
+        Statement::RevokeRole {
+            roles,
+            grantees,
+            revoke_role_option,
+            granted_by,
+            cascade,
+        } => {
+            assert_eq!(roles, vec![Ident::new_unchecked("role_a")]);
+            assert_eq!(grantees, vec![Ident::new_unchecked("user_a")]);
+            assert_eq!(revoke_role_option, Some(RoleOptionKind::Set));
+            assert_eq!(granted_by, None);
+            assert!(!cascade);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_grant_role_granted_by() {
+    let sql = "GRANT role_a TO user_a GRANTED BY current_user";
+    match verified_stmt(sql) {
+        Statement::GrantRole { granted_by, .. } => {
+            assert_eq!(granted_by, Some(Ident::new_unchecked("current_user")));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_revoke_role_granted_by() {
+    let sql = "REVOKE role_a FROM user_a GRANTED BY current_user RESTRICT";
+    match verified_stmt(sql) {
+        Statement::RevokeRole { granted_by, .. } => {
+            assert_eq!(granted_by, Some(Ident::new_unchecked("current_user")));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_set_role() {
+    let sql = "SET LOCAL ROLE analytics";
+    match verified_stmt(sql) {
+        Statement::SetRole {
+            context_modifier,
+            role_name,
+        } => {
+            assert_eq!(context_modifier, Some(RoleContextModifier::Local));
+            assert_eq!(
+                role_name,
+                SetRoleSpec::Name(Ident::new_unchecked("analytics"))
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_reset_role() {
+    let sql = "RESET ROLE";
+    match verified_stmt(sql) {
+        Statement::ResetRole => {}
         _ => unreachable!(),
     }
 }

@@ -481,6 +481,7 @@ pub async fn handle(
                 .await
         }
         Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
+        Statement::CreateRole(stmt) => create_user::handle_create_role(handler_args, stmt).await,
         Statement::DeclareCursor { stmt } => {
             declare_cursor::handle_declare_cursor(handler_args, stmt).await
         }
@@ -491,11 +492,18 @@ pub async fn handle(
             close_cursor::handle_close_cursor(handler_args, stmt).await
         }
         Statement::AlterUser(stmt) => alter_user::handle_alter_user(handler_args, stmt).await,
+        Statement::AlterRole(stmt) => alter_user::handle_alter_role(handler_args, stmt).await,
         Statement::Grant { .. } => {
             handle_privilege::handle_grant_privilege(handler_args, stmt).await
         }
+        Statement::GrantRole { .. } => {
+            handle_privilege::handle_grant_role(handler_args, stmt).await
+        }
         Statement::Revoke { .. } => {
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
+        }
+        Statement::RevokeRole { .. } => {
+            handle_privilege::handle_revoke_role(handler_args, stmt).await
         }
         Statement::Describe { name, kind } => match kind {
             DescribeKind::Fragments => {
@@ -535,7 +543,7 @@ pub async fn handle(
                     | ObjectType::Schema
                     | ObjectType::Connection
                     | ObjectType::Secret => true,
-                    ObjectType::Database | ObjectType::User => {
+                    ObjectType::Database | ObjectType::Role | ObjectType::User => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 }
@@ -577,7 +585,7 @@ pub async fn handle(
                     drop_schema::handle_drop_schema(handler_args, object_name, if_exists, cascade)
                         .await
                 }
-                ObjectType::User => {
+                ObjectType::Role | ObjectType::User => {
                     drop_user::handle_drop_user(handler_args, object_name, if_exists).await
                 }
                 ObjectType::View => {
@@ -688,6 +696,11 @@ pub async fn handle(
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
+        Statement::SetRole {
+            context_modifier,
+            role_name,
+        } => variable::handle_set_role(handler_args, context_modifier, role_name),
+        Statement::ResetRole => variable::handle_reset_role(handler_args),
         Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {
             name,

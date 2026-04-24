@@ -11,6 +11,14 @@
   expected_outputs:
   - batch_plan
 - sql: |
+    select current_user;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select current_role;
+  expected_outputs:
+  - batch_plan
+- sql: |
     select current_schemas(true);
   expected_outputs:
   - batch_plan

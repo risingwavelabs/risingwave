@@ -139,6 +139,7 @@ impl LocalQueryExecution {
         let meta_client = self.front_env.meta_client_ref();
 
         let sender1 = sender.clone();
+        let role_membership_info_reader = self.front_env.role_membership_info_reader().clone();
         let exec = async move {
             let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
             while let Some(mut r) = data_stream.next().await {
@@ -158,12 +159,17 @@ impl LocalQueryExecution {
         use risingwave_expr::expr_context::*;
 
         use crate::expr::function_impl::context::{
-            AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, SEARCH_PATH, USER_INFO_READER,
+            AUTH_CONTEXT, CATALOG_READER, DB_NAME, META_CLIENT, ROLE_MEMBERSHIP_INFO_READER,
+            SEARCH_PATH, USER_INFO_READER,
         };
 
         // box is necessary, otherwise the size of `exec` will double each time it is nested.
         let exec = async move { CATALOG_READER::scope(catalog_reader, exec).await }.boxed();
         let exec = async move { USER_INFO_READER::scope(user_info_reader, exec).await }.boxed();
+        let exec = async move {
+            ROLE_MEMBERSHIP_INFO_READER::scope(role_membership_info_reader, exec).await
+        }
+        .boxed();
         let exec = async move { DB_NAME::scope(db_name, exec).await }.boxed();
         let exec = async move { SEARCH_PATH::scope(search_path, exec).await }.boxed();
         let exec = async move { AUTH_CONTEXT::scope(auth_context, exec).await }.boxed();
