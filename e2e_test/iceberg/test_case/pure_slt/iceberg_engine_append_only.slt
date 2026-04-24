@@ -249,6 +249,26 @@ statement ok
 DROP TABLE price;
 
 statement ok
+CREATE TABLE t_order_key_append_only (
+  id BIGINT PRIMARY KEY,
+  v1 INT
+)
+APPEND ONLY
+WITH (
+  commit_checkpoint_interval = 1,
+  order_key = 'v1 desc nulls last, id asc'
+) ENGINE = ICEBERG;
+
+statement ok
+INSERT INTO t_order_key_append_only VALUES (1, 10), (2, 20);
+
+statement ok
+FLUSH;
+
+statement ok
+DROP TABLE t_order_key_append_only;
+
+statement ok
 DROP CONNECTION my_conn;
 
 # test hosted catalog (meta store as jdbc catalog)

@@ -16,6 +16,7 @@
 #[path = "./arrow_impl.rs"]
 mod arrow_impl;
 type ArrowIntervalType = arrow_buffer::IntervalMonthDayNano;
+#[allow(unused_imports)]
 pub use arrow_impl::{FromArrow, ToArrow, is_parquet_schema_match_source_schema};
 pub use {
     arrow_57_array as arrow_array, arrow_57_buffer as arrow_buffer, arrow_57_cast as arrow_cast,

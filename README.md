@@ -102,32 +102,25 @@ The row store and Iceberg layer serve different purposes: the row store is for l
 
 ## Use cases
 
-**Agentic AI**
-- Agent memory: continuously maintained, low-latency queryable state across sessions, signals, and entity profiles
-- Tool backends: pre-computed results for agent tool calls such as fraud scores, anomaly detection, and inventory checks
-- Event-driven triggers: react to live events and inject fresh context into LLM calls
-- ML feature stores: unified batch and streaming feature computation over a single codebase
-
-**Real-time data infrastructure**
-- Live dashboards with sub-second freshness
-- Continuous monitoring and alerting
-- Stream enrichment: join live events with historical data before delivering downstream
-- Iceberg lakehouses: continuous ingestion into open-format tables for analytics and long-term retention
+- **Monitoring and alerting**: continuous evaluation of streaming metrics against thresholds
+- **Feature store**s: batch and streaming features computed over the same pipeline, served from the same system
+- **Live dashboards**: materialized views updated incrementally, no scheduled refreshes
+- **Real-time enrichment**: live events joined with historical reference data in-flight, before delivery downstream
+- **Streaming lakehouses**: continuous, exactly-once ingestion into open-format tables with automated compaction and snapshot management
 
 ---
 
 ## Design decisions
 
-### Object store as primary storage
+### Ultimate cost efficiency
 
-Internal state, tables, and materialized views are stored in S3 or equivalent object storage. This enables elastic scaling without data rebalancing and fast failure recovery in seconds. For latency-sensitive workloads, [elastic disk cache](https://docs.risingwave.com/get-started/disk-cache) uses local disks or EBS to reduce S3 access overhead.
+Internal state, tables, and materialized views are stored in object storage (S3 or equivalent), which is roughly 100x cheaper than RAM. This enables elastic scaling without data rebalancing and failure recovery in seconds. For latency-sensitive workloads, [elastic disk cache](https://docs.risingwave.com/get-started/disk-cache) pins hot data on local SSD or EBS, keeping p99 query latency at 10-20 ms.
 
-### Postgres compatibility
+### Native experience for both humans and agents
 
-RisingWave connects via the PostgreSQL wire protocol and works with psql, JDBC, and any Postgres-compatible tooling. No custom query language, no proprietary APIs.
+RisingWave connects via the PostgreSQL wire protocol and works with psql, JDBC, and any Postgres-compatible tooling. For agents, RisingWave provides a MCP server, a CLI, and Skills, so agents can query and operate RisingWave without custom integration.
 
-
-### Apache Iceberg™ native
+### Openness
 
 RisingWave [natively integrates with Apache Iceberg™](https://docs.risingwave.com/iceberg/overview) for continuous stream ingestion, direct reads via DataFusion, and automated table maintenance. Data in Iceberg is in an open format and accessible to any compatible query engine.
 
