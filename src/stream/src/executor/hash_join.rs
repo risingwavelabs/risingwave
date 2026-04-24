@@ -556,6 +556,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
+        tracing::debug!("!!!");
+        tokio::time::sleep(Duration::from_secs(60)).await;
         let input_l = self.input_l.take().unwrap();
         let input_r = self.input_r.take().unwrap();
         let aligned_stream = barrier_align(
