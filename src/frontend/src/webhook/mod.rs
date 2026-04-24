@@ -131,7 +131,9 @@ pub(super) mod handlers {
             }
             PayloadSchema::FullSchema { columns } => {
                 let rows: Vec<_> = if webhook_source_info.is_batched {
-                    body.split(|&byte| byte == b'\n').collect()
+                    body.split(|&byte| byte == b'\n')
+                        .filter(|b| !b.is_empty())
+                        .collect()
                 } else {
                     vec![body.as_ref()]
                 };
@@ -189,12 +191,16 @@ pub(super) mod handlers {
                     StatusCode::UNPROCESSABLE_ENTITY,
                 )
             })?;
+
             let jsonb_val = JsonbVal::from(json_value);
             builder.append(Some(jsonb_val.as_scalar_ref()));
 
             Ok(DataChunk::new(vec![builder.finish().into_ref()], 1))
         } else {
-            let rows: Vec<_> = body.split(|&b| b == b'\n').collect();
+            let rows: Vec<_> = body
+                .split(|&b| b == b'\n')
+                .filter(|b| !b.is_empty())
+                .collect();
 
             for row in &rows {
                 let json_value = Value::from_text(row).map_err(|e| {
