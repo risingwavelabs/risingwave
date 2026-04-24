@@ -470,23 +470,49 @@ pub async fn parse_schema_change(
                                     }
                                 }
 
-                                let snapshot_value: Datum = if let Some(value_text) = value_text {
-                                    Some(ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
-                                        |err| {
-                                            tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
-                                            AccessError::TypeError {
-                                                expected: "constant expression".into(),
-                                                got: data_type.to_string(),
-                                                value: value_text,
-                                            }
-                                        },
-                                    )?)
-                                } else {
-                                    None
-                                };
+                                // Handling default values during auto schema change is hard to get
+                                // completely right. The fundamental challenge is that we need to
+                                // accurately distinguish "literal constants" from "real expressions"
+                                // and evaluate each correctly. However, PostgreSQL / MySQL literal
+                                // grammar is quite complex (bit / hex / escape strings, arrays,
+                                // literals with casts, etc.), and `ScalarImpl::from_text` only
+                                // recognizes simple literals. Any function call (`now()`,
+                                // `gen_random_uuid()`) or unsupported literal form will fail here.
+                                //
+                                // Current strategy is fail-open: on parse failure we only emit a
+                                // warn log and add the column without a default, rather than
+                                // aborting the whole auto schema change. This is strictly better
+                                // than the previous hard-crash behavior — the pipeline stays
+                                // available, and the worst case is that existing rows are NULL in a
+                                // newly-added column (see the warn message below for details).
+                                //
+                                // TODO: the schema change event carries the **full** set of columns
+                                // of the table, so here we cannot tell "columns newly added by this
+                                // ALTER" from "columns that already existed". A better approach
+                                // would be to only process the delta columns that actually changed
+                                // in this event, which would let us precisely tell the user: which
+                                // columns have existing rows filled with NULL (needs attention),
+                                // and which ones are pre-existing columns merely surfaced by the
+                                // event (harmless, can be ignored silently).
+                                let snapshot_value: Datum = value_text.and_then(|value_text| {
+                                    ScalarImpl::from_text(value_text.as_str(), &data_type)
+                                        .inspect_err(|err| {
+                                            tracing::warn!(
+                                                target: "auto_schema_change",
+                                                error = %err.as_report(),
+                                                column = %name,
+                                                data_type = %data_type,
+                                                default_value_expression = default_val_expr_str,
+                                                upstream_ddl = %upstream_ddl,
+                                                "non-constant default expression, column added without default. \
+                                                 If this column is not newly added by this schema change, it is safe to ignore this warning. \
+                                                 If this column is newly added by this schema change, existing rows will be NULL in this column — consider using COALESCE in queries to provide a fallback value."
+                                            );
+                                        })
+                                        .ok()
+                                });
 
                                 if snapshot_value.is_none() {
-                                    tracing::warn!(target: "auto_schema_change", "failed to parse default value expression: {}", default_val_expr_str);
                                     ColumnDesc::named(name, ColumnId::placeholder(), data_type)
                                 } else {
                                     ColumnDesc::named_with_default_value(
