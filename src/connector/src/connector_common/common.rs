@@ -274,9 +274,40 @@ pub struct KafkaConnectionProps {
     #[serde(rename = "properties.sasl.kerberos.min.time.before.relogin")]
     sasl_kerberos_min_time_before_relogin: Option<String>,
 
-    /// Configurations for SASL/OAUTHBEARER.
+    /// Configurations for SASL/OAUTHBEARER. Only used with the default (unsecured) OAUTHBEARER
+    /// handler.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
+
+    /// SASL/OAUTHBEARER login method. Set to `oidc` to use the built-in OIDC client and fetch
+    /// tokens from an OAuth 2.0 / OIDC identity provider. When `oidc`, the properties
+    /// `properties.sasl.oauthbearer.client.id`, `properties.sasl.oauthbearer.client.secret` and
+    /// `properties.sasl.oauthbearer.token.endpoint.url` must be provided.
+    #[serde(rename = "properties.sasl.oauthbearer.method")]
+    sasl_oauthbearer_method: Option<String>,
+
+    /// OIDC client id. Only used when `properties.sasl.oauthbearer.method` is `oidc`.
+    #[serde(rename = "properties.sasl.oauthbearer.client.id")]
+    sasl_oauthbearer_client_id: Option<String>,
+
+    /// OIDC client secret. Only used when `properties.sasl.oauthbearer.method` is `oidc`.
+    #[serde(rename = "properties.sasl.oauthbearer.client.secret")]
+    sasl_oauthbearer_client_secret: Option<String>,
+
+    /// OAuth/OIDC token endpoint URL used to retrieve the access token. Only used when
+    /// `properties.sasl.oauthbearer.method` is `oidc`.
+    #[serde(rename = "properties.sasl.oauthbearer.token.endpoint.url")]
+    sasl_oauthbearer_token_endpoint_url: Option<String>,
+
+    /// OAuth scope the client requests from the authorization server. Only used when
+    /// `properties.sasl.oauthbearer.method` is `oidc`.
+    #[serde(rename = "properties.sasl.oauthbearer.scope")]
+    sasl_oauthbearer_scope: Option<String>,
+
+    /// Comma-separated `key=value` pairs sent as SASL extensions to the broker. Only used when
+    /// `properties.sasl.oauthbearer.method` is `oidc`.
+    #[serde(rename = "properties.sasl.oauthbearer.extensions")]
+    sasl_oauthbearer_extensions: Option<String>,
 }
 
 impl EnforceSecret for KafkaConnectionProps {
@@ -284,6 +315,7 @@ impl EnforceSecret for KafkaConnectionProps {
         "properties.ssl.key.pem",
         "properties.ssl.key.password",
         "properties.sasl.password",
+        "properties.sasl.oauthbearer.client.secret",
     };
 }
 
@@ -412,6 +444,12 @@ impl KafkaConnectionProps {
             sasl_kerberos_kinit_cmd: None,
             sasl_kerberos_min_time_before_relogin: None,
             sasl_oathbearer_config: None,
+            sasl_oauthbearer_method: None,
+            sasl_oauthbearer_client_id: None,
+            sasl_oauthbearer_client_secret: None,
+            sasl_oauthbearer_token_endpoint_url: None,
+            sasl_oauthbearer_scope: None,
+            sasl_oauthbearer_extensions: None,
         }
     }
 
@@ -499,8 +537,40 @@ impl KafkaConnectionProps {
         if let Some(sasl_oathbearer_config) = self.sasl_oathbearer_config.as_ref() {
             config.set("sasl.oauthbearer.config", sasl_oathbearer_config);
         }
-        // Currently, we only support unsecured OAUTH.
-        config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
+
+        // SASL/OAUTHBEARER — OIDC login flow (KIP-768).
+        // librdkafka's built-in OIDC client handles token fetch and refresh when
+        // `sasl.oauthbearer.method=oidc`.
+        if let Some(method) = self.sasl_oauthbearer_method.as_ref() {
+            config.set("sasl.oauthbearer.method", method);
+        }
+        if let Some(v) = self.sasl_oauthbearer_client_id.as_ref() {
+            config.set("sasl.oauthbearer.client.id", v);
+        }
+        if let Some(v) = self.sasl_oauthbearer_client_secret.as_ref() {
+            config.set("sasl.oauthbearer.client.secret", v);
+        }
+        if let Some(v) = self.sasl_oauthbearer_token_endpoint_url.as_ref() {
+            config.set("sasl.oauthbearer.token.endpoint.url", v);
+        }
+        if let Some(v) = self.sasl_oauthbearer_scope.as_ref() {
+            config.set("sasl.oauthbearer.scope", v);
+        }
+        if let Some(v) = self.sasl_oauthbearer_extensions.as_ref() {
+            config.set("sasl.oauthbearer.extensions", v);
+        }
+
+        // The unsecure JWT handler is only used as a fallback for the default OAUTHBEARER
+        // method. Do not set it when OIDC is in use, otherwise librdkafka rejects the config.
+        if !self.is_oidc() {
+            config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
+        }
+    }
+
+    pub(crate) fn is_oidc(&self) -> bool {
+        self.sasl_oauthbearer_method
+            .as_deref()
+            .is_some_and(|m| m.eq_ignore_ascii_case("oidc"))
     }
 
     pub(crate) fn is_aws_msk_iam(&self) -> bool {
@@ -1185,3 +1255,97 @@ impl MongodbCommon {
         Ok(client)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use maplit::btreemap;
+
+    use super::*;
+
+    fn parse_kafka_connection_props(
+        map: std::collections::BTreeMap<String, String>,
+    ) -> KafkaConnectionProps {
+        serde_json::from_value(serde_json::to_value(map).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn test_kafka_oidc_properties_are_forwarded_to_rdkafka() {
+        let props = parse_kafka_connection_props(btreemap! {
+            "properties.bootstrap.server".to_owned() => "broker:9092".to_owned(),
+            "properties.security.protocol".to_owned() => "SASL_SSL".to_owned(),
+            "properties.sasl.mechanism".to_owned() => "OAUTHBEARER".to_owned(),
+            "properties.sasl.oauthbearer.method".to_owned() => "oidc".to_owned(),
+            "properties.sasl.oauthbearer.client.id".to_owned() => "my-client".to_owned(),
+            "properties.sasl.oauthbearer.client.secret".to_owned() => "my-secret".to_owned(),
+            "properties.sasl.oauthbearer.token.endpoint.url".to_owned()
+                => "https://idp.example.com/oauth/token".to_owned(),
+            "properties.sasl.oauthbearer.scope".to_owned() => "kafka".to_owned(),
+            "properties.sasl.oauthbearer.extensions".to_owned()
+                => "tenant=acme,role=producer".to_owned(),
+        });
+
+        assert!(props.is_oidc());
+
+        let mut config = ClientConfig::new();
+        props.set_security_properties(&mut config);
+
+        assert_eq!(config.get("security.protocol"), Some("SASL_SSL"));
+        assert_eq!(config.get("sasl.mechanism"), Some("OAUTHBEARER"));
+        assert_eq!(config.get("sasl.oauthbearer.method"), Some("oidc"));
+        assert_eq!(config.get("sasl.oauthbearer.client.id"), Some("my-client"));
+        assert_eq!(
+            config.get("sasl.oauthbearer.client.secret"),
+            Some("my-secret")
+        );
+        assert_eq!(
+            config.get("sasl.oauthbearer.token.endpoint.url"),
+            Some("https://idp.example.com/oauth/token")
+        );
+        assert_eq!(config.get("sasl.oauthbearer.scope"), Some("kafka"));
+        assert_eq!(
+            config.get("sasl.oauthbearer.extensions"),
+            Some("tenant=acme,role=producer")
+        );
+
+        // The unsecure JWT handler must NOT be enabled when the OIDC method is in use,
+        // otherwise librdkafka rejects the config.
+        assert_eq!(config.get("enable.sasl.oauthbearer.unsecure.jwt"), None);
+    }
+
+    #[test]
+    fn test_kafka_default_oauthbearer_keeps_unsecure_jwt_enabled() {
+        let props = parse_kafka_connection_props(btreemap! {
+            "properties.bootstrap.server".to_owned() => "broker:9092".to_owned(),
+            "properties.security.protocol".to_owned() => "SASL_PLAINTEXT".to_owned(),
+            "properties.sasl.mechanism".to_owned() => "OAUTHBEARER".to_owned(),
+            "properties.sasl.oauthbearer.config".to_owned()
+                => "principal=admin scope=kafka".to_owned(),
+        });
+
+        assert!(!props.is_oidc());
+
+        let mut config = ClientConfig::new();
+        props.set_security_properties(&mut config);
+
+        assert_eq!(config.get("sasl.mechanism"), Some("OAUTHBEARER"));
+        assert_eq!(
+            config.get("sasl.oauthbearer.config"),
+            Some("principal=admin scope=kafka")
+        );
+        // Backwards compatibility: default OAUTHBEARER still uses the unsecure JWT handler.
+        assert_eq!(
+            config.get("enable.sasl.oauthbearer.unsecure.jwt"),
+            Some("true")
+        );
+        assert_eq!(config.get("sasl.oauthbearer.method"), None);
+    }
+
+    #[test]
+    fn test_kafka_oidc_client_secret_is_enforced_as_secret() {
+        assert!(
+            KafkaConnectionProps::ENFORCE_SECRET_PROPERTIES
+                .contains("properties.sasl.oauthbearer.client.secret")
+        );
+    }
+}
+

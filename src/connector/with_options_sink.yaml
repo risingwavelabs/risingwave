@@ -886,7 +886,43 @@ KafkaConfig:
     required: false
   - name: properties.sasl.oauthbearer.config
     field_type: String
-    comments: Configurations for SASL/OAUTHBEARER.
+    comments: |-
+      Configurations for SASL/OAUTHBEARER. Only used with the default (unsecured) OAUTHBEARER
+      handler.
+    required: false
+  - name: properties.sasl.oauthbearer.method
+    field_type: String
+    comments: |-
+      SASL/OAUTHBEARER login method. Set to `oidc` to use the built-in OIDC client and fetch
+      tokens from an OAuth 2.0 / OIDC identity provider. When `oidc`, the properties
+      `properties.sasl.oauthbearer.client.id`, `properties.sasl.oauthbearer.client.secret` and
+      `properties.sasl.oauthbearer.token.endpoint.url` must be provided.
+    required: false
+  - name: properties.sasl.oauthbearer.client.id
+    field_type: String
+    comments: OIDC client id. Only used when `properties.sasl.oauthbearer.method` is `oidc`.
+    required: false
+  - name: properties.sasl.oauthbearer.client.secret
+    field_type: String
+    comments: OIDC client secret. Only used when `properties.sasl.oauthbearer.method` is `oidc`.
+    required: false
+  - name: properties.sasl.oauthbearer.token.endpoint.url
+    field_type: String
+    comments: |-
+      OAuth/OIDC token endpoint URL used to retrieve the access token. Only used when
+      `properties.sasl.oauthbearer.method` is `oidc`.
+    required: false
+  - name: properties.sasl.oauthbearer.scope
+    field_type: String
+    comments: |-
+      OAuth scope the client requests from the authorization server. Only used when
+      `properties.sasl.oauthbearer.method` is `oidc`.
+    required: false
+  - name: properties.sasl.oauthbearer.extensions
+    field_type: String
+    comments: |-
+      Comma-separated `key=value` pairs sent as SASL extensions to the broker. Only used when
+      `properties.sasl.oauthbearer.method` is `oidc`.
     required: false
   - name: properties.retry.max
     field_type: u32
