@@ -224,9 +224,6 @@ impl Binder {
         let (select_items, aliases) = self.bind_select_list(&select.projection)?;
         let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
 
-        // Bind DISTINCT ON.
-        let distinct =
-            self.bind_distinct_on(&select.distinct, &out_name_to_index, &select_items)?;
 
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
@@ -289,6 +286,10 @@ impl Binder {
                     .try_collect()?,
             )
         };
+        // Bind DISTINCT ON.
+        let distinct =
+            self.bind_distinct_on(&select.distinct, &out_name_to_index, &select_items)?;
+
         self.context.clause = None;
 
         // Bind HAVING clause.
