@@ -756,27 +756,13 @@ async fn create_and_validate_table_impl(
 
 async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkParam) -> Result<()> {
     let catalog = config.create_catalog().await?;
-    let namespace = if let Some(database_name) = config.table.database_name() {
-        let namespace = NamespaceIdent::new(database_name.to_owned());
-        if !catalog
-            .namespace_exists(&namespace)
-            .await
-            .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
-        {
-            catalog
-                .create_namespace(&namespace, HashMap::default())
-                .await
-                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-                .context("failed to create iceberg namespace")?;
-        }
-        namespace
-    } else {
-        bail!("database name must be set if you want to create table")
-    };
-
     let table_id = config
         .full_table_name()
         .context("Unable to parse table name")?;
+    let namespace = table_id.namespace().clone();
+    let table_name = table_id.name().to_owned();
+    create_namespace_if_not_exists(catalog.as_ref(), &namespace).await?;
+
     if !catalog
         .table_exists(&table_id)
         .await
@@ -804,7 +790,7 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
 
         let location = {
             let mut names = namespace.clone().inner();
-            names.push(config.table.table_name().to_owned());
+            names.push(table_name.clone());
             match &config.common.warehouse_path {
                 Some(warehouse_path) => {
                     let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
@@ -872,7 +858,7 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
         )]);
 
         let table_creation_builder = TableCreation::builder()
-            .name(config.table.table_name().to_owned())
+            .name(table_name)
             .schema(iceberg_schema)
             .format_version(config.table_format_version())
             .properties(properties);
@@ -895,6 +881,34 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
             .map_err(|e| SinkError::Iceberg(anyhow!(e)))
             .context("failed to create iceberg table")?;
     }
+    Ok(())
+}
+
+async fn create_namespace_if_not_exists(
+    catalog: &dyn Catalog,
+    namespace: &NamespaceIdent,
+) -> Result<()> {
+    let mut namespaces = vec![namespace.clone()];
+    let mut parent = namespace.parent();
+    while let Some(parent_namespace) = parent {
+        parent = parent_namespace.parent();
+        namespaces.push(parent_namespace);
+    }
+
+    for namespace in namespaces.into_iter().rev() {
+        if !catalog
+            .namespace_exists(&namespace)
+            .await
+            .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
+        {
+            catalog
+                .create_namespace(&namespace, HashMap::default())
+                .await
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .with_context(|| format!("failed to create iceberg namespace: {namespace}"))?;
+        }
+    }
+
     Ok(())
 }
 
