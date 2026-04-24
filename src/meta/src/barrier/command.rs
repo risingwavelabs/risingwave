@@ -717,7 +717,6 @@ impl PostCollectCommand {
         }
     }
 
-
     pub fn command_name(&self) -> &str {
         match self {
             PostCollectCommand::Command(name) => name.as_str(),
