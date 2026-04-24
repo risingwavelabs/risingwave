@@ -21,7 +21,7 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
-use risingwave_connector::connector_common::create_pg_client;
+use risingwave_connector::connector_common::{PgConnectionConfig, create_pg_client};
 use risingwave_connector::source::iceberg::{
     FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
     new_azblob_operator, new_gcs_operator, new_s3_operator,
@@ -403,17 +403,16 @@ impl TableFunction {
                         .get(7)
                         .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
 
-                    let client = create_pg_client(
-                        &evaled_args[2],
-                        &evaled_args[3],
-                        &evaled_args[0],
-                        &evaled_args[1],
-                        &evaled_args[4],
-                        &ssl_mode,
-                        &ssl_root_cert,
-                        None,
-                    )
-                    .await?;
+                    let pg_conn = PgConnectionConfig {
+                        host: evaled_args[0].clone(),
+                        port: evaled_args[1].clone(),
+                        user: evaled_args[2].clone(),
+                        password: evaled_args[3].clone(),
+                        database: evaled_args[4].clone(),
+                        ssl_mode,
+                        ssl_root_cert,
+                    };
+                    let client = create_pg_client(&pg_conn, None).await?;
 
                     let statement = client.prepare(evaled_args[5].as_str()).await?;
 
