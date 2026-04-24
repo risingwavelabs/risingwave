@@ -802,7 +802,6 @@ mod test {
             "default"
         );
     }
-
     #[test]
     fn test_streaming_parallelism_for_backfill_accepts_default_and_fixed() {
         let mut config = SessionConfig::default();

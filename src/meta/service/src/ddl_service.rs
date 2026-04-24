@@ -23,6 +23,7 @@ use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::id::{ObjectId, TableId};
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
@@ -1099,6 +1100,7 @@ impl DdlService for DdlServiceImpl {
                 job_id,
                 ReschedulePolicy::Parallelism(ParallelismPolicy {
                     parallelism: streaming_parallelism,
+                    adaptive_parallelism_strategy: None,
                 }),
             )
             .await?;
@@ -1115,18 +1117,41 @@ impl DdlService for DdlServiceImpl {
         let parallelism = *req.get_parallelism()?;
         let deferred = req.get_deferred();
 
-        let parallelism = match parallelism.get_parallelism()? {
+        let adaptive_parallelism_strategy = req.adaptive_parallelism_strategy;
+        let (parallelism, adaptive_parallelism_strategy) = match parallelism.get_parallelism()? {
             Parallelism::Fixed(FixedParallelism { parallelism }) => {
-                StreamingParallelism::Fixed(*parallelism as _)
+                (StreamingParallelism::Fixed(*parallelism as _), None)
             }
-            Parallelism::Auto(_) | Parallelism::Adaptive(_) => StreamingParallelism::Adaptive,
-            _ => bail_unavailable!(),
+            Parallelism::Auto(_) | Parallelism::Adaptive(_) => (
+                StreamingParallelism::Adaptive,
+                Some(adaptive_parallelism_strategy.unwrap_or_else(|| "AUTO".to_owned())),
+            ),
+            Parallelism::Custom(_) => (
+                StreamingParallelism::Adaptive,
+                Some(adaptive_parallelism_strategy.ok_or_else(|| {
+                    Status::invalid_argument(
+                        "adaptive_parallelism_strategy is required for custom parallelism",
+                    )
+                })?),
+            ),
+        };
+
+        if let Some(strategy) = adaptive_parallelism_strategy.as_deref() {
+            parse_strategy(strategy).map_err(|e| {
+                Status::invalid_argument(format!(
+                    "invalid adaptive parallelism strategy: {}",
+                    e.as_report()
+                ))
+            })?;
         };
 
         self.ddl_controller
             .reschedule_streaming_job(
                 job_id,
-                ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
+                ReschedulePolicy::Parallelism(ParallelismPolicy {
+                    parallelism,
+                    adaptive_parallelism_strategy,
+                }),
                 deferred,
             )
             .await?;
@@ -1142,20 +1167,44 @@ impl DdlService for DdlServiceImpl {
 
         let job_id = req.get_table_id();
         let deferred = req.get_deferred();
+        let adaptive_parallelism_strategy = req.adaptive_parallelism_strategy;
 
         let parallelism = match req.parallelism {
             None => None,
             Some(parallelism) => {
-                let parallelism = match parallelism.get_parallelism()? {
+                let (parallelism, adaptive_parallelism_strategy) = match parallelism
+                    .get_parallelism()?
+                {
                     Parallelism::Fixed(FixedParallelism { parallelism }) => {
-                        StreamingParallelism::Fixed(*parallelism as _)
+                        (StreamingParallelism::Fixed(*parallelism as _), None)
                     }
-                    Parallelism::Auto(_) | Parallelism::Adaptive(_) => {
-                        StreamingParallelism::Adaptive
-                    }
-                    _ => bail_unavailable!(),
+                    Parallelism::Auto(_) | Parallelism::Adaptive(_) => (
+                        StreamingParallelism::Adaptive,
+                        Some(adaptive_parallelism_strategy.unwrap_or_else(|| "AUTO".to_owned())),
+                    ),
+                    Parallelism::Custom(_) => (
+                        StreamingParallelism::Adaptive,
+                        Some(adaptive_parallelism_strategy.ok_or_else(|| {
+                            Status::invalid_argument(
+                                "adaptive_parallelism_strategy is required for custom parallelism",
+                            )
+                        })?),
+                    ),
                 };
-                Some(parallelism)
+
+                if let Some(strategy) = adaptive_parallelism_strategy.as_deref() {
+                    parse_strategy(strategy).map_err(|e| {
+                        Status::invalid_argument(format!(
+                            "invalid adaptive parallelism strategy: {}",
+                            e.as_report()
+                        ))
+                    })?;
+                };
+
+                Some(ParallelismPolicy {
+                    parallelism,
+                    adaptive_parallelism_strategy,
+                })
             }
         };
 

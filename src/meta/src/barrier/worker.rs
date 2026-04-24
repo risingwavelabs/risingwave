@@ -24,8 +24,8 @@ use arc_swap::ArcSwap;
 use futures::{TryFutureExt, pin_mut};
 use itertools::Itertools;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_common::system_param::{AdaptiveParallelismStrategy, PAUSE_ON_NEXT_BOOTSTRAP_KEY};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::Recovery;
@@ -86,8 +86,6 @@ pub(super) struct GlobalBarrierWorker<C> {
     /// Whether per database failure isolation is enabled in system parameters.
     system_enable_per_database_isolation: bool,
 
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-
     pub(super) context: Arc<C>,
 
     env: MetaSrvEnv,
@@ -142,13 +140,8 @@ mod tests {
             checkpoint: false,
         };
 
-        let result = resolve_reschedule_intent(
-            env,
-            HashMap::new(),
-            AdaptiveParallelismStrategy::default(),
-            Some(&database_info),
-            new_barrier,
-        );
+        let result =
+            resolve_reschedule_intent(env, HashMap::new(), Some(&database_info), new_barrier);
 
         assert!(matches!(result, Ok(None)));
         let started = started_rx.await.expect("started notifier dropped");
@@ -172,14 +165,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let system_enable_per_database_isolation = reader.per_database_isolation();
         // Load config will be performed in bootstrap phase.
         let periodic_barriers = PeriodicBarriers::default();
-        let adaptive_parallelism_strategy = reader.adaptive_parallelism_strategy();
 
         let checkpoint_control = CheckpointControl::new(env.clone());
         Self {
             enable_recovery,
             periodic_barriers,
             system_enable_per_database_isolation,
-            adaptive_parallelism_strategy,
             context,
             env,
             checkpoint_control,
@@ -194,7 +185,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 fn resolve_reschedule_intent(
     env: MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     database_info: Option<&InflightDatabaseInfo>,
     mut new_barrier: schedule::NewBarrier,
 ) -> MetaResult<Option<schedule::NewBarrier>> {
@@ -226,7 +216,6 @@ fn resolve_reschedule_intent(
                 build_reschedule_from_context(
                     &env,
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     new_barrier.database_id,
                     context,
                     database_info.ok_or_else(|| {
@@ -274,7 +263,6 @@ fn resolve_reschedule_intent(
 fn build_reschedule_from_context(
     env: &MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     database_id: DatabaseId,
     context: RescheduleContext,
     database_info: &InflightDatabaseInfo,
@@ -294,11 +282,7 @@ fn build_reschedule_from_context(
         .map(|fragment| (fragment.fragment_id, fragment))
         .collect();
 
-    let previewed = preview_actor_assignments(
-        &worker_nodes,
-        adaptive_parallelism_strategy,
-        &context.loaded,
-    )?;
+    let previewed = preview_actor_assignments(&worker_nodes, &context.loaded)?;
 
     if rendered_layout_matches_current(&previewed.fragments, &all_prev_fragments)? {
         return Ok(None);
@@ -543,7 +527,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             self.periodic_barriers
                                 .set_sys_checkpoint_frequency(p.checkpoint_frequency());
                             self.system_enable_per_database_isolation = p.per_database_isolation();
-                            self.adaptive_parallelism_strategy = p.adaptive_parallelism_strategy();
                         }
                     }
                 }
@@ -587,7 +570,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     let rendered_info = render_runtime_info(
                                         self.env.actor_id_generator(),
                                         &self.active_streaming_nodes,
-                                        self.adaptive_parallelism_strategy,
                                         &runtime_info.recovery_context,
                                         database_id,
                                     )
@@ -729,12 +711,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             .iter()
                             .map(|(worker_id, worker)| (*worker_id, worker.clone()))
                             .collect();
-                        let adaptive_parallelism_strategy = self.adaptive_parallelism_strategy;
                         let database_info = self.checkpoint_control.database_info(database_id);
                         match resolve_reschedule_intent(
                             env,
                             worker_nodes,
-                            adaptive_parallelism_strategy,
                             database_info,
                             new_barrier,
                         ) {
@@ -751,7 +731,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(
                         new_barrier,
                         &mut self.partial_graph_manager,
-                        self.adaptive_parallelism_strategy,
                         self.active_streaming_nodes.current()
                     ) {
                         if !self.enable_recovery {
@@ -1043,7 +1022,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         let Some(rendered_info) = render_runtime_info(
                             self.env.actor_id_generator(),
                             &active_streaming_nodes,
-                            self.adaptive_parallelism_strategy,
                             &recovery_context,
                             database_id,
                         )

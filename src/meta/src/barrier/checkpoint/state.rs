@@ -23,7 +23,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{DispatcherType, WorkerId, streaming_job};
@@ -268,7 +267,6 @@ fn render_actors(
     streaming_job_model: &streaming_job::Model,
     actor_id_counter: &AtomicU32,
     worker_map: &HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     ensembles: &[NoShuffleEnsemble],
     database_resource_group: &str,
 ) -> MetaResult<RenderResult> {
@@ -330,7 +328,6 @@ fn render_actors(
             EnsembleActorTemplate::render_new(
                 streaming_job_model,
                 worker_map,
-                adaptive_parallelism_strategy,
                 None,
                 database_resource_group.to_owned(),
                 distribution_type,
@@ -413,7 +410,6 @@ impl DatabaseCheckpointControl {
         barrier_info: BarrierInfo,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
-        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<ApplyCommandInfo> {
         debug_assert!(
@@ -512,7 +508,6 @@ impl DatabaseCheckpointControl {
                         .env
                         .actor_id_generator(),
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     &ensembles,
                     &info.database_resource_group,
                 )?;
@@ -645,7 +640,6 @@ impl DatabaseCheckpointControl {
                         .env
                         .actor_id_generator(),
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     &ensembles,
                     &info.database_resource_group,
                 )?;
@@ -950,7 +944,6 @@ impl DatabaseCheckpointControl {
                         .env
                         .actor_id_generator(),
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     &ensembles,
                     &plan.database_resource_group,
                 )?;

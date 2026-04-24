@@ -116,7 +116,6 @@ pub async fn load_fragment_info<C>(
     actor_id_counter: &AtomicU32,
     database_id: Option<DatabaseId>,
     worker_nodes: &ActiveStreamingWorkerNodes,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
 ) -> MetaResult<FragmentRenderMap>
 where
     C: ConnectionTrait,
@@ -145,12 +144,8 @@ where
         return Ok(HashMap::new());
     }
 
-    let RenderedGraph { fragments, .. } = render_actor_assignments(
-        actor_id_counter,
-        worker_nodes.current(),
-        adaptive_parallelism_strategy,
-        &loaded,
-    )?;
+    let RenderedGraph { fragments, .. } =
+        render_actor_assignments(actor_id_counter, worker_nodes.current(), &loaded)?;
 
     Ok(fragments)
 }
@@ -593,32 +588,20 @@ where
 pub(crate) fn render_actor_assignments(
     actor_id_counter: &AtomicU32,
     worker_map: &HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     loaded: &LoadedFragmentContext,
 ) -> MetaResult<RenderedGraph> {
     let mut actor_id_allocator = RenderActorIdAllocator::Persistent(actor_id_counter);
-    render_actor_assignments_with_allocator(
-        &mut actor_id_allocator,
-        worker_map,
-        adaptive_parallelism_strategy,
-        loaded,
-    )
+    render_actor_assignments_with_allocator(&mut actor_id_allocator, worker_map, loaded)
 }
 
 /// Render a graph with preview-only actor ids so callers can compare layouts
 /// without consuming the global actor id generator.
 pub(crate) fn preview_actor_assignments(
     worker_map: &HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     loaded: &LoadedFragmentContext,
 ) -> MetaResult<RenderedGraph> {
     let mut actor_id_allocator = RenderActorIdAllocator::Preview { next_actor_id: 0 };
-    render_actor_assignments_with_allocator(
-        &mut actor_id_allocator,
-        worker_map,
-        adaptive_parallelism_strategy,
-        loaded,
-    )
+    render_actor_assignments_with_allocator(&mut actor_id_allocator, worker_map, loaded)
 }
 
 /// Replace preview actor ids with real actor ids after the caller has decided
@@ -761,7 +744,6 @@ fn assert_materialization_preserves_preview_slots(
 fn render_actor_assignments_with_allocator(
     actor_id_allocator: &mut RenderActorIdAllocator<'_>,
     worker_map: &HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     loaded: &LoadedFragmentContext,
 ) -> MetaResult<RenderedGraph> {
     if loaded.is_empty() {
@@ -781,7 +763,6 @@ fn render_actor_assignments_with_allocator(
         &loaded.job_fragments,
         &loaded.job_map,
         worker_map,
-        adaptive_parallelism_strategy,
         render_context,
     )?;
 
@@ -882,7 +863,7 @@ where
 }
 
 // Only metadata resolved asynchronously lives here so the renderer stays synchronous
-// and the call site keeps the runtime dependencies (maps, strategy, actor counter, etc.) explicit.
+// and the call site keeps the runtime dependencies (maps, actor counter, etc.) explicit.
 struct RenderActorsContext<'a> {
     fragment_source_ids: &'a HashMap<FragmentId, SourceId>,
     fragment_splits: &'a HashMap<FragmentId, Vec<SplitImpl>>,
@@ -923,7 +904,6 @@ fn render_actors(
     job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
     job_map: &HashMap<JobId, streaming_job::Model>,
     worker_map: &HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     context: RenderActorsContext<'_>,
 ) -> MetaResult<FragmentRenderMap> {
     let mut actor_id_allocator = RenderActorIdAllocator::Persistent(actor_id_counter);
@@ -933,7 +913,6 @@ fn render_actors(
         job_fragments,
         job_map,
         worker_map,
-        adaptive_parallelism_strategy,
         context,
     )
 }
@@ -944,7 +923,6 @@ fn render_actors_with_allocator(
     job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
     job_map: &HashMap<JobId, streaming_job::Model>,
     worker_map: &HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     context: RenderActorsContext<'_>,
 ) -> MetaResult<FragmentRenderMap> {
     let RenderActorsContext {
@@ -1014,7 +992,6 @@ fn render_actors_with_allocator(
         let actor_template = EnsembleActorTemplate::render_new(
             job,
             worker_map,
-            adaptive_parallelism_strategy,
             entry_fragment_parallelism,
             database_resource_group,
             distribution_type,
@@ -1118,17 +1095,15 @@ impl EnsembleActorTemplate {
     pub(crate) fn render_new(
         job: &streaming_job::Model,
         worker_map: &HashMap<WorkerId, WorkerNode>,
-        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         entry_fragment_parallelism: Option<StreamingParallelism>,
         database_resource_group: String,
         distribution_type: DistributionType,
         vnode_count: usize,
     ) -> MetaResult<Self> {
         let job_id = job.job_id;
-        let job_strategy = job
-            .stream_context()
-            .adaptive_parallelism_strategy
-            .unwrap_or(adaptive_parallelism_strategy);
+        let stream_context = job.stream_context();
+        let job_strategy = stream_context.adaptive_parallelism_strategy;
+        let backfill_job_strategy = stream_context.backfill_adaptive_parallelism_strategy;
 
         let resource_group = match &job.specific_resource_group {
             None => database_resource_group,
@@ -1167,13 +1142,26 @@ impl EnsembleActorTemplate {
         } else {
             &job.parallelism
         };
+        let effective_job_strategy = if job.job_status != JobStatus::Created {
+            backfill_job_strategy.or(job_strategy)
+        } else {
+            job_strategy
+        };
 
         let actual_parallelism = match entry_fragment_parallelism
             .as_ref()
             .unwrap_or(effective_job_parallelism)
         {
             StreamingParallelism::Adaptive | StreamingParallelism::Custom => {
-                job_strategy.compute_target_parallelism(total_parallelism)
+                let effective_job_strategy = effective_job_strategy.unwrap_or_else(|| {
+                    tracing::warn!(
+                        job_id = %job_id,
+                        ?effective_job_parallelism,
+                        "adaptive/custom job is missing adaptive strategy in StreamContext; falling back to default"
+                    );
+                    AdaptiveParallelismStrategy::default()
+                });
+                effective_job_strategy.compute_target_parallelism(total_parallelism)
             }
             StreamingParallelism::Fixed(n) => *n,
         }
@@ -1984,6 +1972,7 @@ mod tests {
             adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(1),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 1,
             specific_resource_group: None,
@@ -2028,7 +2017,6 @@ mod tests {
             &job_fragments,
             &job_map,
             &worker_map,
-            AdaptiveParallelismStrategy::Auto,
             context,
         )
         .expect("actor rendering succeeds");
@@ -2077,6 +2065,7 @@ mod tests {
             adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 2,
             specific_resource_group: None,
@@ -2126,7 +2115,6 @@ mod tests {
             &job_fragments,
             &job_map,
             &worker_map,
-            AdaptiveParallelismStrategy::Auto,
             context,
         )
         .expect("actor rendering succeeds");
@@ -2191,6 +2179,7 @@ mod tests {
             adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 2,
             specific_resource_group: None,
@@ -2255,7 +2244,6 @@ mod tests {
             &job_fragments,
             &job_map,
             &worker_map,
-            AdaptiveParallelismStrategy::Auto,
             context,
         )
         .expect("actor rendering succeeds");
@@ -2316,6 +2304,7 @@ mod tests {
             adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 2,
             specific_resource_group: None,
@@ -2372,8 +2361,7 @@ mod tests {
         };
 
         let preview =
-            preview_actor_assignments(&worker_map, AdaptiveParallelismStrategy::Auto, &loaded)
-                .expect("preview rendering succeeds");
+            preview_actor_assignments(&worker_map, &loaded).expect("preview rendering succeeds");
         assert_eq!(actor_id_counter.load(Ordering::Relaxed), 100);
 
         let preview_entry_state =
@@ -2424,6 +2412,7 @@ mod tests {
             adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
             parallelism: StreamingParallelism::Adaptive,
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 8,
             specific_resource_group: None,
@@ -2474,7 +2463,6 @@ mod tests {
             &fragment_map,
             &job_map,
             &worker_map,
-            AdaptiveParallelismStrategy::Full,
             context,
         )
         .expect("actor rendering succeeds");
@@ -2488,9 +2476,10 @@ mod tests {
         );
     }
 
-    /// Test that global strategy is used when job has no custom strategy.
+    /// Test that adaptive jobs without a persisted strategy fall back to the default adaptive
+    /// strategy instead of failing.
     #[test]
-    fn render_actors_uses_global_strategy_when_job_has_none() {
+    fn render_actors_falls_back_to_default_when_adaptive_job_has_no_strategy() {
         let actor_id_counter = AtomicU32::new(0);
         let fragment_id: FragmentId = 1.into();
         let job_id: JobId = 101.into();
@@ -2515,6 +2504,7 @@ mod tests {
             adaptive_parallelism_strategy: None, // No custom strategy
             parallelism: StreamingParallelism::Adaptive,
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 8,
             specific_resource_group: None,
@@ -2558,24 +2548,21 @@ mod tests {
             database_map: &database_map,
         };
 
-        // Global strategy is BOUNDED(3)
         let result = render_actors(
             &actor_id_counter,
             &ensembles,
             &fragment_map,
             &job_map,
             &worker_map,
-            AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(3).unwrap()),
             context,
         )
         .expect("actor rendering succeeds");
 
         let state = collect_actor_state(&result[&database_id][&job_id][&fragment_id]);
-        // Should use global strategy BOUNDED(3)
         assert_eq!(
             state.len(),
-            3,
-            "Should use global strategy BOUNDED(3) when job has no custom strategy"
+            4,
+            "default adaptive strategy should use the full available parallelism"
         );
     }
 
@@ -2607,6 +2594,7 @@ mod tests {
             adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
             parallelism: StreamingParallelism::Fixed(5),
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 8,
             specific_resource_group: None,
@@ -2658,7 +2646,6 @@ mod tests {
             &fragment_map,
             &job_map,
             &worker_map,
-            AdaptiveParallelismStrategy::Full,
             context,
         )
         .expect("actor rendering succeeds");
@@ -2699,6 +2686,7 @@ mod tests {
             adaptive_parallelism_strategy: Some("RATIO(0.5)".to_owned()),
             parallelism: StreamingParallelism::Adaptive,
             backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
             backfill_orders: None,
             max_parallelism: 16,
             specific_resource_group: None,
@@ -2752,7 +2740,6 @@ mod tests {
             &fragment_map,
             &job_map,
             &worker_map,
-            AdaptiveParallelismStrategy::Full,
             context,
         )
         .expect("actor rendering succeeds");
@@ -2763,6 +2750,91 @@ mod tests {
             state.len(),
             4,
             "RATIO(0.5) of 8 workers should give 4 actors"
+        );
+    }
+
+    #[test]
+    fn render_actors_backfill_strategy_overrides_job_strategy() {
+        let actor_id_counter = AtomicU32::new(0);
+        let fragment_id: FragmentId = 1.into();
+        let job_id: JobId = 104.into();
+        let database_id: DatabaseId = DatabaseId::new(14);
+
+        let fragment_model = build_fragment(
+            fragment_id,
+            job_id,
+            0,
+            DistributionType::Hash,
+            16,
+            StreamingParallelism::Adaptive,
+        );
+
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Creating,
+            create_type: CreateType::Background,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: Some("BOUNDED(4)".to_owned()),
+            parallelism: StreamingParallelism::Adaptive,
+            backfill_parallelism: Some(StreamingParallelism::Adaptive),
+            backfill_adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
+            backfill_orders: None,
+            max_parallelism: 16,
+            specific_resource_group: None,
+            is_serverless_backfill: false,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "test_db".into(),
+            resource_group: "default".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([fragment_id]),
+            components: HashSet::from([fragment_id]),
+        }];
+
+        let fragment_map =
+            HashMap::from([(job_id, HashMap::from([(fragment_id, fragment_model)]))]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        let worker_map = HashMap::from([
+            (1.into(), build_worker_node(1, 1, "default")),
+            (2.into(), build_worker_node(2, 1, "default")),
+            (3.into(), build_worker_node(3, 1, "default")),
+            (4.into(), build_worker_node(4, 1, "default")),
+        ]);
+
+        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
+        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let state = collect_actor_state(&result[&database_id][&job_id][&fragment_id]);
+        assert_eq!(
+            state.len(),
+            2,
+            "Backfill strategy BOUNDED(2) should override the job strategy during backfill"
         );
     }
 }

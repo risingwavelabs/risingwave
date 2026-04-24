@@ -43,7 +43,7 @@ use crate::optimizer::backfill_order_strategy::explain_backfill_order_in_dot_for
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{BatchPlanRef, Explain, StreamPlanRef};
 use crate::scheduler::BatchPlanFragmenter;
-use crate::stream_fragmenter::build_graph;
+use crate::stream_fragmenter::{GraphJobType, build_graph};
 use crate::utils::{explain_stream_graph, explain_stream_graph_as_dot};
 
 pub async fn do_handle_explain(
@@ -65,7 +65,7 @@ pub async fn do_handle_explain(
     let session = handler_args.session.clone();
 
     enum PhysicalPlanRef {
-        Stream(StreamPlanRef),
+        Stream(StreamPlanRef, Option<GraphJobType>),
         Batch(BatchPlanRef),
     }
     enum PlanToExplain {
@@ -119,7 +119,10 @@ pub async fn do_handle_explain(
                 .await?;
                 let context = plan.ctx();
                 (
-                    Ok(PlanToExplain::Rw(PhysicalPlanRef::Stream(plan))),
+                    Ok(PlanToExplain::Rw(PhysicalPlanRef::Stream(
+                        plan,
+                        Some(GraphJobType::Table),
+                    ))),
                     Some(table),
                     context,
                 )
@@ -130,7 +133,10 @@ pub async fn do_handle_explain(
                     .map(|plan| plan.sink_plan)?;
                 let context = plan.ctx();
                 (
-                    Ok(PlanToExplain::Rw(PhysicalPlanRef::Stream(plan))),
+                    Ok(PlanToExplain::Rw(PhysicalPlanRef::Stream(
+                        plan,
+                        Some(GraphJobType::Sink),
+                    ))),
                     None,
                     context,
                 )
@@ -176,7 +182,10 @@ pub async fn do_handle_explain(
                     } => gen_create_mv_plan(&session, context, *query, name, columns, emit_mode)
                         .map(|(plan, table)| {
                             (
-                                PlanToExplain::Rw(PhysicalPlanRef::Stream(plan)),
+                                PlanToExplain::Rw(PhysicalPlanRef::Stream(
+                                    plan,
+                                    Some(GraphJobType::MaterializedView),
+                                )),
                                 Some(table),
                             )
                         }),
@@ -221,7 +230,10 @@ pub async fn do_handle_explain(
                     }
                     .map(|(plan, index_table, _index)| {
                         (
-                            PlanToExplain::Rw(PhysicalPlanRef::Stream(plan)),
+                            PlanToExplain::Rw(PhysicalPlanRef::Stream(
+                                plan,
+                                Some(GraphJobType::Index),
+                            )),
                             Some(index_table),
                         )
                     }),
@@ -285,8 +297,8 @@ pub async fn do_handle_explain(
                                 ExplainFormat::Json
                             }
                         }
-                        PlanToExplain::Rw(PhysicalPlanRef::Stream(plan)) => {
-                            let graph = build_graph(plan.clone(), None)?;
+                        PlanToExplain::Rw(PhysicalPlanRef::Stream(plan, job_type)) => {
+                            let graph = build_graph(plan.clone(), *job_type)?;
                             let table = table.map(|x| x.to_prost());
                             if explain_format == ExplainFormat::Dot {
                                 blocks.push(explain_stream_graph_as_dot(
@@ -316,7 +328,7 @@ pub async fn do_handle_explain(
                     match physical_plan {
                         PlanToExplain::Rw(physical_plan) => {
                             let plan = match &physical_plan {
-                                PhysicalPlanRef::Stream(plan) => plan as &dyn Explain,
+                                PhysicalPlanRef::Stream(plan, _) => plan as &dyn Explain,
                                 PhysicalPlanRef::Batch(plan) => plan as &dyn Explain,
                             };
                             match explain_format {
@@ -328,7 +340,7 @@ pub async fn do_handle_explain(
                                 ExplainFormat::Yaml => blocks.push(plan.explain_to_yaml()),
                                 ExplainFormat::Dot => {
                                     if explain_backfill
-                                        && let PhysicalPlanRef::Stream(plan) = physical_plan
+                                        && let PhysicalPlanRef::Stream(plan, _) = physical_plan
                                     {
                                         let dot_formatted_backfill_order =
                                             explain_backfill_order_in_dot_format(

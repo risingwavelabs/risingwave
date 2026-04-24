@@ -36,6 +36,7 @@ echo "--- Run generic source tests"
 risedev slt './e2e_test/source_inline/fs/posix_fs.slt'
 risedev slt './e2e_test/source_inline/refresh/refresh_table.slt'
 risedev slt './e2e_test/source_inline/vault/vault_secret_ddl.slt'
+risedev slt './e2e_test/ddl/streaming_parallelism/source.slt' --label 'streaming_parallelism_source_kafka'
 
 echo "--- Run webhook source tests"
 sleep 5

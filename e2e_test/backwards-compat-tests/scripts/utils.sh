@@ -265,6 +265,15 @@ seed_old_cluster() {
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/version-columns/validate_original.slt"
   fi
 
+  # Test legacy streaming parallelism session parameter migration for versions in [2.8.0, 2.9.0).
+  if version_le "2.8.0" "$OLD_VERSION" && version_lt "$OLD_VERSION" "2.9.0"; then
+    echo "--- STREAMING PARALLELISM TEST: Seeding old cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/streaming-parallelism/seed.slt"
+
+    echo "--- STREAMING PARALLELISM TEST: Validating old cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/streaming-parallelism/validate_original.slt"
+  fi
+
   # Test invalid WITH options, if OLD_VERSION <= 1.5.0
   if version_le "$OLD_VERSION" "1.5.0"; then
     echo "--- KAFKA TEST (invalid options): Seeding old cluster with data"
@@ -338,6 +347,12 @@ validate_new_cluster() {
   if version_le "$OLD_VERSION" "2.6.0"; then
     echo "--- VERSION COLUMNS TEST: Validating new cluster"
     sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/version-columns/validate_restart.slt"
+  fi
+
+  # Test legacy streaming parallelism session parameter migration for versions in [2.8.0, 2.9.0).
+  if version_le "2.8.0" "$OLD_VERSION" && version_lt "$OLD_VERSION" "2.9.0"; then
+    echo "--- STREAMING PARALLELISM TEST: Validating new cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/streaming-parallelism/validate_restart.slt"
   fi
 
   # Test invalid WITH options, if OLD_VERSION <= 1.5.0
