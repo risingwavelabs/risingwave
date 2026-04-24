@@ -839,6 +839,7 @@ impl StorageWriterClient {
         let conn_options = ConnectionOptions {
             connect_timeout: CONNECT_TIMEOUT,
             timeout: CONNECTION_TIMEOUT,
+            ..Default::default()
         };
         let environment = Environment::GoogleCloud(Box::new(ts_grpc));
         let conn = ConnectionManager::new(DEFAULT_GRPC_CHANNEL_NUMS, &environment, &conn_options)
