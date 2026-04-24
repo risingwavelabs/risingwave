@@ -110,8 +110,8 @@ impl BlockStreamIterator {
     }
 
     async fn create_stream(&mut self) -> HummockResult<()> {
-        // Fast compact only support the single table compaction.(not split sst)
-        // So we don't need to filter the block_metas with table_id and key_range
+        // Fast compaction streams the physical SST blocks directly. Table-id pruning is handled
+        // later by `CompactTaskExecutor` before raw block copy or decoded block compaction.
         let block_stream = self
             .sstable_store
             .get_stream_for_blocks(
@@ -379,13 +379,13 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         let get_id_time = Arc::new(AtomicU64::new(0));
 
         let key_range = KeyRange::inf();
+        let read_table_ids = HashSet::from_iter(task.get_table_ids_from_input_ssts());
 
         let task_config = TaskConfig {
             key_range,
             cache_policy: CachePolicy::NotFill,
             gc_delete_keys: task.gc_delete_keys,
             retain_multiple_version: false,
-            stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
             table_schemas: Default::default(),
@@ -422,13 +422,19 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             compact_task_to_string(&task)
         );
         let left = Box::new(ConcatSstableIterator::new(
-            task.input_ssts[0].table_infos.clone(),
+            task.input_ssts[0]
+                .read_sstable_infos()
+                .cloned()
+                .collect_vec(),
             context.sstable_store.clone(),
             task_progress.clone(),
             context.storage_opts.compactor_iter_max_io_retry_times,
         ));
         let right = Box::new(ConcatSstableIterator::new(
-            task.input_ssts[1].table_infos.clone(),
+            task.input_ssts[1]
+                .read_sstable_infos()
+                .cloned()
+                .collect_vec(),
             context.sstable_store,
             task_progress.clone(),
             context.storage_opts.compactor_iter_max_io_retry_times,
@@ -447,8 +453,6 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             compaction_catalog_agent_ref,
         );
 
-        let compact_table_ids = HashSet::from_iter(task.build_compact_table_ids());
-
         Self {
             executor: CompactTaskExecutor::new(
                 sst_builder,
@@ -458,7 +462,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                 non_pk_prefix_state,
                 value_skip_watermark_state,
                 compaction_filter,
-                compact_table_ids,
+                read_table_ids,
             ),
             left,
             right,
@@ -659,7 +663,7 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
     value_skip_watermark_state: ValueSkipWatermarkState,
     compaction_filter: C,
-    compact_table_ids: HashSet<TableId>,
+    read_table_ids: HashSet<TableId>,
 }
 
 impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
@@ -671,7 +675,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
         value_skip_watermark_state: ValueSkipWatermarkState,
         compaction_filter: C,
-        compact_table_ids: HashSet<TableId>,
+        read_table_ids: HashSet<TableId>,
     ) -> Self {
         Self {
             builder,
@@ -687,7 +691,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             non_pk_prefix_skip_watermark_state,
             value_skip_watermark_state,
             compaction_filter,
-            compact_table_ids,
+            read_table_ids,
         }
     }
 
@@ -715,7 +719,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
 
     #[inline(always)]
     fn should_skip_block(&self, table_id: TableId) -> bool {
-        !self.compact_table_ids.contains(&table_id)
+        !self.read_table_ids.contains(&table_id)
     }
 
     #[inline(always)]
@@ -785,17 +789,9 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             if drop {
                 self.compaction_statistics.iter_drop_key_counts += 1;
 
-                let should_count = match self.task_config.stats_target_table_ids.as_ref() {
-                    Some(target_table_ids) => {
-                        target_table_ids.contains(&self.last_key.user_key.table_id)
-                    }
-                    None => true,
-                };
-                if should_count {
-                    self.last_table_stats.total_key_count -= 1;
-                    self.last_table_stats.total_key_size -= self.last_key.encoded_len() as i64;
-                    self.last_table_stats.total_value_size -= value.encoded_len() as i64;
-                }
+                self.last_table_stats.total_key_count -= 1;
+                self.last_table_stats.total_key_size -= self.last_key.encoded_len() as i64;
+                self.last_table_stats.total_value_size -= value.encoded_len() as i64;
                 iter.next();
                 continue;
             }
@@ -809,7 +805,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
 
     pub fn shall_copy_raw_block(&mut self, smallest_key: &FullKey<&[u8]>) -> bool {
         if self.should_skip_block(smallest_key.user_key.table_id) {
-            // If the table id of smallest key is not in compact_table_ids, we can not copy the raw block.
+            // If the table id of smallest key is not in read_table_ids, we can not copy the raw block.
             return false;
         }
 

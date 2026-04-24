@@ -48,8 +48,7 @@ use std::time::{Duration, SystemTime};
 use await_tree::{InstrumentAwait, SpanExt};
 pub use compaction_executor::CompactionExecutor;
 pub use compaction_filter::{
-    CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, StateCleanUpCompactionFilter,
-    TtlCompactionFilter,
+    CompactionFilter, DummyCompactionFilter, MultiCompactionFilter, TtlCompactionFilter,
 };
 pub use context::{
     CompactionAwaitTreeRegRef, CompactorContext, await_tree_key, new_compaction_await_tree_reg_ref,
@@ -841,28 +840,6 @@ pub fn start_compactor(
                         match event {
                             ResponseEvent::CompactTask(compact_task) => {
                                 let compact_task = CompactTask::from(compact_task);
-                                if compact_task.build_compact_table_ids().is_empty() {
-                                    tracing::info!(
-                                        task_id = compact_task.task_id,
-                                        "Skip compaction task because no existing table ids remain in input SSTs"
-                                    );
-                                    let (compact_task, table_stats, object_timestamps) =
-                                        compact_done(
-                                            compact_task,
-                                            context.clone(),
-                                            vec![],
-                                            TaskStatus::Success,
-                                        );
-
-                                    send_report_task_event(
-                                        &compact_task,
-                                        table_stats,
-                                        object_timestamps,
-                                        &request_sender,
-                                    );
-
-                                    continue 'consume_stream;
-                                }
                                 let parallelism =
                                     calculate_task_parallelism(&compact_task, &context);
 
@@ -928,8 +905,10 @@ pub fn start_compactor(
                                     let need_check_task = !compact_task.sorted_output_ssts.is_empty() && compact_task.task_status == TaskStatus::Success;
 
                                     if enable_check_compaction_result && need_check_task {
-                                        let compact_table_ids = compact_task.build_compact_table_ids();
-                                        match compaction_catalog_manager_ref.acquire(compact_table_ids.into_iter().collect()).await {
+                                        let read_table_ids = compact_task
+                                            .get_table_ids_from_input_ssts()
+                                            .collect::<Vec<_>>();
+                                        match compaction_catalog_manager_ref.acquire(read_table_ids.into_iter().collect()).await {
                                             Ok(compaction_catalog_agent_ref) =>  {
                                                 match check_compaction_result(&compact_task, context.clone(), compaction_catalog_agent_ref).await
                                                 {
