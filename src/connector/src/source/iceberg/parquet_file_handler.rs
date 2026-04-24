@@ -378,7 +378,7 @@ pub async fn read_parquet_file(
                     ColumnId::new(index as i32),
                     data_type,
                 );
-                SourceColumnDesc::from_column_desc(&column_desc, false)
+                SourceColumnDesc::from(&column_desc)
             })
             .collect(),
     };

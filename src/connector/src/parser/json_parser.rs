@@ -42,13 +42,8 @@ pub struct JsonAccessBuilder {
     json_parse_options: JsonParseOptions,
 }
 
-impl AccessBuilder for JsonAccessBuilder {
-    #[allow(clippy::unused_async)]
-    async fn generate_accessor(
-        &mut self,
-        payload: Vec<u8>,
-        _: &crate::source::SourceMeta,
-    ) -> ConnectorResult<AccessImpl<'_>> {
+impl JsonAccessBuilder {
+    pub fn generate_json_access(&mut self, payload: Vec<u8>) -> ConnectorResult<JsonAccess<'_>> {
         // XXX: When will we enter this branch?
         if payload.is_empty() {
             self.value = Some("{}".into());
@@ -59,12 +54,22 @@ impl AccessBuilder for JsonAccessBuilder {
             &mut self.value.as_mut().unwrap()[self.payload_start_idx..],
         )
         .context("failed to parse json payload")?;
-        Ok(AccessImpl::Json(JsonAccess::new_with_options(
+        Ok(JsonAccess::new_with_options(
             value,
             // Debezium and Canal have their special json access builder and will not
             // use this
             &self.json_parse_options,
-        )))
+        ))
+    }
+}
+
+impl AccessBuilder for JsonAccessBuilder {
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        _: &crate::source::SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
+        Ok(AccessImpl::Json(self.generate_json_access(payload)?))
     }
 }
 
@@ -328,7 +333,7 @@ mod tests {
             ColumnDesc::named("VarcharCastToI64", 11.into(), DataType::Int64),
         ]
         .iter()
-        .map(|c| SourceColumnDesc::from_column_desc(c, false))
+        .map(SourceColumnDesc::from)
         .collect_vec();
 
         let parser = make_parser(descs);
@@ -390,7 +395,7 @@ mod tests {
             ])),
         )]
         .iter()
-        .map(|c| SourceColumnDesc::from_column_desc(c, false))
+        .map(SourceColumnDesc::from)
         .collect_vec();
 
         let parser = make_parser(descs);
@@ -426,7 +431,7 @@ mod tests {
             ])),
         )]
         .iter()
-        .map(|c| SourceColumnDesc::from_column_desc(c, false))
+        .map(SourceColumnDesc::from)
         .collect_vec();
 
         let parser = make_parser(descs);

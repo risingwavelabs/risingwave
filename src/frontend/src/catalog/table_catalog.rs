@@ -635,13 +635,20 @@ impl TableCatalog {
     /// The returned columns exclude hidden columns and generated columns. The shifted
     /// `row_id_index` rules out generated columns before the row-id column, matching the DML
     /// input schema.
-    pub fn columns_to_insert(&self) -> (Vec<ColumnCatalog>, Option<usize>) {
+    pub fn columns_to_insert(
+        &self,
+    ) -> (
+        impl Iterator<Item = (&ColumnCatalog, bool)> + '_,
+        Option<usize>,
+    ) {
+        let pk_column_indices: HashSet<_> =
+            self.pk.iter().map(|column| column.column_index).collect();
         let columns = self
             .columns
             .iter()
-            .filter(|c| !c.is_hidden() && !c.is_generated())
-            .cloned()
-            .collect_vec();
+            .enumerate()
+            .filter(|(_, c)| !c.is_hidden() && !c.is_generated())
+            .map(move |(idx, column)| (column, pk_column_indices.contains(&idx)));
         let row_id_index = self.row_id_index.map(|row_id_index| {
             let generated_column_count = self
                 .columns()

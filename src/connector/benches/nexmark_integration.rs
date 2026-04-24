@@ -112,7 +112,7 @@ fn make_parser(use_struct: bool) -> ByteStreamSourceParserImpl {
     let rw_columns = if use_struct {
         let struct_type = StructType::new(fields).into();
         let struct_col = ColumnDesc::named("bid", 114514.into(), struct_type);
-        vec![SourceColumnDesc::from_column_desc(&struct_col, false)]
+        vec![(&struct_col).into()]
     } else {
         fields
             .into_iter()

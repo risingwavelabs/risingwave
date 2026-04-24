@@ -381,7 +381,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 
         let columns = columns
             .iter()
-            .map(|c| SourceColumnDesc::from_column_desc(c, false))
+            .map(SourceColumnDesc::from)
             .collect::<Vec<_>>();
 
         let source_ctx = generate_source_context_ref();
@@ -433,7 +433,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 
         let columns = columns
             .iter()
-            .map(|c| SourceColumnDesc::from_column_desc(c, false))
+            .map(SourceColumnDesc::from)
             .collect::<Vec<_>>();
 
         let data = vec![
@@ -562,7 +562,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 
         let columns = columns
             .iter()
-            .map(|c| SourceColumnDesc::from_column_desc(c, false))
+            .map(SourceColumnDesc::from)
             .collect::<Vec<_>>();
 
         let packet = br#"
@@ -652,7 +652,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 
         let columns = columns
             .iter()
-            .map(|c| SourceColumnDesc::from_column_desc(c, false))
+            .map(SourceColumnDesc::from)
             .collect::<Vec<_>>();
 
         let data = vec![
@@ -746,7 +746,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
 
         let columns = columns
             .iter()
-            .map(|c| SourceColumnDesc::from_column_desc(c, false))
+            .map(SourceColumnDesc::from)
             .collect::<Vec<_>>();
 
         let data = vec![
@@ -851,7 +851,7 @@ serde_json::json!({"_id": {"$numberLong": "1001"},"first_name": "Sally","last_na
         ];
         let columns = columns
             .iter()
-            .map(|c| SourceColumnDesc::from_column_desc(c, false))
+            .map(SourceColumnDesc::from)
             .collect::<Vec<_>>();
 
         let data = [

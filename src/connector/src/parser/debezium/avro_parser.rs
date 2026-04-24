@@ -392,7 +392,7 @@ mod tests {
             .map_to_columns()?
             .iter()
             .map(CatColumnDesc::from_field_without_column_id)
-            .map(|c| SourceColumnDesc::from_column_desc(&c, false))
+            .map(|c| SourceColumnDesc::from(&c))
             .collect_vec();
         let parser = DebeziumParser::new(
             parser_config,

@@ -75,12 +75,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         let columns: Vec<_> = source_node
             .columns
             .iter()
-            .map(|c| {
-                SourceColumnDesc::from_column_desc(
-                    &ColumnDesc::from(c.column_desc.as_ref().unwrap()),
-                    false,
-                )
-            })
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
 
         let column_ids: Vec<_> = source_node

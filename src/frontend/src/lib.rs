@@ -238,7 +238,7 @@ pub fn start(
         let webhook_listen_addr = opts.webhook_listen_addr.parse().unwrap();
         let tcp_keepalive =
             TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
-        let tls_config = TlsConfig::new_default();
+        let tls_config = TlsConfig::new_default().unwrap();
 
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
         SESSION_MANAGER.get_or_init(|| session_mgr.clone());

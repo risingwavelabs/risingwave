@@ -12,22 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use anyhow::anyhow;
-use axum::body::Bytes;
 use axum::http::{HeaderMap, StatusCode};
-use futures::FutureExt;
-use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Op};
-use risingwave_connector::parser::plain_parser::PlainParser;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::ToOwnedDatum;
 use risingwave_connector::parser::{
-    BigintUnsignedHandlingMode, ByteStreamSourceParser, EncodingProperties, JsonProperties,
-    ParseResult, ProtocolProperties, SourceStreamChunkBuilder, SpecificParserConfig, TimeHandling,
-    TimestampHandling, TimestamptzHandling,
+    Access, AccessResult, BigintUnsignedHandlingMode, JsonAccessBuilder, JsonProperties,
+    TimeHandling, TimestampHandling, TimestamptzHandling,
 };
-use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 
+use super::WebhookTableColumnDesc;
 use super::utils::{Result, err};
 
 const WEBHOOK_FORMAT_HEADER: &str = "x-rw-webhook-format";
@@ -40,85 +34,45 @@ const WEBHOOK_JSON_BIGINT_UNSIGNED_HANDLING_HEADER: &str =
     "x-rw-webhook-json-bigint-unsigned-handling-mode";
 const WEBHOOK_JSON_HANDLE_TOAST_COLUMNS_HEADER: &str = "x-rw-webhook-json-handle-toast-columns";
 
-#[derive(Debug)]
-pub(super) struct WebhookJsonDecoder {
-    columns: Vec<SourceColumnDesc>,
-    parser: PlainParser,
+pub(crate) fn build_json_access_builder(headers: &HeaderMap) -> Result<JsonAccessBuilder> {
+    JsonAccessBuilder::new(json_properties_from_headers(headers)?).map_err(|e| {
+        err(
+            anyhow!(e).context("failed to build webhook JSON decoder"),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )
+    })
 }
 
-impl WebhookJsonDecoder {
-    pub(super) async fn new(headers: &HeaderMap, columns: Vec<SourceColumnDesc>) -> Result<Self> {
-        let parser = PlainParser::new(
-            SpecificParserConfig {
-                encoding_config: EncodingProperties::Json(json_properties_from_headers(headers)?),
-                protocol_config: ProtocolProperties::Plain,
-            },
-            columns.clone(),
-            Arc::new(SourceContext::dummy()),
-        )
-        .await
+pub(crate) fn owned_row_from_payload_row(
+    access_builder: &mut JsonAccessBuilder,
+    columns: &[WebhookTableColumnDesc],
+    payload_row: &[u8],
+) -> Result<OwnedRow> {
+    let access = access_builder
+        .generate_json_access(payload_row.to_vec())
         .map_err(|e| {
             err(
-                anyhow!(e).context("failed to build webhook JSON decoder"),
-                StatusCode::INTERNAL_SERVER_ERROR,
+                anyhow!(e).context("failed to decode webhook JSON payload"),
+                StatusCode::UNPROCESSABLE_ENTITY,
             )
         })?;
-
-        Ok(Self { columns, parser })
-    }
-
-    pub(super) fn decode(&mut self, is_batched: bool, body: &Bytes) -> Result<DataChunk> {
-        let source_ctrl_opts = SourceCtrlOpts {
-            chunk_size: body.len().max(1),
-            split_txn: false,
-        };
-        let mut chunk_builder =
-            SourceStreamChunkBuilder::new(self.columns.clone(), source_ctrl_opts);
-
-        for row in payload_rows(is_batched, body) {
-            match self
-                .parser
-                .parse_one_with_txn(None, Some(row.to_vec()), chunk_builder.row_writer())
-                .now_or_never()
-                .ok_or_else(|| {
-                    err(
-                        anyhow!("webhook JSON decoder unexpectedly yielded"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    )
-                })?
-                .map_err(|e| {
-                    err(
-                        anyhow!(e).context("failed to decode webhook JSON payload"),
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                    )
-                })? {
-                ParseResult::Rows => {}
-                ParseResult::TransactionControl(_) | ParseResult::SchemaChange(_) => {
-                    return Err(err(
-                        anyhow!("unexpected non-row webhook JSON parse result"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ));
-                }
-            }
-        }
-
-        chunk_builder.finish_current_chunk();
-        let chunks = chunk_builder.consume_ready_chunks().collect_vec();
-        let [chunk] = chunks.try_into().map_err(|chunks: Vec<_>| {
-            err(
-                anyhow!("expected one decoded webhook chunk, got {}", chunks.len()),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            )
-        })?;
-        let (data_chunk, ops) = chunk.into_parts();
-        if !ops.iter().all(|op| matches!(op, Op::Insert)) {
-            return Err(err(
-                anyhow!("webhook JSON decoder emitted non-insert rows"),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ));
-        }
-        Ok(data_chunk)
-    }
+    let row = columns
+        .iter()
+        .map(
+            |column| match access.access(&[column.name.as_str()], &column.data_type) {
+                Ok(datum) => Ok(datum.to_owned_datum()),
+                Err(error) if column.is_pk => Err(error),
+                Err(_) => Ok(None),
+            },
+        )
+        .collect::<AccessResult<Vec<_>>>()
+        .map(OwnedRow::new);
+    row.map_err(|e| {
+        err(
+            anyhow!(e).context("failed to decode webhook JSON payload"),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+    })
 }
 
 fn json_properties_from_headers(headers: &HeaderMap) -> Result<JsonProperties> {
@@ -242,39 +196,28 @@ fn header_value(headers: &HeaderMap, key: &'static str) -> Result<Option<String>
         .transpose()
 }
 
-fn payload_rows(is_batched: bool, body: &Bytes) -> impl Iterator<Item = &[u8]> {
-    let split_rows = is_batched.then(|| body.split(|&byte| byte == b'\n'));
-    split_rows
-        .into_iter()
-        .flatten()
-        .chain((!is_batched).then_some(body.as_ref()))
-}
-
 #[cfg(test)]
 mod tests {
-    use axum::http::HeaderValue;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::row::Row;
+    use axum::http::{HeaderMap, HeaderValue};
+    use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 
     use super::*;
 
-    async fn decoder(columns: Vec<(&str, DataType, bool)>) -> WebhookJsonDecoder {
-        WebhookJsonDecoder::new(
-            &HeaderMap::new(),
-            columns
-                .into_iter()
-                .enumerate()
-                .map(|(idx, (name, data_type, is_pk))| {
-                    SourceColumnDesc::from_column_desc(
-                        &ColumnDesc::named(name, ColumnId::new(idx as i32), data_type),
-                        is_pk,
-                    )
-                })
-                .collect(),
-        )
-        .await
-        .unwrap()
+    fn decode_payload_row(columns: &[WebhookTableColumnDesc], payload: &[u8]) -> Result<OwnedRow> {
+        let mut access_builder = build_json_access_builder(&HeaderMap::new())?;
+        owned_row_from_payload_row(&mut access_builder, columns, payload)
+    }
+
+    fn test_columns(columns: &[(&str, DataType, bool)]) -> Vec<WebhookTableColumnDesc> {
+        columns
+            .iter()
+            .map(|(name, data_type, is_pk)| WebhookTableColumnDesc {
+                name: (*name).to_owned(),
+                data_type: data_type.clone(),
+                is_pk: *is_pk,
+            })
+            .collect()
     }
 
     #[test]
@@ -362,18 +305,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_decode_plain_json_payload() {
-        let mut decoder = decoder(vec![
+    #[test]
+    fn test_decode_plain_json_payload() {
+        let columns = test_columns(&[
             ("id", DataType::Int32, true),
             ("name", DataType::Varchar, false),
-        ])
-        .await;
-        let chunk = decoder
-            .decode(false, &Bytes::from_static(br#"{"id":1,"name":"alice"}"#))
-            .unwrap();
+        ]);
+        let row = decode_payload_row(&columns, br#"{"id":1,"name":"alice"}"#).unwrap();
 
-        let row = chunk.rows().next().unwrap();
         assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
         assert_eq!(
             row.datum_at(1).to_owned_datum(),
@@ -381,16 +320,52 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_decode_plain_json_payload_rejects_missing_pk() {
-        let mut decoder = decoder(vec![
+    #[test]
+    fn test_decode_plain_json_payload_rejects_missing_pk() {
+        let columns = test_columns(&[
             ("id", DataType::Int32, true),
             ("name", DataType::Varchar, false),
-        ])
-        .await;
-        let err = decoder
-            .decode(false, &Bytes::from_static(br#"{"name":"alice"}"#))
-            .unwrap_err();
+        ]);
+        let err = decode_payload_row(&columns, br#"{"name":"alice"}"#).unwrap_err();
+        assert_eq!(err.code(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn test_decode_single_json_object_payload() {
+        let columns = test_columns(&[
+            ("id", DataType::Int32, true),
+            ("price", DataType::Decimal, false),
+            ("created_at", DataType::Timestamp, false),
+            ("name", DataType::Varchar, false),
+        ]);
+        let row = decode_payload_row(
+            &columns,
+            br#"{"id":1,"price":"19.99","created_at":"2026-04-15 10:00:00","name":"alice"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+        assert!(matches!(
+            row.datum_at(1).to_owned_datum(),
+            Some(ScalarImpl::Decimal(_))
+        ));
+        assert!(matches!(
+            row.datum_at(2).to_owned_datum(),
+            Some(ScalarImpl::Timestamp(_))
+        ));
+        assert_eq!(
+            row.datum_at(3).to_owned_datum(),
+            Some(ScalarImpl::Utf8("alice".into()))
+        );
+    }
+
+    #[test]
+    fn test_decode_single_json_object_payload_rejects_missing_pk() {
+        let columns = test_columns(&[
+            ("id", DataType::Int32, true),
+            ("name", DataType::Varchar, false),
+        ]);
+        let err = decode_payload_row(&columns, br#"{"name":"alice"}"#).unwrap_err();
         assert_eq!(err.code(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 }
