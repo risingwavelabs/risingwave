@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::backtrace::Backtrace;
 use std::collections::VecDeque;
+use std::panic::resume_unwind;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -24,8 +26,9 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
-use risingwave_common::row::{OwnedRow, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
@@ -85,6 +88,7 @@ impl EpochChunkBuffer {
 struct ChangeBufferTableSerde {
     data_types: Vec<DataType>,
     pk_indices: Vec<usize>,
+    dist_key_in_pk_indices: Vec<usize>,
     value_indices: Option<Vec<usize>>,
     distribution: TableDistribution,
     pk_serde: OrderedRowSerde,
@@ -129,7 +133,7 @@ impl ChangeBufferTableSerde {
 
         let distribution = TableDistribution::new(
             Some(vnodes.clone()),
-            dist_key_in_pk_indices,
+            dist_key_in_pk_indices.clone(),
             vnode_col_idx_in_pk,
         );
         if distribution.vnode_count() != table.vnode_count() {
@@ -167,6 +171,7 @@ impl ChangeBufferTableSerde {
         Ok(Self {
             data_types,
             pk_indices,
+            dist_key_in_pk_indices,
             value_indices,
             distribution,
             pk_serde,
@@ -200,25 +205,103 @@ impl ChangeBufferTableSerde {
         Ok(OwnedRow::new(row))
     }
 
+    fn assert_vnode_matches_row(&self, key: &TableKey<&[u8]>, row: &OwnedRow) {
+        let key_vnode = key.vnode_part();
+        let pk_row = row.project(&self.pk_indices).into_owned_row();
+        let dist_key_row = (!self.dist_key_in_pk_indices.is_empty()).then(|| {
+            (&pk_row)
+                .project(&self.dist_key_in_pk_indices)
+                .into_owned_row()
+        });
+        let computed_vnode =
+            match rw_catch_unwind(|| self.distribution.compute_vnode_by_pk(&pk_row)) {
+                Ok(vnode) => vnode,
+                Err(payload) => {
+                    let panic_message = format_panic_payload(payload.as_ref());
+                    let panic_backtrace = Backtrace::force_capture();
+                    tracing::info!(
+                        key_vnode = ?key_vnode,
+                        pk_indices = ?self.pk_indices,
+                        dist_key_in_pk_indices = ?self.dist_key_in_pk_indices,
+                        pk_row = ?pk_row,
+                        dist_key_row = ?dist_key_row,
+                        pk_columns = %format_row_columns(&pk_row),
+                        dist_key_columns = %format_optional_row_columns(dist_key_row.as_ref()),
+                        "change buffer captured pk row before rethrowing vnode compute panic"
+                    );
+                    tracing::error!(
+                        key_vnode = ?key_vnode,
+                        pk_indices = ?self.pk_indices,
+                        dist_key_in_pk_indices = ?self.dist_key_in_pk_indices,
+                        value_indices = ?self.value_indices,
+                        panic_message = %panic_message,
+                        backtrace = %panic_backtrace,
+                        row = ?row,
+                        pk_row = ?pk_row,
+                        dist_key_row = ?dist_key_row,
+                        row_columns = %format_row_columns(row),
+                        pk_columns = %format_row_columns(&pk_row),
+                        dist_key_columns = %format_optional_row_columns(dist_key_row.as_ref()),
+                        "change buffer failed to compute vnode from changelog row"
+                    );
+                    resume_unwind(payload);
+                }
+            };
+        assert_eq!(
+            key_vnode, computed_vnode,
+            "change buffer changelog key vnode must match row vnode"
+        );
+    }
+
     fn record_from_change_log(
         &self,
+        key: TableKey<&[u8]>,
         change: ChangeLogValue<&[u8]>,
     ) -> StreamExecutorResult<Record<OwnedRow>> {
         match change {
-            ChangeLogValue::Insert(new_value) => Ok(Record::Insert {
-                new_row: self.deserialize_value(new_value)?,
-            }),
-            ChangeLogValue::Delete(old_value) => Ok(Record::Delete {
-                old_row: self.deserialize_value(old_value)?,
-            }),
+            ChangeLogValue::Insert(new_value) => {
+                let new_row = self.deserialize_value(new_value)?;
+                self.assert_vnode_matches_row(&key, &new_row);
+                Ok(Record::Insert { new_row })
+            }
+            ChangeLogValue::Delete(old_value) => {
+                let old_row = self.deserialize_value(old_value)?;
+                self.assert_vnode_matches_row(&key, &old_row);
+                Ok(Record::Delete { old_row })
+            }
             ChangeLogValue::Update {
                 old_value,
                 new_value,
-            } => Ok(Record::Update {
-                old_row: self.deserialize_value(old_value)?,
-                new_row: self.deserialize_value(new_value)?,
-            }),
+            } => {
+                let old_row = self.deserialize_value(old_value)?;
+                self.assert_vnode_matches_row(&key, &old_row);
+                let new_row = self.deserialize_value(new_value)?;
+                self.assert_vnode_matches_row(&key, &new_row);
+                Ok(Record::Update { old_row, new_row })
+            }
         }
+    }
+}
+
+fn format_row_columns(row: &impl Row) -> String {
+    row.iter()
+        .enumerate()
+        .map(|(idx, datum)| format!("{idx}={datum:?}"))
+        .join(", ")
+}
+
+fn format_optional_row_columns(row: Option<&OwnedRow>) -> String {
+    row.map(|row| format_row_columns(row))
+        .unwrap_or_else(|| "<empty>".to_owned())
+}
+
+fn format_panic_payload(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_owned()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        format!("non-string panic payload of type {:?}", payload.type_id())
     }
 }
 
@@ -349,8 +432,8 @@ where
         let mut iter = self.local_state_store.iter_uncommitted_log().await?;
         let mut builder = StreamChunkBuilder::new(chunk_size, self.serde.data_types.clone());
 
-        while let Some((_key, change)) = iter.try_next().await? {
-            let record = self.serde.record_from_change_log(change)?;
+        while let Some((key, change)) = iter.try_next().await? {
+            let record = self.serde.record_from_change_log(key, change)?;
             if let Some(chunk) = builder.append_record(record) {
                 yield chunk;
             }

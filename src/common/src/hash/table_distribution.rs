@@ -235,6 +235,7 @@ impl TableDistribution {
                     .map(|(vnode, vis)| {
                         // Ignore the invisible rows.
                         if vis {
+                            tracing::info!("The StreamChunk vnode is :{}", vnode);
                             check_vnode_is_set(vnode, vnodes);
                         }
                         vnode
