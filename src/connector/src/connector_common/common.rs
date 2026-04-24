@@ -280,7 +280,7 @@ pub struct KafkaConnectionProps {
     sasl_oathbearer_config: Option<String>,
 
     /// SASL/OAUTHBEARER login method. Set to `oidc` to use the built-in OIDC client and fetch
-    /// tokens from an OAuth 2.0 / OIDC identity provider. When `oidc`, the properties
+    /// tokens from an `OAuth` 2.0 / OIDC identity provider. When `oidc`, the properties
     /// `properties.sasl.oauthbearer.client.id`, `properties.sasl.oauthbearer.client.secret` and
     /// `properties.sasl.oauthbearer.token.endpoint.url` must be provided.
     #[serde(rename = "properties.sasl.oauthbearer.method")]
@@ -294,12 +294,12 @@ pub struct KafkaConnectionProps {
     #[serde(rename = "properties.sasl.oauthbearer.client.secret")]
     sasl_oauthbearer_client_secret: Option<String>,
 
-    /// OAuth/OIDC token endpoint URL used to retrieve the access token. Only used when
+    /// `OAuth`/OIDC token endpoint URL used to retrieve the access token. Only used when
     /// `properties.sasl.oauthbearer.method` is `oidc`.
     #[serde(rename = "properties.sasl.oauthbearer.token.endpoint.url")]
     sasl_oauthbearer_token_endpoint_url: Option<String>,
 
-    /// OAuth scope the client requests from the authorization server. Only used when
+    /// `OAuth` scope the client requests from the authorization server. Only used when
     /// `properties.sasl.oauthbearer.method` is `oidc`.
     #[serde(rename = "properties.sasl.oauthbearer.scope")]
     sasl_oauthbearer_scope: Option<String>,
