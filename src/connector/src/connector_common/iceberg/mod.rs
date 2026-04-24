@@ -223,7 +223,8 @@ impl EnforceSecret for IcebergCommon {
 pub struct IcebergTableIdentifier {
     #[serde(rename = "database.name")]
     pub database_name: Option<String>,
-    /// Full name of table, must include schema name when database is provided.
+    /// Table name or namespace-qualified table name. Dots are treated as
+    /// Iceberg namespace separators.
     #[serde(rename = "table.name")]
     pub table_name: String,
 }
@@ -237,12 +238,32 @@ impl IcebergTableIdentifier {
         &self.table_name
     }
 
+    fn identifier_parts(&self) -> ConnectorResult<Vec<&str>> {
+        let mut parts = Vec::new();
+        if let Some(database_name) = &self.database_name {
+            parts.extend(database_name.split('.'));
+        }
+        parts.extend(self.table_name.split('.'));
+
+        if parts.iter().any(|part| part.is_empty()) {
+            bail!(
+                "Invalid iceberg table identifier '{}': identifier parts must not be empty",
+                self.full_identifier()
+            );
+        }
+
+        Ok(parts)
+    }
+
+    fn full_identifier(&self) -> String {
+        match &self.database_name {
+            Some(database_name) => format!("{}.{}", database_name, self.table_name),
+            None => self.table_name.clone(),
+        }
+    }
+
     pub fn to_table_ident(&self) -> ConnectorResult<TableIdent> {
-        let ret = if let Some(database_name) = &self.database_name {
-            TableIdent::from_strs(vec![database_name, &self.table_name])
-        } else {
-            TableIdent::from_strs(vec![&self.table_name])
-        };
+        let ret = TableIdent::from_strs(self.identifier_parts()?);
 
         Ok(ret.context("Failed to create table identifier")?)
     }
@@ -917,4 +938,86 @@ pub async fn rebuild_table_with_shared_cache(table: Table) -> Table {
     let init_object_cache = table.object_cache();
     let object_cache = shared_object_cache(init_object_cache, table_uuid).await;
     table.with_object_cache(object_cache)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn namespace_parts(table_ident: &TableIdent) -> Vec<&str> {
+        table_ident
+            .namespace()
+            .as_ref()
+            .iter()
+            .map(String::as_str)
+            .collect()
+    }
+
+    #[test]
+    fn test_iceberg_table_identifier_rejects_empty_parts() {
+        let empty_part = IcebergTableIdentifier {
+            database_name: Some("a..b".to_owned()),
+            table_name: "test_table".to_owned(),
+        };
+        let result = empty_part.to_table_ident();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("identifier parts must not be empty")
+        );
+
+        let leading_dot = IcebergTableIdentifier {
+            database_name: None,
+            table_name: ".test_table".to_owned(),
+        };
+        let result = leading_dot.to_table_ident();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("identifier parts must not be empty")
+        );
+    }
+
+    #[test]
+    fn test_iceberg_table_identifier_dots_as_namespace_separators() {
+        let table_ident = IcebergTableIdentifier {
+            database_name: Some("general.zia.stats".to_owned()),
+            table_name: "tagged_security_transactions".to_owned(),
+        }
+        .to_table_ident()
+        .unwrap();
+        assert_eq!(
+            namespace_parts(&table_ident),
+            vec!["general", "zia", "stats"]
+        );
+        assert_eq!(table_ident.name(), "tagged_security_transactions");
+
+        let table_ident = IcebergTableIdentifier {
+            database_name: Some("general".to_owned()),
+            table_name: "zia.stats.tagged_security_transactions".to_owned(),
+        }
+        .to_table_ident()
+        .unwrap();
+        assert_eq!(
+            namespace_parts(&table_ident),
+            vec!["general", "zia", "stats"]
+        );
+        assert_eq!(table_ident.name(), "tagged_security_transactions");
+
+        let table_ident = IcebergTableIdentifier {
+            database_name: None,
+            table_name: "general.zia.stats.tagged_security_transactions".to_owned(),
+        }
+        .to_table_ident()
+        .unwrap();
+        assert_eq!(
+            namespace_parts(&table_ident),
+            vec!["general", "zia", "stats"]
+        );
+        assert_eq!(table_ident.name(), "tagged_security_transactions");
+    }
 }
