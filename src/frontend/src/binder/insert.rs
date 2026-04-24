@@ -133,7 +133,10 @@ impl Binder {
             .filter(|c| !c.is_hidden())
             .cloned()
             .collect_vec();
-        let cols_to_insert_in_table = table_catalog.columns_to_insert().cloned().collect_vec();
+        let (cols_to_insert_in_table, row_id_index) = table_catalog.columns_to_insert();
+        let cols_to_insert_in_table = cols_to_insert_in_table
+            .map(|(column, _)| column.clone())
+            .collect_vec();
 
         let generated_column_names = table_catalog
             .generated_column_names()
@@ -152,23 +155,6 @@ impl Binder {
                 "`RETURNING` clause is not supported for tables with generated columns".to_owned(),
             )));
         }
-
-        // TODO(yuhao): refine this if row_id is always the last column.
-        //
-        // `row_id_index` in insert operation should rule out generated column
-        let row_id_index = {
-            if let Some(row_id_index) = table_catalog.row_id_index {
-                let mut cnt = 0;
-                for col in table_catalog.columns().iter().take(row_id_index + 1) {
-                    if col.is_generated() {
-                        cnt += 1;
-                    }
-                }
-                Some(row_id_index - cnt)
-            } else {
-                None
-            }
-        };
 
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let is_returning = !returning_list.is_empty();

@@ -121,19 +121,16 @@ pub enum TimestamptzHandling {
 impl TimestamptzHandling {
     pub const OPTION_KEY: &'static str = "timestamptz.handling.mode";
 
-    pub fn from_options(
-        options: &std::collections::BTreeMap<String, String>,
-    ) -> Result<Option<Self>, InvalidOptionError> {
-        let mode = match options.get(Self::OPTION_KEY).map(std::ops::Deref::deref) {
-            Some("utc_string") => Self::UtcString,
-            Some("utc_without_suffix") => Self::UtcWithoutSuffix,
-            Some("micro") => Self::Micro,
-            Some("milli") => Self::Milli,
-            Some("guess_number_unit") => Self::GuessNumberUnit,
-            Some(v) => bail_invalid_option_error!("unrecognized {} value {}", Self::OPTION_KEY, v),
-            None => return Ok(None),
+    pub fn from_options(value: &str) -> Result<Self, InvalidOptionError> {
+        let mode = match value {
+            "utc_string" => Self::UtcString,
+            "utc_without_suffix" => Self::UtcWithoutSuffix,
+            "micro" => Self::Micro,
+            "milli" => Self::Milli,
+            "guess_number_unit" => Self::GuessNumberUnit,
+            v => bail_invalid_option_error!("unrecognized {} value {}", Self::OPTION_KEY, v),
         };
-        Ok(Some(mode))
+        Ok(mode)
     }
 }
 

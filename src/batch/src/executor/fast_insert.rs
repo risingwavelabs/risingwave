@@ -14,11 +14,9 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, SerialArray, StreamChunk};
-use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
+use risingwave_common::catalog::{TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
-use risingwave_common::types::DataType;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_pb::task_service::FastInsertRequest;
 
@@ -30,7 +28,6 @@ pub struct FastInsertExecutor {
     table_id: TableId,
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
-    column_indices: Vec<usize>,
 
     row_id_index: Option<usize>,
     txn_id: TxnId,
@@ -43,27 +40,20 @@ impl FastInsertExecutor {
         insert_req: FastInsertRequest,
     ) -> Result<(FastInsertExecutor, DataChunk)> {
         let table_id = insert_req.table_id;
-        let column_indices = insert_req
-            .column_indices
-            .iter()
-            .map(|&i| i as usize)
-            .collect();
-        let mut schema = Schema::new(vec![Field::unnamed(DataType::Jsonb)]);
-        schema.fields.push(Field::unnamed(DataType::Serial)); // row_id column
         let data_chunk_pb = insert_req
             .data_chunk
             .expect("no data_chunk found in fast insert node");
+        let data_chunk = DataChunk::from_protobuf(&data_chunk_pb)?;
 
         Ok((
             FastInsertExecutor::new(
                 table_id,
                 insert_req.table_version_id,
                 dml_manager,
-                column_indices,
                 insert_req.row_id_index.as_ref().map(|index| *index as _),
                 insert_req.request_id,
             ),
-            DataChunk::from_protobuf(&data_chunk_pb)?,
+            data_chunk,
         ))
     }
 
@@ -72,7 +62,6 @@ impl FastInsertExecutor {
         table_id: TableId,
         table_version_id: TableVersionId,
         dml_manager: DmlManagerRef,
-        column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         request_id: u32,
     ) -> Self {
@@ -81,7 +70,6 @@ impl FastInsertExecutor {
             table_id,
             table_version_id,
             dml_manager,
-            column_indices,
             row_id_index,
             txn_id,
             request_id,
@@ -108,19 +96,6 @@ impl FastInsertExecutor {
         let write_txn_data = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
-
-            let mut ordered_columns = self
-                .column_indices
-                .iter()
-                .enumerate()
-                .map(|(i, idx)| (*idx, columns[i].clone()))
-                .collect_vec();
-
-            ordered_columns.sort_unstable_by_key(|(idx, _)| *idx);
-            columns = ordered_columns
-                .into_iter()
-                .map(|(_, column)| column)
-                .collect_vec();
 
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
@@ -157,10 +132,13 @@ mod tests {
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
+    use itertools::Itertools;
     use risingwave_common::array::{Array, JsonbArrayBuilder};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID};
+    use risingwave_common::catalog::{
+        ColumnDesc, ColumnId, Field, INITIAL_TABLE_VERSION_ID, Schema,
+    };
     use risingwave_common::transaction::transaction_message::TxnMsg;
-    use risingwave_common::types::JsonbVal;
+    use risingwave_common::types::{DataType, JsonbVal};
     use risingwave_dml::dml_manager::DmlManager;
     use serde_json::json;
 
@@ -212,7 +190,6 @@ mod tests {
             table_id,
             INITIAL_TABLE_VERSION_ID,
             dml_manager,
-            vec![0], // Ignoring insertion order
             row_id_index,
             0,
         ));

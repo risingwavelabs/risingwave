@@ -96,7 +96,7 @@ impl Binder {
                     // Currently, the generated columns are not supported yet. So the ident here should only be one of the following
                     // - `headers`
                     // - secret name
-                    // - the name of the payload column
+                    // - the identifier bound to the raw webhook payload
                     // TODO(Kexiang): Generated columns or INCLUDE clause should be supported.
                     if ident.real_value() == *"headers" {
                         Ok(InputRef::new(0, DataType::Jsonb).into())
@@ -104,7 +104,7 @@ impl Binder {
                         && ident.real_value() == *ctx.secret_name.as_ref().unwrap()
                     {
                         Ok(InputRef::new(1, DataType::Varchar).into())
-                    } else if ident.real_value() == ctx.column_name {
+                    } else if ident.real_value() == ctx.payload_name {
                         Ok(InputRef::new(2, DataType::Bytea).into())
                     } else {
                         Err(

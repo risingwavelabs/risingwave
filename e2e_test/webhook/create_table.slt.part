@@ -63,12 +63,91 @@ create table hubspot_sha256_v2 (
 
 statement ok
 create table test_primary_key (
-  data JSONB PRIMARY KEY
+  data JSONB,
+  primary key (data)
 ) WITH (
   connector = 'webhook',
 ) VALIDATE SECRET test_secret AS secure_compare(
   headers->>'x-hub-signature',
   'sha1=' || encode(hmac(test_secret, data, 'sha1'), 'hex')
+);
+
+statement ok
+create table multi_column_validate (
+  id int,
+  customer_name varchar,
+  amount double precision,
+  primary key (id)
+) WITH (
+  connector = 'webhook',
+) VALIDATE AS secure_compare(
+  headers->>'x-hub-signature',
+  'sha1=' || encode(hmac('TEST_WEBHOOK', payload, 'sha1'), 'hex')
+);
+
+statement ok
+create table multi_column_no_pk (
+  id int,
+  customer_name varchar,
+  amount double precision
+) WITH (
+  connector = 'webhook'
+);
+
+statement ok
+create table multi_column_with_options (
+  id int,
+  event_time timestamptz,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+);
+
+
+statement ok
+create table multi_column_batched (
+  id int,
+  customer_name varchar,
+  amount double precision
+) WITH (
+  connector = 'webhook',
+  is_batched = true
+);
+
+statement ok
+create table multi_column_timestamp_option (
+  id int,
+  event_time timestamp,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+);
+
+statement ok
+create table multi_column_time_option (
+  id int,
+  event_time time,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+);
+
+statement ok
+create table multi_column_bigint_precise_option (
+  id int,
+  amount decimal,
+  primary key (id)
+) WITH (
+  connector = 'webhook'
+);
+
+statement error generated columns are not supported for webhook tables
+create table multi_column_generated_no_pk (
+  id int,
+  amount double precision,
+  amount_with_fee double precision as amount + 1.0
+) WITH (
+  connector = 'webhook'
 );
 
 statement ok
