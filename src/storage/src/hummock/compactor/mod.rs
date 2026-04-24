@@ -501,8 +501,6 @@ pub fn start_iceberg_compactor(
                                     .max_record_batch_rows(compactor_context.storage_opts.iceberg_compaction_max_record_batch_rows)
                                     .enable_heuristic_output_parallelism(compactor_context.storage_opts.iceberg_compaction_enable_heuristic_output_parallelism)
                                     .max_concurrent_closes(compactor_context.storage_opts.iceberg_compaction_max_concurrent_closes)
-                                    .enable_dynamic_size_estimation(compactor_context.storage_opts.iceberg_compaction_enable_dynamic_size_estimation)
-                                    .size_estimation_smoothing_factor(compactor_context.storage_opts.iceberg_compaction_size_estimation_smoothing_factor)
                                     .target_binpack_group_size_mb(
                                         compactor_context.storage_opts.iceberg_compaction_target_binpack_group_size_mb
                                     )
@@ -927,12 +925,15 @@ pub fn start_compactor(
                                     }
                                 });
                             }
+                            #[expect(deprecated)]
                             ResponseEvent::VacuumTask(_) => {
                                 unreachable!("unexpected vacuum task");
                             }
+                            #[expect(deprecated)]
                             ResponseEvent::FullScanTask(_) => {
                                 unreachable!("unexpected scan task");
                             }
+                            #[expect(deprecated)]
                             ResponseEvent::ValidationTask(validation_task) => {
                                 let validation_task = ValidationTask::from(validation_task);
                                 executor.spawn(async move {
@@ -1210,7 +1211,7 @@ fn schedule_queued_tasks(
                 },
             );
 
-            if let Err(e) = runner.compact(rx).await {
+            if let Err(e) = Box::pin(runner.compact(rx)).await {
                 tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
             }
         });

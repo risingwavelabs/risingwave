@@ -27,7 +27,10 @@ use crate::handler::create_table::{
     ColumnIdGenerator, CreateTableProps, gen_create_table_plan_without_source,
 };
 use crate::handler::query::handle_query;
-use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
+use crate::handler::util::{
+    LongRunningNotificationAction, execute_with_long_running_notification,
+    reject_internal_table_dependencies,
+};
 use crate::stream_fragmenter::GraphJobType;
 use crate::{Binder, OptimizerContext, build_graph};
 
@@ -66,12 +69,12 @@ pub async fn handle_create_as(
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
     // Generate catalog descs from query
-    let mut columns: Vec<_> = {
+    let (mut columns, dependent_relations): (Vec<_>, HashSet<_>) = {
         let mut binder = Binder::new_for_batch(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
             // Create ColumnCatelog by Field
-            query
+            let columns = query
                 .schema()
                 .fields()
                 .iter()
@@ -79,11 +82,14 @@ pub async fn handle_create_as(
                     column_desc: ColumnDesc::from_field_without_column_id(field),
                     is_hidden: false,
                 })
-                .collect()
+                .collect();
+            (columns, binder.included_relations().clone())
         } else {
             unreachable!()
         }
     };
+
+    reject_internal_table_dependencies(&session, &dependent_relations, "CREATE TABLE AS")?;
 
     // Generate column id.
     for c in &mut columns {

@@ -70,7 +70,7 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogResult, DatabaseId, ViewId};
+use crate::catalog::{CatalogResult, DatabaseId, SecretId, ViewId};
 use crate::error::ErrorCode;
 use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
@@ -132,6 +132,9 @@ pub struct Binder {
 
     /// The included user-defined functions while binding a query.
     included_udfs: HashSet<FunctionId>,
+
+    /// The included secrets while binding a query (e.g., secret refs in UDF arguments).
+    included_secrets: HashSet<SecretId>,
 
     param_types: ParameterTypes,
 
@@ -256,6 +259,7 @@ impl Binder {
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
             included_udfs: HashSet::new(),
+            included_secrets: HashSet::new(),
             param_types: ParameterTypes::new(vec![]),
             temporary_source_manager: session.temporary_source_manager(),
             staging_catalog_manager: session.staging_catalog_manager(),
@@ -325,6 +329,11 @@ impl Binder {
     /// Get included user-defined functions in the query after binding.
     pub fn included_udfs(&self) -> &HashSet<FunctionId> {
         &self.included_udfs
+    }
+
+    /// Get included secrets in the query after binding (e.g., secret refs in UDF arguments).
+    pub fn included_secrets(&self) -> &HashSet<SecretId> {
+        &self.included_secrets
     }
 
     fn push_context(&mut self) {

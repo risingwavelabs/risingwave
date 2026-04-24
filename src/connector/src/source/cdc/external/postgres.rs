@@ -26,6 +26,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 use tokio_postgres::types::{PgLsn, Type as PgType};
 
 use crate::connector_common::create_pg_client;
@@ -249,10 +250,56 @@ impl PostgresExternalTableReader {
             None, // No TCP keepalive for CDC source
         )
         .await?;
+
+        // Discover user-defined composite columns. tokio-postgres cannot decode
+        // composite values natively, so for these columns we cast to text in the
+        // snapshot SELECT to get the `(a,b,c)` textual representation. Other
+        // varchar columns stay as-is to preserve RW's own text rendering
+        // (e.g. numeric -> "NaN"/"POSITIVE_INFINITY").
+        let composite_columns = client
+            .query(
+                "SELECT a.attname \
+                 FROM pg_attribute a \
+                 JOIN pg_class c ON a.attrelid = c.oid \
+                 JOIN pg_namespace n ON c.relnamespace = n.oid \
+                 JOIN pg_type t ON a.atttypid = t.oid \
+                 WHERE n.nspname = $1 \
+                   AND c.relname = $2 \
+                   AND a.attnum > 0 \
+                   AND NOT a.attisdropped \
+                   AND t.typtype = 'c'",
+                &[
+                    &schema_table_name.schema_name,
+                    &schema_table_name.table_name,
+                ],
+            )
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| row.get::<_, String>(0))
+                    .collect::<std::collections::HashSet<_>>()
+            })
+            .unwrap_or_else(|err| {
+                tracing::warn!(
+                    error = %err.as_report(),
+                    schema = %schema_table_name.schema_name,
+                    table = %schema_table_name.table_name,
+                    "failed to discover postgres composite columns; falling back to no text cast"
+                );
+                std::collections::HashSet::new()
+            });
+
         let field_names = rw_schema
             .fields
             .iter()
-            .map(|f| Self::quote_column(&f.name))
+            .map(|f| {
+                let quoted = Self::quote_column(&f.name);
+                if matches!(f.data_type, DataType::Varchar) && composite_columns.contains(&f.name) {
+                    format!("{quoted}::text AS {quoted}")
+                } else {
+                    quoted
+                }
+            })
             .join(",");
 
         Ok(Self {

@@ -45,6 +45,13 @@ SELECT tablename, schemaname FROM pg_tables WHERE schemaname = 'test_schema';
 ----
 test_table test_schema
 
+query TT
+SELECT name, schema_name
+FROM rw_catalog.rw_materialized_views
+WHERE name = 'test_mv';
+----
+test_mv test_schema
+
 query TT rowsort
 SELECT indexname, schemaname FROM pg_indexes WHERE schemaname = 'test_schema';
 ----
@@ -99,10 +106,9 @@ statement ok
 ALTER SUBSCRIPTION test_subscription SET SCHEMA test_schema;
 
 query TT
-SELECT name AS subscriptionname, nspname AS schemaname
-FROM rw_subscriptions
-JOIN pg_namespace ON pg_namespace.oid = rw_subscriptions.schema_id
-WHERE nspname = 'test_schema';
+SELECT name, schema_name
+FROM rw_catalog.rw_subscriptions
+WHERE name = 'test_subscription';
 ----
 test_subscription test_schema
 

@@ -24,7 +24,10 @@ pub use frontend::FrontendConfig;
 pub mod hba;
 pub use hba::{AddressPattern, AuthMethod, ConnectionType, HbaConfig, HbaEntry};
 pub mod meta;
-pub use meta::{CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig, MetaStoreConfig};
+pub use meta::{
+    CheckpointCompression, CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig,
+    MetaStoreConfig,
+};
 pub mod streaming;
 pub use streaming::{AsyncStackTraceOption, StreamingConfig};
 pub mod server;
@@ -122,6 +125,10 @@ pub struct RwConfig {
 pub struct RpcClientConfig {
     #[serde(default = "default::developer::rpc_client_connect_timeout_secs")]
     pub connect_timeout_secs: u64,
+    /// Maximum concurrency when setting up an RPC client pool.
+    /// Set to 0 to keep the previous unlimited behavior.
+    #[serde(default = "default::developer::rpc_client_pool_setup_concurrency")]
+    pub pool_setup_concurrency: usize,
 }
 
 pub use risingwave_common_metrics::MetricLevel;
@@ -279,6 +286,10 @@ pub mod default {
             1000
         }
 
+        pub fn hummock_time_travel_delta_fetch_batch_size() -> usize {
+            100
+        }
+
         pub fn hummock_gc_history_insert_batch_size() -> usize {
             1000
         }
@@ -373,6 +384,10 @@ pub mod default {
             30000
         }
 
+        pub fn streaming_join_hash_map_evict_interval_rows() -> u32 {
+            16
+        }
+
         pub fn streaming_now_progress_ratio() -> Option<f32> {
             None
         }
@@ -387,6 +402,10 @@ pub mod default {
 
         pub fn rpc_client_connect_timeout_secs() -> u64 {
             5
+        }
+
+        pub fn rpc_client_pool_setup_concurrency() -> usize {
+            0
         }
 
         pub fn iceberg_list_interval_sec() -> u64 {
@@ -421,8 +440,24 @@ pub mod default {
             2048
         }
 
+        pub fn table_change_log_insert_batch_size() -> u64 {
+            1000
+        }
+
+        pub fn table_change_log_delete_batch_size() -> u64 {
+            1000
+        }
+
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
             false
+        }
+
+        pub fn enable_vnode_key_stats_for_materialize() -> bool {
+            false
+        }
+
+        pub fn max_concurrent_kv_log_store_historical_read() -> usize {
+            0
         }
     }
 }
@@ -663,6 +698,26 @@ pub mod tests {
         }
     }
 
+    #[test]
+    fn test_meta_max_normalize_splits_per_round_must_be_positive() {
+        let config = toml::from_str::<RwConfig>(
+            r#"
+            [meta]
+            max_normalize_splits_per_round = 0
+            "#,
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 3, column 46
+              |
+            3 |             max_normalize_splits_per_round = 0
+              |                                              ^
+            meta.max_normalize_splits_per_round must be greater than 0
+        "#]]
+        .assert_eq(&config.to_string());
+    }
+
     // Previously, we have prefixes like `stream_` for all configs under `streaming.developer`.
     // Later we removed the prefixes, but we still want to guarantee the backward compatibility.
     #[test]
@@ -674,6 +729,7 @@ pub mod tests {
 
             [streaming.developer.stream_compute_client_config]
             connect_timeout_secs = 42
+            pool_setup_concurrency = 10
             ",
         )
         .unwrap();
@@ -686,6 +742,14 @@ pub mod tests {
                 .compute_client_config
                 .connect_timeout_secs,
             42
+        );
+        assert_eq!(
+            config
+                .streaming
+                .developer
+                .compute_client_config
+                .pool_setup_concurrency,
+            10
         );
     }
 
@@ -726,6 +790,26 @@ pub mod tests {
             2 |             [streaming.developer.stream_compute_client_config]
               |                        ^^^^^^^^^
             duplicate field `compute_client_config`
+        "#]]
+        .assert_eq(&config.to_string());
+    }
+
+    #[test]
+    fn test_storage_max_prefetch_block_number_must_be_positive() {
+        let config = toml::from_str::<RwConfig>(
+            r#"
+            [storage]
+            max_prefetch_block_number = 0
+            "#,
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 3, column 41
+              |
+            3 |             max_prefetch_block_number = 0
+              |                                         ^
+            storage.max_prefetch_block_number must be greater than 0
         "#]]
         .assert_eq(&config.to_string());
     }

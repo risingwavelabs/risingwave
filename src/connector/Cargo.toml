@@ -8,7 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [package.metadata.cargo-machete]
-ignored = ["adbc_core"]
+ignored = []
 
 [features]
 default = []
@@ -49,8 +49,8 @@ auto_impl = "1"
 await-tree = { workspace = true }
 aws-config = { workspace = true }
 aws-credential-types = { workspace = true }
-aws-msk-iam-sasl-signer = "1.0.0"
-aws-sdk-dynamodb = "1"
+aws-msk-iam-sasl-signer = "1.0.1"
+aws-sdk-dynamodb = { workspace = true }
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
@@ -77,7 +77,7 @@ elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
 enum-as-inner = "0.7"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-gcp-bigquery-client = { version = "0.18.0", optional = true }
+gcp-bigquery-client = { version = "0.28.0", optional = true }
 glob = "0.3"
 google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.4", features = [
     "auth",
@@ -96,7 +96,7 @@ itertools = { workspace = true }
 jni = { workspace = true }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
-mongodb = "3.2.5"
+mongodb = "3.5.1"
 mysql_async = { workspace = true }
 mysql_common = { version = "0.35", default-features = false, features = [
     "chrono",
@@ -115,21 +115,18 @@ opendal = { workspace = true, features = [
 opensearch = { version = "2.3.0", features = ["rustls-tls"] }
 openssl = "0.10.72"
 parking_lot = { workspace = true }
-parquet = { workspace = true }
+parquet = { version = "58", features = ["async"] }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
 phf = { version = "0.13", features = ["macros"] }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
-prost-011 = { package = "prost", version = "0.11" }
-prost-014 = { package = "prost", version = "0.14" }
-prost-reflect = { version = "0.15", features = ["serde"] }
-prost-types = "0.13"
-prost-types-014 = { package = "prost-types", version = "0.14" }
-pulsar = { version = "6.3", default-features = false, features = [
+prost-013 = { package = "prost", version = "0.13.4" }
+prost-reflect = { workspace = true }
+prost-types = { workspace = true }
+pulsar = { version = "6.7", default-features = false, features = [
     "tokio-runtime",
-    "telemetry",
     "auth-oauth2",
     "lz4",
     "zstd",
@@ -176,8 +173,8 @@ serde_with = { version = "3", features = ["json"] }
 simd-json = { version = "0.17.0", features = ["hints"] }
 smallvec = { workspace = true }
 sqlx = { workspace = true }
-strum = "0.27"
-strum_macros = "0.27"
+strum = "0.28"
+strum_macros = "0.28"
 tempfile = "3"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
@@ -192,16 +189,8 @@ tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "5935
     "tds73",
     "time",
 ] }
-time = "0.3.30"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+time = "0.3.47"
+tokio = { workspace = true, features = ["fs"] }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
@@ -213,7 +202,7 @@ url = "2"
 urlencoding = "2"
 uuid = { version = "1", features = ["v4", "v7", "fast-rng"] }
 with_options = { path = "./with_options" }
-yup-oauth2 = "8.3"
+yup-oauth2 = "12.1.2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

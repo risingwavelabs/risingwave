@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, ObjectIdRange, SyncResult};
 use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest};
@@ -82,9 +84,10 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         table_id: JobId,
         level: u32,
         sst_ids: Vec<HummockSstableId>,
-    ) -> Result<()> {
+        exclusive: bool,
+    ) -> Result<bool> {
         self.meta_client
-            .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)
+            .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids, exclusive)
             .await
     }
 
@@ -122,5 +125,26 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         BoxStream<'static, IcebergCompactionEventItem>,
     )> {
         self.meta_client.subscribe_iceberg_compaction_event().await
+    }
+
+    async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        self.meta_client
+            .get_table_change_logs(
+                epoch_only,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids,
+                exclude_empty,
+                limit,
+            )
+            .await
     }
 }

@@ -378,6 +378,15 @@ message SinkNode {
   optional uint32 rate_limit = 4;
 }
 
+message IcebergWithPkIndexWriterNode {
+  SinkDesc sink_desc = 1;
+  catalog.Table pk_index_table = 2;
+}
+
+message IcebergWithPkIndexDvMergerNode {
+  SinkDesc sink_desc = 1;
+}
+
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
   // this two field is expressing a list of usize pair, which means when project receives a
@@ -584,12 +593,28 @@ enum JoinEncodingType {
   CPU_OPTIMIZED = 2;
 }
 
+message JoinKeyWatermarkIndex {
+  // Index in `left_key`/`right_key`.
+  uint32 index = 1;
+  // Whether watermark on this join key triggers state cleaning of the counterpart.
+  bool do_state_cleaning = 2;
+}
+
+message HashJoinWatermarkHandleDesc {
+  // Join-key positions whose watermarks should be aligned across both sides.
+  repeated JoinKeyWatermarkIndex watermark_indices_in_jk = 1;
+  // Inequality pairs used for watermark generation / state cleaning.
+  repeated InequalityPairV2 inequality_pairs = 2;
+}
+
 message HashJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
-  repeated InequalityPair inequality_pairs = 5;
+  reserved 5;
+  reserved "inequality_pairs";
+
   // Used for internal table states.
   catalog.Table left_table = 6;
   // Used for internal table states.
@@ -620,8 +645,11 @@ message HashJoinNode {
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   JoinEncodingType join_encoding_type = 15 [deprecated = true];
 
-  // New inequality pairs with clearer semantics. Takes precedence over `inequality_pairs` if non-empty.
-  repeated InequalityPairV2 inequality_pairs_v2 = 16;
+  reserved 16;
+  reserved "inequality_pairs_v2";
+
+  // Description of watermark-based and other state cleaning strategies.
+  HashJoinWatermarkHandleDesc watermark_handle_desc = 17;
 }
 
 message AsOfJoinNode {
@@ -647,6 +675,10 @@ message AsOfJoinNode {
   // Which encoding will be used to encode join rows in operator cache.
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   JoinEncodingType join_encoding_type = 11 [deprecated = true];
+  // Whether to use the cache-based implementation (true) or the no-cache implementation (false).
+  // Controlled by session variable `streaming_asof_join_use_cache`.
+  // Optional so that legacy plans (without this field) default to true (cache-based).
+  optional bool use_cache = 12;
 }
 
 message TemporalJoinNode {
@@ -998,6 +1030,9 @@ message EowcOverWindowNode {
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3; // use `repeated` in case of future extension, now only one column is allowed
   catalog.Table state_table = 4;
+  // Optional state table for persisting window function intermediate states.
+  // Currently used for numbering functions (row_number/rank/dense_rank).
+  optional catalog.Table intermediate_state_table = 5;
 }
 
 enum OverWindowCachePolicy {
@@ -1156,6 +1191,8 @@ message StreamNode {
     EowcGapFillNode eowc_gap_fill = 153;
     GapFillNode gap_fill = 154;
     VectorIndexLookupJoinNode vector_index_lookup_join = 155;
+    IcebergWithPkIndexWriterNode iceberg_with_pk_index_writer = 156;
+    IcebergWithPkIndexDvMergerNode iceberg_with_pk_index_dv_merger = 157;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -1267,6 +1304,8 @@ message StreamContext {
   string config_override = 2;
   // The adaptive parallelism strategy for this streaming job, if explicitly set.
   string adaptive_parallelism_strategy = 3;
+  // The adaptive parallelism strategy for the backfill override, if explicitly set.
+  string backfill_adaptive_parallelism_strategy = 4;
 }
 
 message BackfillOrder {

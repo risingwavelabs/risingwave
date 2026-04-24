@@ -29,12 +29,14 @@ chrono = { workspace = true, features = [
 ] }
 chrono-tz = { version = "0.10", features = ["case-insensitive"] }
 constant_time_eq = "0.4"
+crc32c = "0.6"
+crc32fast = "1"
 educe = "0.6"
 fancy-regex = "0.17"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
-ginepro = { git = "https://github.com/risingwavelabs/ginepro.git", rev = "109c6f48f1db0926f4783548250f3e31680ff98c", optional = true }
+ginepro = { git = "https://github.com/risingwavelabs/ginepro.git", rev = "4fb890ab5badbc92a79fb7435f47d79099cd90d3", optional = true }
 hex = "0.4"
 hmac = "0.12"
 iceberg = { workspace = true }
@@ -62,9 +64,9 @@ smallvec = { workspace = true }
 sql-json-path = { version = "0.1.1", features = ["jsonbb"] }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
+tokio = { workspace = true }
 # For arrow-udf-runtime/remote
-tonic = { version = "0.12.3", optional = true }
+tonic = { workspace = true, optional = true }
 tracing = "0.1"
 zstd = { version = "0.13", default-features = false, optional = true }
 
@@ -75,10 +77,7 @@ workspace-hack = { path = "../../workspace-hack" }
 criterion = { workspace = true }
 expect-test = "1"
 hex-literal = "1.1.0"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "macros",
-] }
+tokio = { workspace = true }
 
 [[bench]]
 name = "expr"

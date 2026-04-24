@@ -691,6 +691,11 @@ impl ToStream for LogicalOverWindow {
             let sort_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .streaming_enforce_if_not_satisfies(stream_input)?;
+            // After sharding by partition key, `StreamEowcSort` gives rows in the same partition
+            // and `ORDER BY` value a deterministic tie-break based on the preserved input stream
+            // key. This matches `EowcOverWindow`'s persisted order
+            // (`partition key | order key | input pk`), so numbering functions recover with the
+            // same peer ordering as the live path.
             let sort = StreamEowcSort::new(sort_input, order_key_index);
 
             let core = self.core.clone_with_input(sort.into());
@@ -716,6 +721,24 @@ impl ToStream for LogicalOverWindow {
 
             Ok(StreamOverWindow::new(core)?.into())
         }
+    }
+
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() {
+            return None;
+        }
+
+        let partition_key_indices = self.partition_key_indices();
+        if columns.len() > partition_key_indices.len()
+            || columns != &partition_key_indices[..columns.len()]
+        {
+            return None;
+        }
+
+        // Similar to agg/topn, keep the current over-window node so the locality can be provided
+        // by its own state table after `to_stream`, instead of trying to enforce it on input
+        // during logical rewrite.
+        Some(self.clone_with_input(self.input()).into())
     }
 
     fn logical_rewrite_for_stream(

@@ -117,7 +117,7 @@ fn gen_version(
         vnode_part_count,
     ));
     let committed_epoch = test_epoch(new_epoch_idx as _);
-    let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
+    let mut version = HummockVersion::from_persisted_protobuf_owned(PbHummockVersion {
         id: (new_epoch_idx as u64).into(),
         ..Default::default()
     });

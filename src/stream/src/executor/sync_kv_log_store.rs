@@ -778,39 +778,55 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                         }
                                     }
                                     Message::Chunk(chunk) => {
-                                        let start_seq_id = seq_id;
-                                        let new_seq_id = seq_id + chunk.cardinality() as SeqId;
-                                        let end_seq_id = new_seq_id - 1;
-                                        let epoch = write_state.epoch().curr;
-                                        tracing::trace!(
-                                            start_seq_id,
-                                            end_seq_id,
-                                            new_seq_id,
-                                            epoch,
-                                            cardinality = chunk.cardinality(),
-                                            "received chunk"
-                                        );
-                                        if let Some(chunk_to_flush) = buffer.add_or_flush_chunk(
-                                            start_seq_id,
-                                            end_seq_id,
-                                            chunk,
-                                            epoch,
-                                        ) {
-                                            seq_id = new_seq_id;
-                                            write_future_state = WriteFuture::flush_chunk(
-                                                stream,
-                                                write_state,
-                                                chunk_to_flush,
-                                                epoch,
-                                                start_seq_id,
-                                                end_seq_id,
+                                        // Skip empty chunks to avoid non-advancing seq_id
+                                        // (end_seq_id = start_seq_id - 1), which would violate the
+                                        // strict progress increase invariant in apply_aligned when
+                                        // consecutive empty chunks produce identical end_seq_id.
+                                        if chunk.cardinality() == 0 {
+                                            tracing::warn!(
+                                                epoch = write_state.epoch().curr,
+                                                "received empty chunk (cardinality=0), skipping"
                                             );
-                                        } else {
-                                            seq_id = new_seq_id;
                                             write_future_state = WriteFuture::receive_from_upstream(
                                                 stream,
                                                 write_state,
                                             );
+                                        } else {
+                                            let start_seq_id = seq_id;
+                                            let new_seq_id = seq_id + chunk.cardinality() as SeqId;
+                                            let end_seq_id = new_seq_id - 1;
+                                            let epoch = write_state.epoch().curr;
+                                            tracing::trace!(
+                                                start_seq_id,
+                                                end_seq_id,
+                                                new_seq_id,
+                                                epoch,
+                                                cardinality = chunk.cardinality(),
+                                                "received chunk"
+                                            );
+                                            if let Some(chunk_to_flush) = buffer.add_or_flush_chunk(
+                                                start_seq_id,
+                                                end_seq_id,
+                                                chunk,
+                                                epoch,
+                                            ) {
+                                                seq_id = new_seq_id;
+                                                write_future_state = WriteFuture::flush_chunk(
+                                                    stream,
+                                                    write_state,
+                                                    chunk_to_flush,
+                                                    epoch,
+                                                    start_seq_id,
+                                                    end_seq_id,
+                                                );
+                                            } else {
+                                                seq_id = new_seq_id;
+                                                write_future_state =
+                                                    WriteFuture::receive_from_upstream(
+                                                        stream,
+                                                        write_state,
+                                                    );
+                                            }
                                         }
                                     }
                                     // FIXME(kwannoel): This should truncate the logstore,

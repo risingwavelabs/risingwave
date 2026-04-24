@@ -23,7 +23,7 @@ use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
 use risingwave_connector::sink::SinkParam;
-use risingwave_connector::sink::log_store::LogStoreFactory;
+use risingwave_connector::sink::log_store::{LogStoreFactory, TruncateBarrierLogReader};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel};
@@ -71,7 +71,7 @@ impl LogStoreVnodeProgress {
         match prev_progress {
             None => {
                 assert!(
-                    prev_epoch < epoch,
+                    prev_epoch <= epoch,
                     "barrier epoch {} decrease to {}",
                     prev_epoch,
                     epoch
@@ -80,7 +80,24 @@ impl LogStoreVnodeProgress {
             Some(prev_progress) => {
                 assert_eq!(prev_epoch, epoch);
                 if let Some(progress) = progress {
-                    assert!(progress > prev_progress);
+                    assert!(
+                        progress >= prev_progress,
+                        "seq_id decreased: prev_epoch={}, epoch={}, prev_progress={}, progress={}",
+                        prev_epoch,
+                        epoch,
+                        prev_progress,
+                        progress
+                    );
+                    if progress == prev_progress {
+                        tracing::warn!(
+                            prev_epoch,
+                            epoch,
+                            prev_progress,
+                            progress,
+                            "progress did not strictly increase: this may indicate \
+                             empty chunks (cardinality=0) were not filtered out"
+                        );
+                    }
                 }
             }
         }
@@ -502,6 +519,10 @@ pub struct KvLogStoreFactory<S: StateStore> {
     identity: String,
 
     pk_info: &'static KvLogStorePkInfo,
+
+    /// Semaphore to limit the number of concurrent historical reads.
+    /// `None` means unlimited.
+    historical_read_semaphore: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
@@ -514,6 +535,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         chunk_size: usize,
         metrics: KvLogStoreMetrics,
         identity: impl Into<String>,
+        historical_read_semaphore: Option<Arc<tokio::sync::Semaphore>>,
         pk_info: &'static KvLogStorePkInfo,
     ) -> Self {
         Self {
@@ -525,12 +547,15 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             metrics,
             identity: identity.into(),
             pk_info,
+            historical_read_semaphore,
         }
     }
 }
 
 impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
-    type Reader = KvLogStoreReader<<S::Local as LocalStateStore>::FlushedSnapshotReader>;
+    type Reader = TruncateBarrierLogReader<
+        KvLogStoreReader<<S::Local as LocalStateStore>::FlushedSnapshotReader>,
+    >;
     type Writer = KvLogStoreWriter<S::Local>;
 
     const ALLOW_REWIND: bool = true;
@@ -575,6 +600,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
+            self.historical_read_semaphore,
         );
 
         let writer = KvLogStoreWriter::new(
@@ -587,7 +613,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             self.identity,
         );
 
-        (reader, writer)
+        (TruncateBarrierLogReader::new(reader), writer)
     }
 }
 
@@ -601,22 +627,28 @@ mod tests {
     use std::task::Poll;
     use std::time::Duration;
 
+    use futures::StreamExt;
     use itertools::Itertools;
-    use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+    use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::types::DataType;
+    use risingwave_common::row::{OwnedRow, Row};
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::epoch::{EpochExt, EpochPair};
     use risingwave_connector::sink::log_store::{
         ChunkId, FlushCurrentEpochOptions, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter,
         TruncateOffset,
     };
+    use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_pb::plan_common::PbField;
     use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkSchemaChange};
+    use risingwave_storage::table::batch_table::BatchTable;
 
     use crate::common::log_store_impl::kv_log_store::test_utils::{
-        LogWriterTestExt, TEST_DATA_SIZE, calculate_vnode_bitmap, check_rows_eq,
+        LogWriterTestExt, TEST_DATA_SIZE, TEST_TABLE_ID, calculate_vnode_bitmap, check_rows_eq,
         check_stream_chunk_eq, gen_multi_vnode_stream_chunks, gen_stream_chunk_with_info,
         gen_test_log_store_table,
     };
@@ -628,12 +660,16 @@ mod tests {
     async fn test_basic() {
         for count in (0..20).step_by(5) {
             #[expect(deprecated)]
-            test_basic_inner(
+            Box::pin(test_basic_inner(
                 count * TEST_DATA_SIZE,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_basic_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_basic_inner(
+                count * TEST_DATA_SIZE,
+                &KV_LOG_STORE_V2_INFO,
+            ))
+            .await;
         }
     }
 
@@ -657,6 +693,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -745,12 +782,16 @@ mod tests {
     async fn test_recovery() {
         for count in (0..20).step_by(5) {
             #[expect(deprecated)]
-            test_recovery_inner(
+            Box::pin(test_recovery_inner(
                 count * TEST_DATA_SIZE,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_recovery_inner(count * TEST_DATA_SIZE, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_recovery_inner(
+                count * TEST_DATA_SIZE,
+                &KV_LOG_STORE_V2_INFO,
+            ))
+            .await;
         }
     }
 
@@ -775,6 +816,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -871,6 +913,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -929,12 +972,12 @@ mod tests {
     async fn test_truncate() {
         for count in (2..10).step_by(3) {
             #[expect(deprecated)]
-            test_truncate_inner(
+            Box::pin(test_truncate_inner(
                 count,
                 &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-            )
+            ))
             .await;
-            test_truncate_inner(count, &KV_LOG_STORE_V2_INFO).await;
+            Box::pin(test_truncate_inner(count, &KV_LOG_STORE_V2_INFO)).await;
         }
     }
 
@@ -967,6 +1010,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1089,6 +1133,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1188,6 +1233,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let factory2 = KvLogStoreFactory::new(
@@ -1198,6 +1244,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader1, mut writer1) = factory1.build().await;
@@ -1336,6 +1383,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1408,6 +1456,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1557,6 +1606,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1676,6 +1726,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1746,6 +1797,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -1887,12 +1939,12 @@ mod tests {
     #[tokio::test]
     async fn test_truncate_historical() {
         #[expect(deprecated)]
-        test_truncate_historical_inner(
+        Box::pin(test_truncate_historical_inner(
             10,
             &crate::common::log_store_impl::kv_log_store::v1::KV_LOG_STORE_V1_INFO,
-        )
+        ))
         .await;
-        test_truncate_historical_inner(10, &KV_LOG_STORE_V2_INFO).await;
+        Box::pin(test_truncate_historical_inner(10, &KV_LOG_STORE_V2_INFO)).await;
     }
 
     async fn test_truncate_historical_inner(
@@ -1919,6 +1971,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -2009,6 +2062,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -2084,6 +2138,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -2142,6 +2197,7 @@ mod tests {
             1024,
             KvLogStoreMetrics::for_test(),
             "test",
+            None,
             pk_info,
         );
         let (mut reader, mut writer) = factory.build().await;
@@ -2250,5 +2306,232 @@ mod tests {
 
         // Writer should be able to continue with the next epoch after reader truncation.
         writer.write_chunk(gen_stream_chunk(10)).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_schema_change_batch_scan_skips_old_schema_rows() {
+        let pk_info: &'static KvLogStorePkInfo = &KV_LOG_STORE_V2_INFO;
+        let test_env = prepare_hummock_test_env().await;
+
+        let old_table = gen_test_log_store_table(pk_info);
+        test_env.register_table(old_table.clone()).await;
+
+        let old_chunk = gen_stream_chunk_with_info(0, pk_info);
+        let old_bitmap = Arc::new(calculate_vnode_bitmap(old_chunk.rows()));
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            old_table.clone(),
+            Some(old_bitmap),
+            1024,
+            1024,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            None,
+            pk_info,
+        );
+        let (mut reader, mut writer) = factory.build().await;
+
+        let epoch1 = test_env
+            .storage
+            .get_pinned_version()
+            .table_committed_epoch(old_table.id)
+            .unwrap()
+            .next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch1), false)
+            .await
+            .unwrap();
+        writer.write_chunk(old_chunk).await.unwrap();
+
+        let epoch2 = epoch1.next_epoch();
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
+        let schema_change = PbSinkSchemaChange {
+            original_schema: old_table
+                .columns
+                .iter()
+                .map(|col| PbField {
+                    data_type: Some(
+                        col.column_desc
+                            .as_ref()
+                            .unwrap()
+                            .column_type
+                            .as_ref()
+                            .unwrap()
+                            .clone(),
+                    ),
+                    name: col.column_desc.as_ref().unwrap().name.clone(),
+                })
+                .collect(),
+            op: Some(
+                risingwave_pb::stream_plan::sink_schema_change::PbOp::AddColumns(
+                    PbSinkAddColumnsOp {
+                        fields: vec![PbField {
+                            data_type: Some(DataType::Int32.to_protobuf()),
+                            name: "age".to_owned(),
+                        }],
+                    },
+                ),
+            ),
+        };
+        let flush_future = writer.flush_current_epoch(
+            epoch2,
+            FlushCurrentEpochOptions {
+                is_checkpoint: true,
+                new_vnode_bitmap: None,
+                is_stop: false,
+                schema_change: Some(schema_change),
+            },
+        );
+        let mut flush_future = Box::pin(flush_future);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), flush_future.as_mut())
+                .await
+                .is_err()
+        );
+
+        reader.init().await.unwrap();
+        reader.start_from(None).await.unwrap();
+        let _ = reader.next_item().await.unwrap();
+        let _ = reader.next_item().await.unwrap();
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .unwrap();
+        {
+            let post_flush = tokio::time::timeout(Duration::from_secs(10), flush_future)
+                .await
+                .expect("schema-change flush should finish after reader truncates barrier")
+                .unwrap();
+            post_flush.post_yield_barrier().await.unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(10), test_env.commit_epoch(epoch1))
+            .await
+            .expect("committing the schema-change epoch should not hang");
+
+        drop(reader);
+        drop(writer);
+        test_env.storage.clear_shared_buffer().await;
+
+        let mut new_table = old_table.clone();
+        new_table.columns.push(
+            ColumnCatalog::visible(ColumnDesc::named(
+                "age",
+                ColumnId::new(new_table.columns.len() as i32),
+                DataType::Int32,
+            ))
+            .to_protobuf(),
+        );
+        new_table.value_indices = (0..new_table.columns.len() as i32).collect();
+        let mut builder = DataChunkBuilder::new(
+            vec![DataType::Int64, DataType::Varchar, DataType::Int32],
+            1024,
+        );
+        let vnode_zero_ids = (0_i64..)
+            .filter(|id| {
+                let row = OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(*id)),
+                    Some(ScalarImpl::Utf8("probe".into())),
+                    Some(ScalarImpl::Int32(0)),
+                ]);
+                VirtualNode::compute_row_for_test(&row, &[0]).to_index() == 0
+            })
+            .take(2)
+            .collect_vec();
+        for row in [
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(vnode_zero_ids[0])),
+                Some(ScalarImpl::Utf8("alice".into())),
+                Some(ScalarImpl::Int32(40)),
+            ]),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(vnode_zero_ids[1])),
+                Some(ScalarImpl::Utf8("bob".into())),
+                Some(ScalarImpl::Int32(50)),
+            ]),
+        ] {
+            assert!(builder.append_one_row(row).is_none());
+        }
+        let new_chunk =
+            StreamChunk::from_parts(vec![Op::Insert, Op::Insert], builder.consume_all().unwrap());
+
+        let new_bitmap = Arc::new(calculate_vnode_bitmap(new_chunk.rows()));
+        let factory = KvLogStoreFactory::new(
+            test_env.storage.clone(),
+            new_table.clone(),
+            Some(new_bitmap.clone()),
+            1024,
+            1024,
+            KvLogStoreMetrics::for_test(),
+            "test",
+            None,
+            pk_info,
+        );
+        let (_, mut writer) = factory.build().await;
+        test_env
+            .storage
+            .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
+        writer
+            .init(EpochPair::new_test_epoch(epoch2), false)
+            .await
+            .unwrap();
+        writer.write_chunk(new_chunk).await.unwrap();
+        let epoch3 = epoch2.next_epoch();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            writer.flush_current_epoch_for_test(epoch3, true),
+        )
+        .await
+        .expect("flushing the rebuilt writer should not hang")
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), test_env.commit_epoch(epoch2))
+            .await
+            .expect("committing the rebuilt-writer epoch should not hang");
+
+        let batch_table = BatchTable::for_test(
+            test_env.storage.clone(),
+            TEST_TABLE_ID,
+            new_table
+                .columns
+                .iter()
+                .map(|col| col.column_desc.as_ref().unwrap().into())
+                .collect_vec(),
+            pk_info.pk_orderings.to_vec(),
+            (0..pk_info.pk_len()).collect_vec(),
+            new_table
+                .value_indices
+                .iter()
+                .map(|&idx| idx as usize)
+                .collect_vec(),
+        );
+        let age_column_idx = pk_info.predefined_column_len() + 2;
+        let mut iter = pin!(
+            batch_table
+                .batch_iter(
+                    HummockReadEpoch::Committed(epoch2),
+                    false,
+                    Default::default(),
+                )
+                .await
+                .unwrap()
+        );
+
+        let mut ages = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut ages = vec![];
+            while let Some(row) = iter.next().await {
+                let row = row.unwrap();
+                if let Some(age) = row.datum_at(age_column_idx) {
+                    ages.push(age.into_int32());
+                }
+            }
+            ages
+        })
+        .await
+        .expect("batch scan after schema change should not hang");
+        ages.sort_unstable();
+        assert_eq!(ages, vec![40, 50]);
     }
 }

@@ -262,6 +262,18 @@ struct IcebergCompactionManagerInner {
     pub sink_schedules: HashMap<SinkId, CompactionTrack>,
 }
 
+#[derive(Debug, Clone)]
+pub struct IcebergCompactionScheduleStatus {
+    pub sink_id: SinkId,
+    pub task_type: String,
+    pub trigger_interval_sec: u64,
+    pub trigger_snapshot_count: usize,
+    pub schedule_state: String,
+    pub next_compaction_after_sec: Option<u64>,
+    pub pending_snapshot_count: Option<usize>,
+    pub is_triggerable: bool,
+}
+
 pub struct IcebergCompactionManager {
     pub env: MetaSrvEnv,
     inner: Arc<RwLock<IcebergCompactionManagerInner>>,
@@ -520,6 +532,54 @@ impl IcebergCompactionManager {
     pub fn clear_iceberg_commits_by_sink_id(&self, sink_id: SinkId) {
         let mut guard = self.inner.write();
         guard.sink_schedules.remove(&sink_id);
+    }
+
+    pub async fn list_compaction_statuses(&self) -> Vec<IcebergCompactionScheduleStatus> {
+        let now = Instant::now();
+        let schedules = {
+            let guard = self.inner.read();
+            guard
+                .sink_schedules
+                .iter()
+                .map(|(&sink_id, track)| (sink_id, track.clone()))
+                .collect_vec()
+        };
+
+        let mut statuses =
+            futures::future::join_all(schedules.into_iter().map(|(sink_id, track)| async move {
+                let pending_snapshot_count = self.get_pending_snapshot_count(sink_id).await;
+                let next_compaction_after_sec = match &track.state {
+                    CompactionTrackState::Idle {
+                        next_compaction_time,
+                    } => Some(
+                        next_compaction_time
+                            .saturating_duration_since(now)
+                            .as_secs(),
+                    ),
+                    CompactionTrackState::Processing => None,
+                };
+                let is_triggerable = pending_snapshot_count
+                    .map(|snapshot_count| track.should_trigger(now, snapshot_count))
+                    .unwrap_or(false);
+
+                IcebergCompactionScheduleStatus {
+                    sink_id,
+                    task_type: track.task_type.as_str_name().to_ascii_lowercase(),
+                    trigger_interval_sec: track.trigger_interval_sec,
+                    trigger_snapshot_count: track.trigger_snapshot_count,
+                    schedule_state: match track.state {
+                        CompactionTrackState::Idle { .. } => "idle".to_owned(),
+                        CompactionTrackState::Processing => "processing".to_owned(),
+                    },
+                    next_compaction_after_sec,
+                    pending_snapshot_count,
+                    is_triggerable,
+                }
+            }))
+            .await;
+
+        statuses.sort_by_key(|status| status.sink_id);
+        statuses
     }
 
     pub async fn get_sink_param(&self, sink_id: SinkId) -> MetaResult<SinkParam> {

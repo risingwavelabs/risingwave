@@ -21,11 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
-
-echo "--- starting risingwave cluster"
-risedev ci-start ci-sink-test
-sleep 1
+sink_test_env_setup "$profile"
 
 
 echo "--- create starrocks table"

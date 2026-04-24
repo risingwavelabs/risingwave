@@ -150,13 +150,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 continue;
             }
 
-            // Find the database ID for this table
-            let database_id = self
-                .metadata_manager
-                .catalog_controller
-                .get_object_database_id(associated_source_id)
-                .await
-                .context("Failed to get database id for table")?;
+            let Some(database_id) = self
+                .get_source_database_id_for_refresh_stage(table_id, associated_source_id, "list")
+                .await?
+            else {
+                continue;
+            };
 
             // Create ListFinish command
             let list_finish_command = Command::ListFinish {
@@ -202,13 +201,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 continue;
             }
 
-            // Find the database ID for this table
-            let database_id = self
-                .metadata_manager
-                .catalog_controller
-                .get_object_database_id(associated_source_id)
-                .await
-                .context("Failed to get database id for table")?;
+            let Some(database_id) = self
+                .get_source_database_id_for_refresh_stage(table_id, associated_source_id, "load")
+                .await?
+            else {
+                continue;
+            };
 
             // Create LoadFinish command
             let load_finish_command = Command::LoadFinish {
@@ -246,6 +244,39 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    async fn get_source_database_id_for_refresh_stage(
+        &self,
+        table_id: TableId,
+        associated_source_id: SourceId,
+        stage: &'static str,
+    ) -> MetaResult<Option<DatabaseId>> {
+        match self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(associated_source_id)
+            .await
+        {
+            Ok(database_id) => Ok(Some(database_id)),
+            Err(err) if err.is_catalog_id_not_found("object") => {
+                tracing::warn!(
+                    %table_id,
+                    %associated_source_id,
+                    stage,
+                    "skip refresh finish command because associated source is already dropped"
+                );
+                Ok(None)
+            }
+            Err(err) => Err(err)
+                .with_context(|| {
+                    format!(
+                        "failed to get database id for refresh stage: table_id={}, associated_source_id={}, stage={stage}",
+                        table_id, associated_source_id
+                    )
+                })
+                .map_err(Into::into),
+        }
+    }
+
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
     }
@@ -351,6 +382,7 @@ impl PostCollectCommand {
                 info,
                 job_type,
                 cross_db_snapshot_backfill_info,
+                resolved_split_assignment,
             } => {
                 match &job_type {
                     CreateStreamingJobType::SinkIntoTable(_) | CreateStreamingJobType::Normal => {
@@ -424,7 +456,7 @@ impl PostCollectCommand {
                         stream_job_fragments.stream_job_id(),
                         &upstream_fragment_downstreams,
                         new_sink_downstream,
-                        Some(&info.init_split_assignment),
+                        Some(&resolved_split_assignment),
                     )
                     .await?;
 
@@ -452,14 +484,16 @@ impl PostCollectCommand {
                     .await?;
             }
 
-            PostCollectCommand::ReplaceStreamJob(replace_plan) => {
+            PostCollectCommand::ReplaceStreamJob {
+                plan: replace_plan,
+                resolved_split_assignment,
+            } => {
                 let ReplaceStreamJobPlan {
                     old_fragments,
                     new_fragments,
                     upstream_fragment_downstreams,
                     to_drop_state_table_ids,
                     auto_refresh_schema_sinks,
-                    init_split_assignment,
                     ..
                 } = &replace_plan;
                 // Update actors and actor_dispatchers for new table fragments.
@@ -470,7 +504,7 @@ impl PostCollectCommand {
                         new_fragments.stream_job_id,
                         upstream_fragment_downstreams,
                         None,
-                        Some(init_split_assignment),
+                        Some(&resolved_split_assignment),
                     )
                     .await?;
 
@@ -514,5 +548,22 @@ impl PostCollectCommand {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skip_refresh_finish_when_associated_source_missing() {
+        let err = MetaError::catalog_id_not_found("object", 42);
+        assert!(err.is_catalog_id_not_found("object"));
+    }
+
+    #[test]
+    fn test_do_not_skip_refresh_finish_for_other_not_found_types() {
+        let err = MetaError::catalog_id_not_found("table", 42);
+        assert!(!err.is_catalog_id_not_found("object"));
     }
 }

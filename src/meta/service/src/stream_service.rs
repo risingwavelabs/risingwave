@@ -24,6 +24,7 @@ use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
+use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
 use risingwave_meta_model::{ConnectionId, FragmentId, SourceId, StreamingParallelism};
@@ -58,6 +59,7 @@ pub struct StreamServiceImpl {
     stream_manager: GlobalStreamManagerRef,
     metadata_manager: MetadataManager,
     refresh_manager: GlobalRefreshManagerRef,
+    iceberg_compaction_manager: IcebergCompactionManagerRef,
 }
 
 impl StreamServiceImpl {
@@ -68,6 +70,7 @@ impl StreamServiceImpl {
         stream_manager: GlobalStreamManagerRef,
         metadata_manager: MetadataManager,
         refresh_manager: GlobalRefreshManagerRef,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         StreamServiceImpl {
             env,
@@ -76,6 +79,7 @@ impl StreamServiceImpl {
             stream_manager,
             metadata_manager,
             refresh_manager,
+            iceberg_compaction_manager,
         }
     }
 }
@@ -114,6 +118,34 @@ impl StreamManagerService for StreamServiceImpl {
             .collect();
         Ok(Response::new(ListRefreshTableStatesResponse {
             states: refresh_table_states,
+        }))
+    }
+
+    async fn list_iceberg_compaction_status(
+        &self,
+        _request: Request<ListIcebergCompactionStatusRequest>,
+    ) -> TonicResponse<ListIcebergCompactionStatusResponse> {
+        let statuses = self
+            .iceberg_compaction_manager
+            .list_compaction_statuses()
+            .await
+            .into_iter()
+            .map(
+                |status| list_iceberg_compaction_status_response::IcebergCompactionStatus {
+                    sink_id: status.sink_id.as_raw_id(),
+                    task_type: status.task_type,
+                    trigger_interval_sec: status.trigger_interval_sec,
+                    trigger_snapshot_count: status.trigger_snapshot_count as u64,
+                    schedule_state: status.schedule_state,
+                    next_compaction_after_sec: status.next_compaction_after_sec,
+                    pending_snapshot_count: status.pending_snapshot_count.map(|count| count as u64),
+                    is_triggerable: status.is_triggerable,
+                },
+            )
+            .collect();
+
+        Ok(Response::new(ListIcebergCompactionStatusResponse {
+            statuses,
         }))
     }
 
@@ -272,7 +304,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         let mut info = HashMap::new();
         for job_id in table_ids {
-            let table_fragments = self
+            let (table_fragments, fragment_actors, _actor_status) = self
                 .metadata_manager
                 .catalog_controller
                 .get_job_fragments_by_id(job_id)
@@ -293,15 +325,16 @@ impl StreamManagerService for StreamServiceImpl {
                         .into_iter()
                         .map(|(id, fragment)| FragmentInfo {
                             id,
-                            actors: fragment
-                                .actors
+                            actors: fragment_actors
+                                .get(&id)
                                 .into_iter()
-                                .map(|actor| ActorInfo {
-                                    id: actor.actor_id,
+                                .flat_map(|actors| actors.iter().map(|actor| actor.actor_id))
+                                .map(|actor_id| ActorInfo {
+                                    id: actor_id,
                                     node: Some(fragment.nodes.clone()),
                                     dispatcher: dispatchers
                                         .get_mut(&fragment.fragment_id)
-                                        .and_then(|dispatchers| dispatchers.remove(&actor.actor_id))
+                                        .and_then(|dispatchers| dispatchers.remove(&actor_id))
                                         .unwrap_or_default(),
                                 })
                                 .collect_vec(),
@@ -357,6 +390,7 @@ impl StreamManagerService for StreamServiceImpl {
                         database_id,
                         schema_id,
                         config_override,
+                        adaptive_parallelism_strategy: None,
                     }
                 },
             )

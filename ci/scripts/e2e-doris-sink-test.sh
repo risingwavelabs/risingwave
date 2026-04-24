@@ -21,10 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
-
-echo "--- starting risingwave cluster"
-risedev ci-start ci-sink-test
+sink_test_env_setup "$profile" --sleep-duration 0
 
 echo "--- create doris table"
 sleep 10 # Wait for doris to start. TODO: shall we use `service_healthy` condition in docker-compose.yml?

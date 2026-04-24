@@ -29,10 +29,16 @@ def _(outer_panels: Panels):
                             "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
-                        panels.target_hidden(
-                            f"rate({table_metric('stream_snapshot_backfill_consume_snapshot_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} {{stage}} @ {{%s}}"
-                            % NODE_LABEL,
+                        panels.target(
+                            f"""
+                                sum by (table_id) (
+                                    rate({table_metric('stream_snapshot_backfill_consume_snapshot_row_count')}[$__rate_interval])
+                                )
+                                * on(table_id) group_left(table_name) (
+                                  group({metric('table_info', node_filter_enabled=False)}) by (table_name, table_id)
+                                )
+                            """,
+                            "table_name={{table_name}} table_id={{table_id}} consume snapshot"
                         ),
                     ],
                 ),

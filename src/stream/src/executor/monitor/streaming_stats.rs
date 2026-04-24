@@ -66,6 +66,7 @@ pub struct StreamingMetrics {
     pub actor_count: LabelGuardedIntGaugeVec,
     pub actor_in_record_cnt: RelabeledGuardedIntCounterVec,
     pub actor_out_record_cnt: RelabeledGuardedIntCounterVec,
+    pub fragment_channel_buffered_bytes: LabelGuardedIntGaugeVec,
     pub actor_current_epoch: RelabeledGuardedIntGaugeVec,
 
     // Source
@@ -222,6 +223,11 @@ pub struct StreamingMetrics {
     pub mysql_cdc_state_binlog_file_seq: LabelGuardedIntGaugeVec,
     pub mysql_cdc_state_binlog_position: LabelGuardedIntGaugeVec,
 
+    // SQL Server CDC LSN monitoring
+    pub sqlserver_cdc_state_change_lsn: LabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_state_commit_lsn: LabelGuardedIntGaugeVec,
+    pub sqlserver_cdc_jni_commit_offset_lsn: LabelGuardedIntGaugeVec,
+
     // Gap Fill
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
 
@@ -344,6 +350,30 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let sqlserver_cdc_state_change_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_state_change_lsn",
+            "Current change_lsn value stored in SQL Server CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_state_commit_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_state_commit_lsn",
+            "Current commit_lsn value stored in SQL Server CDC state table",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_jni_commit_offset_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "stream_sqlserver_cdc_jni_commit_offset_lsn",
+            "LSN value when JNI commit offset is called for SQL Server CDC",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
         let sink_chunk_buffer_size = register_guarded_int_gauge_vec_with_registry!(
             "stream_sink_chunk_buffer_size",
             "Total size of chunks buffered in a barrier",
@@ -372,6 +402,14 @@ impl StreamingMetrics {
             .unwrap()
             // mask the first label `actor_id` if the level is less verbose than `Debug`
             .relabel_debug_1(level);
+
+        let fragment_channel_buffered_bytes = register_guarded_int_gauge_vec_with_registry!(
+            "stream_fragment_channel_buffered_bytes",
+            "Estimated buffered bytes for actor channels by fragment",
+            &["fragment_id"],
+            registry
+        )
+        .unwrap();
 
         let exchange_frag_recv_size = register_guarded_int_counter_vec_with_registry!(
             "stream_exchange_frag_recv_size",
@@ -1282,6 +1320,7 @@ impl StreamingMetrics {
             actor_count,
             actor_in_record_cnt,
             actor_out_record_cnt,
+            fragment_channel_buffered_bytes,
             actor_current_epoch,
             source_output_row_count,
             source_split_change_count,
@@ -1388,6 +1427,9 @@ impl StreamingMetrics {
             pg_cdc_jni_commit_offset_lsn,
             mysql_cdc_state_binlog_file_seq,
             mysql_cdc_state_binlog_position,
+            sqlserver_cdc_state_change_lsn,
+            sqlserver_cdc_state_commit_lsn,
+            sqlserver_cdc_jni_commit_offset_lsn,
             gap_fill_generated_rows_count,
             state_table_iter_count,
             state_table_get_count,

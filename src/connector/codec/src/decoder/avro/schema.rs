@@ -168,7 +168,8 @@ fn avro_type_mapping(
             ancestor_records.pop();
             ty
         }
-        Schema::Array(item_schema) => {
+        Schema::Array(array_schema) => {
+            let item_schema = &array_schema.items;
             let item_type =
                 avro_type_mapping(item_schema.as_ref(), ancestor_records, refs, map_handling)?;
             DataType::list(item_type)
@@ -230,7 +231,8 @@ fn avro_type_mapping(
                 )?
             }
         }
-        Schema::Map(value_schema) => {
+        Schema::Map(map_schema) => {
+            let value_schema = &map_schema.types;
             // TODO: support native map type
             match map_handling {
                 Some(MapHandling::Jsonb) => {
@@ -257,7 +259,11 @@ fn avro_type_mapping(
             }
         }
         Schema::Uuid => DataType::Varchar,
-        Schema::Null | Schema::Fixed(_) => {
+        Schema::Null
+        | Schema::BigDecimal
+        | Schema::TimestampNanos
+        | Schema::LocalTimestampNanos
+        | Schema::Fixed(_) => {
             bail_not_implemented!("Avro type: {:?}", schema);
         }
     };
@@ -270,9 +276,8 @@ fn supported_avro_to_json_type(schema: &Schema) -> bool {
     match schema {
         Schema::Null | Schema::Boolean | Schema::Int | Schema::String => true,
 
-        Schema::Map(value_schema) | Schema::Array(value_schema) => {
-            supported_avro_to_json_type(value_schema)
-        }
+        Schema::Map(map_schema) => supported_avro_to_json_type(&map_schema.types),
+        Schema::Array(array_schema) => supported_avro_to_json_type(&array_schema.items),
         Schema::Record(RecordSchema { fields, .. }) => fields
             .iter()
             .all(|f| supported_avro_to_json_type(&f.schema)),
@@ -283,14 +288,17 @@ fn supported_avro_to_json_type(schema: &Schema) -> bool {
         | Schema::Enum(_)
         | Schema::Fixed(_)
         | Schema::Decimal(_)
+        | Schema::BigDecimal
         | Schema::Uuid
         | Schema::Date
         | Schema::TimeMillis
         | Schema::TimeMicros
         | Schema::TimestampMillis
         | Schema::TimestampMicros
+        | Schema::TimestampNanos
         | Schema::LocalTimestampMillis
         | Schema::LocalTimestampMicros
+        | Schema::LocalTimestampNanos
         | Schema::Duration
         | Schema::Ref { name: _ }
         | Schema::Union(_) => false,
@@ -352,13 +360,16 @@ pub(super) fn avro_schema_to_struct_field_name(schema: &Schema) -> Result<String
 */
         Schema::Uuid
         | Schema::Decimal(_)
+        | Schema::BigDecimal
         | Schema::Date
         | Schema::TimeMillis
         | Schema::TimeMicros
         | Schema::TimestampMillis
         | Schema::TimestampMicros
+        | Schema::TimestampNanos
         | Schema::LocalTimestampMillis
         | Schema::LocalTimestampMicros
+        | Schema::LocalTimestampNanos
         | Schema::Duration => {
             bail_not_implemented!(issue=17616, "Avro logicalType used in Union type: {:?}", schema)
         }

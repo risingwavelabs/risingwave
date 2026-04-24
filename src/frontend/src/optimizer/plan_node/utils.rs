@@ -62,6 +62,8 @@ pub struct TableCatalogBuilder {
     column_names: HashMap<String, i32>,
     watermark_columns: Option<FixedBitSet>,
     dist_key_in_pk: Option<Vec<usize>>,
+    /// Indices of watermark columns in all columns that should be used for state cleaning.
+    clean_watermark_indices: Vec<usize>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -125,6 +127,12 @@ impl TableCatalogBuilder {
 
     pub fn set_dist_key_in_pk(&mut self, dist_key_in_pk: Vec<usize>) {
         self.dist_key_in_pk = Some(dist_key_in_pk);
+    }
+
+    /// Set the indices of watermark columns used for state cleaning.
+    /// These are column indices in the table schema.
+    pub fn set_clean_watermark_indices(&mut self, clean_watermark_indices: Vec<usize>) {
+        self.clean_watermark_indices = clean_watermark_indices;
     }
 
     /// Check the column name whether exist before. if true, record occurrence and change the name
@@ -214,9 +222,9 @@ impl TableCatalogBuilder {
             webhook_info: None,
             job_id: None,
             engine: Engine::Hummock,
-            clean_watermark_index_in_pk: None, // TODO: fill this field
-            clean_watermark_indices: vec![],   // TODO: fill this field
-            refreshable: false,                // Internal tables are not refreshable
+            clean_watermark_index_in_pk: None,
+            clean_watermark_indices: self.clean_watermark_indices,
+            refreshable: false, // Internal tables are not refreshable
             vector_index_info: None,
             cdc_table_type: None,
         }

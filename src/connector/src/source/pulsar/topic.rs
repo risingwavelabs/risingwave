@@ -177,12 +177,12 @@ pub(crate) async fn check_topic_exists(
 ) -> Result<()> {
     // issue about api `get_topics_of_namespace`:
     // for partitioned topic, the api will return all sub-topic of the topic instead of the topic itself
-    let topics_on_broker = client
-        .get_topics_of_namespace(
-            format!("{}/{}", topic.tenant, topic.namespace),
-            LookupMode::All,
-        )
-        .await?;
+    // Reduce async state machine size (see `clippy::large_futures`).
+    let topics_on_broker = Box::pin(client.get_topics_of_namespace(
+        format!("{}/{}", topic.tenant, topic.namespace),
+        LookupMode::All,
+    ))
+    .await?;
     if !topics_on_broker.contains(&topic.to_string()) {
         bail!(
             "topic {} not found on broker, available topics: {:?}",
