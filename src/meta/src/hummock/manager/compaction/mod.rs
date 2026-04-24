@@ -31,13 +31,13 @@ use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_table_watermarks_impl;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     PbTableStatsMap, add_prost_table_stats_map, purge_prost_table_stats,
 };
-use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
@@ -48,7 +48,7 @@ use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
     CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment,
-    SubscribeCompactionEventRequest, TableOption, TableSchema, compact_task,
+    SubscribeCompactionEventRequest, TableOption, compact_task,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::RwLockWriteGuard;
@@ -64,9 +64,15 @@ use crate::hummock::compaction::selector::{
     ManualCompactionSelector, SpaceReclaimCompactionSelector, TombstoneCompactionSelector,
     TtlCompactionSelector, VnodeWatermarkCompactionSelector,
 };
-use crate::hummock::compaction::{CompactStatus, CompactionDeveloperConfig, CompactionSelector};
+use crate::hummock::compaction::{
+    CompactStatus, CompactionDeveloperConfig, CompactionSelector,
+    CompactionTask as PickedCompactionTask,
+};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::CompactionTaskReportResult;
+use crate::hummock::manager::compaction::compact_task_builder::{
+    CompactTaskBuildContext, attach_compact_task_table_metadata, build_base_compact_task,
+};
 use crate::hummock::manager::transaction::{
     HummockVersionStatsTransaction, HummockVersionTransaction,
 };
@@ -86,6 +92,7 @@ pub enum ManualCompactionTriggerResult {
     Retry,
 }
 
+mod compact_task_builder;
 pub mod compaction_event_loop;
 pub mod compaction_group_manager;
 pub mod compaction_group_schedule;
@@ -129,6 +136,11 @@ fn init_selectors() -> HashMap<compact_task::TaskType, Box<dyn CompactionSelecto
         Box::<VnodeWatermarkCompactionSelector>::default(),
     );
     compaction_selectors
+}
+
+enum BuiltCompactTask {
+    MetaFinished(CompactTask),
+    PendingAssignment(CompactTask),
 }
 
 impl HummockVersionTransaction<'_> {
@@ -404,9 +416,6 @@ impl HummockManager {
             }
             let mut compact_status = compaction_statuses.get_mut(compaction_group_id).unwrap();
 
-            let can_trivial_move = matches!(selector.task_type(), TaskType::Dynamic)
-                || matches!(selector.task_type(), TaskType::Emergency);
-
             let mut stats = LocalSelectorStatistic::default();
             let member_table_ids: Vec<_> = version
                 .latest_version()
@@ -427,7 +436,7 @@ impl HummockManager {
                 }
             }
 
-            while let Some(compact_task) = compact_status.get_compact_task(
+            while let Some(picked_task) = compact_status.get_compact_task(
                 version
                     .latest_version()
                     .get_compaction_group_levels(compaction_group_id),
@@ -444,156 +453,76 @@ impl HummockManager {
                 &version.latest_version().table_watermarks,
                 &version.latest_version().state_table_info,
             ) {
-                let target_level_id = compact_task.input.target_level as u32;
-                let compaction_group_version_id = version
+                let compaction_group_levels = version
                     .latest_version()
-                    .get_compaction_group_levels(compaction_group_id)
-                    .compaction_group_version_id;
-                let compression_algorithm = match compact_task.compression_algorithm.as_str() {
-                    "Lz4" => 1,
-                    "Zstd" => 2,
-                    _ => 0,
-                };
-                let vnode_partition_count = compact_task.input.vnode_partition_count;
-                let mut compact_task = CompactTask {
-                    input_ssts: compact_task.input.input_levels,
-                    splits: vec![KeyRange::inf()],
-                    sorted_output_ssts: vec![],
-                    task_id,
-                    target_level: target_level_id,
-                    // only gc delete keys in last level because there may be older version in more bottom
-                    // level.
-                    gc_delete_keys: version
-                        .latest_version()
-                        .get_compaction_group_levels(compaction_group_id)
-                        .is_last_level(target_level_id),
-                    base_level: compact_task.base_level as u32,
-                    task_status: TaskStatus::Pending,
-                    compaction_group_id: group_config.group_id,
-                    compaction_group_version_id,
-                    existing_table_ids: member_table_ids.clone(),
-                    compression_algorithm,
-                    target_file_size: compact_task.target_file_size,
-                    table_options: table_id_to_option
-                        .iter()
-                        .map(|(table_id, table_option)| {
-                            (*table_id, TableOption::from(table_option))
-                        })
-                        .collect(),
-                    current_epoch_time: Epoch::now().0,
-                    compaction_filter_mask: group_config.compaction_config.compaction_filter_mask,
-                    target_sub_level_id: compact_task.input.target_sub_level_id,
-                    task_type: compact_task.compaction_task_type,
-                    split_weight_by_vnode: vnode_partition_count,
-                    max_sub_compaction: group_config.compaction_config.max_sub_compaction,
-                    max_kv_count_for_xor16: group_config.compaction_config.max_kv_count_for_xor16,
-                    max_vnode_key_range_bytes: group_config
-                        .compaction_config
-                        .max_vnode_key_range_bytes,
-                    ..Default::default()
-                };
+                    .get_compaction_group_levels(compaction_group_id);
+                let target_level_id = picked_task.input.target_level as u32;
+                let is_target_level_last = compaction_group_levels.is_last_level(target_level_id);
+                let table_options = table_id_to_option
+                    .iter()
+                    .map(|(table_id, table_option)| (*table_id, TableOption::from(table_option)))
+                    .collect();
+                let built_compact_task = self.build_ready_compact_task(
+                    picked_task,
+                    CompactTaskBuildContext {
+                        task_id,
+                        compaction_group_id: group_config.group_id,
+                        compaction_group_version_id: compaction_group_levels
+                            .compaction_group_version_id,
+                        existing_table_ids: member_table_ids.clone(),
+                        table_options,
+                        is_target_level_last,
+                        compaction_config: group_config.compaction_config.clone(),
+                        current_epoch_time: Epoch::now().0,
+                    },
+                    &version.latest_version().table_watermarks,
+                    &all_versioned_table_schemas,
+                );
 
-                let is_trivial_reclaim = compact_task.is_trivial_reclaim();
-                let is_trivial_move = compact_task.is_trivial_move_task();
-                if is_trivial_reclaim || (is_trivial_move && can_trivial_move) {
-                    let log_label = if is_trivial_reclaim {
-                        "TrivialReclaim"
-                    } else {
-                        "TrivialMove"
-                    };
-                    let label = if is_trivial_reclaim {
-                        "trivial-space-reclaim"
-                    } else {
-                        "trivial-move"
-                    };
-
-                    tracing::debug!(
-                        "{} for compaction group {}: input: {:?}, cost time: {:?}",
-                        log_label,
-                        compact_task.compaction_group_id,
-                        compact_task.input_ssts,
-                        start_time.elapsed()
-                    );
-                    compact_task.task_status = TaskStatus::Success;
-                    compact_status.report_compact_task(&compact_task);
-                    if !is_trivial_reclaim {
-                        compact_task
-                            .sorted_output_ssts
-                            .clone_from(&compact_task.input_ssts[0].table_infos);
-                    }
-                    update_table_stats_for_vnode_watermark_trivial_reclaim(
-                        &mut version_stats.table_stats,
-                        &compact_task,
-                    );
-                    self.metrics
-                        .compact_frequency
-                        .with_label_values(&[
+                match built_compact_task {
+                    BuiltCompactTask::MetaFinished(compact_task) => {
+                        let label = compact_task.task_label();
+                        tracing::debug!(
+                            "{} for compaction group {}: input: {:?}, cost time: {:?}",
                             label,
-                            &compact_task.compaction_group_id.to_string(),
-                            selector.task_type().as_str_name(),
-                            "SUCCESS",
-                        ])
-                        .inc();
+                            compact_task.compaction_group_id,
+                            compact_task.input_ssts,
+                            start_time.elapsed()
+                        );
+                        compact_status.report_compact_task(&compact_task);
+                        update_table_stats_for_vnode_watermark_trivial_reclaim(
+                            &mut version_stats.table_stats,
+                            &compact_task,
+                        );
+                        self.metrics
+                            .compact_frequency
+                            .with_label_values(&[
+                                label,
+                                &compact_task.compaction_group_id.to_string(),
+                                selector.task_type().as_str_name(),
+                                "SUCCESS",
+                            ])
+                            .inc();
 
-                    version.apply_compact_task(&compact_task);
-                    trivial_tasks.push(compact_task);
-                    if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop {
-                        break 'outside;
-                    }
-                } else {
-                    self.calculate_vnode_partition(
-                        &mut compact_task,
-                        group_config.compaction_config.as_ref(),
-                    );
-
-                    let mut pk_prefix_table_watermarks = BTreeMap::default();
-                    let mut non_pk_prefix_table_watermarks = BTreeMap::default();
-                    let mut value_table_watermarks = BTreeMap::default();
-                    for (table_id, watermark) in version
-                        .latest_version()
-                        .safe_epoch_table_watermarks(&compact_task.build_compact_table_ids())
-                    {
-                        match watermark.watermark_type {
-                            WatermarkSerdeType::PkPrefix => {
-                                pk_prefix_table_watermarks.insert(table_id, watermark);
-                            }
-                            WatermarkSerdeType::NonPkPrefix => {
-                                non_pk_prefix_table_watermarks.insert(table_id, watermark);
-                            }
-                            WatermarkSerdeType::Value => {
-                                value_table_watermarks.insert(table_id, watermark);
-                            }
+                        version.apply_compact_task(&compact_task);
+                        trivial_tasks.push(compact_task);
+                        if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop
+                        {
+                            break 'outside;
                         }
                     }
-                    compact_task.pk_prefix_table_watermarks = pk_prefix_table_watermarks;
-                    compact_task.non_pk_prefix_table_watermarks = non_pk_prefix_table_watermarks;
-                    compact_task.value_table_watermarks = value_table_watermarks;
+                    BuiltCompactTask::PendingAssignment(compact_task) => {
+                        compact_task_assignment.insert(
+                            compact_task.task_id,
+                            CompactTaskAssignment {
+                                compact_task: Some(compact_task.clone().into()),
+                                context_id: META_NODE_ID, // deprecated
+                            },
+                        );
 
-                    compact_task.table_schemas = compact_task
-                        .existing_table_ids
-                        .iter()
-                        .filter_map(|table_id| {
-                            all_versioned_table_schemas.get(table_id).map(|column_ids| {
-                                (
-                                    *table_id,
-                                    TableSchema {
-                                        column_ids: column_ids.clone(),
-                                    },
-                                )
-                            })
-                        })
-                        .collect();
-
-                    compact_task_assignment.insert(
-                        compact_task.task_id,
-                        CompactTaskAssignment {
-                            compact_task: Some(compact_task.clone().into()),
-                            context_id: META_NODE_ID, // deprecated
-                        },
-                    );
-
-                    pick_tasks.push(compact_task);
-                    break;
+                        pick_tasks.push(compact_task);
+                        break;
+                    }
                 }
 
                 stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
@@ -1218,9 +1147,10 @@ impl HummockManager {
         &self,
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
+        compact_table_ids: &[TableId],
     ) {
         if compaction_config.split_weight_by_vnode > 0 {
-            for table_id in &compact_task.existing_table_ids {
+            for table_id in compact_table_ids {
                 compact_task
                     .table_vnode_partition
                     .insert(*table_id, compact_task.split_weight_by_vnode);
@@ -1229,21 +1159,16 @@ impl HummockManager {
             return;
         }
 
-        // Calculate per-table size from input SSTs
+        // Calculate per-table size from normalized input SSTs.
         let mut table_size_info: HashMap<TableId, u64> = HashMap::default();
-        let mut existing_table_ids: HashSet<TableId> = HashSet::default();
         for input_ssts in &compact_task.input_ssts {
             for sst in &input_ssts.table_infos {
-                existing_table_ids.extend(sst.table_ids.iter());
                 for table_id in &sst.table_ids {
                     *table_size_info.entry(*table_id).or_default() +=
                         sst.sst_size / (sst.table_ids.len() as u64);
                 }
             }
         }
-        compact_task
-            .existing_table_ids
-            .retain(|table_id| existing_table_ids.contains(table_id));
 
         let hybrid_vnode_count = self.env.opts.hybrid_partition_node_count;
         let default_partition_count = self.env.opts.partition_vnode_count;
@@ -1290,13 +1215,14 @@ impl HummockManager {
 
         compact_task
             .table_vnode_partition
-            .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+            .retain(|table_id, _| compact_table_ids.contains(table_id));
     }
 
     pub(crate) fn calculate_vnode_partition(
         &self,
         compact_task: &mut CompactTask,
         compaction_config: &CompactionConfig,
+        compact_table_ids: &[TableId],
     ) {
         // Do not split sst by vnode partition when target_level > base_level
         // The purpose of data alignment is mainly to improve the parallelism of base level compaction
@@ -1307,7 +1233,64 @@ impl HummockManager {
         }
 
         // Apply split_weight_by_vnode based partition strategy
-        self.apply_split_weight_by_vnode_partition(compact_task, compaction_config);
+        self.apply_split_weight_by_vnode_partition(
+            compact_task,
+            compaction_config,
+            compact_table_ids,
+        );
+    }
+
+    fn build_ready_compact_task(
+        &self,
+        picked_task: PickedCompactionTask,
+        context: CompactTaskBuildContext,
+        table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
+        all_versioned_table_schemas: &HashMap<TableId, Vec<i32>>,
+    ) -> BuiltCompactTask {
+        let compaction_config = context.compaction_config.clone();
+        let (mut compact_task, compact_table_ids) = build_base_compact_task(picked_task, context);
+
+        if compact_task.is_trivial_reclaim() {
+            compact_task.task_status = TaskStatus::Success;
+            compact_task.sorted_output_ssts.clear();
+            return BuiltCompactTask::MetaFinished(compact_task);
+        }
+
+        if compact_task.is_trivial_move_task() {
+            compact_task.task_status = TaskStatus::Success;
+            compact_task.sorted_output_ssts = compact_task.input_ssts[0]
+                .read_sstable_infos()
+                .cloned()
+                .collect();
+            return BuiltCompactTask::MetaFinished(compact_task);
+        }
+
+        self.prepare_compact_task_for_assignment(
+            &mut compact_task,
+            compaction_config.as_ref(),
+            &compact_table_ids,
+            safe_epoch_table_watermarks_impl(table_watermarks, &compact_table_ids),
+            all_versioned_table_schemas,
+        );
+
+        BuiltCompactTask::PendingAssignment(compact_task)
+    }
+
+    fn prepare_compact_task_for_assignment(
+        &self,
+        compact_task: &mut CompactTask,
+        compaction_config: &CompactionConfig,
+        compact_table_ids: &[TableId],
+        table_watermarks: BTreeMap<TableId, TableWatermarks>,
+        all_versioned_table_schemas: &HashMap<TableId, Vec<i32>>,
+    ) {
+        self.calculate_vnode_partition(compact_task, compaction_config, compact_table_ids);
+        attach_compact_task_table_metadata(
+            compact_task,
+            compact_table_ids,
+            table_watermarks,
+            all_versioned_table_schemas,
+        );
     }
 
     pub fn compactor_manager_ref(&self) -> crate::hummock::CompactorManagerRef {
