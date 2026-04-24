@@ -5,7 +5,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-VERSION=17
+VERSION=21
 
 while getopts 'p:v:' opt; do
     case ${opt} in
@@ -31,7 +31,7 @@ RISINGWAVE_ROOT=${PWD}
 
 echo "--- install java"
 sudo apt-get update -y
-if [ "$VERSION" = "17" ] || [ "$VERSION" = "21" ]; then
+if [ "$VERSION" = "21" ]; then
   echo "The test image default java version is 11, need to install java $VERSION"
   sudo apt install openjdk-"$VERSION"-jdk openjdk-"$VERSION"-jre -y
 else
