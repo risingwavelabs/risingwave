@@ -338,7 +338,12 @@ impl HummockEventHandler {
             spawn_upload_task,
             buffer_tracker,
         );
-        let refiller = CacheRefiller::new(refill_config, sstable_store, spawn_refill_task);
+        let refiller = CacheRefiller::new(
+            refill_config,
+            sstable_store,
+            spawn_refill_task,
+            read_version_mapping.clone(),
+        );
 
         Self {
             hummock_event_tx,
