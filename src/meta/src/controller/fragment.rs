@@ -1611,7 +1611,6 @@ impl CatalogController {
         let RenderedGraph { fragments, .. } = render_actor_assignments(
             self.env.actor_id_generator(),
             worker_nodes.current(),
-            AdaptiveParallelismStrategy::default(),
             &loaded,
         )?;
 
