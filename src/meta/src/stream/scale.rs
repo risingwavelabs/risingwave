@@ -1440,6 +1440,9 @@ impl GlobalStreamManager {
                     };
 
                     match notification {
+                        // TODO(#25478): add a local notification path for relevant session
+                        // parameter updates and trigger a control round here when the cluster
+                        // defaults for stream/backfill parallelism change.
                         LocalNotification::SystemParamsChange(_) => {}
                         LocalNotification::WorkerNodeActivated(worker) => {
                             if !worker_is_streaming_compute(&worker) {
