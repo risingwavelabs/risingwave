@@ -87,7 +87,7 @@ chmod +x ./target/debug/risingwave_e2e_extended_mode_test
 echo "--- Install Python Dependencies"
 python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
 
-export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn,risingwave_storage::hummock::compactor=error,risingwave_hummock_sdk::compaction_group::hummock_version_ext=error,await_tree=error,risingwave_connector::sink::log_store=warn,risingwave_stream::executor::sink=warn,risingwave_meta::barrier::info=error"
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn,risingwave_storage::hummock::compactor=error,risingwave_hummock_sdk::compaction_group::hummock_version_ext=error"
 
 echo "--- e2e, $mode, dashboard"
 cluster_start
