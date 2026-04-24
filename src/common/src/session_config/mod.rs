@@ -392,6 +392,15 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_use_shared_source: bool,
 
+    /// Enable in-memory cache for `AsOf` join executor.
+    ///
+    /// When enabled (default), `AsOf` join uses the cache-based implementation.
+    ///
+    /// When disabled, `AsOf` join uses a no-cache implementation that directly queries
+    /// the state table on-demand, reducing unnecessary data fetches for cache.
+    #[parameter(default = true)]
+    streaming_asof_join_use_cache: bool,
+
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]
     server_encoding: String,

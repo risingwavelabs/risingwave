@@ -70,14 +70,7 @@ strum = { version = "0.28", features = ["derive"] }
 sync-point = { path = "../utils/sync-point" }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
+tokio = { workspace = true }
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 toml = { workspace = true }

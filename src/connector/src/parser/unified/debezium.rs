@@ -26,6 +26,12 @@ use risingwave_pb::plan_common::additional_column::ColumnType;
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
+
+/// JDBC type constants found in Debezium schema change events.
+mod debezium_sql_types {
+    pub const STRUCT: i32 = 2002;
+}
+use crate::connector_common::{create_pg_client_from_properties, discover_pgvector_dimensions};
 use crate::parser::TransactionControl;
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::schema_change::TableChangeType;
@@ -59,6 +65,76 @@ fn is_bigserial_default(default_value_expression: &str) -> bool {
 
     // Return true if it is a `nextval()` function (bigserial default).
     expr.starts_with("nextval(")
+}
+
+/// Parse Debezium `tableChanges[].id` into `(schema_name, table_name)`.
+///
+/// Input examples observed in Debezium schema-change events:
+/// - `"public"."orders"` (quoted format)
+/// - `public.orders` (plain dotted format)
+/// - `db.public.orders` (database-prefixed dotted format)
+///
+/// Why two parsing branches:
+/// - Different Debezium versions/connectors may emit quoted or plain identifiers.
+/// - We normalize both forms so downstream lookup can consistently query upstream catalogs.
+///
+/// Output:
+/// - `Some((schema, table))` when both schema and table are successfully extracted.
+/// - `None` when the id is malformed or does not contain enough segments.
+fn parse_schema_table_from_debezium_id(id: &str) -> Option<(String, String)> {
+    let trimmed = id.trim();
+    if trimmed.contains("\".\"") {
+        let parts = trimmed
+            .split("\".\"")
+            .map(|s| s.trim_matches('"').trim())
+            .collect_vec();
+        if parts.len() >= 2 {
+            let schema = parts[parts.len() - 2].to_owned();
+            let table = parts[parts.len() - 1].to_owned();
+            if !schema.is_empty() && !table.is_empty() {
+                return Some((schema, table));
+            }
+        }
+    }
+
+    let cleaned = trimmed.trim_matches('"');
+    let parts = cleaned.split('.').collect_vec();
+    if parts.len() >= 2 {
+        let schema = parts[parts.len() - 2].trim().to_owned();
+        let table = parts[parts.len() - 1].trim().to_owned();
+        if !schema.is_empty() && !table.is_empty() {
+            return Some((schema, table));
+        }
+    }
+    None
+}
+
+async fn fetch_pgvector_dimensions_for_table(
+    connector_props: &ConnectorProperties,
+    schema: &str,
+    table: &str,
+) -> AccessResult<std::collections::HashMap<String, usize>> {
+    let ConnectorProperties::PostgresCdc(cdc_props) = connector_props else {
+        return Ok(std::collections::HashMap::new());
+    };
+
+    let client = create_pg_client_from_properties(&cdc_props.properties, None)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to connect upstream postgres for schema change lookup: {}",
+                err.as_report()
+            ),
+        })?;
+
+    discover_pgvector_dimensions(&client, schema, table)
+        .await
+        .map_err(|err| AccessError::Uncategorized {
+            message: format!(
+                "failed to query upstream postgres schema for {schema}.{table}: {}",
+                err.as_report()
+            ),
+        })
 }
 
 // Example of Debezium JSON value:
@@ -189,13 +265,17 @@ macro_rules! jsonb_access_field {
 /// Parse the schema change message from Debezium.
 /// The layout of MySQL schema change message can refer to
 /// <https://debezium.io/documentation/reference/2.6/connectors/mysql.html#mysql-schema-change-topic>
-pub fn parse_schema_change(
+pub async fn parse_schema_change(
     accessor: &impl Access,
     source_id: SourceId,
     source_name: &str,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
+    let mut pgvector_dims_cache: std::collections::HashMap<
+        (String, String),
+        std::collections::HashMap<String, usize>,
+    > = std::collections::HashMap::new();
 
     let upstream_ddl: String = accessor
         .access(&[UPSTREAM_DDL], &DataType::Varchar)?
@@ -230,16 +310,68 @@ pub fn parse_schema_change(
                 for col in columns.array_elements().unwrap() {
                     let name = jsonb_access_field!(col, "name", string);
                     let type_name = jsonb_access_field!(col, "typeName", string);
-                    // Determine if this column is an enum type
+                    // User-defined types (enum, composite) are not in the
+                    // `type_name_to_pg_type` whitelist because their type names are
+                    // user-chosen. We detect them via Debezium metadata instead:
+                    //  - Enum: has a non-null `enumValues` field in the column descriptor.
+                    //  - Composite (STRUCT): identified by `jdbcType == 2002`.
+                    // Both are mapped to Varchar — enum values are plain strings, and
+                    // composite values are converted to text by our CustomConverter.
                     let is_enum = matches!(col.access_object_field("enumValues"), Some(val) if !val.is_jsonb_null());
+                    let is_composite = col
+                        .access_object_field("jdbcType")
+                        .and_then(|v| v.as_number().ok())
+                        .map(|n| n.0 as i32)
+                        == Some(debezium_sql_types::STRUCT);
+
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
-                            let ty = type_name_to_pg_type(type_name.as_str());
-                            if is_enum {
+                            if is_composite || is_enum {
                                 tracing::debug!(target: "auto_schema_change",
-                                    "Convert PostgreSQL user defined enum type '{}' to VARCHAR", type_name);
+                                    "Convert PostgreSQL user-defined type '{}' ({}) to VARCHAR",
+                                    type_name,
+                                    if is_composite { "composite" } else { "enum" });
                                 DataType::Varchar
+                            } else if type_name.eq_ignore_ascii_case("vector") {
+                                let Some((schema_name, table_name_only)) =
+                                    parse_schema_table_from_debezium_id(id.as_str())
+                                else {
+                                    return Err(AccessError::CdcAutoSchemaChangeError {
+                                        ty: type_name,
+                                        table_name: format!("{}.{}", source_name, table_name),
+                                    });
+                                };
+
+                                // Cache by normalized `(schema, table)` tuple to avoid split/join churn on id text.
+                                let cache_key = (schema_name, table_name_only);
+                                if !pgvector_dims_cache.contains_key(&cache_key) {
+                                    let fetched = fetch_pgvector_dimensions_for_table(
+                                        connector_props,
+                                        &cache_key.0,
+                                        &cache_key.1,
+                                    )
+                                    .await?;
+                                    pgvector_dims_cache.insert(cache_key.clone(), fetched);
+                                }
+
+                                match pgvector_dims_cache
+                                    .get(&cache_key)
+                                    .and_then(|m| m.get(name.as_str()).copied())
+                                {
+                                    Some(dim) if (1..=DataType::VEC_MAX_SIZE).contains(&dim) => {
+                                        DataType::Vector(dim)
+                                    }
+                                    _ => {
+                                        // No fallback to VARCHAR: a dimension-less vector cannot be mapped to
+                                        // RW's required `vector(n)` type safely.
+                                        return Err(AccessError::CdcAutoSchemaChangeError {
+                                            ty: type_name,
+                                            table_name: format!("{}.{}", source_name, table_name),
+                                        });
+                                    }
+                                }
                             } else {
+                                let ty = type_name_to_pg_type(type_name.as_str());
                                 match ty {
                                     Some(ty) => match pg_type_to_rw_type(&ty) {
                                         Ok(data_type) => data_type,
@@ -338,23 +470,49 @@ pub fn parse_schema_change(
                                     }
                                 }
 
-                                let snapshot_value: Datum = if let Some(value_text) = value_text {
-                                    Some(ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
-                                        |err| {
-                                            tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
-                                            AccessError::TypeError {
-                                                expected: "constant expression".into(),
-                                                got: data_type.to_string(),
-                                                value: value_text,
-                                            }
-                                        },
-                                    )?)
-                                } else {
-                                    None
-                                };
+                                // Handling default values during auto schema change is hard to get
+                                // completely right. The fundamental challenge is that we need to
+                                // accurately distinguish "literal constants" from "real expressions"
+                                // and evaluate each correctly. However, PostgreSQL / MySQL literal
+                                // grammar is quite complex (bit / hex / escape strings, arrays,
+                                // literals with casts, etc.), and `ScalarImpl::from_text` only
+                                // recognizes simple literals. Any function call (`now()`,
+                                // `gen_random_uuid()`) or unsupported literal form will fail here.
+                                //
+                                // Current strategy is fail-open: on parse failure we only emit a
+                                // warn log and add the column without a default, rather than
+                                // aborting the whole auto schema change. This is strictly better
+                                // than the previous hard-crash behavior — the pipeline stays
+                                // available, and the worst case is that existing rows are NULL in a
+                                // newly-added column (see the warn message below for details).
+                                //
+                                // TODO: the schema change event carries the **full** set of columns
+                                // of the table, so here we cannot tell "columns newly added by this
+                                // ALTER" from "columns that already existed". A better approach
+                                // would be to only process the delta columns that actually changed
+                                // in this event, which would let us precisely tell the user: which
+                                // columns have existing rows filled with NULL (needs attention),
+                                // and which ones are pre-existing columns merely surfaced by the
+                                // event (harmless, can be ignored silently).
+                                let snapshot_value: Datum = value_text.and_then(|value_text| {
+                                    ScalarImpl::from_text(value_text.as_str(), &data_type)
+                                        .inspect_err(|err| {
+                                            tracing::warn!(
+                                                target: "auto_schema_change",
+                                                error = %err.as_report(),
+                                                column = %name,
+                                                data_type = %data_type,
+                                                default_value_expression = default_val_expr_str,
+                                                upstream_ddl = %upstream_ddl,
+                                                "non-constant default expression, column added without default. \
+                                                 If this column is not newly added by this schema change, it is safe to ignore this warning. \
+                                                 If this column is newly added by this schema change, existing rows will be NULL in this column — consider using COALESCE in queries to provide a fallback value."
+                                            );
+                                        })
+                                        .ok()
+                                });
 
                                 if snapshot_value.is_none() {
-                                    tracing::warn!(target: "auto_schema_change", "failed to parse default value expression: {}", default_val_expr_str);
                                     ColumnDesc::named(name, ColumnId::placeholder(), data_type)
                                 } else {
                                     ColumnDesc::named_with_default_value(

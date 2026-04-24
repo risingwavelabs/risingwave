@@ -162,17 +162,6 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         }
         flush_info.report(&self.metrics);
 
-        if let Some(truncate_offset) = self.tx.pop_truncation(epoch) {
-            self.last_truncate_offset = Some(truncate_offset);
-        }
-        let post_seal_epoch = self.state.seal_current_epoch(
-            next_epoch,
-            self.last_truncate_offset
-                .map(|(epoch, seq_id)| {
-                    LogStoreVnodeProgress::Aligned(self.state.vnodes().clone(), epoch, seq_id)
-                })
-                .unwrap_or(LogStoreVnodeProgress::None),
-        );
         let has_schema_change = options.schema_change.is_some();
         // Barrier's new_vnode_bitmap field does not need to be passed to log-reader, because when sink is decoupled, we
         // always rebuild sink when update vnode bitmap.
@@ -188,6 +177,17 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             assert_eq!(truncate_offset, (epoch, None));
             self.last_truncate_offset = Some(truncate_offset);
         }
+        if let Some(truncate_offset) = self.tx.pop_truncation(epoch) {
+            self.last_truncate_offset = Some(truncate_offset);
+        }
+        let post_seal_epoch = self.state.seal_current_epoch(
+            next_epoch,
+            self.last_truncate_offset
+                .map(|(epoch, seq_id)| {
+                    LogStoreVnodeProgress::Aligned(self.state.vnodes().clone(), epoch, seq_id)
+                })
+                .unwrap_or(LogStoreVnodeProgress::None),
+        );
         let update_vnode_bitmap_tx = &mut self.update_vnode_bitmap_tx;
         let tx = &mut self.tx;
         self.seq_id = FIRST_SEQ_ID;

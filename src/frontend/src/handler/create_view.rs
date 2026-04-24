@@ -24,6 +24,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
+use crate::handler::util::reject_internal_table_dependencies;
 use crate::optimizer::OptimizerContext;
 
 pub async fn handle_create_view(
@@ -63,6 +64,8 @@ pub async fn handle_create_view(
             Statement::Query(Box::new(query.clone())),
         )?
         .unwrap_rw()?;
+
+        reject_internal_table_dependencies(&session, &dependent_relations, "CREATE VIEW")?;
 
         (dependent_relations, dependent_secrets, schema)
     };

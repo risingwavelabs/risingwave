@@ -193,7 +193,7 @@ pub struct AutoRefreshSchemaSinkContext {
     pub newly_add_fields: Vec<Field>,
     pub removed_column_names: Vec<String>,
     pub new_fragment: Fragment,
-    pub new_log_store_table: Option<PbTable>,
+    pub new_log_store_table: Option<Box<PbTable>>,
     /// The sink's own stream context (timezone, `config_override`).
     pub ctx: StreamContext,
 }
