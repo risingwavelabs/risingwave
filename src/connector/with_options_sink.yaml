@@ -629,7 +629,9 @@ IcebergConfig:
     required: false
   - name: table.name
     field_type: String
-    comments: Full name of table, must include schema name when database is provided.
+    comments: |-
+      Table name or namespace-qualified table name. Dots are treated as
+      Iceberg namespace separators.
     required: true
   - name: primary_key
     field_type: Vec<String>
