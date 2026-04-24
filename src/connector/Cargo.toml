@@ -112,7 +112,7 @@ opendal = { workspace = true, features = [
     "services-s3",
     "services-webhdfs",
 ] }
-opensearch = { version = "2.3.0", features = ["rustls-tls"] }
+opensearch = { version = "2.4.0", features = ["rustls-tls"] }
 openssl = { workspace = true }
 parking_lot = { workspace = true }
 parquet = { version = "58", features = ["async"] }
