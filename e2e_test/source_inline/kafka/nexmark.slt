@@ -1,5 +1,6 @@
 include ../../nexmark/produce_kafka.slt.part
 include ../../nexmark/create_sources_kafka.slt.part
+include ../../nexmark/verify_sources_kafka.slt.part
 
 control substitution off
 

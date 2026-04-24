@@ -129,12 +129,12 @@ sleep 2s
 statement ok
 flush;
 
-query I
+query I retry 3 backoff 5s
 select count(*) > 2*10 from s1;
 ----
 t
 
-query I
+query I retry 3 backoff 5s
 select l.len, count(*) > 2*10 from (select length(s1.c1) as len from s1) as l group by l.len;
 ----
 100 t

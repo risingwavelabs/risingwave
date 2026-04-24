@@ -18,7 +18,7 @@ use anyhow::{Context, anyhow};
 use either::Either;
 use parking_lot::RwLock;
 use risingwave_common::array::Op;
-use risingwave_common::array::arrow::arrow_array_56 as arrow;
+use risingwave_common::array::arrow::arrow_array_57 as arrow;
 use risingwave_common::id::TableId;
 use risingwave_common::types::{DataType, JsonbRef, JsonbVal, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;
@@ -255,7 +255,10 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
 
         if let Some(batch) = batches.first()
             && batch.num_rows() > 0
-            && let Some(array) = batch.column(0).as_any().downcast_ref::<arrow::StringArray>()
+            && let Some(array) = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<arrow::StringArray>()
         {
             let timestamp: String = array.value(0).into();
             return Ok(Some(timestamp));
