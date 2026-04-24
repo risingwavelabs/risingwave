@@ -813,4 +813,24 @@ pub mod tests {
         "#]]
         .assert_eq(&config.to_string());
     }
+
+    #[test]
+    fn test_storage_iceberg_compaction_pull_interval_ms_must_be_positive() {
+        let config = toml::from_str::<RwConfig>(
+            r#"
+            [storage]
+            iceberg_compaction_pull_interval_ms = 0
+            "#,
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 3, column 51
+              |
+            3 |             iceberg_compaction_pull_interval_ms = 0
+              |                                                   ^
+            storage.iceberg_compaction_pull_interval_ms must be greater than 0
+        "#]]
+        .assert_eq(&config.to_string());
+    }
 }
