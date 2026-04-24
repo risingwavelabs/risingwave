@@ -34,7 +34,7 @@ use crate::barrier::command::PostCollectCommand;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
-    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot,
+    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot, BatchRefreshInfo,
     CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
     RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
@@ -50,13 +50,23 @@ pub(super) struct CreateSnapshotBackfillJobCommandInfo {
     pub snapshot_backfill_info: SnapshotBackfillInfo,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     pub resolved_split_assignment: SplitAssignment,
+    /// If set, this is a batch refresh job rather than a regular snapshot backfill.
+    pub refresh_interval_sec: Option<u64>,
 }
 
 impl CreateSnapshotBackfillJobCommandInfo {
     pub(super) fn into_post_collect(self) -> PostCollectCommand {
+        let job_type = if let Some(refresh_interval_sec) = self.refresh_interval_sec {
+            CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+                snapshot_backfill_info: self.snapshot_backfill_info,
+                refresh_interval_sec,
+            })
+        } else {
+            CreateStreamingJobType::SnapshotBackfill(self.snapshot_backfill_info)
+        };
         PostCollectCommand::CreateStreamingJob {
             info: self.info,
-            job_type: CreateStreamingJobType::SnapshotBackfill(self.snapshot_backfill_info),
+            job_type,
             cross_db_snapshot_backfill_info: self.cross_db_snapshot_backfill_info,
             resolved_split_assignment: self.resolved_split_assignment,
         }
