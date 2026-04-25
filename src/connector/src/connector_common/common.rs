@@ -239,7 +239,7 @@ pub struct KafkaConnectionProps {
     #[serde(rename = "properties.ssl.key.password")]
     ssl_key_password: Option<String>,
 
-    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
+    /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, OAUTHBEARER, and `AWS_MSK_IAM`.
     #[serde(rename = "properties.sasl.mechanism")]
     #[with_option(allow_alter_on_fly)]
     sasl_mechanism: Option<String>,
@@ -277,6 +277,26 @@ pub struct KafkaConnectionProps {
     /// Configurations for SASL/OAUTHBEARER.
     #[serde(rename = "properties.sasl.oauthbearer.config")]
     sasl_oathbearer_config: Option<String>,
+
+    /// SASL/OAUTHBEARER token acquisition method. Set to "oidc" to use the OIDC client credentials flow.
+    #[serde(rename = "properties.sasl.oauthbearer.method")]
+    sasl_oauthbearer_method: Option<String>,
+
+    /// Client ID for SASL/OAUTHBEARER OIDC provider.
+    #[serde(rename = "properties.sasl.oauthbearer.client.id")]
+    sasl_oauthbearer_client_id: Option<String>,
+
+    /// Client secret for SASL/OAUTHBEARER OIDC provider.
+    #[serde(rename = "properties.sasl.oauthbearer.client.secret")]
+    sasl_oauthbearer_client_secret: Option<String>,
+
+    /// OIDC token endpoint URL for SASL/OAUTHBEARER.
+    #[serde(rename = "properties.sasl.oauthbearer.token.endpoint.url")]
+    sasl_oauthbearer_token_endpoint_url: Option<String>,
+
+    /// OIDC scope for SASL/OAUTHBEARER.
+    #[serde(rename = "properties.sasl.oauthbearer.scope")]
+    sasl_oauthbearer_scope: Option<String>,
 }
 
 impl EnforceSecret for KafkaConnectionProps {
@@ -412,6 +432,11 @@ impl KafkaConnectionProps {
             sasl_kerberos_kinit_cmd: None,
             sasl_kerberos_min_time_before_relogin: None,
             sasl_oathbearer_config: None,
+            sasl_oauthbearer_method: None,
+            sasl_oauthbearer_client_id: None,
+            sasl_oauthbearer_client_secret: None,
+            sasl_oauthbearer_token_endpoint_url: None,
+            sasl_oauthbearer_scope: None,
         }
     }
 
@@ -499,8 +524,41 @@ impl KafkaConnectionProps {
         if let Some(sasl_oathbearer_config) = self.sasl_oathbearer_config.as_ref() {
             config.set("sasl.oauthbearer.config", sasl_oathbearer_config);
         }
-        // Currently, we only support unsecured OAUTH.
-        config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
+        if let Some(sasl_oauthbearer_method) = self.sasl_oauthbearer_method.as_ref() {
+            config.set("sasl.oauthbearer.method", sasl_oauthbearer_method);
+        }
+        if let Some(sasl_oauthbearer_client_id) = self.sasl_oauthbearer_client_id.as_ref() {
+            config.set("sasl.oauthbearer.client.id", sasl_oauthbearer_client_id);
+        }
+        if let Some(sasl_oauthbearer_client_secret) =
+            self.sasl_oauthbearer_client_secret.as_ref()
+        {
+            config.set(
+                "sasl.oauthbearer.client.secret",
+                sasl_oauthbearer_client_secret,
+            );
+        }
+        if let Some(sasl_oauthbearer_token_endpoint_url) =
+            self.sasl_oauthbearer_token_endpoint_url.as_ref()
+        {
+            config.set(
+                "sasl.oauthbearer.token.endpoint.url",
+                sasl_oauthbearer_token_endpoint_url,
+            );
+        }
+        if let Some(sasl_oauthbearer_scope) = self.sasl_oauthbearer_scope.as_ref() {
+            config.set("sasl.oauthbearer.scope", sasl_oauthbearer_scope);
+        }
+        // Only enable unsecured JWT when not using OIDC method.
+        if !self.is_oauthbearer_oidc() {
+            config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
+        }
+    }
+
+    pub(crate) fn is_oauthbearer_oidc(&self) -> bool {
+        self.sasl_oauthbearer_method
+            .as_deref()
+            .is_some_and(|m| m.eq_ignore_ascii_case("oidc"))
     }
 
     pub(crate) fn is_aws_msk_iam(&self) -> bool {
