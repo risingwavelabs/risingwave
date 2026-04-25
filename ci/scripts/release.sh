@@ -30,7 +30,7 @@ dnf install -y perl-core wget python3.12 python3.12-devel cyrus-sasl-devel rsync
 update-alternatives --install /usr/bin/python3 python3 /usr/local/bin/python3.12 3
 
 echo "--- Install java and maven"
-dnf install -y java-17-openjdk java-17-openjdk-devel
+dnf install -y java-21-openjdk java-21-openjdk-devel
 pipx install toml-cli
 wget --no-verbose https://rw-ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
 export PATH="${REPO_ROOT}/apache-maven-3.9.3/bin:$PATH"
