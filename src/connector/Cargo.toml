@@ -156,6 +156,7 @@ risingwave_jni_core = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.25.0", features = ["url"] }
+lapin = "4.1.0"
 rust_decimal = "1"
 rustls-native-certs = "0.8"
 rustls-pki-types = { version = "1", features = ["std"] }
