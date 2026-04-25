@@ -310,6 +310,7 @@ pub enum Command {
     DropStreamingJobs {
         streaming_job_ids: HashSet<JobId>,
         actors: Vec<ActorId>,
+        /// Used by recovery quick path when draining buffered drop/cancel commands.
         unregistered_state_table_ids: HashSet<TableId>,
         unregistered_fragment_ids: HashSet<FragmentId>,
         // target_fragment -> [sink_fragments]
@@ -675,10 +676,7 @@ impl Command {
 #[derive(Debug)]
 pub enum PostCollectCommand {
     Command(String),
-    DropStreamingJobs {
-        streaming_job_ids: HashSet<JobId>,
-        unregistered_state_table_ids: HashSet<TableId>,
-    },
+    DropStreamingJobs,
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
@@ -705,10 +703,24 @@ impl PostCollectCommand {
         PostCollectCommand::Command("barrier".to_owned())
     }
 
+    pub fn should_checkpoint(&self) -> bool {
+        match self {
+            PostCollectCommand::DropStreamingJobs
+            | PostCollectCommand::CreateStreamingJob { .. }
+            | PostCollectCommand::RescheduleFragment { .. }
+            | PostCollectCommand::ReplaceStreamJob(_)
+            | PostCollectCommand::SourceChangeSplit { .. }
+            | PostCollectCommand::CreateSubscription { .. }
+            | PostCollectCommand::ConnectorPropsChange(_)
+            | PostCollectCommand::ResumeBackfill { .. } => true,
+            PostCollectCommand::Command(_) => false,
+        }
+    }
+
     pub fn command_name(&self) -> &str {
         match self {
             PostCollectCommand::Command(name) => name.as_str(),
-            PostCollectCommand::DropStreamingJobs { .. } => "DropStreamingJobs",
+            PostCollectCommand::DropStreamingJobs => "DropStreamingJobs",
             PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
             PostCollectCommand::RescheduleFragment { .. } => "RescheduleFragment",
             PostCollectCommand::ReplaceStreamJob(_) => "ReplaceStreamJob",
@@ -729,14 +741,7 @@ impl Display for PostCollectCommand {
 impl Command {
     pub(super) fn into_post_collect(self) -> PostCollectCommand {
         match self {
-            Command::DropStreamingJobs {
-                streaming_job_ids,
-                unregistered_state_table_ids,
-                ..
-            } => PostCollectCommand::DropStreamingJobs {
-                streaming_job_ids,
-                unregistered_state_table_ids,
-            },
+            Command::DropStreamingJobs { .. } => PostCollectCommand::DropStreamingJobs,
             Command::CreateStreamingJob {
                 info,
                 job_type,
