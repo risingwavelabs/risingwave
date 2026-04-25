@@ -92,6 +92,43 @@ message FastInsertResponse {
   string error_message = 2;
 }
 
+message IngestDmlInitRequest {
+  // Id of the table to perform DML on.
+  uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 2;
+  // Used to select the DML channel (same as request_id in FastInsertRequest).
+  uint32 request_id = 3;
+  // Same as row_id_index in FastInsertRequest.
+  optional uint32 row_id_index = 4;
+}
+
+message IngestDmlPayloadRequest {
+  uint64 dml_id = 1;
+  // A StreamChunk carrying the logical upsert / delete payload.
+  data.StreamChunk chunk = 2;
+}
+
+message IngestDmlRequest {
+  oneof request {
+    IngestDmlInitRequest init = 1;
+    IngestDmlPayloadRequest payload = 2;
+  }
+}
+
+message IngestDmlInitResponse {}
+
+message IngestDmlAckResponse {
+  uint64 dml_id = 1;
+}
+
+message IngestDmlResponse {
+  oneof response {
+    IngestDmlInitResponse init = 1;
+    IngestDmlAckResponse ack = 2;
+  }
+}
+
 message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
@@ -108,6 +145,8 @@ service TaskService {
   rpc Execute(ExecuteRequest) returns (stream GetDataResponse);
   // A lightweight version insert, only for non-pgwire insert, such as inserts from webhooks and websockets.
   rpc FastInsert(FastInsertRequest) returns (FastInsertResponse);
+  // DML stream with async persistence ack, used by the WebSocket ingest endpoint.
+  rpc IngestDml(stream IngestDmlRequest) returns (stream IngestDmlResponse);
 }
 
 message GetDataRequest {

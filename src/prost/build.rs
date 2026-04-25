@@ -974,6 +974,9 @@ for_all_wrapped_id_fields! (
             up_actor_id: ActorId,
             down_actor_id: ActorId,
         }
+        IngestDmlInitRequest {
+            table_id: TableId,
+        }
     }
     user {
         AlterDefaultPrivilegeRequest {

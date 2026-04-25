@@ -185,6 +185,7 @@ pool_setup_concurrency = 0
 max_total_query_size_bytes = 1073741824
 min_single_query_size_bytes = 1048576
 max_single_query_size_bytes = 1073741824
+webhook_auth_max_clock_skew_ms = 300000
 
 [[frontend.hba_config.entries]]
 connection_type = "Local"
