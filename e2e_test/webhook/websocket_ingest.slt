@@ -36,6 +36,28 @@ create table ws_missing_pk (
 );
 
 statement ok
+create table ws_multi_column_no_pk (
+  id int,
+  customer_name varchar,
+  amount double precision
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', payload, 'sha256'), 'hex')
+);
+
+statement ok
+create table ws_single_jsonb_no_pk (
+  data jsonb
+) WITH (
+  connector = 'webhook'
+) VALIDATE AS secure_compare(
+  headers->>'x-rw-signature',
+  'sha256=' || encode(hmac('TEST_WEBSOCKET', data, 'sha256'), 'hex')
+);
+
+statement ok
 create table ws_delete_only_pk (
   id int,
   customer_name varchar,
@@ -132,6 +154,24 @@ query TTTTTTT
 select id::varchar, customer_name, product, quantity::varchar, price::varchar, status, created_at::varchar from ws_orders order by id;
 ----
 401 TestUser Widget 5 19.99 delivered 2026-04-15 10:00:00
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_multi_column_no_pk --scenario multi_column_no_pk
+
+query TTT
+select id::varchar, customer_name, amount::varchar from ws_multi_column_no_pk order by id;
+----
+601 NoPkAlice 61.5
+602 NoPkBob 62.5
+
+system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_single_jsonb_no_pk --scenario single_jsonb_no_pk
+
+query TT
+select data ->> 'id', data ->> 'status' from ws_single_jsonb_no_pk order by data ->> 'id';
+----
+701 created
+702 updated
 
 system ok
 python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_missing_pk --scenario error_missing_pk

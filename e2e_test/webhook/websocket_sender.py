@@ -256,6 +256,8 @@ def parse_args() -> argparse.Namespace:
         required=True,
         choices=[
             "success",
+            "multi_column_no_pk",
+            "single_jsonb_no_pk",
             "delete_only_pk",
             "error_missing_pk",
             "error_incomplete_composite_pk_insert",
@@ -460,6 +462,74 @@ def scenario_success(ws: SimpleWebSocketApp, state: WsState) -> None:
     expect_no_fatal(state)
     if sorted(state.acks_received) != [1, 2, 3, 4]:
         raise RuntimeError(f"expected acks [1, 2, 3, 4], got {state.acks_received}")
+
+
+def scenario_multi_column_no_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
+    send_batch(
+        ws,
+        [
+            {
+                "dml_id": 1,
+                "op": "upsert",
+                "data": {
+                    "id": 601,
+                    "customer_name": "NoPkAlice",
+                    "amount": 61.5,
+                },
+            },
+            {
+                "dml_id": 2,
+                "op": "upsert",
+                "data": {
+                    "id": 602,
+                    "customer_name": "NoPkBob",
+                    "amount": 62.5,
+                },
+            },
+        ],
+    )
+    wait_for(
+        lambda: len(state.acks_received) >= 2 or bool(state.fatal),
+        timeout=30,
+        description="multi-column no-pk responses",
+    )
+    expect_no_fatal(state)
+    if sorted(state.acks_received) != [1, 2]:
+        raise RuntimeError(f"expected acks [1, 2], got {state.acks_received}")
+
+
+def scenario_single_jsonb_no_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
+    send_batch(
+        ws,
+        [
+            {
+                "dml_id": 1,
+                "op": "upsert",
+                "data": {
+                    "id": 701,
+                    "source": "ws-jsonb",
+                    "status": "created",
+                },
+            },
+            {
+                "dml_id": 2,
+                "op": "upsert",
+                "data": {
+                    "id": 702,
+                    "source": "ws-jsonb",
+                    "status": "updated",
+                },
+            },
+        ],
+    )
+    wait_for(
+        lambda: len(state.acks_received) >= 2 or bool(state.fatal),
+        timeout=30,
+        description="single-jsonb no-pk responses",
+    )
+    expect_no_fatal(state)
+    if sorted(state.acks_received) != [1, 2]:
+        raise RuntimeError(f"expected acks [1, 2], got {state.acks_received}")
 
 
 def scenario_delete_only_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
@@ -667,6 +737,10 @@ def main() -> int:
     try:
         if args.scenario == "success":
             scenario_success(ws, state)
+        elif args.scenario == "multi_column_no_pk":
+            scenario_multi_column_no_pk(ws, state)
+        elif args.scenario == "single_jsonb_no_pk":
+            scenario_single_jsonb_no_pk(ws, state)
         elif args.scenario == "delete_only_pk":
             scenario_delete_only_pk(ws, state)
         elif args.scenario == "error_missing_pk":

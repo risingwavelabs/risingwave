@@ -99,6 +99,8 @@ message IngestDmlInitRequest {
   uint64 table_version_id = 2;
   // Used to select the DML channel (same as request_id in FastInsertRequest).
   uint32 request_id = 3;
+  // Same as row_id_index in FastInsertRequest.
+  optional uint32 row_id_index = 4;
 }
 
 message IngestDmlPayloadRequest {

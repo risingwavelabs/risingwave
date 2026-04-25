@@ -35,7 +35,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::error::BatchError;
-use crate::executor::FastInsertExecutor;
+use crate::executor::{FastInsertExecutor, inject_optional_row_id_column};
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
     BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, StateReporter,
@@ -169,7 +169,7 @@ impl TaskService for BatchServiceImpl {
 
         let (tx, rx) = tokio::sync::mpsc::channel(64);
 
-        let (table_dml_handle, request_id) = self.init_ingest_dml(&init)?;
+        let (table_dml_handle, request_id, row_id_index) = self.init_ingest_dml(&init)?;
         let _ = tx.send(Ok(Self::ingest_dml_init_response())).await;
 
         let dml_manager = self.env.dml_manager_ref();
@@ -200,6 +200,7 @@ impl TaskService for BatchServiceImpl {
                                 table_dml_handle.clone(),
                                 dml_manager.clone(),
                                 request_id,
+                                row_id_index,
                                 payload,
                             )
                             .await
@@ -310,7 +311,7 @@ impl BatchServiceImpl {
     fn init_ingest_dml(
         &self,
         init: &IngestDmlInitRequest,
-    ) -> Result<(TableDmlHandleRef, u32), Status> {
+    ) -> Result<(TableDmlHandleRef, u32, Option<u32>), Status> {
         let table_id = init.table_id;
         let table_version_id = init.table_version_id;
         let table_dml_handle = self
@@ -318,22 +319,24 @@ impl BatchServiceImpl {
             .dml_manager_ref()
             .table_dml_handle(table_id, table_version_id)
             .map_err(|err| Status::internal(format!("{}", err.as_report())))?;
-        Ok((table_dml_handle, init.request_id))
+        Ok((table_dml_handle, init.request_id, init.row_id_index))
     }
 
     async fn do_ingest_dml_payload(
         table_dml_handle: TableDmlHandleRef,
         dml_manager: DmlManagerRef,
         request_id: u32,
+        row_id_index: Option<u32>,
         payload: IngestDmlPayloadRequest,
     ) -> Result<impl Future<Output = risingwave_dml::error::Result<()>> + Send + 'static, BatchError>
     {
         let pb_chunk = payload.chunk.ok_or_else(|| {
             BatchError::Internal(anyhow::anyhow!("no chunk in IngestDmlPayloadRequest"))
         })?;
-        let chunk = StreamChunk::from_protobuf(&pb_chunk)
+        let mut chunk = StreamChunk::from_protobuf(&pb_chunk)
             .context("failed to decode chunk")
             .map_err(BatchError::Internal)?;
+        chunk = inject_optional_row_id_column(chunk, row_id_index.map(|index| index as usize));
         let txn_id = dml_manager.gen_txn_id();
         let mut write_handle = table_dml_handle
             .write_handle(request_id, txn_id)

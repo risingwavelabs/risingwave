@@ -232,6 +232,7 @@ async fn try_handle_connection(
     let webhook_source_info = table_info.webhook_source_info;
     let table_id = table_info.table_id;
     let table_version_id = table_info.table_version_id;
+    let row_id_index = table_info.row_id_index;
     let compute_client = table_info.compute_client;
     let payload_schema = table_info.payload_schema;
 
@@ -268,6 +269,7 @@ async fn try_handle_connection(
                 table_id,
                 table_version_id,
                 request_id,
+                row_id_index,
             })),
         })
         .await
