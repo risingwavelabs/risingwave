@@ -997,7 +997,7 @@ dependencies = [
  "itertools 0.14.0",
  "pyo3",
  "pyo3-build-config",
- "reqwest",
+ "reqwest 0.12.25",
  "rquickjs",
  "serde_json",
  "tempfile",
@@ -1158,7 +1158,7 @@ dependencies = [
  "futures",
  "getrandom 0.3.1",
  "rand 0.9.2",
- "reqwest",
+ "reqwest 0.12.25",
  "reqwest-eventsource",
  "secrecy",
  "serde",
@@ -4558,7 +4558,7 @@ dependencies = [
  "itertools 0.14.0",
  "object_store 0.12.4",
  "parquet 57.3.0",
- "reqwest",
+ "reqwest 0.12.25",
  "roaring",
  "rustc_version",
  "serde",
@@ -5162,7 +5162,7 @@ dependencies = [
  "flate2",
  "lazy_static",
  "percent-encoding",
- "reqwest",
+ "reqwest 0.12.25",
  "rustc_version",
  "serde",
  "serde_json",
@@ -6107,7 +6107,7 @@ dependencies = [
  "gcloud-metadata",
  "home",
  "jsonwebtoken 9.3.1",
- "reqwest",
+ "reqwest 0.12.25",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -6136,7 +6136,7 @@ dependencies = [
  "gcloud-googleapis",
  "num-bigint",
  "prost-types 0.14.3",
- "reqwest",
+ "reqwest 0.12.25",
  "reqwest-middleware",
  "serde",
  "serde_json",
@@ -6181,7 +6181,7 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61f706788c1b58712c513e4d403234707fd255f49caa89d1c930197418b5fb2c"
 dependencies = [
- "reqwest",
+ "reqwest 0.12.25",
  "thiserror 2.0.17",
  "tokio",
 ]
@@ -6222,7 +6222,7 @@ dependencies = [
  "prost 0.14.3",
  "prost-build 0.14.3",
  "prost-types 0.14.3",
- "reqwest",
+ "reqwest 0.12.25",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -7034,7 +7034,7 @@ dependencies = [
  "parquet 58.1.0",
  "rand 0.8.5",
  "reqsign",
- "reqwest",
+ "reqwest 0.12.25",
  "roaring",
  "serde",
  "serde_bytes",
@@ -7079,7 +7079,7 @@ dependencies = [
  "http 1.4.0",
  "iceberg",
  "itertools 0.13.0",
- "reqwest",
+ "reqwest 0.12.25",
  "serde",
  "serde_derive",
  "serde_json",
@@ -9013,7 +9013,7 @@ dependencies = [
  "getrandom 0.2.11",
  "http 1.4.0",
  "rand 0.8.5",
- "reqwest",
+ "reqwest 0.12.25",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -9085,7 +9085,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.38.4",
  "rand 0.9.2",
- "reqwest",
+ "reqwest 0.12.25",
  "ring",
  "rustls-pemfile 2.2.0",
  "serde",
@@ -9185,7 +9185,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.38.4",
  "reqsign",
- "reqwest",
+ "reqwest 0.12.25",
  "serde",
  "serde_json",
  "sha2",
@@ -9227,16 +9227,16 @@ dependencies = [
 
 [[package]]
 name = "opensearch"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a62b025c3503d3d53eaba3b6f14adb955af9f69fc71141b4d030a4e5331f5d42"
+checksum = "2af6815a23449a0860c8fe049a828c3589d3ad56d3b5875d0d1f340d1291871e"
 dependencies = [
  "base64 0.22.1",
  "bytes",
  "dyn-clone",
  "lazy_static",
  "percent-encoding",
- "reqwest",
+ "reqwest 0.13.2",
  "rustc_version",
  "serde",
  "serde_json",
@@ -9323,7 +9323,7 @@ dependencies = [
  "bytes",
  "http 1.4.0",
  "opentelemetry",
- "reqwest",
+ "reqwest 0.12.25",
 ]
 
 [[package]]
@@ -9338,7 +9338,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost 0.14.3",
- "reqwest",
+ "reqwest 0.12.25",
  "thiserror 2.0.17",
  "tokio",
  "tonic",
@@ -9868,7 +9868,7 @@ dependencies = [
  "peekable",
  "postgres-types",
  "rand 0.8.5",
- "reqwest",
+ "reqwest 0.12.25",
  "risingwave_common",
  "risingwave_sqlparser",
  "rsa",
@@ -10512,7 +10512,7 @@ checksum = "0fcebfa99f03ae51220778316b37d24981e36322c82c24848f48c5bd0f64cbdb"
 dependencies = [
  "enum-as-inner 0.6.1",
  "mime",
- "reqwest",
+ "reqwest 0.12.25",
  "serde",
  "time",
  "url",
@@ -10938,6 +10938,7 @@ version = "0.11.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
 dependencies = [
+ "aws-lc-rs",
  "bytes",
  "getrandom 0.3.1",
  "lru-slab",
@@ -11360,7 +11361,7 @@ dependencies = [
  "percent-encoding",
  "quick-xml 0.37.1",
  "rand 0.8.5",
- "reqwest",
+ "reqwest 0.12.25",
  "rsa",
  "rust-ini",
  "serde",
@@ -11421,6 +11422,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "reqwest"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab3f43e3283ab1488b624b44b0e988d0acea0b3214e694730a055cb6b2efa801"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-core",
+ "http 1.4.0",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.9.0",
+ "hyper-rustls 0.27.5",
+ "hyper-tls",
+ "hyper-util",
+ "js-sys",
+ "log",
+ "native-tls",
+ "percent-encoding",
+ "pin-project-lite",
+ "quinn",
+ "rustls 0.23.35",
+ "rustls-pki-types",
+ "rustls-platform-verifier",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sync_wrapper 1.0.2",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-rustls 0.26.4",
+ "tower",
+ "tower-http",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "reqwest-eventsource"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11432,7 +11474,7 @@ dependencies = [
  "mime",
  "nom",
  "pin-project-lite",
- "reqwest",
+ "reqwest 0.12.25",
  "thiserror 1.0.63",
 ]
 
@@ -11445,7 +11487,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "http 1.4.0",
- "reqwest",
+ "reqwest 0.12.25",
  "serde",
  "thiserror 1.0.63",
  "tower-service",
@@ -11522,7 +11564,7 @@ dependencies = [
  "panic-message",
  "redis",
  "regex",
- "reqwest",
+ "reqwest 0.12.25",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -11817,7 +11859,7 @@ dependencies = [
  "prost 0.14.3",
  "rand 0.9.2",
  "regex",
- "reqwest",
+ "reqwest 0.12.25",
  "risingwave-fields-derive",
  "risingwave_common_estimate_size",
  "risingwave_common_log",
@@ -11983,7 +12025,7 @@ dependencies = [
  "moka",
  "parking_lot 0.12.5",
  "prost 0.14.3",
- "reqwest",
+ "reqwest 0.12.25",
  "risingwave_pb",
  "serde",
  "serde_json",
@@ -12198,7 +12240,7 @@ dependencies = [
  "rand 0.9.2",
  "redis",
  "regex",
- "reqwest",
+ "reqwest 0.12.25",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_common_rate_limit",
@@ -12268,7 +12310,7 @@ dependencies = [
  "prost-reflect",
  "prost-types 0.14.3",
  "protox",
- "reqwest",
+ "reqwest 0.12.25",
  "risingwave_common",
  "risingwave_pb",
  "rust_decimal",
@@ -12826,7 +12868,7 @@ dependencies = [
  "dircpy",
  "mime_guess",
  "npm_rs",
- "reqwest",
+ "reqwest 0.12.25",
  "rust-embed",
  "thiserror-ext",
  "tokio",
@@ -12947,7 +12989,7 @@ dependencies = [
  "madsim-tokio",
  "opendal",
  "prometheus",
- "reqwest",
+ "reqwest 0.12.25",
  "risingwave_common",
  "spin 0.10.0",
  "thiserror 2.0.17",
@@ -13358,7 +13400,7 @@ dependencies = [
  "jsonbb",
  "madsim-tokio",
  "prost 0.14.3",
- "reqwest",
+ "reqwest 0.12.25",
  "risingwave_common_log",
  "risingwave_pb",
  "thiserror-ext",
@@ -13765,6 +13807,33 @@ dependencies = [
  "web-time",
  "zeroize",
 ]
+
+[[package]]
+name = "rustls-platform-verifier"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d99feebc72bae7ab76ba994bb5e121b8d83d910ca40b36e0921f53becc41784"
+dependencies = [
+ "core-foundation 0.10.1",
+ "core-foundation-sys",
+ "jni",
+ "log",
+ "once_cell",
+ "rustls 0.23.35",
+ "rustls-native-certs 0.8.1",
+ "rustls-platform-verifier-android",
+ "rustls-webpki 0.103.8",
+ "security-framework 3.5.1",
+ "security-framework-sys",
+ "webpki-root-certs",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rustls-platform-verifier-android"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
@@ -17328,6 +17397,15 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webpki-root-certs"
+version = "1.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]
