@@ -229,24 +229,28 @@ impl IndexCatalog {
 }
 
 impl TableIndex {
-    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<ColumnOrder> {
+    pub fn primary_table_pk_ref_to_index_table(&self) -> Option<Vec<ColumnOrder>> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
             .pk
             .iter()
-            .map(|x| ColumnOrder::new(*mapping.get(&x.column_index).unwrap(), x.order_type))
-            .collect_vec()
+            .map(|x| {
+                mapping
+                    .get(&x.column_index)
+                    .map(|&idx| ColumnOrder::new(idx, x.order_type))
+            })
+            .collect()
     }
 
-    pub fn primary_table_distribute_key_ref_to_index_table(&self) -> Vec<usize> {
+    pub fn primary_table_distribute_key_ref_to_index_table(&self) -> Option<Vec<usize>> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
             .distribution_key
             .iter()
-            .map(|x| *mapping.get(x).unwrap())
-            .collect_vec()
+            .map(|x| mapping.get(x).copied())
+            .collect()
     }
 
     pub fn full_covering(&self) -> bool {
@@ -478,5 +482,60 @@ mod item_rewriter {
                 .collect();
             FunctionCall::new_unchecked(func_type, inputs, ret).into()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, HashMap};
+    use std::sync::Arc;
+
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+
+    use super::*;
+    use crate::catalog::TableCatalog;
+
+    /// Reproduces the panic that occurred in `primary_table_pk_ref_to_index_table` when a
+    /// primary-key column of the primary table was absent from the index's
+    /// `primary_to_secondary_mapping`.
+    ///
+    /// This happens for function-based indexes (e.g. `CREATE INDEX ON t(lower(a))`) where
+    /// the PK column `a` only appears as an *argument* inside a `FunctionCall` in the
+    /// index item, but never as a bare `InputRef`.  Without the fix the code called
+    /// `mapping.get(&pk_col).unwrap()` which panicked with
+    /// `"called Option::unwrap() on a None value"`.
+    #[test]
+    fn test_pk_ref_to_index_table_missing_pk_col() {
+        // Only `pk` matters for the function under test; all other TableCatalog fields
+        // are left as their zero values via `Default`.
+        let primary_table = Arc::new(TableCatalog {
+            // PK is the column at index 0.
+            pk: vec![ColumnOrder::new(0, OrderType::ascending())],
+            ..Default::default()
+        });
+
+        let index_table = Arc::new(TableCatalog::default());
+
+        let table_index = TableIndex {
+            name: "test_idx".to_string(),
+            index_column_properties: vec![],
+            index_table,
+            primary_table,
+            // Column 1 maps to index column 0 (a non-PK column is covered).
+            // Column 0 (the PK) is intentionally absent — this is the scenario that
+            // previously caused a panic.
+            primary_to_secondary_mapping: BTreeMap::from([(1, 0)]),
+            secondary_to_primary_mapping: BTreeMap::from([(0, 1)]),
+            function_mapping: HashMap::new(),
+            index_columns_len: 1,
+        };
+
+        // Before the fix: `mapping.get(&0).unwrap()` would panic here.
+        // After the fix: returns `None` to signal that the PK cannot be mapped.
+        let result = table_index.primary_table_pk_ref_to_index_table();
+        assert!(
+            result.is_none(),
+            "expected None when a PK column is absent from the index mapping"
+        );
     }
 }
