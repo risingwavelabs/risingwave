@@ -273,12 +273,20 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredTableStateStore<S> {
         new_val: Bytes,
         old_val: Option<Bytes>,
     ) -> StorageResult<()> {
-        // TODO: collect metrics
+        let table_id_label = self.table_id().to_string();
+        self.storage_metrics
+            .local_write_counts
+            .with_guarded_label_values(&[table_id_label.as_str(), "insert"])
+            .inc();
         self.inner.insert(key, new_val, old_val)
     }
 
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
-        // TODO: collect metrics
+        let table_id_label = self.table_id().to_string();
+        self.storage_metrics
+            .local_write_counts
+            .with_guarded_label_values(&[table_id_label.as_str(), "delete"])
+            .inc();
         self.inner.delete(key, old_val)
     }
 
@@ -309,7 +317,11 @@ impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl for MonitoredTa
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
-        // TODO: may collect metrics
+        let table_id_label = self.table_id().to_string();
+        self.storage_metrics
+            .local_write_counts
+            .with_guarded_label_values(&[table_id_label.as_str(), "seal_epoch"])
+            .inc();
         self.inner.seal_current_epoch(next_epoch, opts)
     }
 
@@ -322,7 +334,11 @@ impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl for MonitoredTa
 
 impl<S: StateStoreWriteVector> StateStoreWriteVector for MonitoredTableStateStore<S> {
     fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
-        // TODO: monitor
+        let table_id_label = self.table_id().to_string();
+        self.storage_metrics
+            .local_write_counts
+            .with_guarded_label_values(&[table_id_label.as_str(), "vector_insert"])
+            .inc();
         self.inner.insert(vec, info)
     }
 }
