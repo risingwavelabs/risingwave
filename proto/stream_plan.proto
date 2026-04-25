@@ -675,6 +675,10 @@ message AsOfJoinNode {
   // Which encoding will be used to encode join rows in operator cache.
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   JoinEncodingType join_encoding_type = 11 [deprecated = true];
+  // Whether to use the cache-based implementation (true) or the no-cache implementation (false).
+  // Controlled by session variable `streaming_asof_join_use_cache`.
+  // Optional so that legacy plans (without this field) default to true (cache-based).
+  optional bool use_cache = 12;
 }
 
 message TemporalJoinNode {

@@ -620,7 +620,6 @@ impl IcebergSinkCommitter {
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: self.sink_id,
-                    compaction_interval: self.config.compaction_interval_sec(),
                     force_compaction: false,
                 })
                 .is_err()
@@ -868,7 +867,6 @@ impl IcebergSinkCommitter {
                     && iceberg_compact_stat_sender
                         .send(IcebergSinkCompactionUpdate {
                             sink_id: self.sink_id,
-                            compaction_interval: self.config.compaction_interval_sec(),
                             force_compaction: true,
                         })
                         .is_err()

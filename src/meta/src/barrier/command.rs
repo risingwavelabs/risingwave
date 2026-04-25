@@ -448,6 +448,7 @@ pub enum Command {
     /// drop actors, and then delete the job fragments info from meta store.
     DropStreamingJobs {
         streaming_job_ids: HashSet<JobId>,
+        /// Used by recovery quick path when draining buffered drop/cancel commands.
         unregistered_state_table_ids: HashSet<TableId>,
         unregistered_fragment_ids: HashSet<FragmentId>,
         // target_fragment -> [sink_fragments]
@@ -678,10 +679,7 @@ impl Command {
 #[derive(Debug)]
 pub enum PostCollectCommand {
     Command(String),
-    DropStreamingJobs {
-        streaming_job_ids: HashSet<JobId>,
-        unregistered_state_table_ids: HashSet<TableId>,
-    },
+    DropStreamingJobs,
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
@@ -714,7 +712,7 @@ impl PostCollectCommand {
 
     pub fn should_checkpoint(&self) -> bool {
         match self {
-            PostCollectCommand::DropStreamingJobs { .. }
+            PostCollectCommand::DropStreamingJobs
             | PostCollectCommand::CreateStreamingJob { .. }
             | PostCollectCommand::Reschedule { .. }
             | PostCollectCommand::ReplaceStreamJob { .. }
@@ -729,7 +727,7 @@ impl PostCollectCommand {
     pub fn command_name(&self) -> &str {
         match self {
             PostCollectCommand::Command(name) => name.as_str(),
-            PostCollectCommand::DropStreamingJobs { .. } => "DropStreamingJobs",
+            PostCollectCommand::DropStreamingJobs => "DropStreamingJobs",
             PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
             PostCollectCommand::Reschedule { .. } => "Reschedule",
             PostCollectCommand::ReplaceStreamJob { .. } => "ReplaceStreamJob",

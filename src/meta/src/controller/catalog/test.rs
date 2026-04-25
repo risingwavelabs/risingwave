@@ -14,8 +14,10 @@
 
 #[cfg(test)]
 mod tests {
+    use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
+    use tokio::sync::oneshot;
 
     use crate::controller::catalog::*;
 
@@ -251,6 +253,107 @@ mod tests {
         assert!(
             View::find_by_id(view_id)
                 .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_abort_initial_materialized_view_reports_cancellation() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+
+        let mut inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let job_id = obj.oid.as_job_id();
+
+        table::ActiveModel {
+            table_id: Set(obj.oid.as_table_id()),
+            name: Set("mv_abort_initial".to_owned()),
+            optional_associated_source_id: Set(None),
+            table_type: Set(TableType::MaterializedView),
+            belongs_to_job_id: Set(None),
+            columns: Set(vec![].into()),
+            pk: Set(vec![].into()),
+            distribution_key: Set(Vec::<i32>::new().into()),
+            stream_key: Set(Vec::<i32>::new().into()),
+            append_only: Set(false),
+            fragment_id: Set(None),
+            vnode_col_index: Set(None),
+            row_id_index: Set(None),
+            value_indices: Set(Vec::<i32>::new().into()),
+            definition: Set("CREATE MATERIALIZED VIEW mv_abort_initial AS SELECT 1".to_owned()),
+            handle_pk_conflict_behavior: Set(HandleConflictBehavior::NoCheck),
+            version_column_indices: Set(None),
+            read_prefix_len_hint: Set(0),
+            watermark_indices: Set(Vec::<i32>::new().into()),
+            dist_key_in_pk: Set(Vec::<i32>::new().into()),
+            dml_fragment_id: Set(None),
+            cardinality: Set(None),
+            cleaned_by_watermark: Set(false),
+            description: Set(None),
+            version: Set(None),
+            retention_seconds: Set(None),
+            cdc_table_id: Set(None),
+            vnode_count: Set(1),
+            webhook_info: Set(None),
+            engine: Set(None),
+            clean_watermark_index_in_pk: Set(None),
+            clean_watermark_indices: Set(None),
+            refreshable: Set(false),
+            vector_index_info: Set(None),
+            cdc_table_type: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Initial),
+            create_type: Set(CreateType::Foreground),
+            timezone: Set(None),
+            config_override: Set(None),
+            adaptive_parallelism_strategy: Set(None),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            backfill_parallelism: Set(None),
+            backfill_orders: Set(None),
+            max_parallelism: Set(1),
+            specific_resource_group: Set(None),
+            is_serverless_backfill: Set(false),
+        }
+        .insert(&txn)
+        .await?;
+
+        let (tx, rx) = oneshot::channel();
+        inner.register_finish_notifier(TEST_DATABASE_ID, job_id, tx);
+        txn.commit().await?;
+        drop(inner);
+
+        let (aborted, database_id) = mgr.try_abort_creating_streaming_job(job_id, true).await?;
+        assert!(aborted);
+        assert_eq!(database_id, Some(TEST_DATABASE_ID));
+
+        let err = rx
+            .await
+            .expect("finish notifier should be notified")
+            .expect_err("initial job drop should cancel the create wait");
+        assert!(err.contains("cancelled"));
+
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(job_id).one(db).await?.is_none());
+        assert!(StreamingJob::find_by_id(job_id).one(db).await?.is_none());
+        assert!(
+            Table::find_by_id(job_id.as_mv_table_id())
+                .one(db)
                 .await?
                 .is_none()
         );

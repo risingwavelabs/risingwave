@@ -139,7 +139,9 @@ impl PlainParser {
                         self.source_ctx.source_id,
                         &self.source_ctx.source_name,
                         &self.source_ctx.connector_props,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(schema_change) => Ok(ParseResult::SchemaChange(schema_change)),
                         Err(err) => {
                             // Report CDC auto schema change fail event
