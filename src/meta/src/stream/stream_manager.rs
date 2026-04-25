@@ -193,7 +193,7 @@ pub struct AutoRefreshSchemaSinkContext {
     pub new_schema: Vec<PbColumnCatalog>,
     pub newly_add_fields: Vec<Field>,
     pub new_fragment: Fragment,
-    pub new_log_store_table: Option<PbTable>,
+    pub new_log_store_table: Option<Box<PbTable>>,
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
 }
 
