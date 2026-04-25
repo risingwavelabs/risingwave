@@ -28,7 +28,9 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::id::{ExecutorId, GlobalOperatorId};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{self, StreamNode, StreamScanNode, StreamScanType};
+use risingwave_pb::stream_plan::{
+    self, StreamNode, StreamScanNode, StreamScanType, SyncLogStoreNode,
+};
 use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
@@ -43,7 +45,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
+    SnapshotBackfillExecutor, SyncLogStoreDispatchExecutor, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -469,6 +471,67 @@ impl StreamActorManager {
         Ok(actor)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn create_actor_with_log_store_dispatcher<S: StateStore>(
+        self: Arc<Self>,
+        actor: BuildActorInfo,
+        fragment_id: FragmentId,
+        node: Arc<StreamNode>,
+        local_barrier_manager: LocalBarrierManager,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        actor_config: Arc<StreamingConfig>,
+        sync: Box<SyncLogStoreNode>,
+        state_store: S,
+    ) -> StreamResult<Actor<SyncLogStoreDispatchExecutor<S>>> {
+        let actor_context = ActorContext::create(
+            &actor,
+            fragment_id,
+            self.env.total_mem_usage(),
+            self.streaming_metrics.clone(),
+            self.env.meta_client(),
+            actor_config,
+            self.env.clone(),
+        );
+        let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
+        let expr_context = actor.expr_context.clone().unwrap();
+
+        let [input] = node.input.as_slice() else {
+            bail!("SyncLogStoreNode should have exactly one input");
+        };
+
+        let (executor, subtasks) = self
+            .create_nodes(
+                fragment_id,
+                input,
+                self.env.clone(),
+                &actor_context,
+                vnode_bitmap.clone(),
+                &local_barrier_manager,
+            )
+            .await?;
+
+        let dispatcher = SyncLogStoreDispatchExecutor::new(
+            executor,
+            new_output_request_rx,
+            actor.dispatchers,
+            &actor_context,
+            sync.as_ref(),
+            vnode_bitmap,
+            state_store,
+        )
+        .await?;
+
+        let actor = Actor::new(
+            dispatcher,
+            subtasks,
+            self.streaming_metrics.clone(),
+            actor_context.clone(),
+            expr_context,
+            local_barrier_manager,
+        );
+        Ok(actor)
+    }
+
     pub(super) fn spawn_actor(
         self: &Arc<Self>,
         actor: BuildActorInfo,
@@ -489,27 +552,56 @@ impl StreamActorManager {
         let handle = {
             let trace_span = format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
             let barrier_manager = local_barrier_manager;
+            let node_body = node.get_node_body().unwrap().clone();
             // wrap the future of `create_actor` with `boxed` to avoid stack overflow
-            let actor = self
-                .clone()
-                .create_actor(
-                    actor,
-                    fragment_id,
-                    node,
-                    barrier_manager.clone(),
-                    new_output_request_rx,
-                    actor_config,
-                )
-                .boxed()
-                .and_then(|actor| actor.run())
-                .map(move |result| {
-                    if let Err(err) = result {
+            let actor = match node_body {
+                NodeBody::SyncLogStore(sync) => {
+                    dispatch_state_store!(self.env.state_store(), store, {
+                        self
+                        .clone()
+                        .create_actor_with_log_store_dispatcher(
+                            actor,
+                            fragment_id,
+                            node,
+                            barrier_manager.clone(),
+                            new_output_request_rx,
+                            actor_config,
+                            sync,
+                            store,
+                        )
+                        .and_then(|actor| actor.run())
+                        .map(move |result| {
+                            if let Err(err) = result {
+                                tracing::error!(%actor_id, error = ?err.as_report(), "actor exit with error");
+                                barrier_manager.notify_failure(actor_id, err);
+                            }
+                        })
+                        .boxed()
+                    })
+                }
+                _ => {
+                    self
+                    .clone()
+                    .create_actor(
+                        actor,
+                        fragment_id,
+                        node,
+                        barrier_manager.clone(),
+                        new_output_request_rx,
+                        actor_config,
+                    )
+                    .and_then(|actor| actor.run())
+                    .map(move |result| {
+                        if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
                         tracing::error!(%actor_id, error = ?err.as_report(), "actor exit with error");
                         barrier_manager.notify_failure(actor_id, err);
-                    }
-                });
+                        }
+                    })
+                    .boxed()
+                }
+            };
             let traced = match &self.await_tree_reg {
                 Some(m) => m
                     .register(await_tree_key::Actor(actor_id), trace_span)
