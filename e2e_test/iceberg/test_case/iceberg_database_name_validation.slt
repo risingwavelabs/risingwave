@@ -1,8 +1,4 @@
-# Test cases for iceberg database.name validation
-# This file tests that dots are not allowed in database.name field
-
-statement ok
-DROP TABLE IF EXISTS t_db_validation;
+# Test cases for dotted iceberg namespaces in database.name
 
 statement ok
 CREATE TABLE t_db_validation (
@@ -10,13 +6,14 @@ CREATE TABLE t_db_validation (
     data varchar
 );
 
-# Test case 1: Error - database.name with single dot
-statement error Invalid database.name 'a.b': dots are not allowed in database names
+# Test case 1: database.name with a two-level namespace
+statement ok
 CREATE SINK s_single_dot AS SELECT * FROM t_db_validation WITH (
     connector = 'iceberg',
-    type = 'append-only',
+    type = 'upsert',
+    primary_key = 'id',
     database.name = 'a.b',
-    table.name = 'test_table',
+    table.name = 'test_table_single_dot',
     catalog.name = 'demo',
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
@@ -27,14 +24,20 @@ CREATE SINK s_single_dot AS SELECT * FROM t_db_validation WITH (
     create_table_if_not_exists = 'true'
 );
 
-# Test case 2: Error - database.name with multiple dots
-statement error Invalid database.name 'a.b.c': dots are not allowed in database names
+statement ok
+DROP SINK s_single_dot;
+
+statement ok
+INSERT INTO t_db_validation VALUES (1, 'multi_dot_namespace');
+
+# Test case 2: database.name with a three-level namespace for storage catalog sink and source
+statement ok
 CREATE SINK s_multiple_dots AS SELECT * FROM t_db_validation WITH (
     connector = 'iceberg',
     type = 'upsert',
     primary_key = 'id',
     database.name = 'a.b.c',
-    table.name = 'test_table',
+    table.name = 'test_table_multiple_dots',
     catalog.name = 'demo',
     catalog.type = 'storage',
     warehouse.path = 's3a://icebergdata/demo',
@@ -42,8 +45,96 @@ CREATE SINK s_multiple_dots AS SELECT * FROM t_db_validation WITH (
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
-    create_table_if_not_exists = 'true'
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 1
 );
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SOURCE storage_multiple_dots_source WITH (
+    connector = 'iceberg',
+    database.name = 'a.b.c',
+    table.name = 'test_table_multiple_dots',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+query IT retry 6 backoff 1s
+SELECT id, data FROM storage_multiple_dots_source WHERE id = 1;
+----
+1 multi_dot_namespace
+
+statement ok
+DROP SOURCE storage_multiple_dots_source;
+
+statement ok
+DROP SINK s_multiple_dots;
+
+# Test case 3: database.name with a three-level namespace for Lakekeeper sink and source
+statement ok
+CREATE SECRET lakekeeper_multi_dot_secret WITH (
+    backend = 'meta'
+) AS 'hummockadmin';
+
+statement ok
+CREATE CONNECTION lakekeeper_multi_dot_catalog_conn WITH (
+    type = 'iceberg',
+    catalog.type = 'rest',
+    catalog.uri = 'http://127.0.0.1:8181/catalog/',
+    warehouse.path = 'risingwave-warehouse',
+    s3.access.key = secret lakekeeper_multi_dot_secret,
+    s3.secret.key = secret lakekeeper_multi_dot_secret,
+    s3.path.style.access = 'true',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1'
+);
+
+statement ok
+CREATE SINK s_lakekeeper_multiple_dots AS SELECT * FROM t_db_validation WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'id',
+    database.name = 'lakekeeper.multi.dot',
+    table.name = 'test_table_multiple_dots',
+    connection = lakekeeper_multi_dot_catalog_conn,
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 1
+);
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SOURCE lakekeeper_multiple_dots_source WITH (
+    connector = 'iceberg',
+    database.name = 'lakekeeper.multi.dot',
+    table.name = 'test_table_multiple_dots',
+    connection = lakekeeper_multi_dot_catalog_conn
+);
+
+query IT retry 6 backoff 1s
+SELECT id, data FROM lakekeeper_multiple_dots_source WHERE id = 1;
+----
+1 multi_dot_namespace
+
+statement ok
+DROP SOURCE lakekeeper_multiple_dots_source;
+
+statement ok
+DROP SINK s_lakekeeper_multiple_dots;
+
+statement ok
+DROP CONNECTION lakekeeper_multi_dot_catalog_conn;
+
+statement ok
+DROP SECRET lakekeeper_multi_dot_secret;
 
 statement ok
 DROP TABLE t_db_validation;

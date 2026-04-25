@@ -292,8 +292,12 @@ async fn bind_columns_from_source_for_non_cdc(
                 // It would be too late to report error in `SpecificParserConfig::new`,
                 // which leads to recovery loop.
                 // TODO: rely on SpecificParserConfig::new to validate, like Avro
-                TimestamptzHandling::from_options(&format_encode_options_to_consume)
-                    .map_err(|err| InvalidInputSyntax(err.message))?;
+                if let Some(value) =
+                    format_encode_options_to_consume.get(TimestamptzHandling::OPTION_KEY)
+                {
+                    TimestamptzHandling::from_options(value)
+                        .map_err(|err| InvalidInputSyntax(err.message))?;
+                }
                 try_consume_string_from_options(
                     &mut format_encode_options_to_consume,
                     TimestamptzHandling::OPTION_KEY,

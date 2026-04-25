@@ -606,9 +606,17 @@ pub(super) enum MarkReadyOptions {
     },
 }
 
+pub(super) struct PreApplyDropCancel {
+    pub streaming_job_ids: Vec<JobId>,
+    pub dropped_state_table_ids: Vec<TableId>,
+}
+
 impl ScheduledBarriers {
     /// Pre buffered drop and cancel command, return all dropped state tables if any.
-    pub(super) fn pre_apply_drop_cancel(&self, database_id: Option<DatabaseId>) -> Vec<TableId> {
+    pub(super) fn pre_apply_drop_cancel(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> PreApplyDropCancel {
         self.pre_apply_drop_cancel_scheduled(database_id)
     }
 
@@ -749,9 +757,12 @@ impl ScheduledBarriers {
     pub(super) fn pre_apply_drop_cancel_scheduled(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> Vec<TableId> {
+    ) -> PreApplyDropCancel {
         let mut queue = self.inner.queue.lock();
-        let mut dropped_tables = vec![];
+        let mut drop_cancel = PreApplyDropCancel {
+            streaming_job_ids: vec![],
+            dropped_state_table_ids: vec![],
+        };
 
         let mut pre_apply_drop_cancel = |queue: &mut DatabaseScheduledQueue| {
             while let Some(ScheduledQueueItem {
@@ -760,10 +771,14 @@ impl ScheduledBarriers {
             {
                 match command {
                     Command::DropStreamingJobs {
+                        streaming_job_ids,
                         unregistered_state_table_ids,
                         ..
                     } => {
-                        dropped_tables.extend(unregistered_state_table_ids);
+                        drop_cancel.streaming_job_ids.extend(streaming_job_ids);
+                        drop_cancel
+                            .dropped_state_table_ids
+                            .extend(unregistered_state_table_ids);
                     }
                     Command::DropSubscription { .. } => {}
                     _ => {
@@ -789,7 +804,7 @@ impl ScheduledBarriers {
             }
         }
 
-        dropped_tables
+        drop_cancel
     }
 }
 

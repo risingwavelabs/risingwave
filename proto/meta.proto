@@ -476,6 +476,7 @@ message ListIcebergCompactionStatusResponse {
     uint64 trigger_snapshot_count = 4;
     string schedule_state = 5;
     optional uint64 next_compaction_after_sec = 6;
+    // V1 approximates pending snapshot backlog with in-memory sink commit backlog.
     optional uint64 pending_snapshot_count = 7;
     bool is_triggerable = 8;
   }
