@@ -169,6 +169,7 @@ pub enum Encode {
     Native,
     Template,
     Parquet,
+    Xml,
 }
 
 // TODO: unify with `from_keyword`
@@ -188,6 +189,7 @@ impl fmt::Display for Encode {
                 Encode::None => "NONE",
                 Encode::Parquet => "PARQUET",
                 Encode::Text => "TEXT",
+                Encode::Xml => "XML",
             }
         )
     }
@@ -206,8 +208,9 @@ impl Encode {
             "PARQUET" => Encode::Parquet,
             "NATIVE" => Encode::Native,
             "NONE" => Encode::None,
+            "XML" => Encode::Xml,
             _ => parser_err!(
-                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | NONE after Encode"
+                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | XML | NONE after Encode"
             ),
         })
     }

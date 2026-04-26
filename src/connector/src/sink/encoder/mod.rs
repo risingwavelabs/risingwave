@@ -23,15 +23,19 @@ use crate::sink::Result;
 mod avro;
 mod bson;
 pub mod bytes;
+pub mod csv;
 mod json;
 mod proto;
 pub mod template;
 pub mod text;
+pub mod xml;
 
 pub use avro::{AvroEncoder, AvroHeader};
 pub use bson::BsonEncoder;
+pub use csv::CsvEncoder;
 pub use json::JsonEncoder;
 pub use proto::{ProtoEncoder, ProtoHeader};
+pub use xml::XmlEncoder;
 
 /// Encode a row of a relation into
 /// * an object in json

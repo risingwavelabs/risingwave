@@ -583,8 +583,8 @@ impl SinkFormatterImpl {
                 | (F::Upsert, E::Bytes, _)
                 | (F::Debezium, E::Json, Some(_))
                 | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text | E::Bytes, _)
-                | (_, E::Parquet, _)
-                | (_, _, Some(E::Parquet))
+                | (_, E::Parquet | E::Csv | E::Xml, _)
+                | (_, _, Some(E::Parquet | E::Csv | E::Xml))
                 | (F::AppendOnly, E::Bytes, Some(_))
                 | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
                 => {
