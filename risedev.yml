@@ -292,6 +292,10 @@ profile:
     steps:
       - use: kafka
 
+  rabbitmq:
+    steps:
+      - use: rabbitmq
+
   meta-1cn-1fe-sqlite:
     steps:
       - use: minio
@@ -1650,6 +1654,34 @@ template:
 
     # address of redis
     address: "127.0.0.1"
+
+  # RabbitMQ service backed by docker.
+  rabbitmq:
+    # Id to be picked-up by services
+    id: rabbitmq
+
+    # address of rabbitmq
+    address: "127.0.0.1"
+
+    # listen port of RabbitMQ AMQP endpoint
+    port: 5672
+
+    # listen port of RabbitMQ management UI
+    management-port: 15672
+
+    # default username and password for initialization
+    user: guest
+    password: guest
+
+    # The docker image. Can be overridden to use a different version.
+    image: "rabbitmq:3-management"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
 
   # MySQL service backed by docker.
   mysql:

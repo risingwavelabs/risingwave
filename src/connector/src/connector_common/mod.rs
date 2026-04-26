@@ -17,6 +17,9 @@
 mod mqtt_common;
 pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 
+mod rabbit_mq;
+pub use rabbit_mq::RabbitMQCommon;
+
 mod common;
 pub use common::{
     AwsAuthProps, AwsPrivateLinkItem, DISABLE_DEFAULT_CREDENTIAL, KafkaCommon,
