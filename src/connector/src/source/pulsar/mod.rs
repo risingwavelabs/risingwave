@@ -21,7 +21,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 pub use enumerator::*;
-use serde::Deserialize;
+use pulsar::OperationRetryOptions;
+use serde::{Deserialize, de};
 use serde_with::serde_as;
 pub use split::*;
 use with_options::WithOptions;
@@ -71,6 +72,70 @@ pub struct PulsarConsumerOptions {
     pub read_compacted: Option<bool>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, WithOptions)]
+#[serde_as]
+pub struct PulsarSourceOperationRetry {
+    #[serde(
+        rename = "pulsar.operation.retry.max.retries",
+        deserialize_with = "deserialize_optional_u32_from_string",
+        default
+    )]
+    pub max_retries: Option<u32>,
+
+    /// This controls Pulsar client operation retry delay for the source.
+    /// It is distinct from `subscription.unacked.resend.delay`, which only affects
+    /// unacked message redelivery, and from sink-side `properties.retry.*` settings.
+    #[serde(
+        rename = "pulsar.operation.retry.delay",
+        deserialize_with = "deserialize_optional_duration_from_string",
+        default
+    )]
+    pub retry_delay: Option<Duration>,
+}
+
+impl PulsarSourceOperationRetry {
+    pub(crate) fn to_pulsar_options(&self) -> Option<OperationRetryOptions> {
+        if self.max_retries.is_none() && self.retry_delay.is_none() {
+            return None;
+        }
+
+        let mut options = OperationRetryOptions::default();
+        options.max_retries = self.max_retries;
+        if let Some(retry_delay) = self.retry_delay {
+            options.retry_delay = retry_delay;
+        }
+
+        Some(options)
+    }
+}
+
+fn deserialize_optional_u32_from_string<'de, D>(deserializer: D) -> Result<Option<u32>, D::Error>
+where
+    D: de::Deserializer<'de>,
+{
+    let s: Option<String> = de::Deserialize::deserialize(deserializer)?;
+    if let Some(s) = s {
+        let parsed = s.parse().map_err(|_| {
+            de::Error::invalid_value(
+                de::Unexpected::Str(&s),
+                &"integer greater than or equal to 0",
+            )
+        })?;
+        Ok(Some(parsed))
+    } else {
+        Ok(None)
+    }
+}
+
+#[doc(hidden)]
+pub fn make_retryable_pulsar_connector_error(message: impl Into<String>) -> ConnectorError {
+    pulsar::Error::Connection(pulsar::error::ConnectionError::Io(std::io::Error::new(
+        std::io::ErrorKind::ConnectionReset,
+        message.into(),
+    )))
+    .into()
+}
+
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 #[serde_as]
 pub struct PulsarProperties {
@@ -118,8 +183,62 @@ pub struct PulsarProperties {
     pub subscription_unacked_resend_delay: Option<Duration>,
 
     #[serde(flatten)]
+    pub operation_retry: PulsarSourceOperationRetry,
+
+    #[serde(flatten)]
     pub consumer_options: PulsarConsumerOptions,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn parse_pulsar_properties(extra: serde_json::Value) -> PulsarProperties {
+        let mut value = json!({
+            "topic": "persistent://public/default/test-topic",
+            "service.url": "pulsar://localhost:6650",
+        });
+
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn test_operation_retry_override_uses_upstream_defaults_when_absent() {
+        let props = parse_pulsar_properties(json!({}));
+        assert!(props.operation_retry.to_pulsar_options().is_none());
+    }
+
+    #[test]
+    fn test_operation_retry_override_sets_max_retries_only() {
+        let props = parse_pulsar_properties(json!({"pulsar.operation.retry.max.retries": "7"}));
+
+        let options = props.operation_retry.to_pulsar_options().unwrap();
+        assert_eq!(options.max_retries, Some(7));
+        assert_eq!(
+            options.retry_delay,
+            OperationRetryOptions::default().retry_delay
+        );
+    }
+
+    #[test]
+    fn test_operation_retry_override_sets_max_retries_and_delay() {
+        let props = parse_pulsar_properties(json!({
+            "pulsar.operation.retry.max.retries": "9",
+            "pulsar.operation.retry.delay": "3s",
+        }));
+
+        let options = props.operation_retry.to_pulsar_options().unwrap();
+        assert_eq!(options.max_retries, Some(9));
+        assert_eq!(options.retry_delay, Duration::from_secs(3));
+    }
 }

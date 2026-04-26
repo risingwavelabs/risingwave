@@ -489,3 +489,91 @@ pub enum SourceWorkerCommand {
     /// Update the properties of the source worker.
     UpdateProps(ConnectorProperties),
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use risingwave_connector::WithOptionsSecResolved;
+    use risingwave_connector::source::pulsar::make_retryable_pulsar_connector_error;
+    use risingwave_connector::source::{AnySplitEnumerator, ConnectorProperties, SplitImpl};
+    use tokio::sync::Mutex;
+
+    use super::*;
+
+    struct FailingEnumerator;
+
+    #[async_trait::async_trait]
+    impl AnySplitEnumerator for FailingEnumerator {
+        async fn list_splits(&mut self) -> ConnectorResult<Vec<SplitImpl>> {
+            Err(make_retryable_pulsar_connector_error(
+                "retryable pulsar worker test error",
+            ))
+        }
+
+        async fn on_drop_fragments(
+            &mut self,
+            _fragment_ids: Vec<FragmentId>,
+        ) -> ConnectorResult<()> {
+            Ok(())
+        }
+
+        async fn on_finish_backfill(
+            &mut self,
+            _fragment_ids: Vec<FragmentId>,
+        ) -> ConnectorResult<()> {
+            Ok(())
+        }
+
+        async fn on_tick(&mut self) -> ConnectorResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tick_surfaces_retryable_pulsar_error_without_stall() {
+        let source_id = SourceId::new(1);
+        let source_name = "test-pulsar-enumerator".to_owned();
+        let connector_properties = ConnectorProperties::extract(
+            WithOptionsSecResolved::without_secrets(BTreeMap::from([(
+                "connector".to_owned(),
+                "datagen".to_owned(),
+            )])),
+            false,
+        )
+        .unwrap();
+        let current_splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
+        let metrics = Arc::new(MetaMetrics::default());
+        let source_is_up = metrics
+            .source_is_up
+            .with_guarded_label_values(&[source_id.to_string().as_str(), &source_name]);
+        let mut worker = ConnectorSourceWorker {
+            source_id,
+            source_name,
+            current_splits,
+            enumerator: Box::new(FailingEnumerator),
+            period: Duration::from_secs(30),
+            metrics,
+            connector_properties,
+            fail_cnt: 0,
+            source_is_up,
+            debug_splits: None,
+        };
+
+        let err = tokio::time::timeout(Duration::from_secs(1), worker.tick())
+            .await
+            .expect("tick should not stall")
+            .unwrap_err();
+        assert!(err.to_string().contains("Pulsar error"));
+        assert_eq!(worker.fail_cnt, 1);
+
+        let err = tokio::time::timeout(Duration::from_secs(1), worker.tick())
+            .await
+            .expect("subsequent tick should not stall")
+            .unwrap_err();
+        assert!(err.to_string().contains("Pulsar error"));
+        assert_eq!(worker.fail_cnt, 2);
+    }
+}

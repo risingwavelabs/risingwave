@@ -164,7 +164,11 @@ impl SplitReader for PulsarBrokerReader {
         let split = splits.into_iter().next().unwrap();
         let pulsar = props
             .common
-            .build_client(&props.oauth, &props.aws_auth_props)
+            .build_client(
+                &props.oauth,
+                &props.aws_auth_props,
+                props.operation_retry.to_pulsar_options(),
+            )
             .await?;
         let topic = split.topic.to_string();
 
