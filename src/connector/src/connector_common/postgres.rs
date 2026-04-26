@@ -25,6 +25,7 @@ use sea_schema::postgres::def::{ColumnType as SeaType, TableDef, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use sea_schema::sea_query::{Alias, IntoIden};
 use serde::Deserialize;
+use serde_with::{DisplayFromStr, serde_as};
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{PgPool, Row};
 use thiserror_ext::AsReport;
@@ -34,7 +35,6 @@ use tokio_postgres::{Client as PgClient, NoTls};
 #[cfg(not(madsim))]
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::error::ConnectorResult;
-use crate::sink::postgres::TcpKeepaliveConfig;
 
 /// SQL query to discover primary key columns directly from PostgreSQL system tables.
 /// This bypasses querying `information_schema.table_constraints` to avoid permission issues.
@@ -67,6 +67,11 @@ const DISCOVER_PGVECTOR_COLUMNS_QUERY: &str = r#"
     ORDER BY a.attnum
 "#;
 
+/// Canonical Postgres connection parameters shared across sink, source CDC, batch
+/// executor, and frontend `postgres_query` table function. Each caller constructs
+/// this from its own user-facing config struct before invoking the shared helpers
+/// like `create_pg_client` or `PostgresExternalTable::connect`.
+#[derive(Debug, Clone, Default)]
 pub struct PgConnectionConfig {
     pub host: String,
     pub port: String,
@@ -75,6 +80,65 @@ pub struct PgConnectionConfig {
     pub database: String,
     pub ssl_mode: SslMode,
     pub ssl_root_cert: Option<String>,
+}
+
+impl PgConnectionConfig {
+    fn port_u16(&self) -> anyhow::Result<u16> {
+        self.port
+            .parse::<u16>()
+            .with_context(|| format!("invalid postgres port `{}`", self.port))
+    }
+
+    fn to_sqlx_connect_options(&self) -> anyhow::Result<PgConnectOptions> {
+        let mut options = PgConnectOptions::new()
+            .username(&self.user)
+            .password(&self.password)
+            .host(&self.host)
+            .port(self.port_u16()?)
+            .database(&self.database)
+            .ssl_mode(match self.ssl_mode {
+                SslMode::Disabled => PgSslMode::Disable,
+                SslMode::Preferred => PgSslMode::Prefer,
+                SslMode::Required => PgSslMode::Require,
+                SslMode::VerifyCa => PgSslMode::VerifyCa,
+                SslMode::VerifyFull => PgSslMode::VerifyFull,
+            });
+
+        if matches!(self.ssl_mode, SslMode::VerifyCa | SslMode::VerifyFull)
+            && let Some(root_cert) = &self.ssl_root_cert
+        {
+            options = options.ssl_root_cert(root_cert.as_str());
+        }
+
+        Ok(options)
+    }
+}
+
+/// TCP keepalive knobs for the long-lived Postgres client used by the sink.
+/// Lives in `connector_common` so both the sink config and the shared
+/// `create_pg_client` helper reference the same definition.
+#[serde_as]
+#[derive(Debug, Clone, Deserialize)]
+pub struct TcpKeepaliveConfig {
+    #[serde(rename = "tcp.keepalive.idle")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_idle: u32,
+    #[serde(rename = "tcp.keepalive.interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_interval: u32,
+    #[serde(rename = "tcp.keepalive.count")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_count: u32,
+}
+
+impl Default for TcpKeepaliveConfig {
+    fn default() -> Self {
+        Self {
+            tcp_keepalive_idle: 10 * 60,
+            tcp_keepalive_interval: 10,
+            tcp_keepalive_count: 3,
+        }
+    }
 }
 
 pub fn pg_connection_config_from_properties(
@@ -111,18 +175,9 @@ pub async fn create_pg_client_from_properties(
     tcp_keepalive: Option<TcpKeepaliveConfig>,
 ) -> ConnectorResult<PgClient> {
     let config = pg_connection_config_from_properties(props)?;
-    create_pg_client(
-        &config.user,
-        &config.password,
-        &config.host,
-        &config.port,
-        &config.database,
-        &config.ssl_mode,
-        &config.ssl_root_cert,
-        tcp_keepalive,
-    )
-    .await
-    .map_err(Into::into)
+    create_pg_client(&config, tcp_keepalive)
+        .await
+        .map_err(Into::into)
 }
 
 pub async fn discover_pgvector_dimensions(
@@ -199,36 +254,11 @@ impl PostgresExternalTable {
     /// This method uses direct PostgreSQL system table queries for primary keys
     /// to avoid permission issues when querying `information_schema.table_constraints`
     async fn discover_pk_and_full_columns(
-        username: &str,
-        password: &str,
-        host: &str,
-        port: u16,
-        database: &str,
+        config: &PgConnectionConfig,
         schema: &str,
         table: &str,
-        ssl_mode: &SslMode,
-        ssl_root_cert: &Option<String>,
     ) -> ConnectorResult<(Vec<sea_schema::postgres::def::ColumnInfo>, Vec<String>)> {
-        let mut options = PgConnectOptions::new()
-            .username(username)
-            .password(password)
-            .host(host)
-            .port(port)
-            .database(database)
-            .ssl_mode(match ssl_mode {
-                SslMode::Disabled => PgSslMode::Disable,
-                SslMode::Preferred => PgSslMode::Prefer,
-                SslMode::Required => PgSslMode::Require,
-                SslMode::VerifyCa => PgSslMode::VerifyCa,
-                SslMode::VerifyFull => PgSslMode::VerifyFull,
-            });
-
-        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
-            && let Some(root_cert) = ssl_root_cert
-        {
-            options = options.ssl_root_cert(root_cert.as_str());
-        }
-
+        let options = config.to_sqlx_connect_options()?;
         let connection = PgPool::connect_with(options).await?;
 
         // Use sea-schema only for column discovery (no permission issues)
@@ -277,36 +307,11 @@ impl PostgresExternalTable {
     }
 
     async fn discover_schema(
-        username: &str,
-        password: &str,
-        host: &str,
-        port: u16,
-        database: &str,
+        config: &PgConnectionConfig,
         schema: &str,
         table: &str,
-        ssl_mode: &SslMode,
-        ssl_root_cert: &Option<String>,
     ) -> ConnectorResult<TableDef> {
-        let mut options = PgConnectOptions::new()
-            .username(username)
-            .password(password)
-            .host(host)
-            .port(port)
-            .database(database)
-            .ssl_mode(match ssl_mode {
-                SslMode::Disabled => PgSslMode::Disable,
-                SslMode::Preferred => PgSslMode::Prefer,
-                SslMode::Required => PgSslMode::Require,
-                SslMode::VerifyCa => PgSslMode::VerifyCa,
-                SslMode::VerifyFull => PgSslMode::VerifyFull,
-            });
-
-        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
-            && let Some(root_cert) = ssl_root_cert
-        {
-            options = options.ssl_root_cert(root_cert.as_str());
-        }
-
+        let options = config.to_sqlx_connect_options()?;
         let connection = PgPool::connect_with(options).await?;
         let schema_discovery = SchemaDiscovery::new(connection, schema);
         // fetch column schema and primary key
@@ -324,31 +329,14 @@ impl PostgresExternalTable {
     }
 
     pub async fn connect(
-        username: &str,
-        password: &str,
-        host: &str,
-        port: u16,
-        database: &str,
+        config: &PgConnectionConfig,
         schema: &str,
         table: &str,
-        ssl_mode: &SslMode,
-        ssl_root_cert: &Option<String>,
         is_append_only: bool,
     ) -> ConnectorResult<Self> {
         tracing::debug!("connect to postgres external table");
 
-        let (columns, pk_names) = Self::discover_pk_and_full_columns(
-            username,
-            password,
-            host,
-            port,
-            database,
-            schema,
-            table,
-            ssl_mode,
-            ssl_root_cert,
-        )
-        .await?;
+        let (columns, pk_names) = Self::discover_pk_and_full_columns(config, schema, table).await?;
 
         let mut column_descs = vec![];
         for col in &columns {
@@ -397,30 +385,13 @@ impl PostgresExternalTable {
 
     // return the mapping from column name to pg type, the pg type is used for writing data to postgres
     pub async fn type_mapping(
-        username: &str,
-        password: &str,
-        host: &str,
-        port: u16,
-        database: &str,
+        config: &PgConnectionConfig,
         schema: &str,
         table: &str,
-        ssl_mode: &SslMode,
-        ssl_root_cert: &Option<String>,
         is_append_only: bool,
     ) -> ConnectorResult<HashMap<String, tokio_postgres::types::Type>> {
         tracing::debug!("connect to postgres external table to get type mapping");
-        let table_schema = Self::discover_schema(
-            username,
-            password,
-            host,
-            port,
-            database,
-            schema,
-            table,
-            ssl_mode,
-            ssl_root_cert,
-        )
-        .await?;
+        let table_schema = Self::discover_schema(config, schema, table).await?;
         let mut column_name_to_pg_type = HashMap::new();
         for col in &table_schema.columns {
             let pg_type = sea_type_to_pg_type(&col.col_type)?;
@@ -465,22 +436,17 @@ impl std::str::FromStr for SslMode {
 }
 
 pub async fn create_pg_client(
-    user: &str,
-    password: &str,
-    host: &str,
-    port: &str,
-    database: &str,
-    ssl_mode: &SslMode,
-    ssl_root_cert: &Option<String>,
+    config: &PgConnectionConfig,
     tcp_keepalive: Option<TcpKeepaliveConfig>,
 ) -> anyhow::Result<PgClient> {
+    let port = config.port_u16()?;
     let mut pg_config = tokio_postgres::Config::new();
     pg_config
-        .user(user)
-        .password(password)
-        .host(host)
-        .port(port.parse::<u16>().unwrap())
-        .dbname(database);
+        .user(&config.user)
+        .password(&config.password)
+        .host(&config.host)
+        .port(port)
+        .dbname(&config.database);
 
     // Configure TCP keepalive if provided
     if let Some(keepalive) = tcp_keepalive {
@@ -503,14 +469,10 @@ pub async fn create_pg_client(
         );
     }
 
-    let (_verify_ca, verify_hostname) = match ssl_mode {
-        SslMode::VerifyCa => (true, false),
-        SslMode::VerifyFull => (true, true),
-        _ => (false, false),
-    };
+    let verify_hostname = matches!(config.ssl_mode, SslMode::VerifyFull);
 
     #[cfg(not(madsim))]
-    let connector = match ssl_mode {
+    let connector = match config.ssl_mode {
         SslMode::Disabled => {
             pg_config.ssl_mode(tokio_postgres::config::SslMode::Disable);
             MaybeMakeTlsConnector::NoTls(NoTls)
@@ -540,15 +502,15 @@ pub async fn create_pg_client(
         SslMode::VerifyCa | SslMode::VerifyFull => {
             pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
             let mut builder = SslConnector::builder(SslMethod::tls())?;
-            if let Some(ssl_root_cert) = ssl_root_cert {
+            if let Some(ssl_root_cert) = &config.ssl_root_cert {
                 builder.set_ca_file(ssl_root_cert).map_err(|e| {
                     anyhow!(format!("bad ssl root cert error: {}", e.to_report_string()))
                 })?;
             }
             let mut connector = MakeTlsConnector::new(builder.build());
             if !verify_hostname {
-                connector.set_callback(|config, _| {
-                    config.set_verify_hostname(false);
+                connector.set_callback(|c, _| {
+                    c.set_verify_hostname(false);
                     Ok(())
                 });
             }

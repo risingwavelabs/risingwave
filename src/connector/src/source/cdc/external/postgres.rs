@@ -239,17 +239,8 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-        let client = create_pg_client(
-            &config.username,
-            &config.password,
-            &config.host,
-            &config.port,
-            &config.database,
-            &config.ssl_mode,
-            &config.ssl_root_cert,
-            None, // No TCP keepalive for CDC source
-        )
-        .await?;
+        // No TCP keepalive for CDC source
+        let client = create_pg_client(&config.pg_connection_config(), None).await?;
 
         // Discover user-defined composite columns. tokio-postgres cannot decode
         // composite values natively, so for these columns we cast to text in the
@@ -989,15 +980,9 @@ mod tests {
         };
 
         let table = PostgresExternalTable::connect(
-            &config.username,
-            &config.password,
-            &config.host,
-            config.port.parse::<u16>().unwrap(),
-            &config.database,
+            &config.pg_connection_config(),
             &config.schema,
             &config.table,
-            &config.ssl_mode,
-            &config.ssl_root_cert,
             false,
         )
         .await
