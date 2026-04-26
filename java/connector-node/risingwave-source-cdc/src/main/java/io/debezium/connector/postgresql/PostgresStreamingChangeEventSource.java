@@ -48,6 +48,8 @@ import java.sql.SQLException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -105,6 +107,13 @@ public class PostgresStreamingChangeEventSource
     // In case of failure we are going to terminate the processing gracefully from the current
     // thread.
     private volatile boolean commitOffsetFailure = false;
+
+    // Keep-alive thread may fail silently (e.g., connection reset during status update).
+    // This flag allows the main processMessages loop to detect the failure and exit gracefully,
+    // triggering engine restart via the error handler.
+    private volatile boolean keepAliveFailure = false;
+    private volatile Throwable keepAliveError = null;
+    private volatile boolean keepAliveStopping = false;
 
     /**
      * The minimum of (number of event received since the last event sent to Kafka, number of event
@@ -216,13 +225,12 @@ public class PostgresStreamingChangeEventSource
             }
 
             // Start keep alive thread to prevent connection timeout during time-consuming
-            // operations the DB side.
+            // operations the DB side. Use monitored executor to detect keep-alive failures.
+            keepAliveFailure = false;
+            keepAliveError = null;
+            keepAliveStopping = false;
             ReplicationStream stream = this.replicationStream.get();
-            stream.startKeepAlive(
-                    Threads.newSingleThreadExecutor(
-                            PostgresConnector.class,
-                            connectorConfig.getLogicalName(),
-                            KEEP_ALIVE_THREAD_NAME));
+            stream.startKeepAlive(createMonitoredKeepAliveExecutor());
 
             // If we need to do a pre-snapshot streaming catch up, we should allow the snapshot
             // transaction to persist
@@ -244,17 +252,17 @@ public class PostgresStreamingChangeEventSource
                     LOGGER.info("Commit failed while preparing for reconnect", e);
                 }
                 walPosition.enableFiltering();
+                keepAliveStopping = true;
                 stream.stopKeepAlive();
                 replicationConnection.reconnect();
                 replicationStream.set(
                         replicationConnection.startStreaming(
                                 walPosition.getLastEventStoredLsn(), walPosition));
                 stream = this.replicationStream.get();
-                stream.startKeepAlive(
-                        Threads.newSingleThreadExecutor(
-                                PostgresConnector.class,
-                                connectorConfig.getLogicalName(),
-                                KEEP_ALIVE_THREAD_NAME));
+                keepAliveFailure = false;
+                keepAliveError = null;
+                keepAliveStopping = false;
+                stream.startKeepAlive(createMonitoredKeepAliveExecutor());
             }
 
             // Signal connected only when the final streaming session is ready.
@@ -276,6 +284,7 @@ public class PostgresStreamingChangeEventSource
             // executor pool
             ReplicationStream stream = replicationStream.get();
             if (stream != null) {
+                keepAliveStopping = true;
                 stream.stopKeepAlive();
             }
             // TODO author=Horia Chiorean date=08/11/2016 description=Ideally we'd close the stream,
@@ -314,7 +323,8 @@ public class PostgresStreamingChangeEventSource
         int noMessageIterations = 0;
         while (context.isRunning()
                 && haveNotReceivedStreamingStoppingLsn(offsetContext, lastCompletelyProcessedLsn)
-                && !commitOffsetFailure) {
+                && !commitOffsetFailure
+                && !keepAliveFailure) {
             boolean receivedMessage =
                     stream.readPending(
                             new ReplicationStream.ReplicationMessageProcessor() {
@@ -380,6 +390,8 @@ public class PostgresStreamingChangeEventSource
                 LOGGER.info("Streaming resumed");
             }
         }
+
+        throwIfKeepAliveFailed();
     }
 
     private void processReplicationMessages(
@@ -499,7 +511,7 @@ public class PostgresStreamingChangeEventSource
         int noMessageIterations = 0;
 
         LOGGER.info("Searching for WAL resume position");
-        while (context.isRunning() && resumeLsn.get() == null) {
+        while (context.isRunning() && resumeLsn.get() == null && !keepAliveFailure) {
 
             boolean receivedMessage =
                     stream.readPending(
@@ -548,6 +560,7 @@ public class PostgresStreamingChangeEventSource
 
             probeConnectionIfNeeded();
         }
+        throwIfKeepAliveFailed();
         LOGGER.info("WAL resume position '{}' discovered", resumeLsn.get());
     }
 
@@ -555,6 +568,104 @@ public class PostgresStreamingChangeEventSource
         if (connectionProbeTimer.hasElapsed()) {
             connection.prepareQuery("SELECT 1");
             connection.commit();
+        }
+    }
+
+    /**
+     * Creates a keep-alive executor that monitors for failures. When the keep-alive task fails
+     * (e.g., connection reset during status update), the failure is recorded so the main
+     * processMessages loop can detect it and trigger engine restart.
+     */
+    private ExecutorService createMonitoredKeepAliveExecutor() {
+        ExecutorService delegate =
+                Threads.newSingleThreadExecutor(
+                        PostgresConnector.class,
+                        connectorConfig.getLogicalName(),
+                        KEEP_ALIVE_THREAD_NAME);
+        return new MonitoredKeepAliveExecutor(delegate);
+    }
+
+    private void throwIfKeepAliveFailed() {
+        if (keepAliveFailure) {
+            throw new ConnectException(
+                    "Keep-alive thread failed, replication stream is no longer healthy",
+                    keepAliveError);
+        }
+    }
+
+    private boolean isKeepAliveStopException(Throwable t) {
+        if (keepAliveStopping || Thread.currentThread().isInterrupted()) {
+            return true;
+        }
+
+        Throwable current = t;
+        while (current != null) {
+            if (current instanceof InterruptedException
+                    || current instanceof CancellationException
+                    || current instanceof java.nio.channels.ClosedByInterruptException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+
+        return false;
+    }
+
+    /**
+     * A delegating ExecutorService that wraps submitted tasks to detect keep-alive thread failures.
+     * Only the methods used by ReplicationStream.startKeepAlive are overridden.
+     */
+    private class MonitoredKeepAliveExecutor extends AbstractExecutorService {
+        private final ExecutorService delegate;
+
+        MonitoredKeepAliveExecutor(ExecutorService delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public void execute(Runnable command) {
+            delegate.execute(
+                    () -> {
+                        try {
+                            command.run();
+                        } catch (Throwable t) {
+                            if (delegate.isShutdown() || isKeepAliveStopException(t)) {
+                                LOGGER.debug(
+                                        "Keep-alive thread stopped during shutdown/reconnect", t);
+                                return;
+                            }
+                            LOGGER.error(
+                                    "Keep-alive thread failed, will trigger streaming restart", t);
+                            keepAliveFailure = true;
+                            keepAliveError = t;
+                            throw t;
+                        }
+                    });
+        }
+
+        @Override
+        public void shutdown() {
+            delegate.shutdown();
+        }
+
+        @Override
+        public java.util.List<Runnable> shutdownNow() {
+            return delegate.shutdownNow();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return delegate.isShutdown();
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return delegate.isTerminated();
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+            return delegate.awaitTermination(timeout, unit);
         }
     }
 
