@@ -46,7 +46,10 @@ pub async fn shrink_file(
     let reduced_sql = shrink_statements(&file_contents)?;
 
     // shrink the reduced sql
-    let reduced_sql = shrink_with_reducer(&reduced_sql, client, restore_cmd).await?;
+    let (reduced_sql, client) = shrink_with_reducer(&reduced_sql, client, restore_cmd).await?;
+
+    // log explain plan for the reduced failing query
+    log_explain_plan(&client, &reduced_sql).await;
 
     // write reduced sql
     let mut file = create_file(output_file_path).unwrap();
@@ -106,15 +109,51 @@ fn shrink_statements(sql: &str) -> Result<String> {
 }
 
 /// Shrink function using path-based reduction
-async fn shrink_with_reducer(sql: &str, client: Client, restore_cmd: &str) -> Result<String> {
+async fn shrink_with_reducer(
+    sql: &str,
+    client: Client,
+    restore_cmd: &str,
+) -> Result<(String, Client)> {
     let sql_statements = parse_sql(sql);
     let proceeding_stmts = sql_statements.split_last().unwrap().1.to_vec();
     let checker = Checker::new(client, proceeding_stmts, restore_cmd.to_owned());
     let mut reducer = Reducer::new(checker);
 
     let reduced_sql = reducer.reduce(sql).await?;
+    let client = reducer.into_client();
+    Ok((reduced_sql, client))
+}
 
-    Ok(reduced_sql)
+/// Runs `EXPLAIN` on the last statement in the reduced SQL and logs the query plan.
+///
+/// This is a best-effort helper: failures are logged as warnings and do not
+/// propagate to the caller.
+async fn log_explain_plan(client: &Client, sql: &str) {
+    let sql_statements = parse_sql(sql);
+    if let Some(last_stmt) = sql_statements.last() {
+        let explain_query = format!("EXPLAIN {}", last_stmt);
+        match client.simple_query(&explain_query).await {
+            Ok(rows) => {
+                let plan: Vec<String> = rows
+                    .iter()
+                    .filter_map(|msg| {
+                        if let tokio_postgres::SimpleQueryMessage::Row(row) = msg {
+                            row.get(0).map(|s| s.to_owned())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                tracing::info!(
+                    "EXPLAIN plan for reduced failing query:\n{}",
+                    plan.join("\n")
+                );
+            }
+            Err(e) => {
+                tracing::warn!("Failed to get EXPLAIN plan for reduced query: {}", e);
+            }
+        }
+    }
 }
 
 pub(crate) fn find_ddl_references(sql_statements: &[Statement]) -> HashSet<String> {
