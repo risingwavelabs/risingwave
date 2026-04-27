@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(cargo fmt *)",
-      "Bash(git commit -m ' *)",
-      "Bash(./risedev c *)"
-    ]
-  }
-}
