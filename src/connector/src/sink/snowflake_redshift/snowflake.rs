@@ -91,6 +91,13 @@ pub struct SnowflakeV2Config {
     #[serde(rename = "warehouse")]
     pub snowflake_warehouse: Option<String>,
 
+    #[serde(default, rename = "task.serverless")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub task_serverless: bool,
+
+    #[serde(rename = "task.target_completion_interval")]
+    pub task_target_completion_interval: Option<String>,
+
     #[serde(rename = "jdbc.url")]
     pub jdbc_url: Option<String>,
 
@@ -366,11 +373,16 @@ impl SnowflakeV2Config {
                 )))?;
             snowflake_task_ctx.cdc_table_name = Some(cdc_table_name.clone());
             snowflake_task_ctx.writer_target_interval_seconds = self.writer_target_interval_seconds;
-            snowflake_task_ctx.warehouse = Some(
-                self.snowflake_warehouse
-                    .clone()
-                    .ok_or(SinkError::Config(anyhow!("warehouse is required")))?,
-            );
+            snowflake_task_ctx.task_serverless = self.task_serverless;
+            snowflake_task_ctx.task_target_completion_interval =
+                self.task_target_completion_interval.clone();
+            if !self.task_serverless {
+                snowflake_task_ctx.warehouse = Some(
+                    self.snowflake_warehouse
+                        .clone()
+                        .ok_or(SinkError::Config(anyhow!("warehouse is required")))?,
+                );
+            }
             let pk_column_names: Vec<_> = schema
                 .fields
                 .iter()
@@ -631,6 +643,8 @@ pub struct SnowflakeTaskContext {
     pub cdc_table_name: Option<String>,
     pub writer_target_interval_seconds: u64,
     pub warehouse: Option<String>,
+    pub task_serverless: bool,
+    pub task_target_completion_interval: Option<String>,
     pub pk_column_names: Option<Vec<String>>,
     pub all_column_names: Option<Vec<String>>,
 
@@ -1040,6 +1054,8 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         target_table_name,
         writer_target_interval_seconds,
         warehouse,
+        task_serverless,
+        task_target_completion_interval,
         pk_column_names,
         all_column_names,
         database,
@@ -1099,9 +1115,17 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         .collect::<Vec<String>>()
         .join(", ");
 
+    let compute_clause = if *task_serverless {
+        task_target_completion_interval
+            .as_ref()
+            .map(|interval| format!("TARGET_COMPLETION_INTERVAL = '{}'", interval))
+    } else {
+        Some(format!("WAREHOUSE = {}", warehouse.as_ref().unwrap()))
+    };
+
     format!(
         r#"CREATE OR REPLACE TASK {task_name}
-WAREHOUSE = {warehouse}
+{compute_clause}
 SCHEDULE = '{writer_target_interval_seconds} SECONDS'
 AS
 BEGIN
@@ -1129,7 +1153,9 @@ BEGIN
     WHERE "{snowflake_sink_row_id}" <= :max_row_id;
 END;"#,
         task_name = full_task_name,
-        warehouse = warehouse.as_ref().unwrap(),
+        compute_clause = compute_clause
+            .map(|clause| format!("{clause}\n"))
+            .unwrap_or_default(),
         writer_target_interval_seconds = writer_target_interval_seconds,
         cdc_table_name = full_cdc_table_name,
         target_table_name = full_target_table_name,
@@ -1230,6 +1256,8 @@ mod tests {
             target_table_name: "test_target_table".to_owned(),
             writer_target_interval_seconds: 3600,
             warehouse: Some("test_warehouse".to_owned()),
+            task_serverless: false,
+            task_target_completion_interval: None,
             pk_column_names: Some(vec!["v1".to_owned()]),
             all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
             database: "test_db".to_owned(),
@@ -1278,6 +1306,8 @@ END;"#;
             target_table_name: "target_multi_pk".to_owned(),
             writer_target_interval_seconds: 300,
             warehouse: Some("multi_pk_warehouse".to_owned()),
+            task_serverless: false,
+            task_target_completion_interval: None,
             pk_column_names: Some(vec!["id1".to_owned(), "id2".to_owned()]),
             all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),
             database: "test_db".to_owned(),
@@ -1313,6 +1343,56 @@ BEGIN
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id1", "id2", "val") VALUES (source."id1", source."id2", source."val");
 
     DELETE FROM "test_db"."test_schema"."cdc_multi_pk"
+    WHERE "__row_id" <= :max_row_id;
+END;"#;
+        assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
+    }
+
+    #[test]
+    fn test_snowflake_sink_commit_coordinator_serverless_task() {
+        let snowflake_task_context = SnowflakeTaskContext {
+            task_name: Some("test_serverless_task".to_owned()),
+            cdc_table_name: Some("serverless_cdc_table".to_owned()),
+            target_table_name: "serverless_target_table".to_owned(),
+            writer_target_interval_seconds: 120,
+            warehouse: None,
+            task_serverless: true,
+            task_target_completion_interval: Some("5 MINUTES".to_owned()),
+            pk_column_names: Some(vec!["id".to_owned()]),
+            all_column_names: Some(vec!["id".to_owned(), "val".to_owned()]),
+            database: "test_db".to_owned(),
+            schema_name: "test_schema".to_owned(),
+            schema: Schema { fields: vec![] },
+            stage: None,
+            pipe_name: None,
+        };
+        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
+        let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_serverless_task"
+TARGET_COMPLETION_INTERVAL = '5 MINUTES'
+SCHEDULE = '120 SECONDS'
+AS
+BEGIN
+    LET max_row_id STRING;
+
+    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    FROM "test_db"."test_schema"."serverless_cdc_table";
+
+    MERGE INTO "test_db"."test_schema"."serverless_target_table" AS target
+    USING (
+        SELECT *
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id" ORDER BY "__row_id" DESC) AS dedupe_id
+            FROM "test_db"."test_schema"."serverless_cdc_table"
+            WHERE "__row_id" <= :max_row_id
+        ) AS subquery
+        WHERE dedupe_id = 1
+    ) AS source
+    ON target."id" = source."id"
+    WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
+    WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."id" = source."id", target."val" = source."val"
+    WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id", "val") VALUES (source."id", source."val");
+
+    DELETE FROM "test_db"."test_schema"."serverless_cdc_table"
     WHERE "__row_id" <= :max_row_id;
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
