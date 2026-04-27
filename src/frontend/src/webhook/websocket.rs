@@ -66,6 +66,7 @@ use risingwave_pb::task_service::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
+use thiserror_ext::AsReport;
 use tokio::time::timeout;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::ServiceBuilder;
@@ -222,7 +223,7 @@ async fn try_handle_connection(
 ) -> Result<(), String> {
     let table_info = acquire_table_info(request_id, &database, &schema, &table)
         .await
-        .map_err(|e| format!("table lookup failed: {e}"))?;
+        .map_err(|e| format!("table lookup failed: {}", e.as_report()))?;
 
     let session_mgr = SESSION_MANAGER.get().expect("session manager initialized");
     let max_clock_skew_ms = session_mgr
@@ -243,7 +244,10 @@ async fn try_handle_connection(
             return Err("the first WebSocket frame must be a text init message".to_owned());
         }
         Ok(Some(Err(e))) => {
-            return Err(format!("failed to read WebSocket init message: {e}"));
+            return Err(format!(
+                "failed to read WebSocket init message: {}",
+                e.as_report()
+            ));
         }
         Err(_) => {
             return Err(format!(
@@ -257,7 +261,7 @@ async fn try_handle_connection(
         authenticate_webhook_payload(headers_jsonb, init_text.as_bytes(), &webhook_source_info)
             .await
     {
-        return Err(e.to_string());
+        return Err(format!("{}", e.as_report()));
     }
 
     parse_and_validate_init_request(&init_text, max_clock_skew_ms)?;
@@ -281,7 +285,7 @@ async fn try_handle_connection(
     let mut ingest_resp_stream = compute_client
         .ingest_dml(ReceiverStream::new(ingest_req_rx))
         .await
-        .map_err(|e| format!("failed to open ingest stream: {e}"))?;
+        .map_err(|e| format!("failed to open ingest stream: {}", e.as_report()))?;
 
     match ingest_resp_stream.message().await {
         Ok(Some(resp)) => match resp.response {
@@ -291,7 +295,9 @@ async fn try_handle_connection(
             }
         },
         Ok(None) => return Err("ingest stream closed during init".to_owned()),
-        Err(e) => return Err(format!("ingest stream init error: {e}")),
+        Err(e) => {
+            return Err(format!("ingest stream init error: {}", e.as_report()));
+        }
     }
 
     let mut pending_ack_batches = HashMap::<u64, Vec<u64>>::new();
@@ -304,13 +310,18 @@ async fn try_handle_connection(
                     Some(Ok(Message::Text(text))) => text,
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Ok(_)) => continue,
-                    Some(Err(e)) => return Err(format!("failed to read WebSocket message: {e}")),
+                    Some(Err(e)) => {
+                        return Err(format!(
+                            "failed to read WebSocket message: {}",
+                            e.as_report()
+                        ));
+                    }
                 };
 
                 let raw_dml_reqs = match serde_json::from_str::<Vec<RawDmlRequest>>(&text) {
                     Ok(reqs) if !reqs.is_empty() => reqs,
                     Ok(_) => return Err("payload must contain at least one DML request".to_owned()),
-                    Err(e) => return Err(format!("malformed payload: {e}")),
+                    Err(e) => return Err(format!("malformed payload: {}", e.as_report())),
                 };
 
                 last_seen_dml_id = validate_monotonic_dml_ids(&raw_dml_reqs, last_seen_dml_id)?;
@@ -321,7 +332,9 @@ async fn try_handle_connection(
                     &payload_schema,
                 ) {
                     Ok(batch) => batch,
-                    Err(e) => return Err(format!("failed to prepare DML batch: {e}")),
+                    Err(e) => {
+                        return Err(format!("failed to prepare DML batch: {e}"));
+                    }
                 };
 
                 let PreparedDmlBatch { payload, ack_dml_ids } = prepared_batch;
@@ -361,7 +374,7 @@ async fn try_handle_connection(
                         None => return Err("empty response from ingest stream".to_owned()),
                     },
                     Ok(None) => return Err("ingest stream closed".to_owned()),
-                    Err(e) => return Err(format!("ingest stream error: {e}")),
+                    Err(e) => return Err(format!("ingest stream error: {}", e.as_report())),
                 }
             }
         }
@@ -374,8 +387,8 @@ fn parse_and_validate_init_request(
     text: &str,
     max_clock_skew_ms: u64,
 ) -> Result<InitRequest, String> {
-    let init_req: InitRequest =
-        serde_json::from_str(text).map_err(|e| format!("malformed init message: {e}"))?;
+    let init_req: InitRequest = serde_json::from_str(text)
+        .map_err(|e| format!("malformed init message: {}", e.as_report()))?;
 
     if init_req.msg_type != INIT_MESSAGE_TYPE {
         return Err(format!(
@@ -447,7 +460,9 @@ fn prepare_dml_batch_payload(
 
                 let row = Value::from_text(dml_req.data.get().as_bytes())
                     .map(|json_value| OwnedRow::new(vec![Some(JsonbVal::from(json_value).into())]))
-                    .map_err(|e| format!("dml_id {dml_id}: Failed to parse body: {e}"))?;
+                    .map_err(|e| {
+                        format!("dml_id {dml_id}: Failed to parse body: {}", e.as_report())
+                    })?;
 
                 let output = chunk_builder.append_one_row(row);
                 debug_assert!(output.is_none());
@@ -478,7 +493,7 @@ fn prepare_dml_batch_payload(
         }
         PayloadSchema::FullSchema { columns } => {
             let mut access_builder =
-                build_json_access_builder(headers).map_err(|e| e.to_string())?;
+                build_json_access_builder(headers).map_err(|e| format!("{}", e.as_report()))?;
             let mut chunk_builder = DataChunkBuilder::new(
                 columns
                     .iter()
@@ -499,7 +514,7 @@ fn prepare_dml_batch_payload(
                     columns,
                     dml_req.data.get().as_bytes(),
                 )
-                .map_err(|e| format!("dml_id {dml_id}: {e}"))?;
+                .map_err(|e| format!("dml_id {dml_id}: {}", e.as_report()))?;
 
                 let output = chunk_builder.append_one_row(row);
                 debug_assert!(output.is_none());
@@ -532,11 +547,11 @@ fn prepare_dml_batch_payload(
 }
 
 async fn send_server_message(ws_tx: &mut WsTx, msg: ServerMessage) -> Result<(), String> {
-    let text = serde_json::to_string(&msg).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string(&msg).map_err(|e| format!("{}", e.as_report()))?;
     ws_tx
         .send(Message::Text(text.into()))
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| format!("{}", e.as_report()))
 }
 
 async fn send_fatal(ws_tx: &mut WsTx, fatal: String) -> Result<(), String> {

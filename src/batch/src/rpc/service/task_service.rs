@@ -181,12 +181,7 @@ impl TaskService for BatchServiceImpl {
                     tokio::select! {
                         req = req_stream.message() => {
                             let req = req
-                                .map_err(|err| {
-                                    format!(
-                                        "ingest dml stream read failed: {}",
-                                        err.as_report()
-                                    )
-                                })?
+                                .map_err(|err| format!("ingest dml stream read failed: {}", err.as_report()))?
                                 .ok_or_else(|| "ingest dml stream closed unexpectedly".to_owned())?;
                             let payload = match req.request {
                                 Some(ingest_dml_request::Request::Payload(payload)) => payload,
