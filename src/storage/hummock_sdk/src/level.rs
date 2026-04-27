@@ -379,6 +379,16 @@ impl InputLevel {
                 .map(|sst| sst.estimated_encode_len())
                 .sum::<usize>()
     }
+
+    /// Returns SSTs that should be read by a compact task.
+    ///
+    /// Empty `table_ids` marks a dropped-only SST that is kept in the task input only for version
+    /// removal.
+    pub fn read_sstable_infos(&self) -> impl Iterator<Item = &SstableInfo> {
+        self.table_infos
+            .iter()
+            .filter(|sst| !sst.table_ids.is_empty())
+    }
 }
 
 impl From<PbInputLevel> for InputLevel {
