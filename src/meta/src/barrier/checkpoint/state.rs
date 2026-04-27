@@ -799,9 +799,9 @@ impl DatabaseCheckpointControl {
 
             Some(Command::DropStreamingJobs {
                 streaming_job_ids,
-                unregistered_state_table_ids,
                 unregistered_fragment_ids,
                 dropped_sink_fragment_by_targets,
+                ..
             }) => {
                 let actors = self
                     .database_info
@@ -835,10 +835,7 @@ impl DatabaseCheckpointControl {
                     table_ids,
                     None,
                     node_actors,
-                    PostCollectCommand::DropStreamingJobs {
-                        streaming_job_ids,
-                        unregistered_state_table_ids,
-                    },
+                    PostCollectCommand::DropStreamingJobs,
                 )
             }
 
