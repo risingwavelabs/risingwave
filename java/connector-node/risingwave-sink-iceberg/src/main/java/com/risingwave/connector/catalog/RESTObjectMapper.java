@@ -21,7 +21,7 @@ import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.PropertyNamingStrategy;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import org.apache.iceberg.rest.RESTSerializers;
 
 class RESTObjectMapper {
@@ -38,7 +38,7 @@ class RESTObjectMapper {
                     MAPPER.setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.ANY);
                     MAPPER.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
                     MAPPER.setPropertyNamingStrategy(
-                            new PropertyNamingStrategy.KebabCaseStrategy());
+                            PropertyNamingStrategies.KEBAB_CASE);
                     RESTSerializers.registerAll(MAPPER);
                     isInitialized = true;
                 }
