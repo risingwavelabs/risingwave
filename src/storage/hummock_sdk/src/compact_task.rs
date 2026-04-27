@@ -36,9 +36,8 @@ use crate::{CompactionGroupId, HummockSstableObjectId};
 pub struct CompactTask {
     /// SSTs selected by meta, which will be removed from LSM after compaction succeeds.
     ///
-    /// After meta-side task construction, each SST's `table_ids` is normalized to the live table
-    /// ids this task should read. An SST with empty `table_ids` is a dropped-only input kept here so
-    /// meta can remove it from the version without sending it through the compactor read path.
+    /// Each SST's `table_ids` comes from version metadata, where truncate/drop table deltas prune
+    /// table ids before later compaction tasks are picked.
     pub input_ssts: Vec<InputLevel>,
     /// In ideal case, the compaction will generate `splits.len()` tables which have key range
     /// corresponding to that in `splits`, respectively
@@ -59,8 +58,8 @@ pub struct CompactTask {
     pub compaction_group_version_id: u64,
     /// Table ids that still exist in the version when the compaction task is picked.
     ///
-    /// This may be broader than the table ids touched by this task's input SSTs. After meta-side
-    /// task construction, `input_ssts[*].table_ids` contains the task-local live table ids.
+    /// This may be broader than the table ids touched by this task's input SSTs. Task-local table
+    /// ids should be read from `input_ssts[*].table_ids`.
     pub existing_table_ids: Vec<TableId>,
     pub compression_algorithm: u32,
     pub target_file_size: u64,
@@ -255,9 +254,8 @@ impl CompactTask {
 
     /// Returns input SSTs that should be read by the compactor.
     ///
-    /// Dropped-only SST entries have empty `table_ids` after meta-side task construction. They are
-    /// still part of `input_ssts` so meta can remove them from the version, but they are not read by
-    /// the compactor.
+    /// SST entries with empty `table_ids` are ignored defensively and should not be read by the
+    /// compactor.
     pub fn read_input_ssts(&self) -> impl Iterator<Item = &SstableInfo> {
         self.input_ssts
             .iter()

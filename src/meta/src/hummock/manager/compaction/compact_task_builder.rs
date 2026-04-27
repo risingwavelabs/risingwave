@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::level::InputLevel;
 use risingwave_hummock_sdk::table_watermark::{TableWatermarks, WatermarkSerdeType};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -43,10 +42,14 @@ pub(super) fn build_base_compact_task(
     context: CompactTaskBuildContext,
 ) -> (CompactTask, Vec<TableId>) {
     let target_level_id = picked_task.input.target_level as u32;
-    let mut input_ssts = picked_task.input.input_levels;
-    let existing_table_id_set: HashSet<_> = context.existing_table_ids.iter().copied().collect();
-    retain_table_ids_in_input_ssts(&mut input_ssts, &existing_table_id_set);
-    let compact_table_ids = collect_table_ids_from_input_ssts(&input_ssts);
+    let input_ssts = picked_task.input.input_levels;
+    let compact_table_ids = input_ssts
+        .iter()
+        .flat_map(|level| level.table_infos.iter())
+        .flat_map(|sst| sst.table_ids.iter().copied())
+        .sorted()
+        .dedup()
+        .collect_vec();
     let compact_table_id_set: HashSet<_> = compact_table_ids.iter().copied().collect();
     let mut table_options = context.table_options;
     retain_table_options(&mut table_options, &compact_table_id_set);
@@ -136,90 +139,9 @@ fn retain_table_options(
     table_options.retain(|table_id, _| table_id_set.contains(table_id));
 }
 
-fn retain_table_ids_in_input_ssts(input_ssts: &mut [InputLevel], table_id_set: &HashSet<TableId>) {
-    for input_level in &mut *input_ssts {
-        for sst in &mut input_level.table_infos {
-            let mut inner = sst.get_inner();
-            inner
-                .table_ids
-                .retain(|table_id| table_id_set.contains(table_id));
-            sst.set_inner(inner);
-        }
-    }
-}
-
-fn collect_table_ids_from_input_ssts(input_ssts: &[InputLevel]) -> Vec<TableId> {
-    input_ssts
-        .iter()
-        .flat_map(|level| level.table_infos.iter())
-        .flat_map(|sst| sst.table_ids.iter().copied())
-        .sorted()
-        .dedup()
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
-
     use super::*;
-
-    fn test_sstable(table_ids: Vec<TableId>) -> SstableInfo {
-        SstableInfo::from(SstableInfoInner {
-            table_ids,
-            ..Default::default()
-        })
-    }
-
-    #[test]
-    fn test_retain_table_ids_in_input_ssts() {
-        let mut input_ssts = vec![InputLevel {
-            table_infos: vec![
-                test_sstable(vec![TableId::new(3), TableId::new(1), TableId::new(2)]),
-                test_sstable(vec![TableId::new(2)]),
-                test_sstable(vec![TableId::new(3), TableId::new(1)]),
-            ],
-            ..Default::default()
-        }];
-        let existing_table_id_set = HashSet::from_iter([TableId::new(1), TableId::new(3)]);
-        retain_table_ids_in_input_ssts(&mut input_ssts, &existing_table_id_set);
-
-        let table_infos = &input_ssts[0].table_infos;
-        assert_eq!(
-            table_infos[0].table_ids,
-            vec![TableId::new(3), TableId::new(1)]
-        );
-        assert!(table_infos[1].table_ids.is_empty());
-        assert_eq!(
-            table_infos[2].table_ids,
-            vec![TableId::new(3), TableId::new(1)]
-        );
-
-        let compact_table_ids = collect_table_ids_from_input_ssts(&input_ssts);
-        assert_eq!(compact_table_ids, vec![TableId::new(1), TableId::new(3)]);
-    }
-
-    #[test]
-    fn test_retain_table_ids_keeps_dropped_only_ssts_for_trivial_reclaim() {
-        let mut input_ssts = vec![InputLevel {
-            table_infos: vec![test_sstable(vec![TableId::new(2)])],
-            ..Default::default()
-        }];
-        let existing_table_id_set = HashSet::from_iter([TableId::new(1)]);
-        retain_table_ids_in_input_ssts(&mut input_ssts, &existing_table_id_set);
-
-        assert_eq!(input_ssts[0].table_infos.len(), 1);
-        assert!(input_ssts[0].table_infos[0].table_ids.is_empty());
-
-        let compact_table_ids = collect_table_ids_from_input_ssts(&input_ssts);
-        assert!(compact_table_ids.is_empty());
-
-        let compact_task = CompactTask {
-            input_ssts,
-            ..Default::default()
-        };
-        assert!(compact_task.is_trivial_reclaim());
-    }
 
     #[test]
     fn test_retain_table_options() {

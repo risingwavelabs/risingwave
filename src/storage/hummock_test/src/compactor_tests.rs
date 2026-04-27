@@ -584,15 +584,18 @@ pub(crate) mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
-        // assert compact_task
-        assert_eq!(
-            compact_task
-                .input_ssts
+        // The dropped table has already been pruned from version SST metadata before task picking.
+        let compact_input_ssts = compact_task
+            .input_ssts
+            .iter()
+            .filter(|level| level.level_idx != compact_task.target_level)
+            .flat_map(|level| level.table_infos.iter())
+            .collect_vec();
+        assert_eq!(compact_input_ssts.len(), kv_count / 2);
+        assert!(
+            compact_input_ssts
                 .iter()
-                .filter(|level| level.level_idx != compact_task.target_level)
-                .map(|level| level.table_infos.len())
-                .sum::<usize>(),
-            kv_count
+                .all(|sst| sst.table_ids == vec![existing_table_id])
         );
 
         // 4. compact

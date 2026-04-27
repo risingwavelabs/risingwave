@@ -298,61 +298,63 @@ impl HummockManager {
             &self.env.opts,
         );
         let mut new_version_delta = version.new_delta();
-        let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
-            HashMap::new();
+        struct UnregisterGroupChange {
+            remaining_member_count: usize,
+            removed_table_ids: HashSet<TableId>,
+        }
+        let mut group_changes: HashMap<CompactionGroupId, UnregisterGroupChange> = HashMap::new();
         // Remove member tables
         for table_id in table_ids.into_iter().unique() {
             let version = new_version_delta.latest_version();
             let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
             };
+            let compaction_group_id = info.compaction_group_id;
 
-            modified_groups
-                .entry(info.compaction_group_id)
-                .and_modify(|count| *count -= 1)
-                .or_insert(
-                    version
-                        .state_table_info
-                        .compaction_group_member_tables()
-                        .get(&info.compaction_group_id)
-                        .expect("should exist")
-                        .len() as u64
-                        - 1,
-                );
+            let group_change =
+                group_changes
+                    .entry(compaction_group_id)
+                    .or_insert_with(|| UnregisterGroupChange {
+                        remaining_member_count: version
+                            .state_table_info
+                            .compaction_group_member_tables()
+                            .get(&compaction_group_id)
+                            .expect("should exist")
+                            .len(),
+                        removed_table_ids: HashSet::new(),
+                    });
+            group_change.remaining_member_count = group_change
+                .remaining_member_count
+                .checked_sub(1)
+                .expect("member table count should be positive");
+            assert!(group_change.removed_table_ids.insert(table_id));
             new_version_delta.removed_table_ids.insert(table_id);
         }
 
-        let groups_to_remove = modified_groups
-            .into_iter()
-            .filter_map(|(group_id, member_count)| {
-                if member_count == 0 && group_id > StaticCompactionGroupId::End {
-                    return Some((
-                        group_id,
-                        new_version_delta
-                            .latest_version()
-                            .get_compaction_group_levels(group_id)
-                            .levels
-                            .len(),
-                    ));
-                }
-                None
-            })
-            .collect_vec();
-        for (group_id, _) in &groups_to_remove {
-            let group_deltas = &mut new_version_delta
-                .group_deltas
-                .entry(*group_id)
-                .or_default()
-                .group_deltas;
-
-            let group_delta = GroupDelta::GroupDestroy(PbGroupDestroy {});
-            group_deltas.push(group_delta);
-        }
-
-        for (group_id, max_level) in groups_to_remove {
-            remove_compaction_group_in_sst_stat(&self.metrics, group_id, max_level);
-            // clean up compaction schedule state for the removed group
-            self.compaction_state.remove_compaction_group(group_id);
+        for (group_id, change) in group_changes {
+            if change.remaining_member_count == 0 && group_id > StaticCompactionGroupId::End {
+                let max_level = new_version_delta
+                    .latest_version()
+                    .get_compaction_group_levels(group_id)
+                    .levels
+                    .len();
+                new_version_delta
+                    .group_deltas
+                    .entry(group_id)
+                    .or_default()
+                    .group_deltas
+                    .push(GroupDelta::GroupDestroy(PbGroupDestroy {}));
+                remove_compaction_group_in_sst_stat(&self.metrics, group_id, max_level);
+                // clean up compaction schedule state for the removed group
+                self.compaction_state.remove_compaction_group(group_id);
+            } else {
+                new_version_delta
+                    .group_deltas
+                    .entry(group_id)
+                    .or_default()
+                    .group_deltas
+                    .push(GroupDelta::PruneTableIdsFromSsts(change.removed_table_ids));
+            }
         }
 
         new_version_delta.pre_apply();

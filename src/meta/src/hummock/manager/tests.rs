@@ -2446,6 +2446,63 @@ async fn test_partition_level() {
 }
 
 #[tokio::test]
+async fn test_unregister_table_prunes_sst_table_ids() {
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+    let compaction_group_id = StaticCompactionGroupId::StateDefault;
+    hummock_manager
+        .register_table_ids_for_test(&[(100, compaction_group_id), (101, compaction_group_id)])
+        .await
+        .unwrap();
+    hummock_meta_client
+        .commit_epoch(
+            test_epoch(30),
+            SyncResult {
+                uncommitted_ssts: vec![
+                    gen_local_sstable_info(10, vec![100, 101], test_epoch(20)),
+                    gen_local_sstable_info(11, vec![101], test_epoch(20)),
+                ],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    hummock_manager
+        .unregister_table_ids([TableId::new(101)])
+        .await
+        .unwrap();
+
+    let current_version = hummock_manager.get_current_version().await;
+    assert_eq!(
+        current_version
+            .state_table_info
+            .compaction_group_member_table_ids(compaction_group_id)
+            .iter()
+            .copied()
+            .collect_vec(),
+        vec![TableId::new(100)]
+    );
+    assert_eq!(
+        get_compaction_group_object_ids(&current_version, compaction_group_id),
+        vec![10]
+    );
+    let levels = current_version.get_compaction_group_levels(compaction_group_id);
+    let table_ids = levels
+        .l0
+        .sub_levels
+        .iter()
+        .chain(levels.levels.iter())
+        .flat_map(|level| level.table_infos.iter())
+        .map(|sst| sst.table_ids.clone())
+        .collect_vec();
+    assert_eq!(table_ids, vec![vec![TableId::new(100)]]);
+}
+
+#[tokio::test]
 async fn test_unregister_moved_table() {
     let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(

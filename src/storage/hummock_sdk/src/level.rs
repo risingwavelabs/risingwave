@@ -382,8 +382,8 @@ impl InputLevel {
 
     /// Returns SSTs that should be read by a compact task.
     ///
-    /// Empty `table_ids` marks a dropped-only SST that is kept in the task input only for version
-    /// removal.
+    /// SST entries with empty `table_ids` are ignored defensively and should not be read by the
+    /// compactor.
     pub fn read_sstable_infos(&self) -> impl Iterator<Item = &SstableInfo> {
         self.table_infos
             .iter()
