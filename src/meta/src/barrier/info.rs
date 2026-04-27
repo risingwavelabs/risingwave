@@ -21,7 +21,9 @@ use itertools::Itertools;
 use parking_lot::RawRwLock;
 use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
+use risingwave_common::catalog::{
+    BACKFILL_FRAGMENTS, DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId,
+};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
@@ -491,11 +493,7 @@ impl InflightDatabaseInfo {
             .filter_map(|(fragment_id, fragment)| {
                 fragment
                     .fragment_type_mask
-                    .contains_any([
-                        FragmentTypeFlag::StreamScan,
-                        FragmentTypeFlag::SourceScan,
-                        FragmentTypeFlag::LocalityProvider,
-                    ])
+                    .contains_any(BACKFILL_FRAGMENTS)
                     .then_some(*fragment_id)
             })
             .collect())
@@ -512,11 +510,7 @@ impl InflightDatabaseInfo {
             .fragment_infos
             .get(&fragment_id)
             .expect("should exist");
-        Ok(fragment.fragment_type_mask.contains_any([
-            FragmentTypeFlag::StreamScan,
-            FragmentTypeFlag::SourceScan,
-            FragmentTypeFlag::LocalityProvider,
-        ]))
+        Ok(fragment.fragment_type_mask.contains_any(BACKFILL_FRAGMENTS))
     }
 
     pub fn gen_backfill_progress(&self) -> impl Iterator<Item = (JobId, BackfillProgress)> + '_ {

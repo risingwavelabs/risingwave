@@ -99,6 +99,9 @@ impl StreamNode for StreamSource {
         let source_inner = source_catalog.map(|source_catalog| {
             let (with_properties, secret_refs) =
                 source_catalog.with_properties.clone().into_parts();
+            let wait_for_backfill = with_properties
+                .get("backfill.wait")
+                .is_some_and(|v| v.eq_ignore_ascii_case("true"));
             PbStreamSource {
                 source_id: source_catalog.id,
                 source_name: source_catalog.name.clone(),
@@ -123,6 +126,7 @@ impl StreamNode for StreamSource {
                 }),
                 refresh_mode: source_catalog.refresh_mode,
                 associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
+                wait_for_backfill,
             }
         });
         PbNodeBody::Source(Box::new(SourceNode { source_inner }))

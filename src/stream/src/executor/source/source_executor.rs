@@ -51,6 +51,7 @@ use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::{SourceReaderEventWithState, StreamReaderBuilder};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
+use crate::task::progress::CreateMviewProgressReporter;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
 /// some latencies in network and cost in meta.
@@ -82,6 +83,11 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Local barrier manager for reporting source load finished events
     barrier_manager: LocalBarrierManager,
+
+    /// Progress reporter for `wait_for_backfill`. When set, the executor tracks
+    /// whether all splits have reached their backfill target offsets and reports
+    /// completion to the meta service.
+    backfill_progress: Option<CreateMviewProgressReporter>,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -95,6 +101,7 @@ impl<S: StateStore> SourceExecutor<S> {
         rate_limit_rps: Option<u32>,
         is_shared_non_cdc: bool,
         barrier_manager: LocalBarrierManager,
+        backfill_progress: Option<CreateMviewProgressReporter>,
     ) -> Self {
         Self {
             actor_ctx,
@@ -105,6 +112,7 @@ impl<S: StateStore> SourceExecutor<S> {
             rate_limit_rps,
             is_shared_non_cdc,
             barrier_manager,
+            backfill_progress,
         }
     }
 
@@ -243,6 +251,11 @@ impl<S: StateStore> SourceExecutor<S> {
                 {
                     recover_state
                 } else {
+                    // No persisted state => partition discovered after DDL started.
+                    // Mark `Finished` so `wait_for_backfill` doesn't extend its criteria
+                    // beyond the creation-time backlog. No-op for non-Pending states.
+                    let mut split = split;
+                    split.mark_backfill_finished();
                     split
                 };
 
@@ -528,6 +541,77 @@ impl<S: StateStore> SourceExecutor<S> {
             .extend(latest_state);
     }
 
+    /// Extract backfill target offsets from splits.
+    fn build_backfill_target_offsets(
+        split_info: &HashMap<SplitId, SplitImpl>,
+    ) -> HashMap<SplitId, i64> {
+        split_info
+            .iter()
+            .filter_map(|(split_id, split)| {
+                split.backfill_target_offset().and_then(|target_str| {
+                    target_str
+                        .parse::<i64>()
+                        .ok()
+                        .map(|target| (split_id.clone(), target))
+                })
+            })
+            .collect()
+    }
+
+    /// Check and report backfill progress for `wait_for_backfill`.
+    fn maybe_report_backfill_progress(
+        &mut self,
+        epoch: EpochPair,
+        backfill_finished: &mut bool,
+        backfill_target_offsets: &HashMap<SplitId, i64>,
+        consumed_rows: u64,
+    ) {
+        let Some(progress) = &mut self.backfill_progress else {
+            return;
+        };
+        if *backfill_finished {
+            return;
+        }
+
+        // Check if all splits with a target offset have reached their target.
+        let all_reached = backfill_target_offsets.iter().all(|(split_id, target)| {
+            if let Some(split) = self.stream_source_core.latest_split_info.get(split_id) {
+                if let Some(current_offset_str) = split.current_offset()
+                    && let Ok(current_offset) = current_offset_str.parse::<i64>()
+                {
+                    return current_offset >= *target;
+                }
+                false
+            } else {
+                false
+            }
+        });
+
+        if backfill_target_offsets.is_empty() || all_reached {
+            progress.finish(epoch, consumed_rows);
+            *backfill_finished = true;
+            // Transition splits to `Finished`; persisted on the next barrier.
+            // Edge case: if the actor crashes between this in-memory transition and
+            // the next persist, a post-DDL split whose `Finished` mark was not yet
+            // persisted re-appears as `Pending` at init and causes one `done=false`
+            // warn (`update the progress of an created streaming job`) on meta after
+            // restart, then self-heals.
+            let core = &mut self.stream_source_core;
+            for (split_id, split) in &mut core.latest_split_info {
+                split.mark_backfill_finished();
+                core.updated_splits_in_epoch
+                    .insert(split_id.clone(), split.clone());
+            }
+            tracing::info!(
+                actor_id = %self.actor_ctx.id,
+                source_id = %core.source_id,
+                "Source backfill finished, all splits reached target offsets"
+            );
+        } else {
+            progress.update_for_source_backfill(epoch, consumed_rows);
+        }
+    }
+
     /// Report CDC source offset updated only the first time.
     fn maybe_report_cdc_source_offset(
         &self,
@@ -652,6 +736,18 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // init in-memory split states with persisted state if any
         core.init_split_state(boot_state.clone());
+
+        // Initialize backfill target offsets from splits (for wait_for_backfill).
+        // The backfill_target_offset is set by the enumerator at table creation time
+        // and persisted with the split state, so it survives restarts.
+        let mut backfill_target_offsets: HashMap<SplitId, i64> = if self.backfill_progress.is_some()
+        {
+            Self::build_backfill_target_offsets(&core.latest_split_info)
+        } else {
+            HashMap::new()
+        };
+        let mut backfill_finished = false;
+        let mut backfill_consumed_rows: u64 = 0;
 
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = core;
@@ -976,6 +1072,13 @@ impl<S: StateStore> SourceExecutor<S> {
                         must_wait_cdc_offset_before_report,
                     );
 
+                    self.maybe_report_backfill_progress(
+                        epoch,
+                        &mut backfill_finished,
+                        &backfill_target_offsets,
+                        backfill_consumed_rows,
+                    );
+
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
                         && let Some(task_builder) = &mut wait_checkpoint_task_builder
@@ -997,6 +1100,15 @@ impl<S: StateStore> SourceExecutor<S> {
                             to_apply_mutation,
                         )
                         .await?;
+
+                        // Rebuild target offsets so removed splits don't block completion.
+                        // Post-DDL splits are marked `Finished` in `update_state_if_changed`,
+                        // so the rebuild only picks up creation-time / migrated Pending splits.
+                        if self.backfill_progress.is_some() && !backfill_finished {
+                            backfill_target_offsets = Self::build_backfill_target_offsets(
+                                &self.stream_source_core.latest_split_info,
+                            );
+                        }
                     }
                 }
                 Either::Left(_) => {
@@ -1061,6 +1173,9 @@ impl<S: StateStore> SourceExecutor<S> {
                         continue;
                     }
                     source_output_row_count.inc_by(card as u64);
+                    if !backfill_finished {
+                        backfill_consumed_rows += card as u64;
+                    }
                     let to_remove_col_indices =
                         if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
                             vec![split_idx, offset_idx, pulsar_message_id_idx]
@@ -1345,6 +1460,7 @@ mod tests {
             None,
             false,
             LocalBarrierManager::for_test(),
+            None,
         );
         let mut executor = executor.boxed().execute();
 
@@ -1433,6 +1549,7 @@ mod tests {
             None,
             false,
             LocalBarrierManager::for_test(),
+            None,
         );
         let mut handler = executor.boxed().execute();
 

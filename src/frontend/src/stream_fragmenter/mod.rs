@@ -392,12 +392,18 @@ fn build_fragment(
                     .fragment_type_mask
                     .add(FragmentTypeFlag::Source);
 
-                if let Some(source) = node.source_inner.as_ref()
-                    && let Some(source_info) = source.info.as_ref()
-                    && ((source_info.is_shared() && !source_info.is_distributed)
-                        || source.with_properties.requires_singleton())
-                {
-                    current_fragment.requires_singleton = true;
+                if let Some(source) = node.source_inner.as_ref() {
+                    if let Some(source_info) = source.info.as_ref()
+                        && ((source_info.is_shared() && !source_info.is_distributed)
+                            || source.with_properties.requires_singleton())
+                    {
+                        current_fragment.requires_singleton = true;
+                    }
+                    if source.wait_for_backfill {
+                        current_fragment
+                            .fragment_type_mask
+                            .add(FragmentTypeFlag::SourceWaitForBackfill);
+                    }
                 }
             }
 
