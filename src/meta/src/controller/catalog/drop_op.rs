@@ -12,14 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
+use risingwave_pb::ddl_service::CascadeObject;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
-use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, ModelTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, DatabaseTransaction, EntityTrait, JoinType, ModelTrait,
+    QueryFilter, QuerySelect,
+};
 
 use super::*;
 impl CatalogController {
+    pub async fn get_drop_cascade_objects(
+        &self,
+        object_id: ObjectId,
+    ) -> MetaResult<Vec<CascadeObject>> {
+        let inner = self.inner.read().await;
+        let referring = get_referring_objects_cascade(object_id, &inner.db).await?;
+        build_drop_cascade_objects(referring, &inner.db).await
+    }
+
     // Drop all kinds of objects including databases,
     // schemas, relations, connections, functions, etc.
     pub async fn drop_object(
@@ -510,4 +524,245 @@ async fn report_drop_object(
             None,
         );
     }
+}
+
+async fn build_drop_cascade_objects<C>(
+    referring_objects: Vec<PartialObject>,
+    db: &C,
+) -> MetaResult<Vec<CascadeObject>>
+where
+    C: ConnectionTrait,
+{
+    let grouped = referring_objects
+        .into_iter()
+        .into_group_map_by(|o| o.obj_type);
+
+    let mut result = vec![];
+
+    for (obj_type, objs) in grouped {
+        match obj_type {
+            ObjectType::Table => {
+                let rows: Vec<(String, String, table::TableType)> = Object::find()
+                    .join(JoinType::InnerJoin, object::Relation::Table.def())
+                    .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                    .select_only()
+                    .column(schema::Column::Name)
+                    .column(table::Column::Name)
+                    .column(table::Column::TableType)
+                    .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(
+                    rows.into_iter()
+                        .map(|(schema_name, object_name, table_type)| {
+                            let object = match table_type {
+                                table::TableType::MaterializedView => "materialized view",
+                                table::TableType::Index => "index",
+                                table::TableType::VectorIndex => "vector index",
+                                table::TableType::Table | table::TableType::Internal => "table",
+                            };
+                            CascadeObject {
+                                object: object.to_owned(),
+                                schema_name: Some(schema_name),
+                                object_name,
+                            }
+                        }),
+                );
+            }
+            ObjectType::View => {
+                let rows: Vec<(String, String)> = Object::find()
+                    .join(JoinType::InnerJoin, object::Relation::View.def())
+                    .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                    .select_only()
+                    .column(schema::Column::Name)
+                    .column(view::Column::Name)
+                    .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(
+                    rows.into_iter()
+                        .map(|(schema_name, object_name)| CascadeObject {
+                            object: "view".to_owned(),
+                            schema_name: Some(schema_name),
+                            object_name,
+                        }),
+                );
+            }
+            ObjectType::Sink => {
+                let rows: Vec<(String, String)> = Object::find()
+                    .join(JoinType::InnerJoin, object::Relation::Sink.def())
+                    .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                    .select_only()
+                    .column(schema::Column::Name)
+                    .column(sink::Column::Name)
+                    .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(
+                    rows.into_iter()
+                        .map(|(schema_name, object_name)| CascadeObject {
+                            object: "sink".to_owned(),
+                            schema_name: Some(schema_name),
+                            object_name,
+                        }),
+                );
+            }
+            ObjectType::Source => {
+                let rows: Vec<(String, String)> = Object::find()
+                    .join(JoinType::InnerJoin, object::Relation::Source.def())
+                    .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                    .select_only()
+                    .column(schema::Column::Name)
+                    .column(source::Column::Name)
+                    .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(
+                    rows.into_iter()
+                        .map(|(schema_name, object_name)| CascadeObject {
+                            object: "source".to_owned(),
+                            schema_name: Some(schema_name),
+                            object_name,
+                        }),
+                );
+            }
+            ObjectType::Subscription => {
+                let rows: Vec<(String, String)> = Object::find()
+                    .join(JoinType::InnerJoin, object::Relation::Subscription.def())
+                    .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                    .select_only()
+                    .column(schema::Column::Name)
+                    .column(subscription::Column::Name)
+                    .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(
+                    rows.into_iter()
+                        .map(|(schema_name, object_name)| CascadeObject {
+                            object: "subscription".to_owned(),
+                            schema_name: Some(schema_name),
+                            object_name,
+                        }),
+                );
+            }
+            ObjectType::Connection => {
+                let rows: Vec<(String, String)> = Object::find()
+                    .join(JoinType::InnerJoin, object::Relation::Connection.def())
+                    .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                    .select_only()
+                    .column(schema::Column::Name)
+                    .column(connection::Column::Name)
+                    .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(
+                    rows.into_iter()
+                        .map(|(schema_name, object_name)| CascadeObject {
+                            object: "connection".to_owned(),
+                            schema_name: Some(schema_name),
+                            object_name,
+                        }),
+                );
+            }
+            ObjectType::Function => {
+                let rows: Vec<(String, String)> = Object::find()
+                    .join(JoinType::InnerJoin, object::Relation::Function.def())
+                    .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                    .select_only()
+                    .column(schema::Column::Name)
+                    .column(function::Column::Name)
+                    .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(
+                    rows.into_iter()
+                        .map(|(schema_name, object_name)| CascadeObject {
+                            object: "function".to_owned(),
+                            schema_name: Some(schema_name),
+                            object_name,
+                        }),
+                );
+            }
+            ObjectType::Index => {
+                let rows: Vec<(String, String)> = Object::find()
+                    .join(JoinType::InnerJoin, object::Relation::Index.def())
+                    .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+                    .select_only()
+                    .column(schema::Column::Name)
+                    .column(index::Column::Name)
+                    .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(
+                    rows.into_iter()
+                        .map(|(schema_name, object_name)| CascadeObject {
+                            object: "index".to_owned(),
+                            schema_name: Some(schema_name),
+                            object_name,
+                        }),
+                );
+            }
+            ObjectType::Secret => {
+                let rows: Vec<String> = Secret::find()
+                    .select_only()
+                    .column(secret::Column::Name)
+                    .filter(secret::Column::SecretId.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(rows.into_iter().map(|object_name| CascadeObject {
+                    object: "secret".to_owned(),
+                    schema_name: None,
+                    object_name,
+                }));
+            }
+            ObjectType::Schema => {
+                let rows: Vec<String> = Object::find()
+                    .join(JoinType::InnerJoin, object::Relation::Schema.def())
+                    .select_only()
+                    .column(schema::Column::Name)
+                    .filter(object::Column::Oid.is_in(objs.iter().map(|o| o.oid)))
+                    .into_tuple()
+                    .all(db)
+                    .await?;
+
+                result.extend(rows.into_iter().map(|object_name| CascadeObject {
+                    object: "schema".to_owned(),
+                    schema_name: None,
+                    object_name,
+                }));
+            }
+            ObjectType::Database => unreachable!(),
+        }
+    }
+
+    result.sort_by(|a, b| {
+        (&a.object, &a.schema_name, &a.object_name).cmp(&(
+            &b.object,
+            &b.schema_name,
+            &b.object_name,
+        ))
+    });
+    result.dedup_by(|a, b| {
+        a.object == b.object && a.schema_name == b.schema_name && a.object_name == b.object_name
+    });
+
+    Ok(result)
 }

@@ -23,10 +23,12 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::code::PostgresErrorCode;
 use risingwave_connector::sink::catalog::SinkCatalog;
+use risingwave_pb::ddl_service::CascadeObject;
 use risingwave_pb::user::grant_privilege::Object as PbGrantObject;
 use thiserror::Error;
 
 use crate::error::{ErrorCode, Result, RwError};
+use crate::session::current::notice_to_user;
 pub(crate) mod catalog_service;
 pub mod purify;
 
@@ -99,6 +101,21 @@ pub fn check_schema_writable(schema: &str) -> Result<()> {
         )).into())
     } else {
         Ok(())
+    }
+}
+
+// Notify the user about cascade objects.
+pub fn notice_drop_cascade_objects(objects: &Vec<CascadeObject>) {
+    for object in objects {
+        let msg = if let Some(schema_name) = &object.schema_name {
+            format!(
+                "drop cascades to {} {}.{}",
+                object.object, schema_name, object.object_name
+            )
+        } else {
+            format!("drop cascades to {} {}", object.object, object.object_name)
+        };
+        notice_to_user(msg);
     }
 }
 
