@@ -805,6 +805,30 @@ fn test_parse_compaction_config() {
     );
 }
 
+#[test]
+fn test_reject_zero_trigger_snapshot_count() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("compaction.trigger_snapshot_count", "0"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let err = IcebergConfig::from_btreemap(values).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`compaction.trigger_snapshot_count` must be greater than 0")
+    );
+}
+
 /// Test parquet compression parsing.
 #[test]
 fn test_parse_parquet_compression() {

@@ -66,7 +66,7 @@ use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use crate::binder::{Clause, SecureCompareContext, bind_data_type};
+use crate::binder::{Clause, SecureCompareContext, WEBHOOK_PAYLOAD_FIELD_NAME, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
@@ -2716,24 +2716,45 @@ fn get_source_and_resolved_table_name(
 // validate the webhook_info and also bind the webhook_info to protobuf
 fn bind_webhook_info(
     session: &Arc<SessionImpl>,
-    columns_defs: &[ColumnDef],
+    column_defs: &[ColumnDef],
     webhook_info: WebhookSourceInfo,
 ) -> Result<PbWebhookSourceInfo> {
-    // validate columns
-    if columns_defs.len() != 1 || columns_defs[0].data_type.as_ref().unwrap() != &AstDataType::Jsonb
-    {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "Table with webhook source should have exactly one JSONB column".to_owned(),
-        )
-        .into());
-    }
-
     let WebhookSourceInfo {
         secret_ref,
         signature_expr,
         wait_for_persistence,
         is_batched,
     } = webhook_info;
+
+    for column in column_defs {
+        for option_def in &column.options {
+            match option_def.option {
+                ColumnOption::Null => {}
+                ColumnOption::GeneratedColumns(_) => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "generated columns are not supported for webhook tables".to_owned(),
+                    )
+                    .into());
+                }
+                ColumnOption::DefaultValue(_) | ColumnOption::DefaultValueInternal { .. } => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "default values are not supported for webhook tables".to_owned(),
+                    )
+                    .into());
+                }
+                ColumnOption::NotNull
+                | ColumnOption::Unique { .. }
+                | ColumnOption::ForeignKey { .. }
+                | ColumnOption::Check(_)
+                | ColumnOption::DialectSpecific(_) => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "only NULL column option is supported for webhook tables".to_owned(),
+                    )
+                    .into());
+                }
+            }
+        }
+    }
 
     // validate secret_ref
     let (pb_secret_ref, secret_name) = if let Some(secret_ref) = secret_ref {
@@ -2757,8 +2778,15 @@ fn bind_webhook_info(
     };
 
     let signature_expr = if let Some(signature_expr) = signature_expr {
+        let payload_name = if column_defs.len() == 1
+            && column_defs[0].data_type.as_ref() == Some(&AstDataType::Jsonb)
+        {
+            column_defs[0].name.real_value()
+        } else {
+            WEBHOOK_PAYLOAD_FIELD_NAME.to_owned()
+        };
         let secure_compare_context = SecureCompareContext {
-            column_name: columns_defs[0].name.real_value(),
+            payload_name,
             secret_name,
         };
         let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
@@ -2838,6 +2866,146 @@ mod tests {
         };
 
         assert_eq!(columns, expected_columns, "{columns:#?}");
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_with_arbitrary_columns() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("create schema ingest_schema;")
+            .await
+            .unwrap();
+        frontend
+            .run_sql(
+                r#"
+                create table ingest_schema.orders (
+                    id int,
+                    customer_name varchar,
+                    amount double precision,
+                    primary key (id)
+                ) with (
+                    connector = 'webhook'
+                ) validate as secure_compare(
+                    headers->>'x-rw-signature',
+                    'sha256=' || encode(hmac('webhook-secret', payload, 'sha256'), 'hex')
+                );
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (table, _) = catalog_reader
+            .get_created_table_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name("ingest_schema"),
+                "orders",
+            )
+            .unwrap();
+
+        assert!(table.webhook_info.is_some());
+        assert_eq!(
+            table
+                .columns
+                .iter()
+                .filter(|column| column.can_dml())
+                .count(),
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_uses_single_jsonb_column_name_in_validate() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql(
+                r#"
+                create table webhook_single_column (
+                    body jsonb
+                ) with (
+                    connector = 'webhook'
+                ) validate as secure_compare(
+                    headers->>'x-rw-signature',
+                    'sha256=' || encode(hmac('webhook-secret', body, 'sha256'), 'hex')
+                );
+                "#,
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_with_generated_columns() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let err = frontend
+            .run_sql(
+                r#"
+                create table webhook_generated_columns (
+                    id int,
+                    amount double precision,
+                    amount_with_fee double precision as amount + 1.0
+                ) with (
+                    connector = 'webhook'
+                );
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("generated columns are not supported for webhook tables"),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_with_default_value() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let err = frontend
+            .run_sql(
+                r#"
+                create table webhook_default_value (
+                    id int default 42,
+                    amount double precision
+                ) with (
+                    connector = 'webhook'
+                );
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("default values are not supported for webhook tables"),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_with_not_null_option() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let err = frontend
+            .run_sql(
+                r#"
+                create table webhook_not_null (
+                    id int not null,
+                    amount double precision
+                ) with (
+                    connector = 'webhook'
+                );
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("only NULL column option is supported for webhook tables"),
+            "{err:?}"
+        );
     }
 
     #[test]

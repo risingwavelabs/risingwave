@@ -47,6 +47,11 @@ use super::IcebergTaskMeta;
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
 
+pub struct IcebergTaskExecution {
+    pub sink_id: u32,
+    pub plan_runners: Vec<IcebergCompactionPlanRunner>,
+}
+
 static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
     LazyLock::new(|| {
         Box::new(PrometheusMetricsRegistry::new(
@@ -231,6 +236,16 @@ impl IcebergCompactionPlanRunner {
         branch: String,
         compaction_plan: CompactionPlan,
     ) -> HummockResult<RewriteFilesStat> {
+        if !compaction_plan.has_files() {
+            tracing::info!(
+                task_id,
+                plan_index,
+                table = %table_ident,
+                "skip empty iceberg compaction plan"
+            );
+            return Ok(RewriteFilesStat::default());
+        }
+
         let statistics = analyze_task_statistics(&compaction_plan);
 
         // Build writer properties from sink configuration
@@ -247,12 +262,12 @@ impl IcebergCompactionPlanRunner {
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
             .build()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to build iceberg compaction execution config: {:?}",
-                    e.as_report()
-                );
-            });
+            .map_err(|e| {
+                HummockError::compaction_executor(
+                    anyhow::Error::new(e)
+                        .context("failed to build iceberg compaction execution config"),
+                )
+            })?;
 
         tracing::info!(
             task_id = task_id,
@@ -288,15 +303,21 @@ impl IcebergCompactionPlanRunner {
             },
         );
 
+        let compaction_result = compaction
+            .compact_with_plan(compaction_plan, &compaction_execution_config)
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?
+            .ok_or_else(|| {
+                HummockError::compaction_executor(anyhow::anyhow!(
+                    "compact_with_plan returned no result for a non-empty iceberg compaction plan"
+                ))
+            })?;
+
         let CompactionResult {
             data_files,
             stats,
             table,
-        } = compaction
-            .compact_with_plan(compaction_plan, &compaction_execution_config)
-            .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?
-            .unwrap();
+        } = compaction_result;
 
         if let Some(committed_table) = table
             && should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
@@ -406,14 +427,15 @@ fn analyze_task_statistics(plan: &CompactionPlan) -> IcebergCompactionTaskStatis
     }
 }
 
-/// Creates plan runners from an iceberg compaction task.
-pub async fn create_plan_runners(
+/// Creates a task execution context from an iceberg compaction task.
+pub async fn create_task_execution(
     iceberg_compaction_task: IcebergCompactionTask,
     config: IcebergCompactorRunnerConfig,
     metrics: Arc<CompactorMetrics>,
-) -> HummockResult<Vec<IcebergCompactionPlanRunner>> {
+) -> HummockResult<IcebergTaskExecution> {
     let IcebergCompactionTask {
         task_id,
+        sink_id,
         props,
         task_type,
     } = iceberg_compaction_task;
@@ -540,7 +562,10 @@ pub async fn create_plan_runners(
             table = %table_ident,
             "No files to compact, skip the task"
         );
-        return Ok(vec![]);
+        return Ok(IcebergTaskExecution {
+            sink_id,
+            plan_runners: vec![],
+        });
     }
 
     let mut runners = Vec::with_capacity(compaction_plans.len());
@@ -567,5 +592,8 @@ pub async fn create_plan_runners(
         "Created plan runners for iceberg compaction task"
     );
 
-    Ok(runners)
+    Ok(IcebergTaskExecution {
+        sink_id,
+        plan_runners: runners,
+    })
 }
