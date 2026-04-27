@@ -627,13 +627,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                     // Truncate the logstore.
                     let post_seal =
                         initial_write_state.seal_current_epoch(barrier.epoch.curr, progress.take());
-                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
-                    if update_vnode_bitmap.is_some() {
-                        return Err(anyhow!(
-                            "updating vnode bitmap in place is not supported any more!"
-                        )
-                        .into());
-                    }
+                    barrier.assume_no_update_vnode_bitmap(actor_id)?;
                     yield Message::Barrier(barrier);
                     post_seal.post_yield_barrier(None).await?;
                     if !realigned_logstore && is_checkpoint {
@@ -857,14 +851,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     )
                                     .await?;
                                     seq_id = FIRST_SEQ_ID;
-                                    let update_vnode_bitmap =
-                                        barrier.as_update_vnode_bitmap(self.actor_context.id);
-                                    if update_vnode_bitmap.is_some() {
-                                        return Err(anyhow!(
-                                            "vnode bitmap update during dispatch is not supported."
-                                        )
-                                        .into());
-                                    }
+                                    barrier.assume_no_update_vnode_bitmap(self.actor_context.id)?;
 
                                     yield Message::Barrier(barrier);
 

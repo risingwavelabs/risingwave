@@ -55,7 +55,7 @@ pub struct SyncLogStoreDispatchExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(crate) async fn new(
         input: Executor,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
@@ -431,11 +431,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                             )
                                             .await?;
                                         seq_id = FIRST_SEQ_ID;
-                                        let update_vnode_bitmap =
-                                            barrier.as_update_vnode_bitmap(actor_id);
-                                        if update_vnode_bitmap.is_some() {
-                                            return Err(anyhow!("vnode bitmap update during dispatch is not supported.").into());
-                                        }
+                                        barrier.assume_no_update_vnode_bitmap(actor_id)?;
 
                                         write_state_post_write_barrier
                                             .post_yield_barrier(None)

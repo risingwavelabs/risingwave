@@ -131,7 +131,7 @@ mod utils;
 mod vector;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 pub use approx_percentile::global::GlobalApproxPercentileExecutor;
 pub use approx_percentile::local::LocalApproxPercentileExecutor;
 pub use backfill::arrangement_backfill::*;
@@ -663,6 +663,13 @@ impl Barrier {
                 }
                 _ => None,
             })
+    }
+
+    pub fn assume_no_update_vnode_bitmap(&self, actor_id: ActorId) -> StreamExecutorResult<()> {
+        if self.as_update_vnode_bitmap(actor_id).is_some() {
+            return Err(anyhow!("updating vnode bitmap in place is not supported").into());
+        }
+        Ok(())
     }
 
     pub fn as_sink_schema_change(&self, sink_id: SinkId) -> Option<PbSinkSchemaChange> {
