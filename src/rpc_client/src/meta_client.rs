@@ -969,8 +969,17 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_user(&self, user_id: UserId) -> Result<u64> {
-        let request = DropUserRequest { user_id };
+    pub async fn drop_user(
+        &self,
+        user_id: UserId,
+        dropped_by: UserId,
+        session_user: UserId,
+    ) -> Result<u64> {
+        let request = DropUserRequest {
+            user_id,
+            dropped_by,
+            session_user,
+        };
         let resp = self.inner.drop_user(request).await?;
         Ok(resp.version)
     }
@@ -1034,6 +1043,8 @@ impl MetaClient {
         role_ids: Vec<UserId>,
         member_ids: Vec<UserId>,
         granted_by: UserId,
+        executed_by: UserId,
+        granted_by_specified: bool,
         admin_option: Option<bool>,
         inherit_option: Option<bool>,
         set_option: Option<bool>,
@@ -1042,6 +1053,8 @@ impl MetaClient {
             role_ids: role_ids.into_iter().map(|id| id.as_raw_id()).collect(),
             member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
             granted_by: granted_by.as_raw_id(),
+            executed_by: executed_by.as_raw_id(),
+            granted_by_specified,
             admin_option,
             inherit_option,
             set_option,
@@ -1055,6 +1068,7 @@ impl MetaClient {
         role_ids: Vec<UserId>,
         member_ids: Vec<UserId>,
         granted_by: UserId,
+        granted_by_specified: bool,
         revoked_by: UserId,
         revoke_admin_option: bool,
         revoke_inherit_option: bool,
@@ -1065,6 +1079,7 @@ impl MetaClient {
             role_ids: role_ids.into_iter().map(|id| id.as_raw_id()).collect(),
             member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
             granted_by: granted_by.as_raw_id(),
+            granted_by_specified,
             revoked_by: revoked_by.as_raw_id(),
             revoke_admin_option,
             revoke_inherit_option,

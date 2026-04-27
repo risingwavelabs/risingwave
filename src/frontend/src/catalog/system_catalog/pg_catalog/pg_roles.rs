@@ -24,23 +24,23 @@ use risingwave_frontend_macro::system_catalog;
 #[system_catalog(
     view,
     "pg_catalog.pg_roles",
-    "SELECT id AS oid,
-        name AS rolname,
+    "SELECT name AS rolname,
         is_super AS rolsuper,
         can_inherit AS rolinherit,
         create_user AS rolcreaterole,
         create_db AS rolcreatedb,
         can_login AS rolcanlogin,
-        true AS rolreplication,
+        false AS rolreplication,
         -1 AS rolconnlimit,
+        '********' AS rolpassword,
         NULL::timestamptz AS rolvaliduntil,
-        true AS rolbypassrls,
-        '********' AS rolpassword
+        false AS rolbypassrls,
+        NULL::text[] AS rolconfig,
+        id AS oid
     FROM rw_catalog.rw_users"
 )]
 #[derive(Fields)]
 struct PgRule {
-    oid: i32,
     rolname: String,
     rolsuper: bool,
     rolinherit: bool,
@@ -49,7 +49,9 @@ struct PgRule {
     rolcanlogin: bool,
     rolreplication: bool,
     rolconnlimit: i32,
+    rolpassword: String,
     rolvaliduntil: Timestamptz,
     rolbypassrls: bool,
-    rolpassword: String,
+    rolconfig: Vec<String>,
+    oid: i32,
 }

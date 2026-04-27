@@ -211,7 +211,7 @@ async fn test_grant_revoke_role_granted_by_current_user_only() {
         .unwrap_err()
         .to_string();
     assert!(
-        err.contains("GRANTED BY must specify the current user"),
+        err.contains("User \"postgres\" does not exist"),
         "unexpected error: {err}"
     );
 
@@ -279,7 +279,7 @@ async fn test_granted_by_current_role_works_but_session_user_fails_after_set_rol
         .unwrap_err()
         .to_string();
     assert!(
-        err.contains("GRANTED BY must specify the current user"),
+        err.contains("does not possess grantor role"),
         "unexpected error: {err}"
     );
 

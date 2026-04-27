@@ -64,7 +64,7 @@ impl UserService for UserServiceImpl {
         let version = self
             .metadata_manager
             .catalog_controller
-            .drop_user(req.user_id as _)
+            .drop_user(req.user_id as _, req.dropped_by as _, req.session_user as _)
             .await?;
 
         Ok(Response::new(DropUserResponse {
@@ -159,6 +159,8 @@ impl UserService for UserServiceImpl {
                 role_ids,
                 member_ids,
                 UserId::from(req.granted_by),
+                UserId::from(req.executed_by),
+                req.granted_by_specified,
                 req.admin_option,
                 req.inherit_option,
                 req.set_option,
@@ -186,6 +188,7 @@ impl UserService for UserServiceImpl {
                 role_ids,
                 member_ids,
                 UserId::from(req.granted_by),
+                req.granted_by_specified,
                 UserId::from(req.revoked_by),
                 req.revoke_admin_option,
                 req.revoke_inherit_option,

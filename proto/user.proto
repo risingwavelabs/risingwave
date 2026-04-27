@@ -84,6 +84,8 @@ message CreateUserResponse {
 
 message DropUserRequest {
   uint32 user_id = 1;
+  uint32 dropped_by = 2;
+  uint32 session_user = 3;
 }
 
 message DropUserResponse {
@@ -145,6 +147,7 @@ message RoleMembership {
   bool admin_option = 4;
   bool inherit_option = 5;
   bool set_option = 6;
+  uint32 id = 7;
 }
 
 message GrantRoleRequest {
@@ -154,6 +157,8 @@ message GrantRoleRequest {
   optional bool admin_option = 4;
   optional bool inherit_option = 5;
   optional bool set_option = 6;
+  uint32 executed_by = 7;
+  bool granted_by_specified = 8;
 }
 
 message GrantRoleResponse {
@@ -171,6 +176,7 @@ message RevokeRoleRequest {
   bool revoke_inherit_option = 6;
   bool revoke_set_option = 7;
   bool cascade = 8;
+  bool granted_by_specified = 9;
 }
 
 message RevokeRoleResponse {

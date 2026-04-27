@@ -990,6 +990,8 @@ for_all_wrapped_id_fields! (
         }
         DropUserRequest {
             user_id: UserId,
+            dropped_by: UserId,
+            session_user: UserId,
         }
         GrantPrivilege {
             database_id: DatabaseId,

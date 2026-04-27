@@ -61,7 +61,7 @@ impl RoleMembershipInfoReader {
 pub trait UserInfoWriter: Send + Sync {
     async fn create_user(&self, user_info: UserInfo) -> Result<()>;
 
-    async fn drop_user(&self, id: UserId) -> Result<()>;
+    async fn drop_user(&self, id: UserId, dropped_by: UserId, session_user: UserId) -> Result<()>;
 
     async fn update_user(&self, user: UserInfo, update_fields: Vec<UpdateField>) -> Result<()>;
 
@@ -88,6 +88,8 @@ pub trait UserInfoWriter: Send + Sync {
         role_ids: Vec<UserId>,
         member_ids: Vec<UserId>,
         granted_by: UserId,
+        executed_by: UserId,
+        granted_by_specified: bool,
         admin_option: Option<bool>,
         inherit_option: Option<bool>,
         set_option: Option<bool>,
@@ -98,6 +100,7 @@ pub trait UserInfoWriter: Send + Sync {
         role_ids: Vec<UserId>,
         member_ids: Vec<UserId>,
         granted_by: UserId,
+        granted_by_specified: bool,
         revoked_by: UserId,
         revoke_admin_option: bool,
         revoke_inherit_option: bool,
@@ -129,8 +132,11 @@ impl UserInfoWriter for UserInfoWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_user(&self, id: UserId) -> Result<()> {
-        let version = self.meta_client.drop_user(id).await?;
+    async fn drop_user(&self, id: UserId, dropped_by: UserId, session_user: UserId) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_user(id, dropped_by, session_user)
+            .await?;
         self.wait_version(version).await?;
         self.refresh_role_memberships().await
     }
@@ -182,6 +188,8 @@ impl UserInfoWriter for UserInfoWriterImpl {
         role_ids: Vec<UserId>,
         member_ids: Vec<UserId>,
         granted_by: UserId,
+        executed_by: UserId,
+        granted_by_specified: bool,
         admin_option: Option<bool>,
         inherit_option: Option<bool>,
         set_option: Option<bool>,
@@ -192,6 +200,8 @@ impl UserInfoWriter for UserInfoWriterImpl {
                 role_ids.clone(),
                 member_ids.clone(),
                 granted_by,
+                executed_by,
+                granted_by_specified,
                 admin_option,
                 inherit_option,
                 set_option,
@@ -206,6 +216,7 @@ impl UserInfoWriter for UserInfoWriterImpl {
         role_ids: Vec<UserId>,
         member_ids: Vec<UserId>,
         granted_by: UserId,
+        granted_by_specified: bool,
         revoked_by: UserId,
         revoke_admin_option: bool,
         revoke_inherit_option: bool,
@@ -218,6 +229,7 @@ impl UserInfoWriter for UserInfoWriterImpl {
                 role_ids.clone(),
                 member_ids.clone(),
                 granted_by,
+                granted_by_specified,
                 revoked_by,
                 revoke_admin_option,
                 revoke_inherit_option,

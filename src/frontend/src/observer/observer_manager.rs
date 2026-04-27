@@ -42,6 +42,17 @@ use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 
+fn publish_catalog_version_if_newer(
+    catalog_updated_tx: &Sender<CatalogVersion>,
+    version: CatalogVersion,
+) {
+    if *catalog_updated_tx.borrow() < version
+        && let Err(error) = catalog_updated_tx.send(version)
+    {
+        warn!(error = %error, version, "failed to publish catalog version");
+    }
+}
+
 pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     version: CatalogVersion,
@@ -209,30 +220,35 @@ impl ObserverState for FrontendObserverNode {
 
         let snapshot_version = version.unwrap();
         self.version = snapshot_version.catalog_version;
-        self.catalog_updated_tx
-            .send(snapshot_version.catalog_version)
-            .unwrap();
         *self.session_params.write() =
             serde_json::from_str(&session_params.unwrap().params).unwrap();
         LocalSecretManager::global().init_secrets(secrets);
         LicenseManager::get().update_cluster_resource(cluster_resource.unwrap());
-        self.refresh_role_memberships_cache(
+        self.refresh_role_memberships_cache_and_publish(
+            snapshot_version.catalog_version,
             "failed to refresh cached role memberships after observer initialization",
         );
     }
 }
 
 impl FrontendObserverNode {
-    fn refresh_role_memberships_cache(&self, failure_context: &'static str) {
+    fn refresh_role_memberships_cache_and_publish(
+        &self,
+        version: CatalogVersion,
+        failure_context: &'static str,
+    ) {
         let role_memberships = self.role_memberships.clone();
         let meta_client = self.meta_client.clone();
+        let catalog_updated_tx = self.catalog_updated_tx.clone();
         tokio::spawn(async move {
             match meta_client.list_role_memberships(vec![]).await {
                 Ok(memberships) => {
                     *role_memberships.write() = memberships;
+                    publish_catalog_version_if_newer(&catalog_updated_tx, version);
                 }
                 Err(error) => {
                     warn!(error = %error, failure_context, "failed to refresh cached role memberships");
+                    publish_catalog_version_if_newer(&catalog_updated_tx, version);
                 }
             }
         });
@@ -487,8 +503,8 @@ impl FrontendObserverNode {
             self.version
         );
         self.version = resp.version;
-        self.catalog_updated_tx.send(resp.version).unwrap();
-        self.refresh_role_memberships_cache(
+        self.refresh_role_memberships_cache_and_publish(
+            resp.version,
             "failed to refresh cached role memberships after user notification",
         );
     }
@@ -609,4 +625,25 @@ fn convert_worker_slot_mapping(
             },
         )
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::watch;
+
+    use super::*;
+
+    #[test]
+    fn publish_catalog_version_if_newer_is_monotonic() {
+        let (tx, rx) = watch::channel(10);
+
+        publish_catalog_version_if_newer(&tx, 9);
+        assert_eq!(*rx.borrow(), 10);
+
+        publish_catalog_version_if_newer(&tx, 11);
+        assert_eq!(*rx.borrow(), 11);
+
+        publish_catalog_version_if_newer(&tx, 10);
+        assert_eq!(*rx.borrow(), 11);
+    }
 }

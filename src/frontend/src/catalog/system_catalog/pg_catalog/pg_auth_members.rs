@@ -46,9 +46,8 @@ async fn read_pg_auth_members(reader: &SysCatalogReaderImpl) -> Result<Vec<PgAut
 
     Ok(memberships
         .into_iter()
-        .enumerate()
-        .map(|(idx, membership)| PgAuthMember {
-            oid: (idx + 1) as i32,
+        .map(|membership| PgAuthMember {
+            oid: membership.id as i32,
             roleid: membership.role_id as i32,
             member: membership.member_id as i32,
             grantor: membership.granted_by as i32,

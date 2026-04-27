@@ -45,3 +45,47 @@ val	NULL
 
 statement ok
 drop table myy_table;
+
+statement ok
+create schema pg_visible_s1;
+
+statement ok
+create schema pg_visible_s2;
+
+statement ok
+create table pg_visible_s1.t(v int);
+
+statement ok
+create table pg_visible_s2.t(v int);
+
+statement ok
+set search_path = pg_visible_s1, pg_visible_s2;
+
+query BB
+select pg_table_is_visible('pg_visible_s1.t'::regclass),
+       pg_table_is_visible('pg_visible_s2.t'::regclass);
+----
+t f
+
+statement ok
+set search_path = pg_visible_s1;
+
+query B
+select pg_table_is_visible('pg_visible_s2.t'::regclass);
+----
+f
+
+statement ok
+reset search_path;
+
+statement ok
+drop table pg_visible_s1.t;
+
+statement ok
+drop table pg_visible_s2.t;
+
+statement ok
+drop schema pg_visible_s1;
+
+statement ok
+drop schema pg_visible_s2;

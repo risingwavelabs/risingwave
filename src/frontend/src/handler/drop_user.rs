@@ -75,7 +75,9 @@ pub async fn handle_drop_user(
             }
 
             let user_info_writer = session.user_info_writer()?;
-            user_info_writer.drop_user(user_id).await?;
+            user_info_writer
+                .drop_user(user_id, session.user_id(), session.session_user_id())
+                .await?;
         }
         None => {
             return if if_exists {

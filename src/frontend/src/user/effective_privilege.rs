@@ -59,20 +59,25 @@ pub fn can_set_role(
         .contains(&target_role_id)
 }
 
+pub fn can_inherit_role(
+    current_role_id: UserId,
+    target_role_id: UserId,
+    memberships: &[RoleMembership],
+) -> bool {
+    current_role_id == target_role_id
+        || reachable_role_ids([current_role_id], memberships, |membership| {
+            membership.inherit_option
+        })
+        .contains(&target_role_id)
+}
+
 pub fn effective_role_ids(
-    user_info_reader: &UserInfoReader,
+    _user_info_reader: &UserInfoReader,
     auth_context: &AuthContext,
     memberships: &[RoleMembership],
 ) -> HashSet<UserId> {
     let current_user_id = auth_context.current_user_id();
     let mut ids = HashSet::from([current_user_id]);
-    let reader = user_info_reader.read_guard();
-    let Some(current_user) = reader.get_user_by_id(&current_user_id) else {
-        return ids;
-    };
-    if !current_user.can_inherit {
-        return ids;
-    }
     ids.extend(reachable_role_ids(
         [current_user_id],
         memberships,
@@ -89,8 +94,6 @@ pub fn session_has_privilege(
     object: impl Copy + Into<risingwave_pb::user::grant_privilege::Object>,
     mode: AclMode,
 ) -> bool {
-    let reader = user_info_reader.read_guard();
-    drop(reader);
     for role_id in effective_role_ids(user_info_reader, auth_context, memberships) {
         let reader = user_info_reader.read_guard();
         let Some(user) = reader.get_user_by_id(&role_id) else {
@@ -114,9 +117,6 @@ pub fn principal_has_privilege(
     let reader = user_info_reader.read_guard();
     if has_privilege_for_catalog_user(principal, owner, object, mode) {
         return true;
-    }
-    if !principal.can_inherit {
-        return false;
     }
 
     for role_id in reachable_role_ids([principal.id], memberships, |membership| {

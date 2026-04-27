@@ -1044,7 +1044,12 @@ impl UserInfoWriter for MockUserInfoWriter {
         Ok(())
     }
 
-    async fn drop_user(&self, id: UserId) -> Result<()> {
+    async fn drop_user(
+        &self,
+        id: UserId,
+        _dropped_by: UserId,
+        _session_user: UserId,
+    ) -> Result<()> {
         self.user_info.write().drop_user(id);
         let user_id = id.as_raw_id();
         self.role_memberships.write().retain(|membership| {
@@ -1131,13 +1136,12 @@ impl UserInfoWriter for MockUserInfoWriter {
         role_ids: Vec<UserId>,
         member_ids: Vec<UserId>,
         granted_by: UserId,
+        _executed_by: UserId,
+        _granted_by_specified: bool,
         admin_option: Option<bool>,
         inherit_option: Option<bool>,
         set_option: Option<bool>,
     ) -> Result<()> {
-        let admin_option = admin_option.unwrap_or(false);
-        let inherit_option = inherit_option.unwrap_or(true);
-        let set_option = set_option.unwrap_or(true);
         let granted_by = granted_by.as_raw_id();
         let mut memberships = self.role_memberships.write();
 
@@ -1145,22 +1149,35 @@ impl UserInfoWriter for MockUserInfoWriter {
             for member_id in &member_ids {
                 let role_id = role_id.as_raw_id();
                 let member_id = member_id.as_raw_id();
+                let member_inherit = self
+                    .user_info
+                    .read()
+                    .get_user_by_id(&UserId::from(member_id))
+                    .map(|user| user.can_inherit)
+                    .unwrap_or(true);
                 if let Some(existing) = memberships.iter_mut().find(|membership| {
                     membership.role_id == role_id
                         && membership.member_id == member_id
                         && membership.granted_by == granted_by
                 }) {
-                    existing.admin_option |= admin_option;
-                    existing.inherit_option |= inherit_option;
-                    existing.set_option |= set_option;
+                    existing.admin_option = admin_option.unwrap_or(existing.admin_option);
+                    existing.inherit_option = inherit_option.unwrap_or(existing.inherit_option);
+                    existing.set_option = set_option.unwrap_or(existing.set_option);
                 } else {
+                    let id = memberships
+                        .iter()
+                        .map(|membership| membership.id)
+                        .max()
+                        .unwrap_or(0)
+                        + 1;
                     memberships.push(RoleMembership {
                         role_id,
                         member_id,
                         granted_by,
-                        admin_option,
-                        inherit_option,
-                        set_option,
+                        admin_option: admin_option.unwrap_or(false),
+                        inherit_option: inherit_option.unwrap_or(member_inherit),
+                        set_option: set_option.unwrap_or(true),
+                        id,
                     });
                 }
             }
@@ -1173,6 +1190,7 @@ impl UserInfoWriter for MockUserInfoWriter {
         role_ids: Vec<UserId>,
         member_ids: Vec<UserId>,
         granted_by: UserId,
+        _granted_by_specified: bool,
         _revoked_by: UserId,
         revoke_admin_option: bool,
         revoke_inherit_option: bool,
