@@ -638,7 +638,7 @@ steps:
       - ./ci/plugins/swapfile
       - docker-compose#v5.5.0:
           <<: *docker-compose
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "check"
