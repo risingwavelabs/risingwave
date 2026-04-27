@@ -175,6 +175,115 @@ def send_batched(secret):
     }
     send_webhook(url, headers, payload_jsonl)
 
+
+def send_multi_column_validate(secret):
+    payload = {
+        "id": 1234,
+        "customer_name": "Alice",
+        "amount": 99.99,
+    }
+    url = SERVER_URL + "multi_column_validate"
+
+    payload_json = json.dumps(payload)
+    signature = generate_signature_hmac(secret, payload_json, 'sha1', "sha1=")
+    headers = {
+        "Content-Type": "application/json",
+        "X-Hub-Signature": signature
+    }
+    send_webhook(url, headers, payload_json)
+
+
+def send_multi_column_no_pk():
+    payload = {
+        "id": 1234,
+        "customer_name": "Alice",
+        "amount": 99.99,
+    }
+    url = SERVER_URL + "multi_column_no_pk"
+
+    payload_json = json.dumps(payload)
+    headers = {
+        "Content-Type": "application/json",
+    }
+    send_webhook(url, headers, payload_json)
+
+
+def send_multi_column_with_options():
+    payload = {
+        "id": 1,
+        "event_time": 1712800800123,
+    }
+    url = SERVER_URL + "multi_column_with_options"
+
+    payload_json = json.dumps(payload)
+    headers = {
+        "Content-Type": "application/json",
+        "x-rw-webhook-format": "plain",
+        "x-rw-webhook-encode": "json",
+        "x-rw-webhook-json-timestamptz-handling-mode": "milli",
+    }
+    send_webhook(url, headers, payload_json)
+
+
+
+def send_multi_column_batched():
+    rows = [
+        {"id": 2001, "customer_name": "Bob", "amount": 10.5},
+        {"id": 2002, "customer_name": "Carol", "amount": 20.5},
+    ]
+    url = SERVER_URL + "multi_column_batched"
+    payload_jsonl = '\n'.join(json.dumps(row) for row in rows)
+    headers = {
+        "Content-Type": "application/json",
+    }
+    send_webhook(url, headers, payload_jsonl)
+
+
+def send_multi_column_timestamp_option():
+    payload = {
+        "id": 1,
+        "event_time": 1712800800123,
+    }
+    url = SERVER_URL + "multi_column_timestamp_option"
+
+    payload_json = json.dumps(payload)
+    headers = {
+        "Content-Type": "application/json",
+        "x-rw-webhook-json-timestamp-handling-mode": "milli",
+    }
+    send_webhook(url, headers, payload_json)
+
+
+def send_multi_column_time_option():
+    payload = {
+        "id": 1,
+        "event_time": 3723123,
+    }
+    url = SERVER_URL + "multi_column_time_option"
+
+    payload_json = json.dumps(payload)
+    headers = {
+        "Content-Type": "application/json",
+        "x-rw-webhook-json-time-handling-mode": "milli",
+    }
+    send_webhook(url, headers, payload_json)
+
+
+def send_multi_column_bigint_precise_option():
+    payload = {
+        "id": 1,
+        "amount": "AeJA",
+    }
+    url = SERVER_URL + "multi_column_bigint_precise_option"
+
+    payload_json = json.dumps(payload)
+    headers = {
+        "Content-Type": "application/json",
+        "x-rw-webhook-json-bigint-unsigned-handling-mode": "precise",
+    }
+    send_webhook(url, headers, payload_json)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simulate sending Webhook messages")
     parser.add_argument("--secret", required=True, help="Secret key for generating signature")
@@ -197,3 +306,11 @@ if __name__ == "__main__":
     send_validate_raw_string(secret)
     # batch multiple rows per request
     send_batched(secret)
+    # decode JSON payloads into multiple columns
+    send_multi_column_validate(secret)
+    send_multi_column_no_pk()
+    send_multi_column_with_options()
+    send_multi_column_batched()
+    send_multi_column_timestamp_option()
+    send_multi_column_time_option()
+    send_multi_column_bigint_precise_option()

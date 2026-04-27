@@ -62,11 +62,13 @@ message GetDataResponse {
 }
 
 message FastInsertRequest {
+  reserved "column_indices";
+  reserved 3;
+
   // Id of the table to perform inserting.
   uint32 table_id = 1;
   // Version of the table.
   uint64 table_version_id = 2;
-  repeated uint32 column_indices = 3;
   data.DataChunk data_chunk = 4;
 
   // An optional field and will be `None` for tables without user-defined pk.

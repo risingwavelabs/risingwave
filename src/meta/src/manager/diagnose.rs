@@ -636,10 +636,7 @@ impl DiagnoseCommand {
             }
         };
 
-        let statuses = self
-            .iceberg_compaction_manager
-            .list_compaction_statuses()
-            .await;
+        let statuses = self.iceberg_compaction_manager.list_compaction_statuses();
 
         let _ = writeln!(s, "ICEBERG COMPACTION SCHEDULE");
 
