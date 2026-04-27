@@ -256,6 +256,7 @@ def parse_args() -> argparse.Namespace:
         required=True,
         choices=[
             "success",
+            "empty_payload",
             "multi_column_no_pk",
             "single_jsonb_no_pk",
             "delete_only_pk",
@@ -367,8 +368,11 @@ def connect_and_init(
     return ws, state
 
 
-def send_batch(ws: SimpleWebSocketApp, batch: list[dict]) -> None:
-    text = json.dumps(batch, separators=(",", ":"))
+def send_batch(ws: SimpleWebSocketApp, dml_batch_id: int, items: list[dict]) -> None:
+    text = json.dumps(
+        {"dml_batch_id": dml_batch_id, "items": items},
+        separators=(",", ":"),
+    )
     print("\n--- Sending batched DML payload ---")
     print(f"  -> {text}")
     ws.send(text)
@@ -380,16 +384,16 @@ def expect_no_fatal(state: WsState) -> None:
 
 
 def expect_fatal_and_close(
-    state: WsState, expected_dml_id: int, expected_error_substring: str
+    state: WsState, expected_batch_id: int, expected_error_substring: str
 ) -> None:
     wait_for(
         lambda: bool(state.fatal),
         timeout=10,
         description="websocket fatal response",
     )
-    if f"dml_id {expected_dml_id}" not in state.fatal[0]:
+    if f"dml_batch_id {expected_batch_id}" not in state.fatal[0]:
         raise RuntimeError(
-            f"expected fatal containing dml_id {expected_dml_id}, got {state.fatal}"
+            f"expected fatal containing dml_batch_id {expected_batch_id}, got {state.fatal}"
         )
     if expected_error_substring not in state.fatal[0]:
         raise RuntimeError(f"unexpected fatal message: {state.fatal[0]!r}")
@@ -399,9 +403,9 @@ def expect_fatal_and_close(
 def scenario_success(ws: SimpleWebSocketApp, state: WsState) -> None:
     send_batch(
         ws,
+        1,
         [
             {
-                "dml_id": 1,
                 "op": "upsert",
                 "data": {
                     "id": 401,
@@ -414,7 +418,6 @@ def scenario_success(ws: SimpleWebSocketApp, state: WsState) -> None:
                 },
             },
             {
-                "dml_id": 2,
                 "op": "upsert",
                 "data": {
                     "id": 402,
@@ -427,7 +430,6 @@ def scenario_success(ws: SimpleWebSocketApp, state: WsState) -> None:
                 },
             },
             {
-                "dml_id": 3,
                 "op": "upsert",
                 "data": {
                     "id": 401,
@@ -440,7 +442,6 @@ def scenario_success(ws: SimpleWebSocketApp, state: WsState) -> None:
                 },
             },
             {
-                "dml_id": 4,
                 "op": "delete",
                 "data": {
                     "id": 402,
@@ -455,21 +456,33 @@ def scenario_success(ws: SimpleWebSocketApp, state: WsState) -> None:
         ],
     )
     wait_for(
-        lambda: len(state.acks_received) >= 4 or bool(state.fatal),
+        lambda: len(state.acks_received) >= 1 or bool(state.fatal),
         timeout=30,
         description="websocket success responses",
     )
     expect_no_fatal(state)
-    if sorted(state.acks_received) != [1, 2, 3, 4]:
-        raise RuntimeError(f"expected acks [1, 2, 3, 4], got {state.acks_received}")
+    if state.acks_received != [1]:
+        raise RuntimeError(f"expected ack [1], got {state.acks_received}")
+
+
+def scenario_empty_payload(ws: SimpleWebSocketApp, state: WsState) -> None:
+    send_batch(ws, 1, [])
+    wait_for(
+        lambda: len(state.acks_received) >= 1 or bool(state.fatal),
+        timeout=10,
+        description="empty payload ack",
+    )
+    expect_no_fatal(state)
+    if state.acks_received != [1]:
+        raise RuntimeError(f"expected ack [1], got {state.acks_received}")
 
 
 def scenario_multi_column_no_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
     send_batch(
         ws,
+        1,
         [
             {
-                "dml_id": 1,
                 "op": "upsert",
                 "data": {
                     "id": 601,
@@ -478,7 +491,6 @@ def scenario_multi_column_no_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
                 },
             },
             {
-                "dml_id": 2,
                 "op": "upsert",
                 "data": {
                     "id": 602,
@@ -489,21 +501,21 @@ def scenario_multi_column_no_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
         ],
     )
     wait_for(
-        lambda: len(state.acks_received) >= 2 or bool(state.fatal),
+        lambda: len(state.acks_received) >= 1 or bool(state.fatal),
         timeout=30,
         description="multi-column no-pk responses",
     )
     expect_no_fatal(state)
-    if sorted(state.acks_received) != [1, 2]:
-        raise RuntimeError(f"expected acks [1, 2], got {state.acks_received}")
+    if state.acks_received != [1]:
+        raise RuntimeError(f"expected ack [1], got {state.acks_received}")
 
 
 def scenario_single_jsonb_no_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
     send_batch(
         ws,
+        1,
         [
             {
-                "dml_id": 1,
                 "op": "upsert",
                 "data": {
                     "id": 701,
@@ -512,7 +524,6 @@ def scenario_single_jsonb_no_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
                 },
             },
             {
-                "dml_id": 2,
                 "op": "upsert",
                 "data": {
                     "id": 702,
@@ -523,21 +534,21 @@ def scenario_single_jsonb_no_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
         ],
     )
     wait_for(
-        lambda: len(state.acks_received) >= 2 or bool(state.fatal),
+        lambda: len(state.acks_received) >= 1 or bool(state.fatal),
         timeout=30,
         description="single-jsonb no-pk responses",
     )
     expect_no_fatal(state)
-    if sorted(state.acks_received) != [1, 2]:
-        raise RuntimeError(f"expected acks [1, 2], got {state.acks_received}")
+    if state.acks_received != [1]:
+        raise RuntimeError(f"expected ack [1], got {state.acks_received}")
 
 
 def scenario_delete_only_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
     send_batch(
         ws,
+        1,
         [
             {
-                "dml_id": 1,
                 "op": "upsert",
                 "data": {
                     "id": 501,
@@ -546,7 +557,6 @@ def scenario_delete_only_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
                 },
             },
             {
-                "dml_id": 2,
                 "op": "delete",
                 "data": {
                     "id": 501,
@@ -555,25 +565,20 @@ def scenario_delete_only_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
         ],
     )
     wait_for(
-        lambda: len(state.acks_received) >= 2 or bool(state.fatal),
+        lambda: len(state.acks_received) >= 1 or bool(state.fatal),
         timeout=30,
         description="delete-only-pk responses",
     )
     expect_no_fatal(state)
-    if sorted(state.acks_received) != [1, 2]:
-        raise RuntimeError(f"expected acks [1, 2], got {state.acks_received}")
+    if state.acks_received != [1]:
+        raise RuntimeError(f"expected ack [1], got {state.acks_received}")
 
 
 def scenario_error_missing_pk(ws: SimpleWebSocketApp, state: WsState) -> None:
     send_batch(
         ws,
-        [
-            {
-                "dml_id": 1,
-                "op": "upsert",
-                "data": {"customer_name": "Alice", "amount": 99.99},
-            }
-        ],
+        1,
+        [{"op": "upsert", "data": {"customer_name": "Alice", "amount": 99.99}}],
     )
     expect_fatal_and_close(state, 1, "failed to decode webhook JSON payload")
 
@@ -583,9 +588,9 @@ def scenario_error_incomplete_composite_pk_insert(
 ) -> None:
     send_batch(
         ws,
+        1,
         [
             {
-                "dml_id": 1,
                 "op": "upsert",
                 "data": {
                     "id": 1001,
@@ -603,9 +608,9 @@ def scenario_error_incomplete_composite_pk_delete(
 ) -> None:
     send_batch(
         ws,
+        1,
         [
             {
-                "dml_id": 1,
                 "op": "upsert",
                 "data": {
                     "tenant_id": 11,
@@ -625,15 +630,8 @@ def scenario_error_incomplete_composite_pk_delete(
 
     send_batch(
         ws,
-        [
-            {
-                "dml_id": 2,
-                "op": "delete",
-                "data": {
-                    "tenant_id": 11,
-                },
-            }
-        ],
+        2,
+        [{"op": "delete", "data": {"tenant_id": 11}}],
     )
     expect_fatal_and_close(state, 2, "failed to decode webhook JSON payload")
 
@@ -641,13 +639,8 @@ def scenario_error_incomplete_composite_pk_delete(
 def scenario_error_type(ws: SimpleWebSocketApp, state: WsState) -> None:
     send_batch(
         ws,
-        [
-            {
-                "dml_id": 1,
-                "op": "upsert",
-                "data": {"id": "not-an-int", "customer_name": "Bob", "amount": 77.77},
-            }
-        ],
+        1,
+        [{"op": "upsert", "data": {"id": "not-an-int", "customer_name": "Bob", "amount": 77.77}}],
     )
     expect_fatal_and_close(state, 1, "failed to decode webhook JSON payload")
 
@@ -655,7 +648,8 @@ def scenario_error_type(ws: SimpleWebSocketApp, state: WsState) -> None:
 def scenario_timestamp_milli(ws: SimpleWebSocketApp, state: WsState) -> None:
     send_batch(
         ws,
-        [{"dml_id": 1, "op": "upsert", "data": {"id": 1, "event_time": 1712800800123}}],
+        1,
+        [{"op": "upsert", "data": {"id": 1, "event_time": 1712800800123}}],
     )
     wait_for(lambda: 1 in state.acks_received or bool(state.fatal), 10, "timestamp ack")
     expect_no_fatal(state)
@@ -664,7 +658,8 @@ def scenario_timestamp_milli(ws: SimpleWebSocketApp, state: WsState) -> None:
 def scenario_time_milli(ws: SimpleWebSocketApp, state: WsState) -> None:
     send_batch(
         ws,
-        [{"dml_id": 1, "op": "upsert", "data": {"id": 1, "event_time": 3723123}}],
+        1,
+        [{"op": "upsert", "data": {"id": 1, "event_time": 3723123}}],
     )
     wait_for(lambda: 1 in state.acks_received or bool(state.fatal), 10, "time ack")
     expect_no_fatal(state)
@@ -673,7 +668,8 @@ def scenario_time_milli(ws: SimpleWebSocketApp, state: WsState) -> None:
 def scenario_bigint_precise(ws: SimpleWebSocketApp, state: WsState) -> None:
     send_batch(
         ws,
-        [{"dml_id": 1, "op": "upsert", "data": {"id": 1, "amount": "AeJA"}}],
+        1,
+        [{"op": "upsert", "data": {"id": 1, "amount": "AeJA"}}],
     )
     wait_for(lambda: 1 in state.acks_received or bool(state.fatal), 10, "bigint ack")
     expect_no_fatal(state)
@@ -684,7 +680,8 @@ def scenario_invalid_decoder_header(
 ) -> None:
     send_batch(
         ws,
-        [{"dml_id": 1, "op": "upsert", "data": {"id": 1, "customer_name": "Alice", "amount": 99.99}}],
+        1,
+        [{"op": "upsert", "data": {"id": 1, "customer_name": "Alice", "amount": 99.99}}],
     )
     wait_for(lambda: bool(state.fatal), 10, "fatal websocket response")
     if expected_fatal_substring not in state.fatal[0]:
@@ -737,6 +734,8 @@ def main() -> int:
     try:
         if args.scenario == "success":
             scenario_success(ws, state)
+        elif args.scenario == "empty_payload":
+            scenario_empty_payload(ws, state)
         elif args.scenario == "multi_column_no_pk":
             scenario_multi_column_no_pk(ws, state)
         elif args.scenario == "single_jsonb_no_pk":

@@ -190,7 +190,7 @@ impl TaskService for BatchServiceImpl {
                                 }
                             };
 
-                            let dml_id = payload.dml_id;
+                            let dml_batch_id = payload.dml_batch_id;
                             let wait_fut = Self::do_ingest_dml_payload(
                                 table_dml_handle.clone(),
                                 dml_manager.clone(),
@@ -199,17 +199,17 @@ impl TaskService for BatchServiceImpl {
                                 payload,
                             )
                             .await
-                            .map_err(|err| format!("ingest dml {} failed: {}", dml_id, err.as_report()))?;
+                            .map_err(|err| format!("ingest dml batch {} failed: {}", dml_batch_id, err.as_report()))?;
 
-                            pending_acks.push_back(async move { wait_fut.await.map(|()| dml_id) });
+                            pending_acks.push_back(async move { wait_fut.await.map(|()| dml_batch_id) });
                         }
                         ack = pending_acks.next(), if !pending_acks.is_empty() => {
-                            let ack_dml_id = ack
+                            let ack_dml_batch_id = ack
                                 .expect("branch guarded by non-empty pending_acks")
                                 .map_err(|err: DmlError| format!("ingest dml persistence failed: {}", err.as_report()))?;
 
                             if tx
-                                .send(Ok(BatchServiceImpl::ingest_dml_ack_response(ack_dml_id)))
+                                .send(Ok(BatchServiceImpl::ingest_dml_ack_response(ack_dml_batch_id)))
                                 .await
                                 .is_err()
                             {
@@ -356,10 +356,10 @@ impl BatchServiceImpl {
         }
     }
 
-    fn ingest_dml_ack_response(dml_id: u64) -> IngestDmlResponse {
+    fn ingest_dml_ack_response(dml_batch_id: u64) -> IngestDmlResponse {
         IngestDmlResponse {
             response: Some(ingest_dml_response::Response::Ack(IngestDmlAckResponse {
-                dml_id,
+                dml_batch_id,
             })),
         }
     }

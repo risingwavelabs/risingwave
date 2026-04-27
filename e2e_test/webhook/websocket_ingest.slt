@@ -156,6 +156,14 @@ select id::varchar, customer_name, product, quantity::varchar, price::varchar, s
 401 TestUser Widget 5 19.99 delivered 2026-04-15 10:00:00
 
 system ok
+python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_orders --scenario empty_payload
+
+query
+select count(*) from ws_orders;
+----
+1
+
+system ok
 python3 e2e_test/webhook/websocket_sender.py --secret TEST_WEBSOCKET --table ws_multi_column_no_pk --scenario multi_column_no_pk
 
 query TTT

@@ -15,8 +15,8 @@
 //! WebSocket-based streaming DML ingest endpoint.
 //!
 //! Clients open a `WebSocket` connection per table. The first text frame authenticates the session
-//! and later frames carry unsigned batches of upsert / delete DML messages. Each DML carries a
-//! monotonically increasing `dml_id`.
+//! and later frames carry unsigned batches of upsert / delete DML messages. Each websocket
+//! payload carries a monotonically increasing `dml_batch_id`.
 //!
 //! Wire format (JSON over text `WebSocket` frames):
 //!
@@ -27,10 +27,13 @@
 //!
 //! **Client → Server** (DML batch):
 //! ```json
-//! [
-//!   {"dml_id": 1, "op": "upsert", "data": {"id": 1, "name": "foo"}},
-//!   {"dml_id": 2, "op": "delete", "data": {"id": 1, "name": "foo"}}
-//! ]
+//! {
+//!   "dml_batch_id": 1,
+//!   "items": [
+//!     {"op": "upsert", "data": {"id": 1, "name": "foo"}},
+//!     {"op": "delete", "data": {"id": 1, "name": "foo"}}
+//!   ]
+//! }
 //! ```
 //!
 //! **Server → Client** (ack):
@@ -42,7 +45,6 @@
 //! ```json
 //! {"fatal": "DML channel closed, please reconnect"}
 //! ```
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -104,8 +106,13 @@ struct InitRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct RawDmlBatchRequest {
+    pub dml_batch_id: u64,
+    pub items: Vec<RawDmlRequest>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RawDmlRequest {
-    pub dml_id: u64,
     pub op: Option<String>,
     // `RawValue` is unsized; `Box<RawValue>` is serde's owned form that preserves the original JSON text.
     pub data: Box<RawValue>,
@@ -119,7 +126,6 @@ enum DmlOp {
 
 #[derive(Debug)]
 pub struct DmlRequest {
-    pub dml_id: u64,
     op: DmlOp,
     data: Box<RawValue>,
 }
@@ -139,11 +145,7 @@ impl TryFrom<RawDmlRequest> for DmlRequest {
             }
         };
 
-        Ok(Self {
-            dml_id: raw.dml_id,
-            op,
-            data: raw.data,
-        })
+        Ok(Self { op, data: raw.data })
     }
 }
 
@@ -156,8 +158,8 @@ pub enum ServerMessage {
 
 #[derive(Debug)]
 struct PreparedDmlBatch {
-    payload: Option<IngestDmlPayloadRequest>,
-    ack_dml_ids: Vec<u64>,
+    dml_batch_id: u64,
+    payload: IngestDmlPayloadRequest,
 }
 
 type WsTx = futures::stream::SplitSink<WebSocket, Message>;
@@ -300,11 +302,45 @@ async fn try_handle_connection(
         }
     }
 
-    let mut pending_ack_batches = HashMap::<u64, Vec<u64>>::new();
-    let mut last_seen_dml_id = 0_u64;
+    let mut last_seen_dml_batch_id = 0_u64;
+    let mut last_forwarded_dml_batch_id = 0_u64;
+    let mut last_acked_dml_batch_id = 0_u64;
 
     loop {
         tokio::select! {
+            biased;
+            ingest_resp = ingest_resp_stream.message() => {
+                match ingest_resp {
+                    Ok(Some(resp)) => match resp.response {
+                        Some(ingest_dml_response::Response::Ack(ack)) => {
+                            if ack.dml_batch_id <= last_acked_dml_batch_id
+                                || ack.dml_batch_id > last_forwarded_dml_batch_id
+                            {
+                                return Err(format!(
+                                    "unexpected ack for dml_batch_id {}",
+                                    ack.dml_batch_id
+                                ));
+                            }
+                            last_acked_dml_batch_id = ack.dml_batch_id;
+                            send_server_message(
+                                ws_tx,
+                                ServerMessage::Ack {
+                                    ack: ack.dml_batch_id,
+                                },
+                            )
+                            .await
+                            .map_err(|_| "websocket connection closed while sending ack".to_owned())?;
+                        }
+                        Some(ingest_dml_response::Response::Init(_)) => {
+                            return Err("unexpected extra init response from ingest stream".to_owned());
+                        }
+                        None => return Err("empty response from ingest stream".to_owned()),
+                    },
+                    Ok(None) => return Err("ingest stream closed".to_owned()),
+                    Err(e) => return Err(format!("ingest stream error: {}", e.as_report())),
+                }
+            }
+
             ws_msg = ws_rx.next() => {
                 let text = match ws_msg {
                     Some(Ok(Message::Text(text))) => text,
@@ -318,64 +354,47 @@ async fn try_handle_connection(
                     }
                 };
 
-                let raw_dml_reqs = match serde_json::from_str::<Vec<RawDmlRequest>>(&text) {
-                    Ok(reqs) if !reqs.is_empty() => reqs,
-                    Ok(_) => return Err("payload must contain at least one DML request".to_owned()),
+                let raw_dml_batch = match serde_json::from_str::<RawDmlBatchRequest>(&text) {
+                    Ok(batch) => batch,
                     Err(e) => return Err(format!("malformed payload: {}", e.as_report())),
                 };
 
-                last_seen_dml_id = validate_monotonic_dml_ids(&raw_dml_reqs, last_seen_dml_id)?;
+                last_seen_dml_batch_id = validate_monotonic_dml_batch_id(
+                    raw_dml_batch.dml_batch_id,
+                    last_seen_dml_batch_id,
+                )?;
 
-                let prepared_batch = match prepare_dml_batch_payload(
+                if raw_dml_batch.items.is_empty() {
+                    send_server_message(
+                        ws_tx,
+                        ServerMessage::Ack {
+                            ack: raw_dml_batch.dml_batch_id,
+                        },
+                    )
+                    .await
+                    .map_err(|_| "websocket connection closed while sending ack".to_owned())?;
+                    continue;
+                }
+
+                let prepared_batch = prepare_dml_batch_payload(
                     &headers,
-                    raw_dml_reqs,
+                    raw_dml_batch,
                     &payload_schema,
-                ) {
-                    Ok(batch) => batch,
-                    Err(e) => {
-                        return Err(format!("failed to prepare DML batch: {e}"));
-                    }
-                };
+                )
+                .map_err(|e| format!("failed to prepare DML batch: {e}"))?;
 
-                let PreparedDmlBatch { payload, ack_dml_ids } = prepared_batch;
+                let PreparedDmlBatch {
+                    dml_batch_id,
+                    payload,
+                } = prepared_batch;
 
-                if let Some(payload) = payload {
-                    let batch_dml_id = payload.dml_id;
-                    if ingest_req_tx
-                        .send(IngestDmlRequest {
-                            request: Some(ingest_dml_request::Request::Payload(payload)),
-                        })
-                        .await
-                        .is_err()
-                    {
-                        return Err("ingest stream request channel closed".to_owned());
-                    }
-                    pending_ack_batches.insert(batch_dml_id, ack_dml_ids);
-                }
-            }
-
-            ingest_resp = ingest_resp_stream.message() => {
-                match ingest_resp {
-                    Ok(Some(resp)) => match resp.response {
-                        Some(ingest_dml_response::Response::Ack(ack)) => {
-                            let Some(batch_dml_ids) = pending_ack_batches.remove(&ack.dml_id) else {
-                                return Err(format!("unexpected ack for dml_id {}", ack.dml_id));
-                            };
-
-                            for dml_id in batch_dml_ids {
-                                if send_server_message(ws_tx, ServerMessage::Ack { ack: dml_id }).await.is_err() {
-                                    return Ok(());
-                                }
-                            }
-                        }
-                        Some(ingest_dml_response::Response::Init(_)) => {
-                            return Err("unexpected extra init response from ingest stream".to_owned());
-                        }
-                        None => return Err("empty response from ingest stream".to_owned()),
-                    },
-                    Ok(None) => return Err("ingest stream closed".to_owned()),
-                    Err(e) => return Err(format!("ingest stream error: {}", e.as_report())),
-                }
+                ingest_req_tx
+                    .send(IngestDmlRequest {
+                        request: Some(ingest_dml_request::Request::Payload(payload)),
+                    })
+                    .await
+                    .map_err(|_| "ingest stream request channel closed".to_owned())?;
+                last_forwarded_dml_batch_id = dml_batch_id;
             }
         }
     }
@@ -422,28 +441,27 @@ fn validate_timestamp_skew(timestamp_ms: i64, max_clock_skew_ms: u64) -> Result<
     Ok(())
 }
 
-fn validate_monotonic_dml_ids(
-    raw_dml_reqs: &[RawDmlRequest],
-    last_seen_dml_id: u64,
+fn validate_monotonic_dml_batch_id(
+    dml_batch_id: u64,
+    last_seen_dml_batch_id: u64,
 ) -> Result<u64, String> {
-    let mut current = last_seen_dml_id;
-    for raw_dml_req in raw_dml_reqs {
-        if raw_dml_req.dml_id <= current {
-            return Err(format!(
-                "dml_id must increase monotonically: received {} after {}",
-                raw_dml_req.dml_id, current
-            ));
-        }
-        current = raw_dml_req.dml_id;
+    if dml_batch_id <= last_seen_dml_batch_id {
+        return Err(format!(
+            "dml_batch_id must increase monotonically: received {} after {}",
+            dml_batch_id, last_seen_dml_batch_id
+        ));
     }
-    Ok(current)
+    Ok(dml_batch_id)
 }
 
 fn prepare_dml_batch_payload(
     headers: &HeaderMap,
-    raw_dml_reqs: Vec<RawDmlRequest>,
+    raw_dml_batch: RawDmlBatchRequest,
     payload_schema: &PayloadSchema,
 ) -> Result<PreparedDmlBatch, String> {
+    let dml_batch_id = raw_dml_batch.dml_batch_id;
+    let raw_dml_reqs = raw_dml_batch.items;
+
     match payload_schema {
         PayloadSchema::SingleJsonb => {
             let mut chunk_builder = DataChunkBuilder::new(
@@ -451,17 +469,19 @@ fn prepare_dml_batch_payload(
                 raw_dml_reqs.len().saturating_add(1).max(1),
             );
             let mut ops = Vec::with_capacity(raw_dml_reqs.len());
-            let mut ack_dml_ids = Vec::with_capacity(raw_dml_reqs.len());
 
-            for raw_dml_req in raw_dml_reqs {
-                let dml_id = raw_dml_req.dml_id;
+            for (index, raw_dml_req) in raw_dml_reqs.into_iter().enumerate() {
+                let item_index = index + 1;
                 let dml_req = DmlRequest::try_from(raw_dml_req)
-                    .map_err(|e| format!("dml_id {dml_id}: {e}"))?;
+                    .map_err(|e| format!("dml_batch_id {dml_batch_id} item {item_index}: {e}"))?;
 
                 let row = Value::from_text(dml_req.data.get().as_bytes())
                     .map(|json_value| OwnedRow::new(vec![Some(JsonbVal::from(json_value).into())]))
                     .map_err(|e| {
-                        format!("dml_id {dml_id}: Failed to parse body: {}", e.as_report())
+                        format!(
+                            "dml_batch_id {dml_batch_id} item {item_index}: Failed to parse body: {}",
+                            e.as_report()
+                        )
                     })?;
 
                 let output = chunk_builder.append_one_row(row);
@@ -470,25 +490,20 @@ fn prepare_dml_batch_payload(
                     DmlOp::Upsert => Op::Insert,
                     DmlOp::Delete => Op::Delete,
                 });
-                ack_dml_ids.push(dml_req.dml_id);
             }
 
-            let payload = if ack_dml_ids.is_empty() {
-                None
-            } else {
-                let data_chunk = chunk_builder
-                    .consume_all()
-                    .expect("buffered rows should produce a chunk");
-                let chunk = StreamChunk::from_parts(ops, data_chunk);
-                Some(IngestDmlPayloadRequest {
-                    dml_id: *ack_dml_ids.last().expect("checked above"),
-                    chunk: Some(chunk.to_protobuf()),
-                })
+            let data_chunk = chunk_builder
+                .consume_all()
+                .expect("buffered rows should produce a chunk");
+            let chunk = StreamChunk::from_parts(ops, data_chunk);
+            let payload = IngestDmlPayloadRequest {
+                dml_batch_id,
+                chunk: Some(chunk.to_protobuf()),
             };
 
             Ok(PreparedDmlBatch {
+                dml_batch_id,
                 payload,
-                ack_dml_ids,
             })
         }
         PayloadSchema::FullSchema { columns } => {
@@ -502,19 +517,23 @@ fn prepare_dml_batch_payload(
                 raw_dml_reqs.len().saturating_add(1).max(1),
             );
             let mut ops = Vec::with_capacity(raw_dml_reqs.len());
-            let mut ack_dml_ids = Vec::with_capacity(raw_dml_reqs.len());
 
-            for raw_dml_req in raw_dml_reqs {
-                let dml_id = raw_dml_req.dml_id;
+            for (index, raw_dml_req) in raw_dml_reqs.into_iter().enumerate() {
+                let item_index = index + 1;
                 let dml_req = DmlRequest::try_from(raw_dml_req)
-                    .map_err(|e| format!("dml_id {dml_id}: {e}"))?;
+                    .map_err(|e| format!("dml_batch_id {dml_batch_id} item {item_index}: {e}"))?;
 
                 let row = owned_row_from_payload_row(
                     &mut access_builder,
                     columns,
                     dml_req.data.get().as_bytes(),
                 )
-                .map_err(|e| format!("dml_id {dml_id}: {}", e.as_report()))?;
+                .map_err(|e| {
+                    format!(
+                        "dml_batch_id {dml_batch_id} item {item_index}: {}",
+                        e.as_report()
+                    )
+                })?;
 
                 let output = chunk_builder.append_one_row(row);
                 debug_assert!(output.is_none());
@@ -522,25 +541,20 @@ fn prepare_dml_batch_payload(
                     DmlOp::Upsert => Op::Insert,
                     DmlOp::Delete => Op::Delete,
                 });
-                ack_dml_ids.push(dml_req.dml_id);
             }
 
-            let payload = if ack_dml_ids.is_empty() {
-                None
-            } else {
-                let data_chunk = chunk_builder
-                    .consume_all()
-                    .expect("buffered rows should produce a chunk");
-                let chunk = StreamChunk::from_parts(ops, data_chunk);
-                Some(IngestDmlPayloadRequest {
-                    dml_id: *ack_dml_ids.last().expect("checked above"),
-                    chunk: Some(chunk.to_protobuf()),
-                })
+            let data_chunk = chunk_builder
+                .consume_all()
+                .expect("buffered rows should produce a chunk");
+            let chunk = StreamChunk::from_parts(ops, data_chunk);
+            let payload = IngestDmlPayloadRequest {
+                dml_batch_id,
+                chunk: Some(chunk.to_protobuf()),
             };
 
             Ok(PreparedDmlBatch {
+                dml_batch_id,
                 payload,
-                ack_dml_ids,
             })
         }
     }
@@ -581,6 +595,20 @@ mod tests {
         serde_json::from_str(text).unwrap()
     }
 
+    fn raw_req(op: Option<&str>, data: &str) -> RawDmlRequest {
+        RawDmlRequest {
+            op: op.map(str::to_owned),
+            data: raw_json(data),
+        }
+    }
+
+    fn raw_batch(dml_batch_id: u64, items: Vec<RawDmlRequest>) -> RawDmlBatchRequest {
+        RawDmlBatchRequest {
+            dml_batch_id,
+            items,
+        }
+    }
+
     fn test_columns(columns: &[(&str, DataType, bool)]) -> Vec<WebhookTableColumnDesc> {
         columns
             .iter()
@@ -593,38 +621,14 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_monotonic_dml_ids() {
-        let reqs = vec![
-            RawDmlRequest {
-                dml_id: 3,
-                op: Some("upsert".to_owned()),
-                data: raw_json("{}"),
-            },
-            RawDmlRequest {
-                dml_id: 5,
-                op: Some("delete".to_owned()),
-                data: raw_json("{}"),
-            },
-        ];
-        assert_eq!(validate_monotonic_dml_ids(&reqs, 1).unwrap(), 5);
+    fn test_validate_monotonic_dml_batch_id() {
+        assert_eq!(validate_monotonic_dml_batch_id(5, 1).unwrap(), 5);
     }
 
     #[test]
-    fn test_validate_monotonic_dml_ids_rejects_non_monotonic_sequence() {
-        let reqs = vec![
-            RawDmlRequest {
-                dml_id: 3,
-                op: Some("upsert".to_owned()),
-                data: raw_json("{}"),
-            },
-            RawDmlRequest {
-                dml_id: 3,
-                op: Some("delete".to_owned()),
-                data: raw_json("{}"),
-            },
-        ];
-        let err = validate_monotonic_dml_ids(&reqs, 1).unwrap_err();
-        assert!(err.contains("dml_id must increase monotonically"));
+    fn test_validate_monotonic_dml_batch_id_rejects_non_monotonic_sequence() {
+        let err = validate_monotonic_dml_batch_id(3, 3).unwrap_err();
+        assert!(err.contains("dml_batch_id must increase monotonically"));
     }
 
     #[test]
@@ -651,33 +655,35 @@ mod tests {
 
     #[test]
     fn test_dml_request_requires_op() {
-        let err = DmlRequest::try_from(RawDmlRequest {
-            dml_id: 1,
-            op: None,
-            data: raw_json(r#"{"id":1}"#),
-        })
-        .unwrap_err();
+        let err = DmlRequest::try_from(raw_req(None, r#"{"id":1}"#)).unwrap_err();
         assert_eq!(err, "missing op, expected upsert/delete");
     }
 
     #[test]
+    fn test_empty_batch_is_valid_json_protocol_input() {
+        let raw_dml_batch = raw_batch(42, vec![]);
+        assert_eq!(
+            validate_monotonic_dml_batch_id(raw_dml_batch.dml_batch_id, 41).unwrap(),
+            42
+        );
+        assert!(raw_dml_batch.items.is_empty());
+    }
+
+    #[test]
     fn test_prepare_dml_batch_payload_builds_single_chunk_for_batch() {
-        let raw_dml_reqs = vec![
-            RawDmlRequest {
-                dml_id: 1,
-                op: Some("upsert".to_owned()),
-                data: raw_json(
+        let raw_dml_batch = raw_batch(
+            10,
+            vec![
+                raw_req(
+                    Some("upsert"),
                     r#"{"id":1,"price":"19.99","created_at":"2026-04-15 10:00:00","name":"alice"}"#,
                 ),
-            },
-            RawDmlRequest {
-                dml_id: 2,
-                op: Some("delete".to_owned()),
-                data: raw_json(
+                raw_req(
+                    Some("delete"),
                     r#"{"id":2,"price":"29.99","created_at":"2026-04-16 10:00:00","name":"bob"}"#,
                 ),
-            },
-        ];
+            ],
+        );
         let payload_schema = PayloadSchema::FullSchema {
             columns: test_columns(&[
                 ("id", DataType::Int32, true),
@@ -688,12 +694,12 @@ mod tests {
         };
 
         let prepared_batch =
-            prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_reqs, &payload_schema).unwrap();
+            prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_batch, &payload_schema).unwrap();
 
-        assert_eq!(prepared_batch.ack_dml_ids, vec![1, 2]);
+        assert_eq!(prepared_batch.dml_batch_id, 10);
 
-        let payload = prepared_batch.payload.expect("payload should be present");
-        assert_eq!(payload.dml_id, 2);
+        let payload = prepared_batch.payload;
+        assert_eq!(payload.dml_batch_id, 10);
         let chunk = StreamChunk::from_protobuf(payload.chunk.as_ref().unwrap()).unwrap();
 
         assert_eq!(chunk.ops(), &[Op::Insert, Op::Delete]);
@@ -718,19 +724,14 @@ mod tests {
     }
 
     #[test]
-    fn test_prepare_dml_batch_payload_returns_first_dml_error() {
-        let raw_dml_reqs = vec![
-            RawDmlRequest {
-                dml_id: 2,
-                op: Some("delete".to_owned()),
-                data: raw_json(r#"{"id":1,"name":"alice"}"#),
-            },
-            RawDmlRequest {
-                dml_id: 3,
-                op: Some("upsert".to_owned()),
-                data: raw_json(r#"{"name":"bob"}"#),
-            },
-        ];
+    fn test_prepare_dml_batch_payload_returns_first_item_error() {
+        let raw_dml_batch = raw_batch(
+            11,
+            vec![
+                raw_req(Some("delete"), r#"{"id":1,"name":"alice"}"#),
+                raw_req(Some("upsert"), r#"{"name":"bob"}"#),
+            ],
+        );
         let payload_schema = PayloadSchema::FullSchema {
             columns: test_columns(&[
                 ("id", DataType::Int32, true),
@@ -738,27 +739,22 @@ mod tests {
             ]),
         };
 
-        let err = prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_reqs, &payload_schema)
+        let err = prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_batch, &payload_schema)
             .unwrap_err();
 
-        assert!(err.contains("dml_id 3"));
+        assert!(err.contains("dml_batch_id 11 item 2"));
         assert!(err.contains("failed to decode webhook JSON payload"));
     }
 
     #[test]
     fn test_prepare_dml_batch_payload_allows_delete_with_only_pk() {
-        let raw_dml_reqs = vec![
-            RawDmlRequest {
-                dml_id: 1,
-                op: Some("upsert".to_owned()),
-                data: raw_json(r#"{"id":7,"name":"alice"}"#),
-            },
-            RawDmlRequest {
-                dml_id: 2,
-                op: Some("delete".to_owned()),
-                data: raw_json(r#"{"id":7}"#),
-            },
-        ];
+        let raw_dml_batch = raw_batch(
+            12,
+            vec![
+                raw_req(Some("upsert"), r#"{"id":7,"name":"alice"}"#),
+                raw_req(Some("delete"), r#"{"id":7}"#),
+            ],
+        );
         let payload_schema = PayloadSchema::FullSchema {
             columns: test_columns(&[
                 ("id", DataType::Int32, true),
@@ -767,12 +763,11 @@ mod tests {
         };
 
         let prepared_batch =
-            prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_reqs, &payload_schema).unwrap();
+            prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_batch, &payload_schema).unwrap();
         let chunk =
-            StreamChunk::from_protobuf(prepared_batch.payload.unwrap().chunk.as_ref().unwrap())
-                .unwrap();
+            StreamChunk::from_protobuf(prepared_batch.payload.chunk.as_ref().unwrap()).unwrap();
 
-        assert_eq!(prepared_batch.ack_dml_ids, vec![1, 2]);
+        assert_eq!(prepared_batch.dml_batch_id, 12);
         assert_eq!(chunk.ops(), &[Op::Insert, Op::Delete]);
         let mut rows = chunk.rows();
         assert_eq!(
@@ -784,11 +779,10 @@ mod tests {
 
     #[test]
     fn test_prepare_dml_batch_payload_rejects_incomplete_composite_pk_insert() {
-        let raw_dml_reqs = vec![RawDmlRequest {
-            dml_id: 51,
-            op: Some("upsert".to_owned()),
-            data: raw_json(r#"{"id":1,"name":"alice"}"#),
-        }];
+        let raw_dml_batch = raw_batch(
+            51,
+            vec![raw_req(Some("upsert"), r#"{"id":1,"name":"alice"}"#)],
+        );
         let payload_schema = PayloadSchema::FullSchema {
             columns: test_columns(&[
                 ("tenant_id", DataType::Int32, true),
@@ -797,20 +791,16 @@ mod tests {
             ]),
         };
 
-        let err = prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_reqs, &payload_schema)
+        let err = prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_batch, &payload_schema)
             .unwrap_err();
 
-        assert!(err.contains("dml_id 51"));
+        assert!(err.contains("dml_batch_id 51 item 1"));
         assert!(err.contains("failed to decode webhook JSON payload"));
     }
 
     #[test]
     fn test_prepare_dml_batch_payload_rejects_incomplete_composite_pk_delete() {
-        let raw_dml_reqs = vec![RawDmlRequest {
-            dml_id: 52,
-            op: Some("delete".to_owned()),
-            data: raw_json(r#"{"tenant_id":1}"#),
-        }];
+        let raw_dml_batch = raw_batch(52, vec![raw_req(Some("delete"), r#"{"tenant_id":1}"#)]);
         let payload_schema = PayloadSchema::FullSchema {
             columns: test_columns(&[
                 ("tenant_id", DataType::Int32, true),
@@ -819,10 +809,10 @@ mod tests {
             ]),
         };
 
-        let err = prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_reqs, &payload_schema)
+        let err = prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_batch, &payload_schema)
             .unwrap_err();
 
-        assert!(err.contains("dml_id 52"));
+        assert!(err.contains("dml_batch_id 52 item 1"));
         assert!(err.contains("failed to decode webhook JSON payload"));
     }
 
@@ -850,23 +840,19 @@ mod tests {
         };
         let prepared_timestamp_batch = prepare_dml_batch_payload(
             &headers,
-            vec![RawDmlRequest {
-                dml_id: 11,
-                op: Some("upsert".to_owned()),
-                data: raw_json(r#"{"id":1,"event_time":1712800800123}"#),
-            }],
+            raw_batch(
+                13,
+                vec![raw_req(
+                    Some("upsert"),
+                    r#"{"id":1,"event_time":1712800800123}"#,
+                )],
+            ),
             &payload_schema,
         )
         .unwrap();
-        let timestamp_chunk = StreamChunk::from_protobuf(
-            prepared_timestamp_batch
-                .payload
-                .unwrap()
-                .chunk
-                .as_ref()
-                .unwrap(),
-        )
-        .unwrap();
+        let timestamp_chunk =
+            StreamChunk::from_protobuf(prepared_timestamp_batch.payload.chunk.as_ref().unwrap())
+                .unwrap();
         assert!(matches!(
             timestamp_chunk
                 .rows()
@@ -886,18 +872,16 @@ mod tests {
         };
         let prepared_time_batch = prepare_dml_batch_payload(
             &headers,
-            vec![RawDmlRequest {
-                dml_id: 12,
-                op: Some("upsert".to_owned()),
-                data: raw_json(r#"{"id":2,"event_time":3723123}"#),
-            }],
+            raw_batch(
+                14,
+                vec![raw_req(Some("upsert"), r#"{"id":2,"event_time":3723123}"#)],
+            ),
             &payload_schema,
         )
         .unwrap();
-        let time_chunk = StreamChunk::from_protobuf(
-            prepared_time_batch.payload.unwrap().chunk.as_ref().unwrap(),
-        )
-        .unwrap();
+        let time_chunk =
+            StreamChunk::from_protobuf(prepared_time_batch.payload.chunk.as_ref().unwrap())
+                .unwrap();
         assert!(matches!(
             time_chunk
                 .rows()
@@ -917,23 +901,16 @@ mod tests {
         };
         let prepared_decimal_batch = prepare_dml_batch_payload(
             &headers,
-            vec![RawDmlRequest {
-                dml_id: 13,
-                op: Some("upsert".to_owned()),
-                data: raw_json(r#"{"id":3,"amount":"AeJA"}"#),
-            }],
+            raw_batch(
+                15,
+                vec![raw_req(Some("upsert"), r#"{"id":3,"amount":"AeJA"}"#)],
+            ),
             &payload_schema,
         )
         .unwrap();
-        let decimal_chunk = StreamChunk::from_protobuf(
-            prepared_decimal_batch
-                .payload
-                .unwrap()
-                .chunk
-                .as_ref()
-                .unwrap(),
-        )
-        .unwrap();
+        let decimal_chunk =
+            StreamChunk::from_protobuf(prepared_decimal_batch.payload.chunk.as_ref().unwrap())
+                .unwrap();
         assert!(matches!(
             decimal_chunk
                 .rows()
@@ -977,11 +954,10 @@ mod tests {
         ] {
             let mut headers = HeaderMap::new();
             headers.insert(header, HeaderValue::from_static(value));
-            let raw_dml_reqs = vec![RawDmlRequest {
-                dml_id: 21,
-                op: Some("upsert".to_owned()),
-                data: raw_json(r#"{"id":1,"name":"alice"}"#),
-            }];
+            let raw_dml_batch = raw_batch(
+                21,
+                vec![raw_req(Some("upsert"), r#"{"id":1,"name":"alice"}"#)],
+            );
             let payload_schema = PayloadSchema::FullSchema {
                 columns: test_columns(&[
                     ("id", DataType::Int32, true),
@@ -990,25 +966,20 @@ mod tests {
             };
 
             let err =
-                prepare_dml_batch_payload(&headers, raw_dml_reqs, &payload_schema).unwrap_err();
+                prepare_dml_batch_payload(&headers, raw_dml_batch, &payload_schema).unwrap_err();
             assert!(err.contains(expected), "{header}");
         }
     }
 
     #[test]
-    fn test_prepare_dml_batch_payload_returns_first_type_error_with_dml_id() {
-        let raw_dml_reqs = vec![
-            RawDmlRequest {
-                dml_id: 31,
-                op: Some("upsert".to_owned()),
-                data: raw_json(r#"{"id":1,"name":"alice"}"#),
-            },
-            RawDmlRequest {
-                dml_id: 32,
-                op: Some("upsert".to_owned()),
-                data: raw_json(r#"{"id":"not-an-int","name":"bob"}"#),
-            },
-        ];
+    fn test_prepare_dml_batch_payload_returns_first_type_error_with_item_index() {
+        let raw_dml_batch = raw_batch(
+            31,
+            vec![
+                raw_req(Some("upsert"), r#"{"id":1,"name":"alice"}"#),
+                raw_req(Some("upsert"), r#"{"id":"not-an-int","name":"bob"}"#),
+            ],
+        );
         let payload_schema = PayloadSchema::FullSchema {
             columns: test_columns(&[
                 ("id", DataType::Int32, true),
@@ -1016,28 +987,28 @@ mod tests {
             ]),
         };
 
-        let err = prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_reqs, &payload_schema)
+        let err = prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_batch, &payload_schema)
             .unwrap_err();
 
-        assert!(err.contains("dml_id 32"));
+        assert!(err.contains("dml_batch_id 31 item 2"));
         assert!(err.contains("failed to decode webhook JSON payload"));
     }
 
     #[test]
     fn test_prepare_dml_batch_payload_single_jsonb_accepts_scalar_json() {
-        let raw_dml_reqs = vec![RawDmlRequest {
-            dml_id: 41,
-            op: Some("upsert".to_owned()),
-            data: raw_json("123"),
-        }];
+        let raw_dml_batch = raw_batch(41, vec![raw_req(Some("upsert"), "123")]);
 
-        let prepared_batch =
-            prepare_dml_batch_payload(&HeaderMap::new(), raw_dml_reqs, &PayloadSchema::SingleJsonb)
-                .unwrap();
-        let payload = prepared_batch.payload.expect("payload should be present");
+        let prepared_batch = prepare_dml_batch_payload(
+            &HeaderMap::new(),
+            raw_dml_batch,
+            &PayloadSchema::SingleJsonb,
+        )
+        .unwrap();
+        let payload = prepared_batch.payload;
         let chunk = StreamChunk::from_protobuf(payload.chunk.as_ref().unwrap()).unwrap();
 
-        assert_eq!(prepared_batch.ack_dml_ids, vec![41]);
+        assert_eq!(prepared_batch.dml_batch_id, 41);
+        assert_eq!(payload.dml_batch_id, 41);
         assert_eq!(chunk.ops(), &[Op::Insert]);
         assert!(matches!(
             chunk.rows().next().unwrap().1.datum_at(0).to_owned_datum(),

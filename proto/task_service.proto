@@ -104,8 +104,9 @@ message IngestDmlInitRequest {
 }
 
 message IngestDmlPayloadRequest {
-  uint64 dml_id = 1;
-  // A StreamChunk carrying the logical upsert / delete payload.
+  // Monotonically increasing per websocket payload.
+  uint64 dml_batch_id = 1;
+  // A StreamChunk carrying the logical upsert / delete payload for a single websocket batch.
   data.StreamChunk chunk = 2;
 }
 
@@ -119,7 +120,7 @@ message IngestDmlRequest {
 message IngestDmlInitResponse {}
 
 message IngestDmlAckResponse {
-  uint64 dml_id = 1;
+  uint64 dml_batch_id = 1;
 }
 
 message IngestDmlResponse {
