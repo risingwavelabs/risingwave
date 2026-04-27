@@ -34,6 +34,10 @@ pub struct FrontendConfig {
     /// Host-based authentication configuration
     #[serde(default = "HbaConfig::default")]
     pub hba_config: HbaConfig,
+
+    /// Maximum allowed clock skew in milliseconds for `WebSocket` ingest init authentication.
+    #[serde(default = "default::frontend::webhook_auth_max_clock_skew_ms")]
+    pub webhook_auth_max_clock_skew_ms: u64,
 }
 
 pub mod default {
@@ -49,6 +53,10 @@ pub mod default {
 
         pub fn max_single_query_size_bytes() -> u64 {
             1024 * 1024 * 1024
+        }
+
+        pub fn webhook_auth_max_clock_skew_ms() -> u64 {
+            300_000
         }
     }
 }

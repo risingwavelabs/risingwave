@@ -22,6 +22,21 @@ use risingwave_pb::task_service::FastInsertRequest;
 
 use crate::error::{BatchError, Result};
 
+pub(crate) fn inject_optional_row_id_column(
+    chunk: StreamChunk,
+    row_id_index: Option<usize>,
+) -> StreamChunk {
+    let Some(row_id_index) = row_id_index else {
+        return chunk;
+    };
+
+    let cap = chunk.data_chunk().capacity();
+    let (ops, mut columns, vis) = chunk.into_inner();
+    let row_id_col = SerialArray::from_iter(std::iter::repeat_n(None, cap));
+    columns.insert(row_id_index, Arc::new(row_id_col.into()));
+    StreamChunk::with_visibility(ops, columns, vis)
+}
+
 /// A fast insert executor spacially designed for non-pgwire inserts such as websockets and webhooks.
 pub struct FastInsertExecutor {
     /// Target table id.
@@ -94,17 +109,10 @@ impl FastInsertExecutor {
         // Transform the data chunk to a stream chunk, then write to the source.
         // Return the returning chunk.
         let write_txn_data = |chunk: DataChunk| async {
-            let cap = chunk.capacity();
-            let (mut columns, vis) = chunk.into_parts();
-
-            // If the user does not specify the primary key, then we need to add a column as the
-            // primary key.
-            if let Some(row_id_index) = self.row_id_index {
-                let row_id_col = SerialArray::from_iter(std::iter::repeat_n(None, cap));
-                columns.insert(row_id_index, Arc::new(row_id_col.into()))
-            }
-
-            let stream_chunk = StreamChunk::with_visibility(vec![Op::Insert; cap], columns, vis);
+            let stream_chunk = inject_optional_row_id_column(
+                StreamChunk::from_parts(vec![Op::Insert; chunk.capacity()], chunk),
+                self.row_id_index,
+            );
 
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);

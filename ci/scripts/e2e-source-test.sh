@@ -214,8 +214,8 @@ echo "--- cluster killed "
 echo "--- starting risingwave cluster for webhook source test"
 risedev ci-start ci-1cn-1fe-with-recovery
 sleep 5
-# check results
-risedev slt "e2e_test/webhook/webhook_source.slt"
+risedev slt 'e2e_test/webhook/webhook_source.slt'
+risedev slt 'e2e_test/webhook/websocket_ingest.slt'
 
 risedev kill
 
