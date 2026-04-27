@@ -51,6 +51,79 @@ impl Debug for ChronoPattern {
 }
 
 impl ChronoPattern {
+    const ERA_DOTTED_LOWER_PLACEHOLDER: &str = "__RW_TO_CHAR_ERA_DOTTED_LOWER__";
+    const ERA_DOTTED_UPPER_PLACEHOLDER: &str = "__RW_TO_CHAR_ERA_DOTTED_UPPER__";
+    const ERA_LOWER_PLACEHOLDER: &str = "__RW_TO_CHAR_ERA_LOWER__";
+    const ERA_UPPER_PLACEHOLDER: &str = "__RW_TO_CHAR_ERA_UPPER__";
+    const FULL_YEAR_PLACEHOLDER: &str = "__RW_TO_CHAR_FULL_YEAR__";
+    const YEAR_MOD_100_PLACEHOLDER: &str = "__RW_TO_CHAR_YEAR_MOD_100__";
+
+    pub fn compile_for_timestamp(tmpl: &str) -> ChronoPattern {
+        // mapping from pg pattern to chrono pattern
+        // pg pattern: https://www.postgresql.org/docs/current/functions-formatting.html
+        // chrono pattern: https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+        const PATTERNS: &[(&str, &str)] = &[
+            ("HH24", "%H"),
+            ("hh24", "%H"),
+            ("HH12", "%I"),
+            ("hh12", "%I"),
+            ("HH", "%I"),
+            ("hh", "%I"),
+            ("AM", "%p"),
+            ("PM", "%p"),
+            ("am", "%P"),
+            ("pm", "%P"),
+            ("MI", "%M"),
+            ("mi", "%M"),
+            ("SS", "%S"),
+            ("ss", "%S"),
+            ("YYYY", ChronoPattern::FULL_YEAR_PLACEHOLDER),
+            ("yyyy", ChronoPattern::FULL_YEAR_PLACEHOLDER),
+            ("YY", ChronoPattern::YEAR_MOD_100_PLACEHOLDER),
+            ("yy", ChronoPattern::YEAR_MOD_100_PLACEHOLDER),
+            ("IYYY", "%G"),
+            ("iyyy", "%G"),
+            ("IY", "%g"),
+            ("iy", "%g"),
+            ("MM", "%m"),
+            ("mm", "%m"),
+            ("Month", "%B"),
+            ("Mon", "%b"),
+            ("DD", "%d"),
+            ("dd", "%d"),
+            ("A.D.", ChronoPattern::ERA_DOTTED_UPPER_PLACEHOLDER),
+            ("B.C.", ChronoPattern::ERA_DOTTED_UPPER_PLACEHOLDER),
+            ("a.d.", ChronoPattern::ERA_DOTTED_LOWER_PLACEHOLDER),
+            ("b.c.", ChronoPattern::ERA_DOTTED_LOWER_PLACEHOLDER),
+            ("AD", ChronoPattern::ERA_UPPER_PLACEHOLDER),
+            ("BC", ChronoPattern::ERA_UPPER_PLACEHOLDER),
+            ("ad", ChronoPattern::ERA_LOWER_PLACEHOLDER),
+            ("bc", ChronoPattern::ERA_LOWER_PLACEHOLDER),
+            ("NS", "%9f"),
+            ("ns", "%9f"),
+            ("US", "%6f"),
+            ("us", "%6f"),
+            ("MS", "%3f"),
+            ("ms", "%3f"),
+            ("TZH:TZM", "%:z"),
+            ("tzh:tzm", "%:z"),
+            ("TZHTZM", "%z"),
+            ("tzhtzm", "%z"),
+            ("TZH", "%#z"),
+            ("tzh", "%#z"),
+        ];
+        // build an Aho-Corasick automaton for fast matching
+        static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
+            AhoCorasickBuilder::new()
+                .ascii_case_insensitive(false)
+                .match_kind(aho_corasick::MatchKind::LeftmostLongest)
+                .build(PATTERNS.iter().map(|(k, _)| k))
+                .expect("failed to build an Aho-Corasick automaton")
+        });
+
+        ChronoPattern::compile_inner(tmpl, PATTERNS, &AC)
+    }
+
     /// Compile the pg pattern to chrono pattern.
     // TODO: Chrono can not fully support the pg format, so consider using other implementations
     // later.
@@ -187,11 +260,12 @@ impl ChronoPattern {
 
 #[function(
     "to_char(timestamp, varchar) -> varchar",
-    prebuild = "ChronoPattern::compile($1)"
+    prebuild = "ChronoPattern::compile_for_timestamp($1)"
 )]
 fn timestamp_to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl std::fmt::Write) {
     let format = data.0.format_with_items(pattern.borrow_dependent().iter());
-    write!(writer, "{}", format).unwrap();
+    let output = rewrite_bce_fields(format.to_string(), data.0.year_ce());
+    write!(writer, "{}", output).unwrap();
 }
 
 #[function("to_char(timestamptz, varchar) -> varchar", rewritten)]
@@ -199,7 +273,7 @@ fn _timestamptz_to_char() {}
 
 #[function(
     "to_char(timestamptz, varchar, varchar) -> varchar",
-    prebuild = "ChronoPattern::compile($1)"
+    prebuild = "ChronoPattern::compile_for_timestamp($1)"
 )]
 fn timestamptz_to_char3(
     data: Timestamptz,
@@ -207,11 +281,38 @@ fn timestamptz_to_char3(
     tmpl: &ChronoPattern,
     writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
-    let format = data
-        .to_datetime_in_zone(Timestamptz::lookup_time_zone(zone).map_err(time_zone_err)?)
-        .format_with_items(tmpl.borrow_dependent().iter());
-    write!(writer, "{}", format).unwrap();
+    let local_datetime =
+        data.to_datetime_in_zone(Timestamptz::lookup_time_zone(zone).map_err(time_zone_err)?);
+    let format = local_datetime.format_with_items(tmpl.borrow_dependent().iter());
+    let output = rewrite_bce_fields(format.to_string(), local_datetime.year_ce());
+    write!(writer, "{}", output).unwrap();
     Ok(())
+}
+
+fn rewrite_bce_fields(mut output: String, year_ce: (bool, u32)) -> String {
+    let (ce, year) = year_ce;
+    output = output.replace(ChronoPattern::FULL_YEAR_PLACEHOLDER, &format!("{year:04}"));
+    output = output.replace(
+        ChronoPattern::YEAR_MOD_100_PLACEHOLDER,
+        &format!("{:02}", year % 100),
+    );
+    output = output.replace(
+        ChronoPattern::ERA_DOTTED_UPPER_PLACEHOLDER,
+        if ce { "A.D." } else { "B.C." },
+    );
+    output = output.replace(
+        ChronoPattern::ERA_DOTTED_LOWER_PLACEHOLDER,
+        if ce { "a.d." } else { "b.c." },
+    );
+    output = output.replace(
+        ChronoPattern::ERA_UPPER_PLACEHOLDER,
+        if ce { "AD" } else { "BC" },
+    );
+    output = output.replace(
+        ChronoPattern::ERA_LOWER_PLACEHOLDER,
+        if ce { "ad" } else { "bc" },
+    );
+    output
 }
 
 #[function(
@@ -402,5 +503,23 @@ fn format_inner(w: &mut impl std::fmt::Write, interval: Interval, item: &Item<'_
             }
         }
         Item::Error => Err(invalid_pattern_err()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use risingwave_common::types::Timestamptz;
+
+    use super::{ChronoPattern, timestamptz_to_char3};
+
+    #[test]
+    fn test_timestamptz_to_char_with_timezone_offset_tokens() {
+        let tsz = Timestamptz::from_str("2023-07-12 03:01:00Z").unwrap();
+        let pattern = ChronoPattern::compile_for_timestamp("Mon DD, YYYY HH12:MI:SS am TZH:TZM");
+        let mut out = String::new();
+        timestamptz_to_char3(tsz, "US/Pacific", &pattern, &mut out).unwrap();
+        assert_eq!(out, "Jul 11, 2023 08:01:00 pm -07:00");
     }
 }
