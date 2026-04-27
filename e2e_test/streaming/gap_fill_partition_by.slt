@@ -1,0 +1,235 @@
+# Test for GAP_FILL with PARTITION BY in normal streaming mode.
+# Tests that gap filling operates independently per partition.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# ============================================
+# Test 1: Basic PARTITION BY with single column
+# ============================================
+
+statement ok
+CREATE TABLE sensor_data (
+    device_id INT,
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (device_id, ts)
+);
+
+statement ok
+INSERT INTO sensor_data VALUES
+    (1, '2024-05-21 10:00:00', 10.0),
+    (1, '2024-05-21 10:03:00', 40.0),
+    (2, '2024-05-21 10:00:00', 100.0),
+    (2, '2024-05-21 10:02:00', 120.0);
+
+# Gap fill per device - each device should be filled independently
+statement ok
+CREATE MATERIALIZED VIEW gf_partitioned AS
+SELECT device_id, ts, value
+FROM GAP_FILL(sensor_data, ts, INTERVAL '1' MINUTE, LOCF(value), PARTITION_BY(device_id));
+
+# Device 1: gaps at 10:01, 10:02 filled with LOCF from 10:00 (value=10)
+# Device 2: gap at 10:01 filled with LOCF from 10:00 (value=100)
+query ITR
+SELECT device_id, ts, value FROM gf_partitioned ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 10
+1 2024-05-21 10:02:00 10
+1 2024-05-21 10:03:00 40
+2 2024-05-21 10:00:00 100
+2 2024-05-21 10:01:00 100
+2 2024-05-21 10:02:00 120
+
+# Insert into the gap for device 1 only
+statement ok
+INSERT INTO sensor_data VALUES
+    (1, '2024-05-21 10:01:00', 20.0);
+
+# Device 1: 10:01 now has real data (20), 10:02 still LOCF from 10:01 (20)
+# Device 2: unchanged
+query ITR
+SELECT device_id, ts, value FROM gf_partitioned ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 20
+1 2024-05-21 10:02:00 20
+1 2024-05-21 10:03:00 40
+2 2024-05-21 10:00:00 100
+2 2024-05-21 10:01:00 100
+2 2024-05-21 10:02:00 120
+
+# Delete a data point from device 2
+statement ok
+DELETE FROM sensor_data WHERE device_id = 2 AND ts = '2024-05-21 10:02:00';
+
+# Device 2 now only has 10:00, no gap to fill (no next anchor)
+query ITR
+SELECT device_id, ts, value FROM gf_partitioned ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 20
+1 2024-05-21 10:02:00 20
+1 2024-05-21 10:03:00 40
+2 2024-05-21 10:00:00 100
+
+# Add data back to device 2 with larger gap
+statement ok
+INSERT INTO sensor_data VALUES
+    (2, '2024-05-21 10:03:00', 130.0);
+
+# Device 2: gaps at 10:01, 10:02 filled with LOCF from 10:00 (100)
+query ITR
+SELECT device_id, ts, value FROM gf_partitioned ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 20
+1 2024-05-21 10:02:00 20
+1 2024-05-21 10:03:00 40
+2 2024-05-21 10:00:00 100
+2 2024-05-21 10:01:00 100
+2 2024-05-21 10:02:00 100
+2 2024-05-21 10:03:00 130
+
+statement ok
+DROP MATERIALIZED VIEW gf_partitioned;
+
+statement ok
+DROP TABLE sensor_data;
+
+# ============================================
+# Test 2: PARTITION BY with INTERPOLATE
+# ============================================
+
+statement ok
+CREATE TABLE metrics (
+    device_id INT,
+    ts TIMESTAMP,
+    temp DOUBLE,
+    PRIMARY KEY (device_id, ts)
+);
+
+statement ok
+INSERT INTO metrics VALUES
+    (1, '2024-05-21 10:00:00', 20.0),
+    (1, '2024-05-21 10:04:00', 24.0),
+    (2, '2024-05-21 10:00:00', 100.0),
+    (2, '2024-05-21 10:02:00', 200.0);
+
+statement ok
+CREATE MATERIALIZED VIEW gf_interpolated AS
+SELECT device_id, ts, temp
+FROM GAP_FILL(metrics, ts, INTERVAL '1' MINUTE, INTERPOLATE(temp), PARTITION_BY(device_id));
+
+# Device 1: interpolate 20→24 over 4 minutes: 21, 22, 23
+# Device 2: interpolate 100→200 over 2 minutes: 150
+query ITR
+SELECT device_id, ts, temp FROM gf_interpolated ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 20
+1 2024-05-21 10:01:00 21
+1 2024-05-21 10:02:00 22
+1 2024-05-21 10:03:00 23
+1 2024-05-21 10:04:00 24
+2 2024-05-21 10:00:00 100
+2 2024-05-21 10:01:00 150
+2 2024-05-21 10:02:00 200
+
+statement ok
+DROP MATERIALIZED VIEW gf_interpolated;
+
+statement ok
+DROP TABLE metrics;
+
+# ============================================
+# Test 3: PARTITION BY with multiple columns
+# ============================================
+
+statement ok
+CREATE TABLE multi_partition (
+    region VARCHAR,
+    device_id INT,
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (region, device_id, ts)
+);
+
+statement ok
+INSERT INTO multi_partition VALUES
+    ('us', 1, '2024-05-21 10:00:00', 10.0),
+    ('us', 1, '2024-05-21 10:02:00', 30.0),
+    ('eu', 1, '2024-05-21 10:00:00', 100.0),
+    ('eu', 1, '2024-05-21 10:02:00', 300.0);
+
+statement ok
+CREATE MATERIALIZED VIEW gf_multi_part AS
+SELECT region, device_id, ts, value
+FROM GAP_FILL(multi_partition, ts, INTERVAL '1' MINUTE, LOCF(value), PARTITION_BY(region, device_id));
+
+# (us, 1): gap at 10:01 → LOCF from 10 = 10
+# (eu, 1): gap at 10:01 → LOCF from 100 = 100
+query TITR
+SELECT region, device_id, ts, value FROM gf_multi_part ORDER BY region, device_id, ts;
+----
+eu 1 2024-05-21 10:00:00 100
+eu 1 2024-05-21 10:01:00 100
+eu 1 2024-05-21 10:02:00 300
+us 1 2024-05-21 10:00:00 10
+us 1 2024-05-21 10:01:00 10
+us 1 2024-05-21 10:02:00 30
+
+statement ok
+DROP MATERIALIZED VIEW gf_multi_part;
+
+statement ok
+DROP TABLE multi_partition;
+
+# ============================================
+# Test 4: Update within partitioned gap fill
+# ============================================
+
+statement ok
+CREATE TABLE update_test (
+    device_id INT,
+    ts TIMESTAMP,
+    value DOUBLE,
+    PRIMARY KEY (device_id, ts)
+);
+
+statement ok
+INSERT INTO update_test VALUES
+    (1, '2024-05-21 10:00:00', 10.0),
+    (1, '2024-05-21 10:03:00', 40.0);
+
+statement ok
+CREATE MATERIALIZED VIEW gf_update AS
+SELECT device_id, ts, value
+FROM GAP_FILL(update_test, ts, INTERVAL '1' MINUTE, LOCF(value), PARTITION_BY(device_id));
+
+# Initial state: gaps at 10:01, 10:02 filled with LOCF(10)
+query ITR
+SELECT device_id, ts, value FROM gf_update ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 10
+1 2024-05-21 10:02:00 10
+1 2024-05-21 10:03:00 40
+
+# Update the endpoint - should retract old fills and generate new ones
+statement ok
+UPDATE update_test SET "value" = 50.0 WHERE device_id = 1 AND ts = '2024-05-21 10:03:00';
+
+query ITR
+SELECT device_id, ts, value FROM gf_update ORDER BY device_id, ts;
+----
+1 2024-05-21 10:00:00 10
+1 2024-05-21 10:01:00 10
+1 2024-05-21 10:02:00 10
+1 2024-05-21 10:03:00 50
+
+statement ok
+DROP MATERIALIZED VIEW gf_update;
+
+statement ok
+DROP TABLE update_test;

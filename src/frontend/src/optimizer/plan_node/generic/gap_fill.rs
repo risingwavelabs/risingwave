@@ -29,6 +29,46 @@ pub struct GapFill<PlanRef> {
     pub time_col: InputRef,
     pub interval: ExprImpl,
     pub fill_strategies: Vec<BoundFillStrategy>,
+    pub partition_by_cols: Vec<InputRef>,
+}
+
+impl<PlanRef: GenericPlanRef> GapFill<PlanRef> {
+    pub fn partition_key_indices(&self) -> Vec<usize> {
+        self.partition_by_cols.iter().map(|c| c.index()).collect()
+    }
+
+    pub fn stream_key_indices(&self) -> Option<Vec<usize>> {
+        let mut stream_key = self.partition_key_indices();
+
+        if !stream_key.contains(&self.time_col.index()) {
+            stream_key.push(self.time_col.index());
+        }
+
+        for &key in self.input.stream_key()? {
+            if !stream_key.contains(&key) {
+                stream_key.push(key);
+            }
+        }
+
+        Some(stream_key)
+    }
+
+    pub fn pointer_key_indices(&self) -> Option<Vec<usize>> {
+        let time_col_idx = self.time_col.index();
+        let partition_key_indices = self.partition_key_indices();
+        let mut pointer_key_indices = vec![time_col_idx];
+
+        for &key in self.input.stream_key()? {
+            if key != time_col_idx
+                && !partition_key_indices.contains(&key)
+                && !pointer_key_indices.contains(&key)
+            {
+                pointer_key_indices.push(key);
+            }
+        }
+
+        Some(pointer_key_indices)
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for GapFill<PlanRef> {
@@ -37,11 +77,14 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for GapFill<PlanRef> {
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        self.input.functional_dependency().clone()
+        match self.stream_key_indices() {
+            Some(stream_key) => FunctionalDependencySet::with_key(self.schema().len(), &stream_key),
+            None => FunctionalDependencySet::new(self.schema().len()),
+        }
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        self.input.stream_key().map(|key| key.to_vec())
+        self.stream_key_indices()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -78,6 +121,16 @@ impl<PlanRef> GapFill<PlanRef> {
                 .clone();
         });
         self.interval = mapping.rewrite_expr(self.interval.clone());
+
+        self.partition_by_cols.iter_mut().for_each(|c| {
+            let expr: ExprImpl = c.clone().into();
+            *c = mapping
+                .rewrite_expr(expr)
+                .as_input_ref()
+                .expect("partition_by_col must be an InputRef after rewrite")
+                .as_ref()
+                .clone();
+        });
     }
 
     pub fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
@@ -100,16 +153,29 @@ impl<PlanRef> GapFill<PlanRef> {
                 .as_ref()
                 .clone();
         });
+
+        self.partition_by_cols.iter_mut().for_each(|c| {
+            let expr: ExprImpl = c.clone().into();
+            let rewritten = r.rewrite_expr(expr);
+            *c = rewritten
+                .as_input_ref()
+                .expect("partition_by_col must be an InputRef after rewrite")
+                .as_ref()
+                .clone();
+        });
     }
 }
 
 impl<PlanRef: GenericPlanRef> DistillUnit for GapFill<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
-        let fields = vec![
+        let mut fields = vec![
             ("time_col", Pretty::debug(&self.time_col)),
             ("interval", Pretty::debug(&self.interval)),
             ("fill_strategies", Pretty::debug(&self.fill_strategies)),
         ];
+        if !self.partition_by_cols.is_empty() {
+            fields.push(("partition_by", Pretty::debug(&self.partition_by_cols)));
+        }
         childless_record(name, fields)
     }
 }

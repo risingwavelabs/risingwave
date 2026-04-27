@@ -42,11 +42,17 @@ impl StreamEowcGapFill {
     pub fn new(core: generic::GapFill<PlanRef<Stream>>) -> Self {
         let input = &core.input;
 
-        // Force singleton distribution for GapFill operations.
-        // GapFill requires access to all data across time ranges to correctly identify and fill gaps, so that missing intervals can be detected and filled appropriately.
+        let dist = if core.partition_by_cols.is_empty() {
+            Distribution::Single
+        } else {
+            let partition_indices: Vec<usize> =
+                core.partition_by_cols.iter().map(|c| c.index()).collect();
+            Distribution::HashShard(partition_indices)
+        };
+
         let base = PlanBase::new_stream_with_core(
             &core,
-            Distribution::Single,
+            dist,
             input.stream_kind(),
             true, // provides EOWC semantics
             input.watermark_columns().clone(),
@@ -67,6 +73,7 @@ impl StreamEowcGapFill {
             time_col,
             interval,
             fill_strategies,
+            partition_by_cols: vec![],
         };
         Self::new(core)
     }
@@ -91,11 +98,31 @@ impl StreamEowcGapFill {
             tbl_builder.add_column(field);
         }
 
-        // Just use time column as the primary key since SortBuffer requires it for ordering
+        // PK: partition_cols + time_col + stream_key for buffer ordering
+        let mut added_to_pk = std::collections::HashSet::new();
+        for pc in &self.core.partition_by_cols {
+            tbl_builder.add_order_column(pc.index(), OrderType::ascending());
+            added_to_pk.insert(pc.index());
+        }
         let time_col_idx = self.time_col().index();
-        tbl_builder.add_order_column(time_col_idx, OrderType::ascending());
+        if added_to_pk.insert(time_col_idx) {
+            tbl_builder.add_order_column(time_col_idx, OrderType::ascending());
+        }
+        let input_ref = self.input();
+        let input_stream_key = input_ref.expect_stream_key();
+        for &sk_idx in input_stream_key {
+            if added_to_pk.insert(sk_idx) {
+                tbl_builder.add_order_column(sk_idx, OrderType::ascending());
+            }
+        }
 
-        tbl_builder.build(vec![], 0)
+        let dist_key_indices: Vec<usize> = self
+            .core
+            .partition_by_cols
+            .iter()
+            .map(|c| c.index())
+            .collect();
+        tbl_builder.build(dist_key_indices, 0)
     }
 
     fn infer_prev_row_table(&self) -> TableCatalog {
@@ -105,11 +132,25 @@ impl StreamEowcGapFill {
             tbl_builder.add_column(field);
         }
 
-        if !self.core.schema().fields().is_empty() {
-            tbl_builder.add_order_column(0, OrderType::ascending());
+        if self.core.partition_by_cols.is_empty() {
+            // No partition: single-row table, use first column as PK
+            if !self.core.schema().fields().is_empty() {
+                tbl_builder.add_order_column(0, OrderType::ascending());
+            }
+            tbl_builder.build(vec![], 0)
+        } else {
+            // With partition: PK = partition_cols (one prev_row per partition)
+            for pc in &self.core.partition_by_cols {
+                tbl_builder.add_order_column(pc.index(), OrderType::ascending());
+            }
+            let dist_key_indices: Vec<usize> = self
+                .core
+                .partition_by_cols
+                .iter()
+                .map(|c| c.index())
+                .collect();
+            tbl_builder.build(dist_key_indices, 0)
         }
-
-        tbl_builder.build(vec![], 0)
     }
 }
 
@@ -169,6 +210,13 @@ impl TryToStreamPb for StreamEowcGapFill {
             fill_strategies,
             buffer_table: Some(buffer_table),
             prev_row_table: Some(prev_row_table),
+            partition_by_indices: self
+                .core
+                .partition_by_cols
+                .iter()
+                .map(|c| c.index() as u32)
+                .collect(),
+            upstream_stream_key: vec![],
         })))
     }
 }

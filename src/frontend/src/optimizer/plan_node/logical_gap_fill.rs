@@ -42,12 +42,14 @@ impl LogicalGapFill {
         time_col: InputRef,
         interval: ExprImpl,
         fill_strategies: Vec<BoundFillStrategy>,
+        partition_by_cols: Vec<InputRef>,
     ) -> Self {
         let core = generic::GapFill {
             input,
             time_col,
             interval,
             fill_strategies,
+            partition_by_cols,
         };
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
@@ -64,6 +66,10 @@ impl LogicalGapFill {
     pub fn fill_strategies(&self) -> &[BoundFillStrategy] {
         &self.core.fill_strategies
     }
+
+    pub fn partition_by_cols(&self) -> &[InputRef] {
+        &self.core.partition_by_cols
+    }
 }
 
 impl PlanTreeNodeUnary<Logical> for LogicalGapFill {
@@ -77,6 +83,7 @@ impl PlanTreeNodeUnary<Logical> for LogicalGapFill {
             self.time_col().clone(),
             self.interval().clone(),
             self.fill_strategies().to_vec(),
+            self.partition_by_cols().to_vec(),
         )
     }
 }
@@ -87,12 +94,18 @@ impl_distill_by_unit!(LogicalGapFill, core, "LogicalGapFill");
 impl ColPrunable for LogicalGapFill {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_col_num = self.input().schema().len();
-        let mut input_required = FixedBitSet::from_iter(required_cols.iter().copied());
+        let mut input_required = FixedBitSet::with_capacity(input_col_num);
+        for &required_col in required_cols {
+            input_required.insert(required_col);
+        }
         input_required.insert(self.time_col().index());
         input_required.union_with(&self.interval().collect_input_refs(input_col_num));
         self.fill_strategies()
             .iter()
             .for_each(|s| input_required.insert(s.target_col.index()));
+        self.partition_by_cols()
+            .iter()
+            .for_each(|c| input_required.insert(c.index()));
 
         let input_required_cols: Vec<_> = input_required.ones().collect();
         let mut col_index_mapping =
@@ -170,31 +183,33 @@ impl ToStream for LogicalGapFill {
         use crate::optimizer::property::RequiredDist;
 
         let stream_input = self.input().to_stream(ctx)?;
+        let partition_cols = &self.core.partition_by_cols;
 
-        // GapFill (both normal and EOWC) always uses singleton distribution for correctness.
-        // It needs to see complete time series data to identify and fill gaps properly.
-        let new_input = RequiredDist::single().streaming_enforce_if_not_satisfies(stream_input)?;
+        // Choose distribution based on partition_by_cols
+        let new_input = if partition_cols.is_empty() {
+            // No partition: singleton distribution (backward compatible)
+            RequiredDist::single().streaming_enforce_if_not_satisfies(stream_input)?
+        } else {
+            // With partition: hash distribute by partition columns
+            let partition_indices: Vec<usize> = partition_cols.iter().map(|c| c.index()).collect();
+            RequiredDist::shard_by_key(stream_input.schema().len(), &partition_indices)
+                .streaming_enforce_if_not_satisfies(stream_input)?
+        };
 
-        // Common validation: time column must be the sole primary key for both modes
-        let time_col_idx = self.core.time_col.index();
-        let input_stream_key = new_input.expect_stream_key();
-        if !(input_stream_key.len() == 1 && input_stream_key[0] == time_col_idx) {
-            return Err(ErrorCode::NotSupported(
-                "GAP_FILL requires the time column to be the sole primary key.".to_owned(),
-                format!("The time column (index {}) must be the only primary key. Found stream key: {:?}", time_col_idx, input_stream_key),
-            )
-            .into());
-        }
+        // No stream key validation - gap fill manages its own state internally
+        // using (partition_cols, time_col, upstream_stream_key) as state table PK.
 
         let core = generic::GapFill {
             input: new_input.clone(),
             time_col: self.core.time_col.clone(),
             interval: self.core.interval.clone(),
             fill_strategies: self.core.fill_strategies.clone(),
+            partition_by_cols: self.core.partition_by_cols.clone(),
         };
 
         if ctx.emit_on_window_close() {
             // EOWC mode requires watermark on time column
+            let time_col_idx = self.core.time_col.index();
             let input_watermark_cols = new_input.watermark_columns();
             if !input_watermark_cols.contains(time_col_idx) {
                 return Err(ErrorCode::NotSupported(
@@ -225,7 +240,7 @@ impl ToStream for LogicalGapFill {
         if col_index_mapping.is_identity() {
             return Ok((
                 Self {
-                    base: self.base.clone_with_new_plan_id(),
+                    base: PlanBase::new_logical_with_core(&new_core),
                     core: new_core,
                 }
                 .into(),

@@ -65,11 +65,37 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
         let fill_columns_with_strategies: HashMap<usize, FillStrategy> =
             fill_columns.into_iter().zip_eq(fill_strategies).collect();
 
+        let partition_by_indices: Vec<usize> = node
+            .get_partition_by_indices()
+            .iter()
+            .map(|&x| x as usize)
+            .collect();
+
+        // Hash-distributed state table needs vnodes; singleton (no partition) does not.
+        let vnodes = if partition_by_indices.is_empty() {
+            None
+        } else {
+            Some(std::sync::Arc::new(
+                params
+                    .vnode_bitmap
+                    .expect("vnodes not set for hash-distributed GapFill"),
+            ))
+        };
+
         let state_table =
-            StateTableBuilder::new(node.get_state_table().as_ref().unwrap(), store, None)
+            StateTableBuilder::new(node.get_state_table().as_ref().unwrap(), store, vnodes)
                 .forbid_preload_all_rows()
                 .build()
                 .await;
+
+        let pointer_key_indices: Vec<usize> = (!node.get_pointer_key_indices().is_empty())
+            .then(|| {
+                node.get_pointer_key_indices()
+                    .iter()
+                    .map(|&x| x as usize)
+                    .collect()
+            })
+            .expect("GapFillNode should always carry pointer_key_indices");
 
         let exec = GapFillExecutor::new(GapFillExecutorArgs {
             ctx: params.actor_context,
@@ -80,6 +106,9 @@ impl ExecutorBuilder for GapFillExecutorBuilder {
             fill_columns: fill_columns_with_strategies,
             gap_interval: interval_expr,
             state_table,
+            partition_by_indices,
+            pointer_key_indices,
+            watermark_epoch: params.watermark_epoch,
         });
 
         Ok((params.info, exec).into())
