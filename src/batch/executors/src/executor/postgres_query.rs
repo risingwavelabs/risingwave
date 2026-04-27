@@ -160,11 +160,15 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
             NodeBody::PostgresQuery
         )?;
 
+        let port = postgres_query_node
+            .port
+            .parse::<u16>()
+            .with_context(|| format!("invalid postgres port `{}`", postgres_query_node.port))?;
         Ok(Box::new(PostgresQueryExecutor::new(
             Schema::from_iter(postgres_query_node.columns.iter().map(Field::from)),
             PgConnectionConfig {
                 host: postgres_query_node.hostname.clone(),
-                port: postgres_query_node.port.clone(),
+                port,
                 user: postgres_query_node.username.clone(),
                 password: postgres_query_node.password.clone(),
                 database: postgres_query_node.database.clone(),

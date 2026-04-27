@@ -403,9 +403,12 @@ impl TableFunction {
                         .get(7)
                         .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
 
+                    let port = evaled_args[1]
+                        .parse::<u16>()
+                        .with_context(|| format!("invalid postgres port `{}`", evaled_args[1]))?;
                     let pg_conn = PgConnectionConfig {
                         host: evaled_args[0].clone(),
-                        port: evaled_args[1].clone(),
+                        port,
                         user: evaled_args[2].clone(),
                         password: evaled_args[3].clone(),
                         database: evaled_args[4].clone(),

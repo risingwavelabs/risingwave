@@ -104,7 +104,7 @@ impl PostgresConfig {
     pub fn pg_connection_config(&self) -> PgConnectionConfig {
         PgConnectionConfig {
             host: self.host.clone(),
-            port: self.port.to_string(),
+            port: self.port,
             user: self.user.clone(),
             password: self.password.clone(),
             database: self.database.clone(),

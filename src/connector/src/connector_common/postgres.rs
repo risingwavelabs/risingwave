@@ -71,10 +71,10 @@ const DISCOVER_PGVECTOR_COLUMNS_QUERY: &str = r#"
 /// executor, and frontend `postgres_query` table function. Each caller constructs
 /// this from its own user-facing config struct before invoking the shared helpers
 /// like `create_pg_client` or `PostgresExternalTable::connect`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PgConnectionConfig {
     pub host: String,
-    pub port: String,
+    pub port: u16,
     pub user: String,
     pub password: String,
     pub database: String,
@@ -83,18 +83,12 @@ pub struct PgConnectionConfig {
 }
 
 impl PgConnectionConfig {
-    fn port_u16(&self) -> anyhow::Result<u16> {
-        self.port
-            .parse::<u16>()
-            .with_context(|| format!("invalid postgres port `{}`", self.port))
-    }
-
-    fn to_sqlx_connect_options(&self) -> anyhow::Result<PgConnectOptions> {
+    fn to_sqlx_connect_options(&self) -> PgConnectOptions {
         let mut options = PgConnectOptions::new()
             .username(&self.user)
             .password(&self.password)
             .host(&self.host)
-            .port(self.port_u16()?)
+            .port(self.port)
             .database(&self.database)
             .ssl_mode(match self.ssl_mode {
                 SslMode::Disabled => PgSslMode::Disable,
@@ -110,7 +104,7 @@ impl PgConnectionConfig {
             options = options.ssl_root_cert(root_cert.as_str());
         }
 
-        Ok(options)
+        options
     }
 }
 
@@ -149,10 +143,13 @@ pub fn pg_connection_config_from_properties(
             .get("hostname")
             .context("missing `hostname` in postgres-cdc properties")?
             .clone(),
-        port: props
-            .get("port")
-            .context("missing `port` in postgres-cdc properties")?
-            .clone(),
+        port: {
+            let raw = props
+                .get("port")
+                .context("missing `port` in postgres-cdc properties")?;
+            raw.parse::<u16>()
+                .with_context(|| format!("invalid postgres port `{}`", raw))?
+        },
         user: props
             .get("username")
             .context("missing `username` in postgres-cdc properties")?
@@ -258,7 +255,7 @@ impl PostgresExternalTable {
         schema: &str,
         table: &str,
     ) -> ConnectorResult<(Vec<sea_schema::postgres::def::ColumnInfo>, Vec<String>)> {
-        let options = config.to_sqlx_connect_options()?;
+        let options = config.to_sqlx_connect_options();
         let connection = PgPool::connect_with(options).await?;
 
         // Use sea-schema only for column discovery (no permission issues)
@@ -311,7 +308,7 @@ impl PostgresExternalTable {
         schema: &str,
         table: &str,
     ) -> ConnectorResult<TableDef> {
-        let options = config.to_sqlx_connect_options()?;
+        let options = config.to_sqlx_connect_options();
         let connection = PgPool::connect_with(options).await?;
         let schema_discovery = SchemaDiscovery::new(connection, schema);
         // fetch column schema and primary key
@@ -439,13 +436,12 @@ pub async fn create_pg_client(
     config: &PgConnectionConfig,
     tcp_keepalive: Option<TcpKeepaliveConfig>,
 ) -> anyhow::Result<PgClient> {
-    let port = config.port_u16()?;
     let mut pg_config = tokio_postgres::Config::new();
     pg_config
         .user(&config.user)
         .password(&config.password)
         .host(&config.host)
-        .port(port)
+        .port(config.port)
         .dbname(&config.database);
 
     // Configure TCP keepalive if provided

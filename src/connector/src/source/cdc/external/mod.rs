@@ -20,7 +20,7 @@ pub mod mysql;
 
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use futures::pin_mut;
 use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
@@ -331,16 +331,20 @@ impl ExternalTableConfig {
     /// Project the Postgres-specific subset of this config so it can drive the
     /// shared `create_pg_client` / `PostgresExternalTable` helpers. Only meaningful
     /// for the Postgres CDC connector; other connectors ignore the fields.
-    pub fn pg_connection_config(&self) -> PgConnectionConfig {
-        PgConnectionConfig {
+    pub fn pg_connection_config(&self) -> ConnectorResult<PgConnectionConfig> {
+        let port = self
+            .port
+            .parse::<u16>()
+            .with_context(|| format!("invalid postgres port `{}`", self.port))?;
+        Ok(PgConnectionConfig {
             host: self.host.clone(),
-            port: self.port.clone(),
+            port,
             user: self.username.clone(),
             password: self.password.clone(),
             database: self.database.clone(),
             ssl_mode: self.ssl_mode.clone(),
             ssl_root_cert: self.ssl_root_cert.clone(),
-        }
+        })
     }
 }
 
@@ -489,7 +493,7 @@ impl ExternalTableImpl {
                 MySqlExternalTable::connect(config).await?,
             )),
             CdcSourceType::Postgres => {
-                let pg_conn = config.pg_connection_config();
+                let pg_conn = config.pg_connection_config()?;
                 Ok(ExternalTableImpl::Postgres(
                     PostgresExternalTable::connect(&pg_conn, &config.schema, &config.table, false)
                         .await?,
