@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeStatistics};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
-use risingwave_pb::hummock::BloomFilterType;
+use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -469,15 +469,20 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
-        let bloom_filter_kind = if self.filter_builder.support_blocked_raw_data() {
-            BloomFilterType::Blocked
-        } else {
-            BloomFilterType::Sstable
-        };
         let bloom_filter = if self.options.bloom_false_positive > 0.0 {
             self.filter_builder.finish(self.memory_limiter.clone())
         } else {
             vec![]
+        };
+        let (bloom_filter_kind, filter_type) = if bloom_filter.is_empty() {
+            (
+                BloomFilterType::BloomFilterUnspecified,
+                PbSstableFilterType::SstableFilterNone,
+            )
+        } else if self.filter_builder.support_blocked_raw_data() {
+            (BloomFilterType::Blocked, self.filter_builder.filter_type())
+        } else {
+            (BloomFilterType::Sstable, self.filter_builder.filter_type())
         };
 
         let total_key_count = self
@@ -603,6 +608,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             max_epoch,
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
+            filter_type,
             vnode_statistics: vnode_user_key_ranges,
         }
         .into();

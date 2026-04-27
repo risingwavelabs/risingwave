@@ -1524,6 +1524,7 @@ mod tests {
             uncompressed_file_size: 0,
             range_tombstone_count: 0,
             bloom_filter_kind: PbBloomFilterType::Sstable,
+            filter_type: risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
             sst_size: 1,
             vnode_statistics: Some(vnode_stats),
         }

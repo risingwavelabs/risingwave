@@ -16,6 +16,8 @@
 
 use std::sync::Arc;
 
+use risingwave_pb::hummock::PbSstableFilterType;
+
 use crate::hummock::MemoryLimiter;
 
 pub trait FilterBuilder: Send {
@@ -38,4 +40,6 @@ pub trait FilterBuilder: Send {
     fn support_blocked_raw_data(&self) -> bool {
         false
     }
+
+    fn filter_type(&self) -> PbSstableFilterType;
 }
