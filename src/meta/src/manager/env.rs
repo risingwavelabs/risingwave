@@ -121,6 +121,9 @@ pub struct MetaOpts {
     /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
     /// meta node.
     pub vacuum_spin_interval_ms: u64,
+    /// Interval of purging empty dynamic compaction groups from the latest Hummock version, and
+    /// purging stale compaction-group configs that are not referenced by the version.
+    pub periodic_purge_stale_compaction_group_interval_sec: u64,
     /// Interval of invoking iceberg garbage collection, to expire old snapshots.
     pub iceberg_gc_interval_sec: u64,
     /// Maximum time to wait for an iceberg compaction task report before the lease expires.
@@ -330,6 +333,7 @@ impl MetaOpts {
             time_travel_vacuum_interval_sec: 30,
             time_travel_vacuum_max_version_count: None,
             vacuum_spin_interval_ms: 0,
+            periodic_purge_stale_compaction_group_interval_sec: 0,
             iceberg_gc_interval_sec: 3600,
             iceberg_compaction_report_timeout_sec: 30 * 60,
             iceberg_compaction_config_refresh_interval_sec: 60,

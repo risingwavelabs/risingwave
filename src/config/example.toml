@@ -22,6 +22,7 @@ max_inflight_time_travel_query = 1000
 periodic_compaction_interval_sec = 300
 vacuum_interval_sec = 30
 vacuum_spin_interval_ms = 100
+periodic_purge_stale_compaction_group_interval_sec = 3600
 iceberg_gc_interval_sec = 3600
 iceberg_compaction_report_timeout_sec = 1800
 iceberg_compaction_config_refresh_interval_sec = 60
