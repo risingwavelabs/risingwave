@@ -48,18 +48,16 @@ type HashMappingId = usize;
 enum Req {
     /// The fragment must be singleton and is scheduled to the given worker id.
     Singleton,
+    /// The fragment must be singleton, but can be scheduled anywhere.
+    AnySingleton,
     /// The fragment must be hash-distributed and is scheduled by the given hash mapping.
     Hash(HashMappingId),
     /// The fragment must have the given vnode count, but can be scheduled anywhere.
-    /// When the vnode count is 1, it means the fragment must be singleton.
+    /// A vnode count of `1` still does not imply singleton semantics by itself.
     AnyVnodeCount(usize),
 }
 
 impl Req {
-    /// Equivalent to `Req::AnyVnodeCount(1)`.
-    #[allow(non_upper_case_globals)]
-    const AnySingleton: Self = Self::AnyVnodeCount(1);
-
     /// Merge two requirements. Returns an error if the requirements are incompatible.
     ///
     /// The `mapping_len` function is used to get the vnode count of a hash mapping by its id.
@@ -67,6 +65,8 @@ impl Req {
         // Note that a and b are always different, as they come from a set.
         let merge = |a, b| match (a, b) {
             (Self::AnySingleton, Self::Singleton) => Some(Self::Singleton),
+            (Self::AnySingleton, Self::AnyVnodeCount(1)) => Some(Self::AnySingleton),
+            (Self::AnyVnodeCount(1), Self::Singleton) => Some(Self::Singleton),
             (Self::AnyVnodeCount(count), Self::Hash(id)) if mapping_len(id) == count => {
                 Some(Self::Hash(id))
             }
@@ -594,6 +594,22 @@ mod tests {
 
         let expected = maplit::hashmap! {
             101.into() => Result::Required(Req::Singleton),
+        };
+
+        test_success(facts, expected);
+    }
+
+    // 1
+    #[test]
+    fn test_singleton_requirement_is_not_just_vnode_count_one() {
+        #[rustfmt::skip]
+        let facts = [
+            Fact::Req { id: 101.into(), req: Req::AnySingleton },
+            Fact::Req { id: 101.into(), req: Req::AnyVnodeCount(1) },
+        ];
+
+        let expected = maplit::hashmap! {
+            101.into() => Result::DefaultSingleton,
         };
 
         test_success(facts, expected);
