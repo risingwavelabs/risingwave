@@ -128,7 +128,6 @@ impl StreamManagerService for StreamServiceImpl {
         let statuses = self
             .iceberg_compaction_manager
             .list_compaction_statuses()
-            .await
             .into_iter()
             .map(
                 |status| list_iceberg_compaction_status_response::IcebergCompactionStatus {
@@ -304,7 +303,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         let mut info = HashMap::new();
         for job_id in table_ids {
-            let table_fragments = self
+            let (table_fragments, fragment_actors, _actor_status) = self
                 .metadata_manager
                 .catalog_controller
                 .get_job_fragments_by_id(job_id)
@@ -325,15 +324,16 @@ impl StreamManagerService for StreamServiceImpl {
                         .into_iter()
                         .map(|(id, fragment)| FragmentInfo {
                             id,
-                            actors: fragment
-                                .actors
+                            actors: fragment_actors
+                                .get(&id)
                                 .into_iter()
-                                .map(|actor| ActorInfo {
-                                    id: actor.actor_id,
+                                .flat_map(|actors| actors.iter().map(|actor| actor.actor_id))
+                                .map(|actor_id| ActorInfo {
+                                    id: actor_id,
                                     node: Some(fragment.nodes.clone()),
                                     dispatcher: dispatchers
                                         .get_mut(&fragment.fragment_id)
-                                        .and_then(|dispatchers| dispatchers.remove(&actor.actor_id))
+                                        .and_then(|dispatchers| dispatchers.remove(&actor_id))
                                         .unwrap_or_default(),
                                 })
                                 .collect_vec(),
@@ -389,6 +389,7 @@ impl StreamManagerService for StreamServiceImpl {
                         database_id,
                         schema_id,
                         config_override,
+                        adaptive_parallelism_strategy: None,
                     }
                 },
             )

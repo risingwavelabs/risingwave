@@ -1,0 +1,43 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE eowc_rank_input (
+    tm TIMESTAMPTZ,
+    foo INT,
+    bar INT,
+    WATERMARK FOR tm AS tm - INTERVAL '5' SECOND
+) APPEND ONLY;
+
+statement ok
+CREATE MATERIALIZED VIEW eowc_rank_mv AS
+SELECT
+    tm,
+    foo,
+    bar,
+    row_number() OVER (PARTITION BY bar ORDER BY tm) AS rn,
+    rank() OVER (PARTITION BY bar ORDER BY tm) AS rk,
+    dense_rank() OVER (PARTITION BY bar ORDER BY tm) AS dr
+FROM eowc_rank_input
+EMIT ON WINDOW CLOSE;
+
+statement ok
+INSERT INTO eowc_rank_input VALUES ('2024-01-01 00:00:00+00', 10, 1);
+
+statement ok
+INSERT INTO eowc_rank_input VALUES ('2024-01-01 00:00:00+00', 20, 2);
+
+statement ok
+INSERT INTO eowc_rank_input VALUES ('2024-01-01 00:00:20+00', 11, 1);
+
+statement ok
+INSERT INTO eowc_rank_input VALUES ('2024-01-01 00:00:20+00', 12, 1);
+
+statement ok
+INSERT INTO eowc_rank_input VALUES ('2024-01-01 00:00:20+00', 21, 2);
+
+statement ok
+INSERT INTO eowc_rank_input VALUES ('2024-01-01 00:00:20+00', 22, 2);

@@ -544,12 +544,7 @@ static LOGICAL_FILTER_EXPRESSION_SIMPLIFY: LazyLock<OptimizationStage> = LazyLoc
 static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Rewrite Source For Batch",
-        vec![
-            SourceToKafkaScanRule::create(),
-            // For Iceberg, we use the intermediate scan to defer metadata reading
-            // until after predicate pushdown and column pruning
-            SourceToIcebergIntermediateScanRule::create(),
-        ],
+        vec![SourceToKafkaScanRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -557,7 +552,13 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
 static MATERIALIZE_ICEBERG_SCAN: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Materialize Iceberg Scan",
-        vec![IcebergIntermediateScanRule::create()],
+        vec![
+            // When storage mode is auto, may rewrite Iceberg intermediate scan to Hummock scan based on statistics.
+            IcebergEngineStorageSelectionRule::create(),
+            // This converts LogicalIcebergIntermediateScan to LogicalIcebergScan with anti-joins
+            // for delete files.
+            IcebergIntermediateScanRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
@@ -934,8 +935,6 @@ impl LogicalOptimizer {
         }
 
         // Materialize Iceberg intermediate scans after predicate pushdown and column pruning.
-        // This converts LogicalIcebergIntermediateScan to LogicalIcebergScan with anti-joins
-        // for delete files.
         plan = plan.optimize_by_rules(&MATERIALIZE_ICEBERG_SCAN)?;
 
         plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;

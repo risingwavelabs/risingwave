@@ -63,10 +63,6 @@ pub(super) type GlobalTableIdGen = GlobalIdGen<GlobalId<{ IdCategory::Table }>>;
 pub(crate) struct GlobalActorId(u32);
 
 impl GlobalActorId {
-    pub fn new(id: ActorId) -> Self {
-        Self(id.as_raw_id())
-    }
-
     pub fn as_global_id(&self) -> ActorId {
         self.0.into()
     }
@@ -114,28 +110,5 @@ impl<ID: From<u32>> GlobalIdGen<ID> {
             self.len
         );
         ID::from(local_id + self.offset)
-    }
-
-    pub fn len(&self) -> u32 {
-        self.len
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn global_actor_id_gen_reserves_unique_ranges() {
-        let counter = AtomicU32::new(10);
-        let first = GlobalActorIdGen::new(&counter, 3);
-        assert_eq!(first.len(), 3);
-        let second = GlobalActorIdGen::new(&counter, 2);
-        assert_eq!(second.len(), 2);
-
-        assert_eq!(first.to_global_id(0).as_global_id(), 10);
-        assert_eq!(first.to_global_id(2).as_global_id(), 12);
-        assert_eq!(second.to_global_id(1).as_global_id(), 14);
-        assert_eq!(counter.load(Ordering::Relaxed), 15);
     }
 }

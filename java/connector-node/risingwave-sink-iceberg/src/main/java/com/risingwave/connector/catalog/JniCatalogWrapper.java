@@ -41,6 +41,18 @@ public class JniCatalogWrapper {
         this.catalog = Objects.requireNonNull(catalog, "Catalog can't be null!");
     }
 
+    private static Namespace parseNamespace(String namespaceStr) {
+        if (namespaceStr == null || namespaceStr.isEmpty()) {
+            return Namespace.empty();
+        } else {
+            String[] levels = namespaceStr.split("\\.", -1);
+            for (String level : levels) {
+                checkArgument(!level.isEmpty(), "Invalid namespace: " + namespaceStr);
+            }
+            return Namespace.of(levels);
+        }
+    }
+
     /**
      * Load table through this prox.
      *
@@ -77,12 +89,7 @@ public class JniCatalogWrapper {
      * @throws Exception
      */
     public String createTable(String namespaceStr, String createTableRequest) throws Exception {
-        Namespace namespace;
-        if (namespaceStr == null) {
-            namespace = Namespace.empty();
-        } else {
-            namespace = Namespace.of(namespaceStr);
-        }
+        Namespace namespace = parseNamespace(namespaceStr);
         CreateTableRequest req =
                 RESTObjectMapper.mapper().readValue(createTableRequest, CreateTableRequest.class);
         LoadTableResponse resp = CatalogHandlers.createTable(catalog, namespace, req);
@@ -107,12 +114,7 @@ public class JniCatalogWrapper {
      * @return true if the namespace exists, false otherwise.
      */
     public boolean namespaceExists(String namespaceStr) {
-        Namespace namespace;
-        if (namespaceStr == null) {
-            namespace = Namespace.empty();
-        } else {
-            namespace = Namespace.of(namespaceStr);
-        }
+        Namespace namespace = parseNamespace(namespaceStr);
         if (catalog instanceof SupportsNamespaces) {
             return ((SupportsNamespaces) catalog).namespaceExists(namespace);
         } else {
@@ -126,12 +128,7 @@ public class JniCatalogWrapper {
      * @param namespaceStr The namespace to create.
      */
     public void createNamespace(String namespaceStr) {
-        Namespace namespace;
-        if (namespaceStr == null) {
-            namespace = Namespace.empty();
-        } else {
-            namespace = Namespace.of(namespaceStr);
-        }
+        Namespace namespace = parseNamespace(namespaceStr);
         if (catalog instanceof SupportsNamespaces) {
             ((SupportsNamespaces) catalog).createNamespace(namespace);
         }
@@ -173,12 +170,7 @@ public class JniCatalogWrapper {
      * @throws Exception
      */
     public String listTables(String namespaceStr) throws Exception {
-        Namespace namespace;
-        if (namespaceStr == null) {
-            namespace = Namespace.empty();
-        } else {
-            namespace = Namespace.of(namespaceStr);
-        }
+        Namespace namespace = parseNamespace(namespaceStr);
         ListTablesResponse resp = CatalogHandlers.listTables(catalog, namespace);
         return RESTObjectMapper.mapper().writer().writeValueAsString(resp);
     }

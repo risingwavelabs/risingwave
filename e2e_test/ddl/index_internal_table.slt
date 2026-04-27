@@ -1,0 +1,24 @@
+control substitution on
+
+statement ok
+create table internal_index_t (v1 int);
+
+statement ok
+create materialized view internal_index_source as select * from internal_index_t;
+
+let internal_streamscan_table
+SELECT name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'internal_index_source'
+  AND name LIKE '%streamscan%'
+ORDER BY id
+LIMIT 1
+
+statement error CREATE INDEX does not support internal table
+create index internal_index_idx on ${internal_streamscan_table} (row_count);
+
+statement ok
+drop materialized view internal_index_source;
+
+statement ok
+drop table internal_index_t;

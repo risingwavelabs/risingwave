@@ -139,7 +139,9 @@ impl PlainParser {
                         self.source_ctx.source_id,
                         &self.source_ctx.source_name,
                         &self.source_ctx.connector_props,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(schema_change) => Ok(ParseResult::SchemaChange(schema_change)),
                         Err(err) => {
                             // Report CDC auto schema change fail event
@@ -259,8 +261,8 @@ mod tests {
     use std::sync::Arc;
 
     use expect_test::expect;
-    use futures::StreamExt;
     use futures::executor::block_on;
+    use futures::{StreamExt, TryStreamExt};
     use futures_async_stream::try_stream;
     use itertools::Itertools;
     use risingwave_common::catalog::ColumnCatalog;
@@ -269,7 +271,10 @@ mod tests {
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
     use crate::source::cdc::DebeziumCdcMeta;
-    use crate::source::{ConnectorProperties, SourceCtrlOpts, SourceMessage, SplitId};
+    use crate::source::{
+        ConnectorProperties, SourceCtrlOpts, SourceMessage, SourceMessageEvent, SourceReaderEvent,
+        SplitId,
+    };
 
     #[tokio::test]
     async fn test_emit_transactional_chunk() {
@@ -299,16 +304,17 @@ mod tests {
         let message_stream = source_message_stream(transactional);
         let chunk_stream = crate::parser::parse_message_stream(
             parser,
-            message_stream.boxed(),
+            message_stream.map_ok(SourceMessageEvent::Data).boxed(),
             SourceCtrlOpts::for_test(),
         );
-        let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.collect::<Vec<_>>())
-            .into_iter()
-            .collect();
+        let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.try_collect::<Vec<_>>());
         let output = output
             .unwrap()
             .into_iter()
-            .filter(|c| c.cardinality() > 0)
+            .filter_map(|event| match event {
+                SourceReaderEvent::DataChunk(chunk) if chunk.cardinality() > 0 => Some(chunk),
+                SourceReaderEvent::DataChunk(_) | SourceReaderEvent::SplitProgress(_) => None,
+            })
             .enumerate()
             .map(|(i, c)| {
                 if i == 0 {
@@ -340,16 +346,17 @@ mod tests {
         let message_stream = source_message_stream(transactional);
         let chunk_stream = crate::parser::parse_message_stream(
             parser,
-            message_stream.boxed(),
+            message_stream.map_ok(SourceMessageEvent::Data).boxed(),
             SourceCtrlOpts::for_test(),
         );
-        let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.collect::<Vec<_>>())
-            .into_iter()
-            .collect();
+        let output: std::result::Result<Vec<_>, _> = block_on(chunk_stream.try_collect::<Vec<_>>());
         let output = output
             .unwrap()
             .into_iter()
-            .filter(|c| c.cardinality() > 0)
+            .filter_map(|event| match event {
+                SourceReaderEvent::DataChunk(chunk) if chunk.cardinality() > 0 => Some(chunk),
+                SourceReaderEvent::DataChunk(_) | SourceReaderEvent::SplitProgress(_) => None,
+            })
             .inspect(|c| {
                 // 5 data messages in a single chunk
                 assert_eq!(5, c.cardinality());

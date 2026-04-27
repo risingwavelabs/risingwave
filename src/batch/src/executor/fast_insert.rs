@@ -14,16 +14,13 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, SerialArray, StreamChunk};
-use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
+use risingwave_common::catalog::{TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
-use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_pb::task_service::FastInsertRequest;
 
-use crate::error::Result;
+use crate::error::{BatchError, Result};
 
 /// A fast insert executor spacially designed for non-pgwire inserts such as websockets and webhooks.
 pub struct FastInsertExecutor {
@@ -31,7 +28,6 @@ pub struct FastInsertExecutor {
     table_id: TableId,
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
-    column_indices: Vec<usize>,
 
     row_id_index: Option<usize>,
     txn_id: TxnId,
@@ -44,27 +40,20 @@ impl FastInsertExecutor {
         insert_req: FastInsertRequest,
     ) -> Result<(FastInsertExecutor, DataChunk)> {
         let table_id = insert_req.table_id;
-        let column_indices = insert_req
-            .column_indices
-            .iter()
-            .map(|&i| i as usize)
-            .collect();
-        let mut schema = Schema::new(vec![Field::unnamed(DataType::Jsonb)]);
-        schema.fields.push(Field::unnamed(DataType::Serial)); // row_id column
         let data_chunk_pb = insert_req
             .data_chunk
             .expect("no data_chunk found in fast insert node");
+        let data_chunk = DataChunk::from_protobuf(&data_chunk_pb)?;
 
         Ok((
             FastInsertExecutor::new(
                 table_id,
                 insert_req.table_version_id,
                 dml_manager,
-                column_indices,
                 insert_req.row_id_index.as_ref().map(|index| *index as _),
                 insert_req.request_id,
             ),
-            DataChunk::from_protobuf(&data_chunk_pb)?,
+            data_chunk,
         ))
     }
 
@@ -73,7 +62,6 @@ impl FastInsertExecutor {
         table_id: TableId,
         table_version_id: TableVersionId,
         dml_manager: DmlManagerRef,
-        column_indices: Vec<usize>,
         row_id_index: Option<usize>,
         request_id: u32,
     ) -> Self {
@@ -82,7 +70,6 @@ impl FastInsertExecutor {
             table_id,
             table_version_id,
             dml_manager,
-            column_indices,
             row_id_index,
             txn_id,
             request_id,
@@ -94,8 +81,8 @@ impl FastInsertExecutor {
     pub async fn do_execute(
         self,
         data_chunk_to_insert: DataChunk,
-        returning_epoch: bool,
-    ) -> Result<Epoch> {
+        wait_for_persistence: bool,
+    ) -> Result<()> {
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
@@ -109,19 +96,6 @@ impl FastInsertExecutor {
         let write_txn_data = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
-
-            let mut ordered_columns = self
-                .column_indices
-                .iter()
-                .enumerate()
-                .map(|(i, idx)| (*idx, columns[i].clone()))
-                .collect_vec();
-
-            ordered_columns.sort_unstable_by_key(|(idx, _)| *idx);
-            columns = ordered_columns
-                .into_iter()
-                .map(|(_, column)| column)
-                .collect_vec();
 
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
@@ -140,12 +114,14 @@ impl FastInsertExecutor {
             Result::Ok(())
         };
         write_txn_data(data_chunk_to_insert).await?;
-        if returning_epoch {
-            write_handle.end_returning_epoch().await.map_err(Into::into)
+        if wait_for_persistence {
+            write_handle
+                .end_wait_persistence()
+                .map_err(BatchError::from)?
+                .await
+                .map_err(BatchError::from)
         } else {
-            write_handle.end().await?;
-            // the returned epoch is invalid and should not be used.
-            Ok(Epoch(INVALID_EPOCH))
+            write_handle.end().await.map_err(Into::into)
         }
     }
 }
@@ -153,17 +129,17 @@ impl FastInsertExecutor {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::ops::Bound;
 
     use assert_matches::assert_matches;
     use futures::StreamExt;
+    use itertools::Itertools;
     use risingwave_common::array::{Array, JsonbArrayBuilder};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID};
+    use risingwave_common::catalog::{
+        ColumnDesc, ColumnId, Field, INITIAL_TABLE_VERSION_ID, Schema,
+    };
     use risingwave_common::transaction::transaction_message::TxnMsg;
-    use risingwave_common::types::JsonbVal;
+    use risingwave_common::types::{DataType, JsonbVal};
     use risingwave_dml::dml_manager::DmlManager;
-    use risingwave_storage::hummock::test_utils::{ReadOptions, StateStoreReadTestExt};
-    use risingwave_storage::memory::MemoryStateStore;
     use serde_json::json;
 
     use super::*;
@@ -173,9 +149,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fast_insert() -> Result<()> {
-        let epoch = Epoch::now();
         let dml_manager = Arc::new(DmlManager::for_test());
-        let store = MemoryStateStore::new();
         // Schema of the table
         let mut schema = Schema::new(vec![Field::unnamed(DataType::Jsonb)]);
         schema.fields.push(Field::unnamed(DataType::Serial)); // row_id column
@@ -216,33 +190,26 @@ mod tests {
             table_id,
             INITIAL_TABLE_VERSION_ID,
             dml_manager,
-            vec![0], // Ignoring insertion order
             row_id_index,
             0,
         ));
         let handle = tokio::spawn(async move {
-            let epoch_received = insert_executor.do_execute(data_chunk, true).await.unwrap();
-            assert_eq!(epoch, epoch_received);
+            insert_executor.do_execute(data_chunk, true).await.unwrap();
         });
 
         // Read
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
 
         assert_matches!(reader.next().await.unwrap()?, TxnMsg::Data(_, chunk) => {
-            assert_eq!(chunk.columns().len(),2);
+            assert_eq!(chunk.columns().len(), 2);
             let array = chunk.columns()[0].as_jsonb().iter().collect::<Vec<_>>();
             assert_eq!(JsonbVal::from(array[0].unwrap()), jsonb_val);
         });
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, Some(epoch_notifier)) => {
-            epoch_notifier.send(epoch).unwrap();
+        // Simulate the DmlExecutor: fire the persistence notifier after try_wait_epoch succeeds.
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, Some(persistence_notifier)) => {
+            persistence_notifier.send(()).unwrap();
         });
-        let epoch = u64::MAX;
-        let full_range = (Bound::Unbounded, Bound::Unbounded);
-        let store_content = store
-            .scan(full_range, epoch, None, ReadOptions::default())
-            .await?;
-        assert!(store_content.is_empty());
 
         handle.await.unwrap();
 

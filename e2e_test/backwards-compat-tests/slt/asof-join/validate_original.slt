@@ -1,0 +1,14 @@
+query IIIIII rowsort
+SELECT * FROM asof_inner_mv;
+----
+1 15 1 1 10 100
+1 25 2 1 20 200
+1 35 3 1 30 300
+
+query IIIIII rowsort
+SELECT * FROM asof_left_outer_mv;
+----
+1 15 1 1 10 100
+1 25 2 1 20 200
+1 35 3 1 30 300
+2 10 4 NULL NULL NULL

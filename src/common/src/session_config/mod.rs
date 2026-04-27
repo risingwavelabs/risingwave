@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod iceberg_query_storage_mode;
 mod non_zero64;
 mod opt;
 pub mod parallelism;
@@ -23,6 +24,7 @@ mod transaction_isolation_level;
 mod visibility_mode;
 
 use chrono_tz::Tz;
+pub use iceberg_query_storage_mode::IcebergQueryStorageMode;
 use itertools::Itertools;
 pub use opt::OptionConfig;
 pub use query_mode::QueryMode;
@@ -37,7 +39,7 @@ use crate::config::mutate::TomlTableMutateExt;
 use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
-use crate::session_config::parallelism::{ConfigAdaptiveParallelismStrategy, ConfigParallelism};
+use crate::session_config::parallelism::{ConfigBackfillParallelism, ConfigParallelism};
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -66,13 +68,6 @@ const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
 const DISABLE_DML_RATE_LIMIT: i32 = -1;
 const DISABLE_SINK_RATE_LIMIT: i32 = -1;
-
-/// Default parallelism bound for tables
-const DEFAULT_TABLE_PARALLELISM_BOUND: std::num::NonZeroU64 = std::num::NonZeroU64::new(4).unwrap();
-
-/// Default parallelism bound for sources
-const DEFAULT_SOURCE_PARALLELISM_BOUND: std::num::NonZeroU64 =
-    std::num::NonZeroU64::new(4).unwrap();
 
 /// Default to bypass cluster limits iff in debug mode.
 const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
@@ -108,6 +103,11 @@ pub struct SessionConfig {
     /// or distributed mode automatically.
     #[parameter(default = QueryMode::default())]
     query_mode: QueryMode,
+
+    /// For Iceberg engine tables, which storage to use for batch SELECT: Iceberg (columnar) or
+    /// Hummock (row). Only affects batch SELECT on tables with ENGINE = ICEBERG.
+    #[parameter(default = IcebergQueryStorageMode::default())]
+    iceberg_query_storage_mode: IcebergQueryStorageMode,
 
     /// Sets the number of digits displayed for floating-point values.
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>
@@ -171,60 +171,42 @@ pub struct SessionConfig {
     #[parameter(default = "UTC", check_hook = check_timezone)]
     timezone: String,
 
-    /// The execution parallelism for streaming queries, including tables, materialized views, indexes,
-    /// and sinks. Defaults to 0, which means they will be scheduled adaptively based on the cluster size.
-    ///
-    /// If a non-zero value is set, streaming queries will be scheduled to use a fixed number of parallelism.
-    /// Note that the value will be bounded at `STREAMING_MAX_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    /// The execution parallelism for streaming queries, including tables, materialized views,
+    /// indexes, and sinks. Defaults to `default`, which preserves the legacy adaptive
+    /// scheduling behavior during effective resolution.
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism: ConfigParallelism,
 
-    /// Specific parallelism for backfill. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
-    streaming_parallelism_for_backfill: ConfigParallelism,
+    /// Specific parallelism for backfill. Only `default` and a fixed positive integer are
+    /// supported here. Adaptive backfill strategies are deferred to a later change.
+    #[parameter(
+        default = ConfigBackfillParallelism::Default,
+        check_hook = check_streaming_parallelism_for_backfill
+    )]
+    streaming_parallelism_for_backfill: ConfigBackfillParallelism,
 
-    /// The adaptive parallelism strategy for streaming jobs. Defaults to `default`, which follows the system setting.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
-    streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
-
-    /// Specific adaptive parallelism strategy for table. Defaults to `BOUNDED(4)`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_TABLE_PARALLELISM_BOUND))]
-    streaming_parallelism_strategy_for_table: ConfigAdaptiveParallelismStrategy,
-
-    /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    /// Specific parallelism for table. Defaults to `default`, which preserves the legacy
+    /// bounded adaptive behavior only when the global parallelism itself remains `default`.
+    /// Otherwise it follows the explicit global parallelism.
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_table: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for sink. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
-    streaming_parallelism_strategy_for_sink: ConfigAdaptiveParallelismStrategy,
-
     /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_sink: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for index. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
-    streaming_parallelism_strategy_for_index: ConfigAdaptiveParallelismStrategy,
-
     /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_index: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for source. Defaults to `BOUNDED(4)`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::Bounded(DEFAULT_SOURCE_PARALLELISM_BOUND))]
-    streaming_parallelism_strategy_for_source: ConfigAdaptiveParallelismStrategy,
-
-    /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    /// Specific parallelism for source. Defaults to `default`, which preserves the legacy
+    /// bounded adaptive behavior only when the global parallelism itself remains `default`.
+    /// Otherwise it follows the explicit global parallelism.
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_source: ConfigParallelism,
 
-    /// Specific adaptive parallelism strategy for materialized view. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
-    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
-    streaming_parallelism_strategy_for_materialized_view: ConfigAdaptiveParallelismStrategy,
-
     /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::default())]
+    #[parameter(default = ConfigParallelism::Default)]
     streaming_parallelism_for_materialized_view: ConfigParallelism,
 
     /// Enable delta join for streaming queries. Defaults to false.
@@ -410,6 +392,15 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     streaming_use_shared_source: bool,
 
+    /// Enable in-memory cache for `AsOf` join executor.
+    ///
+    /// When enabled (default), `AsOf` join uses the cache-based implementation.
+    ///
+    /// When disabled, `AsOf` join uses a no-cache implementation that directly queries
+    /// the state table on-demand, reducing unnecessary data fetches for cache.
+    #[parameter(default = true)]
+    streaming_asof_join_use_cache: bool,
+
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]
     server_encoding: String,
@@ -495,7 +486,7 @@ pub struct SessionConfig {
 
     /// Enable DataFusion Engine
     /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     enable_datafusion_engine: bool,
 
     /// Prefer hash join over sort merge join in DataFusion engine
@@ -562,6 +553,17 @@ fn check_streaming_max_parallelism(val: &usize) -> Result<(), String> {
             "STREAMING_MAX_PARALLELISM must be less than or equal to {}",
             VirtualNode::MAX_COUNT
         )),
+    }
+}
+
+fn check_streaming_parallelism_for_backfill(val: &ConfigBackfillParallelism) -> Result<(), String> {
+    match val {
+        ConfigBackfillParallelism::Default | ConfigBackfillParallelism::Fixed(_) => Ok(()),
+        ConfigBackfillParallelism::Adaptive
+        | ConfigBackfillParallelism::Bounded(_)
+        | ConfigBackfillParallelism::Ratio(_) => Err(
+            "Only `default` or fixed backfill parallelism is supported here; adaptive backfill strategy is deferred to a later change.".to_owned(),
+        ),
     }
 }
 
@@ -717,5 +719,142 @@ mod test {
             merged.developer.over_window_cache_policy,
             OverWindowCachePolicy::RecentFirstN
         );
+    }
+
+    #[test]
+    fn test_streaming_parallelism_defaults() {
+        let config = SessionConfig::default();
+
+        assert_eq!(config.streaming_parallelism(), ConfigParallelism::Default);
+        assert_eq!(
+            config.streaming_parallelism_for_table(),
+            ConfigParallelism::Default
+        );
+        assert_eq!(
+            config.streaming_parallelism_for_source(),
+            ConfigParallelism::Default
+        );
+        assert_eq!(
+            config.streaming_parallelism_for_sink(),
+            ConfigParallelism::Default
+        );
+        assert_eq!(
+            config.streaming_parallelism_for_index(),
+            ConfigParallelism::Default
+        );
+        assert_eq!(
+            config.streaming_parallelism_for_materialized_view(),
+            ConfigParallelism::Default
+        );
+    }
+
+    #[test]
+    fn test_streaming_parallelism_default_round_trip() {
+        let mut config = SessionConfig::default();
+
+        assert_eq!(config.get("streaming_parallelism").unwrap(), "default");
+        assert_eq!(
+            config.get("streaming_parallelism_for_table").unwrap(),
+            "default"
+        );
+        assert_eq!(
+            config.get("streaming_parallelism_for_source").unwrap(),
+            "default"
+        );
+
+        config
+            .set("streaming_parallelism", "default".to_owned(), &mut ())
+            .unwrap();
+        assert_eq!(config.get("streaming_parallelism").unwrap(), "default");
+
+        config
+            .set("streaming_parallelism", "bounded(16)".to_owned(), &mut ())
+            .unwrap();
+        config
+            .set(
+                "streaming_parallelism_for_table",
+                "bounded(8)".to_owned(),
+                &mut (),
+            )
+            .unwrap();
+        config
+            .set(
+                "streaming_parallelism_for_source",
+                "bounded(8)".to_owned(),
+                &mut (),
+            )
+            .unwrap();
+
+        assert_eq!(
+            config.reset("streaming_parallelism", &mut ()).unwrap(),
+            "default"
+        );
+        assert_eq!(
+            config
+                .reset("streaming_parallelism_for_table", &mut ())
+                .unwrap(),
+            "default"
+        );
+        assert_eq!(
+            config
+                .reset("streaming_parallelism_for_source", &mut ())
+                .unwrap(),
+            "default"
+        );
+    }
+
+    #[test]
+    fn test_streaming_parallelism_for_backfill_accepts_default_and_fixed() {
+        let mut config = SessionConfig::default();
+
+        config
+            .set(
+                "streaming_parallelism_for_backfill",
+                "default".to_owned(),
+                &mut (),
+            )
+            .unwrap();
+        assert_eq!(
+            config.get("streaming_parallelism_for_backfill").unwrap(),
+            "default"
+        );
+
+        config
+            .set(
+                "streaming_parallelism_for_backfill",
+                "2".to_owned(),
+                &mut (),
+            )
+            .unwrap();
+        assert_eq!(config.streaming_parallelism_for_backfill().to_string(), "2");
+    }
+
+    #[test]
+    fn test_streaming_parallelism_for_backfill_rejects_adaptive_modes() {
+        let mut config = SessionConfig::default();
+        let expected = "Only `default` or fixed backfill parallelism is supported here; adaptive backfill strategy is deferred to a later change.";
+
+        for value in ["adaptive", "bounded(2)", "ratio(0.5)"] {
+            let err = config
+                .set(
+                    "streaming_parallelism_for_backfill",
+                    value.to_owned(),
+                    &mut (),
+                )
+                .unwrap_err();
+
+            match err {
+                SessionConfigError::InvalidValue {
+                    entry,
+                    value: actual_value,
+                    source,
+                } => {
+                    assert_eq!(entry, "streaming_parallelism_for_backfill");
+                    assert_eq!(actual_value, value);
+                    assert_eq!(source.to_string(), expected);
+                }
+                other => panic!("unexpected error: {other:?}"),
+            }
+        }
     }
 }

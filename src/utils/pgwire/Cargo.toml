@@ -16,7 +16,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
 jsonwebtoken = { workspace = true }
 ldap3 = { version = "0.12.1", default-features = false, features = ["tls-rustls-aws-lc-rs"] }
-openssl = "0.10.72"
+openssl = { workspace = true }
 panic-message = "0.3"
 parking_lot = { workspace = true }
 peekable = { version = "0.4", features = ["tokio"] }
@@ -32,10 +32,7 @@ serde_json = "1"
 socket2 = "0.6"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "macros",
-] }
+tokio = { workspace = true }
 tokio-openssl = "0.6.3"
 tracing = "0.1"
 url = "2"

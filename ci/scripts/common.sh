@@ -159,6 +159,77 @@ function download_and_prepare_rw() {
   risedev link-all-in-one-binaries
 }
 
+download_connector_node_artifact() {
+  echo "--- Download connector node package"
+  export CONNECTOR_LIBS_PATH="./connector-node/libs"
+  buildkite-agent artifact download risingwave-connector.tar.gz ./
+  mkdir -p ./connector-node
+  tar xf ./risingwave-connector.tar.gz -C ./connector-node
+}
+
+install_e2e_test_requirements() {
+  echo "--- Install Python test dependencies"
+  python3 -m pip install --break-system-packages -r ./e2e_test/requirements.txt
+}
+
+install_sqlserver_client() {
+  echo "--- Install sqlserver client"
+  curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
+  curl https://packages.microsoft.com/config/ubuntu/20.04/prod.list | sudo tee /etc/apt/sources.list.d/msprod.list
+  apt-get update -y
+  ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y mssql-tools unixodbc-dev
+  export PATH="/opt/mssql-tools/bin/:$PATH"
+}
+
+source_test_env_setup() {
+    local profile="$1"
+    local risedev_profile=""
+    local need_connector="false"
+    local need_python="false"
+
+    shift
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --risedev-profile)
+                risedev_profile="$2"
+                shift 2
+                ;;
+            --need-connector)
+                need_connector="true"
+                shift
+                ;;
+            --need-python)
+                need_python="true"
+                shift
+                ;;
+            *)
+                echo "source_test_env_setup: unknown argument $1" 1>&2
+                exit 1
+                ;;
+        esac
+    done
+
+    if [[ -z "$risedev_profile" ]]; then
+        echo "source_test_env_setup: --risedev-profile is required" 1>&2
+        exit 1
+    fi
+
+    download_and_prepare_rw "$profile" source
+
+    if [[ "$need_connector" == "true" ]]; then
+        download_connector_node_artifact
+    fi
+
+    if [[ "$need_python" == "true" ]]; then
+        install_e2e_test_requirements
+    fi
+
+    echo "--- starting risingwave cluster: ${risedev_profile}"
+    RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
+    risedev ci-start "$risedev_profile"
+}
+
 function filter_stack_trace() {
   # Only keep first 3 lines of backtrace: 0-2.
   echo "filtering stack trace for $1"
@@ -215,6 +286,52 @@ check_link_info() {
       echo "libssl should not be dynamically linked"
       exit 1
   fi
+}
+
+# Set up the environment for E2E sink tests.
+# Arguments:
+#   $1: cargo build profile
+#   --risedev-profile <profile>: risedev profile to start (default: "ci-sink-test")
+#   --need-connector: download connector node package
+#   --sleep-duration <seconds>: seconds to sleep after cluster start (default: 1)
+sink_test_env_setup() {
+    local profile="$1"
+    local risedev_profile="ci-sink-test"
+    local need_connector="false"
+    local sleep_duration="1"
+
+    shift
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --risedev-profile)
+                risedev_profile="$2"
+                shift 2
+                ;;
+            --need-connector)
+                need_connector="true"
+                shift
+                ;;
+            --sleep-duration)
+                sleep_duration="$2"
+                shift 2
+                ;;
+            *)
+                echo "sink_test_env_setup: unknown argument $1" 1>&2
+                exit 1
+                ;;
+        esac
+    done
+
+    download_and_prepare_rw "$profile" source
+
+    if [[ "$need_connector" == "true" ]]; then
+        download_connector_node_artifact
+    fi
+
+    echo "--- starting risingwave cluster: ${risedev_profile}"
+    risedev ci-start "${risedev_profile}"
+    sleep "$sleep_duration"
 }
 
 # Set nextest partition argument based on BuildKite parallel job configuration

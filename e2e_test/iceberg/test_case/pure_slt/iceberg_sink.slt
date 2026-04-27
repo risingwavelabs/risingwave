@@ -59,6 +59,22 @@ CREATE SOURCE iceberg_demo_source WITH (
     table.name='e2e_demo_table'
 );
 
+statement error PRIMARY KEY is not supported for Iceberg CREATE SOURCE
+CREATE SOURCE iceberg_demo_source_with_pk (
+    PRIMARY KEY (v1)
+) WITH (
+    connector = 'iceberg',
+    warehouse.path = 's3a://icebergdata',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = secret iceberg_s3_access_key,
+    s3.secret.key = secret iceberg_s3_secret_key,
+    s3.region = 'us-east-1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    database.name='demo_db',
+    table.name='e2e_demo_table'
+);
+
 statement ok
 CREATE SINK s7 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH (
     connector = 'iceberg',
@@ -75,7 +91,8 @@ CREATE SINK s7 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH 
     table.name='e2e_auto_create_table',
     commit_checkpoint_interval = 1,
     create_table_if_not_exists = 'true',
-    partition_by = 'v1'
+    partition_by = 'v1',
+    order_key = 'v2 desc nulls last, v1 asc'
 );
 
 statement ok
@@ -138,7 +155,7 @@ DROP TABLE t6 cascade;
 
 # check sink destination iceberg
 system ok
-sparksql --e "SELECT * FROM demo.demo_db.e2e_demo_table ORDER BY v1;" 2>/dev/null | tail -n +2
+sparksql --e "SELECT * FROM demo.demo_db.e2e_demo_table ORDER BY v1;" 2>/dev/null | awk 'NR == 1 && /^v1[[:space:]]+v2[[:space:]]+v3$/ { next } { print }'
 ----
 1	50	1-50
 2	2	2-2

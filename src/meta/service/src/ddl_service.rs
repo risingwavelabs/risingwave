@@ -26,6 +26,7 @@ use risingwave_common::id::{ObjectId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_connector::sink::iceberg::ENABLE_PK_INDEX;
 use risingwave_meta::barrier::{BarrierScheduler, Command, ResumeBackfillTarget};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
@@ -1069,8 +1070,9 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(GetTablesResponse { tables }))
     }
 
-    async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
-        let version = self.ddl_controller.wait().await?;
+    async fn wait(&self, request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
+        let req = request.into_inner();
+        let version = self.ddl_controller.wait(req.job_id).await?;
         Ok(Response::new(WaitResponse {
             version: Some(version),
         }))
@@ -1641,6 +1643,15 @@ impl DdlService for DdlServiceImpl {
 
         // Mark sink as background creation, so that it won't block source creation.
         sink.create_type = PbCreateType::Background as _;
+
+        // TODO: Iceberg with pk index doesn't support auto schema change
+        if !sink
+            .properties
+            .get(ENABLE_PK_INDEX)
+            .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+        {
+            sink.auto_refresh_schema_from_table = Some(table_catalog.id);
+        }
 
         let mut fragment_graph = fragment_graph.unwrap();
 

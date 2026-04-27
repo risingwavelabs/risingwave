@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-pub use super::arrow_54::{
+pub use super::arrow_58::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
 };
 use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
@@ -140,7 +140,7 @@ mod tests {
         );
 
         // Empty array - arrow to risingwave conversion.
-        let test_arr_2 = arrow_array::StructArray::from(vec![]);
+        let test_arr_2 = arrow_array::StructArray::new_empty_fields(0, None);
         assert_eq!(
             UdfArrowConvert::default()
                 .from_struct_array(&test_arr_2)
@@ -236,25 +236,14 @@ mod tests {
                             Field {
                                 name: "key",
                                 data_type: Utf8,
-                                nullable: false,
-                                dict_id: 0,
-                                dict_is_ordered: false,
-                                metadata: {},
                             },
                             Field {
                                 name: "value",
                                 data_type: Int32,
                                 nullable: true,
-                                dict_id: 0,
-                                dict_is_ordered: false,
-                                metadata: {},
                             },
                         ],
                     ),
-                    nullable: false,
-                    dict_id: 0,
-                    dict_is_ordered: false,
-                    metadata: {},
                 },
                 false,
             )

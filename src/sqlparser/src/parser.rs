@@ -344,7 +344,8 @@ impl Parser<'_> {
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
-                Keyword::WAIT => Ok(Statement::Wait),
+                Keyword::WAIT => Ok(self.parse_wait()?),
+                Keyword::BACKUP => Ok(Statement::Backup),
                 Keyword::RECOVER => Ok(Statement::Recover),
                 Keyword::USE => Ok(self.parse_use()?),
                 Keyword::VACUUM => Ok(self.parse_vacuum()?),
@@ -4163,6 +4164,16 @@ impl Parser<'_> {
                     |parser: &mut Self| {
                         let checkpoint = *parser;
                         let ident = parser.parse_identifier()?;
+                        if parser.consume_token(&Token::LParen) {
+                            let args = parser.parse_comma_separated(Parser::ensure_parse_value)?;
+                            parser.expect_token(&Token::RParen)?;
+                            let raw = format!(
+                                "{}({})",
+                                ident,
+                                args.iter().map(ToString::to_string).join(", ")
+                            );
+                            return Ok(SetVariableValueSingle::Raw(raw));
+                        }
                         if ident.value == "default" {
                             *parser = checkpoint;
                             return parser.expected("parameter list value").map_err(|e| e.cut());
@@ -4534,6 +4545,15 @@ impl Parser<'_> {
     }
 
     pub fn parse_delete(&mut self) -> ModalResult<Statement> {
+        if self.parse_keyword(Keyword::META) {
+            let Some(_) = self.parse_one_of_keywords(&[Keyword::SNAPSHOT, Keyword::SNAPSHOTS])
+            else {
+                return self.expected("SNAPSHOT or SNAPSHOTS");
+            };
+            let snapshot_ids = self.parse_comma_separated(Parser::parse_literal_u64)?;
+            return Ok(Statement::DeleteMetaSnapshots { snapshot_ids });
+        }
+
         self.expect_keyword(Keyword::FROM)?;
         let table_name = self.parse_object_name()?;
         let selection = if self.parse_keyword(Keyword::WHERE) {
@@ -5929,9 +5949,15 @@ impl Parser<'_> {
             let name = self.parse_identifier()?;
 
             self.expect_token(&Token::RArrow)?;
-            let arg = self.parse_wildcard_or_expr()?.into();
+            let arg = if self.parse_keyword(Keyword::SECRET) {
+                FunctionArgExpr::SecretRef(self.parse_secret_ref()?)
+            } else {
+                self.parse_wildcard_or_expr()?.into()
+            };
 
             FunctionArg::Named { name, arg }
+        } else if self.parse_keyword(Keyword::SECRET) {
+            FunctionArg::Unnamed(FunctionArgExpr::SecretRef(self.parse_secret_ref()?))
         } else {
             FunctionArg::Unnamed(self.parse_wildcard_or_expr()?.into())
         };
@@ -6260,6 +6286,23 @@ impl Parser<'_> {
             window_frame,
         })
     }
+
+    pub fn parse_wait(&mut self) -> ModalResult<Statement> {
+        let target = if self.parse_keyword(Keyword::TABLE) {
+            WaitTarget::Table(self.parse_object_name()?)
+        } else if self.parse_keyword(Keyword::MATERIALIZED) {
+            self.expect_keyword(Keyword::VIEW)?;
+            WaitTarget::MaterializedView(self.parse_object_name()?)
+        } else if self.parse_keyword(Keyword::SINK) {
+            WaitTarget::Sink(self.parse_object_name()?)
+        } else if self.parse_keyword(Keyword::INDEX) {
+            WaitTarget::Index(self.parse_object_name()?)
+        } else {
+            WaitTarget::All
+        };
+
+        Ok(Statement::Wait(target))
+    }
 }
 
 impl Word {
@@ -6289,6 +6332,50 @@ mod tests {
                 parser.parse_expr().unwrap(),
                 Expr::Value(Value::Number("-9223372036854775808".to_owned()))
             )
+        });
+    }
+
+    #[test]
+    fn test_parse_function_arg_secret_ref() {
+        use crate::ast::{FunctionArg, FunctionArgExpr, SecretRefAsType, SecretRefValue};
+
+        // Unnamed secret argument
+        run_parser_method("SECRET my_secret", |parser| {
+            let (_variadic, arg) = parser.parse_function_args().unwrap();
+            assert_eq!(
+                arg,
+                FunctionArg::Unnamed(FunctionArgExpr::SecretRef(SecretRefValue {
+                    secret_name: ObjectName(vec![Ident::new_unchecked("my_secret")]),
+                    ref_as: SecretRefAsType::Text,
+                }))
+            );
+        });
+
+        // Unnamed secret argument with AS FILE
+        run_parser_method("SECRET my_secret AS FILE", |parser| {
+            let (_variadic, arg) = parser.parse_function_args().unwrap();
+            assert_eq!(
+                arg,
+                FunctionArg::Unnamed(FunctionArgExpr::SecretRef(SecretRefValue {
+                    secret_name: ObjectName(vec![Ident::new_unchecked("my_secret")]),
+                    ref_as: SecretRefAsType::File,
+                }))
+            );
+        });
+
+        // Named secret argument
+        run_parser_method("header => SECRET my_secret", |parser| {
+            let (_variadic, arg) = parser.parse_function_args().unwrap();
+            assert_eq!(
+                arg,
+                FunctionArg::Named {
+                    name: Ident::new_unchecked("header"),
+                    arg: FunctionArgExpr::SecretRef(SecretRefValue {
+                        secret_name: ObjectName(vec![Ident::new_unchecked("my_secret")]),
+                        ref_as: SecretRefAsType::Text,
+                    }),
+                }
+            );
         });
     }
 }

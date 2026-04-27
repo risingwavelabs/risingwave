@@ -209,6 +209,10 @@ DeltaLakeConfig:
   - name: r#type
     field_type: String
     required: true
+  - name: is_exactly_once
+    field_type: bool
+    comments: Whether to use the Delta transaction log to deduplicate replayed epoch commits.
+    required: false
 DorisConfig:
   fields:
   - name: doris.url
@@ -434,6 +438,22 @@ GooglePubSubConfig:
       The provided account credential must have the
       `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
     required: false
+HttpConfig:
+  fields:
+  - name: url
+    field_type: String
+    comments: The endpoint URL to POST data to.
+    required: true
+  - name: content_type
+    field_type: String
+    comments: |-
+      Content-Type header value. Defaults to `text/plain` for `varchar` and `application/json`
+      for `jsonb`.
+    required: false
+  - name: r#type
+    field_type: String
+    comments: Sink type, must be "append-only".
+    required: true
 IcebergConfig:
   fields:
   - name: r#type
@@ -609,7 +629,9 @@ IcebergConfig:
     required: false
   - name: table.name
     field_type: String
-    comments: Full name of table, must include schema name when database is provided.
+    comments: |-
+      Table name or namespace-qualified table name. Dots are treated as
+      Iceberg namespace separators.
     required: true
   - name: primary_key
     field_type: Vec<String>
@@ -622,11 +644,23 @@ IcebergConfig:
     field_type: String
     required: false
     default: Default::default
+  - name: order_key
+    field_type: String
+    required: false
+    default: Default::default
   - name: commit_checkpoint_interval
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 60.
     required: false
     default: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
+    allow_alter_on_fly: true
+  - name: commit_checkpoint_size_threshold_mb
+    field_type: u64
+    comments: |-
+      Commit on the next checkpoint barrier after buffered write size exceeds this threshold.
+      Default is 128 MB.
+    required: false
+    default: Some (ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
     allow_alter_on_fly: true
   - name: create_table_if_not_exists
     field_type: bool
@@ -734,18 +768,33 @@ IcebergConfig:
     comments: |-
       Parquet compression codec
       Supported values: uncompressed, snappy, gzip, lzo, brotli, lz4, zstd
-      Default is snappy
+      Default is zstd
     required: false
     default: Default::default
     allow_alter_on_fly: true
   - name: compaction.write_parquet_max_row_group_rows
     field_type: usize
     comments: |-
-      Maximum number of rows in a Parquet row group
-      Default is 122880 (from developer config)
+      Deprecated: maximum number of rows in a Parquet row group.
+      Accepted for backward compatibility, but ignored by the writer.
     required: false
     default: Default::default
     allow_alter_on_fly: true
+  - name: compaction.write_parquet_max_row_group_bytes
+    field_type: usize
+    comments: |-
+      Maximum size of a Parquet row group in bytes
+      Default is 128 `MiB`, matching Iceberg defaults.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: enable_pk_index
+    field_type: bool
+    comments: |-
+      Whether to enable PK index for upsert sink. Default is false.
+      It's used for V3 upsert iceberg sink to generate delete vectors.
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: topic

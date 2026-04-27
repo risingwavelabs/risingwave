@@ -29,11 +29,10 @@ use iceberg_compaction_core::config::{
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
-use parquet_57::file::properties::WriterProperties;
+use parquet_58::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
-    iceberg_compaction_enable_dynamic_size_estimation,
     iceberg_compaction_enable_heuristic_output_parallelism,
-    iceberg_compaction_max_concurrent_closes, iceberg_compaction_size_estimation_smoothing_factor,
+    iceberg_compaction_max_concurrent_closes,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_connector::sink::iceberg::{
@@ -47,6 +46,11 @@ use tokio::sync::oneshot::Receiver;
 use super::IcebergTaskMeta;
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
+
+pub struct IcebergTaskExecution {
+    pub sink_id: u32,
+    pub plan_runners: Vec<IcebergCompactionPlanRunner>,
+}
 
 static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
     LazyLock::new(|| {
@@ -71,10 +75,6 @@ pub struct IcebergCompactorRunnerConfig {
     pub enable_heuristic_output_parallelism: bool,
     #[builder(default = "iceberg_compaction_max_concurrent_closes()")]
     pub max_concurrent_closes: usize,
-    #[builder(default = "iceberg_compaction_enable_dynamic_size_estimation()")]
-    pub enable_dynamic_size_estimation: bool,
-    #[builder(default = "iceberg_compaction_size_estimation_smoothing_factor()")]
-    pub size_estimation_smoothing_factor: f64,
     #[builder]
     pub target_binpack_group_size_mb: Option<u64>,
     #[builder]
@@ -236,12 +236,22 @@ impl IcebergCompactionPlanRunner {
         branch: String,
         compaction_plan: CompactionPlan,
     ) -> HummockResult<RewriteFilesStat> {
+        if !compaction_plan.has_files() {
+            tracing::info!(
+                task_id,
+                plan_index,
+                table = %table_ident,
+                "skip empty iceberg compaction plan"
+            );
+            return Ok(RewriteFilesStat::default());
+        }
+
         let statistics = analyze_task_statistics(&compaction_plan);
 
         // Build writer properties from sink configuration
         let write_parquet_properties = WriterProperties::builder()
             .set_compression(iceberg_config.get_parquet_compression())
-            .set_max_row_group_size(iceberg_config.write_parquet_max_row_group_rows())
+            .set_max_row_group_bytes(iceberg_config.write_parquet_max_row_group_bytes())
             .set_created_by(concat!("risingwave version ", env!("CARGO_PKG_VERSION")).to_owned())
             .build();
 
@@ -251,15 +261,13 @@ impl IcebergCompactionPlanRunner {
             .write_parquet_properties(write_parquet_properties)
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
-            .enable_dynamic_size_estimation(config.enable_dynamic_size_estimation)
-            .size_estimation_smoothing_factor(config.size_estimation_smoothing_factor)
             .build()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to build iceberg compaction execution config: {:?}",
-                    e.as_report()
-                );
-            });
+            .map_err(|e| {
+                HummockError::compaction_executor(
+                    anyhow::Error::new(e)
+                        .context("failed to build iceberg compaction execution config"),
+                )
+            })?;
 
         tracing::info!(
             task_id = task_id,
@@ -295,15 +303,21 @@ impl IcebergCompactionPlanRunner {
             },
         );
 
+        let compaction_result = compaction
+            .compact_with_plan(compaction_plan, &compaction_execution_config)
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?
+            .ok_or_else(|| {
+                HummockError::compaction_executor(anyhow::anyhow!(
+                    "compact_with_plan returned no result for a non-empty iceberg compaction plan"
+                ))
+            })?;
+
         let CompactionResult {
             data_files,
             stats,
             table,
-        } = compaction
-            .compact_with_plan(compaction_plan, &compaction_execution_config)
-            .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?
-            .unwrap();
+        } = compaction_result;
 
         if let Some(committed_table) = table
             && should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
@@ -413,14 +427,15 @@ fn analyze_task_statistics(plan: &CompactionPlan) -> IcebergCompactionTaskStatis
     }
 }
 
-/// Creates plan runners from an iceberg compaction task.
-pub async fn create_plan_runners(
+/// Creates a task execution context from an iceberg compaction task.
+pub async fn create_task_execution(
     iceberg_compaction_task: IcebergCompactionTask,
     config: IcebergCompactorRunnerConfig,
     metrics: Arc<CompactorMetrics>,
-) -> HummockResult<Vec<IcebergCompactionPlanRunner>> {
+) -> HummockResult<IcebergTaskExecution> {
     let IcebergCompactionTask {
         task_id,
+        sink_id,
         props,
         task_type,
     } = iceberg_compaction_task;
@@ -469,7 +484,8 @@ pub async fn create_plan_runners(
         TaskType::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -489,7 +505,8 @@ pub async fn create_plan_runners(
         }
         TaskType::Full => {
             let config = FullCompactionConfigBuilder::default()
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -503,7 +520,8 @@ pub async fn create_plan_runners(
 
         TaskType::FilesWithDelete => {
             let config = FilesWithDeletesConfigBuilder::default()
-                .max_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -544,7 +562,10 @@ pub async fn create_plan_runners(
             table = %table_ident,
             "No files to compact, skip the task"
         );
-        return Ok(vec![]);
+        return Ok(IcebergTaskExecution {
+            sink_id,
+            plan_runners: vec![],
+        });
     }
 
     let mut runners = Vec::with_capacity(compaction_plans.len());
@@ -571,5 +592,8 @@ pub async fn create_plan_runners(
         "Created plan runners for iceberg compaction task"
     );
 
-    Ok(runners)
+    Ok(IcebergTaskExecution {
+        sink_id,
+        plan_runners: runners,
+    })
 }

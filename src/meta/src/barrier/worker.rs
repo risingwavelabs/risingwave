@@ -52,7 +52,7 @@ use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
     RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest, schedule,
 };
-use crate::controller::scale::render_actor_assignments;
+use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -63,6 +63,7 @@ use crate::manager::{
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{
     GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef, build_reschedule_commands,
+    rendered_layout_matches_current,
 };
 use crate::{MetaError, MetaResult};
 
@@ -282,22 +283,31 @@ fn build_reschedule_from_context(
         return Err(anyhow!("no active streaming workers for reschedule").into());
     }
 
-    let actor_id_counter = env.actor_id_generator();
     if context.is_empty() {
         return Ok(None);
     }
 
-    let rendered = render_actor_assignments(
-        actor_id_counter,
+    // Barrier worker resolves this intent against a stable in-flight snapshot.
+    // Reuse the same fragment view for preview comparison and command building.
+    let all_prev_fragments = database_info
+        .fragment_infos()
+        .map(|fragment| (fragment.fragment_id, fragment))
+        .collect();
+
+    let previewed = preview_actor_assignments(
         &worker_nodes,
         adaptive_parallelism_strategy,
         &context.loaded,
     )?;
 
-    let all_prev_fragments = database_info
-        .fragment_infos()
-        .map(|fragment| (fragment.fragment_id, fragment))
-        .collect();
+    if rendered_layout_matches_current(&previewed.fragments, &all_prev_fragments)? {
+        return Ok(None);
+    }
+
+    let actor_id_counter = env.actor_id_generator();
+    // Materialization only replaces preview actor ids with real ids. Worker
+    // placement, vnode ownership, and split assignment remain unchanged.
+    let rendered = materialize_actor_assignments(actor_id_counter, previewed);
     let mut commands = build_reschedule_commands(rendered.fragments, context, all_prev_fragments)?;
     Ok(commands.remove(&database_id))
 }
@@ -548,7 +558,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 ) => {
                     match complete_result {
                         Ok(output) => {
-                            self.checkpoint_control.ack_completed(output);
+                            self.checkpoint_control.ack_completed(&mut self.partial_graph_manager, output);
                         }
                         Err(e) => {
                             self.failure_recovery(e).await;
@@ -738,7 +748,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     } else {
                         new_barrier
                     };
-                    if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.partial_graph_manager) {
+                    if let Err(e) = self.checkpoint_control.handle_new_barrier(
+                        new_barrier,
+                        &mut self.partial_graph_manager,
+                        self.adaptive_parallelism_strategy,
+                        self.active_streaming_nodes.current()
+                    ) {
                         if !self.enable_recovery {
                             panic!(
                                 "failed to inject barrier to some databases but recovery not enabled: {:?}", (
@@ -765,7 +780,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                 }
             }
-            self.checkpoint_control.update_barrier_nums_metrics();
         }
     }
 }
@@ -774,8 +788,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// We need to make sure there are no changes when doing recovery
     pub async fn clear_on_err(&mut self, err: &MetaError) {
         // join spawned completing command to finish no matter it succeeds or not.
-        let is_err = match replace(&mut self.completing_task, CompletingTask::None) {
-            CompletingTask::None => false,
+        match replace(&mut self.completing_task, CompletingTask::None) {
+            CompletingTask::None | CompletingTask::Err(_) => {}
             CompletingTask::Completing {
                 epochs_to_ack,
                 join_handle,
@@ -785,53 +799,26 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 match join_handle.await {
                     Err(e) => {
                         warn!(err = %e.as_report(), "failed to join completing task");
-                        true
                     }
                     Ok(Err(e)) => {
                         warn!(
                             err = %e.as_report(),
                             "failed to complete barrier during clear"
                         );
-                        true
                     }
                     Ok(Ok(hummock_version_stats)) => {
-                        self.checkpoint_control
-                            .ack_completed(BarrierCompleteOutput {
+                        self.checkpoint_control.ack_completed(
+                            &mut self.partial_graph_manager,
+                            BarrierCompleteOutput {
                                 epochs_to_ack,
                                 hummock_version_stats,
-                            });
-                        false
-                    }
-                }
-            }
-            CompletingTask::Err(_) => true,
-        };
-        if !is_err {
-            // continue to finish the pending collected barrier.
-            while let Some(task) = self.checkpoint_control.next_complete_barrier_task(None) {
-                let epochs_to_ack = task.epochs_to_ack();
-                match task
-                    .complete_barrier(&*self.context, self.env.clone())
-                    .await
-                {
-                    Ok(hummock_version_stats) => {
-                        self.checkpoint_control
-                            .ack_completed(BarrierCompleteOutput {
-                                epochs_to_ack,
-                                hummock_version_stats,
-                            });
-                    }
-                    Err(e) => {
-                        error!(
-                            err = %e.as_report(),
-                            "failed to complete barrier during recovery"
+                            },
                         );
-                        break;
                     }
                 }
             }
-        }
-        self.checkpoint_control.clear_on_err(err);
+        };
+        self.partial_graph_manager.notify_all_err(err);
     }
 }
 
@@ -1158,7 +1145,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else if let Some(database) = collected_databases.remove(&database_id) {
                                         warn!(%database_id, %worker_id, "database initialized but later reset during global recovery");
-                                        let resetting_partial_graphs: HashSet<_> = database_partial_graphs(database_id, database.creating_streaming_job_controls.keys().copied()).collect();
+                                        let resetting_partial_graphs: HashSet<_> = database_partial_graphs(database_id, database.independent_checkpoint_job_controls.keys().copied()).collect();
                                         partial_graph_manager.reset_partial_graphs(resetting_partial_graphs.iter().copied());
                                         assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else {

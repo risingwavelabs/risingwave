@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common_proc_macro::serde_prefix_all;
+use serde::de::Error as _;
 
 use super::*;
 
@@ -169,6 +170,15 @@ pub struct MetaConfig {
     /// Interval of invoking iceberg garbage collection, to expire old snapshots.
     #[serde(default = "default::meta::iceberg_gc_interval_sec")]
     pub iceberg_gc_interval_sec: u64,
+
+    /// Maximum time to wait for an iceberg compaction task report before the lease expires.
+    #[serde(default = "default::meta::iceberg_compaction_report_timeout_sec")]
+    pub iceberg_compaction_report_timeout_sec: u64,
+
+    /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it from
+    /// meta catalog.
+    #[serde(default = "default::meta::iceberg_compaction_config_refresh_interval_sec")]
+    pub iceberg_compaction_config_refresh_interval_sec: u64,
 
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
@@ -338,6 +348,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compaction_task_max_progress_interval_secs")]
     pub compaction_task_max_progress_interval_secs: u64,
 
+    /// The number of compaction task ids to prefetch from the meta store in one batch.
+    #[serde(default = "default::meta::compaction_task_id_refill_capacity")]
+    pub compaction_task_id_refill_capacity: u32,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub compaction_config: CompactionConfig,
@@ -399,12 +413,25 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::compact_task_table_size_partition_threshold_high")]
     pub compact_task_table_size_partition_threshold_high: u64,
 
-    /// The interval of the periodic scheduling compaction group split job.
+    /// The interval of the regular periodic compaction group split job.
+    /// This does not disable merge-triggered normalize splits when
+    /// `enable_compaction_group_normalize` is enabled.
     #[serde(
         default = "default::meta::periodic_scheduling_compaction_group_split_interval_sec",
         alias = "periodic_split_compact_group_interval_sec"
     )]
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
+
+    /// Whether to normalize overlapping compaction groups before the regular merge scheduling.
+    #[serde(default = "default::meta::enable_compaction_group_normalize")]
+    pub enable_compaction_group_normalize: bool,
+
+    /// The maximum number of normalize splits in one scheduler round. Must be greater than 0.
+    #[serde(
+        default = "default::meta::max_normalize_splits_per_round",
+        deserialize_with = "deserialize_max_normalize_splits_per_round"
+    )]
+    pub max_normalize_splits_per_round: u64,
 
     /// The interval of the periodic scheduling compaction group merge job.
     #[serde(default = "default::meta::periodic_scheduling_compaction_group_merge_interval_sec")]
@@ -454,6 +481,19 @@ pub struct MetaStoreConfig {
     /// Acquire timeout in seconds for a meta store connection.
     #[serde(default = "default::meta_store_config::acquire_timeout_sec")]
     pub acquire_timeout_sec: u64,
+}
+
+fn deserialize_max_normalize_splits_per_round<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "meta.max_normalize_splits_per_round must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 /// The subsections `[meta.developer]`.
@@ -512,6 +552,10 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
 
+    /// Max number of version deltas fetched from meta store per SELECT, during time travel metadata vacuum.
+    #[serde(default = "default::developer::hummock_time_travel_delta_fetch_batch_size")]
+    pub hummock_time_travel_delta_fetch_batch_size: usize,
+
     #[serde(default = "default::developer::hummock_gc_history_insert_batch_size")]
     pub hummock_gc_history_insert_batch_size: usize,
 
@@ -539,6 +583,12 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default)]
     pub frontend_client_config: RpcClientConfig,
+
+    #[serde(default = "default::developer::table_change_log_insert_batch_size")]
+    pub table_change_log_insert_batch_size: u64,
+
+    #[serde(default = "default::developer::table_change_log_delete_batch_size")]
+    pub table_change_log_delete_batch_size: u64,
 }
 
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
@@ -646,6 +696,14 @@ pub mod default {
             3600
         }
 
+        pub fn iceberg_compaction_report_timeout_sec() -> u64 {
+            30 * 60
+        }
+
+        pub fn iceberg_compaction_config_refresh_interval_sec() -> u64 {
+            60
+        }
+
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
             30
         }
@@ -744,6 +802,10 @@ pub mod default {
             60 * 10 // 10min
         }
 
+        pub fn compaction_task_id_refill_capacity() -> u32 {
+            64
+        }
+
         pub fn cut_table_size_limit() -> u64 {
             1024 * 1024 * 1024 // 1GB
         }
@@ -806,6 +868,14 @@ pub mod default {
 
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {
             60 * 10 // 10min
+        }
+
+        pub fn enable_compaction_group_normalize() -> bool {
+            true
+        }
+
+        pub fn max_normalize_splits_per_round() -> u64 {
+            4
         }
 
         pub fn compaction_group_merge_dimension_threshold() -> f64 {

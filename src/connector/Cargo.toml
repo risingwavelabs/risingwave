@@ -113,9 +113,9 @@ opendal = { workspace = true, features = [
     "services-webhdfs",
 ] }
 opensearch = { version = "2.3.0", features = ["rustls-tls"] }
-openssl = "0.10.72"
+openssl = { workspace = true }
 parking_lot = { workspace = true }
-parquet = { version = "57", features = ["async"] }
+parquet = { version = "58", features = ["async"] }
 paste = "1"
 pg_bigdecimal = { git = "https://github.com/risingwavelabs/rust-pg_bigdecimal", rev = "0b7893d88894ca082b4525f94f812da034486f7c" }
 phf = { version = "0.13", features = ["macros"] }
@@ -125,9 +125,8 @@ prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-013 = { package = "prost", version = "0.13.4" }
 prost-reflect = { workspace = true }
 prost-types = { workspace = true }
-pulsar = { version = "6.3", default-features = false, features = [
+pulsar = { version = "6.7", default-features = false, features = [
     "tokio-runtime",
-    "telemetry",
     "auth-oauth2",
     "lz4",
     "zstd",
@@ -174,8 +173,8 @@ serde_with = { version = "3", features = ["json"] }
 simd-json = { version = "0.17.0", features = ["hints"] }
 smallvec = { workspace = true }
 sqlx = { workspace = true }
-strum = "0.27"
-strum_macros = "0.27"
+strum = "0.28"
+strum_macros = "0.28"
 tempfile = "3"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
@@ -191,15 +190,7 @@ tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "5935
     "time",
 ] }
 time = "0.3.47"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }

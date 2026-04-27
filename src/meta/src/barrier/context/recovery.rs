@@ -25,6 +25,7 @@ use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::SplitImpl;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::SinkId;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -46,7 +47,9 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentDownstreamRelation, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::reload_cdc_table_snapshot_splits;
-use crate::stream::{SourceChange, StreamFragmentGraph, UpstreamSinkInfo};
+use crate::stream::{
+    SourceChange, StreamFragmentGraph, UpstreamSinkInfo, cleanup_dropped_streaming_jobs,
+};
 
 #[derive(Debug)]
 pub(crate) struct UpstreamSinkRecoveryInfo {
@@ -213,6 +216,24 @@ fn build_stream_actors(
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    async fn apply_pre_applied_drop_cancel(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<bool> {
+        let drop_cancel = self.scheduled_barriers.pre_apply_drop_cancel(database_id);
+        let has_drop_streaming_jobs = !drop_cancel.streaming_job_ids.is_empty();
+        cleanup_dropped_streaming_jobs(
+            &self.refresh_manager,
+            &self.hummock_manager,
+            &self.metadata_manager,
+            drop_cancel.streaming_job_ids,
+            drop_cancel.dropped_state_table_ids,
+            "drop_streaming_jobs",
+        )
+        .await?;
+        Ok(has_drop_streaming_jobs)
+    }
+
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
     async fn clean_dirty_streaming_jobs(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
         self.metadata_manager
@@ -441,6 +462,7 @@ impl GlobalBarrierWorkerContextImpl {
     fn resolve_hummock_version_epochs(
         background_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
         version: &HummockVersion,
+        table_change_log: &TableChangeLogs,
     ) -> MetaResult<(
         HashMap<TableId, u64>,
         HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -527,8 +549,7 @@ impl GlobalBarrierWorkerContextImpl {
                     continue;
                 }
                 Ordering::Greater => {
-                    if let Some(table_change_log) = version.table_change_log.get(&upstream_table_id)
-                    {
+                    if let Some(table_change_log) = table_change_log.get(&upstream_table_id) {
                         let epochs = table_change_log
                             .filter_epoch((downstream_committed_epoch, upstream_committed_epoch))
                             .map(|epoch_log| {
@@ -594,7 +615,7 @@ impl GlobalBarrierWorkerContextImpl {
                     tracing::info!("recovered background job progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
+                    let _ = self.apply_pre_applied_drop_cancel(None).await?;
                     self.metadata_manager
                         .catalog_controller
                         .cleanup_dropped_tables()
@@ -652,12 +673,7 @@ impl GlobalBarrierWorkerContextImpl {
                     }
 
                     let mut recovery_context = self.load_recovery_context(None).await?;
-                    let dropped_table_ids = self.scheduled_barriers.pre_apply_drop_cancel(None);
-                    if !dropped_table_ids.is_empty() {
-                        self.metadata_manager
-                            .catalog_controller
-                            .complete_dropped_tables(dropped_table_ids)
-                            .await;
+                    if self.apply_pre_applied_drop_cancel(None).await? {
                         recovery_context = self.load_recovery_context(None).await?;
                     }
 
@@ -675,7 +691,7 @@ impl GlobalBarrierWorkerContextImpl {
 
                     let (state_table_committed_epochs, state_table_log_epochs) = self
                         .hummock_manager
-                        .on_current_version(|version| {
+                        .on_current_version_and_table_change_log(|version, table_change_log| {
                             Self::resolve_hummock_version_epochs(
                                 recovery_context
                                     .fragment_context
@@ -687,6 +703,7 @@ impl GlobalBarrierWorkerContextImpl {
                                             .then_some((*job_id, job))
                                     }),
                                 version,
+                                table_change_log,
                             )
                         })
                         .await?;
@@ -766,13 +783,9 @@ impl GlobalBarrierWorkerContextImpl {
         tracing::info!(?database_id, "recovered background job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-        let dropped_table_ids = self
-            .scheduled_barriers
-            .pre_apply_drop_cancel(Some(database_id));
-        self.metadata_manager
-            .catalog_controller
-            .complete_dropped_tables(dropped_table_ids)
-            .await;
+        let _ = self
+            .apply_pre_applied_drop_cancel(Some(database_id))
+            .await?;
 
         let recovery_context = self.load_recovery_context(Some(database_id)).await?;
 
@@ -796,7 +809,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager
-            .on_current_version(|version| {
+            .on_current_version_and_table_change_log(|version, table_change_log| {
                 Self::resolve_hummock_version_epochs(
                     background_jobs.iter().filter_map(|job_id| {
                         recovery_context
@@ -806,6 +819,7 @@ impl GlobalBarrierWorkerContextImpl {
                             .map(|job| (*job_id, job))
                     }),
                     version,
+                    table_change_log,
                 )
             })
             .await?;

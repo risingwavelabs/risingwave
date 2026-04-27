@@ -41,7 +41,9 @@ use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
     SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
-use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
+use risingwave_connector::{
+    AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, source,
+};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::ConnectionType;
 use risingwave_pb::catalog::{PbSource, PbWebhookSourceInfo, WatermarkDesc};
@@ -59,12 +61,12 @@ use risingwave_sqlparser::ast::{
     FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
     Statement, TableConstraint, WebhookSourceInfo, WithProperties,
 };
-use risingwave_sqlparser::parser::{IncludeOption, Parser};
+use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
 use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
-use crate::binder::{Clause, SecureCompareContext, bind_data_type};
+use crate::binder::{Clause, SecureCompareContext, WEBHOOK_PAYLOAD_FIELD_NAME, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
@@ -95,15 +97,17 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
-    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
-    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, COMPACTION_WRITE_PARQUET_COMPRESSION,
+    COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_DELETE_FILES_COUNT_THRESHOLD,
+    COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, COMPACTION_SMALL_FILES_THRESHOLD_MB,
+    COMPACTION_TARGET_FILE_SIZE_MB, COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE,
+    COMPACTION_WRITE_PARQUET_COMPRESSION, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
     COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, CompactionType, ENABLE_COMPACTION,
-    ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
-    ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode,
+    ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
+    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
+    ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode, ORDER_KEY,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
     SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
-    parse_partition_by_exprs,
+    parse_partition_by_exprs, validate_order_key_columns,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -1734,24 +1738,12 @@ pub async fn create_iceberg_engine_table(
         .map(|c| c.to_string())
         .collect::<Vec<String>>();
 
-    // For the table without primary key. We will use `_row_id` as primary key
-    let sink_from = if pks.len() == 1 && pks[0].eq(ROW_ID_COLUMN_NAME) {
+    // For the table without primary key. We will use `_row_id` as primary key.
+    if pks.len() == 1 && pks[0].eq(ROW_ID_COLUMN_NAME) {
         pks = vec![RISINGWAVE_ICEBERG_ROW_ID.to_owned()];
-        let [stmt]: [_; 1] = Parser::parse_sql(&format!(
-            "select {} as {}, * from {}",
-            ROW_ID_COLUMN_NAME, RISINGWAVE_ICEBERG_ROW_ID, table_name
-        ))
-        .context("unable to parse query")?
-        .try_into()
-        .unwrap();
+    }
 
-        let Statement::Query(query) = &stmt else {
-            panic!("unexpected statement: {:?}", stmt);
-        };
-        CreateSink::AsQuery(query.clone())
-    } else {
-        CreateSink::From(table_name.clone())
-    };
+    let sink_from = CreateSink::From(table_name.clone());
 
     let mut sink_name = table_name.clone();
     *sink_name.0.last_mut().unwrap() = Ident::from(
@@ -1771,6 +1763,15 @@ pub async fn create_iceberg_engine_table(
     let mut sink_handler_args = handler_args.clone();
 
     let mut sink_with = with_common.clone();
+
+    // TODO: Iceberg with pk index doesn't support auto schema change
+    if !handler_args
+        .with_options
+        .get(ENABLE_COMPACTION)
+        .is_some_and(|val| val.eq_ignore_ascii_case("true"))
+    {
+        sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
+    }
 
     if table.append_only {
         sink_with.insert("type".to_owned(), "append-only".to_owned());
@@ -1827,6 +1828,33 @@ pub async fn create_iceberg_engine_table(
     sink_with.insert(
         COMMIT_CHECKPOINT_INTERVAL.to_owned(),
         commit_checkpoint_interval.to_string(),
+    );
+
+    let commit_checkpoint_size_threshold_mb = handler_args
+        .with_options
+        .get(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+        .map(|v| v.to_owned())
+        .unwrap_or_else(|| ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_string());
+    let commit_checkpoint_size_threshold_mb = commit_checkpoint_size_threshold_mb
+        .parse::<u64>()
+        .map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "{} must be greater than 0: {}",
+                COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, commit_checkpoint_size_threshold_mb
+            ))
+        })?;
+    if commit_checkpoint_size_threshold_mb == 0 {
+        bail!("{COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB} must be greater than 0");
+    }
+
+    // remove commit_checkpoint_size_threshold_mb from source options, otherwise it will be considered as an unknown field.
+    source.as_mut().map(|x| {
+        x.with_properties
+            .remove(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+    });
+    sink_with.insert(
+        COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_owned(),
+        commit_checkpoint_size_threshold_mb.to_string(),
     );
     sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
 
@@ -2230,6 +2258,34 @@ pub async fn create_iceberg_engine_table(
         });
     }
 
+    if let Some(write_parquet_max_row_group_bytes) = handler_args
+        .with_options
+        .get(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
+    {
+        let write_parquet_max_row_group_bytes = write_parquet_max_row_group_bytes
+            .parse::<usize>()
+            .map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!(
+                    "{} must be a positive integer: {}",
+                    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, write_parquet_max_row_group_bytes
+                ))
+            })?;
+        if write_parquet_max_row_group_bytes == 0 {
+            bail!(format!(
+                "{} must be greater than 0",
+                COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES
+            ));
+        }
+        sink_with.insert(
+            COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES.to_owned(),
+            write_parquet_max_row_group_bytes.to_string(),
+        );
+        source.as_mut().map(|x| {
+            x.with_properties
+                .remove(COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
+        });
+    }
+
     let partition_by = handler_args
         .with_options
         .get("partition_by")
@@ -2266,6 +2322,19 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove("partition_by"));
+    }
+
+    let order_key = handler_args
+        .with_options
+        .get(ORDER_KEY)
+        .map(|v| v.to_owned());
+    if let Some(order_key) = &order_key {
+        validate_order_key_columns(order_key, table.columns().iter().map(|col| col.name()))
+            .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_report_string()))?;
+
+        sink_with.insert(ORDER_KEY.to_owned(), order_key.to_owned());
+
+        source.as_mut().map(|x| x.with_properties.remove(ORDER_KEY));
     }
 
     sink_handler_args.with_options =
@@ -2647,24 +2716,45 @@ fn get_source_and_resolved_table_name(
 // validate the webhook_info and also bind the webhook_info to protobuf
 fn bind_webhook_info(
     session: &Arc<SessionImpl>,
-    columns_defs: &[ColumnDef],
+    column_defs: &[ColumnDef],
     webhook_info: WebhookSourceInfo,
 ) -> Result<PbWebhookSourceInfo> {
-    // validate columns
-    if columns_defs.len() != 1 || columns_defs[0].data_type.as_ref().unwrap() != &AstDataType::Jsonb
-    {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "Table with webhook source should have exactly one JSONB column".to_owned(),
-        )
-        .into());
-    }
-
     let WebhookSourceInfo {
         secret_ref,
         signature_expr,
         wait_for_persistence,
         is_batched,
     } = webhook_info;
+
+    for column in column_defs {
+        for option_def in &column.options {
+            match option_def.option {
+                ColumnOption::Null => {}
+                ColumnOption::GeneratedColumns(_) => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "generated columns are not supported for webhook tables".to_owned(),
+                    )
+                    .into());
+                }
+                ColumnOption::DefaultValue(_) | ColumnOption::DefaultValueInternal { .. } => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "default values are not supported for webhook tables".to_owned(),
+                    )
+                    .into());
+                }
+                ColumnOption::NotNull
+                | ColumnOption::Unique { .. }
+                | ColumnOption::ForeignKey { .. }
+                | ColumnOption::Check(_)
+                | ColumnOption::DialectSpecific(_) => {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "only NULL column option is supported for webhook tables".to_owned(),
+                    )
+                    .into());
+                }
+            }
+        }
+    }
 
     // validate secret_ref
     let (pb_secret_ref, secret_name) = if let Some(secret_ref) = secret_ref {
@@ -2688,8 +2778,15 @@ fn bind_webhook_info(
     };
 
     let signature_expr = if let Some(signature_expr) = signature_expr {
+        let payload_name = if column_defs.len() == 1
+            && column_defs[0].data_type.as_ref() == Some(&AstDataType::Jsonb)
+        {
+            column_defs[0].name.real_value()
+        } else {
+            WEBHOOK_PAYLOAD_FIELD_NAME.to_owned()
+        };
         let secure_compare_context = SecureCompareContext {
-            column_name: columns_defs[0].name.real_value(),
+            payload_name,
             secret_name,
         };
         let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
@@ -2769,6 +2866,146 @@ mod tests {
         };
 
         assert_eq!(columns, expected_columns, "{columns:#?}");
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_with_arbitrary_columns() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("create schema ingest_schema;")
+            .await
+            .unwrap();
+        frontend
+            .run_sql(
+                r#"
+                create table ingest_schema.orders (
+                    id int,
+                    customer_name varchar,
+                    amount double precision,
+                    primary key (id)
+                ) with (
+                    connector = 'webhook'
+                ) validate as secure_compare(
+                    headers->>'x-rw-signature',
+                    'sha256=' || encode(hmac('webhook-secret', payload, 'sha256'), 'hex')
+                );
+                "#,
+            )
+            .await
+            .unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (table, _) = catalog_reader
+            .get_created_table_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name("ingest_schema"),
+                "orders",
+            )
+            .unwrap();
+
+        assert!(table.webhook_info.is_some());
+        assert_eq!(
+            table
+                .columns
+                .iter()
+                .filter(|column| column.can_dml())
+                .count(),
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_uses_single_jsonb_column_name_in_validate() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql(
+                r#"
+                create table webhook_single_column (
+                    body jsonb
+                ) with (
+                    connector = 'webhook'
+                ) validate as secure_compare(
+                    headers->>'x-rw-signature',
+                    'sha256=' || encode(hmac('webhook-secret', body, 'sha256'), 'hex')
+                );
+                "#,
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_with_generated_columns() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let err = frontend
+            .run_sql(
+                r#"
+                create table webhook_generated_columns (
+                    id int,
+                    amount double precision,
+                    amount_with_fee double precision as amount + 1.0
+                ) with (
+                    connector = 'webhook'
+                );
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("generated columns are not supported for webhook tables"),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_with_default_value() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let err = frontend
+            .run_sql(
+                r#"
+                create table webhook_default_value (
+                    id int default 42,
+                    amount double precision
+                ) with (
+                    connector = 'webhook'
+                );
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("default values are not supported for webhook tables"),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_webhook_table_with_not_null_option() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let err = frontend
+            .run_sql(
+                r#"
+                create table webhook_not_null (
+                    id int not null,
+                    amount double precision
+                ) with (
+                    connector = 'webhook'
+                );
+                "#,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("only NULL column option is supported for webhook tables"),
+            "{err:?}"
+        );
     }
 
     #[test]

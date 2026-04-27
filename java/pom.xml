@@ -56,8 +56,8 @@
     </modules>
 
     <properties>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
         <module.version>0.1.0-SNAPSHOT</module.version>
         <release.version>1.0.0</release.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -72,7 +72,7 @@
         <hadoop.version>3.4.1</hadoop.version>
         <testcontainers.version>1.21.3</testcontainers.version>
         <aws.version>2.32.19</aws.version>
-        <jetty.version>12.0.24</jetty.version>
+        <jetty.version>12.0.33</jetty.version>
         <parquet.version>1.15.1</parquet.version>
     </properties>
 
