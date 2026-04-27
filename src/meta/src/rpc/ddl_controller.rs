@@ -1064,6 +1064,7 @@ impl DdlController {
             }
         };
         let job_id = streaming_job.id();
+        tracing::info!(id = %job_id, "starting streaming job");
         tracing::debug!(
             id = %job_id,
             definition = streaming_job.definition(),

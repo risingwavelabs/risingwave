@@ -384,6 +384,7 @@ impl GlobalStreamManager {
                 CreateType::Unspecified => unreachable!(),
             };
 
+            tracing::info!(id = %streaming_job.id(), "stream job finish");
             tracing::debug!(?streaming_job, "stream job finish");
             Ok(version)
         }
@@ -590,6 +591,7 @@ impl GlobalStreamManager {
             .run_command(streaming_job.database_id(), command)
             .await?;
 
+        tracing::info!(id = %streaming_job.id(), "first barrier collected for stream job");
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
 
         Ok(streaming_job)
