@@ -1,0 +1,181 @@
+name: External PR CI Status
+
+# This workflow adds helpful status messages and labels for external contributor PRs.
+# It helps both contributors and maintainers understand the CI approval workflow.
+
+on:
+  pull_request:
+    # Note: For fork PRs, this workflow runs with a read-only GITHUB_TOKEN by default
+    # unless the repository setting "Workflow permissions" -> "Read and write permissions"
+    # is enabled for fork pull requests. Alternatively, use pull_request_target (with caution)
+    # if you need write access for fork PRs.
+    types: [opened, synchronize, reopened, labeled, closed]
+
+# For fork PRs, these permissions may be restricted to read-only depending on
+# repository settings. See: https://docs.github.com/en/actions/security-guides/automatic-token-authentication#permissions-for-the-github_token
+permissions:
+  pull-requests: write
+  issues: write
+  contents: read
+
+jobs:
+  detect-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if PR is from fork
+        id: check-fork
+        run: |
+          HEAD_REPO="${{ github.event.pull_request.head.repo.full_name }}"
+          BASE_REPO="${{ github.repository }}"
+
+          echo "Head repo: $HEAD_REPO"
+          echo "Base repo: $BASE_REPO"
+
+          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "is_fork=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Fork PR detected"
+          else
+            echo "is_fork=false" >> $GITHUB_OUTPUT
+            echo "✅ Internal PR"
+          fi
+
+      - name: Add external contributor labels
+        if: steps.check-fork.outputs.is_fork == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = ['ci/external-pr', 'ci/pending-approval'];
+
+            await github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: labels
+            });
+
+            console.log('Added labels:', labels);
+
+      - name: Post initial notification (first-time only)
+        if: steps.check-fork.outputs.is_fork == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            const author = context.payload.pull_request.user.login;
+
+            // Check if we've already commented on this PR
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            const alreadyNotified = comments.some(c =>
+              c.body.includes('🔒 External Contributor CI Workflow')
+            );
+
+            if (alreadyNotified) {
+              console.log('Already notified, skipping');
+              return;
+            }
+
+            // Post notification
+            const body = `## 🔒 External Contributor CI Workflow
+
+            Hello @${author}! Thank you for your contribution to RisingWave. 🎉
+
+            ### CI Status: ⏳ Pending Approval
+
+            Since this pull request is from a **forked repository**, our CI pipeline requires **manual security approval** from a maintainer before execution.
+
+            ### What happens next?
+
+            1. 🔍 **Security Review** - A maintainer will review your code for security
+            2. ✅ **Approval** - Once approved, the full CI suite will run automatically
+            3. 📊 **Results** - Test results will be posted as status checks on this PR
+
+            ### Timeline
+
+            - **Typical review time**: Within 24 hours (business days)
+            - **Urgent requests**: Comment with "/ urgent" if this is time-sensitive
+
+            ### Questions?
+
+            - Check our [Contributing Guide](https://github.com/risingwavelabs/risingwave/blob/main/CONTRIBUTING.md)
+            - Join our [Community Slack](https://risingwave.com/slack) for discussions
+
+            ---
+            *This is an automated message. The CI will start automatically once approved by a maintainer.*`;
+
+            await github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+            console.log('Posted external contributor notification');
+
+      - name: Post internal PR acknowledgment (optional)
+        if: steps.check-fork.outputs.is_fork == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Optionally add a simple welcome message for internal PRs
+            // This can be disabled if too noisy
+            console.log('Internal PR - CI will run automatically');
+
+  update-on-approval:
+    # This job runs when a PR is labeled as approved
+    if: github.event.label.name == 'ci/approved'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post approval confirmation
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+
+            await github.rest.issues.createComment({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `✅ **CI Approved**
+
+            The full CI pipeline has been triggered and is now running. Results will appear as status checks below.
+
+            You can monitor progress in the [Buildkite dashboard](https://buildkite.com/risingwavelabs).`
+            });
+
+            // Update labels
+            await github.rest.issues.removeLabel({
+              issue_number: prNumber,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'ci/pending-approval'
+            }).catch(() => {
+              // Label might not exist
+            });
+
+  cleanup-on-close:
+    # Clean up labels when PR is closed
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove temporary labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            const labelsToRemove = ['ci/pending-approval', 'ci/approved'];
+
+            for (const label of labelsToRemove) {
+              await github.rest.issues.removeLabel({
+                issue_number: prNumber,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: label
+              }).catch(() => {
+                // Label might not exist, ignore error
+              });
+            }

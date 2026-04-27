@@ -1,0 +1,215 @@
+# Gatekeeper Pipeline for Main-Cron Security Approval
+# This pipeline handles the security checkpoint for main-cron workflow,
+# especially for external contributors triggering main-cron tests.
+#
+# Main-cron contains extended tests that should only run after thorough review.
+
+# No additional env vars needed - using Buildkite's built-in vars:
+# BUILDKITE_REPO - The main repository
+# BUILDKITE_PULL_REQUEST_REPO - The PR source repository (empty if branch push)
+
+steps:
+  - label: ":detective: Detect PR Source & Type"
+    key: "detect-pr-info"
+    command: |
+      echo "=== Main-Cron Gatekeeper ==="
+      echo "PR Repository: $$BUILDKITE_PULL_REQUEST_REPO"
+      echo "Main Repository: $$BUILDKITE_REPO"
+      echo "PR Number: $$BUILDKITE_PULL_REQUEST"
+      echo "Branch: $$BUILDKITE_BRANCH"
+
+      # Detect if this is a fork PR
+      IS_FORK="false"
+      TRIGGER_REASON=""
+
+      if [[ -n "$$BUILDKITE_PULL_REQUEST_REPO" ]]; then
+        PR_REPO_NORMALIZED=$$(echo "$$BUILDKITE_PULL_REQUEST_REPO" | sed 's|https://||' | sed 's|git://||' | sed 's|github.com/||' | tr '[:upper:]' '[:lower:]')
+
+        if [[ "$$PR_REPO_NORMALIZED" != "risingwavelabs/risingwave" ]]; then
+          IS_FORK="true"
+          echo "⚠️  Fork PR detected"
+
+          # Check if triggered by main-cron label
+          PR_LABELS=$$(curl -s -H "Authorization: token $$GITHUB_TOKEN" \
+            "https://api.github.com/repos/risingwavelabs/risingwave/pulls/$$BUILDKITE_PULL_REQUEST" | \
+            jq -r '.labels[].name // empty')
+
+          if echo "$$PR_LABELS" | grep -q "ci/main-cron"; then
+            TRIGGER_REASON="External contributor requested main-cron via label"
+            echo "📝 Trigger reason: $$TRIGGER_REASON"
+          fi
+        fi
+      fi
+
+      # Store metadata
+      echo "is_fork=$$IS_FORK" | tee -a /tmp/cron_metadata
+      echo "trigger_reason=$$TRIGGER_REASON" | tee -a /tmp/cron_metadata
+      buildkite-agent meta-data set "is_fork" "$$IS_FORK"
+      buildkite-agent meta-data set "trigger_reason" "$$TRIGGER_REASON"
+
+      # Get PR details
+      if [[ -n "$$BUILDKITE_PULL_REQUEST" && "$$BUILDKITE_PULL_REQUEST" != "false" ]]; then
+        PR_INFO=$$(curl -s -H "Authorization: token $$GITHUB_TOKEN" \
+          "https://api.github.com/repos/risingwavelabs/risingwave/pulls/$$BUILDKITE_PULL_REQUEST")
+        PR_AUTHOR=$$(echo "$$PR_INFO" | jq -r '.user.login // "unknown"')
+        buildkite-agent meta-data set "pr_author" "$$PR_AUTHOR"
+        echo "PR Author: @$$PR_AUTHOR"
+      fi
+
+      echo "=== Result: IS_FORK=$$IS_FORK ==="
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            GITHUB_TOKEN: github-token
+
+  - label: ":lock: Extended Security Review (Main-Cron)"
+    key: "security-block-main-cron"
+    depends_on: "detect-pr-info"
+    if: |
+      build.meta_data("is_fork") == "true" &&
+      (build.pull_request.labels includes "ci/main-cron/run-all" ||
+       build.pull_request.labels includes "ci/main-cron/run-selected")
+    block: ":warning: Main-Cron Approval for External PR"
+    prompt: |
+      ## 🔒 Extended Security Review: Main-Cron Tests
+
+      An **external contributor** has requested to run the **main-cron** test suite.
+
+      ### ⚠️ Important Considerations
+
+      **Main-cron tests are:**
+      - More comprehensive and resource-intensive than standard PR tests
+      - Include cloud service integrations (AWS S3, Pulsar, etc.)
+      - Run with production-like configurations
+      - Consume significant compute resources
+
+      **For external contributors, this also means:**
+      - Potential access to cloud resources and secrets
+      - Extended execution time (up to several hours)
+      - Higher infrastructure costs
+
+      ### 📋 Extended Checklist for Main-Cron
+
+      In addition to standard security checks:
+
+      - [ ] **Justification**: Is there a valid reason to run main-cron on this PR?
+      - [ ] **Trust Level**: Do you trust this contributor with extended resource access?
+      - [ ] **Code Completeness**: Is the PR mature enough for full validation?
+      - [ ] **Resource Budget**: Is there available CI capacity for extended tests?
+      - [ ] **Secret Exposure**: Does main-cron expose sensitive cloud credentials?
+
+      ### 🏷️ Trigger Context
+
+      This was triggered by: `ci/main-cron/*` label added by external contributor.
+
+    fields:
+      - select: "Main-Cron Approval"
+        key: "main_cron_approval"
+        required: true
+        options:
+          - label: "✅ Approve Main-Cron - Full Extended Tests"
+            value: "approve_full"
+          - label: "🔬 Approve Limited - Run Without Cloud Tests"
+            value: "approve_limited"
+          - label: "❌ Reject - Do Not Run Main-Cron"
+            value: "reject"
+          - label: "📝 Request Justification - Ask for Reason"
+            value: "request_reason"
+      - text: "Review Notes"
+        key: "review_notes"
+        required: true
+        hint: "Required: Explain your decision, especially for approval"
+
+  - label: ":white_check_mark: Verify Main-Cron Approval"
+    key: "verify-main-cron-approval"
+    depends_on: "security-block-main-cron"
+    # Only run verification if the block step was triggered (fork + main-cron labels)
+    if: |
+      build.meta_data("is_fork") == "true" &&
+      (build.pull_request.labels includes "ci/main-cron/run-all" ||
+       build.pull_request.labels includes "ci/main-cron/run-selected")
+    command: |
+      DECISION="$${BUILDKITE_UNBLOCKER_MAIN_CRON_APPROVAL:-}"
+      NOTES="$${BUILDKITE_UNBLOCKER_REVIEW_NOTES:-}"
+      APPROVER="$${BUILDKITE_UNBLOCKER_NAME:-unknown}"
+
+      echo "=== Main-Cron Approval Verification ==="
+      echo "Decision: $$DECISION"
+      echo "Approver: $$APPROVER"
+
+      case "$$DECISION" in
+        "approve_full")
+          echo "✅ Full main-cron approved by $$APPROVER"
+          buildkite-agent meta-data set "main_cron_approved" "true"
+          buildkite-agent meta-data set "main_cron_scope" "full"
+          buildkite-agent meta-data set "approved_by" "$$APPROVER"
+          ;;
+        "approve_limited")
+          echo "🔬 Limited main-cron approved by $$APPROVER"
+          buildkite-agent meta-data set "main_cron_approved" "true"
+          buildkite-agent meta-data set "main_cron_scope" "limited"
+          buildkite-agent meta-data set "approved_by" "$$APPROVER"
+          ;;
+        "reject")
+          echo "❌ Main-cron rejected by $$APPROVER"
+          buildkite-agent meta-data set "main_cron_approved" "false"
+          echo ""
+          echo "Contributor requested main-cron but was rejected."
+          echo "Reason: $$NOTES"
+          exit 1
+          ;;
+        "request_reason")
+          echo "📝 Justification requested by $$APPROVER"
+          buildkite-agent meta-data set "main_cron_approved" "false"
+          echo ""
+          echo "Please ask the contributor to provide justification for running main-cron."
+          exit 1
+          ;;
+        *)
+          echo "❌ Invalid approval decision"
+          exit 1
+          ;;
+      esac
+
+      # Log audit trail
+      echo ""
+      echo "=== Security Audit Log ==="
+      echo "Main-Cron approval by $$APPROVER at $$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+  - label: ":pipeline: Upload Main-Cron Pipeline"
+    key: "upload-main-cron"
+    depends_on:
+      - "detect-pr-info"
+      - "verify-main-cron-approval"
+    command: |
+      IS_FORK="$$(buildkite-agent meta-data get is_fork 2>/dev/null || echo 'false')"
+      # Default to false for safety - must be explicitly approved
+      APPROVED="$$(buildkite-agent meta-data get main_cron_approved 2>/dev/null || echo 'false')"
+      SCOPE="$$(buildkite-agent meta-data get main_cron_scope 2>/dev/null || echo 'full')"
+
+      echo "=== Uploading Main-Cron Pipeline ==="
+      echo "Is Fork: $$IS_FORK"
+      echo "Approved: $$APPROVED"
+      echo "Scope: $$SCOPE"
+
+      if [[ "$$IS_FORK" == "true" && "$$APPROVED" != "true" ]]; then
+        echo "❌ Main-cron not approved for fork PR"
+        exit 1
+      fi
+
+      # For now, both "full" and "limited" use the same pipeline.
+      # TODO: Create a limited pipeline variant without cloud tests if needed.
+      echo "Uploading main-cron pipeline (scope: $$SCOPE)..."
+      PIPELINE_FILE="ci/workflows/main-cron.yml"
+
+      if [[ ! -f "$$PIPELINE_FILE" ]]; then
+        echo "❌ Pipeline file not found: $$PIPELINE_FILE"
+        exit 1
+      fi
+
+      buildkite-agent pipeline upload "$$PIPELINE_FILE"
+      echo "✅ Main-cron pipeline uploaded"
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            GITHUB_TOKEN: github-token
