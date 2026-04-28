@@ -84,6 +84,8 @@ message CreateUserResponse {
 
 message DropUserRequest {
   uint32 user_id = 1;
+  uint32 dropped_by = 2;
+  uint32 session_user = 3;
 }
 
 message DropUserResponse {
@@ -165,6 +167,24 @@ message GrantRoleResponse {
   repeated RoleMembership memberships = 3;
 }
 
+message RevokeRoleRequest {
+  repeated uint32 role_ids = 1;
+  repeated uint32 member_ids = 2;
+  uint32 granted_by = 3;
+  uint32 revoked_by = 4;
+  bool revoke_admin_option = 5;
+  bool revoke_inherit_option = 6;
+  bool revoke_set_option = 7;
+  bool cascade = 8;
+  bool granted_by_specified = 9;
+}
+
+message RevokeRoleResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+  repeated RoleMembership memberships = 3;
+}
+
 message ListRoleMembershipsRequest {
   repeated uint32 member_ids = 1;
 }
@@ -214,6 +234,8 @@ service UserService {
   rpc AlterDefaultPrivilege(AlterDefaultPrivilegeRequest) returns (AlterDefaultPrivilegeResponse);
   // GrantRole persists direct role membership edges and membership options.
   rpc GrantRole(GrantRoleRequest) returns (GrantRoleResponse);
+  // RevokeRole revokes direct role membership edges or membership options.
+  rpc RevokeRole(RevokeRoleRequest) returns (RevokeRoleResponse);
   // ListRoleMemberships lists direct role memberships for the requested members.
   rpc ListRoleMemberships(ListRoleMembershipsRequest) returns (ListRoleMembershipsResponse);
 }

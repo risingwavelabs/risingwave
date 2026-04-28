@@ -91,6 +91,7 @@ use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::UserId;
+use crate::user::user_catalog::UserCatalog;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 
@@ -228,6 +229,22 @@ impl LocalFrontend {
             .into(),
             Default::default(),
         ))
+    }
+
+    pub fn user_by_name(&self, user_name: &str) -> Option<UserCatalog> {
+        self.env
+            .user_info_reader()
+            .read_guard()
+            .get_user_by_name(user_name)
+            .cloned()
+    }
+
+    pub async fn role_memberships(&self) -> Vec<RoleMembership> {
+        self.env
+            .meta_client()
+            .list_role_memberships(vec![])
+            .await
+            .unwrap()
     }
 }
 
@@ -1021,6 +1038,7 @@ impl MockCatalogWriter {
 pub struct MockUserInfoWriter {
     id: AtomicU32,
     user_info: Arc<RwLock<UserInfoManager>>,
+    role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
 }
 
 #[async_trait::async_trait]
@@ -1032,8 +1050,19 @@ impl UserInfoWriter for MockUserInfoWriter {
         Ok(())
     }
 
-    async fn drop_user(&self, id: UserId) -> Result<()> {
+    async fn drop_user(
+        &self,
+        id: UserId,
+        _dropped_by: UserId,
+        _session_user: UserId,
+    ) -> Result<()> {
         self.user_info.write().drop_user(id);
+        let user_id = id.as_raw_id();
+        self.role_memberships.write().retain(|membership| {
+            membership.role_id != user_id
+                && membership.member_id != user_id
+                && membership.granted_by != user_id
+        });
         Ok(())
     }
 
@@ -1108,6 +1137,110 @@ impl UserInfoWriter for MockUserInfoWriter {
         Ok(())
     }
 
+    async fn grant_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        _executed_by: UserId,
+        _granted_by_specified: bool,
+        admin_option: Option<bool>,
+        inherit_option: Option<bool>,
+        set_option: Option<bool>,
+    ) -> Result<()> {
+        let granted_by = granted_by.as_raw_id();
+        let mut memberships = self.role_memberships.write();
+
+        for role_id in role_ids {
+            for member_id in &member_ids {
+                let role_id = role_id.as_raw_id();
+                let member_id = member_id.as_raw_id();
+                let member_inherit = self
+                    .user_info
+                    .read()
+                    .get_user_by_id(&UserId::from(member_id))
+                    .map(|user| user.can_inherit)
+                    .unwrap_or(true);
+                if let Some(existing) = memberships.iter_mut().find(|membership| {
+                    membership.role_id == role_id
+                        && membership.member_id == member_id
+                        && membership.granted_by == granted_by
+                }) {
+                    existing.admin_option = admin_option.unwrap_or(existing.admin_option);
+                    existing.inherit_option = inherit_option.unwrap_or(existing.inherit_option);
+                    existing.set_option = set_option.unwrap_or(existing.set_option);
+                } else {
+                    let id = memberships
+                        .iter()
+                        .map(|membership| membership.id)
+                        .max()
+                        .unwrap_or(0)
+                        + 1;
+                    memberships.push(RoleMembership {
+                        role_id,
+                        member_id,
+                        granted_by,
+                        admin_option: admin_option.unwrap_or(false),
+                        inherit_option: inherit_option.unwrap_or(member_inherit),
+                        set_option: set_option.unwrap_or(true),
+                        id,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn revoke_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        _granted_by_specified: bool,
+        _revoked_by: UserId,
+        revoke_admin_option: bool,
+        revoke_inherit_option: bool,
+        revoke_set_option: bool,
+        _cascade: bool,
+    ) -> Result<()> {
+        let role_ids = role_ids
+            .into_iter()
+            .map(|id| id.as_raw_id())
+            .collect::<HashSet<_>>();
+        let member_ids = member_ids
+            .into_iter()
+            .map(|id| id.as_raw_id())
+            .collect::<HashSet<_>>();
+        let granted_by = granted_by.as_raw_id();
+        let option_only = revoke_admin_option || revoke_inherit_option || revoke_set_option;
+        let mut memberships = self.role_memberships.write();
+
+        if option_only {
+            for membership in memberships.iter_mut().filter(|membership| {
+                membership.granted_by == granted_by
+                    && role_ids.contains(&membership.role_id)
+                    && member_ids.contains(&membership.member_id)
+            }) {
+                if revoke_admin_option {
+                    membership.admin_option = false;
+                }
+                if revoke_inherit_option {
+                    membership.inherit_option = false;
+                }
+                if revoke_set_option {
+                    membership.set_option = false;
+                }
+            }
+        } else {
+            memberships.retain(|membership| {
+                membership.granted_by != granted_by
+                    || !role_ids.contains(&membership.role_id)
+                    || !member_ids.contains(&membership.member_id)
+            });
+        }
+        Ok(())
+    }
+
     async fn alter_default_privilege(
         &self,
         _users: Vec<UserId>,
@@ -1121,7 +1254,10 @@ impl UserInfoWriter for MockUserInfoWriter {
 }
 
 impl MockUserInfoWriter {
-    pub fn new(user_info: Arc<RwLock<UserInfoManager>>) -> Self {
+    pub fn new(
+        user_info: Arc<RwLock<UserInfoManager>>,
+        role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
+    ) -> Self {
         user_info.write().create_user(UserInfo {
             id: DEFAULT_SUPER_USER_ID,
             name: DEFAULT_SUPER_USER.to_owned(),
@@ -1146,6 +1282,7 @@ impl MockUserInfoWriter {
         Self {
             user_info,
             id: AtomicU32::new(NON_RESERVED_USER_ID.as_raw_id()),
+            role_memberships,
         }
     }
 
@@ -1154,7 +1291,15 @@ impl MockUserInfoWriter {
     }
 }
 
-pub struct MockFrontendMetaClient {}
+pub struct MockFrontendMetaClient {
+    role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
+}
+
+impl MockFrontendMetaClient {
+    pub fn new(role_memberships: Arc<RwLock<Vec<RoleMembership>>>) -> Self {
+        Self { role_memberships }
+    }
+}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
@@ -1394,9 +1539,22 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_role_memberships(
         &self,
-        _member_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
     ) -> RpcResult<Vec<RoleMembership>> {
-        Ok(vec![])
+        let memberships = self.role_memberships.read();
+        if member_ids.is_empty() {
+            return Ok(memberships.clone());
+        }
+
+        let member_ids = member_ids
+            .into_iter()
+            .map(|id| id.as_raw_id())
+            .collect::<HashSet<_>>();
+        Ok(memberships
+            .iter()
+            .filter(|membership| member_ids.contains(&membership.member_id))
+            .cloned()
+            .collect())
     }
 
     async fn list_iceberg_compaction_status(&self) -> RpcResult<Vec<IcebergCompactionStatus>> {
