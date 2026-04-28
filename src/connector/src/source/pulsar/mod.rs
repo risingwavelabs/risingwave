@@ -99,13 +99,12 @@ impl PulsarSourceOperationRetry {
             return None;
         }
 
-        let mut options = OperationRetryOptions::default();
-        options.max_retries = self.max_retries;
-        if let Some(retry_delay) = self.retry_delay {
-            options.retry_delay = retry_delay;
-        }
-
-        Some(options)
+        let default_options = OperationRetryOptions::default();
+        Some(OperationRetryOptions {
+            max_retries: self.max_retries,
+            retry_delay: self.retry_delay.unwrap_or(default_options.retry_delay),
+            ..default_options
+        })
     }
 }
 
