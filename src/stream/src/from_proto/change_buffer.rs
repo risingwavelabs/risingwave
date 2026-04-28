@@ -30,11 +30,11 @@ impl ExecutorBuilder for ChangeBufferExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
-        build_change_buffer_executor(params, node, store).await
+        build_change_buffer_executor(params, node, store)
     }
 }
 
-async fn build_change_buffer_executor<S: StateStore>(
+fn build_change_buffer_executor<S: StateStore>(
     params: ExecutorParams,
     node: &ChangeBufferNode,
     store: S,
