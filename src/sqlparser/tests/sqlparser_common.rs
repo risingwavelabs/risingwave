@@ -4327,6 +4327,33 @@ fn parse_revoke_role_granted_by_requires_identifier() {
 }
 
 #[test]
+fn parse_grant_privilege_granted_by_requires_identifier() {
+    let err = parse_sql_statements("GRANT SELECT ON abc TO user_a GRANTED BY ;")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("expected identifier, found: ;"), "{err}");
+}
+
+#[test]
+fn parse_revoke_privilege_granted_by_requires_identifier() {
+    let err = parse_sql_statements("REVOKE SELECT ON abc FROM user_a GRANTED BY ;")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("expected identifier, found: ;"), "{err}");
+}
+
+#[test]
+fn parse_revoke_grant_option_for_role_is_rejected() {
+    let err = parse_sql_statements("REVOKE GRANT OPTION FOR role_a FROM user_a")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("GRANT OPTION FOR is not valid for role membership revokes"),
+        "{err}"
+    );
+}
+
+#[test]
 fn parse_set_role() {
     let sql = "SET LOCAL ROLE analytics";
     match verified_stmt(sql) {

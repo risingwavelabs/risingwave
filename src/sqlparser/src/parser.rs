@@ -5639,9 +5639,11 @@ impl Parser<'_> {
         let with_grant_option =
             self.parse_keywords(&[Keyword::WITH, Keyword::GRANT, Keyword::OPTION]);
 
-        let granted_by = self
-            .parse_keywords(&[Keyword::GRANTED, Keyword::BY])
-            .then(|| self.parse_identifier().unwrap());
+        let granted_by = if self.parse_keywords(&[Keyword::GRANTED, Keyword::BY]) {
+            Some(self.parse_identifier()?)
+        } else {
+            None
+        };
 
         Ok(Statement::Grant {
             privileges,
@@ -5850,26 +5852,31 @@ impl Parser<'_> {
             None
         };
 
-        if revoke_role_option.is_some()
-            || !self.peek_nth_any_of_keywords(
-                0,
-                &[
-                    Keyword::ALL,
-                    Keyword::CONNECT,
-                    Keyword::CREATE,
-                    Keyword::DELETE,
-                    Keyword::EXECUTE,
-                    Keyword::INSERT,
-                    Keyword::REFERENCES,
-                    Keyword::SELECT,
-                    Keyword::TEMPORARY,
-                    Keyword::TRIGGER,
-                    Keyword::TRUNCATE,
-                    Keyword::UPDATE,
-                    Keyword::USAGE,
-                ],
-            )
-        {
+        let starts_with_privilege = self.peek_nth_any_of_keywords(
+            0,
+            &[
+                Keyword::ALL,
+                Keyword::CONNECT,
+                Keyword::CREATE,
+                Keyword::DELETE,
+                Keyword::EXECUTE,
+                Keyword::INSERT,
+                Keyword::REFERENCES,
+                Keyword::SELECT,
+                Keyword::TEMPORARY,
+                Keyword::TRIGGER,
+                Keyword::TRUNCATE,
+                Keyword::UPDATE,
+                Keyword::USAGE,
+            ],
+        );
+        if revoke_grant_option && !starts_with_privilege {
+            parser_err!(
+                "GRANT OPTION FOR is not valid for role membership revokes; use ADMIN OPTION FOR"
+            );
+        }
+
+        if revoke_role_option.is_some() || !starts_with_privilege {
             let roles = self.parse_comma_separated(Parser::parse_identifier)?;
             self.expect_keyword(Keyword::FROM)?;
             let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
@@ -5899,9 +5906,11 @@ impl Parser<'_> {
         self.expect_keyword(Keyword::FROM)?;
         let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
 
-        let granted_by = self
-            .parse_keywords(&[Keyword::GRANTED, Keyword::BY])
-            .then(|| self.parse_identifier().unwrap());
+        let granted_by = if self.parse_keywords(&[Keyword::GRANTED, Keyword::BY]) {
+            Some(self.parse_identifier()?)
+        } else {
+            None
+        };
 
         let cascade = self.parse_keyword(Keyword::CASCADE);
         let restrict = self.parse_keyword(Keyword::RESTRICT);

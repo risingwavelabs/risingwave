@@ -140,12 +140,15 @@ pub(super) fn handle_set_role(
                         role_name.real_value()
                     ))
                 })?;
+            let session_is_super = reader
+                .get_user_by_name(&session.session_user_name())
+                .map(|user| user.is_super)
+                .unwrap_or(false);
             drop(reader);
 
             let memberships =
                 role_memberships_snapshot(session.env().role_membership_info_reader());
-            if !session.is_super_user()
-                && !can_set_role(session.session_user_id(), role.id, &memberships)
+            if !session_is_super && !can_set_role(session.session_user_id(), role.id, &memberships)
             {
                 return Err(ErrorCode::PermissionDenied(format!(
                     "permission denied to set role \"{}\"",

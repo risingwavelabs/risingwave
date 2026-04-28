@@ -302,6 +302,27 @@ async fn test_set_reset_role_dispatches_and_changes_identity() {
 }
 
 #[tokio::test]
+async fn test_superuser_set_role_uses_session_user_after_role_switch() {
+    let frontend = LocalFrontend::new(Default::default()).await;
+
+    frontend.run_sql("CREATE ROLE first_role").await.unwrap();
+    frontend.run_sql("CREATE ROLE second_role").await.unwrap();
+
+    let session = frontend.session_ref();
+    frontend
+        .run_sql_with_session(session.clone(), "SET ROLE first_role")
+        .await
+        .unwrap();
+    assert_eq!(session.auth_context().current_user_name(), "first_role");
+
+    frontend
+        .run_sql_with_session(session.clone(), "SET ROLE second_role")
+        .await
+        .unwrap();
+    assert_eq!(session.auth_context().current_user_name(), "second_role");
+}
+
+#[tokio::test]
 async fn test_set_role_requires_membership() {
     let frontend = LocalFrontend::new(Default::default()).await;
 
