@@ -40,6 +40,7 @@ risedev slt './e2e_test/source_inline/vault/vault_secret_ddl.slt'
 echo "--- Run webhook source tests"
 sleep 5
 risedev slt 'e2e_test/webhook/webhook_source.slt'
+risedev slt 'e2e_test/webhook/websocket_ingest.slt'
 
 risedev kill
 risedev dev ci-1cn-1fe-with-recovery
