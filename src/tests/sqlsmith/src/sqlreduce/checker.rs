@@ -44,7 +44,6 @@ impl Checker {
         }
     }
 
-
     /// Prepares the schema namespace for testing.
     ///
     /// This creates the `sqlsmith_reducer` schema and sets the search path.
