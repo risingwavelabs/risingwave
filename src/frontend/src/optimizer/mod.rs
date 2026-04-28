@@ -681,7 +681,7 @@ impl LogicalPlanRoot {
                         (plan, out_col_change)
                     } else {
                         let mut output_indices = (0..plan.schema().len()).collect_vec();
-                        #[allow(unused_assignments)]
+                        #[expect(unused_assignments)]
                         let (mut map, mut target_size) = out_col_change.into_parts();
 
                         // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/7234
@@ -1231,7 +1231,7 @@ impl<P: PlanPhase> PlanRoot<P> {
         tar_cols: &[ColumnCatalog],
         user_specified_columns: bool,
     ) -> Vec<Option<usize>> {
-        #[allow(clippy::disallowed_methods)]
+        #[expect(clippy::disallowed_methods)]
         let visible_cols: Vec<(usize, String)> = self
             .out_fields
             .ones()

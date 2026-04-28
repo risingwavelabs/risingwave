@@ -1907,7 +1907,7 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::large_stack_frames)]
+    #[expect(clippy::large_stack_frames)]
     async fn test_split_and_merge() {
         let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(

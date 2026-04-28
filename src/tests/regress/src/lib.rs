@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-#![allow(clippy::derive_partial_eq_without_eq)]
+#![expect(dead_code)]
+
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -27,7 +27,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![allow(rw::format_error)]
+#![expect(rw::format_error)]
 
 mod opts;
 

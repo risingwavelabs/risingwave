@@ -102,7 +102,7 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
 }
 
 impl HopWindowExecutor {
-    #[allow(clippy::too_many_arguments)]
+    
     fn new(
         child: BoxedExecutor,
         schema: Schema,

@@ -77,8 +77,8 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
-    #[allow(clippy::too_many_arguments)]
-    #[allow(dead_code)]
+    #[expect(clippy::too_many_arguments)]
+    
     pub fn new(
         upstream_table: ReplicatedStateTable<S, SD>,
         upstream: Executor,

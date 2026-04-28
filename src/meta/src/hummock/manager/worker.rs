@@ -28,7 +28,7 @@ pub type HummockManagerEventReceiver = tokio::sync::mpsc::UnboundedReceiver<Humm
 
 pub enum HummockManagerEvent {
     DropSafePoint(HummockVersionId),
-    #[allow(dead_code)]
+    
     Shutdown,
 }
 

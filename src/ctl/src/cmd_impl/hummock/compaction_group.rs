@@ -47,7 +47,7 @@ pub async fn update_compaction_config(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn build_compaction_config_vec(
     max_bytes_for_level_base: Option<u64>,
     max_bytes_for_level_multiplier: Option<u64>,

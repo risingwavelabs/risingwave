@@ -53,7 +53,7 @@ pub struct InsertExecutor {
 }
 
 impl InsertExecutor {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
         table_version_id: TableVersionId,

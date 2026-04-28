@@ -169,7 +169,7 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
 }
 
 impl CatalogController {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,

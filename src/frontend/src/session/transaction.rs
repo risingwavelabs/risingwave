@@ -31,7 +31,7 @@ pub struct Id(u64);
 
 impl Id {
     /// Creates a new transaction id.
-    #[allow(clippy::new_without_default)]
+    
     pub fn new() -> Self {
         static NEXT_ID: AtomicU64 = AtomicU64::new(0);
         Self(NEXT_ID.fetch_add(1, Ordering::Relaxed))

@@ -45,7 +45,7 @@ pub struct TemporalJoinExecutor<
     const APPEND_ONLY: bool,
 > {
     ctx: ActorContextRef,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     info: ExecutorInfo,
     left: Executor,
     right: Executor,
@@ -428,7 +428,7 @@ pub(super) mod phase1 {
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(super) async fn handle_chunk<
         'a,
         K: HashKey,
@@ -590,7 +590,7 @@ pub(super) mod phase1 {
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: bool>
     TemporalJoinExecutor<K, S, T, APPEND_ONLY>
 {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,

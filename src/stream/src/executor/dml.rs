@@ -78,7 +78,7 @@ struct TxnBuffer {
 }
 
 impl<S: StateStore> DmlExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         upstream: Executor,

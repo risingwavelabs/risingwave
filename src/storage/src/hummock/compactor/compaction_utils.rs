@@ -109,7 +109,7 @@ pub struct CompactionStatistics {
 }
 
 impl CompactionStatistics {
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn delete_ratio(&self) -> Option<u64> {
         if self.iter_total_key_counts == 0 {
             return None;

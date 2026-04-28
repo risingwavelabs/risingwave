@@ -62,7 +62,7 @@ impl DebeziumJsonAccessBuilder {
 }
 
 impl AccessBuilder for DebeziumJsonAccessBuilder {
-    #[allow(clippy::unused_async)]
+    
     async fn generate_accessor(
         &mut self,
         payload: Vec<u8>,
@@ -110,7 +110,7 @@ impl DebeziumMongoJsonAccessBuilder {
 }
 
 impl AccessBuilder for DebeziumMongoJsonAccessBuilder {
-    #[allow(clippy::unused_async)]
+    
     async fn generate_accessor(
         &mut self,
         payload: Vec<u8>,

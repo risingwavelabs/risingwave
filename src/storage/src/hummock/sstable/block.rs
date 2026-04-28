@@ -34,7 +34,7 @@ pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 24; // table_id(u64) + primary_key(u64) + epoch(u64)
 
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LenType {
     u8 = 1,
@@ -64,7 +64,7 @@ macro_rules! put_fn {
 
 macro_rules! get_fn {
     ($name:ident, $($type:ty),*) => {
-        #[allow(unused_parens)]
+        
         fn $name<T: Buf>(&self, buf: &mut T) -> ($($type), *) {
             match *self {
                 LenType::u8 => {

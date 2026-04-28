@@ -213,7 +213,7 @@ mod match_tests {
     #[error(transparent)]
     struct ExpandError(#[from] anyhow::Error);
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     enum MyEnum {
         A(String),
         B,
@@ -242,7 +242,7 @@ mod match_tests {
 
     #[test]
     fn test_must_match() -> Result<(), ExpandError> {
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         enum A {
             Foo,
             Bar,
@@ -251,7 +251,7 @@ mod match_tests {
         let val = must_match!(a, A::Foo => 42);
         assert_eq!(val, 42);
 
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         enum B {
             Foo,
             Bar(i32),

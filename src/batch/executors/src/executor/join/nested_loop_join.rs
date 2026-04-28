@@ -195,7 +195,7 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
 }
 
 impl NestedLoopJoinExecutor {
-    #[allow(clippy::too_many_arguments)]
+    
     pub fn new(
         join_expr: BoxedExpression,
         join_type: JoinType,

@@ -16,7 +16,7 @@
 #![feature(box_patterns)]
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![allow(rw::format_error)] // test code
+#![expect(rw::format_error)] // test code
 
 risingwave_expr_impl::enable!();
 

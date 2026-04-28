@@ -95,7 +95,7 @@ struct QueryRunner {
 }
 
 impl QueryExecution {
-    #[allow(clippy::too_many_arguments)]
+    
     pub fn new(
         query: Query,
         session_id: SessionId,
@@ -120,7 +120,7 @@ impl QueryExecution {
     /// Note the two shutdown channel sender and receivers are not dual.
     /// One is used for propagate error to `QueryResultFetcher`, one is used for listening on
     /// cancel request (from ctrl-c, cli, ui etc).
-    #[allow(clippy::too_many_arguments)]
+    
     pub async fn start(
         self: Arc<Self>,
         context: ExecutionContextRef,

@@ -517,7 +517,7 @@ impl TableFunction {
                         .context("failed to prepare mysql_query in binder")?;
 
                     let mut rw_types = vec![];
-                    #[allow(clippy::never_loop)]
+                    
                     for column in statement.columns() {
                         let name = column.name_str().to_string();
                         let data_type = match column.column_type() {

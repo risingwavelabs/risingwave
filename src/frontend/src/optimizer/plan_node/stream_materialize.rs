@@ -178,7 +178,7 @@ impl StreamMaterialize {
     /// Different from `create`, the `columns` are passed in directly, instead of being derived from
     /// the input. So the column IDs are preserved from the SQL columns binding step and will be
     /// consistent with the source node and DML node.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_for_table(
         input: PlanRef,
         name: String,

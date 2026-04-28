@@ -67,7 +67,7 @@
 //!   before feeding data to union.
 
 // FIXME: https://github.com/rust-lang/rust-analyzer/issues/17685
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
 

@@ -29,7 +29,7 @@ pub type TopNExecutor<S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerTopNExecutor<S, WITH_TIES>>;
 
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutor<S, WITH_TIES> {
-    #[allow(clippy::too_many_arguments)]
+    
     pub fn new(
         input: Executor,
         ctx: ActorContextRef,
@@ -56,7 +56,7 @@ impl<S: StateStore, const WITH_TIES: bool> TopNExecutor<S, WITH_TIES> {
 impl<S: StateStore> TopNExecutor<S, true> {
     /// It only has 1 capacity for high cache. Used to test the case where the last element in high
     /// has ties.
-    #[allow(clippy::too_many_arguments)]
+    
     #[cfg(test)]
     pub fn new_with_ties_for_test(
         input: Executor,
@@ -99,7 +99,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
     ///
     /// `order_by_len` -- The number of fields of the ORDER BY clause, and will be used to split key
     /// into `CacheKey`.
-    #[allow(clippy::too_many_arguments)]
+    
     pub fn new(
         schema: Schema,
         storage_key: Vec<ColumnOrder>,

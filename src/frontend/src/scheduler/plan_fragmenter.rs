@@ -684,7 +684,7 @@ struct QueryStageBuilder {
 }
 
 impl QueryStageBuilder {
-    #[allow(clippy::too_many_arguments)]
+    
     fn new(
         id: StageId,
         parallelism: Option<u32>,

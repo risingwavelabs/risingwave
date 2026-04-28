@@ -34,7 +34,7 @@ impl Psql {
         Self { opts }
     }
 
-    #[allow(clippy::unused_async)]
+    #[expect(clippy::unused_async)]
     pub(crate) async fn init(&self) -> anyhow::Result<()> {
         info!("Initializing instances.");
 

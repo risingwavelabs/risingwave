@@ -241,7 +241,7 @@ pub struct IcebergSinkWriterInner {
     uncommitted_write_bytes: u64,
 }
 
-#[allow(clippy::type_complexity)]
+
 enum IcebergWriterDispatch {
     Append {
         writer: Option<Box<dyn IcebergWriter>>,

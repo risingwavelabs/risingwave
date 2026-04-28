@@ -181,7 +181,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         let reset_func_name = format_ident!("reset_{}", field_ident);
         struct_impl_reset.push(quote! {
 
-        #[allow(clippy::useless_conversion)]
+        #[expect(clippy::useless_conversion)]
         pub fn #reset_func_name(&mut self, reporter: &mut impl ConfigReporter) -> String {
                 let val = #default;
                 #report_hook
@@ -263,7 +263,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         }
 
         impl Default for #struct_ident {
-            #[allow(clippy::useless_conversion)]
+            #[expect(clippy::useless_conversion)]
             fn default() -> Self {
                 Self {
                     #(#default_fields)*

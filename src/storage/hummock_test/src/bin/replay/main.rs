@@ -17,7 +17,7 @@
 #![feature(proc_macro_hygiene)]
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![allow(rw::format_error)] // test code
+#![expect(rw::format_error)] // test code
 
 #[macro_use]
 mod replay_impl;

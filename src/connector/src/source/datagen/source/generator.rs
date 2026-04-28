@@ -50,7 +50,7 @@ pub struct DatagenMeta {
 }
 
 impl DatagenEventGenerator {
-    #[allow(clippy::too_many_arguments)]
+    
     pub fn new(
         fields_vec: Vec<FieldDesc>,
         field_names: Vec<String>,

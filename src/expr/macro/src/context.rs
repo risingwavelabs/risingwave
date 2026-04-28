@@ -236,7 +236,7 @@ pub(super) fn generate_captured_function(
             #call_old_fn
         };
 
-        #[allow(clippy::disallowed_methods)]
+        #[expect(clippy::disallowed_methods)]
         for (context, arg) in captures.into_iter().zip(captured_inputs.into_iter()) {
             let FnArg::Typed(arg) = arg else {
                 return Err(syn::Error::new_spanned(

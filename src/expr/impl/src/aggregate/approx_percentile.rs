@@ -49,7 +49,7 @@ fn build(agg: &AggCall) -> Result<Box<dyn AggregateFunction>> {
     Ok(Box::new(ApproxPercentile { quantile, base }))
 }
 
-#[allow(dead_code)]
+
 pub struct ApproxPercentile {
     quantile: f64,
     base: f64,

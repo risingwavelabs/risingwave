@@ -23,7 +23,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![allow(rw::format_error)] // test code
+#![expect(rw::format_error)] // test code
 
 mod compaction_test_runner;
 

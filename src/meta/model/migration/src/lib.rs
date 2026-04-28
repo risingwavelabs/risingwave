@@ -1,4 +1,4 @@
-#![allow(clippy::enum_variant_names)]
+#![expect(clippy::enum_variant_names)]
 
 pub use sea_orm_migration::MigrationStatus;
 pub use sea_orm_migration::prelude::*;

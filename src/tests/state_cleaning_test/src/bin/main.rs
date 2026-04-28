@@ -14,7 +14,7 @@
 
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![allow(rw::format_error)] // test code
+#![expect(rw::format_error)] // test code
 
 use std::collections::HashSet;
 use std::path::PathBuf;

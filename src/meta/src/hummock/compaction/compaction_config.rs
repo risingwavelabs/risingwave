@@ -23,7 +23,7 @@ pub struct CompactionConfigBuilder {
 
 impl CompactionConfigBuilder {
     pub fn new() -> Self {
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         Self {
             config: CompactionConfig {
                 max_bytes_for_level_base: compaction_config::max_bytes_for_level_base(),

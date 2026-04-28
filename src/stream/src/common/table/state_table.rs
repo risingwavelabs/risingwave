@@ -748,7 +748,7 @@ where
     }
 
     /// Create state table from table catalog and store.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn from_table_catalog_inner(
         table_catalog: &Table,
         store: S,
@@ -1501,7 +1501,7 @@ where
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
-    #[allow(clippy::disallowed_methods)]
+    
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let chunk = if IS_REPLICATED {
             self.fill_non_output_indices(chunk)

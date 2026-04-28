@@ -395,7 +395,7 @@ impl LogicalMultiJoin {
         output
     }
 
-    #[allow(clippy::doc_overindented_list_items)]
+    #[expect(clippy::doc_overindented_list_items)]
     /// Our heuristic join reordering algorithm will try to perform a left-deep join.
     /// It will try to do the following:
     ///
@@ -501,7 +501,7 @@ impl LogicalMultiJoin {
         Ok(join_ordering)
     }
 
-    #[allow(clippy::doc_overindented_list_items)]
+    
     /// transform multijoin into bushy tree join.
     ///
     /// 1. First, use equivalent condition derivation to get derive join relation.

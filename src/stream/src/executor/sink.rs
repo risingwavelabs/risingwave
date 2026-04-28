@@ -216,7 +216,7 @@ fn compact_output_kind(sink_type: SinkType) -> OutputKind {
 /// Dispatch the code block to different output kinds for chunk compaction based on sink type.
 macro_rules! dispatch_output_kind {
     ($sink_type:expr, $KIND:ident, $body:tt) => {
-        #[allow(unused_braces)]
+        #[expect(unused_braces)]
         match compact_output_kind($sink_type) {
             output_kind::UPSERT => {
                 const KIND: OutputKind = output_kind::UPSERT;
@@ -231,7 +231,7 @@ macro_rules! dispatch_output_kind {
 }
 
 impl<F: LogStoreFactory> SinkExecutor<F> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[expect(clippy::unused_async)]
     pub async fn new(
         actor_context: ActorContextRef,
@@ -540,7 +540,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn process_msg(
         input: impl MessageStream,

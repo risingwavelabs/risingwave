@@ -52,7 +52,7 @@ pub type WatermarkFilterExecutor<S> = WatermarkFilterExecutorInner<S, false>;
 pub type UpsertWatermarkFilterExecutor<S> = WatermarkFilterExecutorInner<S, true>;
 
 impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> {
-    #[allow(clippy::too_many_arguments)]
+    
     pub fn new(
         ctx: ActorContextRef,
         input: Executor,

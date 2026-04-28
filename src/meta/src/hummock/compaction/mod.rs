@@ -92,7 +92,7 @@ impl CompactStatus {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn get_compact_task(
         &mut self,
         levels: &Levels,

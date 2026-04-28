@@ -26,7 +26,7 @@
 #![feature(error_generic_member_access)]
 #![feature(portable_simd)]
 #![feature(once_cell_try)]
-#![allow(incomplete_features)]
+
 #![feature(iterator_try_collect)]
 #![feature(iter_order_by)]
 #![feature(binary_heap_into_iter_sorted)]

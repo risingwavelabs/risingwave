@@ -207,7 +207,7 @@ pub mod tests {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    
     pub fn generate_table_with_ids_and_epochs(
         id: u64,
         table_prefix: u64,

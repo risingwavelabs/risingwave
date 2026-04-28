@@ -19,7 +19,7 @@ use smallvec::{SmallVec, smallvec};
 /// Calculate range (A - B), the result might be the union of two ranges when B is totally included
 /// in the A.
 pub(super) fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>) {
-    #[allow(clippy::if_same_then_else)] // for better readability
+     // for better readability
     if a.is_empty() {
         (0..0, 0..0)
     } else if b.is_empty() {
@@ -54,7 +54,7 @@ pub(super) fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, R
 
 /// Calculate the difference of two ranges A and B, return (removed ranges, added ranges).
 /// Note this is quite different from [`range_except`].
-#[allow(clippy::type_complexity)] // looks complex but it's not
+#[expect(clippy::type_complexity)] // looks complex but it's not
 pub(super) fn range_diff(
     a: Range<usize>,
     b: Range<usize>,

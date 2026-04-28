@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::needless_question_mark)]
+
 
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
@@ -54,7 +54,7 @@ enum Commands {
     Default,
 }
 
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ValueEnum)]
 pub enum Components {
     #[clap(name = "minio")]

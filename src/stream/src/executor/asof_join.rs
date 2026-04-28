@@ -165,7 +165,7 @@ struct EqJoinArgs<'a, S: StateStore, E: AsOfRowEncoding> {
 }
 
 impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoinExecutor<S, T, E> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,

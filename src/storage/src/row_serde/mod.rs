@@ -50,7 +50,7 @@ pub struct ColumnMapping {
     output_indices: Vec<usize>,
 }
 
-#[allow(clippy::len_without_is_empty)]
+
 impl ColumnMapping {
     /// Create a mapping with given `table_columns` projected on the `column_ids`.
     pub fn new(output_indices: Vec<usize>) -> Self {

@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 const TELEMETRY_COMPACTOR_REPORT_TYPE: &str = "compactor";
 
-#[allow(dead_code)] // please remove when used
+#[expect(dead_code)] // please remove when used
 pub(crate) fn report_event(
     event_stage: PbTelemetryEventStage,
     event_name: &str,
@@ -55,7 +55,7 @@ impl CompactorTelemetryCreator {
 
 #[async_trait::async_trait]
 impl TelemetryReportCreator for CompactorTelemetryCreator {
-    #[allow(refining_impl_trait)]
+    
     async fn create_report(
         &self,
         tracking_id: String,

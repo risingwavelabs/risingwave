@@ -107,7 +107,7 @@ pub(super) struct OverPartition<'a, S: StateStore> {
 const MAGIC_BATCH_SIZE: usize = 512;
 
 impl<'a, S: StateStore> OverPartition<'a, S> {
-    #[allow(clippy::too_many_arguments)]
+    
     pub fn new(
         deduped_part_key: &'a OwnedRow,
         cache: &'a mut PartitionCache,

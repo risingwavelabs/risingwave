@@ -24,12 +24,12 @@ pub struct MockSource {
 pub struct MessageSender(mpsc::UnboundedSender<Message>);
 
 impl MessageSender {
-    #[allow(dead_code)]
+    
     pub fn push_chunk(&mut self, chunk: StreamChunk) {
         self.0.send(Message::Chunk(chunk)).unwrap();
     }
 
-    #[allow(dead_code)]
+    
     pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
         let mut barrier = Barrier::new_test_barrier(epoch);
         if stop {
@@ -42,7 +42,7 @@ impl MessageSender {
         self.0.send(Message::Barrier(barrier)).unwrap();
     }
 
-    #[allow(dead_code)]
+    
     pub fn push_barrier_with_prev_epoch_for_test(
         &mut self,
         cur_epoch: u64,
@@ -56,7 +56,7 @@ impl MessageSender {
         self.0.send(Message::Barrier(barrier)).unwrap();
     }
 
-    #[allow(dead_code)]
+    
     pub fn push_watermark(&mut self, col_idx: usize, data_type: DataType, val: ScalarImpl) {
         self.0
             .send(Message::Watermark(Watermark {
@@ -67,7 +67,7 @@ impl MessageSender {
             .unwrap();
     }
 
-    #[allow(dead_code)]
+    
     pub fn push_int64_watermark(&mut self, col_idx: usize, val: i64) {
         self.push_watermark(col_idx, DataType::Int64, ScalarImpl::Int64(val));
     }
@@ -80,7 +80,7 @@ impl std::fmt::Debug for MockSource {
 }
 
 impl MockSource {
-    #[allow(dead_code)]
+    
     pub fn channel() -> (MessageSender, Self) {
         let (tx, rx) = mpsc::unbounded_channel();
         let source = Self {
@@ -90,7 +90,7 @@ impl MockSource {
         (MessageSender(tx), source)
     }
 
-    #[allow(dead_code)]
+    
     pub fn with_messages(msgs: Vec<Message>) -> Self {
         let (tx, source) = Self::channel();
         for msg in msgs {
@@ -107,7 +107,7 @@ impl MockSource {
         source
     }
 
-    #[allow(dead_code)]
+    
     #[must_use]
     pub fn stop_on_finish(self, stop_on_finish: bool) -> Self {
         Self {

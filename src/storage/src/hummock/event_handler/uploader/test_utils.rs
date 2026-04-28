@@ -250,7 +250,7 @@ pub(super) fn dummy_success_upload_output() -> UploadTaskOutput {
     }
 }
 
-#[allow(clippy::unused_async)]
+
 pub(super) async fn dummy_success_upload_future(
     _: UploadTaskPayload,
     _: UploadTaskInfo,
@@ -258,7 +258,7 @@ pub(super) async fn dummy_success_upload_future(
     Ok(dummy_success_upload_output())
 }
 
-#[allow(clippy::unused_async)]
+
 pub(super) async fn dummy_fail_upload_future(
     _: UploadTaskPayload,
     _: UploadTaskInfo,
@@ -318,7 +318,7 @@ pub(crate) fn prepare_uploader_order_test_spawn_task_fn(
     impl Fn(HashMap<LocalInstanceId, Vec<ImmId>>) -> (BoxFuture<'static, ()>, oneshot::Sender<()>),
 ) {
     // (the started task send the imm ids of payload, the started task wait for finish notify)
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     let task_notifier_holder: Arc<
         Mutex<VecDeque<(oneshot::Sender<UploadTaskInfo>, oneshot::Receiver<()>)>>,
     > = Arc::new(Mutex::new(VecDeque::new()));

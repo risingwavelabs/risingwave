@@ -34,7 +34,7 @@
 //! This file is adapted from [arrow-rs](https://github.com/apache/arrow-rs)
 
 // allow `zip` for performance reasons
-#![allow(clippy::disallowed_methods)]
+#![expect(clippy::disallowed_methods)]
 
 use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, Range, RangeInclusive};

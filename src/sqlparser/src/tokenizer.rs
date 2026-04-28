@@ -364,7 +364,7 @@ impl<'a> Tokenizer<'a> {
     /// Tokenize the statement and produce a vector of tokens.
     ///
     /// Whitespaces are included.
-    #[allow(dead_code)]
+    
     fn tokenize_with_whitespace(&mut self) -> Result<Vec<Token>, TokenizerError> {
         let tokens = self.tokenize()?;
         Ok(tokens.into_iter().map(|t| t.token).collect())
@@ -996,7 +996,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(clippy::unnecessary_wraps)]
     fn consume_and_return(&mut self, t: Token) -> Result<Option<Token>, TokenizerError> {
         self.next();
         Ok(Some(t))

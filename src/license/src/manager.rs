@@ -112,13 +112,13 @@ pub struct License {
     /// Subject of the license.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.2>.
-    #[allow(dead_code)]
+    
     pub sub: String,
 
     /// Issuer of the license.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.1>.
-    #[allow(dead_code)]
+    
     pub iss: Issuer,
 
     /// Tier of the license.

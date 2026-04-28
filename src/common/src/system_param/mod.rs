@@ -185,7 +185,7 @@ macro_rules! impl_system_params_to_kv {
     ($({ $field:ident, $($rest:tt)* },)*) => {
         /// The returned map only contains undeprecated fields.
         /// Return error if there are missing fields.
-        #[allow(clippy::vec_init_then_push)]
+        #[expect(clippy::vec_init_then_push)]
         pub fn system_params_to_kv(params: &PbSystemParams) -> Result<Vec<(String, String)>> {
             check_missing_params(params)?;
             let mut ret = Vec::new();
@@ -256,7 +256,7 @@ macro_rules! impl_system_params_from_kv {
 /// `OverrideValidateOnSet` below.
 macro_rules! impl_default_validation {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
-        #[allow(clippy::ptr_arg)]
+        
         pub trait Validate {
             $(
                 /// Default implementation does nothing.
@@ -334,7 +334,7 @@ macro_rules! impl_set_system_param {
                         }
 
                         let v: $type = if let Some(v) = value {
-                            #[allow(rw::format_error)]
+                            #[expect(rw::format_error)]
                             v.as_ref().parse().map_err(|e| format!("cannot parse parameter value: {e}"))?
                         } else {
                             $default.ok_or_else(|| format!("{} does not have a default value", key))?
@@ -381,7 +381,7 @@ macro_rules! impl_is_mutable {
 
 macro_rules! impl_system_params_for_test {
     ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
-        #[allow(clippy::needless_update)]
+        
         pub fn system_params_for_test() -> PbSystemParams {
             let mut ret = PbSystemParams {
                 $(
@@ -407,7 +407,7 @@ macro_rules! impl_validate_all_params {
         /// This function checks the validity of values against the rules in `OverrideValidate`,
         /// regardless of whether a parameter is mutable. It is suitable for validating
         /// initial parameters.
-        #[allow(rw::format_error)]
+        #[expect(rw::format_error)]
         pub fn validate_init_system_params(params: &PbSystemParams) -> Result<()> {
             $(
                 if let Some(ref v_pb) = params.$field {

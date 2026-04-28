@@ -480,7 +480,7 @@ impl TableWatermarks {
 pub fn merge_multiple_new_table_watermarks(
     table_watermarks_list: impl IntoIterator<Item = HashMap<TableId, TableWatermarks>>,
 ) -> HashMap<TableId, TableWatermarks> {
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     let mut ret: HashMap<
         TableId,
         (

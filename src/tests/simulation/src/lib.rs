@@ -17,7 +17,7 @@
 #![feature(register_tool)]
 #![feature(if_let_guard)]
 #![register_tool(rw)]
-#![allow(rw::format_error)] // test code
+#![expect(rw::format_error)] // test code
 
 pub mod client;
 pub mod cluster;
