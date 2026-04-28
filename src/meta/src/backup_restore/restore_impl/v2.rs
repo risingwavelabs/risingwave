@@ -109,6 +109,15 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.workers.clone(), db).await?;
         insert_models(metadata.worker_properties.clone(), db).await?;
         insert_models(metadata.users.clone(), db).await?;
+        insert_models(
+            metadata
+                .user_role_memberships
+                .iter()
+                .sorted_by_key(|m| m.id)
+                .cloned(),
+            db,
+        )
+        .await?;
         // The sort is required to pass table's foreign key check.
         use risingwave_meta_model::object::ObjectType;
         insert_models(
@@ -214,6 +223,7 @@ macro_rules! for_all_auto_increment {
             {"worker", workers, worker_id},
             {"object", objects, oid},
             {"user", users, user_id},
+            {"user_role_membership", user_role_memberships, id},
             {"user_privilege", user_privileges, id},
             {"fragment", fragments, fragment_id},
             {"object_dependency", object_dependencies, id}

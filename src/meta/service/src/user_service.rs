@@ -21,8 +21,8 @@ use risingwave_pb::user::user_service_server::UserService;
 use risingwave_pb::user::{
     AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse, CreateUserRequest,
     CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilegeRequest,
-    GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse, UpdateUserRequest,
-    UpdateUserResponse,
+    GrantPrivilegeResponse, ListRoleMembershipsRequest, ListRoleMembershipsResponse,
+    RevokePrivilegeRequest, RevokePrivilegeResponse, UpdateUserRequest, UpdateUserResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -142,6 +142,25 @@ impl UserService for UserServiceImpl {
             status: None,
             version,
         }))
+    }
+
+    async fn list_role_memberships(
+        &self,
+        request: Request<ListRoleMembershipsRequest>,
+    ) -> Result<Response<ListRoleMembershipsResponse>, Status> {
+        let req = request.into_inner();
+        let member_ids = req
+            .member_ids
+            .iter()
+            .map(|id| UserId::from(*id))
+            .collect_vec();
+        let memberships = self
+            .metadata_manager
+            .catalog_controller
+            .list_role_memberships(&member_ids)
+            .await?;
+
+        Ok(Response::new(ListRoleMembershipsResponse { memberships }))
     }
 
     async fn alter_default_privilege(
