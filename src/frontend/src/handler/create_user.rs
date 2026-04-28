@@ -105,21 +105,16 @@ pub async fn handle_create_user(
                 UserOption::NoSuperUser => user_info.is_super = false,
                 UserOption::CreateDB => user_info.can_create_db = true,
                 UserOption::NoCreateDB => user_info.can_create_db = false,
-                UserOption::CreateUser => user_info.can_create_user = true,
-                UserOption::NoCreateUser => user_info.can_create_user = false,
+                UserOption::CreateRole | UserOption::CreateUser => user_info.can_create_user = true,
+                UserOption::NoCreateRole | UserOption::NoCreateUser => {
+                    user_info.can_create_user = false
+                }
+                UserOption::Inherit => user_info.can_inherit = true,
+                UserOption::NoInherit => user_info.can_inherit = false,
                 UserOption::Login => user_info.can_login = true,
                 UserOption::NoLogin => user_info.can_login = false,
                 UserOption::Admin => user_info.is_admin = true,
                 UserOption::NoAdmin => user_info.is_admin = false,
-                UserOption::CreateRole
-                | UserOption::NoCreateRole
-                | UserOption::Inherit
-                | UserOption::NoInherit => {
-                    return Err(ErrorCode::InvalidParameterValue(
-                        "role options are not supported yet".to_owned(),
-                    )
-                    .into());
-                }
                 UserOption::EncryptedPassword(password) => {
                     if !password.0.is_empty() {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);
@@ -166,6 +161,21 @@ pub async fn handle_create_user(
         response_builder = response_builder.notice(notice);
     }
     Ok(response_builder.into())
+}
+
+pub async fn handle_create_role(
+    handler_args: HandlerArgs,
+    mut stmt: CreateUserStatement,
+) -> Result<RwPgResponse> {
+    let has_explicit_login = stmt
+        .with_options
+        .0
+        .iter()
+        .any(|option| matches!(option, UserOption::Login | UserOption::NoLogin));
+    if !has_explicit_login {
+        stmt.with_options.0.push(UserOption::NoLogin);
+    }
+    handle_create_user(handler_args, stmt).await
 }
 
 #[cfg(test)]
