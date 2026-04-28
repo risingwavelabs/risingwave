@@ -36,8 +36,8 @@ use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbRoleMembership, PbUserIn
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{OnConflict, SimpleExpr, Value};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, IntoActiveModel,
+    PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
@@ -56,6 +56,8 @@ enum RoleMembershipGraphKind {
     Admin,
     Inherit,
 }
+
+type RoleMembershipTarget = (UserId, UserId, UserId);
 
 fn build_role_membership_graph(
     memberships: &[user_role_membership::Model],
@@ -111,6 +113,15 @@ fn has_role_membership_path_strict(
     start != target && has_role_membership_path(graph, start, target)
 }
 
+fn role_membership_dependency_is_valid(
+    admin_graph: &HashMap<UserId, Vec<UserId>>,
+    grantor: UserId,
+    role_id: UserId,
+) -> bool {
+    grantor == DEFAULT_SUPER_USER_ID
+        || has_role_membership_path_strict(admin_graph, grantor, role_id)
+}
+
 fn grantor_has_admin_option_for_grant(
     admin_graph: &HashMap<UserId, Vec<UserId>>,
     grantor: UserId,
@@ -151,6 +162,62 @@ fn closest_reachable_role_ids(graph: &HashMap<UserId, Vec<UserId>>, start: UserI
     reachable
 }
 
+fn matching_role_membership_exists(
+    memberships: &[user_role_membership::Model],
+    role_id: UserId,
+    member_id: UserId,
+    granted_by: UserId,
+) -> bool {
+    memberships.iter().any(|membership| {
+        membership.granted_by == granted_by
+            && membership.role_id == role_id
+            && membership.member_id == member_id
+    })
+}
+
+fn role_membership_target(membership: &user_role_membership::Model) -> RoleMembershipTarget {
+    (
+        membership.role_id,
+        membership.member_id,
+        membership.granted_by,
+    )
+}
+
+fn role_membership_targets_for_grantor(
+    role_ids: &[UserId],
+    member_ids: &[UserId],
+    granted_by: UserId,
+) -> HashSet<RoleMembershipTarget> {
+    role_ids
+        .iter()
+        .copied()
+        .cartesian_product(member_ids.iter().copied())
+        .map(|(role_id, member_id)| (role_id, member_id, granted_by))
+        .collect()
+}
+
+fn select_effective_revoke_grantor_for_membership(
+    memberships: &[user_role_membership::Model],
+    admin_graph: &HashMap<UserId, Vec<UserId>>,
+    possession_graph: &HashMap<UserId, Vec<UserId>>,
+    role_id: UserId,
+    member_id: UserId,
+    revoked_by: UserId,
+) -> Option<UserId> {
+    if has_role_membership_path_strict(admin_graph, revoked_by, role_id)
+        && matching_role_membership_exists(memberships, role_id, member_id, revoked_by)
+    {
+        return Some(revoked_by);
+    }
+
+    closest_reachable_role_ids(possession_graph, revoked_by)
+        .into_iter()
+        .find(|&candidate| {
+            has_role_membership_path_strict(admin_graph, candidate, role_id)
+                && matching_role_membership_exists(memberships, role_id, member_id, candidate)
+        })
+}
+
 fn select_effective_grantor_for_role(
     admin_graph: &HashMap<UserId, Vec<UserId>>,
     possession_graph: &HashMap<UserId, Vec<UserId>>,
@@ -166,8 +233,97 @@ fn select_effective_grantor_for_role(
         .find(|&candidate| has_role_membership_path_strict(admin_graph, candidate, role_id))
 }
 
+fn apply_revoke_to_memberships(
+    memberships: Vec<user_role_membership::Model>,
+    targets: &HashSet<RoleMembershipTarget>,
+    revoke_admin_option: bool,
+    revoke_inherit_option: bool,
+    revoke_set_option: bool,
+) -> Vec<user_role_membership::Model> {
+    let option_only = revoke_admin_option || revoke_inherit_option || revoke_set_option;
+    memberships
+        .into_iter()
+        .filter_map(|mut membership| {
+            let targeted = targets.contains(&role_membership_target(&membership));
+            if !targeted {
+                return Some(membership);
+            }
+
+            if option_only {
+                if revoke_admin_option {
+                    membership.admin_option = false;
+                }
+                if revoke_inherit_option {
+                    membership.inherit_option = false;
+                }
+                if revoke_set_option {
+                    membership.set_option = false;
+                }
+                Some(membership)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn compute_cascading_role_memberships(
+    memberships: &[user_role_membership::Model],
+    targets: &HashSet<RoleMembershipTarget>,
+    revoke_admin_option: bool,
+    revoke_inherit_option: bool,
+    revoke_set_option: bool,
+    cascade: bool,
+) -> MetaResult<Vec<user_role_membership::Model>> {
+    let option_only = revoke_admin_option || revoke_inherit_option || revoke_set_option;
+    let before_admin = build_role_membership_graph(memberships, RoleMembershipGraphKind::Admin);
+    let mut current = apply_revoke_to_memberships(
+        memberships.to_vec(),
+        targets,
+        revoke_admin_option,
+        revoke_inherit_option,
+        revoke_set_option,
+    );
+
+    loop {
+        let after_admin = build_role_membership_graph(&current, RoleMembershipGraphKind::Admin);
+        let mut dependent_ids = vec![];
+
+        for membership in &current {
+            let lost_admin_path = role_membership_dependency_is_valid(
+                &before_admin,
+                membership.granted_by,
+                membership.role_id,
+            ) && !role_membership_dependency_is_valid(
+                &after_admin,
+                membership.granted_by,
+                membership.role_id,
+            );
+            if lost_admin_path {
+                dependent_ids.push(membership.id);
+            }
+        }
+
+        if dependent_ids.is_empty() {
+            return Ok(current);
+        }
+        if !cascade {
+            return Err(MetaError::permission_denied(
+                "dependent role memberships exist; use CASCADE to revoke them".to_owned(),
+            ));
+        }
+
+        let dependent_set: HashSet<_> = dependent_ids.into_iter().collect();
+        current.retain(|membership| !dependent_set.contains(&membership.id));
+
+        if option_only && !revoke_admin_option {
+            return Ok(current);
+        }
+    }
+}
+
 impl CatalogController {
-    async fn user_controller_db(&self) -> sea_orm::DatabaseConnection {
+    async fn user_controller_db(&self) -> DatabaseConnection {
         self.inner.read().await.db.clone()
     }
 
@@ -185,8 +341,8 @@ impl CatalogController {
     }
 
     pub async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         check_user_name_duplicate(&pb_user.name, &txn).await?;
 
         let grant_privileges = pb_user.grant_privileges.clone();
@@ -229,14 +385,14 @@ impl CatalogController {
         update_user: PbUserInfo,
         update_fields: &[PbUpdateField],
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let db = self.user_controller_db().await;
         let rename_flag = update_fields.contains(&PbUpdateField::Rename);
         if rename_flag {
-            check_user_name_duplicate(&update_user.name, &inner.db).await?;
+            check_user_name_duplicate(&update_user.name, &db).await?;
         }
 
         let user = User::find_by_id(update_user.id as UserId)
-            .one(&inner.db)
+            .one(&db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", update_user.id))?;
         let mut user = user.into_active_model();
@@ -254,9 +410,9 @@ impl CatalogController {
             PbUpdateField::Inherit => user.can_inherit = Set(update_user.can_inherit),
         });
 
-        let user = user.update(&inner.db).await?;
+        let user = user.update(&db).await?;
         let mut user_info: PbUserInfo = user.into();
-        user_info.grant_privileges = get_user_privilege(user_info.id as _, &inner.db).await?;
+        user_info.grant_privileges = get_user_privilege(user_info.id as _, &db).await?;
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
@@ -271,13 +427,13 @@ impl CatalogController {
         &self,
         member_ids: &[UserId],
     ) -> MetaResult<Vec<PbRoleMembership>> {
-        let inner = self.inner.read().await;
+        let db = self.user_controller_db().await;
         let memberships = if member_ids.is_empty() {
-            UserRoleMembership::find().all(&inner.db).await?
+            UserRoleMembership::find().all(&db).await?
         } else {
             UserRoleMembership::find()
                 .filter(user_role_membership::Column::MemberId.is_in(member_ids.iter().copied()))
-                .all(&inner.db)
+                .all(&db)
                 .await?
         };
         Ok(memberships.into_iter().map(Into::into).collect())
@@ -462,11 +618,149 @@ impl CatalogController {
         Ok((version, memberships))
     }
 
+    pub async fn revoke_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        granted_by_specified: bool,
+        revoked_by: UserId,
+        revoke_admin_option: bool,
+        revoke_inherit_option: bool,
+        revoke_set_option: bool,
+        cascade: bool,
+    ) -> MetaResult<(NotificationVersion, Vec<PbRoleMembership>)> {
+        if role_ids.is_empty() || member_ids.is_empty() {
+            return Ok((IGNORED_NOTIFICATION_VERSION, vec![]));
+        }
+
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
+        for role_id in &role_ids {
+            ensure_user_id(*role_id, &txn).await?;
+        }
+        for member_id in &member_ids {
+            ensure_user_id(*member_id, &txn).await?;
+        }
+        let revoker = User::find_by_id(revoked_by)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", revoked_by))?;
+
+        let existing_memberships = UserRoleMembership::find().all(&txn).await?;
+        let admin_graph =
+            build_role_membership_graph(&existing_memberships, RoleMembershipGraphKind::Admin);
+        let possession_graph =
+            build_role_membership_graph(&existing_memberships, RoleMembershipGraphKind::Inherit);
+        let targets: HashSet<_> = if granted_by_specified {
+            User::find_by_id(granted_by)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("user", granted_by))?;
+            if !revoker.is_super
+                && !role_possesses_grantor(&possession_graph, revoked_by, granted_by)
+            {
+                return Err(MetaError::permission_denied(format!(
+                    "user {} does not possess grantor role {}",
+                    revoked_by, granted_by
+                )));
+            }
+            if role_ids.iter().any(|&role_id| {
+                !grantor_has_admin_option_for_grant(
+                    &admin_graph,
+                    granted_by,
+                    role_id,
+                    revoker.is_super,
+                )
+            }) {
+                return Err(MetaError::permission_denied(format!(
+                    "grantor {} does not have ADMIN OPTION for all requested roles",
+                    granted_by
+                )));
+            }
+            role_membership_targets_for_grantor(&role_ids, &member_ids, granted_by)
+        } else if revoker.is_super {
+            role_membership_targets_for_grantor(&role_ids, &member_ids, DEFAULT_SUPER_USER_ID)
+        } else {
+            let targets: HashSet<_> = role_ids
+                .iter()
+                .copied()
+                .cartesian_product(member_ids.iter().copied())
+                .filter_map(|(role_id, member_id)| {
+                    select_effective_revoke_grantor_for_membership(
+                        &existing_memberships,
+                        &admin_graph,
+                        &possession_graph,
+                        role_id,
+                        member_id,
+                        revoked_by,
+                    )
+                    .map(|granted_by| (role_id, member_id, granted_by))
+                })
+                .collect();
+            if targets.is_empty() {
+                return Ok((IGNORED_NOTIFICATION_VERSION, vec![]));
+            }
+            targets
+        };
+        let final_memberships = compute_cascading_role_memberships(
+            &existing_memberships,
+            &targets,
+            revoke_admin_option,
+            revoke_inherit_option,
+            revoke_set_option,
+            cascade,
+        )?;
+        let final_by_id: HashMap<_, _> = final_memberships
+            .into_iter()
+            .map(|membership| (membership.id, membership))
+            .collect();
+        for membership in existing_memberships {
+            if let Some(updated) = final_by_id.get(&membership.id) {
+                if &membership != updated {
+                    let mut model = membership.into_active_model();
+                    model.admin_option = Set(updated.admin_option);
+                    model.inherit_option = Set(updated.inherit_option);
+                    model.set_option = Set(updated.set_option);
+                    model.update(&txn).await?;
+                }
+            } else {
+                UserRoleMembership::delete_by_id(membership.id)
+                    .exec(&txn)
+                    .await?;
+            }
+        }
+
+        let memberships = UserRoleMembership::find()
+            .filter(user_role_membership::Column::RoleId.is_in(role_ids.iter().copied()))
+            .filter(user_role_membership::Column::MemberId.is_in(member_ids.iter().copied()))
+            .all(&txn)
+            .await?
+            .into_iter()
+            .filter(|membership| targets.contains(&role_membership_target(membership)))
+            .map(Into::into)
+            .collect();
+        let affected_user_infos = list_user_info_by_ids(
+            role_ids
+                .iter()
+                .chain(member_ids.iter())
+                .copied()
+                .unique()
+                .collect_vec(),
+            &txn,
+        )
+        .await?;
+        txn.commit().await?;
+
+        let version = self.notify_users_update(affected_user_infos).await;
+        Ok((version, memberships))
+    }
+
     #[cfg(test)]
     pub async fn get_user(&self, id: UserId) -> MetaResult<user::Model> {
-        let inner = self.inner.read().await;
+        let db = self.user_controller_db().await;
         let user = User::find_by_id(id)
-            .one(&inner.db)
+            .one(&db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", id))?;
         Ok(user)
@@ -474,27 +768,67 @@ impl CatalogController {
 
     #[cfg(test)]
     pub async fn get_user_by_name(&self, name: &str) -> MetaResult<user::Model> {
-        let inner = self.inner.read().await;
+        let db = self.user_controller_db().await;
         let user = User::find()
             .filter(user::Column::Name.eq(name))
-            .one(&inner.db)
+            .one(&db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("user {name} not found"))?;
         Ok(user)
     }
 
-    pub async fn drop_user(&self, user_id: UserId) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+    pub async fn drop_user(
+        &self,
+        user_id: UserId,
+        dropped_by: UserId,
+        session_user: UserId,
+    ) -> MetaResult<NotificationVersion> {
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         let user = User::find_by_id(user_id)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
+        let actor = User::find_by_id(dropped_by)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", dropped_by))?;
+        if dropped_by == user_id || session_user == user_id {
+            return Err(MetaError::permission_denied(
+                "current user cannot be dropped".to_owned(),
+            ));
+        }
         if user.name == DEFAULT_SUPER_USER || user.name == DEFAULT_SUPER_USER_FOR_PG {
             return Err(MetaError::permission_denied(format!(
                 "drop default super user {} is not allowed",
                 user.name
             )));
+        }
+        if !actor.is_super {
+            if user.is_super {
+                return Err(MetaError::permission_denied(
+                    "must be superuser to drop superusers".to_owned(),
+                ));
+            }
+            if !actor.can_create_user {
+                return Err(MetaError::permission_denied(
+                    "permission denied to drop user".to_owned(),
+                ));
+            }
+            let existing_memberships = UserRoleMembership::find().all(&txn).await?;
+            let admin_graph =
+                build_role_membership_graph(&existing_memberships, RoleMembershipGraphKind::Admin);
+            if !has_role_membership_path(&admin_graph, dropped_by, user_id) {
+                return Err(MetaError::permission_denied(format!(
+                    "user {} does not have ADMIN OPTION for role {}",
+                    dropped_by, user_id
+                )));
+            }
+        }
+        if user.is_admin && !actor.is_admin {
+            return Err(MetaError::permission_denied(
+                "only admin users can drop admin users".to_owned(),
+            ));
         }
 
         // check if the user is the owner of any objects.
@@ -520,6 +854,16 @@ impl CatalogController {
                 user.name, count
             )));
         }
+
+        UserRoleMembership::delete_many()
+            .filter(
+                Condition::any()
+                    .add(user_role_membership::Column::RoleId.eq(user_id))
+                    .add(user_role_membership::Column::MemberId.eq(user_id))
+                    .add(user_role_membership::Column::GrantedBy.eq(user_id)),
+            )
+            .exec(&txn)
+            .await?;
 
         let res = User::delete_by_id(user_id).exec(&txn).await?;
         if res.rows_affected != 1 {
@@ -547,8 +891,8 @@ impl CatalogController {
         grantor: UserId,
         with_grant_option: bool,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -684,8 +1028,8 @@ impl CatalogController {
         revoke_grant_option: bool,
         cascade: bool,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -876,8 +1220,8 @@ impl CatalogController {
             with_grant_option,
             "grant default privileges",
         );
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -1029,8 +1373,8 @@ impl CatalogController {
         grantees: Vec<UserId>,
         revoke_grant_option: bool,
     ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -1094,6 +1438,7 @@ mod tests {
     fn make_test_user(name: &str) -> PbUserInfo {
         PbUserInfo {
             name: name.to_owned(),
+            can_inherit: true,
             ..Default::default()
         }
     }
@@ -1178,7 +1523,9 @@ mod tests {
         .await?;
 
         assert!(
-            mgr.drop_user(user_1.user_id).await.is_err(),
+            mgr.drop_user(user_1.user_id, TEST_ROOT_USER_ID, TEST_ROOT_USER_ID)
+                .await
+                .is_err(),
             "user_1 can't be dropped"
         );
 
@@ -1310,8 +1657,1190 @@ mod tests {
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert!(privilege_2.is_empty());
 
-        mgr.drop_user(user_1.user_id).await?;
-        mgr.drop_user(user_2.user_id).await?;
+        mgr.drop_user(user_1.user_id, TEST_ROOT_USER_ID, TEST_ROOT_USER_ID)
+            .await?;
+        mgr.drop_user(user_2.user_id, TEST_ROOT_USER_ID, TEST_ROOT_USER_ID)
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_membership_lifecycle() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("role_b")).await?;
+        mgr.create_user(make_test_user("member_1")).await?;
+        mgr.create_user(make_test_user("member_2")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let role_b = mgr.get_user_by_name("role_b").await?;
+        let member_1 = mgr.get_user_by_name("member_1").await?;
+        let member_2 = mgr.get_user_by_name("member_2").await?;
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![role_a.user_id],
+                vec![role_b.user_id],
+                TEST_ROOT_USER_ID,
+                TEST_ROOT_USER_ID,
+                false,
+                Some(true),
+                None,
+                None,
+            )
+            .await?;
+        assert_eq!(memberships.len(), 1);
+        assert!(memberships[0].admin_option);
+        assert!(memberships[0].inherit_option);
+        assert!(memberships[0].set_option);
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![role_a.user_id],
+                vec![member_1.user_id],
+                role_b.user_id,
+                role_b.user_id,
+                true,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(memberships[0].granted_by, role_b.user_id.as_raw_id());
+        assert!(!memberships[0].admin_option);
+        assert!(memberships[0].inherit_option);
+        assert!(memberships[0].set_option);
+
+        let member_1_memberships = mgr.list_role_memberships(&[member_1.user_id]).await?;
+        assert_eq!(member_1_memberships.len(), 1);
+        assert_eq!(member_1_memberships[0].role_id, role_a.user_id.as_raw_id());
+        assert_eq!(
+            member_1_memberships[0].member_id,
+            member_1.user_id.as_raw_id()
+        );
+
+        assert!(
+            mgr.grant_role(
+                vec![role_b.user_id],
+                vec![role_a.user_id],
+                TEST_ROOT_USER_ID,
+                TEST_ROOT_USER_ID,
+                false,
+                None,
+                None,
+                None,
+            )
+            .await
+            .is_err()
+        );
+
+        assert!(
+            mgr.revoke_role(
+                vec![role_a.user_id],
+                vec![role_b.user_id],
+                TEST_ROOT_USER_ID,
+                false,
+                TEST_ROOT_USER_ID,
+                true,
+                false,
+                false,
+                false,
+            )
+            .await
+            .is_err()
+        );
+        mgr.revoke_role(
+            vec![role_a.user_id],
+            vec![role_b.user_id],
+            TEST_ROOT_USER_ID,
+            false,
+            TEST_ROOT_USER_ID,
+            true,
+            false,
+            false,
+            true,
+        )
+        .await?;
+
+        assert!(
+            mgr.grant_role(
+                vec![role_a.user_id],
+                vec![member_2.user_id],
+                role_b.user_id,
+                role_b.user_id,
+                true,
+                None,
+                None,
+                None,
+            )
+            .await
+            .is_err()
+        );
+
+        mgr.revoke_role(
+            vec![role_a.user_id],
+            vec![role_b.user_id],
+            TEST_ROOT_USER_ID,
+            false,
+            TEST_ROOT_USER_ID,
+            false,
+            false,
+            false,
+            false,
+        )
+        .await?;
+
+        mgr.drop_user(role_b.user_id, TEST_ROOT_USER_ID, TEST_ROOT_USER_ID)
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_membership_revoke_admin_option_cascade() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("role_b")).await?;
+        mgr.create_user(make_test_user("member_1")).await?;
+        mgr.create_user(make_test_user("member_2")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let role_b = mgr.get_user_by_name("role_b").await?;
+        let member_1 = mgr.get_user_by_name("member_1").await?;
+        let member_2 = mgr.get_user_by_name("member_2").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![role_b.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![member_1.user_id],
+            role_b.user_id,
+            role_b.user_id,
+            true,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![member_2.user_id],
+            member_1.user_id,
+            member_1.user_id,
+            true,
+            None,
+            None,
+            None,
+        )
+        .await?;
+
+        let err = mgr
+            .revoke_role(
+                vec![role_a.user_id],
+                vec![role_b.user_id],
+                TEST_ROOT_USER_ID,
+                false,
+                TEST_ROOT_USER_ID,
+                true,
+                false,
+                false,
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("dependent role memberships exist; use CASCADE")
+        );
+
+        mgr.revoke_role(
+            vec![role_a.user_id],
+            vec![role_b.user_id],
+            TEST_ROOT_USER_ID,
+            false,
+            TEST_ROOT_USER_ID,
+            true,
+            false,
+            false,
+            true,
+        )
+        .await?;
+
+        let memberships = mgr.list_role_memberships(&[]).await?;
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(memberships[0].member_id, role_b.user_id.as_raw_id());
+        assert_eq!(memberships[0].role_id, role_a.user_id.as_raw_id());
+        assert!(!memberships[0].admin_option);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_membership_inherit_defaults_from_member() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        let mut noinherit_member = make_test_user("noinherit_member");
+        noinherit_member.can_inherit = false;
+        mgr.create_user(noinherit_member).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let noinherit_member = mgr.get_user_by_name("noinherit_member").await?;
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![role_a.user_id],
+                vec![noinherit_member.user_id],
+                TEST_ROOT_USER_ID,
+                TEST_ROOT_USER_ID,
+                false,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        assert_eq!(memberships.len(), 1);
+        assert!(!memberships[0].inherit_option);
+        assert!(memberships[0].set_option);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_grant_requires_executor_to_possess_grantor_in_meta() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("manager")).await?;
+        mgr.create_user(make_test_user("outsider")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let manager = mgr.get_user_by_name("manager").await?;
+        let outsider = mgr.get_user_by_name("outsider").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+
+        let err = mgr
+            .grant_role(
+                vec![role_a.user_id],
+                vec![member_a.user_id],
+                manager.user_id,
+                outsider.user_id,
+                true,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("does not possess grantor role"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_grant_does_not_treat_target_role_as_admin_option() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        let err = mgr
+            .grant_role(
+                vec![role_a.user_id],
+                vec![member_a.user_id],
+                role_a.user_id,
+                role_a.user_id,
+                true,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ADMIN OPTION"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_grant_does_not_inherit_superuser_grantor_authority() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("target_role")).await?;
+        let mut super_role = make_test_user("super_role");
+        super_role.is_super = true;
+        mgr.create_user(super_role).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+        mgr.create_user(make_test_user("grantee")).await?;
+
+        let target_role = mgr.get_user_by_name("target_role").await?;
+        let super_role = mgr.get_user_by_name("super_role").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+        let grantee = mgr.get_user_by_name("grantee").await?;
+
+        mgr.grant_role(
+            vec![super_role.user_id],
+            vec![member_a.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(true),
+            Some(true),
+        )
+        .await?;
+
+        let err = mgr
+            .grant_role(
+                vec![target_role.user_id],
+                vec![grantee.user_id],
+                super_role.user_id,
+                member_a.user_id,
+                true,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ADMIN OPTION"));
+
+        let err = mgr
+            .grant_role(
+                vec![target_role.user_id],
+                vec![grantee.user_id],
+                super_role.user_id,
+                TEST_ROOT_USER_ID,
+                true,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ADMIN OPTION"));
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![target_role.user_id],
+                vec![grantee.user_id],
+                TEST_ROOT_USER_ID,
+                TEST_ROOT_USER_ID,
+                true,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(memberships[0].granted_by, TEST_ROOT_USER_ID.as_raw_id());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_grant_selects_possessed_admin_grantor() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("target_role")).await?;
+        mgr.create_user(make_test_user("manager")).await?;
+        mgr.create_user(make_test_user("grantor")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+        mgr.create_user(make_test_user("explicit_member")).await?;
+
+        let target_role = mgr.get_user_by_name("target_role").await?;
+        let manager = mgr.get_user_by_name("manager").await?;
+        let grantor = mgr.get_user_by_name("grantor").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+        let explicit_member = mgr.get_user_by_name("explicit_member").await?;
+
+        mgr.grant_role(
+            vec![target_role.user_id],
+            vec![manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![manager.user_id],
+            vec![grantor.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(true),
+            None,
+        )
+        .await?;
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![target_role.user_id],
+                vec![member_a.user_id],
+                grantor.user_id,
+                grantor.user_id,
+                false,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(memberships[0].granted_by, manager.user_id.as_raw_id());
+
+        let err = mgr
+            .grant_role(
+                vec![target_role.user_id],
+                vec![explicit_member.user_id],
+                grantor.user_id,
+                grantor.user_id,
+                true,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ADMIN OPTION"));
+        assert!(
+            mgr.list_role_memberships(&[explicit_member.user_id])
+                .await?
+                .is_empty()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_grant_selects_closest_possessed_admin_grantor() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("target_role")).await?;
+        mgr.create_user(make_test_user("indirect_manager")).await?;
+        mgr.create_user(make_test_user("direct_manager")).await?;
+        mgr.create_user(make_test_user("grantor")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let target_role = mgr.get_user_by_name("target_role").await?;
+        let indirect_manager = mgr.get_user_by_name("indirect_manager").await?;
+        let direct_manager = mgr.get_user_by_name("direct_manager").await?;
+        let grantor = mgr.get_user_by_name("grantor").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+        assert!(indirect_manager.user_id.as_raw_id() < direct_manager.user_id.as_raw_id());
+
+        mgr.grant_role(
+            vec![target_role.user_id],
+            vec![indirect_manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![target_role.user_id],
+            vec![direct_manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![indirect_manager.user_id],
+            vec![direct_manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(true),
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![direct_manager.user_id],
+            vec![grantor.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(true),
+            None,
+        )
+        .await?;
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![target_role.user_id],
+                vec![member_a.user_id],
+                grantor.user_id,
+                grantor.user_id,
+                false,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(
+            memberships[0].granted_by,
+            direct_manager.user_id.as_raw_id()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_grant_omitted_grantor_requires_inherit_possession() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("target_role")).await?;
+        mgr.create_user(make_test_user("manager")).await?;
+        mgr.create_user(make_test_user("grantor")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let target_role = mgr.get_user_by_name("target_role").await?;
+        let manager = mgr.get_user_by_name("manager").await?;
+        let grantor = mgr.get_user_by_name("grantor").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![target_role.user_id],
+            vec![manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![manager.user_id],
+            vec![grantor.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(false),
+            Some(true),
+        )
+        .await?;
+
+        let err = mgr
+            .grant_role(
+                vec![target_role.user_id],
+                vec![member_a.user_id],
+                grantor.user_id,
+                grantor.user_id,
+                false,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ADMIN OPTION"));
+
+        let err = mgr
+            .grant_role(
+                vec![target_role.user_id],
+                vec![member_a.user_id],
+                manager.user_id,
+                grantor.user_id,
+                true,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("does not possess grantor role"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_grant_omitted_can_select_per_role_grantors() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("role_b")).await?;
+        mgr.create_user(make_test_user("manager_a")).await?;
+        mgr.create_user(make_test_user("manager_b")).await?;
+        mgr.create_user(make_test_user("grantor")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let role_b = mgr.get_user_by_name("role_b").await?;
+        let manager_a = mgr.get_user_by_name("manager_a").await?;
+        let manager_b = mgr.get_user_by_name("manager_b").await?;
+        let grantor = mgr.get_user_by_name("grantor").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![manager_a.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![role_b.user_id],
+            vec![manager_b.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![manager_a.user_id, manager_b.user_id],
+            vec![grantor.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(true),
+            None,
+        )
+        .await?;
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![role_a.user_id, role_b.user_id],
+                vec![member_a.user_id],
+                grantor.user_id,
+                grantor.user_id,
+                false,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        assert_eq!(memberships.len(), 2);
+        let role_a_membership = memberships
+            .iter()
+            .find(|membership| membership.role_id == role_a.user_id.as_raw_id())
+            .unwrap();
+        let role_b_membership = memberships
+            .iter()
+            .find(|membership| membership.role_id == role_b.user_id.as_raw_id())
+            .unwrap();
+        assert_eq!(role_a_membership.granted_by, manager_a.user_id.as_raw_id());
+        assert_eq!(role_b_membership.granted_by, manager_b.user_id.as_raw_id());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_revoke_selects_possessed_admin_grantor() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("manager")).await?;
+        mgr.create_user(make_test_user("revoker")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let manager = mgr.get_user_by_name("manager").await?;
+        let revoker = mgr.get_user_by_name("revoker").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![manager.user_id],
+            vec![revoker.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(true),
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            manager.user_id,
+            manager.user_id,
+            true,
+            None,
+            None,
+            None,
+        )
+        .await?;
+
+        mgr.revoke_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            TEST_ROOT_USER_ID,
+            false,
+            revoker.user_id,
+            false,
+            false,
+            false,
+            false,
+        )
+        .await?;
+
+        let memberships = mgr.list_role_memberships(&[member_a.user_id]).await?;
+        assert!(memberships.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_revoke_selects_grantor_per_membership_edge() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("role_b")).await?;
+        mgr.create_user(make_test_user("manager_a")).await?;
+        mgr.create_user(make_test_user("manager_b")).await?;
+        mgr.create_user(make_test_user("revoker")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let role_b = mgr.get_user_by_name("role_b").await?;
+        let manager_a = mgr.get_user_by_name("manager_a").await?;
+        let manager_b = mgr.get_user_by_name("manager_b").await?;
+        let revoker = mgr.get_user_by_name("revoker").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![manager_a.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![role_b.user_id],
+            vec![manager_b.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![manager_a.user_id, manager_b.user_id],
+            vec![revoker.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(true),
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            manager_a.user_id,
+            manager_a.user_id,
+            true,
+            None,
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![role_b.user_id],
+            vec![member_a.user_id],
+            manager_b.user_id,
+            manager_b.user_id,
+            true,
+            None,
+            None,
+            None,
+        )
+        .await?;
+
+        mgr.revoke_role(
+            vec![role_a.user_id, role_b.user_id],
+            vec![member_a.user_id],
+            TEST_ROOT_USER_ID,
+            false,
+            revoker.user_id,
+            false,
+            false,
+            false,
+            false,
+        )
+        .await?;
+
+        let memberships = mgr.list_role_memberships(&[member_a.user_id]).await?;
+        assert!(memberships.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_revoke_omitted_grantor_requires_inherit_possession() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("manager")).await?;
+        mgr.create_user(make_test_user("revoker")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let manager = mgr.get_user_by_name("manager").await?;
+        let revoker = mgr.get_user_by_name("revoker").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![manager.user_id],
+            vec![revoker.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(false),
+            Some(true),
+        )
+        .await?;
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            manager.user_id,
+            manager.user_id,
+            true,
+            None,
+            None,
+            None,
+        )
+        .await?;
+
+        mgr.revoke_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            TEST_ROOT_USER_ID,
+            false,
+            revoker.user_id,
+            false,
+            false,
+            false,
+            false,
+        )
+        .await?;
+
+        let memberships = mgr.list_role_memberships(&[member_a.user_id]).await?;
+        assert_eq!(memberships.len(), 1);
+        assert_eq!(memberships[0].granted_by, manager.user_id.as_raw_id());
+
+        let err = mgr
+            .revoke_role(
+                vec![role_a.user_id],
+                vec![member_a.user_id],
+                manager.user_id,
+                true,
+                revoker.user_id,
+                false,
+                false,
+                false,
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("does not possess grantor role"));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_revoke_explicit_grantor_is_strict() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("manager")).await?;
+        mgr.create_user(make_test_user("revoker")).await?;
+        mgr.create_user(make_test_user("outsider")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let manager = mgr.get_user_by_name("manager").await?;
+        let revoker = mgr.get_user_by_name("revoker").await?;
+        let outsider = mgr.get_user_by_name("outsider").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![manager.user_id],
+            vec![revoker.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            Some(true),
+            None,
+        )
+        .await?;
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            manager.user_id,
+            manager.user_id,
+            true,
+            None,
+            None,
+            None,
+        )
+        .await?;
+
+        let err = mgr
+            .revoke_role(
+                vec![role_a.user_id],
+                vec![member_a.user_id],
+                manager.user_id,
+                true,
+                outsider.user_id,
+                false,
+                false,
+                false,
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("does not possess grantor role"));
+
+        let err = mgr
+            .revoke_role(
+                vec![role_a.user_id],
+                vec![member_a.user_id],
+                revoker.user_id,
+                true,
+                revoker.user_id,
+                false,
+                false,
+                false,
+                false,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ADMIN OPTION"));
+
+        mgr.revoke_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            manager.user_id,
+            true,
+            revoker.user_id,
+            false,
+            false,
+            false,
+            false,
+        )
+        .await?;
+
+        let memberships = mgr.list_role_memberships(&[member_a.user_id]).await?;
+        assert!(memberships.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_role_membership_option_downgrade_and_omitted_preserve() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            Some(true),
+            Some(true),
+        )
+        .await?;
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![role_a.user_id],
+                vec![member_a.user_id],
+                TEST_ROOT_USER_ID,
+                TEST_ROOT_USER_ID,
+                false,
+                Some(false),
+                None,
+                None,
+            )
+            .await?;
+        assert!(!memberships[0].admin_option);
+        assert!(memberships[0].inherit_option);
+        assert!(memberships[0].set_option);
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![role_a.user_id],
+                vec![member_a.user_id],
+                TEST_ROOT_USER_ID,
+                TEST_ROOT_USER_ID,
+                false,
+                None,
+                Some(false),
+                None,
+            )
+            .await?;
+        assert!(!memberships[0].admin_option);
+        assert!(!memberships[0].inherit_option);
+        assert!(memberships[0].set_option);
+
+        let (_, memberships) = mgr
+            .grant_role(
+                vec![role_a.user_id],
+                vec![member_a.user_id],
+                TEST_ROOT_USER_ID,
+                TEST_ROOT_USER_ID,
+                false,
+                None,
+                None,
+                Some(false),
+            )
+            .await?;
+        assert!(!memberships[0].admin_option);
+        assert!(!memberships[0].inherit_option);
+        assert!(!memberships[0].set_option);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_drop_user_requires_create_user_and_admin_option() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("target_role")).await?;
+        let mut manager = make_test_user("manager");
+        manager.can_create_user = true;
+        mgr.create_user(manager).await?;
+
+        let target_role = mgr.get_user_by_name("target_role").await?;
+        let manager = mgr.get_user_by_name("manager").await?;
+
+        let err = mgr
+            .drop_user(target_role.user_id, manager.user_id, manager.user_id)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ADMIN OPTION"));
+
+        mgr.grant_role(
+            vec![target_role.user_id],
+            vec![manager.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
+
+        mgr.drop_user(target_role.user_id, manager.user_id, manager.user_id)
+            .await?;
+        assert!(mgr.get_user_by_name("target_role").await.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_drop_user_auto_revokes_role_memberships() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(make_test_user("role_a")).await?;
+        mgr.create_user(make_test_user("member_a")).await?;
+
+        let role_a = mgr.get_user_by_name("role_a").await?;
+        let member_a = mgr.get_user_by_name("member_a").await?;
+
+        mgr.grant_role(
+            vec![role_a.user_id],
+            vec![member_a.user_id],
+            TEST_ROOT_USER_ID,
+            TEST_ROOT_USER_ID,
+            false,
+            None,
+            None,
+            None,
+        )
+        .await?;
+        assert_eq!(mgr.list_role_memberships(&[]).await?.len(), 1);
+
+        mgr.drop_user(role_a.user_id, TEST_ROOT_USER_ID, TEST_ROOT_USER_ID)
+            .await?;
+
+        assert!(mgr.get_user_by_name("role_a").await.is_err());
+        assert!(mgr.list_role_memberships(&[]).await?.is_empty());
+
         Ok(())
     }
 }

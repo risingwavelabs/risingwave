@@ -79,6 +79,7 @@ use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
+use risingwave_pb::user::RoleMembership;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
@@ -221,7 +222,8 @@ impl FrontendEnv {
         use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient, MockUserInfoWriter};
 
         let catalog = Arc::new(RwLock::new(Catalog::default()));
-        let meta_client = Arc::new(MockFrontendMetaClient {});
+        let role_memberships = Arc::new(RwLock::new(Vec::<RoleMembership>::new()));
+        let meta_client = Arc::new(MockFrontendMetaClient::new(role_memberships.clone()));
         let hummock_snapshot_manager = Arc::new(HummockSnapshotManager::new(meta_client.clone()));
         let catalog_writer = Arc::new(MockCatalogWriter::new(
             catalog.clone(),
@@ -229,7 +231,10 @@ impl FrontendEnv {
         ));
         let catalog_reader = CatalogReader::new(catalog);
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
-        let user_info_writer = Arc::new(MockUserInfoWriter::new(user_info_manager.clone()));
+        let user_info_writer = Arc::new(MockUserInfoWriter::new(
+            user_info_manager.clone(),
+            role_memberships,
+        ));
         let user_info_reader = UserInfoReader::new(user_info_manager);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
@@ -385,9 +390,13 @@ impl FrontendEnv {
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
         let user_info_reader = UserInfoReader::new(user_info_manager.clone());
+        let role_memberships = Arc::new(RwLock::new(
+            meta_client.list_role_memberships(vec![]).await?,
+        ));
         let user_info_writer = Arc::new(UserInfoWriterImpl::new(
             meta_client.clone(),
             catalog_updated_rx,
+            role_memberships,
         ));
 
         let system_params_manager =
@@ -967,6 +976,10 @@ impl SessionImpl {
 
     pub fn user_id(&self) -> UserId {
         self.auth_context.read().user_id
+    }
+
+    pub fn session_user_id(&self) -> UserId {
+        self.user_id()
     }
 
     pub fn update_database(&self, database: String) {
