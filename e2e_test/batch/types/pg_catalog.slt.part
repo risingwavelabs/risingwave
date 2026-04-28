@@ -61,22 +61,31 @@ create table rw_visible_s2.t(v int);
 statement ok
 set search_path = rw_visible_s1, rw_visible_s2;
 
-query BB
-select pg_table_is_visible('rw_visible_s1.t'::regclass),
-       pg_table_is_visible('rw_visible_s2.t'::regclass);
+query TB
+select n.nspname, pg_table_is_visible(c.oid)
+from pg_class c
+join pg_namespace n on c.relnamespace = n.oid
+where n.nspname in ('rw_visible_s1', 'rw_visible_s2')
+  and c.relname = 't'
+order by n.nspname;
 ----
-t f
+rw_visible_s1 t
+rw_visible_s2 f
 
 statement ok
 set search_path = rw_visible_s1;
 
-query B
-select pg_table_is_visible('rw_visible_s2.t'::regclass);
+query TB
+select n.nspname, pg_table_is_visible(c.oid)
+from pg_class c
+join pg_namespace n on c.relnamespace = n.oid
+where n.nspname = 'rw_visible_s2'
+  and c.relname = 't';
 ----
-f
+rw_visible_s2 f
 
 statement ok
-reset search_path;
+set search_path to default;
 
 statement ok
 create schema rw_visible_private;
@@ -117,7 +126,7 @@ statement ok
 reset role;
 
 statement ok
-reset search_path;
+set search_path to default;
 
 statement ok
 drop table rw_visible_private.usage_shadow;
