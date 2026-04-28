@@ -55,7 +55,6 @@ pub struct SyncLogStoreDispatchExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
-    #[expect(clippy::too_many_arguments)]
     pub(crate) async fn new(
         input: Executor,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
@@ -142,49 +141,47 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
     }
 }
 
-type DispatchingFuture = BoxFuture<'static, (DispatchExecutorInner, StreamResult<()>)>;
-enum DispatchType {
-    ChunkOrWatermark,
-    Barrier(Barrier),
-}
-enum ConsumerFuture<S: StateStoreRead> {
+type DispatchingFuture = BoxFuture<'static, (DispatchExecutorInner, StreamResult<Option<Barrier>>)>;
+
+enum ConsumerFuture {
     ReadingChunk {
-        read_future: ReadFuture<S>,
         inner: DispatchExecutorInner,
     },
     Dispatching {
         future: DispatchingFuture,
-        read_future: ReadFuture<S>,
-        kind: DispatchType,
+        barrier_queue: VecDeque<Message>,
     },
-    Empty,
+    PlaceHolder,
 }
 
 enum ConsumerFutureEvent {
-    ReadOutChunk(StreamChunk),
     BarrierDispatched(Barrier),
-    ChunkDispatched,
+    CleanStateReached,
 }
 
-impl<S: StateStoreRead> ConsumerFuture<S> {
+struct ConsumerFutureControl<'a> {
+    read_paused: bool,
+    clean_state: &'a mut bool,
+}
+
+impl ConsumerFuture {
     fn dispatch(
         mut inner: DispatchExecutorInner,
         message: Message,
-        read_future: ReadFuture<S>,
+        barrier_queue: VecDeque<Message>,
     ) -> Self {
         tracing::trace!("consumer_future: dispatching future created");
-        let kind = match &message {
-            Message::Barrier(barrier) => DispatchType::Barrier(barrier.clone()),
-            Message::Chunk(_) | Message::Watermark(_) => DispatchType::ChunkOrWatermark,
-        };
         let batch = message.into_batch();
         let fut = async move {
             let r = dispatch_message_batch(&mut inner, batch)
                 .await
                 .map(|barrier_batch| {
-                    if let Some(barrier_batch) = barrier_batch {
+                    barrier_batch.map(|mut barrier_batch| {
                         debug_assert_eq!(barrier_batch.len(), 1);
-                    }
+                        barrier_batch
+                            .pop()
+                            .expect("barrier batch should contain one barrier")
+                    })
                 });
             (inner, r)
         }
@@ -192,61 +189,115 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
 
         Self::Dispatching {
             future: fut,
-            read_future,
-            kind,
+            barrier_queue,
         }
     }
 
-    fn read_chunk(inner: DispatchExecutorInner, read_future: ReadFuture<S>) -> Self {
+    fn read_chunk(inner: DispatchExecutorInner) -> Self {
         tracing::trace!("consumer_future: reading chunk future created");
-        Self::ReadingChunk { read_future, inner }
+        Self::ReadingChunk { inner }
     }
 
-    async fn next_event(
+    fn push_barrier(&mut self, barrier: Barrier) {
+        let message = Message::Barrier(barrier);
+        match self {
+            ConsumerFuture::ReadingChunk { .. } => {
+                let inner = must_match!(
+                    replace(self, ConsumerFuture::PlaceHolder),
+                    ConsumerFuture::ReadingChunk { inner } => inner
+                );
+                *self = Self::dispatch(inner, message, VecDeque::new());
+            }
+            ConsumerFuture::Dispatching { barrier_queue, .. } => {
+                barrier_queue.push_front(message);
+            }
+            ConsumerFuture::PlaceHolder => {
+                unreachable!("ConsumerFuture::PlaceHolder should be handled!")
+            }
+        }
+    }
+
+    fn maybe_mark_clean_state<S: StateStoreRead>(
+        clean_state: &mut bool,
+        read_future: &ReadFuture<S>,
+        buffer: &SyncedLogStoreBuffer,
+        metrics: &SyncedKvLogStoreMetrics,
+    ) -> bool {
+        if !*clean_state && matches!(read_future, ReadFuture::Idle) && buffer.is_empty() {
+            *clean_state = true;
+            metrics.clean_state.inc();
+            true
+        } else {
+            false
+        }
+    }
+
+    async fn next_dispatched_barrier<S: StateStoreRead>(
         &mut self,
-        barriers: &mut VecDeque<Message>,
+        read_future: &mut ReadFuture<S>,
+        control: ConsumerFutureControl<'_>,
         progress: &mut LogStoreVnodeProgress,
         read_state: &LogStoreReadState<S>,
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &SyncedKvLogStoreMetrics,
-    ) -> StreamResult<(DispatchExecutorInner, ConsumerFutureEvent, ReadFuture<S>)> {
-        if !barriers.is_empty()
-            && let ConsumerFuture::ReadingChunk { .. } = self
-        {
-            let msg = barriers
-                .pop_back()
-                .expect("barrier queue should not be empty!");
+    ) -> StreamResult<ConsumerFutureEvent> {
+        loop {
+            match self {
+                ConsumerFuture::ReadingChunk { .. } => {
+                    if Self::maybe_mark_clean_state(
+                        control.clean_state,
+                        read_future,
+                        buffer,
+                        metrics,
+                    ) {
+                        return Ok(ConsumerFutureEvent::CleanStateReached);
+                    }
+                    if control.read_paused {
+                        pending().await
+                    }
 
-            let (read_future, inner) = must_match!(
-                std::mem::replace(self, ConsumerFuture::<S>::Empty),
-                ConsumerFuture::ReadingChunk { read_future, inner } => (read_future, inner)
-            );
-            *self = Self::dispatch(inner, msg, read_future);
-        }
-        match self {
-            ConsumerFuture::ReadingChunk { read_future, .. } => {
-                let chunk = read_future
-                    .next_chunk(progress, read_state, buffer, metrics)
-                    .await?;
-                let (read_future, inner) = must_match!(
-                    replace(self, ConsumerFuture::<S>::Empty),
-                    ConsumerFuture::ReadingChunk { read_future, inner } => (read_future, inner)
-                );
-                Ok((inner, ConsumerFutureEvent::ReadOutChunk(chunk), read_future))
-            }
-            ConsumerFuture::Dispatching { future, .. } => {
-                let (inner, result) = future.await;
-                result?;
-                must_match!(replace(self, ConsumerFuture::<S>::Empty), ConsumerFuture::Dispatching { read_future,kind, .. } => {
-                    let event = match kind {
-                        DispatchType::Barrier(msg) => ConsumerFutureEvent::BarrierDispatched(msg),
-                        DispatchType::ChunkOrWatermark => ConsumerFutureEvent::ChunkDispatched,
-                    };
-                    Ok((inner, event, read_future))
-                })
-            }
-            ConsumerFuture::Empty => {
-                unreachable!("ConsumerFuture::Empty should be handled!")
+                    let chunk = read_future
+                        .next_chunk(progress, read_state, buffer, metrics)
+                        .await?;
+                    metrics.total_read_count.inc_by(chunk.cardinality() as _);
+
+                    let clean_state_reached = Self::maybe_mark_clean_state(
+                        control.clean_state,
+                        read_future,
+                        buffer,
+                        metrics,
+                    );
+                    let inner = must_match!(
+                        replace(self, ConsumerFuture::PlaceHolder),
+                        ConsumerFuture::ReadingChunk { inner } => inner
+                    );
+                    *self = Self::dispatch(inner, Message::Chunk(chunk), VecDeque::new());
+
+                    if clean_state_reached {
+                        return Ok(ConsumerFutureEvent::CleanStateReached);
+                    }
+                }
+                ConsumerFuture::Dispatching { future, .. } => {
+                    let (inner, result) = future.await;
+                    let barrier = result?;
+                    let mut barrier_queue = must_match!(
+                        replace(self, ConsumerFuture::PlaceHolder),
+                        ConsumerFuture::Dispatching { barrier_queue, .. } => barrier_queue
+                    );
+
+                    if let Some(next_barrier) = barrier_queue.pop_back() {
+                        *self = Self::dispatch(inner, next_barrier, barrier_queue);
+                    } else {
+                        *self = Self::read_chunk(inner);
+                    }
+
+                    if let Some(barrier) = barrier {
+                        return Ok(ConsumerFutureEvent::BarrierDispatched(barrier));
+                    }
+                }
+                ConsumerFuture::PlaceHolder => {
+                    unreachable!("ConsumerFuture::PlaceHolder should be handled!")
+                }
             }
         }
     }
@@ -261,7 +312,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
             let actor_id = self.inner.actor_id;
             let log_store_config = self.log_store_context;
 
-            let mut barriers = VecDeque::<Message>::new();
             let mut input = self.input.execute();
 
             let first_barrier = expect_first_barrier(&mut input).await?;
@@ -336,11 +386,8 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
             tracing::trace!(?clean_state);
 
             let mut progress = LogStoreVnodeProgress::None;
-            let read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
-            let mut consumer_future_state = ConsumerFuture::ReadingChunk {
-                inner: self.inner,
-                read_future: read_future_state,
-            };
+            let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
+            let mut consumer_future_state = ConsumerFuture::ReadingChunk { inner: self.inner };
 
             let mut write_future_state =
                 WriteFuture::receive_from_upstream(input, initial_write_state);
@@ -349,25 +396,19 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
             loop {
                 let select_result = {
                     let consumer_future = async {
-                        let should_pause_consumer = pause_stream
-                            && barriers.is_empty()
-                            && matches!(
-                                &consumer_future_state,
-                                ConsumerFuture::ReadingChunk { .. }
-                            );
-                        if should_pause_consumer {
-                            pending().await
-                        } else {
-                            consumer_future_state
-                                .next_event(
-                                    &mut barriers,
-                                    &mut progress,
-                                    &read_state,
-                                    &mut buffer,
-                                    &log_store_config.metrics,
-                                )
-                                .await
-                        }
+                        consumer_future_state
+                            .next_dispatched_barrier(
+                                &mut read_future_state,
+                                ConsumerFutureControl {
+                                    read_paused: pause_stream,
+                                    clean_state: &mut clean_state,
+                                },
+                                &mut progress,
+                                &read_state,
+                                &mut buffer,
+                                &log_store_config.metrics,
+                            )
+                            .await
                     };
                     pin_mut!(consumer_future);
                     let write_future = async {
@@ -447,7 +488,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                                 write_state,
                                             );
                                         }
-                                        barriers.push_front(Message::Barrier(barrier));
+                                        consumer_future_state.push_barrier(barrier);
                                     }
                                 }
                                 Message::Watermark(_watermark) => {
@@ -468,42 +509,18 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                         }
                     }
                     Either::Right(consumer_result) => {
-                        drop(consumer_future_state);
-                        let (inner, event, read_future) = consumer_result?;
-                        if !clean_state
-                            && matches!(&read_future, ReadFuture::Idle)
-                            && buffer.is_empty()
-                        {
-                            clean_state = true;
-                            log_store_config.metrics.clean_state.inc();
-
-                            if let WriteFuture::Paused { sleep_future, .. } =
-                                &mut write_future_state
-                            {
-                                assert!(buffer.has_available_capacity());
-                                *sleep_future = None;
-                            }
-                        }
+                        let event = consumer_result?;
                         match event {
-                            ConsumerFutureEvent::ReadOutChunk(chunk) => {
-                                log_store_config
-                                    .metrics
-                                    .total_read_count
-                                    .inc_by(chunk.cardinality() as _);
-                                consumer_future_state = ConsumerFuture::dispatch(
-                                    inner,
-                                    Message::Chunk(chunk),
-                                    read_future,
-                                );
-                            }
-                            ConsumerFutureEvent::ChunkDispatched => {
-                                consumer_future_state =
-                                    ConsumerFuture::read_chunk(inner, read_future);
+                            ConsumerFutureEvent::CleanStateReached => {
+                                if let WriteFuture::Paused { sleep_future, .. } =
+                                    &mut write_future_state
+                                {
+                                    assert!(buffer.has_available_capacity());
+                                    *sleep_future = None;
+                                }
                             }
                             ConsumerFutureEvent::BarrierDispatched(barrier) => {
                                 yield barrier;
-                                consumer_future_state =
-                                    ConsumerFuture::read_chunk(inner, read_future);
                             }
                         }
                     }
