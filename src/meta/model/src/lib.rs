@@ -69,6 +69,7 @@ pub mod table;
 pub mod user;
 pub mod user_default_privilege;
 pub mod user_privilege;
+pub mod user_role_membership;
 pub mod view;
 pub mod worker;
 pub mod worker_property;
@@ -77,6 +78,7 @@ pub type TransactionId = i32;
 
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;
+pub type RoleMembershipId = i32;
 
 pub use risingwave_pb::id::{CompactionGroupId, HummockSstableObjectId, HummockVersionId};
 pub type Epoch = i64;

@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Context;
-use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, WorkerId};
+use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, UserId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -47,6 +47,7 @@ use risingwave_pb::meta::{
     RefreshRequest, RefreshResponse, list_sink_log_store_tables_response,
 };
 use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::user::RoleMembership as PbRoleMembership;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -210,6 +211,9 @@ pub trait FrontendMetaClient: Send + Sync {
     ) -> Result<()>;
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
+
+    async fn list_role_memberships(&self, member_ids: Vec<UserId>)
+    -> Result<Vec<PbRoleMembership>>;
 
     async fn get_fragment_by_id(
         &self,
@@ -548,6 +552,13 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         self.0.list_hosted_iceberg_tables().await
+    }
+
+    async fn list_role_memberships(
+        &self,
+        member_ids: Vec<UserId>,
+    ) -> Result<Vec<PbRoleMembership>> {
+        self.0.list_role_memberships(member_ids).await
     }
 
     async fn get_fragment_by_id(

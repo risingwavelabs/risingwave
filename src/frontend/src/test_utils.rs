@@ -77,7 +77,7 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::alter_default_privilege_request::Operation as AlterDefaultPrivilegeOperation;
 use risingwave_pb::user::update_user_request::UpdateField;
-use risingwave_pb::user::{GrantPrivilege, UserInfo};
+use risingwave_pb::user::{GrantPrivilege, RoleMembership, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
 use tempfile::{Builder, NamedTempFile};
 
@@ -1056,6 +1056,7 @@ impl UserInfoWriter for MockUserInfoWriter {
             UpdateField::AuthInfo => user_info.auth_info.clone_from(&update_user.auth_info),
             UpdateField::Rename => user_info.name.clone_from(&update_user.name),
             UpdateField::Admin => user_info.is_admin = update_user.is_admin,
+            UpdateField::Inherit => user_info.can_inherit = update_user.can_inherit,
             UpdateField::Unspecified => unreachable!(),
         });
         lock.update_user(update_user);
@@ -1128,6 +1129,7 @@ impl MockUserInfoWriter {
             can_create_db: true,
             can_create_user: true,
             can_login: true,
+            can_inherit: true,
             ..Default::default()
         });
         user_info.write().create_user(UserInfo {
@@ -1138,6 +1140,7 @@ impl MockUserInfoWriter {
             can_create_user: true,
             can_login: true,
             is_admin: true,
+            can_inherit: true,
             ..Default::default()
         });
         Self {
@@ -1387,6 +1390,13 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {
         unimplemented!()
+    }
+
+    async fn list_role_memberships(
+        &self,
+        _member_ids: Vec<UserId>,
+    ) -> RpcResult<Vec<RoleMembership>> {
+        Ok(vec![])
     }
 
     async fn list_iceberg_compaction_status(&self) -> RpcResult<Vec<IcebergCompactionStatus>> {
