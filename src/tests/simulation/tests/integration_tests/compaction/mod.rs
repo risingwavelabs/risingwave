@@ -16,6 +16,7 @@
 
 use std::time::Duration;
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
 
@@ -126,7 +127,7 @@ async fn test_vnode_watermark_reclaim_impl(
     let original_compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
     // Move the table to a dedicated group to prevent its vnode watermark from being reclaimed during the compaction of other tables.
     cluster
-        .split_compaction_group(original_compaction_group_id, table_id.into())
+        .split_compaction_group(original_compaction_group_id, TableId::new(table_id as u32))
         .await
         .unwrap();
     let compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;

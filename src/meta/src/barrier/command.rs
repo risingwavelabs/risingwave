@@ -703,20 +703,6 @@ impl PostCollectCommand {
         PostCollectCommand::Command("barrier".to_owned())
     }
 
-    pub fn should_checkpoint(&self) -> bool {
-        match self {
-            PostCollectCommand::DropStreamingJobs
-            | PostCollectCommand::CreateStreamingJob { .. }
-            | PostCollectCommand::RescheduleFragment { .. }
-            | PostCollectCommand::ReplaceStreamJob(_)
-            | PostCollectCommand::SourceChangeSplit { .. }
-            | PostCollectCommand::CreateSubscription { .. }
-            | PostCollectCommand::ConnectorPropsChange(_)
-            | PostCollectCommand::ResumeBackfill { .. } => true,
-            PostCollectCommand::Command(_) => false,
-        }
-    }
-
     pub fn command_name(&self) -> &str {
         match self {
             PostCollectCommand::Command(name) => name.as_str(),
