@@ -45,10 +45,6 @@ impl Reducer {
         }
     }
 
-    /// Consumes the reducer and returns the underlying client.
-    pub fn into_client(self) -> Client {
-        self.checker.into_client()
-    }
 
     /// Perform reduction on a SQL input containing multiple statements,
     /// where only the **last** statement is considered the failing one.
@@ -107,6 +103,34 @@ impl Reducer {
         }
         reduced_sqls.push_str(&reduced_sql);
         reduced_sqls.push_str(";\n");
+
+        // Log the EXPLAIN plan for the reduced failing query before schema is dropped.
+        // This must run before drop_schema() so the referenced tables/views still exist.
+        let last_stmt = parse_sql(&reduced_sqls).into_iter().last();
+        if let Some(stmt) = last_stmt {
+            let explain_sql = format!("EXPLAIN {}", stmt);
+            match self.checker.client.simple_query(&explain_sql).await {
+                Ok(rows) => {
+                    let plan: Vec<String> = rows
+                        .iter()
+                        .filter_map(|msg| {
+                            if let tokio_postgres::SimpleQueryMessage::Row(row) = msg {
+                                row.get(0).map(|s| s.to_owned())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    tracing::info!(
+                        "EXPLAIN plan for reduced failing query:\n{}",
+                        plan.join("\n")
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to get EXPLAIN plan for reduced query: {}", e);
+                }
+            }
+        }
 
         // Drop the schema after the reduction is complete.
         self.checker.drop_schema().await;
@@ -205,7 +229,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "â Valid list-batch reduction! Removed {} items, SQL len {} â {}",
+                                "[OK] Valid list-batch reduction! Removed {} items, SQL len {} -> {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -252,7 +276,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "â Valid attr-batch reduction! Removed {} attributes, SQL len {} â {}",
+                                "[OK] Valid attr-batch reduction! Removed {} attributes, SQL len {} -> {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -299,7 +323,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "â Valid replace-batch reduction! Applied {} replacements, SQL len {} â {}",
+                                "[OK] Valid replace-batch reduction! Applied {} replacements, SQL len {} -> {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
@@ -346,7 +370,7 @@ impl Reducer {
                                 .await
                         {
                             tracing::info!(
-                                "â Valid pullup-batch reduction! Applied {} pullups, SQL len {} â {}",
+                                "[OK] Valid pullup-batch reduction! Applied {} pullups, SQL len {} -> {}",
                                 applied_count,
                                 sql_len,
                                 success_sql.len()
