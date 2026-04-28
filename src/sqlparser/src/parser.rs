@@ -5618,9 +5618,11 @@ impl Parser<'_> {
             } else {
                 vec![]
             };
-            let granted_by = self
-                .parse_keywords(&[Keyword::GRANTED, Keyword::BY])
-                .then(|| self.parse_identifier().unwrap());
+            let granted_by = if self.parse_keywords(&[Keyword::GRANTED, Keyword::BY]) {
+                Some(self.parse_identifier()?)
+            } else {
+                None
+            };
             return Ok(Statement::GrantRole {
                 roles,
                 grantees,
@@ -5871,9 +5873,11 @@ impl Parser<'_> {
             let roles = self.parse_comma_separated(Parser::parse_identifier)?;
             self.expect_keyword(Keyword::FROM)?;
             let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
-            let granted_by = self
-                .parse_keywords(&[Keyword::GRANTED, Keyword::BY])
-                .then(|| self.parse_identifier().unwrap());
+            let granted_by = if self.parse_keywords(&[Keyword::GRANTED, Keyword::BY]) {
+                Some(self.parse_identifier()?)
+            } else {
+                None
+            };
 
             let cascade = self.parse_keyword(Keyword::CASCADE);
             let restrict = self.parse_keyword(Keyword::RESTRICT);

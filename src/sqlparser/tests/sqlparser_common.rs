@@ -4300,6 +4300,14 @@ fn parse_grant_role_granted_by() {
 }
 
 #[test]
+fn parse_grant_role_granted_by_requires_identifier() {
+    let err = parse_sql_statements("GRANT role_a TO user_a GRANTED BY ;")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("expected identifier, found: ;"), "{err}");
+}
+
+#[test]
 fn parse_revoke_role_granted_by() {
     let sql = "REVOKE role_a FROM user_a GRANTED BY current_user RESTRICT";
     match verified_stmt(sql) {
@@ -4308,6 +4316,14 @@ fn parse_revoke_role_granted_by() {
         }
         _ => unreachable!(),
     }
+}
+
+#[test]
+fn parse_revoke_role_granted_by_requires_identifier() {
+    let err = parse_sql_statements("REVOKE role_a FROM user_a GRANTED BY ;")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("expected identifier, found: ;"), "{err}");
 }
 
 #[test]
