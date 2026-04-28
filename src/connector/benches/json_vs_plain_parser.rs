@@ -66,7 +66,7 @@ mod old_json_parser {
             })
         }
 
-        #[allow(clippy::unused_async)]
+        #[expect(clippy::unused_async)]
         pub async fn parse_inner(
             &self,
             mut payload: Vec<u8>,

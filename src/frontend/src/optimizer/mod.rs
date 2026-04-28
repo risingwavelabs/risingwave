@@ -1391,7 +1391,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_as_subplan() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let values = LogicalValues::new(
             vec![],
             Schema::new(vec![

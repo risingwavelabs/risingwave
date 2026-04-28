@@ -1555,9 +1555,9 @@ pub async fn handle(
             handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
         }
         Statement::StartTransaction { modes } => {
-            transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
+            transaction::handle_begin(handler_args, START_TRANSACTION, modes)
         }
-        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes).await,
+        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes),
         Statement::Commit { chain } => {
             transaction::handle_commit(handler_args, COMMIT, chain).await
         }
@@ -1569,7 +1569,7 @@ pub async fn handle(
             modes,
             snapshot,
             session,
-        } => transaction::handle_set(handler_args, modes, snapshot, session).await,
+        } => transaction::handle_set(handler_args, modes, snapshot, session),
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
         Statement::Kill(worker_process_id) => handle_kill(handler_args, worker_process_id).await,
         Statement::Comment {
@@ -1582,9 +1582,9 @@ pub async fn handle(
             name,
             data_types,
             statement,
-        } => prepared_statement::handle_prepare(name, data_types, statement).await,
+        } => prepared_statement::handle_prepare(name, data_types, statement),
         Statement::Deallocate { name, prepare } => {
-            prepared_statement::handle_deallocate(name, prepare).await
+            prepared_statement::handle_deallocate(name, prepare)
         }
         Statement::Vacuum { object_name, full } => {
             vacuum::handle_vacuum(handler_args, object_name, full).await

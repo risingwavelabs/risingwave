@@ -900,7 +900,7 @@ mod test {
         //
         // Output: [v0, v1, v4, v5]
         // FD: v0 --> v1, {} --> v0, {} --> v5, v4 --> v5, v5 --> v4
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let t1 = {
             let fields: Vec<Field> = vec![
                 Field::with_name(DataType::Int32, "v0"),

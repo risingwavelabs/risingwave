@@ -72,7 +72,7 @@ impl Schedule {
         init_env();
 
         self.file_manager.init()?;
-        self.psql.init().await?;
+        self.psql.init()?;
 
         Ok(self)
     }

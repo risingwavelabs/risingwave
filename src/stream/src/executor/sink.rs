@@ -232,7 +232,7 @@ macro_rules! dispatch_output_kind {
 
 impl<F: LogStoreFactory> SinkExecutor<F> {
     #[expect(clippy::too_many_arguments)]
-    #[allow(clippy::unused_async)]
+    #[expect(clippy::unused_async)]
     pub async fn new(
         actor_context: ActorContextRef,
         info: ExecutorInfo,
