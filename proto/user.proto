@@ -35,6 +35,7 @@ message UserInfo {
   repeated GrantPrivilege grant_privileges = 8;
 
   bool is_admin = 9;
+  optional bool can_inherit = 10;
 }
 
 enum Action {
@@ -100,6 +101,7 @@ message UpdateUserRequest {
     RENAME = 5;
     CREATE_USER = 6;
     ADMIN = 7;
+    INHERIT = 8;
   }
   UserInfo user = 1;
   repeated UpdateField update_fields = 2;
@@ -134,6 +136,27 @@ message RevokePrivilegeRequest {
 message RevokePrivilegeResponse {
   common.Status status = 1;
   uint64 version = 2;
+}
+
+message RoleMembership {
+  uint32 role_id = 1;
+  uint32 member_id = 2;
+  uint32 granted_by = 3;
+  bool admin_option = 4;
+  bool inherit_option = 5;
+  bool set_option = 6;
+  uint32 id = 7;
+}
+
+message ListRoleMembershipsRequest {
+  // When false, an empty member_ids list returns no memberships.
+  // Set this explicitly for callers that need the full membership graph.
+  repeated uint32 member_ids = 1;
+  bool include_all = 2;
+}
+
+message ListRoleMembershipsResponse {
+  repeated RoleMembership memberships = 1;
 }
 
 message AlterDefaultPrivilegeRequest {
@@ -175,4 +198,6 @@ service UserService {
   rpc RevokePrivilege(RevokePrivilegeRequest) returns (RevokePrivilegeResponse);
   // AlterDefaultPrivilege alters the default privileges.
   rpc AlterDefaultPrivilege(AlterDefaultPrivilegeRequest) returns (AlterDefaultPrivilegeResponse);
+  // ListRoleMemberships lists direct role memberships for the requested members.
+  rpc ListRoleMemberships(ListRoleMembershipsRequest) returns (ListRoleMembershipsResponse);
 }

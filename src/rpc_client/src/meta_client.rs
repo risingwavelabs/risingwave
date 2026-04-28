@@ -1036,6 +1036,27 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn list_role_memberships(
+        &self,
+        member_ids: Vec<UserId>,
+    ) -> Result<Vec<RoleMembership>> {
+        let request = ListRoleMembershipsRequest {
+            member_ids,
+            include_all: false,
+        };
+        let resp = self.inner.list_role_memberships(request).await?;
+        Ok(resp.memberships)
+    }
+
+    pub async fn list_all_role_memberships(&self) -> Result<Vec<RoleMembership>> {
+        let request = ListRoleMembershipsRequest {
+            member_ids: vec![],
+            include_all: true,
+        };
+        let resp = self.inner.list_role_memberships(request).await?;
+        Ok(resp.memberships)
+    }
+
     pub async fn alter_default_privilege(
         &self,
         user_ids: Vec<UserId>,
@@ -2760,6 +2781,7 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
+            ,{ user_client, list_role_memberships, ListRoleMembershipsRequest, ListRoleMembershipsResponse }
             ,{ user_client, alter_default_privilege, AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }

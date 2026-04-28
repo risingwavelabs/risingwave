@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta_model::UserId;
 use risingwave_pb::user::alter_default_privilege_request::Operation;
@@ -21,8 +20,8 @@ use risingwave_pb::user::user_service_server::UserService;
 use risingwave_pb::user::{
     AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse, CreateUserRequest,
     CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilegeRequest,
-    GrantPrivilegeResponse, RevokePrivilegeRequest, RevokePrivilegeResponse, UpdateUserRequest,
-    UpdateUserResponse,
+    GrantPrivilegeResponse, ListRoleMembershipsRequest, ListRoleMembershipsResponse,
+    RevokePrivilegeRequest, RevokePrivilegeResponse, UpdateUserRequest, UpdateUserResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -142,6 +141,21 @@ impl UserService for UserServiceImpl {
             status: None,
             version,
         }))
+    }
+
+    async fn list_role_memberships(
+        &self,
+        request: Request<ListRoleMembershipsRequest>,
+    ) -> Result<Response<ListRoleMembershipsResponse>, Status> {
+        let req = request.into_inner();
+        let member_ids = req.member_ids;
+        let memberships = self
+            .metadata_manager
+            .catalog_controller
+            .list_role_memberships(&member_ids, req.include_all)
+            .await?;
+
+        Ok(Response::new(ListRoleMembershipsResponse { memberships }))
     }
 
     async fn alter_default_privilege(

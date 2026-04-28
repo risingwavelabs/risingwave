@@ -1013,10 +1013,18 @@ for_all_wrapped_id_fields! (
             user_ids: UserId,
             granted_by: UserId,
         }
+        ListRoleMembershipsRequest {
+            member_ids: UserId,
+        }
         RevokePrivilegeRequest {
             user_ids: UserId,
             granted_by: UserId,
             revoke_by: UserId,
+        }
+        RoleMembership {
+            role_id: UserId,
+            member_id: UserId,
+            granted_by: UserId,
         }
         UserInfo {
             id: UserId,
