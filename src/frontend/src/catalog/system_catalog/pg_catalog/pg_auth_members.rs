@@ -15,11 +15,15 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
-/// The catalog `pg_auth_members` shows the membership relations between roles. Any non-circular set of relationships is allowed.
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
+
+/// The catalog `pg_auth_members` shows the membership relations between roles. Any non-circular
+/// set of relationships is allowed.
 /// Ref: `https://www.postgresql.org/docs/current/catalog-pg-auth-members.html`
-#[system_catalog(view, "pg_catalog.pg_auth_members")]
 #[derive(Fields)]
 struct PgAuthMember {
+    #[primary_key]
     oid: i32,
     roleid: i32,
     member: i32,
@@ -27,4 +31,29 @@ struct PgAuthMember {
     admin_option: bool,
     inherit_option: bool,
     set_option: bool,
+}
+
+#[system_catalog(table, "pg_catalog.pg_auth_members")]
+fn read_pg_auth_members(reader: &SysCatalogReaderImpl) -> Result<Vec<PgAuthMember>> {
+    let mut memberships = reader.role_membership_info_reader.read_guard().clone();
+    memberships.sort_by_key(|membership| {
+        (
+            membership.role_id,
+            membership.member_id,
+            membership.granted_by,
+        )
+    });
+
+    Ok(memberships
+        .into_iter()
+        .map(|membership| PgAuthMember {
+            oid: membership.id as i32,
+            roleid: membership.role_id.as_raw_id() as i32,
+            member: membership.member_id.as_raw_id() as i32,
+            grantor: membership.granted_by.as_raw_id() as i32,
+            admin_option: membership.admin_option,
+            inherit_option: membership.inherit_option,
+            set_option: membership.set_option,
+        })
+        .collect())
 }

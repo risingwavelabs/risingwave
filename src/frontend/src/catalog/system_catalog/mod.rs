@@ -47,7 +47,7 @@ use crate::session::AuthContext;
 use crate::user::UserId;
 use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
-use crate::user::user_service::UserInfoReader;
+use crate::user::user_service::{RoleMembershipInfoReader, UserInfoReader};
 
 #[derive(Clone, Debug, PartialEq, Hash)]
 pub struct SystemTableCatalog {
@@ -95,6 +95,8 @@ pub struct SysCatalogReaderImpl {
     catalog_reader: CatalogReader,
     // Read user info.
     user_info_reader: UserInfoReader,
+    // Read role membership info.
+    role_membership_info_reader: RoleMembershipInfoReader,
     // Read from meta.
     meta_client: Arc<dyn FrontendMetaClient>,
     // Read auth context.
@@ -111,6 +113,7 @@ impl SysCatalogReaderImpl {
     pub fn new(
         catalog_reader: CatalogReader,
         user_info_reader: UserInfoReader,
+        role_membership_info_reader: RoleMembershipInfoReader,
         meta_client: Arc<dyn FrontendMetaClient>,
         auth_context: Arc<AuthContext>,
         config: Arc<RwLock<SessionConfig>>,
@@ -120,6 +123,7 @@ impl SysCatalogReaderImpl {
         Self {
             catalog_reader,
             user_info_reader,
+            role_membership_info_reader,
             meta_client,
             auth_context,
             config,
@@ -424,6 +428,33 @@ mod tests {
         assert_eq!(
             extract_parallelism_from_table_state(&fallback_state),
             "adaptive"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_identity_and_role_catalog_queries() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let identity_rows = frontend
+            .query_formatted_result("SELECT session_user, current_user, current_role")
+            .await;
+        assert_eq!(
+            identity_rows,
+            vec!["Row([Some(b\"root\"), Some(b\"root\"), Some(b\"root\")])".to_owned()]
+        );
+
+        let role_rows = frontend
+            .query_formatted_result(
+                "SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole \
+                 FROM pg_catalog.pg_roles WHERE rolname = 'root'",
+            )
+            .await;
+        assert_eq!(
+            role_rows,
+            vec![
+                "Row([Some(b\"root\"), Some(b\"t\"), Some(b\"t\"), Some(b\"t\"), Some(b\"t\")])"
+                    .to_owned()
+            ]
         );
     }
 }

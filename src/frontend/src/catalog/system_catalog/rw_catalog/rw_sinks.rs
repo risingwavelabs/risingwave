@@ -54,7 +54,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
     let current_user = user_reader
-        .get_user_by_name(&reader.auth_context.user_name)
+        .get_user_by_name(reader.auth_context.current_user_name())
         .expect("user not found");
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();

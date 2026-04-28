@@ -15,7 +15,8 @@
 use std::collections::{HashSet, VecDeque};
 
 use risingwave_common::acl::AclMode;
-use risingwave_pb::user::RoleMembership;
+use risingwave_pb::user::grant_privilege::Object as GrantObject;
+use risingwave_pb::user::{Action as PbAction, RoleMembership};
 
 use crate::session::AuthContext;
 use crate::user::UserId;
@@ -102,6 +103,25 @@ pub fn principal_has_privilege(
     catalog_user_has_privilege(&reader, principal, memberships, owner, object, mode)
 }
 
+pub fn principal_has_privilege_with_grant_option(
+    user_info_reader: &UserInfoReader,
+    memberships: &[RoleMembership],
+    principal: &UserCatalog,
+    owner: UserId,
+    object: impl Copy + Into<GrantObject>,
+    action: PbAction,
+) -> bool {
+    let reader = user_info_reader.read_guard();
+    catalog_user_has_privilege_with_grant_option(
+        &reader,
+        principal,
+        memberships,
+        owner,
+        object,
+        action,
+    )
+}
+
 pub fn catalog_user_has_privilege(
     user_info: &UserInfoManager,
     principal: &UserCatalog,
@@ -128,6 +148,33 @@ pub fn catalog_user_has_privilege(
     false
 }
 
+pub fn catalog_user_has_privilege_with_grant_option(
+    user_info: &UserInfoManager,
+    principal: &UserCatalog,
+    memberships: &[RoleMembership],
+    owner: UserId,
+    object: impl Copy + Into<GrantObject>,
+    action: PbAction,
+) -> bool {
+    let object = object.into();
+    if has_grant_option_or_owner(principal, owner, &object, action) {
+        return true;
+    }
+
+    for role_id in reachable_role_ids([principal.id], memberships, |membership| {
+        membership.inherit_option
+    }) {
+        let Some(role) = user_info.get_user_by_id(&role_id) else {
+            continue;
+        };
+        if has_grant_option_or_owner(role, owner, &object, action) {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn has_direct_privilege_for_catalog_user(
     user: &UserCatalog,
     owner: UserId,
@@ -135,6 +182,17 @@ fn has_direct_privilege_for_catalog_user(
     mode: AclMode,
 ) -> bool {
     user.is_super || has_inherited_privilege_for_catalog_user(user, owner, object, mode)
+}
+
+fn has_grant_option_or_owner(
+    user: &UserCatalog,
+    owner: UserId,
+    object: &GrantObject,
+    action: PbAction,
+) -> bool {
+    user.is_super
+        || user.id == owner
+        || user.check_privilege_with_grant_option(object, &vec![(action, true)])
 }
 
 fn has_inherited_privilege_for_catalog_user(

@@ -33,28 +33,28 @@ statement ok
 GRANT ALL PRIVILEGES ON DATABASE test_db TO test_user;
 
 statement ok
-GRANT ALL PRIVILEGES ON foo TO test_user GRANTED BY root;
+GRANT ALL PRIVILEGES ON foo TO test_user GRANTED BY current_user;
 
 statement ok
-GRANT INSERT ON bar TO test_user WITH GRANT OPTION GRANTED BY root;
+GRANT INSERT ON bar TO test_user WITH GRANT OPTION GRANTED BY current_user;
 
 statement ok
-GRANT INSERT ON foo_view TO test_user WITH GRANT OPTION GRANTED BY root;
+GRANT INSERT ON foo_view TO test_user WITH GRANT OPTION GRANTED BY current_user;
 
 statement ok
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY root;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY current_user;
 
 statement ok
-GRANT SELECT ON ALL MATERIALIZED VIEWS IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY root;
+GRANT SELECT ON ALL MATERIALIZED VIEWS IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY current_user;
 
 statement ok
-GRANT SELECT ON ALL SOURCES IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY root;
+GRANT SELECT ON ALL SOURCES IN SCHEMA public TO test_user WITH GRANT OPTION GRANTED BY current_user;
 
 statement ok
 GRANT CREATE ON SCHEMA test_schema TO test_user;
 
 query error table not found: bar_err
-GRANT INSERT ON bar_err TO test_user WITH GRANT OPTION GRANTED BY root;
+GRANT INSERT ON bar_err TO test_user WITH GRANT OPTION GRANTED BY current_user;
 
 query error database not found: test_db_err
 SELECT has_database_privilege('test_user', 'test_db_err', 'CONNECT');
@@ -71,8 +71,10 @@ SELECT has_table_privilege('test_user', 'foo', 'SELE CT');
 query error Invalid parameter privilege: unrecognized privilege type: "SELECT INSERT"
 SELECT has_table_privilege('test_user', 'foo', 'SELECT INSERT');
 
-query error Invalid parameter privilege
+query I
 SELECT has_table_privilege('test_user', 'foo', 'SELECT, INSERT  WITH GRANT OPTION');
+----
+t
 
 query error Invalid parameter user: User test_user_err not found
 SELECT has_schema_privilege('test_user_err', 'test_schema', 'CREATE');
@@ -102,6 +104,11 @@ SELECT has_table_privilege('test_user', 'foo', 'SELECT WITH GRANT OPTION');
 t
 
 query I
+SELECT has_table_privilege('test_user', 'foo', 'select with grant option');
+----
+t
+
+query I
 SELECT has_table_privilege('test_user', 'foo', 'INSERT WITH GRANT OPTION');
 ----
 f
@@ -119,7 +126,7 @@ t
 query I
 SELECT has_table_privilege('test_user', 'foo', 'DELETE WITH GRANT OPTION, INSERT, SELECT WITH GRANT OPTION');
 ----
-f
+t
 
 query I
 SELECT has_table_privilege('test_user', 'foo_view', 'SELECT');
@@ -236,7 +243,7 @@ SELECT has_database_privilege('test_user', 'test_db', 'CONNECT');
 f
 
 statement ok
-REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM test_user GRANTED BY root;
+REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM test_user GRANTED BY current_user;
 
 query I
 SELECT has_table_privilege('test_user', 'bar'::regclass, 'SELECT');
@@ -254,7 +261,7 @@ SELECT has_table_privilege('test_user', 'foo_view', 'INSERT');
 t
 
 statement ok
-REVOKE INSERT ON foo_view FROM test_user GRANTED BY root;
+REVOKE INSERT ON foo_view FROM test_user GRANTED BY current_user;
 
 query I
 SELECT has_table_privilege('test_user', 'foo_view', 'INSERT');

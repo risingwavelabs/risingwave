@@ -39,7 +39,7 @@ impl Binder {
         let search_path = SchemaPath::new(
             schema_name.as_deref(),
             &self.search_path,
-            &self.auth_context.user_name,
+            self.auth_context.current_user_name(),
         );
         let (sink_catalog, _) =
             self.catalog
@@ -56,7 +56,7 @@ impl Binder {
         let search_path = SchemaPath::new(
             schema_name.as_deref(),
             &self.search_path,
-            &self.auth_context.user_name,
+            self.auth_context.current_user_name(),
         );
         let (view_catalog, _) =
             self.catalog
