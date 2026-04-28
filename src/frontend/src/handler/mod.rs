@@ -537,7 +537,7 @@ pub async fn handle(
                     | ObjectType::Schema
                     | ObjectType::Connection
                     | ObjectType::Secret => true,
-                    ObjectType::Database | ObjectType::User => {
+                    ObjectType::Database | ObjectType::User | ObjectType::Role => {
                         bail_not_implemented!("DROP CASCADE");
                     }
                 }
@@ -581,6 +581,9 @@ pub async fn handle(
                 }
                 ObjectType::User => {
                     drop_user::handle_drop_user(handler_args, object_name, if_exists).await
+                }
+                ObjectType::Role => {
+                    bail_not_implemented!("DROP ROLE")
                 }
                 ObjectType::View => {
                     drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await

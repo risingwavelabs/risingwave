@@ -110,6 +110,15 @@ pub async fn handle_create_user(
                 UserOption::NoLogin => user_info.can_login = false,
                 UserOption::Admin => user_info.is_admin = true,
                 UserOption::NoAdmin => user_info.is_admin = false,
+                UserOption::CreateRole
+                | UserOption::NoCreateRole
+                | UserOption::Inherit
+                | UserOption::NoInherit => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "role options are not supported yet".to_owned(),
+                    )
+                    .into());
+                }
                 UserOption::EncryptedPassword(password) => {
                     if !password.0.is_empty() {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);
