@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use indexmap::IndexMap;
 use itertools::Itertools;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{RoleContextModifier, SetRoleSpec, Statement};
 use risingwave_sqlparser::parser::Parser;
 use shell_words::split;
 use sqllogictest::{DBOutput, DefaultColumnType};
@@ -45,11 +45,11 @@ pub struct SetStmts {
 impl SetStmts {
     fn push(&mut self, sql: &str) {
         let ast = Parser::parse_sql(sql).expect("a set statement should be parsed successfully");
-        match ast
+        let statement = ast
             .into_iter()
             .exactly_one()
-            .expect("should contain only one statement")
-        {
+            .expect("should contain only one statement");
+        match statement {
             // record `local` for variable and `SetTransaction` if supported in the future.
             Statement::SetVariable {
                 local: _,
@@ -60,7 +60,26 @@ impl SetStmts {
                 // store complete sql as value.
                 self.stmts.insert(key, sql.to_owned());
             }
-            _ => unreachable!(),
+            Statement::SetTimeZone { .. } => {
+                self.stmts.insert("time zone".to_owned(), sql.to_owned());
+            }
+            Statement::SetRole {
+                context_modifier: Some(RoleContextModifier::Local),
+                ..
+            } => {}
+            Statement::SetRole { role_name, .. } => {
+                if matches!(role_name, SetRoleSpec::None) {
+                    self.stmts.shift_remove("role");
+                } else {
+                    self.stmts.insert("role".to_owned(), sql.to_owned());
+                }
+            }
+            Statement::ResetRole => {
+                self.stmts.shift_remove("role");
+            }
+            unexpected => {
+                unreachable!("unexpected statement in SetStmts replay: {unexpected:?}");
+            }
         }
     }
 
@@ -183,7 +202,8 @@ impl sqllogictest::AsyncDB for RisingWave {
             self.reconnect().await?;
         }
 
-        if sql.trim_start().to_lowercase().starts_with("set") {
+        let normalized_sql = sql.trim_start().to_lowercase();
+        if normalized_sql.starts_with("set") || normalized_sql.starts_with("reset role") {
             self.set_stmts.push(sql);
         }
 
@@ -260,5 +280,32 @@ mod tests {
         assert!(!output.status.success());
         assert_eq!(output.status.code(), Some(1));
         assert_eq!(output.stderr, b"ctl failed\n");
+    }
+
+    #[test]
+    fn set_stmts_replays_session_role_until_reset() {
+        let mut set_stmts = SetStmts::default();
+
+        set_stmts.push("SET ROLE rw_visible_user");
+        assert_eq!(
+            set_stmts.replay_iter().collect::<Vec<_>>(),
+            vec!["SET ROLE rw_visible_user"]
+        );
+
+        set_stmts.push("RESET ROLE");
+        assert!(set_stmts.replay_iter().collect::<Vec<_>>().is_empty());
+
+        set_stmts.push("SET ROLE rw_visible_user");
+        set_stmts.push("SET ROLE NONE");
+        assert!(set_stmts.replay_iter().collect::<Vec<_>>().is_empty());
+    }
+
+    #[test]
+    fn set_stmts_does_not_replay_local_role() {
+        let mut set_stmts = SetStmts::default();
+
+        set_stmts.push("SET LOCAL ROLE rw_visible_user");
+
+        assert!(set_stmts.replay_iter().collect::<Vec<_>>().is_empty());
     }
 }
