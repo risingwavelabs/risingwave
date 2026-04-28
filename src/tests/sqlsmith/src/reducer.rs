@@ -23,6 +23,7 @@ use risingwave_sqlparser::ast::{
     Cte, CteInner, Expr, FunctionArgExpr, Join, Query, Select, SetExpr, Statement, TableFactor,
     TableWithJoins, With,
 };
+use tokio_postgres::Client;
 
 use crate::parse_sql;
 use crate::sqlreduce::checker::Checker;
@@ -44,7 +45,9 @@ pub async fn shrink_file(
     // reduce failed sql
     let reduced_sql = shrink_statements(&file_contents)?;
 
-    // shrink the reduced sql
+    // shrink the reduced sql.
+    // The reducer logs the EXPLAIN plan internally, before its schema is
+    // dropped, so it is no longer the caller's responsibility here.
     let reduced_sql = shrink_with_reducer(&reduced_sql, client, restore_cmd).await?;
 
     // write reduced sql
@@ -104,7 +107,11 @@ fn shrink_statements(sql: &str) -> Result<String> {
     Ok(sql)
 }
 
-/// Shrink function using path-based reduction
+/// Shrink function using path-based reduction.
+///
+/// `Reducer::reduce` logs the EXPLAIN plan for the reduced failing query
+/// internally, while its reduction schema is still alive — see that method
+/// for details.
 async fn shrink_with_reducer(
     sql: &str,
     client: Client,
