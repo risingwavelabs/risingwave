@@ -26,12 +26,39 @@ sink_test_env_setup "$profile" --need-connector
 # prepare minio deltalake sink
 echo "--- preparing deltalake"
 risedev mc mb hummock-minio/deltalake
-wget --no-verbose https://rw-ci-deps-dist.s3.amazonaws.com/spark-3.3.1-bin-hadoop3.tgz
-tar -xf spark-3.3.1-bin-hadoop3.tgz --no-same-owner
-DEPENDENCIES=io.delta:delta-core_2.12:2.2.0,org.apache.hadoop:hadoop-aws:3.3.2
-spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
+SPARK_VERSION=4.0.2
+DELTA_VERSION=4.0.1
+SPARK_DIR="spark-${SPARK_VERSION}-bin-hadoop3"
+SPARK_FILE="${SPARK_DIR}.tgz"
+
+if [[ -n "${JAVA_HOME:-}" ]]; then
+    JAVA_BIN="${JAVA_HOME}/bin/java"
+else
+    JAVA_BIN="$(type -p java || true)"
+fi
+
+if [[ -x "$JAVA_BIN" ]]; then
+    JAVA_VER=$("$JAVA_BIN" -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d'.' -f1)
+    if [[ "$JAVA_VER" != "17" && "$JAVA_VER" != "21" ]]; then
+        echo -e "\e[31mOnly Java 17/21 are supported for Spark 4.0. Current version: $JAVA_VER\e[0m"
+        exit 1
+    fi
+else
+    echo -e "\e[31mJava not found. Please install Java 17 or 21.\e[0m"
+    exit 1
+fi
+
+if [ ! -d "$SPARK_DIR" ]; then
+    wget --no-verbose "https://rw-ci-deps-dist.s3.amazonaws.com/${SPARK_FILE}"
+    tar -xzf "$SPARK_FILE" --no-same-owner
+fi
+DEPENDENCIES="io.delta:delta-spark_2.13:${DELTA_VERSION},org.apache.hadoop:hadoop-aws:3.4.1"
+unset SPARK_HOME
+
+"${SPARK_DIR}/bin/spark-sql" --packages "$DEPENDENCIES" \
     --conf 'spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension' \
     --conf 'spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog' \
+    --conf 'spark.sql.session.timeZone=UTC' \
     --conf 'spark.hadoop.fs.s3a.access.key=hummockadmin' \
     --conf 'spark.hadoop.fs.s3a.secret.key=hummockadmin' \
     --conf 'spark.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301' \
@@ -56,9 +83,10 @@ check_delta_table() {
     local output_dir="$2"
 
     rm -rf "$output_dir"
-    spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
+    "${SPARK_DIR}/bin/spark-sql" --packages "$DEPENDENCIES" \
         --conf 'spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension' \
         --conf 'spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog' \
+        --conf 'spark.sql.session.timeZone=UTC' \
         --conf 'spark.hadoop.fs.s3a.access.key=hummockadmin' \
         --conf 'spark.hadoop.fs.s3a.secret.key=hummockadmin' \
         --conf 'spark.hadoop.fs.s3a.endpoint=http://localhost:9301' \

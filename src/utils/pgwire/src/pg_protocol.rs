@@ -122,21 +122,38 @@ pub struct TlsConfig {
 }
 
 impl TlsConfig {
-    pub fn new_default() -> Option<Self> {
-        let cert = std::env::var("RW_SSL_CERT").ok()?;
-        let key = std::env::var("RW_SSL_KEY").ok()?;
+    pub fn new_default() -> anyhow::Result<Option<Self>> {
+        let cert = std::env::var("RW_SSL_CERT").ok();
+        let key = std::env::var("RW_SSL_KEY").ok();
         let enforce_ssl = env_var_is_true("RW_SSL_ENFORCE");
+
+        if cert.is_some() ^ key.is_some() {
+            return Err(anyhow::anyhow!(
+                "RW_SSL_CERT and RW_SSL_KEY must be set together"
+            ));
+        }
+
+        if enforce_ssl && cert.is_none() {
+            return Err(anyhow::anyhow!(
+                "RW_SSL_ENFORCE requires RW_SSL_CERT and RW_SSL_KEY to be set"
+            ));
+        }
+
+        let (Some(cert), Some(key)) = (cert, key) else {
+            return Ok(None);
+        };
+
         tracing::info!(
             "RW_SSL_CERT={}, RW_SSL_KEY={}, RW_SSL_ENFORCE={}",
             cert,
             key,
             enforce_ssl
         );
-        Some(Self {
+        Ok(Some(Self {
             cert,
             key,
             enforce_ssl,
-        })
+        }))
     }
 }
 
