@@ -23,7 +23,7 @@ use risingwave_pb::user::{
     CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilegeRequest,
     GrantPrivilegeResponse, GrantRoleRequest, GrantRoleResponse, ListRoleMembershipsRequest,
     ListRoleMembershipsResponse, RevokePrivilegeRequest, RevokePrivilegeResponse,
-    UpdateUserRequest, UpdateUserResponse,
+    RevokeRoleRequest, RevokeRoleResponse, UpdateUserRequest, UpdateUserResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -64,7 +64,7 @@ impl UserService for UserServiceImpl {
         let version = self
             .metadata_manager
             .catalog_controller
-            .drop_user(req.user_id as _)
+            .drop_user(req.user_id as _, req.dropped_by as _, req.session_user as _)
             .await?;
 
         Ok(Response::new(DropUserResponse {
@@ -109,7 +109,7 @@ impl UserService for UserServiceImpl {
             .grant_privilege(
                 user_ids,
                 req.get_privileges(),
-                req.granted_by as _,
+                UserId::from(req.granted_by),
                 req.with_grant_option,
             )
             .await?;
@@ -132,7 +132,7 @@ impl UserService for UserServiceImpl {
             .revoke_privilege(
                 user_ids,
                 req.get_privileges(),
-                req.granted_by as _,
+                UserId::from(req.granted_by),
                 req.revoke_by as _,
                 req.revoke_grant_option,
                 req.cascade,
@@ -143,25 +143,6 @@ impl UserService for UserServiceImpl {
             status: None,
             version,
         }))
-    }
-
-    async fn list_role_memberships(
-        &self,
-        request: Request<ListRoleMembershipsRequest>,
-    ) -> Result<Response<ListRoleMembershipsResponse>, Status> {
-        let req = request.into_inner();
-        let member_ids = req
-            .member_ids
-            .iter()
-            .map(|id| UserId::from(*id))
-            .collect_vec();
-        let memberships = self
-            .metadata_manager
-            .catalog_controller
-            .list_role_memberships(&member_ids)
-            .await?;
-
-        Ok(Response::new(ListRoleMembershipsResponse { memberships }))
     }
 
     async fn grant_role(
@@ -193,6 +174,55 @@ impl UserService for UserServiceImpl {
         }))
     }
 
+    async fn revoke_role(
+        &self,
+        request: Request<RevokeRoleRequest>,
+    ) -> Result<Response<RevokeRoleResponse>, Status> {
+        let req = request.into_inner();
+        let role_ids = req.role_ids.iter().map(|id| UserId::from(*id)).collect();
+        let member_ids = req.member_ids.iter().map(|id| UserId::from(*id)).collect();
+        let (version, memberships) = self
+            .metadata_manager
+            .catalog_controller
+            .revoke_role(
+                role_ids,
+                member_ids,
+                UserId::from(req.granted_by),
+                req.granted_by_specified,
+                UserId::from(req.revoked_by),
+                req.revoke_admin_option,
+                req.revoke_inherit_option,
+                req.revoke_set_option,
+                req.cascade,
+            )
+            .await?;
+
+        Ok(Response::new(RevokeRoleResponse {
+            status: None,
+            version,
+            memberships,
+        }))
+    }
+
+    async fn list_role_memberships(
+        &self,
+        request: Request<ListRoleMembershipsRequest>,
+    ) -> Result<Response<ListRoleMembershipsResponse>, Status> {
+        let req = request.into_inner();
+        let member_ids = req
+            .member_ids
+            .iter()
+            .map(|id| UserId::from(*id))
+            .collect_vec();
+        let memberships = self
+            .metadata_manager
+            .catalog_controller
+            .list_role_memberships(&member_ids)
+            .await?;
+
+        Ok(Response::new(ListRoleMembershipsResponse { memberships }))
+    }
+
     async fn alter_default_privilege(
         &self,
         request: Request<AlterDefaultPrivilegeRequest>,
@@ -209,7 +239,7 @@ impl UserService for UserServiceImpl {
                         user_ids,
                         req.database_id,
                         schema_ids,
-                        req.granted_by as _,
+                        UserId::from(req.granted_by),
                         grant_privilege.actions().collect(),
                         grant_privilege.get_object_type()?,
                         grant_privilege

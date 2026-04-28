@@ -969,8 +969,17 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_user(&self, user_id: UserId) -> Result<u64> {
-        let request = DropUserRequest { user_id };
+    pub async fn drop_user(
+        &self,
+        user_id: UserId,
+        dropped_by: UserId,
+        session_user: UserId,
+    ) -> Result<u64> {
+        let request = DropUserRequest {
+            user_id,
+            dropped_by,
+            session_user,
+        };
         let resp = self.inner.drop_user(request).await?;
         Ok(resp.version)
     }
@@ -1029,17 +1038,6 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn list_role_memberships(
-        &self,
-        member_ids: Vec<UserId>,
-    ) -> Result<Vec<RoleMembership>> {
-        let request = ListRoleMembershipsRequest {
-            member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
-        };
-        let resp = self.inner.list_role_memberships(request).await?;
-        Ok(resp.memberships)
-    }
-
     pub async fn grant_role(
         &self,
         role_ids: Vec<UserId>,
@@ -1063,6 +1061,44 @@ impl MetaClient {
         };
         let resp = self.inner.grant_role(request).await?;
         Ok((resp.version, resp.memberships))
+    }
+
+    pub async fn revoke_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        granted_by_specified: bool,
+        revoked_by: UserId,
+        revoke_admin_option: bool,
+        revoke_inherit_option: bool,
+        revoke_set_option: bool,
+        cascade: bool,
+    ) -> Result<(u64, Vec<RoleMembership>)> {
+        let request = RevokeRoleRequest {
+            role_ids: role_ids.into_iter().map(|id| id.as_raw_id()).collect(),
+            member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
+            granted_by: granted_by.as_raw_id(),
+            granted_by_specified,
+            revoked_by: revoked_by.as_raw_id(),
+            revoke_admin_option,
+            revoke_inherit_option,
+            revoke_set_option,
+            cascade,
+        };
+        let resp = self.inner.revoke_role(request).await?;
+        Ok((resp.version, resp.memberships))
+    }
+
+    pub async fn list_role_memberships(
+        &self,
+        member_ids: Vec<UserId>,
+    ) -> Result<Vec<RoleMembership>> {
+        let request = ListRoleMembershipsRequest {
+            member_ids: member_ids.into_iter().map(|id| id.as_raw_id()).collect(),
+        };
+        let resp = self.inner.list_role_memberships(request).await?;
+        Ok(resp.memberships)
     }
 
     pub async fn alter_default_privilege(
@@ -2788,6 +2824,7 @@ macro_rules! for_all_meta_rpc {
             ,{ user_client, grant_privilege, GrantPrivilegeRequest, GrantPrivilegeResponse }
             ,{ user_client, revoke_privilege, RevokePrivilegeRequest, RevokePrivilegeResponse }
             ,{ user_client, grant_role, GrantRoleRequest, GrantRoleResponse }
+            ,{ user_client, revoke_role, RevokeRoleRequest, RevokeRoleResponse }
             ,{ user_client, list_role_memberships, ListRoleMembershipsRequest, ListRoleMembershipsResponse }
             ,{ user_client, alter_default_privilege, AlterDefaultPrivilegeRequest, AlterDefaultPrivilegeResponse }
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
