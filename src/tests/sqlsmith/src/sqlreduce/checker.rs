@@ -44,10 +44,6 @@ impl Checker {
         }
     }
 
-    /// Consumes the checker and returns the underlying client.
-    pub fn into_client(self) -> Client {
-        self.client
-    }
 
     /// Prepares the schema namespace for testing.
     ///
