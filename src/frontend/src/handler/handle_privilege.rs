@@ -810,8 +810,18 @@ mod tests {
             .await
             .unwrap();
         frontend.run_sql("CREATE DATABASE db1").await.unwrap();
-        frontend
+        let grantor_err = frontend
             .run_sql("GRANT ALL ON DATABASE db1 TO user1 WITH GRANT OPTION GRANTED BY user")
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(
+            grantor_err.contains("GRANTED BY must specify the current user \"root\""),
+            "{grantor_err}"
+        );
+
+        frontend
+            .run_sql("GRANT ALL ON DATABASE db1 TO user1 WITH GRANT OPTION GRANTED BY root")
             .await
             .unwrap();
 
@@ -862,7 +872,7 @@ mod tests {
         }
 
         frontend
-            .run_sql("REVOKE GRANT OPTION FOR ALL ON DATABASE db1 from user1 GRANTED BY user")
+            .run_sql("REVOKE GRANT OPTION FOR ALL ON DATABASE db1 from user1 GRANTED BY root")
             .await
             .unwrap();
         {
@@ -879,7 +889,7 @@ mod tests {
         }
 
         frontend
-            .run_sql("REVOKE ALL ON DATABASE db1 from user1 GRANTED BY user")
+            .run_sql("REVOKE ALL ON DATABASE db1 from user1 GRANTED BY root")
             .await
             .unwrap();
         {

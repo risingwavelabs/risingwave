@@ -35,6 +35,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
 use risingwave_pb::user::RoleMembership;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use thiserror_ext::AsReport;
 use tokio::sync::watch::Sender;
 use tokio::time::sleep;
 use tracing::warn;
@@ -52,7 +53,7 @@ fn publish_catalog_version_if_newer(
     if *catalog_updated_tx.borrow() < version
         && let Err(error) = catalog_updated_tx.send(version)
     {
-        warn!(error = %error, version, "failed to publish catalog version");
+        warn!(error = %error.as_report(), version, "failed to publish catalog version");
     }
 }
 
@@ -302,7 +303,7 @@ impl FrontendObserverNode {
                         return;
                     }
                     Err(error) => {
-                        warn!(error = %error, failure_context, "failed to refresh cached role memberships");
+                        warn!(error = %error.as_report(), failure_context, "failed to refresh cached role memberships");
                         if !invalidate_role_memberships_and_publish_if_current(
                             &role_memberships,
                             &catalog_updated_tx,

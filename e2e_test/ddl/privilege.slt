@@ -11,28 +11,32 @@ statement ok
 CREATE SCHEMA schema1;
 
 # Grant privilege on schema for user1.
-statement ok
+statement error
 GRANT CREATE ON SCHEMA schema1 TO user1 WITH GRANT OPTION GRANTED BY user;
+
+# The GRANTED BY role for object privileges must be the current user.
+statement ok
+GRANT CREATE ON SCHEMA schema1 TO user1 WITH GRANT OPTION GRANTED BY root;
 
 # Grant privilege on all sources in schema for user1.
 statement ok
-GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema1 TO user1 GRANTED BY user;
+GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA schema1 TO user1 GRANTED BY root;
 
 # Grant invalid privilege on source.
 statement error
-GRANT INSERT ON ALL SOURCES IN SCHEMA schema1 TO user1 GRANTED BY user;
+GRANT INSERT ON ALL SOURCES IN SCHEMA schema1 TO user1 GRANTED BY root;
 
 # Grant insert privilege on table.
 statement ok
-GRANT INSERT ON ALL TABLES IN SCHEMA schema1 TO user1 GRANTED BY user;
+GRANT INSERT ON ALL TABLES IN SCHEMA schema1 TO user1 GRANTED BY root;
 
 # Grant privilege on table.
 statement ok
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA schema1 TO user1 GRANTED BY user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA schema1 TO user1 GRANTED BY root;
 
 # Grant privilege on all mviews in schema for user1.
 statement ok
-GRANT ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA schema1 TO user1 GRANTED BY user;
+GRANT ALL PRIVILEGES ON ALL MATERIALIZED VIEWS IN SCHEMA schema1 TO user1 GRANTED BY root;
 
 # Revoke privilege on all mviews in schema for user1.
 statement ok
@@ -59,23 +63,23 @@ CREATE DATABASE db1;
 
 # Grant privilege for user1.
 statement ok
-GRANT ALL ON DATABASE db1 TO user1 WITH GRANT OPTION GRANTED BY user;
+GRANT ALL ON DATABASE db1 TO user1 WITH GRANT OPTION GRANTED BY root;
 
 # Grant invalid privilege on database for user1.
 statement error
-GRANT INSERT ON DATABASE db1 TO user1 WITH GRANT OPTION GRANTED BY user;
+GRANT INSERT ON DATABASE db1 TO user1 WITH GRANT OPTION GRANTED BY root;
 
 # Grant privilege on invalid database for user1.
 statement error
-GRANT ALL ON DATABASE db_invalid TO user1 WITH GRANT OPTION GRANTED BY user;
+GRANT ALL ON DATABASE db_invalid TO user1 WITH GRANT OPTION GRANTED BY root;
 
 # Grant privilege on database for invalid user.
 statement error
-GRANT ALL ON DATABASE db_invalid TO user_invalid WITH GRANT OPTION GRANTED BY user;
+GRANT ALL ON DATABASE db_invalid TO user_invalid WITH GRANT OPTION GRANTED BY root;
 
 # Revoke GRANT OPTION FOR from database for user1.
 statement ok
-REVOKE GRANT OPTION FOR ALL ON DATABASE db1 from user1 GRANTED BY user;
+REVOKE GRANT OPTION FOR ALL ON DATABASE db1 from user1 GRANTED BY root;
 
 # Revoke privilege on database for user1.
 statement ok
