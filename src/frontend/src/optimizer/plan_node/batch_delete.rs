@@ -88,6 +88,7 @@ impl ToBatchPb for BatchDelete {
             returning: self.core.returning,
             upsert: self.base.ctx().session_ctx().config().upsert_dml(),
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
+            wait_for_persistence: self.base.ctx().session_ctx().config().implicit_flush(),
         })
     }
 }

@@ -35,7 +35,6 @@ use crate::binder::{Binder, BoundCreateView, BoundStatement};
 use crate::datafusion::DfBatchQueryPlanResult;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
-use crate::handler::flush::do_flush;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
@@ -562,9 +561,19 @@ async fn execute_risingwave_plan(
     // We need to do some post work after the query is finished and before the `Complete` response
     // it sent. This is achieved by the `callback` in `PgResponse`.
     let callback = async move {
-        // Implicitly flush the writes.
+        // The DML executor has waited for the transaction to be included in a checkpoint. Wait for
+        // the frontend snapshot observer to catch up so later reads in this session can see it.
         if session.config().implicit_flush() && stmt_type.is_dml() {
-            do_flush(&session).await?;
+            let version = session
+                .env()
+                .meta_client()
+                .get_hummock_checkpoint_version()
+                .await?;
+            session
+                .env()
+                .hummock_snapshot_manager()
+                .wait(version.id)
+                .await;
         }
 
         // update some metrics
