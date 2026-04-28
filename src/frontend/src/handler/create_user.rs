@@ -45,6 +45,7 @@ pub async fn handle_create_user(
         name: user_name.clone(),
         // the LOGIN option is implied if it is not explicitly specified.
         can_login: true,
+        can_inherit: true,
         ..Default::default()
     };
     let mut notices = vec![];

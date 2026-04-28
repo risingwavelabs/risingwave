@@ -31,6 +31,7 @@ pub struct UserCatalog {
     pub can_create_user: bool,
     pub can_login: bool,
     pub is_admin: bool,
+    pub can_inherit: bool,
     pub auth_info: Option<PbAuthInfo>,
     pub grant_privileges: Vec<PbGrantPrivilege>,
 
@@ -51,6 +52,7 @@ impl From<PbUserInfo> for UserCatalog {
             can_create_user: user.can_create_user,
             can_login: user.can_login,
             is_admin: user.is_admin,
+            can_inherit: user.can_inherit,
             auth_info: user.auth_info,
             grant_privileges: user.grant_privileges,
             database_acls: Default::default(),
@@ -73,6 +75,7 @@ impl UserCatalog {
             can_create_user: self.can_create_user,
             can_login: self.can_login,
             is_admin: self.is_admin,
+            can_inherit: self.can_inherit,
             auth_info: self.auth_info.clone(),
             grant_privileges: self.grant_privileges.clone(),
         }
