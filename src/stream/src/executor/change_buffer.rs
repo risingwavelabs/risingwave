@@ -127,11 +127,8 @@ impl ChangeBufferTableSerde {
             pk_indices.iter().position(|&i| vnode_col_idx == i)
         });
 
-        let distribution = TableDistribution::new(
-            Some(vnodes.clone()),
-            dist_key_in_pk_indices,
-            vnode_col_idx_in_pk,
-        );
+        let distribution =
+            TableDistribution::new(Some(vnodes), dist_key_in_pk_indices, vnode_col_idx_in_pk);
         if distribution.vnode_count() != table.vnode_count() {
             return Err(StreamExecutorError::from(anyhow!(
                 "vnode count mismatch for change buffer table {}",
@@ -339,7 +336,7 @@ where
     L: LocalStateStore,
 {
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn into_change_log_chunks(&self, chunk_size: usize) {
+    async fn change_log_chunks(&self, chunk_size: usize) {
         if !self.dirty {
             return Ok(());
         }
@@ -453,7 +450,7 @@ where
                     writer.flush().await?;
 
                     #[for_await]
-                    for chunk in writer.into_change_log_chunks(chunk_size) {
+                    for chunk in writer.change_log_chunks(chunk_size) {
                         yield Message::Chunk(chunk?);
                     }
                     writer.seal_current_epoch(barrier.epoch.curr)?;
@@ -689,11 +686,7 @@ mod tests {
         assert_eq!(2, staging.staging().pending_imms.len());
         assert!(staging.staging().uploading_imms.is_empty());
 
-        let chunks: Vec<_> = writer
-            .into_change_log_chunks(1024)
-            .try_collect()
-            .await
-            .unwrap();
+        let chunks: Vec<_> = writer.change_log_chunks(1024).try_collect().await.unwrap();
         assert_eq!(chunks.len(), 1);
         assert_eq!(
             chunks.into_iter().next().unwrap().compact_vis(),

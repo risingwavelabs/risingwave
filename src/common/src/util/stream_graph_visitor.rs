@@ -409,12 +409,12 @@ mod tests {
     fn test_visit_internal_tables_includes_change_buffer_state_table() {
         let mut fragment = StreamFragment {
             node: Some(StreamNode {
-                node_body: Some(NodeBody::ChangeBuffer(ChangeBufferNode {
+                node_body: Some(NodeBody::ChangeBuffer(Box::new(ChangeBufferNode {
                     state_table: Some(Table {
                         id: 42.into(),
                         ..Default::default()
                     }),
-                })),
+                }))),
                 ..Default::default()
             }),
             ..Default::default()

@@ -102,9 +102,9 @@ impl_plan_tree_node_for_unary! { Stream, StreamChangeBuffer }
 
 impl StreamNode for StreamChangeBuffer {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::ChangeBuffer(ChangeBufferNode {
+        PbNodeBody::ChangeBuffer(Box::new(ChangeBufferNode {
             state_table: Some(self.build_state_table(state).to_internal_table_prost()),
-        })
+        }))
     }
 }
 
