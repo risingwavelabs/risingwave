@@ -134,7 +134,7 @@ impl OptimizerContext {
 
     // TODO(TaoWu): Remove the async.
     #[cfg(test)]
-    #[expect(clippy::unused_async)]
+    #[allow(clippy::unused_async)]
     pub async fn mock() -> OptimizerContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),

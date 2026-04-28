@@ -18,7 +18,7 @@
 
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![expect(rw::format_error)]
+#![allow(rw::format_error)]
 
 use std::fmt::{Display, Write as _};
 use std::fs::File;

@@ -182,7 +182,6 @@ impl ByteStreamSourceParser for DebeziumParser {
         ParserFormat::Debezium
     }
 
-     // false positive for `async_trait`
     async fn parse_one<'a>(
         &'a mut self,
         _key: Option<Vec<u8>>,

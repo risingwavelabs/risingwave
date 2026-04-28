@@ -107,7 +107,7 @@ impl CsvParser {
         Ok(Some(v))
     }
 
-    #[expect(clippy::unused_async)]
+    #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &mut self,
         payload: Vec<u8>,

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(dead_code)]
+#![allow(dead_code)]
 
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
@@ -27,7 +27,7 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![expect(rw::format_error)]
+#![allow(rw::format_error)]
 
 mod opts;
 

@@ -178,7 +178,6 @@ impl MonotonicityAnalyzer {
         use monotonicity_variants::*;
 
         fn time_zone_is_without_dst(time_zone: Option<&str>) -> bool {
-             // to make it more readable
             let tz_is_utc =
                 time_zone.is_some_and(|time_zone| time_zone.eq_ignore_ascii_case("UTC"));
             tz_is_utc // conservative

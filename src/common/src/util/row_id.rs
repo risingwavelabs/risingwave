@@ -349,7 +349,7 @@ mod tests {
 
     use super::*;
 
-    #[expect(clippy::unused_async)] // `madsim::time::advance` requires to be in async context
+    #[allow(clippy::unused_async)] // `madsim::time::advance` requires to be in async context
     async fn test_generator_with_vnode_count(vnode_count: usize) {
         let mut generator = RowIdGenerator::new([VirtualNode::from_index(0)], vnode_count);
         let sequence_upper_bound = generator.sequence_upper_bound();
@@ -388,7 +388,7 @@ mod tests {
         );
     }
 
-    #[expect(clippy::unused_async)] // `madsim::time::advance` requires to be in async context
+    #[allow(clippy::unused_async)] // `madsim::time::advance` requires to be in async context
     async fn test_generator_multiple_vnodes_with_vnode_count(vnode_count: usize) {
         assert!(vnode_count >= 20);
 

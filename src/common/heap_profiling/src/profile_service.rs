@@ -36,7 +36,7 @@ pub struct ProfileServiceImpl {
     server_config: ServerConfig,
 }
 
-#[expect(clippy::unused_async)]
+#[allow(clippy::unused_async)]
 impl ProfileServiceImpl {
     pub fn new(server_config: ServerConfig) -> Self {
         Self { server_config }

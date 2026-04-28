@@ -20,7 +20,6 @@
 //! risingwave_expr_impl::enable!();
 //! ```
 
- // for `ctor` generated code
 #![feature(assert_matches)]
 #![feature(iterator_try_collect)]
 #![feature(coroutines)]

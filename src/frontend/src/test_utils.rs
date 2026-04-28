@@ -132,7 +132,7 @@ impl SessionManager for LocalFrontend {
 }
 
 impl LocalFrontend {
-    #[expect(clippy::unused_async)]
+    #[allow(clippy::unused_async)]
     pub async fn new(opts: FrontendOpts) -> Self {
         let env = FrontendEnv::mock();
         Self { opts, env }

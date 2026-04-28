@@ -235,7 +235,6 @@ impl FunctionAttr {
             _ => (0..num_args).collect_vec(),
         };
         let children_indices = match optimize_const {
-             // false-positive
             true => non_prebuilt_indices.clone(),
             false => (0..num_args).collect_vec(),
         };

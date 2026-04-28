@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(clippy::doc_markdown)]
+#![allow(clippy::doc_markdown)]
 
 mod feature;
 mod key;

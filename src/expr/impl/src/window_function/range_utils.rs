@@ -19,7 +19,6 @@ use smallvec::{SmallVec, smallvec};
 /// Calculate range (A - B), the result might be the union of two ranges when B is totally included
 /// in the A.
 pub(super) fn range_except(a: Range<usize>, b: Range<usize>) -> (Range<usize>, Range<usize>) {
-     // for better readability
     if a.is_empty() {
         (0..0, 0..0)
     } else if b.is_empty() {

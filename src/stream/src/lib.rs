@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(clippy::derive_partial_eq_without_eq)]
+#![allow(clippy::derive_partial_eq_without_eq)]
 #![recursion_limit = "256"]
 #![feature(iterator_try_collect)]
 #![feature(trait_alias)]

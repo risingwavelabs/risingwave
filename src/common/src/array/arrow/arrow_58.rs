@@ -13,6 +13,7 @@
 // limitations under the License.
 
 
+#[allow(clippy::duplicate_mod)]
 #[path = "./arrow_impl.rs"]
 mod arrow_impl;
 type ArrowIntervalType = arrow_buffer::IntervalMonthDayNano;

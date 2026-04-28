@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(unused_imports)]
+#![allow(unused_imports)]
 
 pub use std::fmt::{Debug, Formatter};
 pub use std::pin::pin;

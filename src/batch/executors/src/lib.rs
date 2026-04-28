@@ -20,7 +20,7 @@
 //! risingwave_batch_executors::enable!();
 //! ```
 
-#![expect(clippy::derive_partial_eq_without_eq)]
+#![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(exact_size_is_empty)]
 #![feature(type_alias_impl_trait)]

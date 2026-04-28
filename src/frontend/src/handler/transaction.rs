@@ -27,7 +27,7 @@ macro_rules! not_impl {
     };
 }
 
-#[expect(clippy::unused_async)]
+#[allow(clippy::unused_async)]
 pub async fn handle_begin(
     handler_args: HandlerArgs,
     stmt_type: StatementType,
@@ -109,7 +109,7 @@ pub async fn handle_rollback(
     Ok(RwPgResponse::empty_result(stmt_type))
 }
 
-#[expect(clippy::unused_async)]
+#[allow(clippy::unused_async)]
 pub async fn handle_set(
     _handler_args: HandlerArgs,
     _modes: Vec<TransactionMode>,

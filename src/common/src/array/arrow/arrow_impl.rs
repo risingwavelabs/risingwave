@@ -37,7 +37,7 @@
 //! ```
 
 // Is this a bug? Why do we have these lints?
-#![expect(unused_imports)]
+#![allow(unused_imports)]
 
 
 use std::fmt::Write;

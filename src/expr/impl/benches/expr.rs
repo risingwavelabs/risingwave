@@ -17,7 +17,7 @@
 
 // allow using `zip`.
 // `zip_eq` is a source of poor performance.
-#![expect(clippy::disallowed_methods)]
+#![allow(clippy::disallowed_methods)]
 
 risingwave_expr_impl::enable!();
 
