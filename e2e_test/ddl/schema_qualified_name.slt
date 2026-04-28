@@ -17,10 +17,10 @@ statement ok
 CREATE USER user1;
 
 statement error
-GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA dev.qualified_name TO user1 GRANTED BY root;
+GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA dev.qualified_name TO user1 GRANTED BY current_user;
 
 statement ok
-GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA qualified_name TO user1 GRANTED BY root;
+GRANT ALL PRIVILEGES ON ALL SOURCES IN SCHEMA qualified_name TO user1 GRANTED BY current_user;
 
 statement ok
 drop table qualified_name.test;

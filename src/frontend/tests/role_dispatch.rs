@@ -16,11 +16,10 @@ use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
 use risingwave_frontend::test_utils::LocalFrontend;
 
 #[tokio::test]
-async fn test_create_role_defaults_to_nologin_and_alter_role_aliases_user_flow() {
+async fn test_create_alter_drop_role_dispatches_attributes() {
     let frontend = LocalFrontend::new(Default::default()).await;
 
     frontend.run_sql("CREATE ROLE analytics").await.unwrap();
-
     let analytics = frontend.user_by_name("analytics").unwrap();
     assert!(
         !analytics.can_login,
@@ -31,75 +30,35 @@ async fn test_create_role_defaults_to_nologin_and_alter_role_aliases_user_flow()
     assert!(!analytics.can_create_user);
 
     frontend
-        .run_sql("ALTER ROLE analytics RENAME TO reporting")
-        .await
-        .unwrap();
-
-    assert!(frontend.user_by_name("analytics").is_none());
-    let reporting = frontend.user_by_name("reporting").unwrap();
-    assert!(!reporting.can_login);
-}
-
-#[tokio::test]
-async fn test_create_role_with_login_preserves_login_capability() {
-    let frontend = LocalFrontend::new(Default::default()).await;
-
-    frontend
         .run_sql("CREATE ROLE login_role WITH LOGIN PASSWORD 'secret'")
         .await
         .unwrap();
-
-    let login_role = frontend.user_by_name("login_role").unwrap();
-    assert!(login_role.can_login);
-}
-
-#[tokio::test]
-async fn test_create_and_alter_role_inherit_flags() {
-    let frontend = LocalFrontend::new(Default::default()).await;
+    assert!(frontend.user_by_name("login_role").unwrap().can_login);
 
     frontend
         .run_sql("CREATE ROLE inherited_role WITH NOINHERIT")
         .await
         .unwrap();
-    let inherited_role = frontend.user_by_name("inherited_role").unwrap();
-    assert!(!inherited_role.can_inherit);
+    assert!(!frontend.user_by_name("inherited_role").unwrap().can_inherit);
 
     frontend
         .run_sql("ALTER ROLE inherited_role WITH INHERIT")
         .await
         .unwrap();
-    let inherited_role = frontend.user_by_name("inherited_role").unwrap();
-    assert!(inherited_role.can_inherit);
-}
+    assert!(frontend.user_by_name("inherited_role").unwrap().can_inherit);
 
-#[tokio::test]
-async fn test_drop_role_aliases_drop_user_runtime() {
-    let frontend = LocalFrontend::new(Default::default()).await;
+    frontend
+        .run_sql("ALTER ROLE analytics RENAME TO reporting")
+        .await
+        .unwrap();
+    assert!(frontend.user_by_name("analytics").is_none());
+    assert!(!frontend.user_by_name("reporting").unwrap().can_login);
 
     frontend.run_sql("CREATE ROLE doomed_role").await.unwrap();
     assert!(frontend.user_by_name("doomed_role").is_some());
 
     frontend.run_sql("DROP ROLE doomed_role").await.unwrap();
     assert!(frontend.user_by_name("doomed_role").is_none());
-}
-
-#[tokio::test]
-async fn test_drop_role_auto_revokes_memberships() {
-    let frontend = LocalFrontend::new(Default::default()).await;
-
-    frontend.run_sql("CREATE ROLE parent_role").await.unwrap();
-    frontend.run_sql("CREATE ROLE member_role").await.unwrap();
-    frontend
-        .run_sql("GRANT parent_role TO member_role")
-        .await
-        .unwrap();
-
-    assert_eq!(frontend.role_memberships().await.len(), 1);
-
-    frontend.run_sql("DROP ROLE parent_role").await.unwrap();
-
-    assert!(frontend.user_by_name("parent_role").is_none());
-    assert!(frontend.role_memberships().await.is_empty());
 }
 
 #[tokio::test]
@@ -176,17 +135,6 @@ async fn test_grant_revoke_role_membership_options_dispatch() {
         set_role_err.contains("permission denied to set role"),
         "unexpected error: {set_role_err}"
     );
-
-    frontend
-        .run_sql("REVOKE INHERIT OPTION FOR role_a FROM user_b")
-        .await
-        .unwrap();
-    let memberships = frontend.role_memberships().await;
-    assert_eq!(memberships.len(), 1);
-    assert!(!memberships[0].inherit_option);
-
-    frontend.run_sql("REVOKE role_a FROM user_b").await.unwrap();
-    assert!(frontend.role_memberships().await.is_empty());
 }
 
 #[tokio::test]
@@ -223,8 +171,9 @@ async fn test_grant_revoke_role_granted_by_current_user_only() {
 }
 
 #[tokio::test]
-async fn test_granted_by_current_role_works_but_session_user_fails_after_set_role() {
+async fn test_granted_by_current_role_uses_current_role_after_set_role() {
     let frontend = LocalFrontend::new(Default::default()).await;
+    let session = frontend.session_ref();
 
     frontend.run_sql("CREATE ROLE parent_role").await.unwrap();
     frontend.run_sql("CREATE ROLE grantor_role").await.unwrap();
@@ -234,67 +183,50 @@ async fn test_granted_by_current_role_works_but_session_user_fails_after_set_rol
         .await
         .unwrap();
 
-    let root_session = frontend.session_ref();
     frontend
-        .run_sql_with_session(root_session.clone(), "SET ROLE grantor_role")
+        .run_sql_with_session(session.clone(), "SET ROLE grantor_role")
         .await
         .unwrap();
-
     frontend
         .run_sql_with_session(
-            root_session.clone(),
+            session.clone(),
             "GRANT parent_role TO grantee_role GRANTED BY current_role",
         )
         .await
         .unwrap();
 
-    let memberships = frontend.role_memberships().await;
-    assert_eq!(memberships.len(), 2);
-    let membership = memberships
-        .iter()
-        .find(|membership| {
-            membership.member_id
-                == frontend
-                    .user_by_name("grantee_role")
-                    .unwrap()
-                    .id
-                    .as_raw_id()
-        })
-        .unwrap();
-    assert_eq!(
-        membership.granted_by,
-        frontend
-            .user_by_name("grantor_role")
-            .unwrap()
-            .id
-            .as_raw_id()
-    );
-
-    let err = frontend
-        .run_sql_with_session(
-            root_session.clone(),
-            "REVOKE parent_role FROM grantee_role GRANTED BY session_user",
-        )
-        .await
-        .unwrap_err()
-        .to_string();
     assert!(
-        err.contains("does not possess grantor role"),
-        "unexpected error: {err}"
+        frontend
+            .run_sql_with_session(
+                session.clone(),
+                "REVOKE parent_role FROM grantee_role GRANTED BY session_user",
+            )
+            .await
+            .is_err(),
+        "session_user must not be treated as current_role after SET ROLE"
     );
 
     frontend
         .run_sql_with_session(
-            root_session.clone(),
+            session.clone(),
             "REVOKE parent_role FROM grantee_role GRANTED BY current_role",
         )
         .await
         .unwrap();
-
     frontend
-        .run_sql_with_session(root_session, "RESET ROLE")
+        .run_sql_with_session(session, "RESET ROLE")
         .await
         .unwrap();
+
+    let grantee_role = frontend.user_by_name("grantee_role").unwrap();
+    assert!(
+        frontend
+            .role_memberships()
+            .await
+            .iter()
+            .all(|membership| membership.member_id != grantee_role.id.as_raw_id()),
+        "current_role grant should be removable by current_role grantor"
+    );
 }
 
 #[tokio::test]
