@@ -12,25 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::acl::AclMode;
 use risingwave_common::id::ObjectId;
-use risingwave_common::session_config::SearchPath;
+use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_expr::{Result, capture_context, function};
 
-use super::context::{CATALOG_READER, DB_NAME, SEARCH_PATH};
-use crate::catalog::CatalogReader;
+use super::context::{
+    AUTH_CONTEXT, CATALOG_READER, DB_NAME, ROLE_MEMBERSHIP_INFO_READER, SEARCH_PATH,
+    USER_INFO_READER,
+};
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::is_system_catalog;
+use crate::catalog::{CatalogReader, OwnedByUserCatalog};
+use crate::session::AuthContext;
+use crate::user::effective_privilege::{role_memberships_snapshot, session_has_privilege};
+use crate::user::user_service::{RoleMembershipInfoReader, UserInfoReader};
 
 #[function("pg_table_is_visible(int4) -> boolean")]
 fn pg_table_is_visible(oid: i32) -> Result<Option<bool>> {
     pg_table_is_visible_impl_captured(ObjectId::new(oid as _))
 }
 
-#[capture_context(CATALOG_READER, SEARCH_PATH, DB_NAME)]
+#[capture_context(
+    CATALOG_READER,
+    SEARCH_PATH,
+    DB_NAME,
+    AUTH_CONTEXT,
+    USER_INFO_READER,
+    ROLE_MEMBERSHIP_INFO_READER
+)]
 fn pg_table_is_visible_impl(
     catalog: &CatalogReader,
     search_path: &SearchPath,
     db_name: &str,
+    auth_context: &AuthContext,
+    user_info_reader: &UserInfoReader,
+    role_membership_reader: &RoleMembershipInfoReader,
     oid: ObjectId,
 ) -> Result<Option<bool>> {
     // To maintain consistency with PostgreSQL, we ensure that system catalogs are always visible.
@@ -47,8 +64,29 @@ fn pg_table_is_visible_impl(
         return Ok(None);
     };
 
-    for schema in search_path.path() {
-        if let Ok(schema) = catalog_reader.get_schema_by_name(db_name, schema)
+    let current_user_name = user_info_reader
+        .read_guard()
+        .get_user_by_id(&auth_context.current_user_id())
+        .map(|user| user.name.clone());
+    let memberships = role_memberships_snapshot(role_membership_reader);
+    for schema_name in search_path.path() {
+        let schema_name = if schema_name == USER_NAME_WILD_CARD {
+            let Some(user_name) = current_user_name.as_deref() else {
+                continue;
+            };
+            user_name
+        } else {
+            schema_name
+        };
+        if let Ok(schema) = catalog_reader.get_schema_by_name(db_name, schema_name)
+            && session_has_privilege(
+                user_info_reader,
+                auth_context,
+                &memberships,
+                schema.owner(),
+                schema.id(),
+                AclMode::Usage,
+            )
             && let Some(found_oid) = relation_oid_by_name(schema, &target_name)
         {
             return Ok(Some(found_oid == oid));
@@ -91,5 +129,95 @@ fn relation_oid_by_name(schema: &SchemaCatalog, name: &str) -> Option<ObjectId> 
         schema
             .get_subscription_by_name(name)
             .map(|subscription| subscription.id.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_async_stream::for_await;
+    use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
+
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_pg_table_is_visible_skips_schemas_without_usage() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+
+        frontend
+            .run_sql("CREATE SCHEMA rw_visible_private")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("CREATE SCHEMA rw_visible_accessible")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("CREATE TABLE rw_visible_private.usage_shadow(v int)")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("CREATE TABLE rw_visible_accessible.usage_shadow(v int)")
+            .await
+            .unwrap();
+        frontend
+            .run_sql(
+                "CREATE USER rw_visible_user WITH NOSUPERUSER PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
+            )
+            .await
+            .unwrap();
+        frontend
+            .run_sql("GRANT USAGE ON SCHEMA rw_visible_accessible TO rw_visible_user")
+            .await
+            .unwrap();
+
+        let user_id = session
+            .env()
+            .user_info_reader()
+            .read_guard()
+            .get_user_by_name("rw_visible_user")
+            .unwrap()
+            .id;
+        let user_session = frontend.session_user_ref(
+            DEFAULT_DATABASE_NAME.to_owned(),
+            "rw_visible_user".to_owned(),
+            user_id,
+        );
+        frontend
+            .run_sql_with_session(
+                user_session.clone(),
+                "SET search_path = rw_visible_private, rw_visible_accessible",
+            )
+            .await
+            .unwrap();
+
+        let mut response = frontend
+            .run_sql_with_session(
+                user_session,
+                "SELECT n.nspname || ':' || \
+                    CASE WHEN pg_table_is_visible(c.oid) THEN 'visible' ELSE 'hidden' END \
+                 FROM pg_class c \
+                 JOIN pg_namespace n ON c.relnamespace = n.oid \
+                 WHERE n.nspname IN ('rw_visible_private', 'rw_visible_accessible') \
+                   AND c.relname = 'usage_shadow' \
+                 ORDER BY n.nspname",
+            )
+            .await
+            .unwrap();
+        let mut rows = vec![];
+        #[for_await]
+        for row_set in response.values_stream() {
+            for row in row_set.unwrap() {
+                rows.push(format!("{:?}", row));
+            }
+        }
+
+        assert_eq!(
+            rows,
+            vec![
+                "Row([Some(b\"rw_visible_accessible:visible\")])".to_owned(),
+                "Row([Some(b\"rw_visible_private:hidden\")])".to_owned(),
+            ]
+        );
     }
 }

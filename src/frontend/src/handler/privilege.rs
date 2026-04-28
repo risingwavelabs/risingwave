@@ -289,6 +289,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_check_privileges_does_not_inherit_superuser_attribute() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+        frontend
+            .run_sql("CREATE SCHEMA inherited_super_schema")
+            .await
+            .unwrap();
+
+        let schema = catalog_reader
+            .read_guard()
+            .get_schema_by_name(DEFAULT_DATABASE_NAME, "inherited_super_schema")
+            .unwrap()
+            .clone();
+        let check_items = vec![ObjectCheckItem::new(
+            DEFAULT_SUPER_USER_ID,
+            AclMode::Create,
+            "inherited_super_schema".to_owned(),
+            schema.id(),
+        )];
+
+        frontend
+            .run_sql("CREATE USER inherited_super WITH SUPERUSER PASSWORD ''")
+            .await
+            .unwrap();
+        frontend
+            .run_sql(
+                "CREATE USER inherited_super_member WITH NOSUPERUSER PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b'",
+            )
+            .await
+            .unwrap();
+        frontend
+            .run_sql("GRANT inherited_super TO inherited_super_member")
+            .await
+            .unwrap();
+
+        let user_id = {
+            let user_reader = session.env().user_info_reader();
+            user_reader
+                .read_guard()
+                .get_user_by_name("inherited_super_member")
+                .unwrap()
+                .id
+        };
+        let member_session = frontend.session_user_ref(
+            DEFAULT_DATABASE_NAME.to_owned(),
+            "inherited_super_member".to_owned(),
+            user_id,
+        );
+
+        assert!(member_session.check_privileges(&check_items).is_err());
+
+        frontend
+            .run_sql_with_session(member_session.clone(), "SET ROLE inherited_super")
+            .await
+            .unwrap();
+        assert!(member_session.check_privileges(&check_items).is_ok());
+    }
+
+    #[tokio::test]
     async fn test_check_privileges_respects_noinherit_role() {
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();

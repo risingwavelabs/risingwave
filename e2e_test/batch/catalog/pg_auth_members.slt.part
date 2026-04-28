@@ -195,6 +195,9 @@ statement ok
 CREATE ROLE rw_role_grantor_test;
 
 statement ok
+GRANT rw_role_grantor_test TO postgres WITH ADMIN OPTION;
+
+statement ok
 GRANT rw_role_grantor_test TO rw_role_member_test GRANTED BY current_user;
 
 query TTT
@@ -213,6 +216,9 @@ rw_role_grantor_test rw_role_member_test postgres
 
 statement ok
 REVOKE rw_role_grantor_test FROM rw_role_member_test GRANTED BY current_user;
+
+statement ok
+REVOKE rw_role_grantor_test FROM postgres;
 
 query
 SELECT role_role.rolname,
@@ -282,6 +288,257 @@ DROP ROLE rw_role_current_role_grantor;
 
 statement ok
 DROP ROLE rw_role_current_role_parent;
+
+statement ok
+CREATE ROLE rw_role_omitted_parent;
+
+statement ok
+CREATE ROLE rw_role_omitted_manager;
+
+statement ok
+CREATE ROLE rw_role_omitted_alice;
+
+statement ok
+CREATE ROLE rw_role_omitted_bob;
+
+statement ok
+CREATE ROLE rw_role_omitted_explicit_fail;
+
+statement ok
+GRANT rw_role_omitted_parent TO rw_role_omitted_manager WITH ADMIN OPTION;
+
+statement ok
+GRANT rw_role_omitted_manager TO rw_role_omitted_alice;
+
+statement ok
+SET ROLE rw_role_omitted_alice;
+
+statement ok
+GRANT rw_role_omitted_parent TO rw_role_omitted_bob;
+
+statement error
+GRANT rw_role_omitted_parent TO rw_role_omitted_explicit_fail GRANTED BY current_user;
+
+statement ok
+RESET ROLE;
+
+query TTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       grantor_role.rolname
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+JOIN pg_catalog.pg_roles grantor_role ON grantor_role.oid = grantor
+WHERE role_role.rolname = 'rw_role_omitted_parent'
+  AND member_role.rolname = 'rw_role_omitted_bob'
+ORDER BY 1, 2, 3;
+----
+rw_role_omitted_parent rw_role_omitted_bob rw_role_omitted_manager
+
+statement ok
+REVOKE rw_role_omitted_parent FROM rw_role_omitted_bob GRANTED BY rw_role_omitted_manager;
+
+statement ok
+REVOKE rw_role_omitted_manager FROM rw_role_omitted_alice;
+
+statement ok
+REVOKE rw_role_omitted_parent FROM rw_role_omitted_manager;
+
+statement ok
+DROP ROLE rw_role_omitted_explicit_fail;
+
+statement ok
+DROP ROLE rw_role_omitted_bob;
+
+statement ok
+DROP ROLE rw_role_omitted_alice;
+
+statement ok
+DROP ROLE rw_role_omitted_manager;
+
+statement ok
+DROP ROLE rw_role_omitted_parent;
+
+statement ok
+CREATE ROLE rw_role_closest_parent;
+
+statement ok
+CREATE ROLE rw_role_closest_indirect;
+
+statement ok
+CREATE ROLE rw_role_closest_direct;
+
+statement ok
+CREATE ROLE rw_role_closest_actor;
+
+statement ok
+CREATE ROLE rw_role_closest_grantee;
+
+statement ok
+GRANT rw_role_closest_parent TO rw_role_closest_indirect WITH ADMIN OPTION;
+
+statement ok
+GRANT rw_role_closest_parent TO rw_role_closest_direct WITH ADMIN OPTION;
+
+statement ok
+GRANT rw_role_closest_indirect TO rw_role_closest_direct;
+
+statement ok
+GRANT rw_role_closest_direct TO rw_role_closest_actor;
+
+statement ok
+SET ROLE rw_role_closest_actor;
+
+statement ok
+GRANT rw_role_closest_parent TO rw_role_closest_grantee;
+
+statement ok
+RESET ROLE;
+
+query TTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       grantor_role.rolname
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+JOIN pg_catalog.pg_roles grantor_role ON grantor_role.oid = grantor
+WHERE role_role.rolname = 'rw_role_closest_parent'
+  AND member_role.rolname = 'rw_role_closest_grantee'
+ORDER BY 1, 2, 3;
+----
+rw_role_closest_parent rw_role_closest_grantee rw_role_closest_direct
+
+statement ok
+REVOKE rw_role_closest_parent FROM rw_role_closest_grantee GRANTED BY rw_role_closest_direct;
+
+statement ok
+REVOKE rw_role_closest_direct FROM rw_role_closest_actor;
+
+statement ok
+REVOKE rw_role_closest_indirect FROM rw_role_closest_direct;
+
+statement ok
+REVOKE rw_role_closest_parent FROM rw_role_closest_direct;
+
+statement ok
+REVOKE rw_role_closest_parent FROM rw_role_closest_indirect;
+
+statement ok
+DROP ROLE rw_role_closest_grantee;
+
+statement ok
+DROP ROLE rw_role_closest_actor;
+
+statement ok
+DROP ROLE rw_role_closest_direct;
+
+statement ok
+DROP ROLE rw_role_closest_indirect;
+
+statement ok
+DROP ROLE rw_role_closest_parent;
+
+statement ok
+CREATE ROLE rw_role_revoke_multi_a;
+
+statement ok
+CREATE ROLE rw_role_revoke_multi_b;
+
+statement ok
+CREATE ROLE rw_role_revoke_multi_mgr_a;
+
+statement ok
+CREATE ROLE rw_role_revoke_multi_mgr_b;
+
+statement ok
+CREATE ROLE rw_role_revoke_multi_actor;
+
+statement ok
+CREATE ROLE rw_role_revoke_multi_grantee;
+
+statement ok
+GRANT rw_role_revoke_multi_a TO rw_role_revoke_multi_mgr_a WITH ADMIN OPTION;
+
+statement ok
+GRANT rw_role_revoke_multi_b TO rw_role_revoke_multi_mgr_b WITH ADMIN OPTION;
+
+statement ok
+GRANT rw_role_revoke_multi_mgr_a TO rw_role_revoke_multi_actor;
+
+statement ok
+GRANT rw_role_revoke_multi_mgr_b TO rw_role_revoke_multi_actor;
+
+statement ok
+SET ROLE rw_role_revoke_multi_mgr_a;
+
+statement ok
+GRANT rw_role_revoke_multi_a TO rw_role_revoke_multi_grantee;
+
+statement ok
+RESET ROLE;
+
+statement ok
+SET ROLE rw_role_revoke_multi_mgr_b;
+
+statement ok
+GRANT rw_role_revoke_multi_b TO rw_role_revoke_multi_grantee;
+
+statement ok
+RESET ROLE;
+
+statement ok
+SET ROLE rw_role_revoke_multi_actor;
+
+statement ok
+REVOKE rw_role_revoke_multi_a, rw_role_revoke_multi_b FROM rw_role_revoke_multi_grantee;
+
+statement ok
+RESET ROLE;
+
+query TTT
+SELECT role_role.rolname,
+       member_role.rolname,
+       grantor_role.rolname
+FROM pg_catalog.pg_auth_members
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = member
+JOIN pg_catalog.pg_roles grantor_role ON grantor_role.oid = grantor
+WHERE role_role.rolname IN ('rw_role_revoke_multi_a', 'rw_role_revoke_multi_b')
+  AND member_role.rolname = 'rw_role_revoke_multi_grantee'
+ORDER BY 1, 2, 3;
+----
+
+statement ok
+REVOKE rw_role_revoke_multi_mgr_b FROM rw_role_revoke_multi_actor;
+
+statement ok
+REVOKE rw_role_revoke_multi_mgr_a FROM rw_role_revoke_multi_actor;
+
+statement ok
+REVOKE rw_role_revoke_multi_b FROM rw_role_revoke_multi_mgr_b;
+
+statement ok
+REVOKE rw_role_revoke_multi_a FROM rw_role_revoke_multi_mgr_a;
+
+statement ok
+DROP ROLE rw_role_revoke_multi_grantee;
+
+statement ok
+DROP ROLE rw_role_revoke_multi_actor;
+
+statement ok
+DROP ROLE rw_role_revoke_multi_mgr_b;
+
+statement ok
+DROP ROLE rw_role_revoke_multi_mgr_a;
+
+statement ok
+DROP ROLE rw_role_revoke_multi_b;
+
+statement ok
+DROP ROLE rw_role_revoke_multi_a;
 
 statement ok
 CREATE ROLE rw_role_default_inherit_test;

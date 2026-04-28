@@ -71,21 +71,6 @@ pub fn can_inherit_role(
         .contains(&target_role_id)
 }
 
-pub fn effective_role_ids(
-    _user_info_reader: &UserInfoReader,
-    auth_context: &AuthContext,
-    memberships: &[RoleMembership],
-) -> HashSet<UserId> {
-    let current_user_id = auth_context.current_user_id();
-    let mut ids = HashSet::from([current_user_id]);
-    ids.extend(reachable_role_ids(
-        [current_user_id],
-        memberships,
-        |membership| membership.inherit_option,
-    ));
-    ids
-}
-
 pub fn session_has_privilege(
     user_info_reader: &UserInfoReader,
     auth_context: &AuthContext,
@@ -94,12 +79,21 @@ pub fn session_has_privilege(
     object: impl Copy + Into<risingwave_pb::user::grant_privilege::Object>,
     mode: AclMode,
 ) -> bool {
-    for role_id in effective_role_ids(user_info_reader, auth_context, memberships) {
-        let reader = user_info_reader.read_guard();
-        let Some(user) = reader.get_user_by_id(&role_id) else {
+    let current_user_id = auth_context.current_user_id();
+    let reader = user_info_reader.read_guard();
+    if let Some(user) = reader.get_user_by_id(&current_user_id)
+        && has_direct_privilege_for_catalog_user(user, owner, object, mode)
+    {
+        return true;
+    }
+
+    for role_id in reachable_role_ids([current_user_id], memberships, |membership| {
+        membership.inherit_option
+    }) {
+        let Some(role) = reader.get_user_by_id(&role_id) else {
             continue;
         };
-        if has_privilege_for_catalog_user(user, owner, object, mode) {
+        if has_inherited_privilege_for_catalog_user(role, owner, object, mode) {
             return true;
         }
     }
@@ -115,7 +109,7 @@ pub fn principal_has_privilege(
     mode: AclMode,
 ) -> bool {
     let reader = user_info_reader.read_guard();
-    if has_privilege_for_catalog_user(principal, owner, object, mode) {
+    if has_direct_privilege_for_catalog_user(principal, owner, object, mode) {
         return true;
     }
 
@@ -125,7 +119,7 @@ pub fn principal_has_privilege(
         let Some(role) = reader.get_user_by_id(&role_id) else {
             continue;
         };
-        if has_privilege_for_catalog_user(role, owner, object, mode) {
+        if has_inherited_privilege_for_catalog_user(role, owner, object, mode) {
             return true;
         }
     }
@@ -133,13 +127,22 @@ pub fn principal_has_privilege(
     false
 }
 
-fn has_privilege_for_catalog_user(
+fn has_direct_privilege_for_catalog_user(
     user: &UserCatalog,
     owner: UserId,
     object: impl Copy + Into<risingwave_pb::user::grant_privilege::Object>,
     mode: AclMode,
 ) -> bool {
-    user.is_super || user.id == owner || user.has_privilege(object, mode)
+    user.is_super || has_inherited_privilege_for_catalog_user(user, owner, object, mode)
+}
+
+fn has_inherited_privilege_for_catalog_user(
+    user: &UserCatalog,
+    owner: UserId,
+    object: impl Copy + Into<risingwave_pb::user::grant_privilege::Object>,
+    mode: AclMode,
+) -> bool {
+    user.id == owner || user.has_privilege(object, mode)
 }
 
 pub fn role_memberships_snapshot(

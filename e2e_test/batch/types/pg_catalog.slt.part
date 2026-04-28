@@ -47,31 +47,31 @@ statement ok
 drop table myy_table;
 
 statement ok
-create schema pg_visible_s1;
+create schema rw_visible_s1;
 
 statement ok
-create schema pg_visible_s2;
+create schema rw_visible_s2;
 
 statement ok
-create table pg_visible_s1.t(v int);
+create table rw_visible_s1.t(v int);
 
 statement ok
-create table pg_visible_s2.t(v int);
+create table rw_visible_s2.t(v int);
 
 statement ok
-set search_path = pg_visible_s1, pg_visible_s2;
+set search_path = rw_visible_s1, rw_visible_s2;
 
 query BB
-select pg_table_is_visible('pg_visible_s1.t'::regclass),
-       pg_table_is_visible('pg_visible_s2.t'::regclass);
+select pg_table_is_visible('rw_visible_s1.t'::regclass),
+       pg_table_is_visible('rw_visible_s2.t'::regclass);
 ----
 t f
 
 statement ok
-set search_path = pg_visible_s1;
+set search_path = rw_visible_s1;
 
 query B
-select pg_table_is_visible('pg_visible_s2.t'::regclass);
+select pg_table_is_visible('rw_visible_s2.t'::regclass);
 ----
 f
 
@@ -79,13 +79,69 @@ statement ok
 reset search_path;
 
 statement ok
-drop table pg_visible_s1.t;
+create schema rw_visible_private;
 
 statement ok
-drop table pg_visible_s2.t;
+create schema rw_visible_accessible;
 
 statement ok
-drop schema pg_visible_s1;
+create table rw_visible_private.usage_shadow(v int);
 
 statement ok
-drop schema pg_visible_s2;
+create table rw_visible_accessible.usage_shadow(v int);
+
+statement ok
+create user rw_visible_user with password '';
+
+statement ok
+grant usage on schema rw_visible_accessible to rw_visible_user;
+
+statement ok
+set search_path = rw_visible_private, rw_visible_accessible;
+
+statement ok
+set role rw_visible_user;
+
+query TB
+select n.nspname, pg_table_is_visible(c.oid)
+from pg_class c
+join pg_namespace n on c.relnamespace = n.oid
+where n.nspname in ('rw_visible_private', 'rw_visible_accessible')
+  and c.relname = 'usage_shadow'
+order by n.nspname;
+----
+rw_visible_accessible t
+rw_visible_private f
+
+statement ok
+reset role;
+
+statement ok
+reset search_path;
+
+statement ok
+drop table rw_visible_private.usage_shadow;
+
+statement ok
+drop table rw_visible_accessible.usage_shadow;
+
+statement ok
+drop schema rw_visible_private;
+
+statement ok
+drop schema rw_visible_accessible;
+
+statement ok
+drop user rw_visible_user;
+
+statement ok
+drop table rw_visible_s1.t;
+
+statement ok
+drop table rw_visible_s2.t;
+
+statement ok
+drop schema rw_visible_s1;
+
+statement ok
+drop schema rw_visible_s2;
