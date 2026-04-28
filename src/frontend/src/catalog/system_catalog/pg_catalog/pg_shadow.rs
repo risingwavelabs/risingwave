@@ -31,7 +31,8 @@ use risingwave_frontend_macro::system_catalog;
             NULL::text[] AS useconfig
         FROM rw_catalog.rw_users u
         JOIN rw_catalog.rw_user_secrets s
-            ON u.id = s.id"
+            ON u.id = s.id
+        WHERE u.can_login"
 )]
 #[derive(Fields)]
 struct PgShadow {

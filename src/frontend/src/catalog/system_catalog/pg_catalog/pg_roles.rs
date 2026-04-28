@@ -17,27 +17,30 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_roles` provides access to information about database roles. This is simply a
 /// publicly readable view of `pg_authid` that blanks out the password field.
+///
+/// Today this is a compatibility shim over `rw_catalog.rw_users`; membership-derived role state
+/// will be layered in as the unified principal model lands.
 /// Ref: `https://www.postgresql.org/docs/current/view-pg-roles.html`
 #[system_catalog(
     view,
     "pg_catalog.pg_roles",
-    "SELECT id AS oid,
-        name AS rolname,
+    "SELECT name AS rolname,
         is_super AS rolsuper,
-        true AS rolinherit,
+        can_inherit AS rolinherit,
         create_user AS rolcreaterole,
         create_db AS rolcreatedb,
         can_login AS rolcanlogin,
-        true AS rolreplication,
+        false AS rolreplication,
         -1 AS rolconnlimit,
+        '********' AS rolpassword,
         NULL::timestamptz AS rolvaliduntil,
-        true AS rolbypassrls,
-        '********' AS rolpassword
+        false AS rolbypassrls,
+        NULL::text[] AS rolconfig,
+        id AS oid
     FROM rw_catalog.rw_users"
 )]
 #[derive(Fields)]
 struct PgRule {
-    oid: i32,
     rolname: String,
     rolsuper: bool,
     rolinherit: bool,
@@ -46,7 +49,9 @@ struct PgRule {
     rolcanlogin: bool,
     rolreplication: bool,
     rolconnlimit: i32,
+    rolpassword: String,
     rolvaliduntil: Timestamptz,
     rolbypassrls: bool,
-    rolpassword: String,
+    rolconfig: Vec<String>,
+    oid: i32,
 }

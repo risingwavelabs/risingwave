@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::Fields;
+use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_user` provides access to information about database users.
@@ -20,18 +20,27 @@ use risingwave_frontend_macro::system_catalog;
 #[system_catalog(
     view,
     "pg_catalog.pg_user",
-    "SELECT id AS usesysid,
-        name,
+    "SELECT name AS usename,
+        id AS usesysid,
         create_db AS usecreatedb,
         is_super AS usesuper,
-        '********' AS passwd
-    FROM rw_catalog.rw_users"
+        false AS userepl,
+        false AS usebypassrls,
+        '********' AS passwd,
+        NULL::timestamptz AS valuntil,
+        NULL::text[] AS useconfig
+    FROM rw_catalog.rw_users
+    WHERE can_login"
 )]
 #[derive(Fields)]
 struct PgUser {
-    usesysid: i32,
     usename: String,
+    usesysid: i32,
     usecreatedb: bool,
     usesuper: bool,
+    userepl: bool,
+    usebypassrls: bool,
     passwd: String,
+    valuntil: Timestamptz,
+    useconfig: Vec<String>,
 }

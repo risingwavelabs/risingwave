@@ -1,6 +1,19 @@
-query ITTT
+query TITTTTTTT
 SELECT * FROM pg_catalog.pg_user order by usesysid;
 ----
-1 root t t ********
-2 postgres t t ********
-3 rwadmin t t ********
+root 1 t t f f ******** NULL NULL
+postgres 2 t t f f ******** NULL NULL
+rwadmin 3 t t f f ******** NULL NULL
+
+statement ok
+CREATE ROLE pg_user_nologin_probe NOLOGIN;
+
+query I
+SELECT count(*)
+FROM pg_catalog.pg_user
+WHERE usename = 'pg_user_nologin_probe';
+----
+0
+
+statement ok
+DROP ROLE pg_user_nologin_probe;
