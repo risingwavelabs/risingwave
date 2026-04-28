@@ -180,7 +180,7 @@ macro_rules! generate_config_use_single {
 
     // Generate use clause for actual config types
     ($config_type:path) => {
-        
+
         pub(super) use $config_type;
     };
 }

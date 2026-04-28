@@ -501,7 +501,7 @@ impl LogicalMultiJoin {
         Ok(join_ordering)
     }
 
-    
+
     /// transform multijoin into bushy tree join.
     ///
     /// 1. First, use equivalent condition derivation to get derive join relation.

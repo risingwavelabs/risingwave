@@ -1501,7 +1501,7 @@ where
 
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
-    
+
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let chunk = if IS_REPLICATED {
             self.fill_non_output_indices(chunk)

@@ -75,7 +75,7 @@ impl JoinType {
 
 #[cfg(test)]
 impl JoinType {
-    
+
 
     fn keep_all(self) -> bool {
         matches!(

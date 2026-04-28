@@ -88,7 +88,7 @@ mod tests {
     use crate::types::{F32, Fields, StructType, Timestamp, Timestamptz};
 
     #[test]
-    
+
     fn test_macro() {
         #[derive(Fields)]
         struct Sub {

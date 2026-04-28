@@ -68,7 +68,7 @@ pub struct BloomFilterReader {
 
 impl BloomFilterReader {
     /// Creates a Bloom filter from a byte slice
-    
+
     pub fn new(mut buf: Vec<u8>) -> Self {
         if buf.len() <= 1 {
             return Self { data: vec![], k: 0 };
@@ -95,7 +95,7 @@ impl BloomFilterReader {
     ///     the hash;
     ///   - if the return value is true, then the table may or may not have the user key that has
     ///     the hash actually, a.k.a. we don't know the answer.
-    
+
     pub fn may_match(&self, mut h: u32) -> bool {
         if self.k > 30 || self.k == 00 {
             // potential new encoding for short Bloom filters

@@ -434,7 +434,7 @@ mod batched_iter {
     }
 
     impl<R: RangeKv> Iter<R> {
-        
+
         pub fn next(&mut self) -> StorageResult<Option<(BytesFullKey, Option<Bytes>)>> {
             match self.current.next() {
                 Some((key, value)) => Ok(Some((key, value))),
@@ -471,7 +471,7 @@ mod batched_iter {
             let num_to_bytes = |k: i32| Bytes::from(format!("{:06}", k).as_bytes().to_vec());
             let num_to_full_key =
                 |k: i32| FullKey::new(TableId::default(), TableKey(num_to_bytes(k)), 0);
-            
+
             map.ingest_batch(key_range.clone().map(|k| {
                 let key = num_to_full_key(k);
                 let b = key.user_key.table_key.0.clone();

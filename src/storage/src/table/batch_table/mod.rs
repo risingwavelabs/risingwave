@@ -1221,7 +1221,7 @@ struct BatchTableInnerIterLogInner<S: StateStore, SD: ValueRowSerde> {
 
 impl<S: StateStore, SD: ValueRowSerde> BatchTableInnerIterLogInner<S, SD> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
-    
+
     async fn new(
         store: &S,
         mapping: Arc<ColumnMapping>,

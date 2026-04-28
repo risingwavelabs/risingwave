@@ -256,7 +256,7 @@ macro_rules! impl_system_params_from_kv {
 /// `OverrideValidateOnSet` below.
 macro_rules! impl_default_validation {
     ($({ $field:ident, $type:ty, $default:expr, $is_mutable:expr, $($rest:tt)* },)*) => {
-        
+
         pub trait Validate {
             $(
                 /// Default implementation does nothing.
@@ -381,7 +381,7 @@ macro_rules! impl_is_mutable {
 
 macro_rules! impl_system_params_for_test {
     ($({ $field:ident, $type:ty, $default:expr, $($rest:tt)* },)*) => {
-        
+
         pub fn system_params_for_test() -> PbSystemParams {
             let mut ret = PbSystemParams {
                 $(

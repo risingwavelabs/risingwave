@@ -91,7 +91,7 @@ macro_rules! do_dispatch_variants {
         match $impl {
             $( $type::$variant_name($inner) => {
                 do_expand_alias!($array, $variant_name, $alias);
-                
+                #[allow(unused_braces)]
                 $body
             }, )*
         }
@@ -228,7 +228,7 @@ macro_rules! do_dispatch_data_types {
         match $impl {
             $( $crate::types::DataType::$data_type { .. } => {
                 do_expand_alias!($array, $variant_name, $alias);
-                
+                #[allow(unused_braces)]
                 $body
             }, )*
         }

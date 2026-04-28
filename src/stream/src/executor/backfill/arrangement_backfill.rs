@@ -78,7 +78,7 @@ where
     SD: ValueRowSerde,
 {
     #[expect(clippy::too_many_arguments)]
-    
+
     pub fn new(
         upstream_table: ReplicatedStateTable<S, SD>,
         upstream: Executor,

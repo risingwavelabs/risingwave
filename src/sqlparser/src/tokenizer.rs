@@ -364,7 +364,7 @@ impl<'a> Tokenizer<'a> {
     /// Tokenize the statement and produce a vector of tokens.
     ///
     /// Whitespaces are included.
-    
+
     fn tokenize_with_whitespace(&mut self) -> Result<Vec<Token>, TokenizerError> {
         let tokens = self.tokenize()?;
         Ok(tokens.into_iter().map(|t| t.token).collect())

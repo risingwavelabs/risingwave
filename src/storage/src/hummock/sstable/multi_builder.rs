@@ -90,7 +90,7 @@ where
     F: TableBuilderFactory,
 {
     /// Creates a new [`CapacitySplitTableBuilder`] using given configuration generator.
-    
+
     pub fn new(
         builder_factory: F,
         compactor_metrics: Arc<CompactorMetrics>,

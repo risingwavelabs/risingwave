@@ -288,7 +288,7 @@ impl<K: Ord, V: Clone> WindowImpl for RowsWindow<K, V> {
                 } else {
                     // FIXME(rc): Clippy rule `clippy::nonminimal_bool` is misreporting that
                     // the following can be simplified.
-                    
+
                     {
                         assert!(window.curr_idx >= window.left_idx);
                     }
@@ -308,7 +308,7 @@ impl<K: Ord, V: Clone> WindowImpl for RowsWindow<K, V> {
                     true // pure preceding frame, always following-saturated
                 } else {
                     // FIXME(rc): Ditto.
-                    
+
                     {
                         assert!(window.right_excl_idx > 0);
                         assert!(window.right_excl_idx > window.curr_idx);

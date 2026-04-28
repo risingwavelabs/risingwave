@@ -393,7 +393,7 @@ pub enum StorageType {
 task_local! {
     // This is why we need to ignore this rule
     // https://github.com/rust-lang/rust-clippy/issues/9224
-    
+
     pub static LOCAL_ID: ConcurrentId;
 }
 

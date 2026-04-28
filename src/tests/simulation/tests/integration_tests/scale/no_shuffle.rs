@@ -71,7 +71,7 @@ async fn test_delta_join() -> Result<()> {
                 .await?
                 .assert_result_eq(result);
 
-            
+
             {
                 test_times += 1;
             }

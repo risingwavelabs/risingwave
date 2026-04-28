@@ -187,7 +187,7 @@ macro_rules! impl_has_variant {
                     visitor.visit(plan)
                 }
 
-                
+
                 pub fn [<has_ $convention:snake _ $variant_name:snake>](plan: PlanRef<$convention>) -> bool {
                     [<has_ $convention:snake _$variant_name:snake _where>](plan, |_| true)
                 }

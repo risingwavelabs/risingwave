@@ -1656,7 +1656,7 @@ mod tests {
     }
 
     /// Build a committed version from one existing non-overlapping SST.
-    
+
     fn build_version_from_sstable(
         table_id: TableId,
         sstable_info: SstableInfo,

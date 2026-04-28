@@ -76,7 +76,7 @@ pub struct DdlServiceImpl {
 }
 
 impl DdlServiceImpl {
-    
+
     pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,

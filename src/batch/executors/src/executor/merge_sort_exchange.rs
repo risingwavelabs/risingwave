@@ -48,7 +48,7 @@ pub struct MergeSortExchangeExecutorImpl<CS> {
 }
 
 impl<CS: 'static + Send + CreateSource> MergeSortExchangeExecutorImpl<CS> {
-    
+
     pub fn new(
         context: Arc<dyn BatchTaskContext>,
         column_orders: Arc<Vec<ColumnOrder>>,

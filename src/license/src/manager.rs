@@ -112,13 +112,13 @@ pub struct License {
     /// Subject of the license.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.2>.
-    
+
     pub sub: String,
 
     /// Issuer of the license.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.1>.
-    
+
     pub iss: Issuer,
 
     /// Tier of the license.

@@ -72,7 +72,7 @@ impl FastInsertExecutor {
         ))
     }
 
-    
+
     pub fn new(
         table_id: TableId,
         table_version_id: TableVersionId,

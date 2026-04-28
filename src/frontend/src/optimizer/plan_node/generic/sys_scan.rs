@@ -65,7 +65,7 @@ impl SysScan {
     }
 
     /// Create a `LogicalSysScan` node. Used internally by optimizer.
-    
+
     pub(crate) fn new(
         output_col_idx: Vec<usize>, // the column index in the table
         table: Arc<SystemTableCatalog>,
@@ -75,7 +75,7 @@ impl SysScan {
         Self::new_inner(output_col_idx, table, ctx, table_cardinality)
     }
 
-    
+
     pub(crate) fn new_inner(
         output_col_idx: Vec<usize>, // the column index in the table
         table: Arc<SystemTableCatalog>,

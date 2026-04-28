@@ -1235,7 +1235,7 @@ impl Catalog {
         schema_path
             .try_find(|schema_name| -> CatalogResult<_> {
                 let schema = self.get_schema_by_name(db_name, schema_name)?;
-                
+
                 if let Some(item) = schema.get_system_table_by_name(class_name) {
                     Ok(Some(item.id().as_object_id()))
                 } else if let Some(item) = schema.get_any_table_by_name(class_name) {

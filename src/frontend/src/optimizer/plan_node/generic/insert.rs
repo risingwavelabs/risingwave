@@ -132,7 +132,7 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
 
 impl<PlanRef: Eq + Hash> Insert<PlanRef> {
     /// Create a [`Insert`] node. Used internally by optimizer.
-    
+
     pub fn new(
         input: PlanRef,
         table_name: String,

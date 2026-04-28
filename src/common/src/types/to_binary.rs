@@ -50,7 +50,7 @@ macro_rules! implement_using_to_sql {
                     match ty {
                         DataType::$data_type => {
                             let mut output = BytesMut::new();
-                            
+
                             $accessor(self).to_sql(&Type::ANY, &mut output).map_err(ToBinaryError::ToSql)?;
                             Ok(output.freeze())
                         },

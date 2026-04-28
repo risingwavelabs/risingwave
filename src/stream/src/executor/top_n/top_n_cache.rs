@@ -210,7 +210,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     }
 
     /// Clear the cache. After this, the cache must be `init` again before use.
-    
+
     pub fn clear(&mut self) {
         self.low.as_mut().map(Cache::clear);
         self.middle.clear();

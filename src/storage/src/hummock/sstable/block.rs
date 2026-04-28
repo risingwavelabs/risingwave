@@ -64,7 +64,7 @@ macro_rules! put_fn {
 
 macro_rules! get_fn {
     ($name:ident, $($type:ty),*) => {
-        
+
         fn $name<T: Buf>(&self, buf: &mut T) -> ($($type), *) {
             match *self {
                 LenType::u8 => {

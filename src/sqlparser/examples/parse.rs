@@ -20,7 +20,7 @@ use risingwave_sqlparser::tokenizer::Tokenizer;
 /// Input SQL, output AST.
 fn main() {
     let mut sql = String::new();
-    
+
     for line in std::io::stdin().lock().lines() {
         sql += &line.unwrap();
         if !sql.ends_with(';') {
