@@ -119,6 +119,15 @@ fn alter_prost_user_info(
                 user_info.is_admin = false;
                 update_fields.insert(UpdateField::Admin);
             }
+            UserOption::CreateRole
+            | UserOption::NoCreateRole
+            | UserOption::Inherit
+            | UserOption::NoInherit => {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "role options are not supported yet".to_owned(),
+                )
+                .into());
+            }
             UserOption::EncryptedPassword(p) => {
                 if !p.0.is_empty() {
                     user_info.auth_info = encrypted_password(&user_info.name, &p.0);
