@@ -42,7 +42,7 @@ use crate::barrier::{
 use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
-use crate::stream::SourceChange;
+use crate::stream::{SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
@@ -269,26 +269,7 @@ impl PostCollectCommand {
                     .await?;
             }
 
-            PostCollectCommand::DropStreamingJobs {
-                streaming_job_ids,
-                unregistered_state_table_ids,
-            } => {
-                for job_id in streaming_job_ids {
-                    barrier_manager_context
-                        .refresh_manager
-                        .remove_progress_tracker(job_id.as_mv_table_id(), "drop_streaming_jobs");
-                }
-
-                barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
-                    .await?;
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .complete_dropped_tables(unregistered_state_table_ids.iter().copied())
-                    .await;
-            }
+            PostCollectCommand::DropStreamingJobs => {}
             PostCollectCommand::ConnectorPropsChange(obj_id_map_props) => {
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
                 barrier_manager_context
@@ -498,10 +479,15 @@ impl PostCollectCommand {
                         &replace_plan,
                     )
                     .await;
-                barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
-                    .await?;
+                cleanup_dropped_streaming_jobs(
+                    &barrier_manager_context.refresh_manager,
+                    &barrier_manager_context.hummock_manager,
+                    &barrier_manager_context.metadata_manager,
+                    [],
+                    to_drop_state_table_ids.clone(),
+                    "replace_streaming_job",
+                )
+                .await?;
             }
 
             PostCollectCommand::CreateSubscription { subscription_id } => {
