@@ -80,6 +80,7 @@ pub struct PulsarSourceOperationRetry {
         deserialize_with = "deserialize_optional_u32_from_string",
         default
     )]
+    #[with_option(allow_alter_on_fly)]
     pub max_retries: Option<u32>,
 
     /// This controls Pulsar client operation retry delay for the source.
@@ -90,6 +91,7 @@ pub struct PulsarSourceOperationRetry {
         deserialize_with = "deserialize_optional_duration_from_string",
         default
     )]
+    #[with_option(allow_alter_on_fly)]
     pub retry_delay: Option<Duration>,
 }
 

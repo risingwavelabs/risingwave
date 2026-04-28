@@ -1374,6 +1374,7 @@ PulsarProperties:
     field_type: u32
     required: false
     default: Default::default
+    allow_alter_on_fly: true
   - name: pulsar.operation.retry.delay
     field_type: Duration
     comments: |-
@@ -1382,6 +1383,7 @@ PulsarProperties:
       unacked message redelivery, and from sink-side `properties.retry.*` settings.
     required: false
     default: Default::default
+    allow_alter_on_fly: true
   - name: pulsar.read_compacted
     field_type: bool
     required: false
