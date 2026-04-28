@@ -148,6 +148,23 @@ message RoleMembership {
   uint32 id = 7;
 }
 
+message GrantRoleRequest {
+  repeated uint32 role_ids = 1;
+  repeated uint32 member_ids = 2;
+  uint32 granted_by = 3;
+  optional bool admin_option = 4;
+  optional bool inherit_option = 5;
+  optional bool set_option = 6;
+  uint32 executed_by = 7;
+  bool granted_by_specified = 8;
+}
+
+message GrantRoleResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+  repeated RoleMembership memberships = 3;
+}
+
 message ListRoleMembershipsRequest {
   // When false, an empty member_ids list returns no memberships.
   // Set this explicitly for callers that need the full membership graph.
@@ -198,6 +215,8 @@ service UserService {
   rpc RevokePrivilege(RevokePrivilegeRequest) returns (RevokePrivilegeResponse);
   // AlterDefaultPrivilege alters the default privileges.
   rpc AlterDefaultPrivilege(AlterDefaultPrivilegeRequest) returns (AlterDefaultPrivilegeResponse);
+  // GrantRole persists direct role membership edges and membership options.
+  rpc GrantRole(GrantRoleRequest) returns (GrantRoleResponse);
   // ListRoleMemberships lists direct role memberships for the requested members.
   rpc ListRoleMemberships(ListRoleMembershipsRequest) returns (ListRoleMembershipsResponse);
 }
