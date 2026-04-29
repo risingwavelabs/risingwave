@@ -121,6 +121,11 @@ seed_hummock_stale_table_ids() {
   fi
 
   echo "--- HUMMOCK STALE TABLE IDS TEST: Seeding old cluster with mixed-table SST"
+  # Build ctl before creating the target tables. Otherwise the first `risedev ctl` invocation can
+  # spend minutes compiling after we capture compaction group ids, during which the old cluster may
+  # compact and purge those groups.
+  cargo build -p risingwave_ctl
+
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/hummock-stale-table-ids/seed.slt"
 
   local live_table_id
