@@ -99,3 +99,4 @@ book/
 
 # Code agent temporary files
 docs/superpowers
+.project-memory/
