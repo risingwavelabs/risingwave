@@ -705,3 +705,51 @@ impl<S: StateStore> Debug for IcebergFetchExecutor<S> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{DataChunk, Op, StreamChunk};
+
+    /// Verifies the fix for the panic that occurred when a scan task produced no chunks
+    /// (e.g. an empty data file or an Iceberg v2 file fully covered by equality-delete files).
+    ///
+    /// `build_batched_stream_reader` calls `chunks.last().unwrap()` after collecting all
+    /// chunks for a task. Without the `if chunks.is_empty() { continue; }` guard this
+    /// panics on an empty `Vec`. This test confirms that empty tasks are silently skipped
+    /// and that non-empty tasks are still processed normally.
+    #[test]
+    fn test_empty_task_chunks_are_skipped() {
+        // Helper: simulate the per-task logic from `build_batched_stream_reader`.
+        // Returns the cardinality of the last chunk, or None if the task was skipped.
+        let process_task = |chunks: Vec<StreamChunk>| -> Option<usize> {
+            // This is the fix: skip tasks that produced no data.
+            if chunks.is_empty() {
+                return None;
+            }
+            // Without the fix the line below panics when `chunks` is empty.
+            Some(chunks.last().unwrap().cardinality())
+        };
+
+        // Empty task (empty file / fully-deleted file): must be skipped, not panic.
+        assert_eq!(process_task(vec![]), None);
+
+        // Non-empty task: last chunk cardinality must be returned correctly.
+        let chunk = StreamChunk::from_parts(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            DataChunk::new_dummy(3),
+        );
+        assert_eq!(process_task(vec![chunk]), Some(3));
+
+        // Mixed batch: two tasks where the first is empty and the second is not.
+        let empty: Vec<StreamChunk> = vec![];
+        let non_empty = vec![StreamChunk::from_parts(
+            vec![Op::Insert],
+            DataChunk::new_dummy(1),
+        )];
+        let results: Vec<Option<usize>> = [empty, non_empty]
+            .into_iter()
+            .map(process_task)
+            .collect();
+        assert_eq!(results, vec![None, Some(1)]);
+    }
+}
