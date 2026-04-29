@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::external::DebeziumOffset;
-use crate::source::cdc::{CdcSourceType, CdcSourceTypeTrait, Mysql, Postgres};
+use crate::source::cdc::{CdcSourceType, CdcSourceTypeTrait, Mysql, Postgres, SqlServer};
 use crate::source::{SplitId, SplitMetaData};
 
 /// The base states of a CDC split, which will be persisted to checkpoint.
@@ -271,6 +271,18 @@ impl SqlServerCdcSplit {
         };
         Self { inner: split }
     }
+
+    /// Extract SQL Server `change_lsn` value from the offset JSON string.
+    pub fn sql_server_change_lsn(&self) -> Option<u128> {
+        let offset_str = self.inner.start_offset.as_ref()?;
+        extract_sql_server_change_lsn_from_offset_str(offset_str)
+    }
+
+    /// Extract SQL Server `commit_lsn` value from the offset JSON string.
+    pub fn sql_server_commit_lsn(&self) -> Option<u128> {
+        let offset_str = self.inner.start_offset.as_ref()?;
+        extract_sql_server_commit_lsn_from_offset_str(offset_str)
+    }
 }
 
 impl CdcSplitTrait for SqlServerCdcSplit {
@@ -436,6 +448,18 @@ impl DebeziumCdcSplit<Mysql> {
     }
 }
 
+impl DebeziumCdcSplit<SqlServer> {
+    /// Extract SQL Server CDC `change_lsn` from the current split offset.
+    pub fn sql_server_change_lsn(&self) -> Option<u128> {
+        self.sql_server_split.as_ref()?.sql_server_change_lsn()
+    }
+
+    /// Extract SQL Server CDC `commit_lsn` from the current split offset.
+    pub fn sql_server_commit_lsn(&self) -> Option<u128> {
+        self.sql_server_split.as_ref()?.sql_server_commit_lsn()
+    }
+}
+
 /// Extract PostgreSQL LSN value from a CDC offset JSON string.
 ///
 /// This is a standalone helper function that can be used when you only have the offset string
@@ -447,4 +471,62 @@ pub fn extract_postgres_lsn_from_offset_str(offset_str: &str) -> Option<u64> {
     let source_offset = offset.get("sourceOffset")?;
     let lsn = source_offset.get("lsn")?;
     lsn.as_u64()
+}
+
+/// Parse SQL Server LSN string (`XXXXXXXX:XXXXXXXX:XXXX`) into a comparable integer.
+pub fn parse_sql_server_lsn_str(lsn: &str) -> Option<u128> {
+    let mut parts = lsn.split(':');
+    let part0 = u32::from_str_radix(parts.next()?, 16).ok()? as u128;
+    let part1 = u32::from_str_radix(parts.next()?, 16).ok()? as u128;
+    let part2 = u16::from_str_radix(parts.next()?, 16).ok()? as u128;
+    if parts.next().is_some() {
+        return None;
+    }
+
+    Some((part0 << 48) | (part1 << 16) | part2)
+}
+
+/// Extract SQL Server `change_lsn` from a CDC offset JSON string.
+pub fn extract_sql_server_change_lsn_from_offset_str(offset_str: &str) -> Option<u128> {
+    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+    let source_offset = offset.get("sourceOffset")?;
+    let lsn = source_offset.get("change_lsn")?.as_str()?;
+    parse_sql_server_lsn_str(lsn)
+}
+
+/// Extract SQL Server `commit_lsn` from a CDC offset JSON string.
+pub fn extract_sql_server_commit_lsn_from_offset_str(offset_str: &str) -> Option<u128> {
+    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+    let source_offset = offset.get("sourceOffset")?;
+    let lsn = source_offset.get("commit_lsn")?.as_str()?;
+    parse_sql_server_lsn_str(lsn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sql_server_lsn_str() {
+        let lsn = "00000027:00000ac0:0002";
+        let parsed = parse_sql_server_lsn_str(lsn).unwrap();
+        let expected = ((0x00000027_u128) << 48) | ((0x00000ac0_u128) << 16) | (0x0002_u128);
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn test_extract_sql_server_lsn_from_offset_str() {
+        let offset = r#"{
+            "sourcePartition": {"server":"RW_CDC_1001"},
+            "sourceOffset": {
+                "change_lsn":"00000027:00000ac0:0001",
+                "commit_lsn":"00000027:00000ac0:0002"
+            },
+            "isHeartbeat": false
+        }"#;
+
+        let change_lsn = extract_sql_server_change_lsn_from_offset_str(offset).unwrap();
+        let commit_lsn = extract_sql_server_commit_lsn_from_offset_str(offset).unwrap();
+        assert!(change_lsn < commit_lsn);
+    }
 }

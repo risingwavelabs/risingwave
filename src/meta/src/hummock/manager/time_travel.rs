@@ -88,23 +88,31 @@ impl HummockManager {
             txn.commit().await?;
             return Ok(());
         };
+
+        // metadata BELOW watermark_version_id will be truncated.
         let mut watermark_version_id = std::cmp::min(
             version_watermark.version_id,
             min_pinned_version_id.to_u64().try_into().unwrap(),
         );
-        if let Some(max_version_count) = self.env.opts.time_travel_vacuum_max_version_count
-            && let Some(earliest_version_id) = hummock_time_travel_version::Entity::find()
+        if let Some(max_version_count) = self.env.opts.time_travel_vacuum_max_version_count {
+            let earliest2_version_ids = hummock_time_travel_version::Entity::find()
                 .select_only()
                 .column(hummock_time_travel_version::Column::VersionId)
                 .order_by_asc(hummock_time_travel_version::Column::VersionId)
+                .limit(2)
                 .into_tuple::<HummockVersionId>()
-                .one(&txn)
-                .await?
-        {
-            watermark_version_id = std::cmp::min(
-                watermark_version_id,
-                earliest_version_id.saturating_add(max_version_count as i64),
-            );
+                .all(&txn)
+                .await?;
+            // Ensure at least 1 version BELOW watermark_version_id if applying time_travel_vacuum_max_version_count.
+            if earliest2_version_ids.len() == 2 {
+                watermark_version_id = std::cmp::min(
+                    watermark_version_id,
+                    std::cmp::max(
+                        earliest2_version_ids[0].saturating_add(max_version_count as i64),
+                        earliest2_version_ids[1],
+                    ),
+                );
+            }
         }
         let res = hummock_epoch_to_version::Entity::delete_many()
             .filter(
@@ -165,11 +173,15 @@ impl HummockManager {
                 .into_tuple()
                 .all(&txn)
                 .await?;
-        // Reuse hummock_time_travel_epoch_version_insert_batch_size as threshold.
         let delete_sst_batch_size = self
             .env
             .opts
             .hummock_time_travel_epoch_version_insert_batch_size;
+        let delta_fetch_batch_size = self
+            .env
+            .opts
+            .hummock_time_travel_delta_fetch_batch_size
+            .max(1);
         let mut sst_ids_to_delete: HashSet<_> = HashSet::default();
         async fn delete_sst_in_batch(
             txn: &DatabaseTransaction,
@@ -193,32 +205,44 @@ impl HummockManager {
             }
             Ok(())
         }
-        for delta_id_to_delete in delta_ids_to_delete {
-            let delta_to_delete = hummock_time_travel_delta::Entity::find_by_id(delta_id_to_delete)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| {
-                    Error::TimeTravel(anyhow!(format!(
-                        "version delta {} not found",
-                        delta_id_to_delete
-                    )))
-                })?;
-            let delta_to_delete = IncompleteHummockVersionDelta::from_persisted_protobuf(
-                &delta_to_delete.version_delta.to_protobuf(),
-            );
-            let new_sst_ids = delta_to_delete.newly_added_sst_ids(true);
-            // The SST ids added and then deleted by compaction between the 2 versions.
-            sst_ids_to_delete.extend(&new_sst_ids - &latest_valid_version_sst_ids);
-            if sst_ids_to_delete.len() >= delete_sst_batch_size {
-                delete_sst_in_batch(
-                    &txn,
-                    std::mem::take(&mut sst_ids_to_delete),
-                    delete_sst_batch_size,
-                )
-                .await?;
+        for delta_id_batch in delta_ids_to_delete.chunks(delta_fetch_batch_size) {
+            let mut delta_to_delete_by_id: HashMap<_, _> =
+                hummock_time_travel_delta::Entity::find()
+                    .filter(
+                        hummock_time_travel_delta::Column::VersionId
+                            .is_in(delta_id_batch.iter().copied()),
+                    )
+                    .all(&txn)
+                    .await?
+                    .into_iter()
+                    .map(|delta| (delta.version_id, delta))
+                    .collect();
+            for &delta_id_to_delete in delta_id_batch {
+                let delta_to_delete = delta_to_delete_by_id
+                    .remove(&delta_id_to_delete)
+                    .ok_or_else(|| {
+                        Error::TimeTravel(anyhow!(format!(
+                            "version delta {} not found",
+                            delta_id_to_delete
+                        )))
+                    })?;
+                let delta_to_delete = IncompleteHummockVersionDelta::from_persisted_protobuf(
+                    &delta_to_delete.version_delta.to_protobuf(),
+                );
+                let new_sst_ids = delta_to_delete.newly_added_sst_ids(true);
+                // The SST ids added and then deleted by compaction between the 2 versions.
+                sst_ids_to_delete.extend(&new_sst_ids - &latest_valid_version_sst_ids);
+                if sst_ids_to_delete.len() >= delete_sst_batch_size {
+                    delete_sst_in_batch(
+                        &txn,
+                        std::mem::take(&mut sst_ids_to_delete),
+                        delete_sst_batch_size,
+                    )
+                    .await?;
+                }
+                let new_object_ids = delta_to_delete.newly_added_object_ids(true);
+                object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
             }
-            let new_object_ids = delta_to_delete.newly_added_object_ids(true);
-            object_ids_to_delete.extend(&new_object_ids - &latest_valid_version_object_ids);
         }
         let mut next_version_sst_ids = latest_valid_version_sst_ids;
         for prev_version_id in version_ids_to_delete {

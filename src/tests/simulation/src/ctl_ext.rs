@@ -26,7 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::id::WorkerId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
-use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::PbFragment;
@@ -366,7 +366,7 @@ impl Cluster {
     pub async fn split_compaction_group(
         &mut self,
         compaction_group_id: CompactionGroupId,
-        table_id: HummockSstableId,
+        table_id: TableId,
     ) -> Result<()> {
         self.ctl
             .spawn(async move {

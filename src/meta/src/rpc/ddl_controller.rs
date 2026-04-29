@@ -1592,9 +1592,11 @@ impl DdlController {
             .await?;
         let version = match job_status {
             JobStatus::Initial => {
-                unreachable!(
-                    "Job with Initial status should not notify frontend and therefore should not arrive here"
-                );
+                self.metadata_manager
+                    .catalog_controller
+                    .try_abort_creating_streaming_job(job_id.id(), true)
+                    .await?;
+                IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {
                 self.stream_manager

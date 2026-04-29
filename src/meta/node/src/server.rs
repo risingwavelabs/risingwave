@@ -526,7 +526,9 @@ pub async fn start_service_as_election_leader(
             env.clone(),
             metadata_manager.clone(),
             barrier_scheduler.clone(),
+            hummock_manager.clone(),
             source_manager.clone(),
+            refresh_manager.clone(),
             scale_controller.clone(),
         )
         .unwrap(),

@@ -162,6 +162,8 @@ impl CompactorRunner {
             .storage_opts
             .compactor_iter_max_io_retry_times;
         let mut table_iters = Vec::new();
+        let compact_table_ids = self.compact_task.build_compact_table_ids();
+
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
                 continue;
@@ -174,7 +176,7 @@ impl CompactorRunner {
                     let table_ids = &table_info.table_ids;
                     let exist_table = table_ids
                         .iter()
-                        .any(|table_id| self.compact_task.existing_table_ids.contains(table_id));
+                        .any(|table_id| compact_table_ids.contains(table_id));
 
                     self.key_range.full_key_overlap(&table_info.key_range) && exist_table
                 })
@@ -184,7 +186,7 @@ impl CompactorRunner {
             if level.level_type == LevelType::Nonoverlapping {
                 debug_assert!(can_concat(&level.table_infos));
                 table_iters.push(ConcatSstableIterator::new(
-                    self.compact_task.existing_table_ids.clone(),
+                    compact_table_ids.clone(),
                     tables,
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
@@ -213,7 +215,7 @@ impl CompactorRunner {
                         table_infos
                     );
                     table_iters.push(ConcatSstableIterator::new(
-                        self.compact_task.existing_table_ids.clone(),
+                        compact_table_ids.clone(),
                         table_infos,
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
@@ -224,7 +226,7 @@ impl CompactorRunner {
             } else {
                 for table_info in tables {
                     table_iters.push(ConcatSstableIterator::new(
-                        self.compact_task.existing_table_ids.clone(),
+                        compact_table_ids.clone(),
                         vec![table_info],
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),

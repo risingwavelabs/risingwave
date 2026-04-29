@@ -408,6 +408,10 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_epoch_version_insert_batch_size,
+                hummock_time_travel_delta_fetch_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_delta_fetch_batch_size,
                 hummock_gc_history_insert_batch_size: config
                     .meta
                     .developer

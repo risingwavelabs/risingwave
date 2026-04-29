@@ -469,6 +469,7 @@ impl CatalogController {
         }
 
         subscription.delete(&txn).await?;
+        txn.commit().await?;
         Ok(())
     }
 }
