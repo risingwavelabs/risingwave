@@ -1420,7 +1420,7 @@ impl DdlController {
                             .map(|col| Field::from(&col.column_desc))
                             .collect(),
                         new_fragment: new_sink_fragment,
-                        new_log_store_table,
+                        new_log_store_table: new_log_store_table.map(Box::new),
                         actor_status,
                     });
                 }
@@ -1473,10 +1473,7 @@ impl DdlController {
                             tmp_sink_id: sink.tmp_sink_id,
                             original_sink_id: sink.original_sink.id,
                             columns: sink.new_schema.clone(),
-                            new_log_store_table: sink
-                                .new_log_store_table
-                                .as_ref()
-                                .map(|table| (table.id, table.columns.clone())),
+                            new_log_store_table: sink.new_log_store_table.clone(),
                         })
                         .collect()
                 });

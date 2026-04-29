@@ -554,6 +554,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
         extend_sink_columns(&mut log_store_table.columns, newly_added_columns, |name| {
             format!("{}_{}", upstream_table.name, name)
         });
+        log_store_table.value_indices = (0..log_store_table.columns.len() as i32).collect();
         Some(log_store_table.clone())
     } else {
         None
