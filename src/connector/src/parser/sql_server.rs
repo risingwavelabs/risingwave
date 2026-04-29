@@ -53,7 +53,9 @@ pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
                 }
             },
             false => match row.try_get::<ScalarImplTiberiusWrapper, usize>(i) {
-                Ok(datum) => datum.map(|d| d.0),
+                Ok(datum) => datum
+                    .map(|d| d.0)
+                    .map(|scalar| coerce_scalar_to_target_type(scalar, &rw_field.data_type)),
                 Err(err) => {
                     log_error!(name, err, "parse column failed");
                     None
@@ -64,6 +66,19 @@ pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
         datums.push(datum);
     }
     OwnedRow::new(datums)
+}
+
+fn coerce_scalar_to_target_type(scalar: ScalarImpl, target_type: &DataType) -> ScalarImpl {
+    match (scalar, target_type) {
+        // SQL Server validator allows integer upcast (e.g. `int` -> `BIGINT`).
+        // Coerce snapshot values to the target RW type to keep validation and execution consistent.
+        (ScalarImpl::Int16(v), DataType::Int32) => ScalarImpl::Int32(v as i32),
+        (ScalarImpl::Int16(v), DataType::Int64) => ScalarImpl::Int64(v as i64),
+        (ScalarImpl::Int32(v), DataType::Int64) => ScalarImpl::Int64(v as i64),
+        // SQL Server `real` may map to `FLOAT` in RW validator.
+        (ScalarImpl::Float32(v), DataType::Float64) => ScalarImpl::Float64((v.0 as f64).into()),
+        (scalar, _) => scalar,
+    }
 }
 
 pub fn convert_money_i64_to_type(value: i64, data_type: &DataType) -> ScalarImpl {
@@ -77,6 +92,38 @@ pub fn convert_money_i64_to_type(value: i64, data_type: &DataType) -> ScalarImpl
                 data_type
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::F32;
+
+    use super::*;
+
+    #[test]
+    fn test_integer_upcast_coercion() {
+        let v = coerce_scalar_to_target_type(ScalarImpl::Int32(7), &DataType::Int64);
+        assert_eq!(v, ScalarImpl::Int64(7));
+
+        let v = coerce_scalar_to_target_type(ScalarImpl::Int16(7), &DataType::Int32);
+        assert_eq!(v, ScalarImpl::Int32(7));
+
+        let v = coerce_scalar_to_target_type(ScalarImpl::Int16(7), &DataType::Int64);
+        assert_eq!(v, ScalarImpl::Int64(7));
+    }
+
+    #[test]
+    fn test_float_upcast_coercion() {
+        let v =
+            coerce_scalar_to_target_type(ScalarImpl::Float32(F32::from(1.25)), &DataType::Float64);
+        assert_eq!(v, ScalarImpl::Float64(1.25.into()));
+    }
+
+    #[test]
+    fn test_non_upcast_keeps_original() {
+        let v = coerce_scalar_to_target_type(ScalarImpl::Int32(7), &DataType::Int32);
+        assert_eq!(v, ScalarImpl::Int32(7));
     }
 }
 macro_rules! impl_tiberius_wrapper {
