@@ -1829,6 +1829,65 @@ async fn test_non_pk_prefix_watermark_read() {
 }
 
 #[tokio::test]
+async fn test_update_watermark_ignores_duplicate_committed_watermark() {
+    const TEST_TABLE_ID: TableId = TableId::new(23333);
+    let test_env = prepare_hummock_test_env().await;
+
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+    ];
+    let order_types = vec![OrderType::ascending()];
+    let pk_index = vec![0_usize];
+    let read_prefix_len_hint = 1;
+    let mut table = gen_pbtable(
+        TEST_TABLE_ID,
+        column_descs,
+        order_types,
+        pk_index,
+        read_prefix_len_hint,
+    );
+    table.clean_watermark_indices = vec![0];
+
+    test_env.register_table(table.clone()).await;
+    let mut state_table =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.init_epoch(epoch).await.unwrap();
+
+    state_table.update_watermark(ScalarImpl::Int32(1));
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.commit_for_test(epoch).await.unwrap();
+    test_env.commit_epoch(epoch.prev).await;
+    assert_eq!(
+        state_table.get_committed_watermark(),
+        Some(&ScalarImpl::Int32(1))
+    );
+
+    state_table.update_watermark(ScalarImpl::Int32(2));
+    state_table.update_watermark(ScalarImpl::Int32(1));
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.commit_for_test(epoch).await.unwrap();
+    test_env.commit_epoch(epoch.prev).await;
+
+    assert_eq!(
+        state_table.get_committed_watermark(),
+        Some(&ScalarImpl::Int32(2))
+    );
+}
+
+#[tokio::test]
 async fn test_state_table_with_vnode_stats() {
     use prometheus::Registry;
     use risingwave_common::config::MetricLevel;
