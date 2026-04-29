@@ -19,9 +19,11 @@ RECOVERY_DURATION=20
 
 # Setup test directory
 TEST_DIR=.risingwave/e2e_test/backwards-compat-tests/
-# Keep this case on recently verified releases. It relies on Hummock system tables and ctl
-# commands to build a mixed-table SST deterministically.
+# Keep this case on recently verified releases. It relies on Hummock system tables and
+# background compaction group merge/compaction to build a mixed-table SST.
 HUMMOCK_STALE_TABLE_IDS_MIN_VERSION=2.8.0
+HUMMOCK_STALE_TABLE_IDS_AUTO_MERGE_TIMEOUT_SEC=120
+HUMMOCK_STALE_TABLE_IDS_CONFIG="$TEST_DIR/hummock-stale-table-ids/config.toml"
 mkdir -p $TEST_DIR
 cp -r e2e_test/backwards-compat-tests/slt/* $TEST_DIR
 
@@ -109,11 +111,19 @@ seed_json_kafka() {
   insert_json_kafka '{"user_id": 9},{"timestamp": "2023-07-28 06:54:00", "user_id": 9, "page_id": 4, "action": "yjtyjtyyy"}'
 }
 
+write_hummock_stale_table_ids_config() {
+  mkdir -p "$(dirname "$HUMMOCK_STALE_TABLE_IDS_CONFIG")"
+  cat <<EOF > "$HUMMOCK_STALE_TABLE_IDS_CONFIG"
+[meta]
+periodic_scheduling_compaction_group_merge_interval_sec = 1
+periodic_scheduling_compaction_group_split_interval_sec = 0
+periodic_compaction_interval_sec = 10
+EOF
+}
+
 seed_hummock_stale_table_ids() {
   rm -f "$TEST_DIR/hummock-stale-table-ids/enabled" \
-    "$TEST_DIR/hummock-stale-table-ids/live_table_id" \
-    "$TEST_DIR/hummock-stale-table-ids/dropped_table_id" \
-    "$TEST_DIR/hummock-stale-table-ids/compaction_group_id"
+    "$TEST_DIR/hummock-stale-table-ids/dropped_table_id"
 
   if version_lt "$OLD_VERSION" "$HUMMOCK_STALE_TABLE_IDS_MIN_VERSION"; then
     echo "--- HUMMOCK STALE TABLE IDS TEST: Skipped for old version ${OLD_VERSION}"
@@ -121,11 +131,6 @@ seed_hummock_stale_table_ids() {
   fi
 
   echo "--- HUMMOCK STALE TABLE IDS TEST: Seeding old cluster with mixed-table SST"
-  # Build ctl before creating the target tables. Otherwise the first `risedev ctl` invocation can
-  # spend minutes compiling after we capture compaction group ids, during which the old cluster may
-  # compact and purge those groups.
-  cargo build -p risingwave_ctl
-
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/hummock-stale-table-ids/seed.slt"
 
   local live_table_id
@@ -137,31 +142,8 @@ seed_hummock_stale_table_ids() {
     exit 1
   fi
 
-  echo "$live_table_id" > "$TEST_DIR/hummock-stale-table-ids/live_table_id"
-  echo "$dropped_table_id" > "$TEST_DIR/hummock-stale-table-ids/dropped_table_id"
-
-  local live_compaction_group_id
-  live_compaction_group_id=$(run_sql_scalar "SELECT compaction_group_id FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${live_table_id}]'::jsonb LIMIT 1;")
-  local dropped_compaction_group_id
-  dropped_compaction_group_id=$(run_sql_scalar "SELECT compaction_group_id FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb LIMIT 1;")
-  if [[ -z "$live_compaction_group_id" || -z "$dropped_compaction_group_id" ]]; then
-    echo "Failed to capture hummock compaction groups: live=${live_compaction_group_id}, dropped=${dropped_compaction_group_id}"
-    exit 1
-  fi
-  echo "$live_compaction_group_id" > "$TEST_DIR/hummock-stale-table-ids/compaction_group_id"
-
-  if [[ "$live_compaction_group_id" != "$dropped_compaction_group_id" ]]; then
-    ./risedev ctl hummock merge-compaction-group \
-      --left-group-id "$live_compaction_group_id" \
-      --right-group-id "$dropped_compaction_group_id"
-  fi
-
-  ./risedev ctl hummock trigger-manual-compaction \
-    --compaction-group-id "$live_compaction_group_id" \
-    --level 0
-
-  local mixed_sst_count
-  for _ in $(seq 1 30); do
+  local mixed_sst_count=0
+  for _ in $(seq 1 "$HUMMOCK_STALE_TABLE_IDS_AUTO_MERGE_TIMEOUT_SEC"); do
     mixed_sst_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${live_table_id}]'::jsonb AND table_ids @> '[${dropped_table_id}]'::jsonb;")
     if [[ "$mixed_sst_count" != "0" ]]; then
       break
@@ -173,8 +155,17 @@ seed_hummock_stale_table_ids() {
     exit 1
   fi
 
+  echo "$dropped_table_id" > "$TEST_DIR/hummock-stale-table-ids/dropped_table_id"
+
   run_sql "DROP TABLE hummock_stale_dropped;"
   run_sql "FLUSH;"
+
+  local registered_stale_table_count
+  registered_stale_table_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_compaction_group_configs WHERE member_tables @> '[${dropped_table_id}]'::jsonb;")
+  if [[ "$registered_stale_table_count" != "0" ]]; then
+    echo "Old cluster did not unregister dropped table id ${dropped_table_id}"
+    exit 1
+  fi
 
   local stale_sst_count
   stale_sst_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb;")
@@ -197,50 +188,10 @@ validate_hummock_stale_table_ids() {
   echo "--- HUMMOCK STALE TABLE IDS TEST: Validating new cluster before compaction"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/hummock-stale-table-ids/validate_restart.slt"
 
-  local live_table_id
-  live_table_id=$(cat "$TEST_DIR/hummock-stale-table-ids/live_table_id")
   local dropped_table_id
   dropped_table_id=$(cat "$TEST_DIR/hummock-stale-table-ids/dropped_table_id")
   local stale_sst_count
   stale_sst_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb;")
-  if [[ "$stale_sst_count" != "0" ]]; then
-    local compaction_group_id
-    compaction_group_id=$(cat "$TEST_DIR/hummock-stale-table-ids/compaction_group_id")
-    if [[ -z "$compaction_group_id" ]]; then
-      echo "Failed to locate compaction group for live table id ${live_table_id}"
-      exit 1
-    fi
-
-    local stale_level
-    stale_level=$(run_sql_scalar "SELECT level_id FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb LIMIT 1;")
-    if [[ -z "$stale_level" ]]; then
-      echo "Failed to locate stale SST level for dropped table id ${dropped_table_id}"
-      exit 1
-    fi
-    local stale_sst_ids
-    stale_sst_ids=$(run_sql_scalar "SELECT string_agg(sstable_id::varchar, ',') FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb AND level_id = ${stale_level};")
-    if [[ -z "$stale_sst_ids" ]]; then
-      echo "Failed to locate stale SSTs for dropped table id ${dropped_table_id}: level=${stale_level}, ssts=${stale_sst_ids}"
-      exit 1
-    fi
-
-    echo "--- HUMMOCK STALE TABLE IDS TEST: Triggering compaction after upgrade, compaction_group_id=${compaction_group_id}, level=${stale_level}, sst_ids=${stale_sst_ids}, dropped_table_id=${dropped_table_id}"
-    ./risedev ctl hummock trigger-manual-compaction \
-      --compaction-group-id "$compaction_group_id" \
-      --level "$stale_level" \
-      --sst-ids "$stale_sst_ids" \
-      --exclusive \
-      --retry-interval-ms 1000
-    sleep 5
-
-    for _ in $(seq 1 30); do
-      stale_sst_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb;")
-      if [[ "$stale_sst_count" == "0" ]]; then
-        break
-      fi
-      sleep 1
-    done
-  fi
   if [[ "$stale_sst_count" != "0" ]]; then
     echo "Recovered new cluster still has SST metadata containing dropped table id ${dropped_table_id}"
     exit 1

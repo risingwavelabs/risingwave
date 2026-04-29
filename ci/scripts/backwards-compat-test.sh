@@ -46,9 +46,16 @@ ENABLE_BUILD="$2"
 BUILD_CONNECTOR="${3:-true}"
 
 echo "--- Setting up cluster config"
+local hummock_stale_table_ids_config=""
+if ! version_lt "$VERSION" "$HUMMOCK_STALE_TABLE_IDS_MIN_VERSION"; then
+  write_hummock_stale_table_ids_config
+  hummock_stale_table_ids_config="  config-path: $HUMMOCK_STALE_TABLE_IDS_CONFIG"
+fi
+
   if version_le "$VERSION" "1.8.9"; then
     cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
+${hummock_stale_table_ids_config}
   steps:
     - use: minio
     - use: sqlite
@@ -62,14 +69,15 @@ EOF
      # so we need to specify the meta-backend: sqlite
      cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
- steps:
-   - use: minio
-   - use: sqlite
-   - use: meta-node
-     meta-backend: sqlite
-   - use: compute-node
-   - use: frontend
-   - use: compactor
+${hummock_stale_table_ids_config}
+  steps:
+    - use: minio
+    - use: sqlite
+    - use: meta-node
+      meta-backend: sqlite
+    - use: compute-node
+    - use: frontend
+    - use: compactor
 EOF
   fi
 
