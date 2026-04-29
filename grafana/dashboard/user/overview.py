@@ -6,6 +6,7 @@ from . import section
 def _(panels: Panels):
     mv_filter = 'executor_identity=~".*MaterializeExecutor.*"'
     sink_filter = 'executor_identity=~".*SinkExecutor.*"'
+    compute_component_filter = f'{COMPONENT_LABEL}="compute"'
     return [
         panels.row("Overview"),
         panels.timeseries_rowsps(
