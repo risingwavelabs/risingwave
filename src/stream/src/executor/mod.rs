@@ -153,6 +153,7 @@ pub use filter::{FilterExecutor, UpsertFilterExecutor};
 pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
+pub use join::asof_join::{AsOfCpuEncoding, AsOfMemoryEncoding};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
 pub use lookup::*;

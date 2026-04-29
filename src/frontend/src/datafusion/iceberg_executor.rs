@@ -62,7 +62,7 @@ struct IcebergScanInner {
     scan_column_names: Vec<String>,
     need_seq_num: bool,
     need_file_path_and_pos: bool,
-    plan_properties: PlanProperties,
+    plan_properties: Arc<PlanProperties>,
     projection: Option<Vec<usize>>,
 }
 
@@ -109,7 +109,7 @@ impl ExecutionPlan for IcebergScan {
         self
     }
 
-    fn properties(&self) -> &PlanProperties {
+    fn properties(&self) -> &Arc<PlanProperties> {
         &self.inner.plan_properties
     }
 
@@ -139,10 +139,6 @@ impl ExecutionPlan for IcebergScan {
             self.schema(),
             stream,
         )))
-    }
-
-    fn statistics(&self) -> DFResult<Statistics> {
-        self.partition_statistics(None)
     }
 
     fn partition_statistics(&self, partition: Option<usize>) -> DFResult<Statistics> {
@@ -212,12 +208,12 @@ impl IcebergScan {
             .map(|tasks| calculate_statistics(tasks.iter(), &arrow_schema))
             .collect();
         let total_statistics = calculate_statistics(scan_tasks.iter(), &arrow_schema);
-        let plan_properties = PlanProperties::new(
+        let plan_properties = Arc::new(PlanProperties::new(
             EquivalenceProperties::new(arrow_schema.clone()),
             Partitioning::UnknownPartitioning(tasks.len()),
             EmissionType::Incremental,
             Boundedness::Bounded,
-        );
+        ));
 
         Ok(Self {
             inner: Arc::new(IcebergScanInner {

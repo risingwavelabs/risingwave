@@ -69,7 +69,7 @@ use crate::handler::create_mv::parse_column_names;
 use crate::handler::util::{
     LongRunningNotificationAction, check_connector_match_connection_type,
     ensure_connection_type_allowed, execute_with_long_running_notification,
-    get_table_catalog_by_table_name,
+    get_table_catalog_by_table_name, reject_internal_table_dependencies,
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
@@ -327,6 +327,8 @@ pub async fn gen_sink_plan(
         )
     };
 
+    reject_internal_table_dependencies(session, &dependent_relations, "CREATE SINK")?;
+
     let col_names = if sink_into_table_name.is_some() {
         parse_column_names(&stmt.columns)
     } else {
@@ -441,7 +443,7 @@ pub async fn gen_sink_plan(
 
     let sink_desc = sink_plan.sink_desc().clone();
 
-    let mut sink_plan: PlanRef = sink_plan.into();
+    let mut sink_plan: PlanRef = sink_plan.into_stream_plan()?;
 
     let ctx = sink_plan.ctx();
     let explain_trace = ctx.is_explain_trace();

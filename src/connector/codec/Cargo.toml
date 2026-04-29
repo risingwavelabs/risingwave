@@ -43,7 +43,7 @@ workspace-hack = { path = "../../workspace-hack" }
 expect-test = "1"
 fs-err = "3"
 hex = "0.4"
-tokio = { version = "0.2", package = "madsim-tokio" }
+tokio = { workspace = true }
 
 [build-dependencies]
 prost-build = "0.14.3"

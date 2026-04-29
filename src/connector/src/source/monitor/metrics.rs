@@ -138,6 +138,8 @@ pub struct SourceMetrics {
     pub partition_input_bytes: LabelGuardedIntCounterVec,
     /// Report latest message id
     pub latest_message_id: LabelGuardedIntGaugeVec,
+    pub partition_eof_count: LabelGuardedIntCounterVec,
+    pub partition_eof_offset: LabelGuardedIntGaugeVec,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
 
     pub direct_cdc_event_lag_latency: LabelGuardedHistogramVec,
@@ -194,6 +196,20 @@ impl SourceMetrics {
             "Latest message id for a exec per partition",
             &["source_id", "actor_id", "partition"],
             registry,
+        )
+        .unwrap();
+        let partition_eof_count = register_guarded_int_counter_vec_with_registry!(
+            "source_partition_eof_count",
+            "Total number of EOF events received from specific partition",
+            &["source_id", "partition", "source_name", "fragment_id"],
+            registry
+        )
+        .unwrap();
+        let partition_eof_offset = register_guarded_int_gauge_vec_with_registry!(
+            "source_partition_eof_offset",
+            "Latest resolved EOF offset for specific partition",
+            &["source_id", "partition", "source_name", "fragment_id"],
+            registry
         )
         .unwrap();
 
@@ -290,6 +306,8 @@ impl SourceMetrics {
             partition_input_count,
             partition_input_bytes,
             latest_message_id,
+            partition_eof_count,
+            partition_eof_offset,
             rdkafka_native_metric,
             direct_cdc_event_lag_latency,
             parquet_source_skip_row_count,

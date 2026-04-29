@@ -22,12 +22,11 @@ pub use canal::*;
 pub use chunk_builder::{SourceStreamChunkBuilder, SourceStreamChunkRowWriter};
 use csv_parser::CsvParser;
 pub use debezium::*;
-use futures::{Future, TryFutureExt};
+use futures::{Future, Stream, StreamExt, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 pub use json_parser::*;
 pub use parquet_parser::ParquetParser;
 pub use protobuf::*;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{CDC_TABLE_NAME_COLUMN_NAME, KAFKA_TIMESTAMP_COLUMN_NAME};
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
@@ -50,8 +49,9 @@ use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::monitor::GLOBAL_SOURCE_METRICS;
 use crate::source::{
-    BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc, SourceColumnType, SourceContext,
-    SourceContextRef, SourceCtrlOpts, SourceMeta,
+    BoxSourceMessageEventStream, SourceChunkStream, SourceColumnDesc, SourceColumnType,
+    SourceContext, SourceContextRef, SourceCtrlOpts, SourceMessageEvent, SourceMeta,
+    SourceReaderEvent,
 };
 
 mod access_builder;
@@ -78,6 +78,19 @@ mod utils;
 
 use access_builder::{AccessBuilder, AccessBuilderImpl};
 pub use config::*;
+
+pub(crate) fn into_data_chunk_stream(
+    stream: impl Stream<Item = ConnectorResult<SourceReaderEvent>> + Send + 'static,
+) -> impl SourceChunkStream {
+    stream
+        .try_filter_map(|event| async move {
+            Ok(match event {
+                SourceReaderEvent::DataChunk(chunk) => Some(chunk),
+                SourceReaderEvent::SplitProgress(_) => None,
+            })
+        })
+        .boxed()
+}
 pub use debezium::DEBEZIUM_IGNORE_KEY;
 use debezium::schema_change::SchemaChangeEnvelope;
 pub use unified::{AccessError, AccessResult};
@@ -164,7 +177,7 @@ pub enum ParserFormat {
 /// `ByteStreamSourceParser` is the entrypoint abstraction for parsing messages.
 /// It consumes bytes of one individual message and produces parsed records.
 ///
-/// It's used by [`ByteStreamSourceParserImpl::parse_stream`]. `pub` is for benchmark only.
+/// It's used by [`ByteStreamSourceParserImpl::parse_stream_with_events`]. `pub` is for benchmark only.
 pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The column descriptors of the output chunk.
     fn columns(&self) -> &[SourceColumnDesc];
@@ -205,18 +218,10 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
 
 #[easy_ext::ext(SourceParserIntoStreamExt)]
 impl<P: ByteStreamSourceParser> P {
-    /// Parse a `SourceMessage` stream into a [`StreamChunk`] stream.
-    ///
-    /// # Arguments
-    ///
-    /// - `msg_stream`: A stream of batches of `SourceMessage`.
-    ///
-    /// # Returns
-    ///
-    /// A [`SourceChunkStream`] of parsed chunks. Each of the parsed chunks are guaranteed
-    /// to have less than or equal to `source_ctrl_opts.chunk_size` rows, unless there's a
-    /// large transaction and `source_ctrl_opts.split_txn` is false.
-    pub fn parse_stream(self, msg_stream: BoxSourceMessageStream) -> impl SourceChunkStream {
+    pub fn parse_stream_with_events(
+        self,
+        msg_stream: BoxSourceMessageEventStream,
+    ) -> impl Stream<Item = ConnectorResult<SourceReaderEvent>> + Send {
         let actor_id = self.source_ctx().actor_id;
         let source_id = self.source_ctx().source_id.as_raw_id();
 
@@ -231,10 +236,10 @@ impl<P: ByteStreamSourceParser> P {
 
 // TODO: when upsert is disabled, how to filter those empty payload
 // Currently, an err is returned for non upsert with empty payload
-#[try_stream(ok = StreamChunk, error = crate::error::ConnectorError)]
+#[try_stream(ok = SourceReaderEvent, error = crate::error::ConnectorError)]
 async fn parse_message_stream<P: ByteStreamSourceParser>(
     mut parser: P,
-    msg_stream: BoxSourceMessageStream,
+    msg_stream: BoxSourceMessageEventStream,
     source_ctrl_opts: SourceCtrlOpts,
 ) {
     let mut chunk_builder =
@@ -243,13 +248,19 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
     let mut direct_cdc_event_lag_latency_metrics = HashMap::new();
 
     #[for_await]
-    for batch in msg_stream {
+    for event in msg_stream {
         // It's possible that the split is not active, which means the next batch may arrive
         // very lately, so we should prefer emitting all records in current batch before the end
         // of each iteration, instead of merging them with the next batch. An exception is when
         // a transaction is not committed yet, in which yield when the transaction is committed.
 
-        let batch = batch?;
+        let batch = match event? {
+            SourceMessageEvent::Data(batch) => batch,
+            SourceMessageEvent::SplitProgress(progress) => {
+                yield SourceReaderEvent::SplitProgress(progress);
+                continue;
+            }
+        };
         let batch_len = batch.len();
         if batch_len == 0 {
             continue;
@@ -268,7 +279,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                         offset: &msg.offset,
                     });
                     for chunk in chunk_builder.consume_ready_chunks() {
-                        yield chunk;
+                        yield SourceReaderEvent::DataChunk(chunk);
                     }
                     is_heartbeat_emitted = true;
                 }
@@ -334,7 +345,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                     }
 
                     for chunk in chunk_builder.consume_ready_chunks() {
-                        yield chunk;
+                        yield SourceReaderEvent::DataChunk(chunk);
                     }
                 }
 
@@ -354,7 +365,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                         }
 
                         for chunk in chunk_builder.consume_ready_chunks() {
-                            yield chunk;
+                            yield SourceReaderEvent::DataChunk(chunk);
                         }
                     }
                 },
@@ -388,7 +399,7 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
             chunk_builder.finish_current_chunk();
         }
         for chunk in chunk_builder.consume_ready_chunks() {
-            yield chunk;
+            yield SourceReaderEvent::DataChunk(chunk);
         }
     }
 }
@@ -399,7 +410,7 @@ pub enum EncodingType {
     Value,
 }
 
-/// The entrypoint of parsing. It parses `SourceMessage` stream (byte stream) into [`StreamChunk`] stream.
+/// The entrypoint of parsing. It parses `SourceMessage` stream (byte stream) into [`risingwave_common::array::StreamChunk`] stream.
 /// Used by [`crate::source::into_chunk_stream`].
 #[derive(Debug)]
 pub enum ByteStreamSourceParserImpl {
@@ -413,20 +424,19 @@ pub enum ByteStreamSourceParserImpl {
 }
 
 impl ByteStreamSourceParserImpl {
-    /// Converts `SourceMessage` vec stream into [`StreamChunk`] stream.
-    pub fn parse_stream(
+    pub fn parse_stream_with_events(
         self,
-        msg_stream: BoxSourceMessageStream,
-    ) -> impl SourceChunkStream + Unpin {
+        msg_stream: BoxSourceMessageEventStream,
+    ) -> impl Stream<Item = ConnectorResult<SourceReaderEvent>> + Send {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
-            Self::Csv(parser) => parser.parse_stream(msg_stream),
-            Self::Debezium(parser) => parser.parse_stream(msg_stream),
-            Self::DebeziumMongoJson(parser) => parser.parse_stream(msg_stream),
-            Self::Maxwell(parser) => parser.parse_stream(msg_stream),
-            Self::CanalJson(parser) => parser.parse_stream(msg_stream),
-            Self::Plain(parser) => parser.parse_stream(msg_stream),
-            Self::Upsert(parser) => parser.parse_stream(msg_stream),
+            Self::Csv(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::Debezium(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::DebeziumMongoJson(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::Maxwell(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::CanalJson(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::Plain(parser) => parser.parse_stream_with_events(msg_stream),
+            Self::Upsert(parser) => parser.parse_stream_with_events(msg_stream),
         };
         Box::pin(stream)
     }
@@ -487,6 +497,7 @@ impl ByteStreamSourceParserImpl {
 pub mod test_utils {
     use futures::StreamExt;
     use itertools::Itertools;
+    use risingwave_common::array::StreamChunk;
 
     use super::*;
     use crate::source::SourceMessage;
@@ -503,11 +514,16 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
-                .next()
-                .await
-                .unwrap()
-                .unwrap()
+            into_data_chunk_stream(
+                self.parse_stream_with_events(
+                    futures::stream::once(async { Ok(SourceMessageEvent::Data(source_messages)) })
+                        .boxed(),
+                ),
+            )
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
         }
 
         /// Parse the given key-value pairs into a [`StreamChunk`].
@@ -521,11 +537,16 @@ pub mod test_utils {
                 })
                 .collect_vec();
 
-            self.parse_stream(futures::stream::once(async { Ok(source_messages) }).boxed())
-                .next()
-                .await
-                .unwrap()
-                .unwrap()
+            into_data_chunk_stream(
+                self.parse_stream_with_events(
+                    futures::stream::once(async { Ok(SourceMessageEvent::Data(source_messages)) })
+                        .boxed(),
+                ),
+            )
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
         }
     }
 }

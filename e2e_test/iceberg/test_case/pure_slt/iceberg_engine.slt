@@ -191,6 +191,25 @@ statement ok
 DROP TABLE price;
 
 statement ok
+CREATE TABLE t_order_key (
+  id BIGINT PRIMARY KEY,
+  v1 INT,
+  v2 VARCHAR
+) WITH (
+  commit_checkpoint_interval = 1,
+  order_key = 'v1 desc nulls last, id asc'
+) ENGINE = ICEBERG;
+
+statement ok
+INSERT INTO t_order_key VALUES (1, 10, 'a'), (2, 20, 'b');
+
+statement ok
+FLUSH;
+
+statement ok
+DROP TABLE t_order_key;
+
+statement ok
 DROP CONNECTION my_conn;
 
 # test iceberg_tables and iceberg_namespace_properties before creating hosted catalog

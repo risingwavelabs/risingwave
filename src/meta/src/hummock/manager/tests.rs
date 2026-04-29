@@ -3141,7 +3141,7 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
 }
 
 #[tokio::test]
-async fn test_schedule_group_split_runs_split_logic_after_normalize() {
+async fn test_schedule_group_split_does_not_normalize_overlap_when_enabled() {
     let mut opts = MetaOpts::test(false);
     opts.enable_compaction_group_normalize = true;
     let (_env, hummock_manager, _, worker_id) =
@@ -3196,12 +3196,12 @@ async fn test_schedule_group_split_runs_split_logic_after_normalize() {
     hummock_manager.schedule_group_split_for_test().await;
 
     let current_version = hummock_manager.get_current_version().await;
-    assert_compaction_groups_non_overlapping(&current_version);
+    assert!(has_overlapping_compaction_groups(&current_version));
     assert_eq!(
         all_group_member_table_ids(&current_version),
         vec![64, 65, 80, 81, 200, 201]
     );
-    assert_eq!(non_empty_compaction_group_count(&current_version), 6);
+    assert_eq!(non_empty_compaction_group_count(&current_version), 4);
     assert_ne!(
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 200).await,
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 201).await
