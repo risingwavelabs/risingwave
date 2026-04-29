@@ -34,7 +34,7 @@ RUN rustup self update \
   && rustup component add rustfmt \
   && rustup target add wasm32-wasip1
 
-RUN cargo install flamegraph
+RUN cargo install flamegraph --version 0.6.11 --locked
 RUN cargo install addr2line --features bin --bin addr2line
 
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
