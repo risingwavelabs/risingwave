@@ -159,11 +159,6 @@ enum ConsumerFutureEvent {
     CleanStateReached,
 }
 
-struct ConsumerFutureControl<'a> {
-    read_paused: bool,
-    clean_state: &'a mut bool,
-}
-
 impl ConsumerFuture {
     fn dispatch(
         mut inner: DispatchExecutorInner,
@@ -217,7 +212,7 @@ impl ConsumerFuture {
         }
     }
 
-    fn maybe_mark_clean_state<S: StateStoreRead>(
+    fn mark_clean_state<S: StateStoreRead>(
         clean_state: &mut bool,
         read_future: &ReadFuture<S>,
         buffer: &SyncedLogStoreBuffer,
@@ -232,10 +227,12 @@ impl ConsumerFuture {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     async fn next_dispatched_barrier<S: StateStoreRead>(
         &mut self,
         read_future: &mut ReadFuture<S>,
-        control: ConsumerFutureControl<'_>,
+        read_paused: bool,
+        clean_state: &mut bool,
         progress: &mut LogStoreVnodeProgress,
         read_state: &LogStoreReadState<S>,
         buffer: &mut SyncedLogStoreBuffer,
@@ -244,15 +241,10 @@ impl ConsumerFuture {
         loop {
             match self {
                 ConsumerFuture::ReadingChunk { .. } => {
-                    if Self::maybe_mark_clean_state(
-                        control.clean_state,
-                        read_future,
-                        buffer,
-                        metrics,
-                    ) {
+                    if Self::mark_clean_state(clean_state, read_future, buffer, metrics) {
                         return Ok(ConsumerFutureEvent::CleanStateReached);
                     }
-                    if control.read_paused {
+                    if read_paused {
                         pending().await
                     }
 
@@ -261,12 +253,8 @@ impl ConsumerFuture {
                         .await?;
                     metrics.total_read_count.inc_by(chunk.cardinality() as _);
 
-                    let clean_state_reached = Self::maybe_mark_clean_state(
-                        control.clean_state,
-                        read_future,
-                        buffer,
-                        metrics,
-                    );
+                    let clean_state_reached =
+                        Self::mark_clean_state(clean_state, read_future, buffer, metrics);
                     let inner = must_match!(
                         replace(self, ConsumerFuture::PlaceHolder),
                         ConsumerFuture::ReadingChunk { inner } => inner
@@ -399,10 +387,8 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                         consumer_future_state
                             .next_dispatched_barrier(
                                 &mut read_future_state,
-                                ConsumerFutureControl {
-                                    read_paused: pause_stream,
-                                    clean_state: &mut clean_state,
-                                },
+                                pause_stream,
+                                &mut clean_state,
                                 &mut progress,
                                 &read_state,
                                 &mut buffer,
