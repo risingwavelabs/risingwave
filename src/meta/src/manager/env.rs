@@ -19,7 +19,8 @@ use std::sync::atomic::AtomicU32;
 
 use anyhow::Context;
 use risingwave_common::config::{
-    CompactionConfig, DefaultParallelism, ObjectStoreConfig, RpcClientConfig,
+    CompactionConfig, DefaultParallelism, ExplicitSessionInitParams, ObjectStoreConfig,
+    RpcClientConfig,
 };
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -428,6 +429,7 @@ impl MetaSrvEnv {
         opts: MetaOpts,
         mut init_system_params: SystemParams,
         init_session_config: SessionConfig,
+        explicit_session_init_params: ExplicitSessionInitParams,
         meta_store_impl: SqlMetaStore,
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
@@ -491,6 +493,7 @@ impl MetaSrvEnv {
                 meta_store_impl.clone(),
                 notification_manager.clone(),
                 init_session_config,
+                explicit_session_init_params,
             )
             .await?,
         );
@@ -603,6 +606,7 @@ impl MetaSrvEnv {
         Self::new(
             opts,
             system_params,
+            Default::default(),
             Default::default(),
             SqlMetaStore::for_test().await,
         )

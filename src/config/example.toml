@@ -475,6 +475,15 @@ time_travel_retention_ms = 600000
 per_database_isolation = true
 enforce_secret = false
 
+[session_init]
+streaming_parallelism = "default"
+streaming_parallelism_for_backfill = "default"
+streaming_parallelism_for_table = "default"
+streaming_parallelism_for_sink = "default"
+streaming_parallelism_for_index = "default"
+streaming_parallelism_for_source = "default"
+streaming_parallelism_for_materialized_view = "default"
+
 [udf]
 enable_embedded_python_udf = false
 enable_embedded_javascript_udf = true

@@ -42,6 +42,7 @@ pub use storage::{
 pub mod merge;
 pub mod mutate;
 pub mod none_as_empty_string;
+pub mod session;
 pub mod system;
 pub mod utils;
 
@@ -59,6 +60,7 @@ use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
+pub use session::{ExplicitSessionInitParams, SessionInitConfig};
 pub use system::SystemConfig;
 pub use utils::*;
 
@@ -104,6 +106,10 @@ pub struct RwConfig {
     #[educe(Debug(ignore))]
     #[config_doc(nested)]
     pub system: SystemConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub session_init: SessionInitConfig,
 
     #[serde(default)]
     #[config_doc(nested)]
@@ -477,6 +483,7 @@ pub mod tests {
         let mut config = RwConfig::default();
         // Set `license_key` to empty in the docs to avoid any confusion.
         config.system.license_key = Some(LicenseKey::empty());
+        config.session_init = SessionInitConfig::for_docs();
         config
     }
 
@@ -792,6 +799,54 @@ pub mod tests {
             duplicate field `compute_client_config`
         "#]]
         .assert_eq(&config.to_string());
+    }
+
+    #[test]
+    fn test_session_init_configs() {
+        let config: RwConfig = toml::from_str(
+            r#"
+            [session_init]
+            streaming_parallelism = "bounded(8)"
+            streaming_parallelism_for_table = "default"
+            streaming_parallelism_for_backfill = "4"
+            "#,
+        )
+        .unwrap();
+
+        let (session_config, explicit) = config.session_init.into_init_session_config().unwrap();
+
+        assert_eq!(
+            session_config.get("streaming_parallelism").unwrap(),
+            "bounded(8)"
+        );
+        assert_eq!(
+            session_config
+                .get("streaming_parallelism_for_table")
+                .unwrap(),
+            "default"
+        );
+        assert_eq!(
+            session_config
+                .get("streaming_parallelism_for_backfill")
+                .unwrap(),
+            "4"
+        );
+        assert_eq!(
+            explicit.get("streaming_parallelism").map(String::as_str),
+            Some("bounded(8)")
+        );
+        assert_eq!(
+            explicit
+                .get("streaming_parallelism_for_table")
+                .map(String::as_str),
+            Some("default")
+        );
+        assert_eq!(
+            explicit
+                .get("streaming_parallelism_for_backfill")
+                .map(String::as_str),
+            Some("4")
+        );
     }
 
     #[test]

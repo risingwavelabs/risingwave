@@ -43,6 +43,19 @@ The effective defaults preserve the legacy behavior:
 For these parameters, `SET ... = DEFAULT` and `SET ... = 'default'` both restore the stored
 `default` value, so `SHOW` output remains round-trippable.
 
+## Bootstrap Config
+
+Cluster bootstrap can initialize these persisted session parameters from the `[session_init]`
+section in `risingwave.toml`.
+
+- `session_init` values are only used to initialize the cluster-level default session parameters in
+  Meta store.
+- On a new cluster, the configured values are written into `session_parameter`.
+- On an existing cluster, persisted `session_parameter` values take precedence over
+  `session_init`.
+- If a parameter is already persisted, later edits to `session_init` do not change its effective
+  value.
+
 ## Resolution Rules
 
 Resolution happens in a single step:

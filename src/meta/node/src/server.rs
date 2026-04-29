@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use otlp_embedded::TraceServiceServer;
 use regex::Regex;
+use risingwave_common::config::ExplicitSessionInitParams;
 use risingwave_common::monitor::{RouterExt, TcpConfig};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::session_config::SessionConfig;
@@ -130,6 +131,7 @@ pub async fn rpc_serve(
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
+    explicit_session_init_params: ExplicitSessionInitParams,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
     let meta_store_impl = SqlMetaStore::connect(meta_store_backend.clone()).await?;
@@ -170,6 +172,7 @@ pub async fn rpc_serve(
         opts,
         init_system_params,
         init_session_config,
+        explicit_session_init_params,
         shutdown,
     ))
     .await
@@ -189,6 +192,7 @@ pub async fn rpc_serve_with_store(
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
+    explicit_session_init_params: ExplicitSessionInitParams,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
     // TODO(shutdown): directly use cancellation token
@@ -253,6 +257,7 @@ pub async fn rpc_serve_with_store(
         opts,
         init_system_params,
         init_session_config,
+        explicit_session_init_params,
         server_config,
         election_client,
         shutdown,
@@ -316,6 +321,7 @@ pub async fn start_service_as_election_leader(
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
+    explicit_session_init_params: ExplicitSessionInitParams,
     server_config: risingwave_common::config::ServerConfig,
     election_client: ElectionClientRef,
     shutdown: CancellationToken,
@@ -326,6 +332,7 @@ pub async fn start_service_as_election_leader(
         opts.clone(),
         init_system_params,
         init_session_config,
+        explicit_session_init_params,
         meta_store_impl,
     )
     .await?;

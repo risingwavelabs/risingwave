@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::config::ExplicitSessionInitParams;
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
 use risingwave_meta_model::prelude::SessionParameter;
 use risingwave_meta_model::session_parameter;
@@ -47,6 +48,7 @@ impl SessionParamsController {
         sql_meta_store: SqlMetaStore,
         notification_manager: NotificationManagerRef,
         mut init_params: SessionConfig,
+        explicit_init_params: ExplicitSessionInitParams,
     ) -> MetaResult<Self> {
         let db = sql_meta_store.conn;
         let params = SessionParameter::find().all(&db).await?;
@@ -57,6 +59,16 @@ impl SessionParamsController {
             .collect::<HashMap<_, _>>();
 
         for (name, value) in effective_params {
+            if let Some(init_value) = explicit_init_params.get(&name)
+                && init_value != &value
+            {
+                tracing::warn!(
+                    param = %name,
+                    init_value,
+                    persisted_value = %value,
+                    "session_init value differs from persisted session parameter, using persisted value"
+                );
+            }
             if let Err(e) = init_params.set(&name, value, &mut ()) {
                 match e {
                     SessionConfigError::InvalidValue { .. } => {
@@ -169,6 +181,7 @@ mod tests {
             meta_store.clone(),
             env.notification_manager_ref(),
             init_params.clone(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -197,6 +210,7 @@ mod tests {
             meta_store.clone(),
             env.notification_manager_ref(),
             init_params.clone(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -230,5 +244,93 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(models.value, params.get("rw_implicit_flush").unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_explicit_session_init_does_not_override_persisted_value() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref();
+
+        let session_param_ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            SessionConfig::default(),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        session_param_ctl
+            .set_param("streaming_parallelism", Some("bounded(16)".into()))
+            .await
+            .unwrap();
+
+        let mut init_params = SessionConfig::default();
+        init_params
+            .set("streaming_parallelism", "bounded(8)".to_owned(), &mut ())
+            .unwrap();
+        let explicit_init_params =
+            HashMap::from([("streaming_parallelism".to_owned(), "bounded(8)".to_owned())]);
+
+        let session_param_ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            init_params,
+            explicit_init_params,
+        )
+        .await
+        .unwrap();
+
+        let params = session_param_ctl.get_params().await;
+        assert_eq!(params.get("streaming_parallelism").unwrap(), "bounded(16)");
+    }
+
+    #[tokio::test]
+    async fn test_explicit_session_init_fills_missing_persisted_parameter() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref();
+
+        let session_param_ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            SessionConfig::default(),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+
+        SessionParameter::delete_by_id("streaming_parallelism_for_materialized_view")
+            .exec(&session_param_ctl.db)
+            .await
+            .unwrap();
+
+        let mut init_params = SessionConfig::default();
+        init_params
+            .set(
+                "streaming_parallelism_for_materialized_view",
+                "ratio(0.5)".to_owned(),
+                &mut (),
+            )
+            .unwrap();
+        let explicit_init_params = HashMap::from([(
+            "streaming_parallelism_for_materialized_view".to_owned(),
+            "ratio(0.5)".to_owned(),
+        )]);
+
+        let session_param_ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            init_params,
+            explicit_init_params,
+        )
+        .await
+        .unwrap();
+
+        let params = session_param_ctl.get_params().await;
+        assert_eq!(
+            params
+                .get("streaming_parallelism_for_materialized_view")
+                .unwrap(),
+            "ratio(0.5)"
+        );
     }
 }
