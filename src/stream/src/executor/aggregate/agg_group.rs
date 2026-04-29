@@ -504,10 +504,13 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 Record::Insert { new_row }
             }
             RecordType::Delete => {
-                let prev_inter_states = self
-                    .prev_inter_states
-                    .take()
-                    .expect("must exist previous intermediate states");
+                let Some(prev_inter_states) = self.prev_inter_states.take() else {
+                    consistency_panic!(
+                        group = ?self.ctx.group_key_row(),
+                        "missing prev_inter_states for Delete record",
+                    );
+                    return Ok(None);
+                };
                 let old_row = self
                     .group_key()
                     .map(GroupKey::table_row)
@@ -521,10 +524,14 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                     .map(GroupKey::table_row)
                     .chain(&curr_inter_states)
                     .into_owned_row();
-                let prev_inter_states = self
-                    .prev_inter_states
-                    .replace(curr_inter_states)
-                    .expect("must exist previous intermediate states");
+                let Some(prev_inter_states) = self.prev_inter_states.replace(curr_inter_states)
+                else {
+                    consistency_panic!(
+                        group = ?self.ctx.group_key_row(),
+                        "missing prev_inter_states for Update record",
+                    );
+                    return Ok(None);
+                };
                 let old_row = self
                     .group_key()
                     .map(GroupKey::table_row)

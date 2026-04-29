@@ -44,6 +44,7 @@ use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
+use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
 use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, NewOutputRequest};
@@ -981,28 +982,39 @@ impl Dispatcher for HashDataDispatcher {
             // stream key of the downstream executor, and there's an invariant that stream key
             // must be the same for rows within an `Update` pair.
             if op == Op::UpdateDelete {
-                last_update_delete_row_idx = Some(row_idx);
+                // Push a placeholder UpdateDelete now to keep new_ops aligned with chunk rows.
+                // The paired U+ may rewrite this slot to Delete if the dist key changed; an
+                // orphan U- (no following U+) is rewritten to plain Delete after the loop.
+                new_ops.push(Op::UpdateDelete);
+                last_update_delete_row_idx = Some((row_idx, new_ops.len() - 1));
             } else if op == Op::UpdateInsert {
-                let delete_row_idx = last_update_delete_row_idx
-                    .take()
-                    .expect("missing U- before U+");
+                let Some((delete_row_idx, delete_op_idx)) = last_update_delete_row_idx.take()
+                else {
+                    consistency_panic!("missing U- before U+ in hash dispatcher");
+                    // Recover by treating the orphan U+ as a plain Insert.
+                    new_ops.push(Op::Insert);
+                    continue;
+                };
 
                 // Check if any distribution key column value changed
                 let dist_key_changed = chunk.row_at(delete_row_idx).1.project(&self.keys)
                     != chunk.row_at(row_idx).1.project(&self.keys);
 
                 if dist_key_changed {
-                    new_ops.push(Op::Delete);
+                    new_ops[delete_op_idx] = Op::Delete;
                     new_ops.push(Op::Insert);
                 } else {
-                    new_ops.push(Op::UpdateDelete);
                     new_ops.push(Op::UpdateInsert);
                 }
             } else {
                 new_ops.push(op);
             }
         }
-        assert!(last_update_delete_row_idx.is_none(), "missing U+ after U-");
+        if let Some((_, delete_op_idx)) = last_update_delete_row_idx.take() {
+            consistency_panic!("missing U+ after U- in hash dispatcher");
+            // Recover by demoting the orphan U- to plain Delete.
+            new_ops[delete_op_idx] = Op::Delete;
+        }
 
         // Apply output mapping after calculating the vnode and new visibility maps.
         // The output mapping may project columns and eliminate noop updates.

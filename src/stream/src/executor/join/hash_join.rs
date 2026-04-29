@@ -34,7 +34,7 @@ use super::row::{CachedJoinRow, DegreeType, build_degree_row};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
-use crate::consistency::{consistency_error, enable_strict_consistency};
+use crate::consistency::{ConsistentCounter, consistency_error, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::join::row::JoinRow;
 use crate::executor::monitor::StreamingMetrics;
@@ -387,15 +387,12 @@ pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
     );
     if INCREMENT {
         matched_row.degree += 1;
-    } else if matched_row.degree == 0 {
-        // Underflow can occur when a Delete arrives without a paired earlier Insert at this
-        // operator (e.g. probe-side state TTL skew, upstream-dropped Delete causing repeated
-        // Inserts on the same stream key, or independent TTL between data and degree tables).
-        // Skip both the in-memory and persisted decrement to keep the degree saturated at 0.
-        consistency_error!("decreasing zero degree on a join state row");
+    } else if !matched_row
+        .degree
+        .consistent_dec("decreasing zero degree on a join state row")
+    {
+        // Skip the no-op storage write when saturated.
         return;
-    } else {
-        matched_row.degree -= 1;
     }
     let new_degree_row = build_degree_row(
         order_key_indices,

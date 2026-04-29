@@ -25,6 +25,7 @@ use risingwave_expr::table_function::{self, BoxedTableFunction, TableFunctionOut
 use risingwave_pb::expr::PbProjectSetSelectItem;
 use risingwave_pb::expr::project_set_select_item::PbSelectItem;
 
+use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 
@@ -276,12 +277,11 @@ impl Inner {
                 .project(&self.nondecreasing_expr_indices)
                 .iter()
                 .enumerate()
-                .for_each(|(idx, value)| {
-                    last_nondec_expr_values[idx] = Some(
-                        value
-                            .to_owned_datum()
-                            .expect("non-decreasing expression should never be NULL"),
-                    );
+                .for_each(|(idx, value)| match value.to_owned_datum() {
+                    Some(v) => last_nondec_expr_values[idx] = Some(v),
+                    None => {
+                        consistency_panic!("non-decreasing expression should never be NULL")
+                    }
                 });
         }
     }

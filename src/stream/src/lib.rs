@@ -124,4 +124,61 @@ mod consistency {
         };
     }
     pub(crate) use consistency_panic;
+
+    /// Like `assert!`, but routes failure through `consistency_panic!` (panic in strict mode,
+    /// log in non-strict). The side effect after the assertion still runs in non-strict mode,
+    /// so use only at sites where the post-assertion behavior is sane on a violated invariant
+    /// (e.g. last-write-wins).
+    macro_rules! consistent_assert {
+        ($cond:expr, $($arg:tt)*) => {
+            if !($cond) {
+                crate::consistency::consistency_panic!($($arg)*);
+            }
+        };
+    }
+    pub(crate) use consistent_assert;
+
+    /// Saturating-at-zero decrement that routes underflow through `consistency_panic!`.
+    pub(crate) trait ConsistentCounter: Sized {
+        /// Decrement by 1. Returns `false` if saturated; in that case the value is
+        /// left at 0 and a `consistency_panic!` is raised.
+        fn consistent_dec(&mut self, msg: &'static str) -> bool;
+    }
+
+    impl ConsistentCounter for u64 {
+        #[track_caller]
+        fn consistent_dec(&mut self, msg: &'static str) -> bool {
+            if *self == 0 {
+                consistency_panic!("{}", msg);
+                return false;
+            }
+            *self -= 1;
+            true
+        }
+    }
+
+    impl ConsistentCounter for i64 {
+        #[track_caller]
+        fn consistent_dec(&mut self, msg: &'static str) -> bool {
+            if *self <= 0 {
+                consistency_panic!(prev = *self, "{}", msg);
+                *self = 0;
+                return false;
+            }
+            *self -= 1;
+            true
+        }
+    }
+
+    impl ConsistentCounter for usize {
+        #[track_caller]
+        fn consistent_dec(&mut self, msg: &'static str) -> bool {
+            if *self == 0 {
+                consistency_panic!("{}", msg);
+                return false;
+            }
+            *self -= 1;
+            true
+        }
+    }
 }

@@ -18,6 +18,7 @@ use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::NonStrictExpression;
 
+use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
@@ -170,11 +171,11 @@ impl Inner {
                                 .project(&self.nondecreasing_expr_indices)
                                 .iter()
                                 .enumerate()
-                                .for_each(|(idx, value)| {
-                                    self.last_nondec_expr_values[idx] =
-                                        Some(value.to_owned_datum().expect(
-                                            "non-decreasing expression should never be NULL",
-                                        ));
+                                .for_each(|(idx, value)| match value.to_owned_datum() {
+                                    Some(v) => self.last_nondec_expr_values[idx] = Some(v),
+                                    None => consistency_panic!(
+                                        "non-decreasing expression should never be NULL"
+                                    ),
                                 });
                         }
                         yield Message::Chunk(new_chunk)
