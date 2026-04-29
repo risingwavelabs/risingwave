@@ -395,6 +395,10 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                 ));
             }
             // We yield once for each file now, because iceberg-rs doesn't support read part of a file now.
+            // Skip if the task produced no data (e.g. empty or fully-deleted file).
+            if chunks.is_empty() {
+                continue;
+            }
             let last_chunk = chunks.last().unwrap();
             let last_row = last_chunk.row_at(last_chunk.cardinality() - 1).1;
             let data_file_path = last_row
