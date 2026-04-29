@@ -276,6 +276,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         F::create(opts.bloom_false_positive, opts.capacity / 16),
         opts,
         compaction_catalog_agent_ref,
+        HashMap::default(),
         None,
     );
 

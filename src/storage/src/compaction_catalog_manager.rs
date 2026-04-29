@@ -17,22 +17,26 @@ use std::fmt::Debug;
 use std::iter;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
+use risingwave_common::row::Row;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
-use risingwave_hummock_sdk::key::{TABLE_PREFIX_LEN, get_table_id};
+use risingwave_hummock_sdk::key::{FullKey, TABLE_PREFIX_LEN, get_table_id};
+use risingwave_hummock_sdk::table_watermark::{WatermarkDirection, WatermarkSerdeType};
 use risingwave_pb::catalog::Table;
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::{Result as RpcResult, RpcError};
 use thiserror_ext::AsReport;
 
+use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockError, HummockResult};
 use crate::row_serde::value_serde::ValueRowSerdeNew;
 
@@ -543,12 +547,71 @@ impl CompactionCatalogAgent {
             .clone()
     }
 
+    pub fn should_update_max_watermark(
+        &self,
+        direction: WatermarkDirection,
+        current: &[u8],
+        candidate: &[u8],
+    ) -> bool {
+        direction.key_filter_by_watermark(current, candidate)
+    }
+
     pub fn table_id_to_vnode_ref(&self) -> &HashMap<StateTableId, usize> {
         &self.table_id_to_vnode
     }
 
     pub fn table_ids(&self) -> impl Iterator<Item = StateTableId> + '_ {
         self.table_id_to_vnode.keys().cloned()
+    }
+
+    pub fn extract_watermark(
+        &self,
+        table_id: StateTableId,
+        watermark_type: WatermarkSerdeType,
+        full_key: FullKey<&[u8]>,
+        value: HummockValue<&[u8]>,
+    ) -> HummockResult<Option<(Bytes, WatermarkDirection)>> {
+        match watermark_type {
+            WatermarkSerdeType::PkPrefix | WatermarkSerdeType::NonPkPrefix => {
+                let Some((pk_prefix_serde, watermark_col_serde, watermark_col_idx)) =
+                    self.watermark_serde(table_id)
+                else {
+                    tracing::warn!(?table_id, ?watermark_type, "Failed to get watermark serde.");
+                    return Ok(None);
+                };
+                let (_vnode, inner_key) = full_key.user_key.table_key.split_vnode();
+                let row = pk_prefix_serde
+                    .deserialize(inner_key)
+                    .map_err(HummockError::decode_error)?;
+                let datum = row.datum_at(watermark_col_idx);
+                if datum.is_some() {
+                    let mut buf = vec![];
+                    watermark_col_serde.serialize([datum], &mut buf);
+                    let order_type = watermark_col_serde.get_order_types()[0];
+                    let direction = if order_type.is_ascending() {
+                        WatermarkDirection::Ascending
+                    } else {
+                        WatermarkDirection::Descending
+                    };
+                    Ok(Some((Bytes::from(buf), direction)))
+                } else {
+                    Ok(None)
+                }
+            }
+            WatermarkSerdeType::Value => {
+                let Some(value_serde) = self.value_watermark_serde(table_id) else {
+                    tracing::warn!(?table_id, ?watermark_type, "Failed to get watermark serde.");
+                    return Ok(None);
+                };
+                if let HummockValue::Put(val) = value {
+                    return value_serde
+                        .deserialize(val)
+                        .map(|opt| opt.map(Bytes::from))
+                        .map(|opt| opt.map(|watermark| (watermark, value_serde.direction())));
+                }
+                Ok(None)
+            }
+        }
     }
 }
 
@@ -711,6 +774,10 @@ impl ValueWatermarkColumnSerde {
         let bytes = memcmp_encoding::encode_value(datum, self.watermark_column_mem_encoding_order)
             .map_err(HummockError::encode_error)?;
         Ok(Some(bytes.into()))
+    }
+
+    pub fn direction(&self) -> WatermarkDirection {
+        WatermarkDirection::Ascending
     }
 }
 

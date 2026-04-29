@@ -236,6 +236,7 @@ pub async fn sst_dump_via_sstable_store(
         bloom_filter_kind: Default::default(),
         sst_size: 0,
         vnode_statistics: None,
+        max_seen_watermark: None,
     }
     .into();
     let sstable_cache = sstable_store

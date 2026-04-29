@@ -1350,6 +1350,7 @@ pub(crate) mod tests {
             BlockedXor16FilterBuilder::create(opts.bloom_false_positive, opts.capacity / 16),
             opts,
             compaction_catalog_agent_ref,
+            HashMap::default(),
             None,
         );
 
@@ -1605,6 +1606,7 @@ pub(crate) mod tests {
                 BlockedXor16FilterBuilder::create(opts.bloom_false_positive, opts.capacity / 16),
                 opts.clone(),
                 compaction_catalog_agent_ref.clone(),
+                HashMap::default(),
                 None,
             );
             let mut last_k: u64 = 1;
@@ -1733,6 +1735,7 @@ pub(crate) mod tests {
                 BlockedXor16FilterBuilder::create(opts.bloom_false_positive, opts.capacity / 16),
                 opts.clone(),
                 compaction_catalog_agent_ref.clone(),
+                HashMap::default(),
                 None,
             );
             let key_count = KEY_COUNT / VirtualNode::COUNT_FOR_TEST * 2;

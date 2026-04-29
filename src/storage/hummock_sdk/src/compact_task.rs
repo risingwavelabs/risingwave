@@ -252,6 +252,23 @@ impl CompactTask {
         let limit = self.max_vnode_key_range_bytes.filter(|&v| v > 0)? as usize;
         (self.build_compact_table_ids().len() == 1).then_some(limit)
     }
+
+    pub fn build_table_watermark_serde_types(&self) -> HashMap<StateTableId, WatermarkSerdeType> {
+        self.pk_prefix_table_watermarks
+            .keys()
+            .map(|table_id| (*table_id, WatermarkSerdeType::PkPrefix))
+            .chain(
+                self.non_pk_prefix_table_watermarks
+                    .keys()
+                    .map(|table_id| (*table_id, WatermarkSerdeType::NonPkPrefix)),
+            )
+            .chain(
+                self.value_table_watermarks
+                    .keys()
+                    .map(|table_id| (*table_id, WatermarkSerdeType::Value)),
+            )
+            .collect()
+    }
 }
 
 fn split_watermark_serde_types(

@@ -565,6 +565,7 @@ impl SharedBufferCompactRunner {
                 retain_multiple_version: true,
                 stats_target_table_ids: None,
                 table_vnode_partition,
+                table_id_to_watermark_type: HashMap::default(),
                 use_block_based_filter,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
