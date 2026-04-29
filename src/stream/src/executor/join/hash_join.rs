@@ -387,8 +387,14 @@ pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
     );
     if INCREMENT {
         matched_row.degree += 1;
+    } else if matched_row.degree == 0 {
+        // Underflow can occur when a Delete arrives without a paired earlier Insert at this
+        // operator (e.g. probe-side state TTL skew, upstream-dropped Delete causing repeated
+        // Inserts on the same stream key, or independent TTL between data and degree tables).
+        // Skip both the in-memory and persisted decrement to keep the degree saturated at 0.
+        consistency_error!("decreasing zero degree on a join state row");
+        return;
     } else {
-        // DECREMENT
         matched_row.degree -= 1;
     }
     let new_degree_row = build_degree_row(
