@@ -297,7 +297,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(op_consistency_level)
             .enable_preload_all_rows_by_config(&actor_context.config)
-            .enable_vnode_key_stats(true, &actor_context.config)
+            .enable_vnode_key_stats(
+                actor_context
+                    .config
+                    .developer
+                    .enable_vnode_key_stats_for_materialize,
+                &actor_context.config,
+            )
             .with_metrics(state_table_metrics)
             .build()
             .await;

@@ -23,7 +23,8 @@ use risingwave_meta_model::refresh_job::{self, RefreshState};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveModelTrait, DatabaseTransaction};
+use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseTransaction, SqlErr};
+use thiserror_ext::AsReport;
 
 use super::*;
 use crate::controller::utils::load_streaming_jobs_by_ids;
@@ -141,6 +142,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: to_update_relations,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -233,6 +235,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: to_update_relations,
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -458,10 +461,7 @@ impl CatalogController {
 
                 if !index_ids.is_empty() || !table_ids.is_empty() {
                     Object::update_many()
-                        .col_expr(
-                            object::Column::OwnerId,
-                            SimpleExpr::Value(Value::Int(Some(new_owner))),
-                        )
+                        .col_expr(object::Column::OwnerId, SimpleExpr::Value(new_owner.into()))
                         .filter(
                             object::Column::Oid.is_in::<ObjectId, _>(
                                 index_ids
@@ -532,7 +532,7 @@ impl CatalogController {
                         &txn,
                         object_id,
                         object::Column::OwnerId,
-                        Value::Int(Some(new_owner)),
+                        new_owner,
                         &mut objects,
                     )
                     .await?;
@@ -555,7 +555,7 @@ impl CatalogController {
                     &txn,
                     object_id,
                     object::Column::OwnerId,
-                    Value::Int(Some(new_owner)),
+                    new_owner,
                     &mut objects,
                 )
                 .await?;
@@ -616,6 +616,7 @@ impl CatalogController {
                             object_info: Some(object),
                         })
                         .collect(),
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -800,7 +801,7 @@ impl CatalogController {
                         &txn,
                         object_id,
                         object::Column::SchemaId,
-                        new_schema.into(),
+                        new_schema,
                         &mut objects,
                     )
                     .await?;
@@ -824,7 +825,7 @@ impl CatalogController {
                     &txn,
                     object_id,
                     object::Column::SchemaId,
-                    new_schema.into(),
+                    new_schema,
                     &mut objects,
                 )
                 .await?;
@@ -924,6 +925,7 @@ impl CatalogController {
                             object_info: Some(relation_info),
                         })
                         .collect_vec(),
+                    dependencies: vec![],
                 }),
             )
             .await;
@@ -1066,6 +1068,48 @@ impl CatalogController {
         Ok((version, database))
     }
 
+    pub async fn alter_subscription_retention(
+        &self,
+        subscription_id: SubscriptionId,
+        retention_seconds: u64,
+        definition: String,
+    ) -> MetaResult<(NotificationVersion, PbSubscription)> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let obj = Object::find_by_id(subscription_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("subscription", subscription_id))?;
+
+        let active_model = subscription::ActiveModel {
+            subscription_id: Set(subscription_id),
+            retention_seconds: Set(retention_seconds as i64),
+            definition: Set(definition),
+            ..Default::default()
+        };
+        let subscription = active_model.update(&txn).await?;
+
+        txn.commit().await?;
+
+        let pb_subscription: PbSubscription = ObjectModel(subscription, obj, None).into();
+        let subscription_info = PbObjectInfo::Subscription(pb_subscription.clone());
+
+        let version = self
+            .notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: vec![PbObject {
+                        object_info: Some(subscription_info),
+                    }],
+                    dependencies: vec![],
+                }),
+            )
+            .await;
+
+        Ok((version, pb_subscription))
+    }
+
     pub async fn alter_streaming_job_config(
         &self,
         job_id: JobId,
@@ -1156,7 +1200,18 @@ impl CatalogController {
                 tracing::debug!("refresh job already exists for table_id={}", table_id);
                 Ok(())
             }
-            Err(e) => Err(e.into()),
+            Err(e) => {
+                if should_skip_refresh_job_db_err(&inner.db, table_id, &e).await? {
+                    tracing::warn!(
+                        %table_id,
+                        error = %e.as_report(),
+                        "skip ensure_refresh_job for stale dropped table"
+                    );
+                    Ok(())
+                } else {
+                    Err(e.into())
+                }
+            }
         }
     }
 
@@ -1187,8 +1242,21 @@ impl CatalogController {
             },
             ..Default::default()
         };
-        RefreshJob::update(active).exec(&inner.db).await?;
-        Ok(())
+        match RefreshJob::update(active).exec(&inner.db).await {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if should_skip_refresh_job_db_err(&inner.db, table_id, &e).await? {
+                    tracing::warn!(
+                        %table_id,
+                        error = %e.as_report(),
+                        "skip update_refresh_job_status for stale dropped table"
+                    );
+                    Ok(())
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
     }
 
     pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
@@ -1218,4 +1286,27 @@ impl CatalogController {
         RefreshJob::update(active).exec(&inner.db).await?;
         Ok(())
     }
+}
+
+async fn should_skip_refresh_job_db_err<C>(
+    db: &C,
+    table_id: TableId,
+    err: &sea_orm::DbErr,
+) -> MetaResult<bool>
+where
+    C: ConnectionTrait,
+{
+    if matches!(err, sea_orm::DbErr::RecordNotUpdated) {
+        return Ok(true);
+    }
+
+    if !matches!(
+        err.sql_err(),
+        Some(SqlErr::ForeignKeyConstraintViolation(_))
+    ) {
+        return Ok(false);
+    }
+
+    let table_exists = Table::find_by_id(table_id).one(db).await?.is_some();
+    Ok(!table_exists)
 }

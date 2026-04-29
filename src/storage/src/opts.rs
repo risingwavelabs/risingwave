@@ -164,6 +164,7 @@ pub struct StorageOpts {
 
     pub object_store_config: ObjectStoreConfig,
     pub time_travel_version_cache_capacity: u64,
+    pub table_change_log_cache_capacity: u64,
 
     pub iceberg_compaction_enable_validate: bool,
     pub iceberg_compaction_max_record_batch_rows: usize,
@@ -186,6 +187,8 @@ pub struct StorageOpts {
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
     /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
     pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
+    /// Pull interval for iceberg compaction task requests in milliseconds.
+    pub iceberg_compaction_pull_interval_ms: u64,
 }
 
 impl Default for StorageOpts {
@@ -308,6 +311,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .compactor_concurrent_uploading_sst_count,
             time_travel_version_cache_capacity: c.storage.time_travel_version_cache_capacity,
+            table_change_log_cache_capacity: c.storage.table_change_log_cache_capacity,
             compactor_max_overlap_sst_count: c.storage.compactor_max_overlap_sst_count,
             compactor_max_preload_meta_file_count: c.storage.compactor_max_preload_meta_file_count,
 
@@ -343,6 +347,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_pending_parallelism_budget_multiplier: c
                 .storage
                 .iceberg_compaction_pending_parallelism_budget_multiplier,
+            iceberg_compaction_pull_interval_ms: c.storage.iceberg_compaction_pull_interval_ms,
             iceberg_compaction_target_binpack_group_size_mb: c
                 .storage
                 .iceberg_compaction_target_binpack_group_size_mb,

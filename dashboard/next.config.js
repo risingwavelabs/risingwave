@@ -20,11 +20,6 @@
 const nextConfig = {
   output: "export",
   trailingSlash: true,
-  eslint: {
-    // We have a separate step for running ESLint in CI.
-    // Ignore to skip the development dependency on `eslint` for production builds.
-    ignoreDuringBuilds: true,
-  },
 }
 
 module.exports = nextConfig

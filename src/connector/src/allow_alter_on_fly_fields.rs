@@ -14,6 +14,13 @@
 
 // THIS FILE IS AUTO_GENERATED. DO NOT EDIT
 // UPDATE WITH: ./risedev generate-with-options
+// This file is rewritten by `tests::test_allow_alter_on_fly_fields_rust_up_to_date` with
+// `UPDATE_EXPECT=1`.
+// To update content, change source/sink/connection WITH options definitions (for example,
+// `#[with_option(allow_alter_on_fly)]` on struct fields), then run `./risedev generate-with-options`.
+// `./risedev generate-with-options` runs two UPDATE_EXPECT tests:
+// 1) refresh `with_options_{source,sink,connection}.yaml`;
+// 2) regenerate this file from those YAML files.
 
 #![rustfmt::skip]
 
@@ -105,6 +112,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map.try_insert(
@@ -113,6 +121,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map.try_insert(
@@ -121,7 +130,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
-
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
 
@@ -157,6 +166,13 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.enable.auto.commit".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // PubsubProperties
+    map.try_insert(
+        std::any::type_name::<PubsubProperties>().to_owned(),
+        [
+            "pubsub.ack_deadline_seconds".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     map
 });
 
@@ -190,6 +206,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
         std::any::type_name::<IcebergConfig>().to_owned(),
         [
             "commit_checkpoint_interval".to_owned(),
+            "commit_checkpoint_size_threshold_mb".to_owned(),
             "enable_compaction".to_owned(),
             "compaction_interval_sec".to_owned(),
             "enable_snapshot_expiration".to_owned(),
@@ -205,6 +222,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "compaction.type".to_owned(),
             "compaction.write_parquet_compression".to_owned(),
             "compaction.write_parquet_max_row_group_rows".to_owned(),
+            "compaction.write_parquet_max_row_group_bytes".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig

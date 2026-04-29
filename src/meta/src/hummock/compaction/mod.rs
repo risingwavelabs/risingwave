@@ -100,7 +100,7 @@ impl CompactStatus {
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
-        selector: &mut Box<dyn CompactionSelector>,
+        selector: &mut dyn CompactionSelector,
         table_id_to_options: &HashMap<TableId, TableOption>,
         developer_config: Arc<CompactionDeveloperConfig>,
         table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,

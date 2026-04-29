@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::UserId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,7 +22,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwUser {
     #[primary_key]
-    id: i32,
+    id: UserId,
     name: String,
     is_super: bool,
     create_db: bool,
@@ -38,7 +39,7 @@ fn read_rw_user_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUser>> {
     Ok(users
         .into_iter()
         .map(|user| RwUser {
-            id: user.id as i32,
+            id: user.id,
             name: user.name,
             is_super: user.is_super,
             create_db: user.can_create_db,

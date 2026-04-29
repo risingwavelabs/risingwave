@@ -26,7 +26,6 @@ mod nexmark_source;
 mod no_shuffle;
 mod parallelism_exceeds_cores;
 mod resource_group;
-mod schedulability;
 mod shared_source;
 mod singleton_migration;
 mod sink;

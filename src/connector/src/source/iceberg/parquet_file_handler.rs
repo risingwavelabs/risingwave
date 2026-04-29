@@ -44,18 +44,18 @@ use crate::error::ConnectorResult;
 use crate::parser::ParquetParser;
 use crate::source::{Column, SourceColumnDesc};
 
-pub struct ParquetFileReader<R: FileRead> {
+pub struct ParquetFileReader {
     meta: FileMetadata,
-    r: R,
+    r: Box<dyn FileRead>,
 }
 
-impl<R: FileRead> ParquetFileReader<R> {
-    pub fn new(meta: FileMetadata, r: R) -> Self {
+impl ParquetFileReader {
+    pub fn new(meta: FileMetadata, r: Box<dyn FileRead>) -> Self {
         Self { meta, r }
     }
 }
 
-impl<R: FileRead> AsyncFileReader for ParquetFileReader<R> {
+impl AsyncFileReader for ParquetFileReader {
     fn get_bytes(&mut self, range: Range<u64>) -> BoxFuture<'_, parquet::errors::Result<Bytes>> {
         Box::pin(
             self.r
@@ -84,7 +84,7 @@ pub async fn create_parquet_stream_builder(
     s3_access_key: String,
     s3_secret_key: String,
     location: String,
-) -> Result<ParquetRecordBatchStreamBuilder<ParquetFileReader<impl FileRead>>, anyhow::Error> {
+) -> Result<ParquetRecordBatchStreamBuilder<ParquetFileReader>, anyhow::Error> {
     let mut props = HashMap::new();
     props.insert(S3_REGION, s3_region.clone());
     props.insert(S3_ACCESS_KEY_ID, s3_access_key.clone());
@@ -224,6 +224,7 @@ pub async fn list_data_directory(
 pub fn get_project_mask(
     columns: Option<Vec<Column>>,
     metadata: &FileMetaData,
+    case_insensitive: bool,
 ) -> ConnectorResult<ProjectionMask> {
     match columns {
         Some(rw_columns) => {
@@ -238,26 +239,44 @@ pub fn get_project_mask(
             let converted_arrow_schema =
                 parquet_to_arrow_schema(metadata.schema_descr(), metadata.key_value_metadata())
                     .map_err(anyhow::Error::from)?;
+            let mut lowercase_name_to_index: HashMap<String, Option<usize>> = HashMap::new();
+            if case_insensitive {
+                for (index, name) in root_column_names.iter().enumerate() {
+                    let key = name.to_ascii_lowercase();
+                    match lowercase_name_to_index.get(&key) {
+                        Some(Some(_)) => {
+                            lowercase_name_to_index.insert(key, None);
+                        }
+                        Some(None) => {}
+                        None => {
+                            lowercase_name_to_index.insert(key, Some(index));
+                        }
+                    }
+                }
+            }
+
             let valid_column_indices: Vec<usize> = rw_columns
                 .iter()
                 .filter_map(|column| {
-                    root_column_names
+                    let exact_pos = root_column_names
                         .iter()
-                        .position(|&name| name == column.name)
-                        .and_then(|pos| {
-                            let arrow_data_type = converted_arrow_schema
-                                .field_with_name(&column.name)
-                                .ok()?
-                                .data_type();
-                            let rw_data_type: &risingwave_common::types::DataType =
-                                &column.data_type;
-                            if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type)
-                            {
-                                Some(pos)
-                            } else {
-                                None
-                            }
-                        })
+                        .position(|&name| name == column.name);
+                    let pos = match (case_insensitive, exact_pos) {
+                        (_, Some(pos)) => Some(pos),
+                        (true, None) => lowercase_name_to_index
+                            .get(&column.name.to_ascii_lowercase())
+                            .copied()
+                            .flatten(),
+                        _ => None,
+                    }?;
+                    let arrow_field = converted_arrow_schema.fields.get(pos)?;
+                    let arrow_data_type = arrow_field.data_type();
+                    let rw_data_type: &risingwave_common::types::DataType = &column.data_type;
+                    if is_parquet_schema_match_source_schema(arrow_data_type, rw_data_type) {
+                        Some(pos)
+                    } else {
+                        None
+                    }
                 })
                 .collect();
 
@@ -276,6 +295,7 @@ pub async fn read_parquet_file(
     file_name: String,
     rw_columns: Option<Vec<Column>>,
     parser_columns: Option<Vec<SourceColumnDesc>>,
+    case_insensitive: bool,
     batch_size: usize,
     offset: usize,
     file_source_input_row_count_metrics: Option<
@@ -318,7 +338,7 @@ pub async fn read_parquet_file(
         for col in schema_descr.columns() {
             let path = col.path().string();
             let physical = col.physical_type();
-            let logical = col.logical_type();
+            let logical = col.logical_type_ref();
             tracing::debug!(
                 file = %file_name,
                 column_path = path,
@@ -331,7 +351,7 @@ pub async fn read_parquet_file(
             );
         }
     }
-    let projection_mask = get_project_mask(rw_columns, file_metadata)?;
+    let projection_mask = get_project_mask(rw_columns, file_metadata, case_insensitive)?;
 
     // For the Parquet format, we directly convert from a record batch to a stream chunk.
     // Therefore, the offset of the Parquet file represents the current position in terms of the number of rows read from the file.
@@ -362,7 +382,7 @@ pub async fn read_parquet_file(
             })
             .collect(),
     };
-    let parquet_parser = ParquetParser::new(columns, file_name, offset)?;
+    let parquet_parser = ParquetParser::new(columns, file_name, offset, case_insensitive)?;
     let msg_stream: Pin<
         Box<dyn Stream<Item = Result<StreamChunk, crate::error::ConnectorError>> + Send>,
     > = parquet_parser.into_stream(

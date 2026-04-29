@@ -22,13 +22,13 @@ use std::sync::Arc;
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
-use crate::Explain;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::LogicalPlanRef;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
+use crate::{Explain, TableCatalog};
 
 const RESERVED_ID_NUM: u16 = 10000;
 
@@ -58,6 +58,8 @@ pub struct OptimizerContext {
     /// Mapping from iceberg table identifier to current snapshot id.
     /// Used to keep same snapshot id when multiple scans from the same iceberg table exist in a query.
     iceberg_snapshot_id_map: RefCell<HashMap<String, Option<i64>>>,
+    /// Batch materialized view candidates for exact-match rewriting.
+    batch_mview_candidates: RefCell<Vec<MaterializedViewCandidate>>,
 
     /// Last assigned plan node ID.
     last_plan_node_id: Cell<i32>,
@@ -68,7 +70,18 @@ pub struct OptimizerContext {
     /// Last assigned watermark group ID.
     last_watermark_group_id: Cell<u32>,
 
+    // TODO: remove this when locality backfill is enabled by default
+    /// Count of places where locality backfill could have been applied but was not,
+    /// because `enable_locality_backfill` is off.
+    missed_locality_providers: Cell<usize>,
+
     _phantom: PhantomUnsend,
+}
+
+#[derive(Clone, Debug)]
+pub struct MaterializedViewCandidate {
+    pub plan: LogicalPlanRef,
+    pub table: Arc<TableCatalog>,
 }
 
 pub(in crate::optimizer) struct LastAssignedIds {
@@ -105,11 +118,15 @@ impl OptimizerContext {
             total_rule_applied: RefCell::new(0),
             overwrite_options,
             iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
+            batch_mview_candidates: RefCell::new(Vec::new()),
 
             last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(RESERVED_ID_NUM.into()),
             last_watermark_group_id: Cell::new(RESERVED_ID_NUM.into()),
+
+            // TODO: remove this when locality backfill is enabled by default
+            missed_locality_providers: Cell::new(0),
 
             _phantom: Default::default(),
         }
@@ -131,11 +148,14 @@ impl OptimizerContext {
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
             iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
+            batch_mview_candidates: RefCell::new(Vec::new()),
 
             last_plan_node_id: Cell::new(0),
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(0),
             last_watermark_group_id: Cell::new(0),
+
+            missed_locality_providers: Cell::new(0),
 
             _phantom: Default::default(),
         }
@@ -223,6 +243,20 @@ impl OptimizerContext {
         self.session_ctx().notice_to_user(str);
     }
 
+    // TODO: remove this when locality backfill is enabled by default
+    /// Increment the counter for missed locality providers.
+    /// Called when locality backfill could have been applied but `enable_locality_backfill` is off.
+    pub fn inc_missed_locality_providers(&self) {
+        self.missed_locality_providers
+            .set(self.missed_locality_providers.get() + 1);
+    }
+
+    // TODO: remove this when locality backfill is enabled by default
+    /// Get the number of missed locality providers.
+    pub fn missed_locality_providers(&self) -> usize {
+        self.missed_locality_providers.get()
+    }
+
     fn explain_plan_impl(&self, plan: &impl Explain) -> String {
         match self.explain_options.explain_format {
             ExplainFormat::Text => plan.explain_to_string(),
@@ -254,6 +288,16 @@ impl OptimizerContext {
 
     pub fn overwrite_options(&self) -> &OverwriteOptions {
         &self.overwrite_options
+    }
+
+    pub fn add_batch_mview_candidate(&self, table: Arc<TableCatalog>, plan: LogicalPlanRef) {
+        self.batch_mview_candidates
+            .borrow_mut()
+            .push(MaterializedViewCandidate { plan, table });
+    }
+
+    pub fn batch_mview_candidates(&self) -> std::cell::Ref<'_, Vec<MaterializedViewCandidate>> {
+        self.batch_mview_candidates.borrow()
     }
 
     pub fn session_ctx(&self) -> &Arc<SessionImpl> {

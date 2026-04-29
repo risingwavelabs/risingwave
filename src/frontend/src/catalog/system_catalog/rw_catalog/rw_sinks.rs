@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::CreateType;
+use risingwave_common::id::{ConnectionId, SchemaId, SinkId, UserId};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_frontend_macro::system_catalog;
@@ -24,19 +26,21 @@ use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 #[derive(Fields)]
 struct RwSink {
     #[primary_key]
-    id: i32,
+    id: SinkId,
     name: String,
-    schema_id: i32,
-    owner: i32,
+    schema_id: SchemaId,
+    owner: UserId,
     connector: String,
     sink_type: String,
-    connection_id: Option<i32>,
+    connection_id: Option<ConnectionId>,
     definition: String,
+    target_table_name: Option<String>,
     acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
+    background_ddl: bool,
 
     // connector properties in json format
     connector_props: JsonbVal,
@@ -79,11 +83,14 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     })
                     .unwrap_or_else(jsonbb::Value::null)
                     .into();
+                let target_table_name = sink
+                    .target_table
+                    .and_then(|table_id| catalog_reader.get_table_name_by_id(table_id).ok());
                 RwSink {
-                    id: sink.id.as_i32_id(),
+                    id: sink.id,
                     name: sink.name.clone(),
-                    schema_id: schema.id().as_i32_id(),
-                    owner: sink.owner.user_id as i32,
+                    schema_id: schema.id(),
+                    owner: sink.owner,
                     connector: sink
                         .properties
                         .get(UPSTREAM_SOURCE_KEY)
@@ -91,7 +98,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                         .unwrap_or("".to_owned())
                         .to_uppercase(),
                     sink_type: sink.sink_type.to_proto().as_str_name().into(),
-                    connection_id: sink.connection_id.map(|id| id.as_i32_id()),
+                    connection_id: sink.connection_id,
                     definition: sink.create_sql(),
                     acl: get_acl_items(sink.id, false, &users, username_map),
                     initialized_at: sink.initialized_at_epoch.map(|e| e.as_timestamptz()),
@@ -100,6 +107,8 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     created_at_cluster_version: sink.created_at_cluster_version.clone(),
                     connector_props,
                     format_encode_options,
+                    background_ddl: sink.create_type == CreateType::Background,
+                    target_table_name,
                 }
             })
         })

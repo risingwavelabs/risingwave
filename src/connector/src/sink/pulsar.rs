@@ -70,17 +70,20 @@ async fn build_pulsar_producer(
     pulsar: &Pulsar<TokioExecutor>,
     config: &PulsarConfig,
 ) -> Result<Producer<TokioExecutor>> {
-    pulsar
-        .producer()
-        .with_options(ProducerOptions {
-            batch_size: Some(config.producer_properties.batch_size),
-            batch_byte_size: Some(config.producer_properties.batch_byte_size),
-            ..Default::default()
-        })
-        .with_topic(&config.common.topic)
-        .build()
-        .map_err(pulsar_to_sink_err)
-        .await
+    // Reduce async state machine size (see `clippy::large_futures`).
+    Box::pin(
+        pulsar
+            .producer()
+            .with_options(ProducerOptions {
+                batch_size: Some(config.producer_properties.batch_size),
+                batch_byte_size: Some(config.producer_properties.batch_byte_size),
+                ..Default::default()
+            })
+            .with_topic(&config.common.topic)
+            .build()
+            .map_err(pulsar_to_sink_err),
+    )
+    .await
 }
 
 #[serde_as]
@@ -188,16 +191,17 @@ impl Sink for PulsarSink {
     const SINK_NAME: &'static str = PULSAR_SINK;
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(PulsarSinkWriter::new(
+        // Reduce async state machine size (see `clippy::large_futures`).
+        let writer = Box::pin(PulsarSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.downstream_pk.clone(),
             &self.format_desc,
             self.db_name.clone(),
             self.sink_from_name.clone(),
-        )
-        .await?
-        .into_log_sinker(PULSAR_SEND_FUTURE_BUFFER_MAX_SIZE))
+        ))
+        .await?;
+        Ok(writer.into_log_sinker(PULSAR_SEND_FUTURE_BUFFER_MAX_SIZE))
     }
 
     async fn validate(&self) -> Result<()> {

@@ -333,6 +333,24 @@ impl ToStream for LogicalTopN {
         })
     }
 
+    fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
+        if columns.is_empty() || self.group_key().is_empty() {
+            return None;
+        }
+
+        // GroupTopN stores rows with group keys as the primary key prefix in its internal state
+        // table, so it can directly satisfy locality requests on a prefix of its group key.
+        let group_key = self.group_key().to_vec();
+        if columns.len() > group_key.len() || columns != &group_key[..columns.len()] {
+            return None;
+        }
+
+        // Similar to agg, return the current plan directly instead of asking input for better
+        // locality first. The locality can be provided by the current TopN itself after
+        // `to_stream`, while its input does not have it yet during logical rewrite.
+        Some(self.clone_with_input(self.input()).into())
+    }
+
     fn logical_rewrite_for_stream(
         &self,
         ctx: &mut RewriteStreamContext,

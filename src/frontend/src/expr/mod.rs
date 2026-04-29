@@ -48,6 +48,7 @@ mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
 pub mod function_impl;
+mod secret_ref;
 mod session_timezone;
 mod type_inference;
 mod utils;
@@ -65,6 +66,7 @@ pub use now::{InlineNowProcTime, Now, NowProcTimeFinder};
 pub use parameter::Parameter;
 pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
+pub use secret_ref::SecretRef;
 pub use session_timezone::{SessionTimezone, TimestamptzExprFinder};
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
@@ -185,6 +187,7 @@ impl_expr_impl!(
     UserDefinedFunction,
     Parameter,
     Now,
+    SecretRef,
 );
 
 impl ExprImpl {
@@ -648,7 +651,8 @@ impl ExprImpl {
                         | ExprImpl::WindowFunction(_)
                         | ExprImpl::UserDefinedFunction(_)
                         | ExprImpl::Parameter(_)
-                        | ExprImpl::Now(_) => self.has_others = true,
+                        | ExprImpl::Now(_)
+                        | ExprImpl::SecretRef(_) => self.has_others = true,
                         ExprImpl::Literal(_inner) => {}
                         ExprImpl::FunctionCall(inner) => {
                             if !self.is_short_circuit(inner) {
@@ -999,6 +1003,12 @@ impl ExprImpl {
                 )?))
             }
             RexNode::Now(_) => Self::Now(Box::new(Now {})),
+            RexNode::SecretRef(sr) => Self::SecretRef(Box::new(SecretRef {
+                secret_id: sr.secret_id.into(),
+                ref_as: risingwave_pb::secret::secret_ref::RefAsType::try_from(sr.ref_as)
+                    .unwrap_or(risingwave_pb::secret::secret_ref::RefAsType::Text),
+                secret_name: format!("<secret:{}>", sr.secret_id),
+            })),
         })
     }
 }
@@ -1034,6 +1044,7 @@ impl std::fmt::Debug for ExprImpl {
                 }
                 Self::Parameter(arg0) => f.debug_tuple("Parameter").field(arg0).finish(),
                 Self::Now(_) => f.debug_tuple("Now").finish(),
+                Self::SecretRef(arg0) => f.debug_tuple("SecretRef").field(arg0).finish(),
             };
         }
         match self {
@@ -1049,6 +1060,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::UserDefinedFunction(x) => write!(f, "{:?}", x),
             Self::Parameter(x) => write!(f, "{:?}", x),
             Self::Now(x) => write!(f, "{:?}", x),
+            Self::SecretRef(x) => write!(f, "Secret({})", x.secret_name),
         }
     }
 }
@@ -1110,6 +1122,7 @@ impl std::fmt::Debug for ExprDisplay<'_> {
             }
             ExprImpl::Parameter(x) => write!(f, "{:?}", x),
             ExprImpl::Now(x) => write!(f, "{:?}", x),
+            ExprImpl::SecretRef(x) => write!(f, "Secret({})", x.secret_name),
         }
     }
 }
@@ -1141,6 +1154,8 @@ use crate::utils::Condition;
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::secret::secret_ref::RefAsType;
+
     use super::*;
 
     #[test]
@@ -1149,5 +1164,27 @@ mod tests {
         e = FunctionCall::new(ExprType::Not, vec![e]).unwrap().into();
         let s = format!("{:#?}", e);
         assert!(s.contains("return_type: Boolean"))
+    }
+
+    #[test]
+    fn test_secret_ref_display_contains_name() {
+        let expr = ExprImpl::SecretRef(Box::new(SecretRef {
+            secret_id: 42.into(),
+            ref_as: RefAsType::Text,
+            secret_name: "test_secret".to_owned(),
+        }));
+
+        assert_eq!(format!("{expr:?}"), "Secret(test_secret)");
+        assert_eq!(
+            format!(
+                "{:?}",
+                ExprDisplay {
+                    expr: &expr,
+                    input_schema: Schema::empty(),
+                }
+            ),
+            "Secret(test_secret)"
+        );
+        assert!(format!("{expr:#?}").contains("test_secret"));
     }
 }

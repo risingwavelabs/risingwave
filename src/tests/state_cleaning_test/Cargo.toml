@@ -15,10 +15,10 @@ regex = { workspace = true }
 risingwave_rt = { workspace = true }
 serde = { workspace = true }
 serde_with = "3"
-tokio = { version = "0.2", package = "madsim-tokio" }
+tokio = { workspace = true }
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
-toml = "0.9"
+toml = "1.0"
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]

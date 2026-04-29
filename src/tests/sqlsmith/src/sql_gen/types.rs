@@ -22,42 +22,11 @@ use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::sig::{FUNCTION_REGISTRY, FuncSign};
 use risingwave_frontend::expr::{CastContext, CastSig as RwCastSig, ExprType, cast_sigs};
-use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
+use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType};
 
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
-    match data_type {
-        DataType::Boolean => AstDataType::Boolean,
-        DataType::Int16 => AstDataType::SmallInt,
-        DataType::Int32 => AstDataType::Int,
-        DataType::Int64 => AstDataType::BigInt,
-        DataType::Int256 => AstDataType::Custom(vec!["rw_int256".into()].into()),
-        DataType::Serial => unreachable!("serial should not be generated"),
-        DataType::Decimal => AstDataType::Decimal(None, None),
-        DataType::Float32 => AstDataType::Real,
-        DataType::Float64 => AstDataType::Double,
-        DataType::Varchar => AstDataType::Varchar,
-        DataType::Bytea => AstDataType::Bytea,
-        DataType::Date => AstDataType::Date,
-        DataType::Timestamp => AstDataType::Timestamp(false),
-        DataType::Timestamptz => AstDataType::Timestamp(true),
-        DataType::Time => AstDataType::Time(false),
-        DataType::Interval => AstDataType::Interval,
-        DataType::Jsonb => AstDataType::Custom(vec!["JSONB".into()].into()),
-        DataType::Struct(inner) => AstDataType::Struct(
-            inner
-                .iter()
-                .map(|(name, typ)| StructField {
-                    name: name.into(),
-                    data_type: data_type_to_ast_data_type(typ),
-                })
-                .collect(),
-        ),
-        DataType::List(list) => {
-            AstDataType::Array(Box::new(data_type_to_ast_data_type(list.elem())))
-        }
-        DataType::Vector(n) => AstDataType::Vector(*n as _),
-        DataType::Map(_) => todo!(),
-    }
+    use risingwave_frontend::DataTypeToAst as _;
+    data_type.to_ast()
 }
 
 fn data_type_name_to_ast_data_type(data_type_name: &DataTypeName) -> Option<DataType> {
@@ -123,6 +92,7 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
         ExprType::Position,
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
+        #[expect(deprecated)]
         ExprType::Strpos,
     ]
     .into_iter()

@@ -1769,21 +1769,28 @@ impl ToStream for LogicalJoin {
                 .core
                 .r2i_col_mapping()
                 .composite(&join_with_pk.core.i2o_col_mapping());
-            let left_right_stream_keys = join_with_pk
+            let mut left_right_keys = join_with_pk
                 .left()
                 .expect_stream_key()
                 .iter()
                 .map(|i| l2o.map(*i))
-                .chain(
-                    join_with_pk
-                        .right()
-                        .expect_stream_key()
-                        .iter()
-                        .map(|i| r2o.map(*i)),
-                )
                 .collect_vec();
+            left_right_keys.extend(
+                join_with_pk
+                    .right()
+                    .expect_stream_key()
+                    .iter()
+                    .map(|i| r2o.map(*i)),
+            );
+            left_right_keys.extend(
+                eq_predicate
+                    .eq_indexes()
+                    .iter()
+                    .flat_map(|(lk, rk)| [l2o.map(*lk), r2o.map(*rk)]),
+            );
+            let left_right_keys = left_right_keys.into_iter().unique().collect_vec();
             let plan: PlanRef = join_with_pk.into();
-            LogicalFilter::filter_out_all_null_keys(plan, &left_right_stream_keys)
+            LogicalFilter::filter_out_all_null_keys(plan, &left_right_keys)
         } else {
             join_with_pk.into()
         };

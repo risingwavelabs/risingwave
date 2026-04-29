@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::collections::vec_deque::VecDeque;
-use std::collections::{Bound, HashMap};
+use std::ops::Bound::{self};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -50,6 +51,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::{SstableIteratorReadOptions, SstableIteratorType};
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::table_change_log_manager::TableChangeLogManager;
 use crate::hummock::utils::{
     MemoryTracker, filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts,
     range_overlap, search_sst_idx,
@@ -613,6 +615,26 @@ impl HummockVersionReader {
 const SLOW_ITER_FETCH_META_DURATION_SECOND: f64 = 5.0;
 
 impl HummockVersionReader {
+    fn skip_get_by_vnode_user_key_range(
+        sstable_info: &SstableInfo,
+        vnode: VirtualNode,
+        user_key: UserKey<&[u8]>,
+        local_stats: &mut StoreLocalStatistic,
+    ) -> bool {
+        if let Some(vnode_statistics) = &sstable_info.vnode_statistics {
+            // Only skip if vnode-statistics exists and key is out of range.
+            // If vnode-statistics not found, it may be due to incomplete stats (reached limit).
+            if let Some((vnode_min, vnode_max)) = vnode_statistics.get_vnode_user_key_range(vnode) {
+                local_stats.vnode_checked_get_count += 1;
+                if user_key < vnode_min.as_ref() || user_key > vnode_max.as_ref() {
+                    local_stats.vnode_pruned_get_count += 1;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub async fn get<'a, O>(
         &'a self,
         table_key: TableKey<Bytes>,
@@ -732,6 +754,16 @@ impl HummockVersionReader {
                         &single_table_key_range,
                     );
                     for sstable_info in sstable_infos {
+                        // filter vnode-key range that is definitely not containing the key
+                        if Self::skip_get_by_vnode_user_key_range(
+                            sstable_info,
+                            VirtualNode::from_index(full_key.user_key.get_vnode_id()),
+                            full_key.user_key.as_ref(),
+                            local_stats,
+                        ) {
+                            continue;
+                        }
+
                         local_stats.overlapping_get_count += 1;
                         if let Some(iter) = get_from_sstable_info(
                             self.sstable_store.clone(),
@@ -772,7 +804,14 @@ impl HummockVersionReader {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = level.table_infos[table_info_idx]
+                    let sstable_info = &level.table_infos[table_info_idx];
+
+                    if sstable_info.table_ids.binary_search(&table_id).is_err() {
+                        continue;
+                    }
+
+                    // Filter SSTs that definitely cannot contain the key.
+                    let ord = sstable_info
                         .key_range
                         .compare_right_with_user_key(full_key.user_key.as_ref());
                     // the case that the key falls into the gap between two ssts
@@ -781,10 +820,20 @@ impl HummockVersionReader {
                         continue;
                     }
 
+                    // Filter vnode-key range that is definitely not containing the key.
+                    if Self::skip_get_by_vnode_user_key_range(
+                        sstable_info,
+                        VirtualNode::from_index(full_key.user_key.get_vnode_id()),
+                        full_key.user_key.as_ref(),
+                        local_stats,
+                    ) {
+                        continue;
+                    }
+
                     local_stats.non_overlapping_get_count += 1;
                     if let Some(iter) = get_from_sstable_info(
                         self.sstable_store.clone(),
-                        &level.table_infos[table_info_idx],
+                        sstable_info,
                         full_key.to_ref(),
                         &read_options,
                         dist_key_hash,
@@ -1049,9 +1098,11 @@ impl HummockVersionReader {
                     );
                     local_stats.non_overlapping_iter_count += 1;
                 } else {
+                    let sstable_info = &sstable_infos[0];
+
                     let sstable = self
                         .sstable_store
-                        .sstable(&sstable_infos[0], local_stats)
+                        .sstable(sstable_info, local_stats)
                         .await?;
 
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
@@ -1073,7 +1124,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                        &sstable_infos[0],
+                        sstable_info,
                     ));
                     local_stats.non_overlapping_iter_count += 1;
                 }
@@ -1130,13 +1181,16 @@ impl HummockVersionReader {
 
     pub async fn iter_log(
         &self,
-        version: PinnedVersion,
         epoch_range: (u64, u64),
         key_range: TableKeyRange,
         options: ReadLogOptions,
+        table_change_log_manager: Arc<TableChangeLogManager>,
     ) -> HummockResult<ChangeLogIterator> {
-        let change_log = {
-            let table_change_logs = version.table_change_log_read_lock();
+        // The end value of `epoch_range` is not greater than max committed epoch, guaranteed by the caller `BatchTableInnerIterLogInner`.
+        let change_log: Vec<_> = {
+            let table_change_logs = table_change_log_manager
+                .fetch_table_change_logs(options.table_id, epoch_range, false, None)
+                .await?;
             if let Some(change_log) = table_change_logs.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range).cloned().collect_vec()
             } else {
@@ -1305,5 +1359,598 @@ impl HummockVersionReader {
                 Ok(items)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, HashMap, HashSet};
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+    use prometheus::Registry;
+    use risingwave_common::catalog::{TableId, TableOption};
+    use risingwave_common::config::MetricLevel;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, gen_key_from_bytes};
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::{Level, Levels, OverlappingLevel};
+    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeStatistics};
+    use risingwave_hummock_sdk::version::HummockVersion;
+    use risingwave_hummock_sdk::{EpochWithGap, HummockSstableObjectId};
+    use risingwave_pb::hummock::hummock_version::PbLevels;
+    use risingwave_pb::hummock::{
+        LevelType as PbLevelType, PbBloomFilterType, PbHummockVersion, PbLevel, PbOverlappingLevel,
+        PbStateTableInfo, StateTableInfoDelta,
+    };
+    use tokio::sync::mpsc::unbounded_channel;
+
+    use crate::hummock::HummockValue;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
+    use crate::hummock::store::version::{CommittedVersion, HummockVersionReader};
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable_with_table_ids,
+    };
+    use crate::monitor::{HummockStateStoreMetrics, flush_local_metrics_for_test};
+    use crate::store::ReadOptions;
+
+    /// In a nonoverlapping level, `search_sst_idx` may locate an SST whose key range covers
+    /// the query user key but whose `table_ids` does not contain the queried table. The get
+    /// path must skip such SSTs instead of reading them.
+    #[tokio::test]
+    async fn test_get_skips_sst_by_table_id_filter() {
+        let query_table_id = TableId::new(100);
+        let epoch: u64 = (31 * 1000) << 16;
+        let compaction_group_id = StaticCompactionGroupId::StateDefault;
+
+        // SST key range: table_id 50..150, but table_ids = [50, 150] (no 100).
+        let sst_info = SstableInfoInner {
+            sst_id: 1.into(),
+            object_id: 1.into(),
+            key_range: KeyRange {
+                left: Bytes::from(
+                    FullKey::for_test(TableId::new(50), b"aaa".to_vec(), epoch).encode(),
+                ),
+                right: Bytes::from(
+                    FullKey::for_test(TableId::new(150), b"zzz".to_vec(), epoch).encode(),
+                ),
+                right_exclusive: false,
+            },
+            table_ids: vec![TableId::new(50), TableId::new(150)],
+            file_size: 1024,
+            ..Default::default()
+        }
+        .into();
+
+        let level = Level {
+            level_idx: 1,
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![sst_info],
+            total_file_size: 0,
+            sub_level_id: 0,
+            uncompressed_file_size: 0,
+            vnode_partition_count: 0,
+        };
+
+        #[allow(deprecated)]
+        let levels = Levels {
+            levels: vec![level],
+            l0: OverlappingLevel::default(),
+            group_id: compaction_group_id,
+            parent_group_id: compaction_group_id,
+            member_table_ids: vec![],
+            compaction_group_version_id: 0,
+        };
+
+        let mut version = HummockVersion::from_persisted_protobuf_owned(PbHummockVersion {
+            id: 1u64.into(),
+            ..Default::default()
+        });
+        version.levels.insert(compaction_group_id, levels);
+        version.state_table_info.apply_delta(
+            &HashMap::from([(
+                query_table_id,
+                StateTableInfoDelta {
+                    committed_epoch: epoch,
+                    compaction_group_id,
+                },
+            )]),
+            &HashSet::new(),
+        );
+
+        let pinned_version = PinnedVersion::new(version, unbounded_channel().0);
+        let reader = HummockVersionReader::new(
+            mock_sstable_store().await,
+            Arc::new(HummockStateStoreMetrics::unused()),
+            0,
+        );
+
+        let result = reader
+            .get(
+                TableKey(Bytes::from("test_key")),
+                epoch,
+                query_table_id,
+                TableOption::default(),
+                ReadOptions::default(),
+                (vec![], vec![], pinned_version),
+                |_key, _value| Ok(()),
+            )
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
+    }
+
+    /// Build a committed version containing a single SST with custom vnode stats.
+    #[allow(deprecated)]
+    fn build_version_with_vnode_stats(
+        table_id: TableId,
+        vnode_stats: VnodeStatistics,
+        key_range: (Vec<u8>, Vec<u8>),
+        level_type: PbLevelType,
+    ) -> (SstableInfo, CommittedVersion) {
+        let object_id = HummockSstableObjectId::new(1);
+        let left_full_key = FullKey::new_with_gap_epoch(
+            table_id,
+            TableKey(Bytes::from(key_range.0)),
+            EpochWithGap::new_from_epoch(test_epoch(0)),
+        )
+        .encode();
+        let right_full_key = FullKey::new_with_gap_epoch(
+            table_id,
+            TableKey(Bytes::from(key_range.1)),
+            EpochWithGap::new_from_epoch(test_epoch(0)),
+        )
+        .encode();
+
+        let sstable_info: SstableInfo = SstableInfoInner {
+            object_id,
+            sst_id: object_id.as_raw_id().into(),
+            key_range: KeyRange {
+                left: Bytes::from(left_full_key),
+                right: Bytes::from(right_full_key),
+                right_exclusive: false,
+            },
+            file_size: 1,
+            table_ids: vec![table_id],
+            meta_offset: 0,
+            stale_key_count: 0,
+            total_key_count: 0,
+            min_epoch: 0,
+            max_epoch: 0,
+            uncompressed_file_size: 0,
+            range_tombstone_count: 0,
+            bloom_filter_kind: PbBloomFilterType::Sstable,
+            sst_size: 1,
+            vnode_statistics: Some(vnode_stats),
+        }
+        .into();
+        let pb_level = PbLevel {
+            level_idx: if level_type == PbLevelType::Overlapping {
+                0
+            } else {
+                1
+            },
+            level_type: level_type as i32,
+            table_infos: vec![sstable_info.clone().into()],
+            total_file_size: 1,
+            sub_level_id: 0,
+            uncompressed_file_size: 1,
+            vnode_partition_count: 0,
+        };
+
+        let (levels, l0) = if level_type == PbLevelType::Overlapping {
+            (
+                vec![],
+                Some(PbOverlappingLevel {
+                    sub_levels: vec![pb_level],
+                    total_file_size: 1,
+                    uncompressed_file_size: 1,
+                }),
+            )
+        } else {
+            (vec![pb_level], Some(PbOverlappingLevel::default()))
+        };
+
+        let pb_levels = PbLevels {
+            levels,
+            l0,
+            group_id: StaticCompactionGroupId::NewCompactionGroup,
+            parent_group_id: 0.into(),
+            member_table_ids: vec![],
+            compaction_group_version_id: 0,
+        };
+
+        let pb_version = PbHummockVersion {
+            id: 1.into(),
+            levels: HashMap::from_iter([(StaticCompactionGroupId::NewCompactionGroup, pb_levels)]),
+            max_committed_epoch: 0,
+            table_watermarks: HashMap::new(),
+            table_change_logs: HashMap::new(),
+            state_table_info: HashMap::from_iter([(
+                table_id,
+                PbStateTableInfo {
+                    committed_epoch: 0,
+                    compaction_group_id: StaticCompactionGroupId::NewCompactionGroup,
+                },
+            )]),
+            vector_indexes: HashMap::new(),
+        };
+
+        let version = HummockVersion::from(&pb_version);
+        let (tx, _rx) = unbounded_channel::<PinVersionAction>();
+        let pinned = PinnedVersion::new(version, tx);
+        (sstable_info, pinned)
+    }
+
+    /// Build a committed version from an existing SST (with real object in the store).
+    #[allow(deprecated)]
+    fn build_version_from_sstables(
+        table_id: TableId,
+        sstable_infos: Vec<SstableInfo>,
+        level_type: PbLevelType,
+    ) -> CommittedVersion {
+        let total_file_size = sstable_infos.iter().map(|sst| sst.file_size).sum::<u64>();
+        let uncompressed_file_size = sstable_infos
+            .iter()
+            .map(|sst| sst.uncompressed_file_size)
+            .sum::<u64>();
+        let pb_level = PbLevel {
+            level_idx: if level_type == PbLevelType::Overlapping {
+                0
+            } else {
+                1
+            },
+            level_type: level_type as i32,
+            table_infos: sstable_infos.into_iter().map(Into::into).collect(),
+            total_file_size,
+            sub_level_id: 0,
+            uncompressed_file_size,
+            vnode_partition_count: 0,
+        };
+
+        let (levels, l0) = if level_type == PbLevelType::Overlapping {
+            (
+                vec![],
+                Some(PbOverlappingLevel {
+                    sub_levels: vec![pb_level],
+                    total_file_size,
+                    uncompressed_file_size,
+                }),
+            )
+        } else {
+            (vec![pb_level], Some(PbOverlappingLevel::default()))
+        };
+
+        let pb_levels = PbLevels {
+            levels,
+            l0,
+            group_id: StaticCompactionGroupId::NewCompactionGroup,
+            parent_group_id: 0.into(),
+            member_table_ids: vec![],
+            compaction_group_version_id: 0,
+        };
+
+        let pb_version = PbHummockVersion {
+            id: 1.into(),
+            levels: HashMap::from_iter([(StaticCompactionGroupId::NewCompactionGroup, pb_levels)]),
+            max_committed_epoch: 0,
+            table_watermarks: HashMap::new(),
+            table_change_logs: HashMap::new(),
+            state_table_info: HashMap::from_iter([(
+                table_id,
+                PbStateTableInfo {
+                    committed_epoch: 0,
+                    compaction_group_id: StaticCompactionGroupId::NewCompactionGroup,
+                },
+            )]),
+            vector_indexes: HashMap::new(),
+        };
+
+        let version = HummockVersion::from(&pb_version);
+        let (tx, _rx) = unbounded_channel::<PinVersionAction>();
+        PinnedVersion::new(version, tx)
+    }
+
+    /// Build a committed version from one existing non-overlapping SST.
+    #[allow(deprecated)]
+    fn build_version_from_sstable(
+        table_id: TableId,
+        sstable_info: SstableInfo,
+    ) -> CommittedVersion {
+        build_version_from_sstables(table_id, vec![sstable_info], PbLevelType::Nonoverlapping)
+    }
+
+    fn vnode_prune_counts(
+        metrics: &HummockStateStoreMetrics,
+        table_id: TableId,
+        operation: &str,
+    ) -> (u64, u64) {
+        let table_label = table_id.to_string();
+        let checked = metrics
+            .vnode_pruning_counts
+            .with_guarded_label_values(&[
+                table_label.clone(),
+                operation.to_owned(),
+                "checked".to_owned(),
+            ])
+            .get();
+        let pruned = metrics
+            .vnode_pruning_counts
+            .with_guarded_label_values(&[table_label, operation.to_owned(), "pruned".to_owned()])
+            .get();
+        (checked, pruned)
+    }
+
+    async fn assert_vnode_prune_get_skips_out_of_range_key(
+        table_id: TableId,
+        epoch: u64,
+        level_type: PbLevelType,
+    ) {
+        let sstable_store = mock_sstable_store().await;
+        let registry = Registry::new();
+        let metrics = Arc::new(HummockStateStoreMetrics::new(&registry, MetricLevel::Debug));
+        let reader = HummockVersionReader::new(sstable_store, metrics.clone(), 0);
+        let (checked_before, pruned_before) = vnode_prune_counts(&metrics, table_id, "get");
+
+        let make_user_key = |vnode: VirtualNode, suffix: &str| {
+            let mut raw = vnode.to_be_bytes().to_vec();
+            raw.extend_from_slice(suffix.as_bytes());
+            UserKey::new(table_id, TableKey(raw.into()))
+        };
+
+        // Stats cover vnode 1 only up to "bb".
+        let vnode_stats = VnodeStatistics::from_map(BTreeMap::from_iter([(
+            VirtualNode::from_index(1),
+            (
+                make_user_key(VirtualNode::from_index(1), "aa"),
+                make_user_key(VirtualNode::from_index(1), "bb"),
+            ),
+        )]));
+
+        // SST key range is wide enough to include the queried key, but vnode stats should prune it.
+        let key_range = {
+            let mut left = VirtualNode::from_index(0).to_be_bytes().to_vec();
+            left.extend_from_slice(b"aa");
+            let mut right = VirtualNode::from_index(1).to_be_bytes().to_vec();
+            right.extend_from_slice(b"zzzz");
+            (left, right)
+        };
+
+        let (_sst, committed) =
+            build_version_with_vnode_stats(table_id, vnode_stats, key_range, level_type);
+
+        // Query vnode 1 but with suffix beyond the recorded max -> should be pruned.
+        let mut raw = VirtualNode::from_index(1).to_be_bytes().to_vec();
+        raw.extend_from_slice(b"zz");
+        let table_key = TableKey(Bytes::from(raw.clone()));
+
+        let result = reader
+            .get(
+                table_key,
+                epoch,
+                table_id,
+                TableOption::default(),
+                ReadOptions::default(),
+                (vec![], vec![], committed),
+                |_k, v| Ok(Bytes::copy_from_slice(v)),
+            )
+            .await
+            .unwrap();
+        flush_local_metrics_for_test();
+
+        assert!(
+            result.is_none(),
+            "vnode pruning should skip SST without reading data"
+        );
+        let (checked_after, pruned_after) = vnode_prune_counts(&metrics, table_id, "get");
+        assert_eq!(checked_before + 1, checked_after);
+        assert_eq!(pruned_before + 1, pruned_after);
+    }
+
+    async fn assert_vnode_prune_get_not_pruned_nonoverlapping() {
+        let table_id = TableId::new(42);
+        let epoch = test_epoch(3);
+        let sstable_store = mock_sstable_store().await;
+        let registry = Registry::new();
+        let metrics = Arc::new(HummockStateStoreMetrics::new(&registry, MetricLevel::Debug));
+        let reader = HummockVersionReader::new(sstable_store.clone(), metrics.clone(), 0);
+        let (checked_before, pruned_before) = vnode_prune_counts(&metrics, table_id, "get");
+
+        let mut opts = default_builder_opt_for_test();
+        opts.max_vnode_key_range_bytes = None;
+        let mut kvs = vec![
+            (
+                FullKey::new_with_gap_epoch(
+                    table_id,
+                    gen_key_from_bytes(VirtualNode::from_index(1), b"aa"),
+                    EpochWithGap::new_from_epoch(epoch),
+                ),
+                HummockValue::put(Bytes::from_static(b"v1")),
+            ),
+            (
+                FullKey::new_with_gap_epoch(
+                    table_id,
+                    gen_key_from_bytes(VirtualNode::ZERO, b"cc"),
+                    EpochWithGap::new_from_epoch(epoch),
+                ),
+                HummockValue::put(Bytes::from_static(b"v0")),
+            ),
+        ];
+        kvs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        let (_, mut sstable_info): (crate::hummock::sstable_store::TableHolder, SstableInfo) =
+            gen_test_sstable_with_table_ids(
+                opts,
+                10,
+                kvs.into_iter(),
+                sstable_store.clone(),
+                vec![table_id.as_raw_id()],
+            )
+            .await;
+        // Override vnode stats to ensure the queried key falls inside the recorded range.
+        let mut inner = sstable_info.get_inner();
+        inner.vnode_statistics = Some(VnodeStatistics::from_map(BTreeMap::from_iter([(
+            VirtualNode::from_index(1),
+            (
+                UserKey::new(
+                    table_id,
+                    gen_key_from_bytes(VirtualNode::from_index(1), b"aa"),
+                ),
+                UserKey::new(
+                    table_id,
+                    gen_key_from_bytes(VirtualNode::from_index(1), b"zz"),
+                ),
+            ),
+        )])));
+        sstable_info = inner.into();
+        let committed = build_version_from_sstable(table_id, sstable_info.clone());
+
+        // Key is within vnode range, should not be pruned.
+        let mut raw = VirtualNode::from_index(1).to_be_bytes().to_vec();
+        raw.extend_from_slice(b"aa");
+        let table_key = TableKey(Bytes::from(raw.clone()));
+
+        let result = reader
+            .get(
+                table_key,
+                epoch,
+                table_id,
+                TableOption::default(),
+                ReadOptions::default(),
+                (vec![], vec![], committed),
+                |_k, v| Ok(Bytes::copy_from_slice(v)),
+            )
+            .await
+            .unwrap();
+        flush_local_metrics_for_test();
+        assert!(result.is_some(), "key should be read when not pruned");
+        let (checked_after, pruned_after) = vnode_prune_counts(&metrics, table_id, "get");
+        assert_eq!(checked_before + 1, checked_after);
+        assert_eq!(pruned_before, pruned_after);
+    }
+
+    #[tokio::test]
+    async fn test_vnode_prune_get_single_sst_cases() {
+        assert_vnode_prune_get_skips_out_of_range_key(
+            TableId::default(),
+            test_epoch(1),
+            PbLevelType::Nonoverlapping,
+        )
+        .await;
+        assert_vnode_prune_get_skips_out_of_range_key(
+            TableId::new(7),
+            test_epoch(2),
+            PbLevelType::Overlapping,
+        )
+        .await;
+        assert_vnode_prune_get_not_pruned_nonoverlapping().await;
+    }
+
+    #[tokio::test]
+    async fn test_vnode_prune_get_overlapping_distribution_prunes_only_out_of_range_sst() {
+        let table_id = TableId::new(77);
+        let epoch = test_epoch(4);
+        let vnode = VirtualNode::from_index(1);
+        let sstable_store = mock_sstable_store().await;
+        let registry = Registry::new();
+        let metrics = Arc::new(HummockStateStoreMetrics::new(&registry, MetricLevel::Debug));
+        let reader = HummockVersionReader::new(sstable_store.clone(), metrics.clone(), 0);
+        let (checked_before, pruned_before) = vnode_prune_counts(&metrics, table_id, "get");
+
+        let mut opts = default_builder_opt_for_test();
+        opts.max_vnode_key_range_bytes = None;
+
+        let mut kvs1 = vec![
+            (
+                FullKey::new_with_gap_epoch(
+                    table_id,
+                    gen_key_from_bytes(vnode, b"aa"),
+                    EpochWithGap::new_from_epoch(epoch),
+                ),
+                HummockValue::put(Bytes::from_static(b"s1_aa")),
+            ),
+            (
+                FullKey::new_with_gap_epoch(
+                    table_id,
+                    gen_key_from_bytes(vnode, b"zz"),
+                    EpochWithGap::new_from_epoch(epoch),
+                ),
+                HummockValue::put(Bytes::from_static(b"s1_zz")),
+            ),
+        ];
+        kvs1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        let (_, mut sst1): (crate::hummock::sstable_store::TableHolder, SstableInfo) =
+            gen_test_sstable_with_table_ids(
+                opts.clone(),
+                11,
+                kvs1.into_iter(),
+                sstable_store.clone(),
+                vec![table_id.as_raw_id()],
+            )
+            .await;
+        let mut sst1_inner = sst1.get_inner();
+        sst1_inner.vnode_statistics = Some(VnodeStatistics::from_map(BTreeMap::from_iter([(
+            vnode,
+            (
+                UserKey::new(table_id, gen_key_from_bytes(vnode, b"aa")),
+                UserKey::new(table_id, gen_key_from_bytes(vnode, b"bb")),
+            ),
+        )])));
+        sst1 = sst1_inner.into();
+
+        let mut kvs2 = vec![(
+            FullKey::new_with_gap_epoch(
+                table_id,
+                gen_key_from_bytes(vnode, b"mm"),
+                EpochWithGap::new_from_epoch(epoch),
+            ),
+            HummockValue::put(Bytes::from_static(b"hit")),
+        )];
+        kvs2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        let (_, mut sst2): (crate::hummock::sstable_store::TableHolder, SstableInfo) =
+            gen_test_sstable_with_table_ids(
+                opts,
+                12,
+                kvs2.into_iter(),
+                sstable_store.clone(),
+                vec![table_id.as_raw_id()],
+            )
+            .await;
+        let mut sst2_inner = sst2.get_inner();
+        sst2_inner.vnode_statistics = Some(VnodeStatistics::from_map(BTreeMap::from_iter([(
+            vnode,
+            (
+                UserKey::new(table_id, gen_key_from_bytes(vnode, b"aa")),
+                UserKey::new(table_id, gen_key_from_bytes(vnode, b"zz")),
+            ),
+        )])));
+        sst2 = sst2_inner.into();
+
+        let committed =
+            build_version_from_sstables(table_id, vec![sst1, sst2], PbLevelType::Overlapping);
+
+        let table_key = gen_key_from_bytes(vnode, b"mm");
+        let result = reader
+            .get(
+                table_key,
+                epoch,
+                table_id,
+                TableOption::default(),
+                ReadOptions::default(),
+                (vec![], vec![], committed),
+                |_k, v| Ok(Bytes::copy_from_slice(v)),
+            )
+            .await
+            .unwrap();
+        flush_local_metrics_for_test();
+
+        assert_eq!(result, Some(Bytes::from_static(b"hit")));
+        let (checked_after, pruned_after) = vnode_prune_counts(&metrics, table_id, "get");
+        // First SST is pruned by vnode stats; second SST is checked and read.
+        assert_eq!(checked_before + 2, checked_after);
+        assert_eq!(pruned_before + 1, pruned_after);
     }
 }

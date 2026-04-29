@@ -29,7 +29,7 @@ import base64url from "base64url"
 import { saveAs } from "file-saver"
 import Head from "next/head"
 import path from "path"
-import { Fragment, useEffect, useState } from "react"
+import { Fragment, useCallback, useEffect, useState } from "react"
 import SpinnerOverlay from "../components/SpinnerOverlay"
 import Title from "../components/Title"
 import api from "../lib/api/api"
@@ -43,6 +43,33 @@ const SIDEBAR_WIDTH = 200
 interface FileList {
   dir: string
   name: string[]
+}
+
+const workerTypeLabel = (workerType: WorkerType) => {
+  switch (workerType) {
+    case WorkerType.WORKER_TYPE_FRONTEND:
+      return "Frontend"
+    case WorkerType.WORKER_TYPE_COMPUTE_NODE:
+      return "Compute"
+    case WorkerType.WORKER_TYPE_COMPACTOR:
+      return "Compactor"
+    default:
+      return "Other"
+  }
+}
+
+const getWorkerLabel = (
+  nodeId: number | undefined,
+  workerNodes: WorkerNode[] | undefined
+) => {
+  if (nodeId === undefined) {
+    return "Worker Node"
+  }
+  const node = (workerNodes ?? []).find((n) => n.id === nodeId)
+  if (!node) {
+    return `Worker Node ${nodeId}`
+  }
+  return `Worker Node ${nodeId} (${workerTypeLabel(node.type)})`
 }
 
 export default function HeapProfiling() {
@@ -63,7 +90,7 @@ export default function HeapProfiling() {
     }
   }, [workerNodes, workerNodeId])
 
-  async function getProfileList(
+  const getProfileList = useCallback(async function getProfileList(
     workerNodes: WorkerNode[] | undefined,
     workerNodeId: number | undefined
   ) {
@@ -78,7 +105,8 @@ export default function HeapProfiling() {
         setProfileList(list)
         setDisplayInfo(
           `Successfully loaded profiling file list from ${getWorkerLabel(
-            workerNodeId
+            workerNodeId,
+            workerNodes
           )}\n\nFound ${list.nameAuto.length} auto and ${
             list.nameManually.length
           } manually dumped files.`
@@ -86,16 +114,18 @@ export default function HeapProfiling() {
       } catch (e: any) {
         console.error(e)
         let result = `Failed to load profiling file list from ${getWorkerLabel(
-          workerNodeId
+          workerNodeId,
+          workerNodes
         )}\n\nError: ${e.message}\nCause: ${e.cause}`
         setDisplayInfo(result)
       }
     }
-  }
+  },
+  [])
 
   useEffect(() => {
     getProfileList(workerNodes, workerNodeId)
-  }, [workerNodes, workerNodeId])
+  }, [getProfileList, workerNodes, workerNodeId])
 
   useEffect(() => {
     if (!profileList) {
@@ -116,9 +146,10 @@ export default function HeapProfiling() {
       getProfileList(workerNodes, workerNodeId)
     } catch (e: any) {
       setDisplayInfo(
-        `Dumping heap profile on ${getWorkerLabel(workerNodeId)}.\n\nError: ${
-          e.message
-        }\n${e.cause}`
+        `Dumping heap profile on ${getWorkerLabel(
+          workerNodeId,
+          workerNodes
+        )}.\n\nError: ${e.message}\n${e.cause}`
       )
     }
   }
@@ -133,7 +164,7 @@ export default function HeapProfiling() {
 
     let analyzeFilePath = path.join(profileList.dir, analyzeTargetFileName)
 
-    const workerLabel = getWorkerLabel(workerNodeId)
+    const workerLabel = getWorkerLabel(workerNodeId, workerNodes)
     setDisplayInfo(`Analyzing ${analyzeTargetFileName} from ${workerLabel}`)
 
     const title = `Collapsed Profiling of ${workerLabel} for ${analyzeTargetFileName}`
@@ -163,18 +194,6 @@ export default function HeapProfiling() {
     WorkerType.WORKER_TYPE_FRONTEND,
     WorkerType.WORKER_TYPE_COMPACTOR,
   ]
-  const workerTypeLabel = (workerType: WorkerType) => {
-    switch (workerType) {
-      case WorkerType.WORKER_TYPE_FRONTEND:
-        return "Frontend"
-      case WorkerType.WORKER_TYPE_COMPUTE_NODE:
-        return "Compute"
-      case WorkerType.WORKER_TYPE_COMPACTOR:
-        return "Compactor"
-      default:
-        return "Other"
-    }
-  }
   const groupedWorkerNodes = (workerNodes ?? []).reduce((groups, node) => {
     const list = groups.get(node.type) ?? []
     list.push(node)
@@ -183,16 +202,6 @@ export default function HeapProfiling() {
   }, new Map<WorkerType, WorkerNode[]>())
   for (const nodes of groupedWorkerNodes.values()) {
     nodes.sort((a, b) => a.id - b.id)
-  }
-  const getWorkerLabel = (nodeId: number | undefined) => {
-    if (nodeId === undefined) {
-      return "Worker Node"
-    }
-    const node = (workerNodes ?? []).find((n) => n.id === nodeId)
-    if (!node) {
-      return `Worker Node ${nodeId}`
-    }
-    return `Worker Node ${nodeId} (${workerTypeLabel(node.type)})`
   }
 
   const retVal = (

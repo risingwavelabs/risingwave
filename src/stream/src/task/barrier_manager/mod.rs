@@ -15,6 +15,8 @@
 pub mod cdc_progress;
 pub mod progress;
 
+use std::sync::Arc;
+
 pub use progress::CreateMviewProgressReporter;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
@@ -23,7 +25,8 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::error::{IntoUnexpectedExit, StreamError};
-use crate::executor::exchange::permit::{self, channel_from_config};
+use crate::executor::exchange::permit;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BarrierInner};
 use crate::task::barrier_manager::progress::BackfillState;
 use crate::task::cdc_progress::CdcTableBackfillState;
@@ -157,9 +160,21 @@ impl LocalBarrierManager {
         &self,
         actor_id: ActorId,
         upstream_actor_id: ActorId,
+        upstream_fragment_id: FragmentId,
         upstream_partial_graph_id: PartialGraphId,
+        metrics: Arc<StreamingMetrics>,
     ) -> permit::Receiver {
-        let (tx, rx) = channel_from_config(self.env.global_config());
+        let upstream_fragment_id_str = upstream_fragment_id.to_string();
+        let fragment_channel_buffered_bytes = metrics
+            .fragment_channel_buffered_bytes
+            .with_guarded_label_values(&[&upstream_fragment_id_str]);
+        let (tx, rx) = permit::channel_from_config_with_metrics(
+            self.env.global_config(),
+            permit::ChannelMetrics {
+                sender_actor_channel_buffered_bytes: fragment_channel_buffered_bytes.clone(),
+                receiver_actor_channel_buffered_bytes: fragment_channel_buffered_bytes,
+            },
+        );
         self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
             actor_id,
             upstream_actor_id,

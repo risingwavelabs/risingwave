@@ -1,5 +1,11 @@
 control substitution on
 
+system ok
+rpk topic delete test_rate_limit_shared || true
+
+system ok
+rpk topic create test_rate_limit_shared --partitions 3 --replicas 1
+
 ############## Create kafka seed data
 
 statement ok
@@ -22,7 +28,7 @@ from
 
 ############## Source from kafka (rate_limit = 0)
 
-# Wait for the topic to create
+# Wait for sink to write initial data
 sleep 5s
 
 statement ok
@@ -102,9 +108,8 @@ order by name;
 kafka_source	SOURCE	{SOURCE}	1000
 rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	0
 
-sleep 3s
 
-query I
+query I retry 10 backoff 1s
 select * from rl_mv1;
 ----
 2000
@@ -122,7 +127,7 @@ alter materialized view rl_mv2 set source_rate_limit = 1000;
 db error: ERROR: Failed to run the query
 
 Caused by:
-  sql parser error: expected SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET, found: source_rate_limit
+  sql parser error: expected SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET, found: source_rate_limit
 LINE 1: alter materialized view rl_mv2 set source_rate_limit = 1000;
                                            ^
 
@@ -146,9 +151,8 @@ order by name;
 kafka_source	SOURCE	{SOURCE}	1000
 rl_mv2	SOURCE_BACKFILL	{SOURCE_SCAN}	2000
 
-sleep 3s
 
-query T
+query T retry 10 backoff 1s
 select * from rl_mv2;
 ----
 2000
@@ -162,3 +166,6 @@ drop source kafka_source cascade;
 
 statement ok
 drop table kafka_seed_data cascade;
+
+system ok
+rpk topic delete test_rate_limit_shared || true

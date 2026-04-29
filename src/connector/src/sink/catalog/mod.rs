@@ -80,6 +80,7 @@ impl SinkType {
             PbSinkType::AppendOnly => SinkType::AppendOnly,
             // Backward compatibility: normalize force-append-only to append-only. The associated
             // behavior is now represented by another field `ignore_delete`.
+            #[expect(deprecated)]
             PbSinkType::ForceAppendOnly => SinkType::AppendOnly,
             PbSinkType::Upsert => SinkType::Upsert,
             PbSinkType::Retract => SinkType::Retract,
@@ -381,7 +382,7 @@ impl SinkCatalog {
                 .iter()
                 .map(|k| *k as i32)
                 .collect_vec(),
-            owner: self.owner.into(),
+            owner: self.owner,
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
             raw_ignore_delete: self.ignore_delete,
@@ -496,7 +497,7 @@ impl From<PbSink> for SinkCatalog {
                 .map(|k| k as _)
                 .collect_vec(),
             properties: pb.properties,
-            owner: pb.owner.into(),
+            owner: pb.owner,
             sink_type: SinkType::from_proto(sink_type),
             ignore_delete,
             format_desc,

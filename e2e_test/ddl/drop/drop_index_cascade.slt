@@ -19,6 +19,16 @@ create materialized view v as select * from a join b on a.a1 = b.b1;
 statement ok
 drop index i_a1 cascade;
 
+query I
+select count(name) FROM rw_materialized_views WHERE name = 'v';
+----
+0
+
+query I
+select count(name) FROM rw_indexes WHERE name = 'i_a1';
+----
+0
+
 statement ok
 drop table a;
 

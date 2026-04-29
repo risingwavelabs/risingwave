@@ -40,7 +40,7 @@ CREATE TABLE ck_types (
   c_date_array date[],
   c_timestamptz_array timestamptz[],
   c_struct STRUCT<s_int integer, s_boolean boolean>,
-  c_jsonb: jsonb,
+  c_jsonb jsonb,
   PRIMARY KEY (types_id)
 );
 

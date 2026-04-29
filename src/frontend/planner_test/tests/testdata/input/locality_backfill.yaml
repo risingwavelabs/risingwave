@@ -64,6 +64,49 @@
     - stream_plan
 - sql: |
     set enable_locality_backfill = true;
+    create table t(a int, b int, c int);
+    SELECT
+      row_number() OVER (PARTITION BY b ORDER BY a) AS rank2
+    FROM (
+      SELECT * FROM (
+        SELECT
+            *,
+            row_number() OVER (PARTITION BY a, b ORDER BY c) AS rank1
+        FROM t
+      ) WHERE rank1 <= 1
+    );
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t(a int, b int, c int);
+    SELECT
+      rank1,
+      row_number() OVER (PARTITION BY a ORDER BY b) AS rank2
+    FROM (
+      SELECT
+        *,
+        row_number() OVER (PARTITION BY a, b ORDER BY c) AS rank1
+      FROM t
+    );
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
+    create table t(a int, b int, c int);
+    SELECT
+      rank1,
+      row_number() OVER (PARTITION BY b ORDER BY a) AS rank2
+    FROM (
+      SELECT
+        *,
+        row_number() OVER (PARTITION BY a, b ORDER BY c) AS rank1
+      FROM t
+    );
+  expected_outputs:
+    - stream_plan
+- sql: |
+    set enable_locality_backfill = true;
     create table t (
       id int
     , p1 int

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use risingwave_common::catalog::Schema;
@@ -368,10 +368,23 @@ impl Binder {
             return Err(ErrorCode::BindError("RECURSIVE CTE is not supported".to_owned()).into());
         }
 
+        let mut cte_names: HashSet<String> = HashSet::new();
+
         for cte_table in &with.cte_tables {
             let share_id = self.next_share_id();
             let Cte { alias, cte_inner } = cte_table;
             let table_name = alias.name.real_value();
+
+            // Check whether there are duplicate CTE names within the same WITH clause.
+            if cte_names.contains(&table_name) {
+                return Err(ErrorCode::DuplicateRelationName(format!(
+                    "WITH query name \"{}\" specified more than once",
+                    table_name
+                ))
+                .into());
+            }
+
+            cte_names.insert(table_name.clone());
 
             match cte_inner {
                 CteInner::Query(query) => {

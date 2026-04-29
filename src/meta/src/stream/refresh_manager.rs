@@ -254,7 +254,7 @@ impl GlobalRefreshManager {
             );
             return Ok(());
         };
-        let associated_source_id = SourceId::new(src_id);
+        let associated_source_id = src_id;
 
         // Increment cron job trigger counter
         let table_id_str = job.table_id.to_string();

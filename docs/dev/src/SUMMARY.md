@@ -40,6 +40,7 @@
     - [Aggregation](./design/aggregation.md)
     - [MView on Top of MView](./design/mv-on-mv.md)
     - [Backfill](./design/backfill.md)
+    - [Streaming Parallelism Configuration](./design/streaming-parallelism.md)
 - [State Store](./design/state-store-overview.md)
     - [Shared Buffer](./design/shared-buffer.md)
     - [Relational Table](./design/relational-table.md)

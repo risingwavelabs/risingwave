@@ -15,6 +15,7 @@
 use foyer::{
     Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig, Throttle,
 };
+use serde::de::Error as _;
 
 use super::*;
 
@@ -81,7 +82,10 @@ pub struct StorageConfig {
     pub max_cached_recent_versions_number: usize,
 
     /// max prefetch block number
-    #[serde(default = "default::storage::max_prefetch_block_number")]
+    #[serde(
+        default = "default::storage::max_prefetch_block_number",
+        deserialize_with = "deserialize_max_prefetch_block_number"
+    )]
     pub max_prefetch_block_number: usize,
 
     #[serde(default = "default::storage::disable_remote_compactor")]
@@ -209,6 +213,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::time_travel_version_cache_capacity")]
     pub time_travel_version_cache_capacity: u64,
 
+    #[serde(default = "default::storage::table_change_log_cache_capacity")]
+    pub table_change_log_cache_capacity: u64,
+
     // iceberg compaction
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
@@ -248,6 +255,12 @@ pub struct StorageConfig {
         default = "default::storage::iceberg_compaction_pending_parallelism_budget_multiplier"
     )]
     pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
+    /// Pull interval for iceberg compaction task requests in milliseconds.
+    #[serde(
+        default = "default::storage::iceberg_compaction_pull_interval_ms",
+        deserialize_with = "deserialize_iceberg_compaction_pull_interval_ms"
+    )]
+    pub iceberg_compaction_pull_interval_ms: u64,
 
     #[serde(default = "default::storage::iceberg_compaction_target_binpack_group_size_mb")]
     pub iceberg_compaction_target_binpack_group_size_mb: Option<u64>,
@@ -489,6 +502,18 @@ pub struct ObjectStoreConfig {
     #[serde(default)]
     pub s3: S3ObjectStoreConfig,
 
+    /// Maximum number of concurrent object store requests (read, `streaming_read`, metadata, etc.).
+    /// 0 means unlimited. When set to a positive value, a semaphore will be used to limit
+    /// the number of in-flight requests to the object store, preventing HTTP connection pool
+    /// contention under high concurrency.
+    #[serde(default = "default::object_store_config::object_store_req_concurrency_limit")]
+    pub req_concurrency_limit: usize,
+
+    /// Maximum number of concurrent HTTP requests used by the `OpenDAL` GCS backend.
+    /// 0 means unlimited.
+    #[serde(default = "default::object_store_config::http_concurrent_limit")]
+    pub http_concurrent_limit: usize,
+
     // TODO: the following field will be deprecated after opendal is stabilized
     #[serde(default = "default::object_store_config::opendal_upload_concurrency")]
     pub opendal_upload_concurrency: usize,
@@ -499,6 +524,32 @@ pub struct ObjectStoreConfig {
 
     #[serde(default = "default::object_store_config::upload_part_size")]
     pub upload_part_size: usize,
+}
+
+fn deserialize_max_prefetch_block_number<'de, D>(deserializer: D) -> Result<usize, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = usize::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.max_prefetch_block_number must be greater than 0",
+        ));
+    }
+    Ok(value)
+}
+
+fn deserialize_iceberg_compaction_pull_interval_ms<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = u64::deserialize(deserializer)?;
+    if value == 0 {
+        return Err(D::Error::custom(
+            "storage.iceberg_compaction_pull_interval_ms must be greater than 0",
+        ));
+    }
+    Ok(value)
 }
 
 impl ObjectStoreConfig {
@@ -1063,6 +1114,10 @@ pub mod default {
             10
         }
 
+        pub fn table_change_log_cache_capacity() -> u64 {
+            60
+        }
+
         pub fn sst_skip_bloom_filter_in_serde() -> bool {
             false
         }
@@ -1109,6 +1164,10 @@ pub mod default {
 
         pub fn iceberg_compaction_pending_parallelism_budget_multiplier() -> f32 {
             4.0
+        }
+
+        pub fn iceberg_compaction_pull_interval_ms() -> u64 {
+            5000
         }
 
         pub fn iceberg_compaction_target_binpack_group_size_mb() -> Option<u64> {
@@ -1246,6 +1305,14 @@ pub mod default {
 
         pub fn set_atomic_write_dir() -> bool {
             false
+        }
+
+        pub fn object_store_req_concurrency_limit() -> usize {
+            0
+        }
+
+        pub fn http_concurrent_limit() -> usize {
+            0
         }
 
         pub fn object_store_req_backoff_interval_ms() -> u64 {

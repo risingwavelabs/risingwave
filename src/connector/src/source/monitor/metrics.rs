@@ -14,7 +14,10 @@
 
 use std::sync::{Arc, LazyLock};
 
-use prometheus::{Registry, exponential_buckets, histogram_opts};
+use prometheus::{
+    IntCounterVec, Registry, exponential_buckets, histogram_opts,
+    register_int_counter_vec_with_registry,
+};
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
 };
@@ -31,10 +34,16 @@ pub struct EnumeratorMetrics {
     pub high_watermark: LabelGuardedIntGaugeVec,
     /// PostgreSQL CDC confirmed flush LSN monitoring
     pub pg_cdc_confirmed_flush_lsn: LabelGuardedIntGaugeVec,
+    /// PostgreSQL CDC upstream max LSN monitoring
+    pub pg_cdc_upstream_max_lsn: LabelGuardedIntGaugeVec,
     /// MySQL CDC binlog file sequence number (min)
     pub mysql_cdc_binlog_file_seq_min: LabelGuardedIntGaugeVec,
     /// MySQL CDC binlog file sequence number (max)
     pub mysql_cdc_binlog_file_seq_max: LabelGuardedIntGaugeVec,
+    /// SQL Server CDC upstream minimum LSN
+    pub sqlserver_cdc_upstream_min_lsn: LabelGuardedIntGaugeVec,
+    /// SQL Server CDC upstream maximum LSN
+    pub sqlserver_cdc_upstream_max_lsn: LabelGuardedIntGaugeVec,
 }
 
 pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
@@ -58,6 +67,14 @@ impl EnumeratorMetrics {
         )
         .unwrap();
 
+        let pg_cdc_upstream_max_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "pg_cdc_upstream_max_lsn",
+            "PostgreSQL CDC upstream max LSN (pg_current_wal_lsn)",
+            &["source_id", "slot_name"],
+            registry,
+        )
+        .unwrap();
+
         let mysql_cdc_binlog_file_seq_min = register_guarded_int_gauge_vec_with_registry!(
             "mysql_cdc_binlog_file_seq_min",
             "MySQL CDC upstream binlog file sequence number (minimum/oldest)",
@@ -74,11 +91,30 @@ impl EnumeratorMetrics {
         )
         .unwrap();
 
+        let sqlserver_cdc_upstream_min_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "sqlserver_cdc_upstream_min_lsn",
+            "SQL Server CDC upstream minimum LSN",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
+        let sqlserver_cdc_upstream_max_lsn = register_guarded_int_gauge_vec_with_registry!(
+            "sqlserver_cdc_upstream_max_lsn",
+            "SQL Server CDC upstream maximum LSN",
+            &["source_id"],
+            registry,
+        )
+        .unwrap();
+
         EnumeratorMetrics {
             high_watermark,
             pg_cdc_confirmed_flush_lsn,
+            pg_cdc_upstream_max_lsn,
             mysql_cdc_binlog_file_seq_min,
             mysql_cdc_binlog_file_seq_max,
+            sqlserver_cdc_upstream_min_lsn,
+            sqlserver_cdc_upstream_max_lsn,
         }
     }
 
@@ -102,12 +138,16 @@ pub struct SourceMetrics {
     pub partition_input_bytes: LabelGuardedIntCounterVec,
     /// Report latest message id
     pub latest_message_id: LabelGuardedIntGaugeVec,
+    pub partition_eof_count: LabelGuardedIntCounterVec,
+    pub partition_eof_offset: LabelGuardedIntGaugeVec,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
 
     pub direct_cdc_event_lag_latency: LabelGuardedHistogramVec,
 
     pub parquet_source_skip_row_count: LabelGuardedIntCounterVec,
     pub file_source_input_row_count: LabelGuardedIntCounterVec,
+    pub file_source_dirty_split_count: LabelGuardedIntGaugeVec,
+    pub file_source_failed_split_count: LabelGuardedIntCounterVec,
 
     // kinesis source
     pub kinesis_throughput_exceeded_count: LabelGuardedIntCounterVec,
@@ -115,6 +155,9 @@ pub struct SourceMetrics {
     pub kinesis_rebuild_shard_iter_count: LabelGuardedIntCounterVec,
     pub kinesis_early_terminate_shard_count: LabelGuardedIntCounterVec,
     pub kinesis_lag_latency_ms: LabelGuardedHistogramVec,
+
+    /// Total ack failures (RPC errors and timeouts) during checkpoint for source connectors.
+    pub connector_ack_failure_count: IntCounterVec,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -155,6 +198,20 @@ impl SourceMetrics {
             registry,
         )
         .unwrap();
+        let partition_eof_count = register_guarded_int_counter_vec_with_registry!(
+            "source_partition_eof_count",
+            "Total number of EOF events received from specific partition",
+            &["source_id", "partition", "source_name", "fragment_id"],
+            registry
+        )
+        .unwrap();
+        let partition_eof_offset = register_guarded_int_gauge_vec_with_registry!(
+            "source_partition_eof_offset",
+            "Latest resolved EOF offset for specific partition",
+            &["source_id", "partition", "source_name", "fragment_id"],
+            registry
+        )
+        .unwrap();
 
         let opts = histogram_opts!(
             "source_cdc_event_lag_duration_milliseconds",
@@ -178,6 +235,20 @@ impl SourceMetrics {
         let file_source_input_row_count = register_guarded_int_counter_vec_with_registry!(
             "file_source_input_row_count",
             "Total number of rows that have been read in file source",
+            &["source_id", "source_name", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+        let file_source_dirty_split_count = register_guarded_int_gauge_vec_with_registry!(
+            "file_source_dirty_split_count",
+            "Current number of dirty file splits in file source",
+            &["source_id", "source_name", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+        let file_source_failed_split_count = register_guarded_int_counter_vec_with_registry!(
+            "file_source_failed_split_count",
+            "Total number of file splits marked dirty in file source",
             &["source_id", "source_name", "actor_id", "fragment_id"],
             registry
         )
@@ -223,20 +294,34 @@ impl SourceMetrics {
         )
         .unwrap();
 
+        let connector_ack_failure_count = register_int_counter_vec_with_registry!(
+            "source_connector_ack_failure_count",
+            "Total number of ack failures during checkpoint for source connectors",
+            &["source_name", "connector_type", "error_type"],
+            registry
+        )
+        .unwrap();
+
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,
             latest_message_id,
+            partition_eof_count,
+            partition_eof_offset,
             rdkafka_native_metric,
             direct_cdc_event_lag_latency,
             parquet_source_skip_row_count,
             file_source_input_row_count,
+            file_source_dirty_split_count,
+            file_source_failed_split_count,
 
             kinesis_throughput_exceeded_count,
             kinesis_timeout_count,
             kinesis_rebuild_shard_iter_count,
             kinesis_early_terminate_shard_count,
             kinesis_lag_latency_ms,
+
+            connector_ack_failure_count,
         }
     }
 }

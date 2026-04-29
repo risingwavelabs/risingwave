@@ -278,7 +278,7 @@ mod tests {
         };
 
         let server_status = original.to_status(tonic::Code::Internal, "test");
-        let body = server_status.into_http();
+        let body = server_status.into_http::<()>();
         let client_status = tonic::Status::from_header_map(body.headers()).unwrap();
 
         let wrapper = TonicStatusWrapper::new(client_status);

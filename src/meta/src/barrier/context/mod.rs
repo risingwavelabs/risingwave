@@ -41,6 +41,7 @@ use crate::barrier::{
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
+use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 #[derive(Debug)]
@@ -48,6 +49,7 @@ pub(super) struct CreateSnapshotBackfillJobCommandInfo {
     pub info: CreateStreamingJobCommandInfo,
     pub snapshot_backfill_info: SnapshotBackfillInfo,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
+    pub resolved_split_assignment: SplitAssignment,
 }
 
 impl CreateSnapshotBackfillJobCommandInfo {
@@ -56,6 +58,7 @@ impl CreateSnapshotBackfillJobCommandInfo {
             info: self.info,
             job_type: CreateStreamingJobType::SnapshotBackfill(self.snapshot_backfill_info),
             cross_db_snapshot_backfill_info: self.cross_db_snapshot_backfill_info,
+            resolved_split_assignment: self.resolved_split_assignment,
         }
     }
 }

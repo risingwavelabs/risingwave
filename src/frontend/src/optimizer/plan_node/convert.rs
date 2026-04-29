@@ -73,6 +73,8 @@ pub fn try_enforce_locality_requirement(plan: LogicalPlanRef, columns: &[usize])
     } else if plan.ctx().session_ctx().config().enable_locality_backfill() {
         LogicalLocalityProvider::new(plan, columns.to_owned()).into()
     } else {
+        // TODO: remove this when locality backfill is enabled by default
+        plan.ctx().inc_missed_locality_providers();
         plan
     }
 }

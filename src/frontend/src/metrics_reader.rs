@@ -16,7 +16,9 @@ use std::collections::HashMap;
 
 use anyhow::{Result, anyhow};
 use prometheus_http_query::Client as PrometheusClient;
-use risingwave_common::metrics_reader::{ChannelDeltaStats, ChannelKey, MetricsReader};
+use risingwave_common::metrics_reader::{
+    ChannelDeltaStats, ChannelKey, KafkaPartitionMetrics, MetricsReader,
+};
 
 /// Default time offset in seconds for metrics queries
 const DEFAULT_TIME_OFFSET_SECONDS: i64 = 60;
@@ -49,11 +51,10 @@ impl MetricsReader for MetricsReaderImpl {
     ) -> Result<HashMap<ChannelKey, ChannelDeltaStats>> {
         let time_offset = time_offset.unwrap_or(DEFAULT_TIME_OFFSET_SECONDS);
 
-        // Check if Prometheus client is available
-        let prometheus_client = self
-            .prometheus_client
-            .as_ref()
-            .ok_or_else(|| anyhow!("Prometheus endpoint is not set"))?;
+        // Return empty result if Prometheus client is not configured
+        let Some(prometheus_client) = self.prometheus_client.as_ref() else {
+            return Ok(HashMap::new());
+        };
 
         // Query channel delta stats: throughput and backpressure rate
         let channel_input_throughput_query = format!(
@@ -184,5 +185,71 @@ impl MetricsReader for MetricsReaderImpl {
         }
 
         Ok(channel_data)
+    }
+
+    async fn get_kafka_source_metrics(&self) -> Result<Vec<KafkaPartitionMetrics>> {
+        // Return empty result if Prometheus client is not configured
+        let Some(prometheus_client) = self.prometheus_client.as_ref() else {
+            return Ok(vec![]);
+        };
+
+        let high_watermark_query = format!(
+            "max(source_kafka_high_watermark{{{}}}) by (source_id, partition)",
+            self.prometheus_selector
+        );
+        let latest_offset_query = format!(
+            "max(source_latest_message_id{{{}}}) by (source_id, partition)",
+            self.prometheus_selector
+        );
+
+        let (high_watermark_result, latest_offset_result) = tokio::try_join!(
+            prometheus_client.query(high_watermark_query).get(),
+            prometheus_client.query(latest_offset_query).get(),
+        )
+        .map_err(|e| anyhow!(e).context("failed to query Prometheus"))?;
+
+        let mut metrics: HashMap<(u32, String), KafkaPartitionMetrics> = HashMap::new();
+
+        if let Some(samples) = high_watermark_result.data().as_vector() {
+            for sample in samples {
+                if let (Some(source_id_str), Some(partition_id)) = (
+                    sample.metric().get("source_id"),
+                    sample.metric().get("partition"),
+                ) && let Ok(source_id) = source_id_str.parse::<u32>()
+                {
+                    let entry = metrics
+                        .entry((source_id, partition_id.to_owned()))
+                        .or_insert_with(|| KafkaPartitionMetrics {
+                            source_id,
+                            partition_id: partition_id.to_owned(),
+                            high_watermark: None,
+                            latest_offset: None,
+                        });
+                    entry.high_watermark = Some(sample.sample().value().round() as i64);
+                }
+            }
+        }
+
+        if let Some(samples) = latest_offset_result.data().as_vector() {
+            for sample in samples {
+                if let (Some(source_id_str), Some(partition_id)) = (
+                    sample.metric().get("source_id"),
+                    sample.metric().get("partition"),
+                ) && let Ok(source_id) = source_id_str.parse::<u32>()
+                {
+                    let entry = metrics
+                        .entry((source_id, partition_id.to_owned()))
+                        .or_insert_with(|| KafkaPartitionMetrics {
+                            source_id,
+                            partition_id: partition_id.to_owned(),
+                            high_watermark: None,
+                            latest_offset: None,
+                        });
+                    entry.latest_offset = Some(sample.sample().value().round() as i64);
+                }
+            }
+        }
+
+        Ok(metrics.into_values().collect())
     }
 }

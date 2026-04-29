@@ -145,7 +145,7 @@ impl Binder {
             columns.push((false, Field::with_name(DataType::Int64, "ordinality")));
         }
 
-        self.bind_table_to_context(columns, func_name.clone(), alias)?;
+        self.bind_table_to_context(columns, func_name.clone(), None, alias)?;
 
         Ok(Relation::TableFunction {
             expr: func,

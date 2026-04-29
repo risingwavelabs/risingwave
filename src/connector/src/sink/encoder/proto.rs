@@ -591,7 +591,9 @@ mod tests {
                 kind: double,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: F64(
+                    0.0,
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -610,7 +612,9 @@ mod tests {
                 kind: float,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: F32(
+                    0.0,
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -629,7 +633,9 @@ mod tests {
                 kind: int32,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: I32(
+                    0,
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -648,7 +654,9 @@ mod tests {
                 kind: int64,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: I64(
+                    0,
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -667,7 +675,9 @@ mod tests {
                 kind: sint32,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: I32(
+                    0,
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -686,7 +696,9 @@ mod tests {
                 kind: sfixed32,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: I32(
+                    0,
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -705,7 +717,9 @@ mod tests {
                 kind: sfixed64,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: I64(
+                    0,
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -724,7 +738,9 @@ mod tests {
                 kind: bool,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: Bool(
+                    false,
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -743,7 +759,9 @@ mod tests {
                 kind: string,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: String(
+                    "",
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -762,7 +780,9 @@ mod tests {
                 kind: bytes,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: Bytes(
+                    b"",
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -781,7 +801,55 @@ mod tests {
                 kind: all_types.AllTypes.NestedMessage,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: Message(
+                    DynamicMessage {
+                        desc: MessageDescriptor {
+                            name: "NestedMessage",
+                            full_name: "all_types.AllTypes.NestedMessage",
+                            is_map_entry: false,
+                            fields: [
+                                FieldDescriptor {
+                                    name: "id",
+                                    full_name: "all_types.AllTypes.NestedMessage.id",
+                                    json_name: "id",
+                                    number: 1,
+                                    kind: int32,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: I32(
+                                        0,
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                                FieldDescriptor {
+                                    name: "name",
+                                    full_name: "all_types.AllTypes.NestedMessage.name",
+                                    json_name: "name",
+                                    number: 2,
+                                    kind: string,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: String(
+                                        "",
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                            ],
+                            oneofs: [],
+                        },
+                        fields: DynamicMessageFieldSet {
+                            fields: {},
+                        },
+                    },
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -789,7 +857,7 @@ mod tests {
                 supports_presence: true,
             }
 
-            value: Message(DynamicMessage { desc: MessageDescriptor { name: "NestedMessage", full_name: "all_types.AllTypes.NestedMessage", is_map_entry: false, fields: [FieldDescriptor { name: "id", full_name: "all_types.AllTypes.NestedMessage.id", json_name: "id", number: 1, kind: int32, cardinality: Optional, containing_oneof: None, default_value: None, is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }, FieldDescriptor { name: "name", full_name: "all_types.AllTypes.NestedMessage.name", json_name: "name", number: 2, kind: string, cardinality: Optional, containing_oneof: None, default_value: None, is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }], oneofs: [] }, fields: DynamicMessageFieldSet { fields: {1: Value(I32(1)), 2: Value(String(""))} } })
+            value: Message(DynamicMessage { desc: MessageDescriptor { name: "NestedMessage", full_name: "all_types.AllTypes.NestedMessage", is_map_entry: false, fields: [FieldDescriptor { name: "id", full_name: "all_types.AllTypes.NestedMessage.id", json_name: "id", number: 1, kind: int32, cardinality: Optional, containing_oneof: None, default_value: I32(0), is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }, FieldDescriptor { name: "name", full_name: "all_types.AllTypes.NestedMessage.name", json_name: "name", number: 2, kind: string, cardinality: Optional, containing_oneof: None, default_value: String(""), is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }], oneofs: [] }, fields: DynamicMessageFieldSet { fields: {1: Value(I32(1)), 2: Value(String(""))} } })
 
             ==============================
             field: FieldDescriptor {
@@ -800,7 +868,9 @@ mod tests {
                 kind: int32,
                 cardinality: Repeated,
                 containing_oneof: None,
-                default_value: None,
+                default_value: List(
+                    [],
+                ),
                 is_group: false,
                 is_list: true,
                 is_map: false,
@@ -819,7 +889,9 @@ mod tests {
                 kind: all_types.AllTypes.MapFieldEntry,
                 cardinality: Repeated,
                 containing_oneof: None,
-                default_value: None,
+                default_value: Map(
+                    {},
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: true,
@@ -841,7 +913,55 @@ mod tests {
                 kind: google.protobuf.Timestamp,
                 cardinality: Optional,
                 containing_oneof: None,
-                default_value: None,
+                default_value: Message(
+                    DynamicMessage {
+                        desc: MessageDescriptor {
+                            name: "Timestamp",
+                            full_name: "google.protobuf.Timestamp",
+                            is_map_entry: false,
+                            fields: [
+                                FieldDescriptor {
+                                    name: "seconds",
+                                    full_name: "google.protobuf.Timestamp.seconds",
+                                    json_name: "seconds",
+                                    number: 1,
+                                    kind: int64,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: I64(
+                                        0,
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                                FieldDescriptor {
+                                    name: "nanos",
+                                    full_name: "google.protobuf.Timestamp.nanos",
+                                    json_name: "nanos",
+                                    number: 2,
+                                    kind: int32,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: I32(
+                                        0,
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                            ],
+                            oneofs: [],
+                        },
+                        fields: DynamicMessageFieldSet {
+                            fields: {},
+                        },
+                    },
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: false,
@@ -849,7 +969,7 @@ mod tests {
                 supports_presence: true,
             }
 
-            value: Message(DynamicMessage { desc: MessageDescriptor { name: "Timestamp", full_name: "google.protobuf.Timestamp", is_map_entry: false, fields: [FieldDescriptor { name: "seconds", full_name: "google.protobuf.Timestamp.seconds", json_name: "seconds", number: 1, kind: int64, cardinality: Optional, containing_oneof: None, default_value: None, is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }, FieldDescriptor { name: "nanos", full_name: "google.protobuf.Timestamp.nanos", json_name: "nanos", number: 2, kind: int32, cardinality: Optional, containing_oneof: None, default_value: None, is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }], oneofs: [] }, fields: DynamicMessageFieldSet { fields: {2: Value(I32(3000))} } })
+            value: Message(DynamicMessage { desc: MessageDescriptor { name: "Timestamp", full_name: "google.protobuf.Timestamp", is_map_entry: false, fields: [FieldDescriptor { name: "seconds", full_name: "google.protobuf.Timestamp.seconds", json_name: "seconds", number: 1, kind: int64, cardinality: Optional, containing_oneof: None, default_value: I64(0), is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }, FieldDescriptor { name: "nanos", full_name: "google.protobuf.Timestamp.nanos", json_name: "nanos", number: 2, kind: int32, cardinality: Optional, containing_oneof: None, default_value: I32(0), is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }], oneofs: [] }, fields: DynamicMessageFieldSet { fields: {2: Value(I32(3000))} } })
 
             ==============================
             field: FieldDescriptor {
@@ -860,7 +980,9 @@ mod tests {
                 kind: all_types.AllTypes.MapStructFieldEntry,
                 cardinality: Repeated,
                 containing_oneof: None,
-                default_value: None,
+                default_value: Map(
+                    {},
+                ),
                 is_group: false,
                 is_list: false,
                 is_map: true,
@@ -869,8 +991,8 @@ mod tests {
             }
 
             value: Map({
-                String("a"): Message(DynamicMessage { desc: MessageDescriptor { name: "NestedMessage", full_name: "all_types.AllTypes.NestedMessage", is_map_entry: false, fields: [FieldDescriptor { name: "id", full_name: "all_types.AllTypes.NestedMessage.id", json_name: "id", number: 1, kind: int32, cardinality: Optional, containing_oneof: None, default_value: None, is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }, FieldDescriptor { name: "name", full_name: "all_types.AllTypes.NestedMessage.name", json_name: "name", number: 2, kind: string, cardinality: Optional, containing_oneof: None, default_value: None, is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }], oneofs: [] }, fields: DynamicMessageFieldSet { fields: {1: Value(I32(1)), 2: Value(String("x"))} } }),
-                String("b"): Message(DynamicMessage { desc: MessageDescriptor { name: "NestedMessage", full_name: "all_types.AllTypes.NestedMessage", is_map_entry: false, fields: [FieldDescriptor { name: "id", full_name: "all_types.AllTypes.NestedMessage.id", json_name: "id", number: 1, kind: int32, cardinality: Optional, containing_oneof: None, default_value: None, is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }, FieldDescriptor { name: "name", full_name: "all_types.AllTypes.NestedMessage.name", json_name: "name", number: 2, kind: string, cardinality: Optional, containing_oneof: None, default_value: None, is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }], oneofs: [] }, fields: DynamicMessageFieldSet { fields: {1: Value(I32(2)), 2: Value(String("y"))} } }),
+                String("a"): Message(DynamicMessage { desc: MessageDescriptor { name: "NestedMessage", full_name: "all_types.AllTypes.NestedMessage", is_map_entry: false, fields: [FieldDescriptor { name: "id", full_name: "all_types.AllTypes.NestedMessage.id", json_name: "id", number: 1, kind: int32, cardinality: Optional, containing_oneof: None, default_value: I32(0), is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }, FieldDescriptor { name: "name", full_name: "all_types.AllTypes.NestedMessage.name", json_name: "name", number: 2, kind: string, cardinality: Optional, containing_oneof: None, default_value: String(""), is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }], oneofs: [] }, fields: DynamicMessageFieldSet { fields: {1: Value(I32(1)), 2: Value(String("x"))} } }),
+                String("b"): Message(DynamicMessage { desc: MessageDescriptor { name: "NestedMessage", full_name: "all_types.AllTypes.NestedMessage", is_map_entry: false, fields: [FieldDescriptor { name: "id", full_name: "all_types.AllTypes.NestedMessage.id", json_name: "id", number: 1, kind: int32, cardinality: Optional, containing_oneof: None, default_value: I32(0), is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }, FieldDescriptor { name: "name", full_name: "all_types.AllTypes.NestedMessage.name", json_name: "name", number: 2, kind: string, cardinality: Optional, containing_oneof: None, default_value: String(""), is_group: false, is_list: false, is_map: false, is_packed: false, supports_presence: false }], oneofs: [] }, fields: DynamicMessageFieldSet { fields: {1: Value(I32(2)), 2: Value(String("y"))} } }),
             })"#]].assert_eq(&format!("{}",
             m.message.fields().format_with("\n\n==============================\n", |(field,value),f| {
             f(&format!("field: {:#?}\n\nvalue: {}", field, print_proto(value)))

@@ -46,7 +46,7 @@ use crate::error::{ScoredStreamError, StreamError, StreamResult};
 use crate::task::LocalBarrierManager;
 use crate::task::managed_state::{BarrierToComplete, ResetPartialGraphOutput};
 use crate::task::{
-    ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache,
+    ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache, FragmentId,
     PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
 };
 pub mod managed_state;
@@ -224,7 +224,10 @@ impl ControlStreamHandle {
 }
 
 pub(super) enum TakeReceiverRequest {
-    Remote(oneshot::Sender<StreamResult<Receiver>>),
+    Remote {
+        result_sender: oneshot::Sender<StreamResult<Receiver>>,
+        upstream_fragment_id: FragmentId,
+    },
     Local(permit::Sender),
 }
 
@@ -560,7 +563,7 @@ impl LocalBarrierWorker {
                         }
                     }
                 };
-                if let TakeReceiverRequest::Remote(result_sender) = request {
+                if let TakeReceiverRequest::Remote { result_sender, .. } = request {
                     let _ = result_sender.send(Err(err.into()));
                 }
             }

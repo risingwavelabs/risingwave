@@ -1,0 +1,73 @@
+# CRC-32 tests
+
+# Empty input
+query I
+SELECT crc32(''::bytea);
+----
+0
+
+# Single zero byte
+query I
+SELECT crc32('\x00'::bytea);
+----
+3523407757
+
+# Known test vector: "The quick brown fox jumps over the lazy dog"
+query I
+SELECT crc32('The quick brown fox jumps over the lazy dog'::bytea);
+----
+1095738169
+
+# Known test vector: ASCII "123456789" (standard CRC-32 check value 0xCBF43926)
+query I
+SELECT crc32('123456789'::bytea);
+----
+3421780262
+
+# NULL input returns NULL
+query I
+SELECT crc32(NULL::bytea);
+----
+NULL
+
+# Type error: integer input
+statement error
+SELECT crc32(123);
+
+# Type error: varchar input without cast
+statement error
+SELECT crc32('hello'::varchar);
+
+# CRC-32C tests
+
+# Empty input
+query I
+SELECT crc32c(''::bytea);
+----
+0
+
+# Single zero byte
+query I
+SELECT crc32c('\x00'::bytea);
+----
+1383945041
+
+# Known test vector: ASCII "123456789" (standard CRC-32C check value 0xE3069283)
+query I
+SELECT crc32c('123456789'::bytea);
+----
+3808858755
+
+# NULL input returns NULL
+query I
+SELECT crc32c(NULL::bytea);
+----
+NULL
+
+# Type error: integer input
+statement error
+SELECT crc32c(123);
+
+# Type error: varchar input without cast
+statement error
+SELECT crc32c('hello'::varchar);

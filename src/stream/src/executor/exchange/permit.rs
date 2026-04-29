@@ -17,6 +17,8 @@
 use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::task_service::permits;
 use tokio::sync::{AcquireError, Semaphore, SemaphorePermit, mpsc};
 
@@ -32,12 +34,32 @@ pub struct MessageWithPermits {
     pub permits: Option<permits::Value>,
 }
 
-/// Create a channel for the exchange service.
-pub fn channel(
+pub struct ChannelMetrics {
+    pub sender_actor_channel_buffered_bytes: LabelGuardedIntGauge,
+    pub receiver_actor_channel_buffered_bytes: LabelGuardedIntGauge,
+}
+
+impl ChannelMetrics {
+    pub fn for_test() -> Self {
+        Self {
+            sender_actor_channel_buffered_bytes: LabelGuardedIntGauge::test_int_gauge::<1>(),
+            receiver_actor_channel_buffered_bytes: LabelGuardedIntGauge::test_int_gauge::<1>(),
+        }
+    }
+}
+
+/// Create a channel for the exchange service with metrics.
+pub fn channel_with_metrics(
     initial_permits: usize,
     batched_permits: usize,
     concurrent_barriers: usize,
+    metrics: ChannelMetrics,
 ) -> (Sender, Receiver) {
+    let ChannelMetrics {
+        sender_actor_channel_buffered_bytes,
+        receiver_actor_channel_buffered_bytes,
+    } = metrics;
+
     // Use an unbounded channel since we manage the permits manually.
     let (tx, rx) = mpsc::unbounded_channel();
 
@@ -52,16 +74,25 @@ pub fn channel(
             tx,
             permits: permits.clone(),
             max_chunk_permits,
+            sender_actor_channel_buffered_bytes,
         },
-        Receiver { rx, permits },
+        Receiver {
+            rx,
+            permits,
+            receiver_actor_channel_buffered_bytes,
+        },
     )
 }
 
-pub fn channel_from_config(config: &StreamingConfig) -> (Sender, Receiver) {
-    channel(
+pub fn channel_from_config_with_metrics(
+    config: &StreamingConfig,
+    metrics: ChannelMetrics,
+) -> (Sender, Receiver) {
+    channel_with_metrics(
         config.developer.exchange_initial_permits,
         config.developer.exchange_batched_permits,
         config.developer.exchange_concurrent_barriers,
+        metrics,
     )
 }
 
@@ -75,7 +106,12 @@ pub mod for_test {
 pub fn channel_for_test() -> (Sender, Receiver) {
     use for_test::*;
 
-    channel(INITIAL_PERMITS, BATCHED_PERMITS, CONCURRENT_BARRIERS)
+    channel_with_metrics(
+        INITIAL_PERMITS,
+        BATCHED_PERMITS,
+        CONCURRENT_BARRIERS,
+        ChannelMetrics::for_test(),
+    )
 }
 
 /// Semaphore-based permits to control the back-pressure.
@@ -125,6 +161,7 @@ pub struct Sender {
     /// acquire these permits. `BATCHED_PERMITS` is subtracted to avoid deadlock with
     /// batching.
     max_chunk_permits: usize,
+    sender_actor_channel_buffered_bytes: LabelGuardedIntGauge,
 }
 
 impl Sender {
@@ -132,6 +169,11 @@ impl Sender {
     ///
     /// Returns error if the receive half of the channel is closed, including the message passed.
     pub async fn send(&self, message: Message) -> Result<(), mpsc::error::SendError<Message>> {
+        let chunk_size = match &message {
+            Message::Chunk(chunk) => chunk.estimated_size() as i64,
+            _ => 0,
+        };
+
         // The semaphores should never be closed.
         let permits = match &message {
             Message::Chunk(c) => {
@@ -153,7 +195,11 @@ impl Sender {
 
         self.tx
             .send(MessageWithPermits { message, permits })
-            .map_err(|e| mpsc::error::SendError(e.0.message))
+            .map_err(|e| mpsc::error::SendError(e.0.message))?;
+
+        self.sender_actor_channel_buffered_bytes.add(chunk_size);
+
+        Ok(())
     }
 }
 
@@ -161,6 +207,7 @@ impl Sender {
 pub struct Receiver {
     rx: mpsc::UnboundedReceiver<MessageWithPermits>,
     permits: Arc<Permits>,
+    receiver_actor_channel_buffered_bytes: LabelGuardedIntGauge,
 }
 
 impl Receiver {
@@ -198,7 +245,14 @@ impl Receiver {
     ///
     /// Returns `None` if the channel has been closed.
     pub async fn recv_raw(&mut self) -> Option<MessageWithPermits> {
-        self.rx.recv().await
+        let message_with_permits = self.rx.recv().await?;
+
+        if let Message::Chunk(chunk) = &message_with_permits.message {
+            let chunk_size = chunk.estimated_size() as i64;
+            self.receiver_actor_channel_buffered_bytes.sub(chunk_size);
+        }
+
+        Some(message_with_permits)
     }
 
     /// Get a reference to the inner [`Permits`] to manually add permits.
@@ -227,7 +281,7 @@ mod tests {
 
     #[test]
     fn test_channel_close() {
-        let (tx, mut rx) = channel(0, 0, 1);
+        let (tx, mut rx) = channel_with_metrics(0, 0, 1, ChannelMetrics::for_test());
 
         let send = || {
             tx.send(Message::BarrierBatch(vec![

@@ -42,6 +42,8 @@ pub struct ManualCompactionOption {
     pub internal_table_id: HashSet<StateTableId>,
     /// Input level.
     pub level: usize,
+    /// When true, skip manual compaction if any task is pending in the compaction group.
+    pub exclusive: bool,
 }
 
 impl Default for ManualCompactionOption {
@@ -55,17 +57,26 @@ impl Default for ManualCompactionOption {
             },
             internal_table_id: HashSet::default(),
             level: 1,
+            exclusive: false,
         }
     }
 }
 
 pub struct ManualCompactionSelector {
     option: ManualCompactionOption,
+    blocked_by_pending: bool,
 }
 
 impl ManualCompactionSelector {
     pub fn new(option: ManualCompactionOption) -> Self {
-        Self { option }
+        Self {
+            option,
+            blocked_by_pending: false,
+        }
+    }
+
+    pub fn blocked_by_pending(&self) -> bool {
+        self.blocked_by_pending
     }
 }
 
@@ -82,6 +93,8 @@ impl CompactionSelector for ManualCompactionSelector {
             developer_config,
             ..
         } = context;
+        self.blocked_by_pending = false;
+
         let dynamic_level_core =
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
@@ -104,7 +117,18 @@ impl CompactionSelector for ManualCompactionSelector {
         };
 
         let compaction_input =
-            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default())?;
+            picker.pick_compaction(levels, level_handlers, &mut LocalPickerStatistic::default());
+
+        if compaction_input.is_none()
+            && self.option.exclusive
+            && level_handlers
+                .iter()
+                .any(|level_handler| level_handler.pending_file_count() > 0)
+        {
+            self.blocked_by_pending = true;
+        }
+
+        let compaction_input = compaction_input?;
         compaction_input.add_pending_task(task_id, level_handlers);
 
         Some(create_compaction_task(

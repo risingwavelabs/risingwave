@@ -47,11 +47,13 @@ use risingwave_pb::catalog::{
     PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{PbObjectType, WorkerNode};
 use risingwave_pb::expr::{PbExprNode, expr_node};
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::Info as NotificationInfo;
-use risingwave_pb::meta::{PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup};
+use risingwave_pb::meta::{
+    ObjectDependency as PbObjectDependency, PbFragmentWorkerSlotMapping, PbObject, PbObjectGroup,
+};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
@@ -71,7 +73,7 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 use tracing::warn;
 
-use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
+use crate::barrier::SharedFragmentInfo;
 use crate::controller::ObjectModel;
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::scale::resolve_streaming_job_definition;
@@ -164,6 +166,133 @@ pub fn construct_obj_dependency_query(obj_id: ObjectId) -> WithQuery {
                 .cte(common_table_expr)
                 .to_owned(),
         )
+}
+
+fn to_pb_object_type(obj_type: ObjectType) -> PbObjectType {
+    match obj_type {
+        ObjectType::Database => PbObjectType::Database,
+        ObjectType::Schema => PbObjectType::Schema,
+        ObjectType::Table => PbObjectType::Table,
+        ObjectType::Source => PbObjectType::Source,
+        ObjectType::Sink => PbObjectType::Sink,
+        ObjectType::View => PbObjectType::View,
+        ObjectType::Index => PbObjectType::Index,
+        ObjectType::Function => PbObjectType::Function,
+        ObjectType::Connection => PbObjectType::Connection,
+        ObjectType::Subscription => PbObjectType::Subscription,
+        ObjectType::Secret => PbObjectType::Secret,
+    }
+}
+
+/// Collect object dependencies with optional object id filtering, and optionally exclude non-created streaming jobs.
+async fn list_object_dependencies_impl(
+    txn: &DatabaseTransaction,
+    object_id: Option<ObjectId>,
+    include_creating: bool,
+) -> MetaResult<Vec<PbObjectDependency>> {
+    let referenced_alias = Alias::new("referenced_obj");
+    let mut query = ObjectDependency::find()
+        .select_only()
+        .columns([
+            object_dependency::Column::Oid,
+            object_dependency::Column::UsedBy,
+        ])
+        .column_as(
+            Expr::col((referenced_alias.clone(), object::Column::ObjType)),
+            "referenced_obj_type",
+        )
+        .join(
+            JoinType::InnerJoin,
+            object_dependency::Relation::Object1.def(),
+        )
+        .join_as(
+            JoinType::InnerJoin,
+            object_dependency::Relation::Object2.def(),
+            referenced_alias.clone(),
+        );
+    if let Some(object_id) = object_id {
+        query = query.filter(object_dependency::Column::UsedBy.eq(object_id));
+    }
+    let mut obj_dependencies: Vec<PbObjectDependency> = query
+        .into_tuple()
+        .all(txn)
+        .await?
+        .into_iter()
+        .map(|(oid, used_by, referenced_type)| PbObjectDependency {
+            object_id: used_by,
+            referenced_object_id: oid,
+            referenced_object_type: to_pb_object_type(referenced_type) as i32,
+        })
+        .collect();
+
+    let mut sink_query = Sink::find()
+        .select_only()
+        .columns([sink::Column::SinkId, sink::Column::TargetTable])
+        .filter(sink::Column::TargetTable.is_not_null());
+    if let Some(object_id) = object_id {
+        sink_query = sink_query.filter(
+            sink::Column::SinkId
+                .eq(object_id)
+                .or(sink::Column::TargetTable.eq(object_id)),
+        );
+    }
+    let sink_dependencies: Vec<(SinkId, TableId)> = sink_query.into_tuple().all(txn).await?;
+    obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
+        PbObjectDependency {
+            object_id: table_id.into(),
+            referenced_object_id: sink_id.into(),
+            referenced_object_type: PbObjectType::Sink as i32,
+        }
+    }));
+
+    if !include_creating {
+        let mut streaming_job_ids = obj_dependencies
+            .iter()
+            .map(|dependency| dependency.object_id)
+            .collect_vec();
+        streaming_job_ids.sort_unstable();
+        streaming_job_ids.dedup();
+
+        if !streaming_job_ids.is_empty() {
+            let non_created_jobs: HashSet<JobId> = StreamingJob::find()
+                .select_only()
+                .columns([streaming_job::Column::JobId])
+                .filter(
+                    streaming_job::Column::JobId
+                        .is_in(streaming_job_ids)
+                        .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
+                )
+                .into_tuple()
+                .all(txn)
+                .await?
+                .into_iter()
+                .collect();
+
+            if !non_created_jobs.is_empty() {
+                obj_dependencies.retain(|dependency| {
+                    !non_created_jobs.contains(&dependency.object_id.as_job_id())
+                });
+            }
+        }
+    }
+
+    Ok(obj_dependencies)
+}
+
+/// List object dependencies with optional filtering of non-created streaming jobs.
+pub async fn list_object_dependencies(
+    txn: &DatabaseTransaction,
+    include_creating: bool,
+) -> MetaResult<Vec<PbObjectDependency>> {
+    list_object_dependencies_impl(txn, None, include_creating).await
+}
+
+/// List object dependencies for the specified object id without filtering by job status.
+pub async fn list_object_dependencies_by_object_id(
+    txn: &DatabaseTransaction,
+    object_id: ObjectId,
+) -> MetaResult<Vec<PbObjectDependency>> {
+    list_object_dependencies_impl(txn, Some(object_id), true).await
 }
 
 /// This function will construct a query using recursive cte to find if dependent objects are already relying on the target table.
@@ -1168,18 +1297,23 @@ where
         .into_iter()
         .map(|(privilege, object)| {
             let object = object.unwrap();
-            let oid = object.oid.as_raw_id();
             let obj = match object.obj_type {
-                ObjectType::Database => PbGrantObject::DatabaseId(oid),
-                ObjectType::Schema => PbGrantObject::SchemaId(oid),
-                ObjectType::Table | ObjectType::Index => PbGrantObject::TableId(oid),
-                ObjectType::Source => PbGrantObject::SourceId(oid),
-                ObjectType::Sink => PbGrantObject::SinkId(oid),
-                ObjectType::View => PbGrantObject::ViewId(oid),
-                ObjectType::Function => PbGrantObject::FunctionId(oid),
-                ObjectType::Connection => PbGrantObject::ConnectionId(oid),
-                ObjectType::Subscription => PbGrantObject::SubscriptionId(oid),
-                ObjectType::Secret => PbGrantObject::SecretId(oid),
+                ObjectType::Database => PbGrantObject::DatabaseId(object.oid.as_database_id()),
+                ObjectType::Schema => PbGrantObject::SchemaId(object.oid.as_schema_id()),
+                ObjectType::Table | ObjectType::Index => {
+                    PbGrantObject::TableId(object.oid.as_table_id())
+                }
+                ObjectType::Source => PbGrantObject::SourceId(object.oid.as_source_id()),
+                ObjectType::Sink => PbGrantObject::SinkId(object.oid.as_sink_id()),
+                ObjectType::View => PbGrantObject::ViewId(object.oid.as_view_id()),
+                ObjectType::Function => PbGrantObject::FunctionId(object.oid.as_function_id()),
+                ObjectType::Connection => {
+                    PbGrantObject::ConnectionId(object.oid.as_connection_id())
+                }
+                ObjectType::Subscription => {
+                    PbGrantObject::SubscriptionId(object.oid.as_subscription_id())
+                }
+                ObjectType::Secret => PbGrantObject::SecretId(object.oid.as_secret_id()),
             };
             PbGrantPrivilege {
                 action_with_opts: vec![PbActionWithGrantOption {
@@ -1326,16 +1460,16 @@ where
 // todo: remove it after migrated to sql backend.
 pub fn extract_grant_obj_id(object: &PbGrantObject) -> ObjectId {
     match object {
-        PbGrantObject::DatabaseId(id)
-        | PbGrantObject::SchemaId(id)
-        | PbGrantObject::TableId(id)
-        | PbGrantObject::SourceId(id)
-        | PbGrantObject::SinkId(id)
-        | PbGrantObject::ViewId(id)
-        | PbGrantObject::FunctionId(id)
-        | PbGrantObject::SubscriptionId(id)
-        | PbGrantObject::ConnectionId(id)
-        | PbGrantObject::SecretId(id) => (*id).into(),
+        PbGrantObject::DatabaseId(id) => (*id).into(),
+        PbGrantObject::SchemaId(id) => (*id).into(),
+        PbGrantObject::TableId(id) => (*id).into(),
+        PbGrantObject::SourceId(id) => (*id).into(),
+        PbGrantObject::SinkId(id) => (*id).into(),
+        PbGrantObject::ViewId(id) => (*id).into(),
+        PbGrantObject::FunctionId(id) => (*id).into(),
+        PbGrantObject::SubscriptionId(id) => (*id).into(),
+        PbGrantObject::ConnectionId(id) => (*id).into(),
+        PbGrantObject::SecretId(id) => (*id).into(),
     }
 }
 
@@ -1385,7 +1519,10 @@ pub fn compose_dispatchers(
     dispatcher_type: DispatcherType,
     dist_key_indices: Vec<u32>,
     output_mapping: PbDispatchOutputMapping,
-) -> HashMap<crate::model::ActorId, PbDispatcher> {
+) -> (
+    HashMap<crate::model::ActorId, PbDispatcher>,
+    Option<HashMap<crate::model::ActorId, crate::model::ActorId>>,
+) {
     match dispatcher_type {
         DispatcherType::Hash => {
             let dispatcher = PbDispatcher {
@@ -1411,10 +1548,13 @@ pub fn compose_dispatchers(
                 dispatcher_id: target_fragment_id,
                 downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
-            source_fragment_actors
-                .keys()
-                .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
-                .collect()
+            (
+                source_fragment_actors
+                    .keys()
+                    .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
+                    .collect(),
+                None,
+            )
         }
         DispatcherType::Broadcast | DispatcherType::Simple => {
             let dispatcher = PbDispatcher {
@@ -1425,50 +1565,66 @@ pub fn compose_dispatchers(
                 dispatcher_id: target_fragment_id,
                 downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
-            source_fragment_actors
-                .keys()
-                .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
-                .collect()
-        }
-        DispatcherType::NoShuffle => resolve_no_shuffle_actor_dispatcher(
-            source_fragment_distribution,
-            source_fragment_actors,
-            target_fragment_distribution,
-            target_fragment_actors,
-        )
-        .into_iter()
-        .map(|(upstream_actor_id, downstream_actor_id)| {
             (
-                upstream_actor_id,
-                PbDispatcher {
-                    r#type: PbDispatcherType::NoShuffle as _,
-                    dist_key_indices: dist_key_indices.clone(),
-                    output_mapping: output_mapping.clone().into(),
-                    hash_mapping: None,
-                    dispatcher_id: target_fragment_id,
-                    downstream_actor_id: vec![downstream_actor_id],
-                },
+                source_fragment_actors
+                    .keys()
+                    .map(|source_actor_id| (*source_actor_id, dispatcher.clone()))
+                    .collect(),
+                None,
             )
-        })
-        .collect(),
+        }
+        DispatcherType::NoShuffle => {
+            let no_shuffle_map = resolve_no_shuffle_actor_mapping(
+                source_fragment_distribution,
+                source_fragment_actors
+                    .iter()
+                    .map(|(&id, bitmap)| (id, bitmap)),
+                target_fragment_distribution,
+                target_fragment_actors
+                    .iter()
+                    .map(|(&id, bitmap)| (id, bitmap)),
+            );
+            let dispatchers = no_shuffle_map
+                .iter()
+                .map(|(&upstream_actor_id, &downstream_actor_id)| {
+                    (
+                        upstream_actor_id,
+                        PbDispatcher {
+                            r#type: PbDispatcherType::NoShuffle as _,
+                            dist_key_indices: dist_key_indices.clone(),
+                            output_mapping: output_mapping.clone().into(),
+                            hash_mapping: None,
+                            dispatcher_id: target_fragment_id,
+                            downstream_actor_id: vec![downstream_actor_id],
+                        },
+                    )
+                })
+                .collect();
+            (dispatchers, Some(no_shuffle_map))
+        }
     }
 }
 
-/// return (`upstream_actor_id` -> `downstream_actor_id`)
-pub fn resolve_no_shuffle_actor_dispatcher(
+/// Resolve 1:1 actor mapping between two no-shuffle-connected fragments.
+///
+/// Returns `Vec<(upstream_actor_id, downstream_actor_id)>` pairs. The actor id
+/// type is generic so the same logic can be reused both for real `ActorId` mapping
+/// and for alignment checks with synthetic ids (e.g. `(WorkerId, actor_idx)`).
+///
+/// For `Single` distribution the single actors are paired directly.
+/// For `Hash` distribution actors are matched by their bitmap's first vnode and
+/// full bitmap equality is asserted.
+pub fn resolve_no_shuffle_actor_mapping<
+    'a,
+    ActorId: Copy + Eq + std::hash::Hash + std::fmt::Debug,
+>(
     source_fragment_distribution: DistributionType,
-    source_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
+    source_fragment_actors: impl IntoIterator<Item = (ActorId, &'a Option<Bitmap>)>,
     target_fragment_distribution: DistributionType,
-    target_fragment_actors: &HashMap<crate::model::ActorId, Option<Bitmap>>,
-) -> Vec<(crate::model::ActorId, crate::model::ActorId)> {
+    target_fragment_actors: impl IntoIterator<Item = (ActorId, &'a Option<Bitmap>)>,
+) -> HashMap<ActorId, ActorId> {
     assert_eq!(source_fragment_distribution, target_fragment_distribution);
-    assert_eq!(
-        source_fragment_actors.len(),
-        target_fragment_actors.len(),
-        "no-shuffle should have equal upstream downstream actor count: {:?} {:?}",
-        source_fragment_actors,
-        target_fragment_actors
-    );
+
     match source_fragment_distribution {
         DistributionType::Single => {
             let assert_singleton = |bitmap: &Option<Bitmap>| {
@@ -1478,63 +1634,71 @@ pub fn resolve_no_shuffle_actor_dispatcher(
                     bitmap
                 );
             };
-            assert_eq!(
-                source_fragment_actors.len(),
-                1,
-                "singleton distribution actor count not 1: {:?}",
-                source_fragment_distribution
-            );
-            assert_eq!(
-                target_fragment_actors.len(),
-                1,
-                "singleton distribution actor count not 1: {:?}",
-                target_fragment_distribution
-            );
-            let (source_actor_id, bitmap) = source_fragment_actors.iter().next().unwrap();
+            let (source_actor_id, bitmap) = source_fragment_actors
+                .into_iter()
+                .exactly_one()
+                .ok()
+                .expect("Single distribution should have exactly one source actor");
             assert_singleton(bitmap);
-            let (target_actor_id, bitmap) = target_fragment_actors.iter().next().unwrap();
+            let (target_actor_id, bitmap) = target_fragment_actors
+                .into_iter()
+                .exactly_one()
+                .ok()
+                .expect("Single distribution should have exactly one target actor");
             assert_singleton(bitmap);
-            vec![(*source_actor_id, *target_actor_id)]
+            HashMap::from([(source_actor_id, target_actor_id)])
         }
         DistributionType::Hash => {
-            let mut target_fragment_actor_index: HashMap<_, _> = target_fragment_actors
-                .iter()
+            // Build target index keyed by first vnode (one pass over target).
+            let mut target_by_vnode: HashMap<_, _> = target_fragment_actors
+                .into_iter()
                 .map(|(actor_id, bitmap)| {
                     let bitmap = bitmap
                         .as_ref()
                         .expect("hash distribution should have bitmap");
                     let first_vnode = bitmap.iter_vnodes().next().expect("non-empty bitmap");
-                    (first_vnode, (*actor_id, bitmap))
+                    (first_vnode, (actor_id, bitmap))
                 })
                 .collect();
-            source_fragment_actors
-                .iter()
-                .map(|(source_actor_id, bitmap)| {
-                    let bitmap = bitmap
+
+            let target_count = target_by_vnode.len();
+
+            // One pass over source, matching against the target index.
+            let mapping: HashMap<_, _> = source_fragment_actors
+                .into_iter()
+                .map(|(source_actor_id, source_bitmap)| {
+                    let source_bitmap = source_bitmap
                         .as_ref()
                         .expect("hash distribution should have bitmap");
-                    let first_vnode = bitmap.iter_vnodes().next().expect("non-empty bitmap");
+                    let first_vnode = source_bitmap
+                        .iter_vnodes()
+                        .next()
+                        .expect("non-empty bitmap");
                     let (target_actor_id, target_bitmap) =
-                        target_fragment_actor_index.remove(&first_vnode).unwrap_or_else(|| {
+                        target_by_vnode.remove(&first_vnode).unwrap_or_else(|| {
                             panic!(
-                                "cannot find matched target actor: {} {:?} {:?} {:?}",
-                                source_actor_id,
-                                first_vnode,
-                                source_fragment_actors,
-                                target_fragment_actors
-                            );
+                                "cannot find matched target actor: {:?} first_vnode {:?}",
+                                source_actor_id, first_vnode,
+                            )
                         });
                     assert_eq!(
-                        bitmap,
-                        target_bitmap,
-                        "cannot find matched target actor due to bitmap mismatch: {} {:?} {:?} {:?}",
-                        source_actor_id,
-                        first_vnode,
-                        source_fragment_actors,
-                        target_fragment_actors
+                        source_bitmap, target_bitmap,
+                        "bitmap mismatch for source {:?} target {:?} at first_vnode {:?}",
+                        source_actor_id, target_actor_id, first_vnode,
                     );
-                    (*source_actor_id, target_actor_id)
-                }).collect()
+                    (source_actor_id, target_actor_id)
+                })
+                .collect();
+
+            assert_eq!(
+                mapping.len(),
+                target_count,
+                "no-shuffle should have equal upstream downstream actor count: {} vs {}",
+                mapping.len(),
+                target_count,
+            );
+
+            mapping
         }
     }
 }
@@ -1585,24 +1749,17 @@ pub fn rebuild_fragment_mapping(fragment: &SharedFragmentInfo) -> PbFragmentWork
 /// - All fragments
 pub async fn get_fragments_for_jobs<C>(
     db: &C,
-    actor_info: &SharedActorInfos,
     streaming_jobs: Vec<JobId>,
 ) -> MetaResult<(
     HashMap<SourceId, BTreeSet<FragmentId>>,
     HashSet<FragmentId>,
-    HashSet<ActorId>,
     HashSet<FragmentId>,
 )>
 where
     C: ConnectionTrait,
 {
     if streaming_jobs.is_empty() {
-        return Ok((
-            HashMap::default(),
-            HashSet::default(),
-            HashSet::default(),
-            HashSet::default(),
-        ));
+        return Ok((HashMap::default(), HashSet::default(), HashSet::default()));
     }
 
     let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
@@ -1622,15 +1779,6 @@ where
         .map(|(fragment_id, _, _)| *fragment_id)
         .collect();
 
-    let actors = {
-        let guard = actor_info.read_guard();
-        fragment_ids
-            .iter()
-            .flat_map(|id| guard.get_fragment(*id as _))
-            .flat_map(|f| f.actors.keys().cloned().map(|id| id as _))
-            .collect::<HashSet<_>>()
-    };
-
     let mut source_fragment_ids: HashMap<SourceId, BTreeSet<FragmentId>> = HashMap::new();
     let mut sink_fragment_ids: HashSet<FragmentId> = HashSet::new();
     for (fragment_id, mask, stream_node) in fragments {
@@ -1647,12 +1795,7 @@ where
         }
     }
 
-    Ok((
-        source_fragment_ids,
-        sink_fragment_ids,
-        actors.into_iter().collect(),
-        fragment_ids,
-    ))
+    Ok((source_fragment_ids, sink_fragment_ids, fragment_ids))
 }
 
 /// Build a object group for notifying the deletion of the given objects.
@@ -1762,7 +1905,10 @@ pub(crate) fn build_object_group_for_delete(
             }),
         }
     }
-    NotificationInfo::ObjectGroup(PbObjectGroup { objects })
+    NotificationInfo::ObjectGroup(PbObjectGroup {
+        objects,
+        dependencies: vec![],
+    })
 }
 
 pub fn extract_external_table_name_from_definition(table_definition: &str) -> Option<String> {

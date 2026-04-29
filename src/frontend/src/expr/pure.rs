@@ -93,10 +93,15 @@ impl ExprVisitor for ImpureAnalyzer {
         self.impure = Some("NOW or PROCTIME".into());
     }
 
+    fn visit_secret_ref(&mut self, secret_ref: &super::SecretRef) {
+        self.impure = Some(format!("secret reference `{}`", secret_ref.secret_name).into());
+    }
+
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) {
         let func_type = func_call.func_type();
         match func_type {
             Type::Unspecified => unreachable!(),
+            #[expect(deprecated)]
             Type::Add
             | Type::Subtract
             | Type::Multiply
@@ -308,6 +313,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Sha256
             | Type::Sha384
             | Type::Sha512
+            | Type::Crc32
+            | Type::Crc32c
             | Type::Hmac
             | Type::SecureCompare
             | Type::Decrypt

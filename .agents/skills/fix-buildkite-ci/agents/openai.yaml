@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fix Buildkite CI"
+  short_description: "Triage and fix failing Buildkite CI checks"
+  default_prompt: "Investigate failing Buildkite CI jobs, locate the concrete failing test or diff from logs/artifacts, and apply a focused fix."

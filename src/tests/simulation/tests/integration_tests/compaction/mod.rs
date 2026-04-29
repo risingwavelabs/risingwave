@@ -17,6 +17,7 @@
 use std::time::Duration;
 
 use risingwave_hummock_sdk::CompactionGroupId;
+use risingwave_pb::id::TableId;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
 
 fn cluster_config(interval_sec: usize) -> Configuration {
@@ -119,14 +120,14 @@ async fn test_vnode_watermark_reclaim_impl(
         .run("SELECT id FROM rw_internal_tables WHERE name LIKE '%dynamicfilterleft%';")
         .await
         .unwrap()
-        .parse::<u64>()
+        .parse::<TableId>()
         .unwrap();
 
     tokio::time::sleep(Duration::from_secs(5)).await;
     let original_compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
     // Move the table to a dedicated group to prevent its vnode watermark from being reclaimed during the compaction of other tables.
     cluster
-        .split_compaction_group(original_compaction_group_id, table_id.into())
+        .split_compaction_group(original_compaction_group_id, table_id)
         .await
         .unwrap();
     let compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
@@ -148,7 +149,10 @@ async fn test_vnode_watermark_reclaim_impl(
     compaction_group_id
 }
 
-async fn compaction_group_id_by_table_id(session: &mut Session, table_id: u64) -> u64 {
+async fn compaction_group_id_by_table_id(
+    session: &mut Session,
+    table_id: TableId,
+) -> CompactionGroupId {
     session
         .run(format!(
             "SELECT id FROM rw_hummock_compaction_group_configs where member_tables @> '[{}]'::jsonb;",
@@ -156,7 +160,7 @@ async fn compaction_group_id_by_table_id(session: &mut Session, table_id: u64) -
         ))
         .await
         .unwrap()
-        .parse::<u64>()
+        .parse::<CompactionGroupId>()
         .unwrap()
 }
 
@@ -222,7 +226,7 @@ async fn test_watermark_state_cleaning_impl(
         .run("SELECT id FROM rw_tables;")
         .await
         .unwrap()
-        .parse::<u64>()
+        .parse::<TableId>()
         .unwrap();
     let compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
     // This assertion relies on the fact that storage does not filter out rows older than the watermark; compaction is responsible for removing them.

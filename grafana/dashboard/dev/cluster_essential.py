@@ -38,7 +38,7 @@ def _(outer_panels: Panels):
                     "Memory usage relative to k8s resource limit of container. Only works in K8s environment",
                     [
                         panels.target(
-                            '(avg by(namespace, pod) (container_memory_working_set_bytes{namespace=~"$namespace",pod=~"$pod",container=~"$component"})) / (  sum by(namespace, pod) (kube_pod_container_resource_limits{namespace=~"$namespace", pod=~"$pod", container=~"$component", resource="memory", unit="byte"}))',
+                            '(avg by(namespace, pod) (container_memory_working_set_bytes{namespace=~"$namespace",pod=~"$pod",container=~"$component"})) / (sum by(namespace, pod) (topk(1, kube_pod_container_resource_limits{namespace=~"$namespace", pod=~"$pod", container=~"$component", resource="memory", unit="byte"}) by (namespace, pod)))',
                             "avg memory usage @ {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         )
@@ -49,7 +49,7 @@ def _(outer_panels: Panels):
                     "CPU usage relative to k8s resource limit of container. Only works in K8s environment",
                     [
                         panels.target(
-                            '(sum(rate(container_cpu_usage_seconds_total{namespace=~"$namespace",container=~"$component",pod=~"$pod"}[$__rate_interval])) by (namespace, pod)) / (sum(kube_pod_container_resource_limits{namespace=~"$namespace",pod=~"$pod",container=~"$component", resource="cpu"}) by (namespace, pod))',
+                            '(sum(rate(container_cpu_usage_seconds_total{namespace=~"$namespace",container=~"$component",pod=~"$pod"}[$__rate_interval])) by (namespace, pod)) / (sum by(namespace, pod) (topk(1, kube_pod_container_resource_limits{namespace=~"$namespace",pod=~"$pod",container=~"$component", resource="cpu"}) by (namespace, pod)))',
                             "cpu usage @ {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -152,6 +152,32 @@ def _(outer_panels: Panels):
                             "barrier_pending_time (database {{database_id}})",
                         )
                     ],
+                ),
+                panels.timeseries_latency(
+                    "Barrier Latency",
+                    "The time that the data between two consecutive barriers gets fully processed, i.e. the computation "
+                    "results are made durable into materialized views or sink to external systems. This metric shows to users "
+                    "the freshness of materialized views.",
+                    quantile(
+                        lambda quantile, legend: panels.target(
+                            f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le, database_id))",
+                            f"barrier_latency_p{legend} " + " (database {{database_id}})",
+                        ),
+                        [50, 90, 99, 999, "max"],
+                    )
+                    + [
+                        panels.target(
+                            f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval]) > 0",
+                            "barrier_latency_avg (database {{database_id}})",
+                        ),
+                    ]
+                    + quantile(
+                        lambda quantile, legend: panels.target(
+                            f"histogram_quantile({quantile}, sum(rate({metric('meta_snapshot_backfill_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le, table_id, barrier_type))",
+                            f"snapshot_backfill_barrier_latency_p{legend} table_id[{{{{table_id}}}}] {{{{barrier_type}}}}",
+                        ),
+                        [50, 90, 99, 999, "max"],
+                    ),
                 ),
             ],
         )

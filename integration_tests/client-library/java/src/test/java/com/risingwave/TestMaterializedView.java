@@ -48,7 +48,10 @@ public class TestMaterializedView {
             statement.execute("FLUSH;");
 
             QueryRunner runner = new QueryRunner();
-            String query = "SELECT * FROM test_struct";
+            // Build a stable textual representation from struct fields.
+            String query =
+                    "SELECT i1, '(' || (v1).v2::varchar || ',' || (v1).v3::varchar || ')' AS v1, "
+                            + "t1, c1 FROM test_struct";
             List<Map<String, Object>> resultList = runner.query(conn, query, new MapListHandler());
             Assertions.assertEquals(resultList.size(), 1);
             Assertions.assertEquals(resultList.get(0).get("v1"), "(2,3)");

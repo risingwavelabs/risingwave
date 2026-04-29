@@ -19,13 +19,8 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, SchemaId, TableId};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::id::WorkerId;
-use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::worker_node::Property;
-use risingwave_pb::common::{
-    PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode, WorkerType,
-};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 use risingwave_pb::data::DataType;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::ddl_service::TableJobType;
@@ -43,9 +38,8 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::MetaResult;
-use crate::controller::cluster::StreamingClusterInfo;
 use crate::manager::{MetaSrvEnv, StreamingJob};
-use crate::model::{StreamContext, StreamJobFragments};
+use crate::model::StreamJobFragments;
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph, StreamFragmentGraph,
 };
@@ -424,31 +418,6 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     }
 }
 
-fn make_cluster_info() -> StreamingClusterInfo {
-    let worker_nodes: HashMap<WorkerId, WorkerNode> = std::iter::once((
-        0.into(),
-        WorkerNode {
-            id: 0.into(),
-            property: Some(Property {
-                parallelism: 8,
-                resource_group: Some(DEFAULT_RESOURCE_GROUP.to_owned()),
-                ..Default::default()
-            }),
-            r#type: WorkerType::ComputeNode.into(),
-            ..Default::default()
-        },
-    ))
-    .collect();
-
-    let schedulable_workers = worker_nodes.keys().cloned().collect();
-
-    StreamingClusterInfo {
-        worker_nodes,
-        schedulable_workers,
-        unschedulable_workers: Default::default(),
-    }
-}
-
 #[tokio::test]
 async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
@@ -456,15 +425,12 @@ async fn test_graph_builder() -> MetaResult<()> {
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
     let graph = make_stream_graph();
-    let ctx = StreamContext::from_protobuf(graph.ctx.as_ref().unwrap());
     let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
     let internal_tables = fragment_graph.incomplete_internal_tables();
 
     let actor_graph_builder = ActorGraphBuilder::new(
         job.id(),
-        DEFAULT_RESOURCE_GROUP.to_owned(),
         CompleteStreamFragmentGraph::for_test(fragment_graph),
-        make_cluster_info(),
         NonZeroUsize::new(parallel_degree).unwrap(),
     )?;
     let ActorGraphBuildResult {
@@ -472,7 +438,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         upstream_fragment_downstreams,
         downstream_fragment_relations,
         ..
-    } = actor_graph_builder.generate_graph(&env, &job, ctx)?;
+    } = actor_graph_builder.generate_graph()?;
 
     let new_fragment_relation = || {
         upstream_fragment_downstreams
@@ -486,12 +452,10 @@ async fn test_graph_builder() -> MetaResult<()> {
     };
 
     let stream_job_fragments = StreamJobFragments::for_test(0.into(), graph);
-    let actors = stream_job_fragments.actors();
     let mview_fragment_ids = stream_job_fragments.mview_fragment_ids();
 
     assert_eq!(mview_fragment_ids.len(), 1);
 
-    assert_eq!(actors.len(), 9);
     assert_eq!(internal_tables.len(), 3);
 
     for fragment in stream_job_fragments.fragments() {

@@ -96,6 +96,11 @@ pub enum AlterTableOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -140,6 +145,11 @@ pub enum AlterIndexOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -163,6 +173,11 @@ pub enum AlterViewOperation {
     },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
     },
@@ -213,6 +228,11 @@ pub enum AlterSinkOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -244,6 +264,7 @@ pub enum AlterSubscriptionOperation {
     RenameSubscription { subscription_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
     SetSchema { new_schema_name: ObjectName },
+    SetRetention { retention: Value },
     SwapRenameSubscription { target_subscription: ObjectName },
 }
 
@@ -273,6 +294,11 @@ pub enum AlterSourceOperation {
     },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
+        parallelism: SetVariableValue,
+        deferred: bool,
+    },
+    /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
+    SetBackfillParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
     },
@@ -419,6 +445,17 @@ impl fmt::Display for AlterTableOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterTableOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
             AlterTableOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -471,6 +508,17 @@ impl fmt::Display for AlterIndexOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterIndexOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
             AlterIndexOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -500,6 +548,17 @@ impl fmt::Display for AlterViewOperation {
                 write!(
                     f,
                     "SET PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+            AlterViewOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
@@ -561,6 +620,17 @@ impl fmt::Display for AlterSinkOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSinkOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
             AlterSinkOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -603,6 +673,9 @@ impl fmt::Display for AlterSubscriptionOperation {
             }
             AlterSubscriptionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSubscriptionOperation::SetRetention { retention } => {
+                write!(f, "SET RETENTION TO {}", retention)
             }
             AlterSubscriptionOperation::SwapRenameSubscription {
                 target_subscription,
@@ -647,6 +720,17 @@ impl fmt::Display for AlterSourceOperation {
                 write!(
                     f,
                     "SET PARALLELISM TO {}{}",
+                    parallelism,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
+            AlterSourceOperation::SetBackfillParallelism {
+                parallelism,
+                deferred,
+            } => {
+                write!(
+                    f,
+                    "SET BACKFILL_PARALLELISM TO {}{}",
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )

@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ConflictBehavior, FunctionId};
+use risingwave_common::catalog::{ConflictBehavior, FunctionId, SecretId};
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::id::ObjectId;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query, Statement};
@@ -106,12 +106,13 @@ pub async fn handle_alter_mv(
     };
     let handler_args = HandlerArgs::new(session.clone(), &new_definition, Arc::from(""))?;
 
-    let (dependent_relations, dependent_udfs, bound_query) = {
+    let (dependent_relations, dependent_udfs, dependent_secrets, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
         let bound_query = binder.bind_query(&new_query)?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
+            binder.included_secrets().clone(),
             bound_query,
         )
     };
@@ -122,6 +123,7 @@ pub async fn handle_alter_mv(
         bound_query,
         dependent_relations,
         dependent_udfs,
+        dependent_secrets,
         columns,
         emit_mode,
         original_catalog,
@@ -135,6 +137,7 @@ async fn handle_alter_mv_bound(
     query: BoundQuery,
     dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
+    dependent_secrets: HashSet<SecretId>,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
     original_catalog: Arc<TableCatalog>,
@@ -150,6 +153,7 @@ async fn handle_alter_mv_bound(
             query,
             dependent_relations,
             dependent_udfs,
+            dependent_secrets,
             columns,
             emit_mode,
         )

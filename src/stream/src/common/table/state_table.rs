@@ -862,6 +862,7 @@ where
         let new_local_options = if IS_REPLICATED {
             NewLocalOptions::new_replicated(
                 table_id,
+                table_catalog.fragment_id,
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),
@@ -869,6 +870,7 @@ where
         } else {
             NewLocalOptions::new(
                 table_id,
+                table_catalog.fragment_id,
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),
@@ -1953,11 +1955,11 @@ where
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<BoxedRowStream<'_>> {
         let vnode = self.compute_prefix_vnode(&pk_prefix);
-        let stream = self
-            .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
-            .await?;
         let Some(clean_watermark_index) = self.clean_watermark_index else {
-            return Ok(stream.boxed());
+            return self
+                .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+                .await
+                .map(|s| s.boxed());
         };
         let Some((watermark_serde, watermark_type)) = &self.watermark_serde else {
             return Err(StreamExecutorError::from(anyhow!(
@@ -1966,11 +1968,18 @@ where
         };
         // Fast path. TableWatermarksIndex::rewrite_range_with_table_watermark has already filtered the rows.
         if matches!(watermark_type, WatermarkSerdeType::PkPrefix) {
-            return Ok(stream.boxed());
+            return self
+                .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+                .await
+                .map(|s| s.boxed());
         }
+
         let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
         let Some(watermark_bytes) = watermark_bytes else {
-            return Ok(stream.boxed());
+            return self
+                .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
+                .await
+                .map(|s| s.boxed());
         };
         let watermark_row = watermark_serde.deserialize(&watermark_bytes)?;
         if watermark_row.len() != 1 {
@@ -1991,24 +2000,64 @@ where
                 "Watermark serde should have at least one order type"
             ))
         })?;
+
         let direction = if order_type.is_ascending() {
             WatermarkDirection::Ascending
         } else {
             WatermarkDirection::Descending
         };
-        let stream = stream.try_filter_map(move |row| {
-            let watermark_col_value = row.datum_at(clean_watermark_index);
-            let should_filter = direction.datum_filter_by_watermark(
-                watermark_col_value,
-                &watermark_value,
-                *order_type,
-            );
-            if should_filter {
-                ready(Ok(None))
-            } else {
-                ready(Ok(Some(row)))
-            }
-        });
+        let clean_watermark_index_in_pk = self
+            .pk_indices
+            .iter()
+            .position(|&i| i == clean_watermark_index);
+        let clean_watermark_index_in_value = match &self.value_indices {
+            Some(value_indices) => value_indices
+                .iter()
+                .position(|idx| *idx == clean_watermark_index)
+                .ok_or_else(|| {
+                    StreamExecutorError::from(anyhow!(
+                        "clean watermark column index {} is not included in table value indices {:?}",
+                        clean_watermark_index,
+                        value_indices
+                    ))
+                })?,
+            None => clean_watermark_index,
+        };
+
+        let stream = self
+            .iter_with_prefix_inner::</* REVERSE */ false, Bytes>(pk_prefix, sub_range, prefetch_options)
+            .await?
+            .try_filter_map(move |(pk, row)| {
+                let should_filter =  match watermark_type {
+                    WatermarkSerdeType::PkPrefix => unreachable!(),
+                    WatermarkSerdeType::NonPkPrefix => {
+                        let table_key = TableKey(pk);
+                        let (vnode, key) = table_key.split_vnode();
+                        let pk_cols = self.pk_serde
+                        .deserialize(key)
+                        .unwrap_or_else(|e| {
+                            panic!("Failed to deserialize table {} vnode {:?} key {:?} error: {:?}", self.table_id(), vnode, key, e.as_report());
+                        });
+                        direction.datum_filter_by_watermark(
+                            pk_cols.datum_at(clean_watermark_index_in_pk.unwrap()),
+                            &watermark_value,
+                            *order_type,
+                        )
+                    },
+                    WatermarkSerdeType::Value => {
+                        direction.datum_filter_by_watermark(
+                            row.datum_at(clean_watermark_index_in_value),
+                            &watermark_value,
+                            *order_type,
+                        )
+                    }
+                };
+                if should_filter {
+                    ready(Ok(None))
+                } else {
+                    ready(Ok(Some(row)))
+                }
+            });
         Ok(stream.boxed())
     }
 
@@ -2049,6 +2098,18 @@ where
         Ok(
             self.iter_with_prefix_inner::</* REVERSE */ false, Bytes>(pk_prefix, sub_range, prefetch_options)
                 .await?.map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)),
+        )
+    }
+
+    pub async fn rev_iter_keyed_row_with_prefix(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
+        Ok(
+            self.iter_with_prefix_inner::</* REVERSE */ true, Bytes>(pk_prefix, sub_range, prefetch_options)
+            .await?.map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)),
         )
     }
 

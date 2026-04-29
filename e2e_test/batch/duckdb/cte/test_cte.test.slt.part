@@ -43,10 +43,12 @@ with cte1 as (select i as j from a), cte2 as (select ref.j as k from cte1 as ref
 43
 
 
-# FIXME: this should be an error
 # duplicate CTE alias
-query I
+statement error
 with cte1 as (select 42), cte1 as (select 43) select * FROM cte1;
+
+query I
+WITH cte1 AS (SELECT 42) SELECT * FROM (WITH cte1 AS (SELECT 43) SELECT * FROM cte1) t;
 ----
 43
 

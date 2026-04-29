@@ -18,13 +18,15 @@ use std::sync::Arc;
 use iceberg::spec::Transform;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, CreateType, FieldLike};
+use risingwave_common::catalog::{
+    ColumnCatalog, CreateType, FieldLike, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
+};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
-use risingwave_connector::sink::iceberg::ICEBERG_SINK;
+use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -392,7 +394,18 @@ impl StreamSink {
                 .map(|&column_index| columns[column_index].name())
                 .collect_vec();
             if upstream_table_pk_col_names != sink_pk_col_names {
-                return Err(ErrorCode::InvalidInputSyntax(format!("sink with auto schema change should have same pk as upstream table {:?}, but got {:?}", upstream_table_pk_col_names, sink_pk_col_names)).into());
+                let is_iceberg_row_id_alias = properties.is_iceberg_connector()
+                    && upstream_table_pk_col_names.len() == 1
+                    && upstream_table_pk_col_names[0] == ROW_ID_COLUMN_NAME
+                    && sink_pk_col_names.len() == 1
+                    && sink_pk_col_names[0] == RISINGWAVE_ICEBERG_ROW_ID;
+                if !is_iceberg_row_id_alias {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "sink with auto schema change should have same pk as upstream table {:?}, but got {:?}",
+                        upstream_table_pk_col_names, sink_pk_col_names
+                    ))
+                    .into());
+                }
             }
         }
         let mut extra_partition_col_idx = None;
@@ -738,6 +751,37 @@ impl StreamSink {
     fn infer_kv_log_store_table_catalog(&self) -> TableCatalog {
         infer_kv_log_store_table_catalog_inner(&self.input, &self.sink_desc().columns)
     }
+
+    /// Convert this `StreamSink` into a `PlanRef`.
+    ///
+    /// For Iceberg pk index sinks, this rewrites the plan into
+    /// `Upstream → Writer → Exchange(Single) → DvMerger` instead of a single `SinkNode`.
+    /// For all other sinks, returns `self` as-is.
+    pub fn into_stream_plan(self) -> Result<PlanRef> {
+        use super::{StreamIcebergWithPkIndexDvMerger, StreamIcebergWithPkIndexWriter};
+
+        if !is_iceberg_with_pk_index_sink(&self.sink_desc)? {
+            return Ok(self.into());
+        }
+
+        let writer: PlanRef = StreamIcebergWithPkIndexWriter::from_stream_sink(&self)?.into();
+        let dv_merger: PlanRef =
+            StreamIcebergWithPkIndexDvMerger::new(writer, self.sink_desc).into();
+        Ok(dv_merger)
+    }
+}
+
+pub fn is_iceberg_with_pk_index_sink(sink_desc: &SinkDesc) -> Result<bool> {
+    if !sink_desc
+        .properties
+        .get(CONNECTOR_TYPE_KEY)
+        .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK))
+    {
+        return Ok(false);
+    }
+
+    let iceberg_config = IcebergConfig::from_btreemap(sink_desc.properties.clone())?;
+    Ok(iceberg_config.enable_pk_index)
 }
 
 impl PlanTreeNodeUnary<Stream> for StreamSink {

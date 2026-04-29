@@ -728,6 +728,10 @@ impl BatchPlanNodeMetadata for BatchPlanRef {
     fn order(&self) -> &Order {
         self.plan_base().order()
     }
+
+    fn orders(&self) -> Vec<Order> {
+        self.plan_base().orders()
+    }
 }
 
 /// In order to let expression display id started from 1 for explaining, hidden column names and
@@ -1089,6 +1093,8 @@ mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
+mod stream_iceberg_with_pk_index_dv_merger;
+mod stream_iceberg_with_pk_index_writer;
 mod stream_join_common;
 mod stream_local_approx_percentile;
 mod stream_locality_provider;
@@ -1185,7 +1191,7 @@ pub use logical_filter::LogicalFilter;
 pub use logical_gap_fill::LogicalGapFill;
 pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
-pub use logical_iceberg_intermediate_scan::LogicalIcebergIntermediateScan;
+pub use logical_iceberg_intermediate_scan::{HummockRewriteInfo, LogicalIcebergIntermediateScan};
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
@@ -1232,6 +1238,8 @@ pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
+pub use stream_iceberg_with_pk_index_dv_merger::StreamIcebergWithPkIndexDvMerger;
+pub use stream_iceberg_with_pk_index_writer::StreamIcebergWithPkIndexWriter;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_locality_provider::StreamLocalityProvider;
@@ -1409,6 +1417,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, LocalityProvider }
             , { Stream, EowcGapFill }
             , { Stream, GapFill }
+            , { Stream, IcebergWithPkIndexWriter }
+            , { Stream, IcebergWithPkIndexDvMerger }
             $(,$rest)*
         }
     };

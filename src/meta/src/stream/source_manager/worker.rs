@@ -400,32 +400,26 @@ impl ConnectorSourceWorkerHandle {
     pub async fn discovered_splits(
         &self,
         source_id: SourceId,
-        actor_count: usize,
-    ) -> MetaResult<BTreeMap<Arc<str>, SplitImpl>> {
-        // XXX: when is this None? Can we remove the Option?
-        let Some(mut discovered_splits) = self.splits.lock().await.splits.clone() else {
+    ) -> MetaResult<Option<DiscoveredSplits>> {
+        let Some(discovered_splits) = self.splits.lock().await.splits.clone() else {
             tracing::info!(
                 "The discover loop for source {} is not ready yet; we'll wait for the next run",
                 source_id
             );
-            return Ok(BTreeMap::new());
+            return Ok(None);
         };
         if discovered_splits.is_empty() {
-            tracing::warn!("No splits discovered for source {}", source_id);
+            tracing::warn!("Empty splits discovered for source {}", source_id);
         }
 
         if self.enable_adaptive_splits {
-            // Connector supporting adaptive splits returns just one split, and we need to make the number of splits equal to the number of actors in this fragment.
-            // Because we Risingwave consume the splits statelessly and we do not need to keep the id internally, we always use actor_id as split_id.
-            // And prev splits record should be dropped via CN.
-
             debug_assert!(self.enable_drop_split);
             debug_assert!(discovered_splits.len() == 1);
-            discovered_splits =
-                fill_adaptive_split(discovered_splits.values().next().unwrap(), actor_count)?;
+            let template = discovered_splits.into_values().next().unwrap();
+            Ok(Some(DiscoveredSplits::Adaptive(template)))
+        } else {
+            Ok(Some(DiscoveredSplits::Fixed(discovered_splits)))
         }
-
-        Ok(discovered_splits)
     }
 
     fn send_command(&self, command: SourceWorkerCommand) -> MetaResult<()> {

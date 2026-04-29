@@ -165,6 +165,11 @@ impl FunctionAttr {
         };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
+        let maybe_allow_deprecated = if deprecated {
+            quote! { #[allow(deprecated)] }
+        } else {
+            quote! {}
+        };
 
         Ok(quote! {
             #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
@@ -172,6 +177,7 @@ impl FunctionAttr {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
+                #maybe_allow_deprecated
                 FuncSign {
                     name: risingwave_pb::expr::expr_node::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
@@ -724,6 +730,11 @@ impl FunctionAttr {
         };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
+        let maybe_allow_deprecated = if deprecated {
+            quote! { #[allow(deprecated)] }
+        } else {
+            quote! {}
+        };
 
         Ok(quote! {
             #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
@@ -731,6 +742,7 @@ impl FunctionAttr {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
+                #maybe_allow_deprecated
                 FuncSign {
                     name: risingwave_pb::expr::agg_call::PbKind::#pb_kind.into(),
                     inputs_type: vec![#(#args),*],
@@ -1056,6 +1068,11 @@ impl FunctionAttr {
         };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
+        let maybe_allow_deprecated = if deprecated {
+            quote! { #[allow(deprecated)] }
+        } else {
+            quote! {}
+        };
 
         Ok(quote! {
             #[risingwave_expr::codegen::linkme::distributed_slice(risingwave_expr::sig::FUNCTIONS)]
@@ -1063,6 +1080,7 @@ impl FunctionAttr {
                 use risingwave_common::types::{DataType, DataTypeName};
                 use risingwave_expr::sig::{FuncSign, SigDataType, FuncBuilder};
 
+                #maybe_allow_deprecated
                 FuncSign {
                     name: risingwave_pb::expr::table_function::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],

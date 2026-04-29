@@ -157,6 +157,11 @@ fn array_position_common(
 /// {}
 ///
 /// query T
+/// select array_positions(array[]::int[], 1);
+/// ----
+/// {}
+///
+/// query T
 /// select array_positions(null, 1);
 /// ----
 /// NULL
@@ -189,6 +194,9 @@ fn array_positions(
     let Some(array) = array else {
         return Ok(None);
     };
+    if array.is_empty() {
+        return Ok(Some(()));
+    }
     if array.len() - 1 > i32::MAX as usize {
         return Err(ExprError::CastOutOfRange("invalid array length"));
     }

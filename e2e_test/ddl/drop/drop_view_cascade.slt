@@ -12,3 +12,18 @@ CREATE SINK my_sink AS select * from mv WITH (
 statement ok
 drop view v cascade;
 
+query T
+SELECT count(name) FROM rw_views WHERE name = 'v';
+----
+0
+
+query T
+SELECT count(name) FROM rw_sinks WHERE name = 'my_sink';
+----
+0
+
+query T
+SELECT count(name) FROM rw_materialized_views WHERE name = 'mv';
+----
+0
+

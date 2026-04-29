@@ -25,19 +25,19 @@ use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
-use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
+use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamScanType};
+use sea_orm::TransactionTrait;
 use sea_orm::prelude::DateTime;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tokio::sync::oneshot;
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::SharedFragmentInfo;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
-use crate::controller::fragment::FragmentParallelismInfo;
+use crate::controller::scale::find_fragment_no_shuffle_dags_detailed;
 use crate::manager::{LocalNotification, NotificationVersion};
-use crate::model::{ActorId, ClusterId, FragmentId, StreamJobFragments, SubscriptionId};
+use crate::model::{ActorId, ClusterId, Fragment, FragmentId, StreamJobFragments, SubscriptionId};
 use crate::stream::SplitAssignment;
 use crate::telemetry::MetaTelemetryJobDesc;
 
@@ -100,7 +100,10 @@ impl ActiveStreamingWorkerNodes {
         Ok(Self {
             worker_nodes: nodes
                 .into_iter()
-                .filter_map(|node| node.is_streaming_schedulable().then_some((node.id, node)))
+                .filter_map(|node| {
+                    let is_streaming = node.property.as_ref().is_some_and(|p| p.is_streaming);
+                    is_streaming.then_some((node.id, node))
+                })
                 .collect(),
             rx,
             meta_manager: Some(meta_manager),
@@ -121,7 +124,6 @@ impl ActiveStreamingWorkerNodes {
             fn is_target_worker_node(worker: &WorkerNode) -> bool {
                 worker.r#type == WorkerType::ComputeNode as i32
                     && worker.property.as_ref().unwrap().is_streaming
-                    && worker.is_streaming_schedulable()
             }
             match notification {
                 LocalNotification::WorkerNodeDeleted(worker) => {
@@ -359,19 +361,6 @@ impl MetadataManager {
         self.catalog_controller.list_sources().await
     }
 
-    pub fn running_fragment_parallelisms(
-        &self,
-        id_filter: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
-        let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
-        Ok(self
-            .catalog_controller
-            .running_fragment_parallelisms(id_filter)?
-            .into_iter()
-            .map(|(k, v)| (k as FragmentId, v))
-            .collect())
-    }
-
     /// Get and filter the "**root**" fragments of the specified relations.
     /// The root fragment is the bottom-most fragment of its fragment graph, and can be a `MView` or a `Source`.
     ///
@@ -379,16 +368,13 @@ impl MetadataManager {
     pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
-    ) -> MetaResult<(
-        HashMap<JobId, (SharedFragmentInfo, PbStreamNode)>,
-        HashMap<ActorId, WorkerId>,
-    )> {
-        let (upstream_root_fragments, actors) = self
+    ) -> MetaResult<HashMap<JobId, Fragment>> {
+        let upstream_root_fragments = self
             .catalog_controller
             .get_root_fragments(upstream_table_ids.iter().map(|id| id.as_job_id()).collect())
             .await?;
 
-        Ok((upstream_root_fragments, actors))
+        Ok(upstream_root_fragments)
     }
 
     pub async fn get_streaming_cluster_info(&self) -> MetaResult<StreamingClusterInfo> {
@@ -482,16 +468,10 @@ impl MetadataManager {
     pub async fn get_downstream_fragments(
         &self,
         job_id: JobId,
-    ) -> MetaResult<(
-        Vec<(PbDispatcherType, SharedFragmentInfo, PbStreamNode)>,
-        HashMap<ActorId, WorkerId>,
-    )> {
-        let (fragments, actors) = self
-            .catalog_controller
+    ) -> MetaResult<Vec<(PbDispatcherType, Fragment)>> {
+        self.catalog_controller
             .get_downstream_fragments(job_id)
-            .await?;
-
-        Ok((fragments, actors))
+            .await
     }
 
     pub async fn get_job_id_to_internal_table_ids_mapping(
@@ -501,9 +481,11 @@ impl MetadataManager {
     }
 
     pub async fn get_job_fragments_by_id(&self, job_id: JobId) -> MetaResult<StreamJobFragments> {
-        self.catalog_controller
+        Ok(self
+            .catalog_controller
             .get_job_fragments_by_id(job_id)
-            .await
+            .await?
+            .0)
     }
 
     pub fn get_running_actors_of_fragment(&self, id: FragmentId) -> MetaResult<HashSet<ActorId>> {
@@ -733,6 +715,69 @@ impl MetadataManager {
 
         Ok(unreschedulable)
     }
+
+    pub async fn collect_reschedule_blocked_jobs_for_creating_jobs(
+        &self,
+        creating_job_ids: impl IntoIterator<Item = &JobId>,
+        is_online: bool,
+    ) -> MetaResult<HashSet<JobId>> {
+        let creating_job_ids: HashSet<_> = creating_job_ids.into_iter().copied().collect();
+        if creating_job_ids.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        let inner = self.catalog_controller.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        let mut initial_fragment_ids = HashSet::new();
+        for job_id in &creating_job_ids {
+            let scan_types = self
+                .catalog_controller
+                .get_job_fragment_backfill_scan_type_in_txn(&txn, *job_id)
+                .await?;
+            initial_fragment_ids.extend(scan_types.into_iter().filter_map(
+                |(fragment_id, scan_type)| {
+                    (!scan_type.is_reschedulable(is_online)).then_some(fragment_id)
+                },
+            ));
+        }
+
+        if !initial_fragment_ids.is_empty() {
+            let upstream_fragments = self
+                .catalog_controller
+                .upstream_fragments_in_txn(&txn, initial_fragment_ids.iter().copied())
+                .await?;
+            initial_fragment_ids.extend(upstream_fragments.into_values().flatten());
+        }
+
+        let mut blocked_fragment_ids = initial_fragment_ids.clone();
+        if !initial_fragment_ids.is_empty() {
+            let initial_fragment_ids = initial_fragment_ids.into_iter().collect_vec();
+            let ensembles =
+                find_fragment_no_shuffle_dags_detailed(&txn, &initial_fragment_ids).await?;
+            for ensemble in ensembles {
+                blocked_fragment_ids.extend(ensemble.fragments());
+            }
+        }
+
+        let mut blocked_job_ids = HashSet::new();
+        if !blocked_fragment_ids.is_empty() {
+            let fragment_ids = blocked_fragment_ids.into_iter().collect_vec();
+            let fragment_job_ids = self
+                .catalog_controller
+                .get_fragment_job_id_in_txn(&txn, fragment_ids)
+                .await?;
+            blocked_job_ids.extend(
+                fragment_job_ids
+                    .into_iter()
+                    .map(|job_id| job_id.as_job_id()),
+            );
+        }
+
+        txn.commit().await?;
+
+        Ok(blocked_job_ids)
+    }
 }
 
 impl MetadataManager {
@@ -747,7 +792,7 @@ impl MetadataManager {
         tracing::debug!("wait_streaming_job_finished: {id:?}");
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
         if mgr.streaming_job_is_finished(id).await? {
-            return Ok(self.catalog_controller.current_notification_version().await);
+            return Ok(self.catalog_controller.notify_frontend_trivial().await);
         }
         let (tx, rx) = oneshot::channel();
 

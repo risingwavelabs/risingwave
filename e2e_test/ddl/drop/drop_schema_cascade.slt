@@ -53,5 +53,40 @@ drop schema schema1;
 statement ok
 drop schema schema1 cascade;
 
+query T
+select count(name) FROM rw_tables WHERE name = 't1' OR name = 't2' OR name = 't3';
+----
+0
+
+query T
+select count(name) FROM rw_indexes WHERE name = 'idx1';
+----
+0
+
+query T
+select count(name) FROM rw_subscriptions WHERE name = 'sub';
+----
+0
+
+query T
+select count(name) FROM rw_materialized_views WHERE name = 'mv1';
+----
+0
+
+query T
+select count(name) FROM rw_sources WHERE name = 'src1';
+----
+0
+
+query T
+select count(name) FROM rw_functions WHERE name = 'f1';
+----
+0
+
+query T
+select count(name) FROM rw_sinks WHERE name = 's1' OR name = 's2';
+----
+0
+
 statement ok
 drop schema schema2 cascade;

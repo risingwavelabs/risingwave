@@ -19,8 +19,8 @@ use std::process::Command;
 use anyhow::{Result, anyhow};
 
 use super::{ExecuteContext, Task};
-use crate::PubsubConfig;
 use crate::util::stylized_risedev_subcmd;
+use crate::{DummyService, PubsubConfig};
 
 pub struct PubsubService {
     config: PubsubConfig,
@@ -45,6 +45,10 @@ impl PubsubService {
 
 impl Task for PubsubService {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
+        if self.config.user_managed {
+            return DummyService::new(&self.id()).execute(ctx);
+        }
+
         ctx.service(self);
         ctx.pb.set_message("starting...");
 

@@ -329,7 +329,7 @@ impl AggSpillManager {
         spill_metrics: Arc<BatchSpillMetrics>,
     ) -> Result<Self> {
         let suffix_uuid = uuid::Uuid::new_v4();
-        let dir = format!("/{}-{}/", agg_identity, suffix_uuid);
+        let dir = format!("{}-{}/", agg_identity, suffix_uuid);
         let op = SpillOp::create(dir, spill_backend)?;
         let agg_state_writers = Vec::with_capacity(partition_num);
         let agg_state_chunk_builder = Vec::with_capacity(partition_num);
@@ -747,6 +747,7 @@ mod tests {
     use std::ptr::NonNull;
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    use allocator_api2::alloc::{AllocError as AllocErrorApi2, Allocator as AllocatorApi2};
     use futures_async_stream::for_await;
     use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
@@ -944,6 +945,23 @@ mod tests {
                 ) -> std::result::Result<NonNull<[u8]>, AllocError> {
                     let g = Global;
                     g.allocate(layout)
+                }
+
+                unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+                    unsafe {
+                        let g = Global;
+                        g.deallocate(ptr, layout)
+                    }
+                }
+            }
+
+            unsafe impl AllocatorApi2 for MyAlloc {
+                fn allocate(
+                    &self,
+                    layout: Layout,
+                ) -> std::result::Result<NonNull<[u8]>, AllocErrorApi2> {
+                    let g = Global;
+                    g.allocate(layout).map_err(|_| AllocErrorApi2)
                 }
 
                 unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {

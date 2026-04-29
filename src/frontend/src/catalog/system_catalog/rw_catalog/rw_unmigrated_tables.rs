@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::TableId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,7 +22,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwUnmigratedTable {
     #[primary_key]
-    id: i32,
+    id: TableId,
     name: String,
 }
 
@@ -33,9 +34,6 @@ async fn read_rw_unmigrated_tables_info(
 
     Ok(tables
         .into_iter()
-        .map(|(id, name)| RwUnmigratedTable {
-            id: id.as_i32_id(),
-            name,
-        })
+        .map(|(id, name)| RwUnmigratedTable { id, name })
         .collect())
 }

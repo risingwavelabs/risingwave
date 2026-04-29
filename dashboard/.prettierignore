@@ -8,3 +8,4 @@
 out/
 proto/
 public/monaco/
+next-env.d.ts

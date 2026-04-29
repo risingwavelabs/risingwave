@@ -430,7 +430,6 @@ mod tests {
                 host: Some(HostAddr::try_from("127.0.0.1:1234").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
                 property: Some(Property {
-                    is_unschedulable: false,
                     is_serving: true,
                     is_streaming: true,
                     ..Default::default()
@@ -444,7 +443,6 @@ mod tests {
                 host: Some(HostAddr::try_from("127.0.0.1:1235").unwrap().to_protobuf()),
                 state: worker_node::State::Running as i32,
                 property: Some(Property {
-                    is_unschedulable: false,
                     is_serving: true,
                     is_streaming: false,
                     ..Default::default()

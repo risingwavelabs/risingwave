@@ -328,58 +328,6 @@ where
     }
 }
 
-// Compatibility implementation for hyper 0.14 ecosystem.
-// Should be the same as those with imports from `http::Uri` and `hyper_util::client::legacy`.
-// TODO(http-bump): remove this after there is no more dependency on hyper 0.14.
-mod compat {
-    use http_02::Uri;
-    use hyper_014::client::connect::{Connected, Connection};
-
-    use super::*;
-
-    impl<C: Service<Uri>, M: MonitorNewConnection + Clone + 'static> Service<Uri>
-        for MonitoredConnection<C, M>
-    where
-        C::Future: 'static,
-    {
-        type Error = C::Error;
-        type Response = MonitoredConnection<C::Response, M::ConnectionMonitor>;
-
-        type Future = impl Future<Output = Result<Self::Response, Self::Error>> + 'static;
-
-        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            let ret = self.inner.poll_ready(cx);
-            if let Poll::Ready(Err(_)) = &ret {
-                self.monitor.on_err("<poll_ready>".to_owned());
-            }
-            ret
-        }
-
-        fn call(&mut self, uri: Uri) -> Self::Future {
-            let endpoint = format!("{:?}", uri.host());
-            let monitor = self.monitor.clone();
-            self.inner
-                .call(uri)
-                .map(move |result: Result<_, _>| match result {
-                    Ok(resp) => Ok(MonitoredConnection::new(
-                        resp,
-                        monitor.new_connection_monitor(endpoint),
-                    )),
-                    Err(e) => {
-                        monitor.on_err(endpoint);
-                        Err(e)
-                    }
-                })
-        }
-    }
-
-    impl<C: Connection, M> Connection for MonitoredConnection<C, M> {
-        fn connected(&self) -> Connected {
-            self.inner.connected()
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct ConnectionMetrics {
     connection_count: IntGaugeVec,
@@ -663,31 +611,32 @@ impl<L> tonic::transport::server::Router<L> {
     ) -> impl Future<Output = ()>
     where
         L: tower_layer::Layer<tonic::service::Routes>,
-        L::Service: Service<http::Request<tonic::body::BoxBody>, Response = http::Response<ResBody>>
+        L::Service: Service<http::Request<tonic::body::Body>, Response = http::Response<ResBody>>
             + Clone
             + Send
             + 'static,
         <<L as tower_layer::Layer<tonic::service::Routes>>::Service as Service<
-            http::Request<tonic::body::BoxBody>,
+            http::Request<tonic::body::Body>,
         >>::Future: Send + 'static,
         <<L as tower_layer::Layer<tonic::service::Routes>>::Service as Service<
-            http::Request<tonic::body::BoxBody>,
+            http::Request<tonic::body::Body>,
         >>::Error: Into<Box<dyn std::error::Error + Send + Sync>> + Send,
         ResBody: http_body::Body<Data = bytes::Bytes> + Send + 'static,
         ResBody::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     {
         let connection_type = connection_type.into();
-        let incoming = tonic::transport::server::TcpIncoming::new(
-            listen_addr,
-            config.tcp_nodelay,
-            config.keepalive_duration,
-        )
-        .unwrap_or_else(|err| {
-            panic!(
-                "failed to bind `{connection_type}` to `{listen_addr}`: {}",
-                err.as_report()
-            )
-        });
+        let incoming = tonic::transport::server::TcpIncoming::bind(listen_addr)
+            .map(|incoming| {
+                incoming
+                    .with_nodelay(Some(config.tcp_nodelay))
+                    .with_keepalive(config.keepalive_duration)
+            })
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to bind `{connection_type}` to `{listen_addr}`: {}",
+                    err.as_report()
+                )
+            });
         let incoming =
             MonitoredConnection::new(incoming, MonitorNewConnectionImpl { connection_type });
 

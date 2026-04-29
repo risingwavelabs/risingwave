@@ -218,8 +218,10 @@ impl Build for UserDefinedFunction {
                 .to_string(),
         );
 
+        let children: Vec<BoxedExpression> = udf.children.iter().map(build_child).try_collect()?;
+
         Ok(Self {
-            children: udf.children.iter().map(build_child).try_collect()?,
+            children,
             arg_types,
             return_type,
             arg_schema,

@@ -69,6 +69,21 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedLogSinker<
     }
 }
 
+fn should_commit_on_checkpoint_barrier(
+    current_checkpoint: u64,
+    commit_checkpoint_interval: NonZeroU64,
+    writer_requires_commit: bool,
+    vnode_bitmap_updated: bool,
+    is_stop: bool,
+    has_schema_change: bool,
+) -> bool {
+    current_checkpoint >= commit_checkpoint_interval.get()
+        || writer_requires_commit
+        || vnode_bitmap_updated
+        || is_stop
+        || has_schema_change
+}
+
 #[async_trait]
 impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for CoordinatedLogSinker<W> {
     async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
@@ -201,11 +216,14 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                     };
                     if is_checkpoint {
                         current_checkpoint += 1;
-                        if current_checkpoint >= commit_checkpoint_interval.get()
-                            || new_vnode_bitmap.is_some()
-                            || is_stop
-                            || schema_change.is_some()
-                        {
+                        if should_commit_on_checkpoint_barrier(
+                            current_checkpoint,
+                            commit_checkpoint_interval,
+                            sink_writer.should_commit_on_checkpoint(),
+                            new_vnode_bitmap.is_some(),
+                            is_stop,
+                            schema_change.is_some(),
+                        ) {
                             let start_time = Instant::now();
                             let metadata = sink_writer.barrier(true).await?;
                             let metadata = metadata.ok_or_else(|| {
@@ -271,5 +289,72 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroU64;
+
+    use super::should_commit_on_checkpoint_barrier;
+
+    #[test]
+    fn test_should_commit_on_checkpoint_barrier_for_interval() {
+        assert!(should_commit_on_checkpoint_barrier(
+            3,
+            NonZeroU64::new(3).unwrap(),
+            false,
+            false,
+            false,
+            false,
+        ));
+        assert!(!should_commit_on_checkpoint_barrier(
+            2,
+            NonZeroU64::new(3).unwrap(),
+            false,
+            false,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn test_should_commit_on_checkpoint_barrier_for_writer_request() {
+        assert!(should_commit_on_checkpoint_barrier(
+            1,
+            NonZeroU64::new(60).unwrap(),
+            true,
+            false,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn test_should_commit_on_checkpoint_barrier_for_forced_events() {
+        assert!(should_commit_on_checkpoint_barrier(
+            1,
+            NonZeroU64::new(60).unwrap(),
+            false,
+            true,
+            false,
+            false,
+        ));
+        assert!(should_commit_on_checkpoint_barrier(
+            1,
+            NonZeroU64::new(60).unwrap(),
+            false,
+            false,
+            true,
+            false,
+        ));
+        assert!(should_commit_on_checkpoint_barrier(
+            1,
+            NonZeroU64::new(60).unwrap(),
+            false,
+            false,
+            false,
+            true,
+        ));
     }
 }

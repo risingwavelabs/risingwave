@@ -150,6 +150,16 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytes(
+                    "Kv Log Store Buffer Memory",
+                    "Estimated heap bytes used by sync kv log store buffer (unconsumed + consumed but not truncated)",
+                    [
+                        panels.target(
+                            f"{metric('sync_kv_log_store_buffer_memory_bytes')}",
+                            "buffer memory @ {{fragment_id}} {{relation}} ({{target}}) actor {{actor_id}}",
+                        ),
+                    ],
+                ),
                 # FIXME(kwannoel): These are missing metrics
                 panels.timeseries_bytes(
                     "Chunk Buffer Size",

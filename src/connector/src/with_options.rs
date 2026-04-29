@@ -268,10 +268,7 @@ impl WithOptionsSecResolved {
         update_alter_props: BTreeMap<String, String>,
         update_alter_secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> ConnectorResult<(Vec<SecretId>, Vec<SecretId>)> {
-        let to_add_secret_dep = update_alter_secret_refs
-            .values()
-            .map(|new_rely_secret| new_rely_secret.secret_id)
-            .collect();
+        let mut to_add_secret_dep: Vec<SecretId> = vec![];
         let mut to_remove_secret_dep: Vec<SecretId> = vec![];
 
         // make sure the key in update_alter_props and update_alter_secret_refs not collide
@@ -284,22 +281,28 @@ impl WithOptionsSecResolved {
         }
 
         // remove legacy key if it's set in both plaintext and secret
+        // When a property changes from secret to plaintext, remove the old secret dependency
         for k in update_alter_props.keys() {
             if let Some(removed_secret) = self.secret_ref.remove(k) {
                 to_remove_secret_dep.push(removed_secret.secret_id);
             }
         }
+
+        // Handle secret ref updates
         for (k, v) in &update_alter_secret_refs {
+            // Remove any plaintext value for this key
             self.inner.remove(k);
 
             if let Some(old_secret_ref) = self.secret_ref.get(k) {
-                // no need to remove, do extend later
                 if old_secret_ref.secret_id != v.secret_id {
+                    // Secret is being changed to a different secret
                     to_remove_secret_dep.push(old_secret_ref.secret_id);
-                } else {
-                    // If the secret ref is the same, we don't need to update it.
-                    continue;
+                    to_add_secret_dep.push(v.secret_id);
                 }
+                // If the secret ref is the same, we don't need to update dependencies
+            } else {
+                // New secret dependency being added
+                to_add_secret_dep.push(v.secret_id);
             }
         }
 

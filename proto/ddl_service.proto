@@ -321,9 +321,21 @@ message AlterParallelismRequest {
   uint32 table_id = 1;
   meta.TableParallelism parallelism = 2;
   bool deferred = 3;
+  optional string adaptive_parallelism_strategy = 4;
 }
 
 message AlterParallelismResponse {}
+
+message AlterBackfillParallelismRequest {
+  // job id
+  uint32 table_id = 1;
+  // When `parallelism` is `None`, it indicates resetting to no backfill override.
+  optional meta.TableParallelism parallelism = 2;
+  bool deferred = 3;
+  optional string adaptive_parallelism_strategy = 4;
+}
+
+message AlterBackfillParallelismResponse {}
 
 message AlterFragmentParallelismRequest {
   repeated uint32 fragment_ids = 1;
@@ -350,6 +362,17 @@ message AlterResourceGroupRequest {
 message AlterResourceGroupResponse {}
 
 message AlterOwnerResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
+message AlterSubscriptionRetentionRequest {
+  uint32 subscription_id = 1;
+  uint64 retention_seconds = 2;
+  string definition = 3;
+}
+
+message AlterSubscriptionRetentionResponse {
   common.Status status = 1;
   WaitVersion version = 2;
 }
@@ -531,10 +554,12 @@ message CreateSecretResponse {
 
 message DropSecretRequest {
   uint32 secret_id = 1;
+  bool cascade = 2;
 }
 
 message DropSecretResponse {
   WaitVersion version = 1;
+  common.Status status = 2;
 }
 
 message AlterSecretRequest {
@@ -596,9 +621,13 @@ message GetTablesResponse {
   map<uint32, catalog.Table> tables = 1;
 }
 
-message WaitRequest {}
+message WaitRequest {
+  optional uint32 job_id = 1;
+}
 
-message WaitResponse {}
+message WaitResponse {
+  WaitVersion version = 1;
+}
 
 message CommentOnRequest {
   catalog.Comment comment = 1;
@@ -694,8 +723,10 @@ service DdlService {
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
   rpc ResetSource(ResetSourceRequest) returns (ResetSourceResponse);
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
+  rpc AlterSubscriptionRetention(AlterSubscriptionRetentionRequest) returns (AlterSubscriptionRetentionResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
   rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
+  rpc AlterBackfillParallelism(AlterBackfillParallelismRequest) returns (AlterBackfillParallelismResponse);
   rpc AlterFragmentParallelism(AlterFragmentParallelismRequest) returns (AlterFragmentParallelismResponse);
   rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);

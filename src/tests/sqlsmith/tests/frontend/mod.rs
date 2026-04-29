@@ -47,7 +47,7 @@ pub struct SqlsmithEnv {
 /// Skip status is required, so that we know if a SQL statement writing to the database was skipped.
 /// Then, we can infer the correct state of the database.
 async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: Arc<str>) -> Result<bool> {
-    let result = handler::handle(session.clone(), stmt, sql, vec![])
+    let result = Box::pin(handler::handle(session.clone(), stmt, sql, vec![]))
         .await
         .map(|_| ())
         .map_err(|e| format!("Error Reason:\n{}", e.as_report()).into());
@@ -100,7 +100,7 @@ async fn create_tables(
 
     for s in statements {
         let create_sql: Arc<str> = Arc::from(s.to_string());
-        handle(session.clone(), s, create_sql).await?;
+        Box::pin(handle(session.clone(), s, create_sql)).await?;
     }
 
     // Generate some mviews
@@ -116,7 +116,7 @@ async fn create_tables(
         setup_sql.push_str(&format!("{};", &sql));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        let skipped = handle(session.clone(), stmt, sql).await?;
+        let skipped = Box::pin(handle(session.clone(), stmt, sql)).await?;
         if !skipped {
             tables.push(table);
         }
@@ -175,12 +175,12 @@ async fn test_stream_query(
     reproduce_failing_queries(setup_sql, &sql);
     // The generated SQL must be parsable.
     let stmt = round_trip_parse_test(&sql)?;
-    let skipped = handle(session.clone(), stmt, sql).await?;
+    let skipped = Box::pin(handle(session.clone(), stmt, sql)).await?;
     if !skipped {
         let drop_sql: Arc<str> = Arc::from(format!("DROP MATERIALIZED VIEW {}", table.name));
         let drop_stmts = parse_sql(&drop_sql);
         let drop_stmt = drop_stmts[0].clone();
-        handle(session.clone(), drop_stmt, drop_sql).await?;
+        Box::pin(handle(session.clone(), drop_stmt, drop_sql)).await?;
     }
     Ok(())
 }
@@ -277,7 +277,7 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
     } else {
         rng = SmallRng::seed_from_u64(seed);
     }
-    let (tables, setup_sql) = create_tables(session.clone(), &mut rng).await?;
+    let (tables, setup_sql) = Box::pin(create_tables(session.clone(), &mut rng)).await?;
     Ok(SqlsmithEnv {
         session,
         tables,

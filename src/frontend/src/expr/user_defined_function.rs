@@ -49,7 +49,7 @@ impl UserDefinedFunction {
             id: FunctionId::placeholder(),
             name: udf.name.clone(),
             // FIXME(yuhao): owner is not in udf proto.
-            owner: u32::MAX - 1,
+            owner: (u32::MAX - 1).into(),
             kind: FunctionKind::Scalar,
             arg_names: udf.arg_names.clone(),
             arg_types,
@@ -126,12 +126,12 @@ impl std::fmt::Debug for UserDefinedFunctionDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.func_call;
         let mut builder = f.debug_tuple(&that.catalog.name);
-        that.args.iter().for_each(|arg| {
+        for arg in &that.args {
             builder.field(&ExprDisplay {
                 expr: arg,
                 input_schema: self.input_schema,
             });
-        });
+        }
         builder.finish()
     }
 }

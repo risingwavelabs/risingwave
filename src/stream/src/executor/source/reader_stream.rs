@@ -15,20 +15,23 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use futures::StreamExt;
 use itertools::Itertools;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxSourceChunkStream, CdcAutoSchemaChangeFailCallback, ConnectorState, CreateSplitReaderResult,
-    SourceContext, SourceCtrlOpts, SplitMetaData, StreamChunkWithState,
+    BoxSourceReaderEventStream, CdcAutoSchemaChangeFailCallback, ConnectorState,
+    CreateSplitReaderResult, SourceContext, SourceCtrlOpts, SourceReaderEvent, SplitId, SplitImpl,
+    SplitMetaData, StreamChunkWithState,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{apply_rate_limit, get_split_offset_col_idx};
+use super::{apply_rate_limit_to_source_reader_event, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 
@@ -37,12 +40,18 @@ type AutoSchemaChangeSetup = (
     Option<CdcAutoSchemaChangeFailCallback>,
 );
 
+#[derive(Debug)]
+pub(crate) enum SourceReaderEventWithState {
+    Data(StreamChunkWithState),
+    Progress(HashMap<SplitId, SplitImpl>),
+}
+
 pub(crate) struct StreamReaderBuilder {
     pub source_desc: SourceDesc,
     pub rate_limit: Option<u32>,
     pub source_id: SourceId,
     pub source_name: String,
-    pub reader_stream: Option<BoxSourceChunkStream>,
+    pub reader_stream: Option<BoxSourceReaderEventStream>,
 
     // cdc related
     pub is_auto_schema_change_enable: bool,
@@ -50,6 +59,45 @@ pub(crate) struct StreamReaderBuilder {
 }
 
 impl StreamReaderBuilder {
+    fn update_offsets_from_chunk(
+        latest_splits_info: &mut HashMap<SplitId, SplitImpl>,
+        chunk: &StreamChunk,
+        split_idx: usize,
+        offset_idx: usize,
+    ) {
+        // All rows (including those visible or invisible) will be used to update the source offset.
+        for i in 0..chunk.capacity() {
+            let (_, row, _) = chunk.row_at(i);
+            let split = row.datum_at(split_idx).unwrap().into_utf8();
+            let offset = row.datum_at(offset_idx).unwrap().into_utf8();
+            latest_splits_info
+                .get_mut(&Arc::from(split.to_owned()))
+                .map(|split_impl| split_impl.update_in_place(offset.to_owned()));
+        }
+    }
+
+    fn apply_split_progress(
+        latest_splits_info: &mut HashMap<SplitId, SplitImpl>,
+        split_progress: HashMap<SplitId, String>,
+    ) {
+        for (split_id, offset) in split_progress {
+            if let Some(split_impl) = latest_splits_info.get_mut(&split_id) {
+                if let Err(e) = split_impl.update_in_place(offset) {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        split_id = %split_id,
+                        "failed to apply split progress update",
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    split_id = %split_id,
+                    "ignore progress for unknown split",
+                );
+            }
+        }
+    }
+
     fn setup_auto_schema_change(&self) -> AutoSchemaChangeSetup {
         if self.is_auto_schema_change_enable {
             let (schema_change_tx, mut schema_change_rx) =
@@ -180,7 +228,7 @@ impl StreamReaderBuilder {
         Ok(res)
     }
 
-    #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
+    #[try_stream(ok = SourceReaderEventWithState, error = StreamExecutorError)]
     pub(crate) async fn into_retry_stream(mut self, state: ConnectorState, is_initial_build: bool) {
         let (column_ids, source_ctx) = self.prepare_source_stream_build();
         let source_ctx_ref = Arc::new(source_ctx);
@@ -249,23 +297,12 @@ impl StreamReaderBuilder {
             }
 
             let (stream, _) = build_stream_result.unwrap();
-            let stream = apply_rate_limit(stream, self.rate_limit).boxed();
+            let stream = apply_rate_limit_to_source_reader_event(stream, self.rate_limit).boxed();
             let mut is_error = false;
             #[for_await]
-            'consume: for msg in stream {
-                match msg {
-                    Ok(msg) => {
-                        // All rows (including those visible or invisible) will be used to update the source offset.
-                        for i in 0..msg.capacity() {
-                            let (_, row, _) = msg.row_at(i);
-                            let split = row.datum_at(split_idx).unwrap().into_utf8();
-                            let offset = row.datum_at(offset_idx).unwrap().into_utf8();
-                            latest_splits_info
-                                .get_mut(&Arc::from(split.to_owned()))
-                                .map(|split_impl| split_impl.update_in_place(offset.to_owned()));
-                        }
-                        yield (msg, latest_splits_info.clone());
-                    }
+            'consume: for event in stream {
+                let event = match event {
+                    Ok(event) => event,
                     Err(e) => {
                         tracing::error!(
                             error = %e.as_report(),
@@ -283,6 +320,22 @@ impl StreamReaderBuilder {
                         is_error = true;
                         break 'consume;
                     }
+                };
+
+                match event {
+                    SourceReaderEvent::DataChunk(chunk) => {
+                        Self::update_offsets_from_chunk(
+                            &mut latest_splits_info,
+                            &chunk,
+                            split_idx,
+                            offset_idx,
+                        );
+                        yield SourceReaderEventWithState::Data((chunk, latest_splits_info.clone()));
+                    }
+                    SourceReaderEvent::SplitProgress(split_progress) => {
+                        Self::apply_split_progress(&mut latest_splits_info, split_progress);
+                        yield SourceReaderEventWithState::Progress(latest_splits_info.clone());
+                    }
                 }
             }
             if !is_error {
@@ -293,7 +346,7 @@ impl StreamReaderBuilder {
                         *split_impl = batch_split.into();
                     }
                 });
-                yield (
+                yield SourceReaderEventWithState::Data((
                     StreamChunk::empty(
                         self.source_desc
                             .columns
@@ -303,7 +356,7 @@ impl StreamReaderBuilder {
                             .as_slice(),
                     ),
                     latest_splits_info.clone(),
-                );
+                ));
                 break 'build_consume_loop;
             }
             tracing::info!("stream source reader error, retry in 1s");

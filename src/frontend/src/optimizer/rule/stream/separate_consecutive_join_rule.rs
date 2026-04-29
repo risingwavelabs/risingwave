@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use super::prelude::*;
-use crate::optimizer::plan_node::generic::Join;
-use crate::optimizer::plan_node::{PlanTreeNodeBinary, StreamExchange, StreamHashJoin};
+use crate::optimizer::plan_node::{PlanTreeNodeBinary, StreamExchange};
 
 /// Separate consecutive stream hash joins by no-shuffle exchange
 pub struct SeparateConsecutiveJoinRule {}
@@ -25,25 +24,25 @@ impl Rule<Stream> for SeparateConsecutiveJoinRule {
         let left_input = join.left();
         let right_input = join.right();
 
-        let new_left = if left_input.as_stream_hash_join().is_some() {
+        let left_needs_separation = left_input.as_stream_hash_join().is_some();
+        let right_needs_separation = right_input.as_stream_hash_join().is_some();
+
+        if !left_needs_separation && !right_needs_separation {
+            return None;
+        }
+
+        let new_left = if left_needs_separation {
             StreamExchange::new_no_shuffle(left_input).into()
         } else {
             left_input
         };
-
-        let new_right = if right_input.as_stream_hash_join().is_some() {
+        let new_right = if right_needs_separation {
             StreamExchange::new_no_shuffle(right_input).into()
         } else {
             right_input
         };
 
-        let core = Join::with_full_output_eq_predicate(
-            new_left,
-            new_right,
-            join.join_type(),
-            join.eq_join_predicate().clone(),
-        );
-        Some(StreamHashJoin::new(core).unwrap().into())
+        Some(join.clone_with_left_right(new_left, new_right).into())
     }
 }
 

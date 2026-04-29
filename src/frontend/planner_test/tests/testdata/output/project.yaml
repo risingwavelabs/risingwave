@@ -107,7 +107,7 @@
     └─StreamProject { exprs: [$expr1, t1._row_id, t2._row_id, t1.v, t2.v] }
       └─StreamMaterializedExprs { exprs: [PgSleep(t1.v::Float64) as $expr1] }
         └─StreamExchange { dist: HashShard(t1.v, t1._row_id, t2._row_id, t2.v) }
-          └─StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
+          └─StreamFilter { predicate: ((IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) OR (IsNotNull(t1.v) OR IsNotNull(t2.v))) }
             └─StreamHashJoin { type: FullOuter, predicate: t1.v = t2.v, output: [t1.v, t1._row_id, t2._row_id, t2.v] }
               ├─StreamExchange { dist: HashShard(t1.v) }
               │ └─StreamTableScan { table: t1, columns: [t1.v, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -121,7 +121,7 @@
             └── StreamExchange Hash([0, 1, 2, 3]) from 1
 
     Fragment 1
-    StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
+    StreamFilter { predicate: ((IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) OR (IsNotNull(t1.v) OR IsNotNull(t2.v))) }
     └── StreamHashJoin { type: FullOuter, predicate: t1.v = t2.v, output: [t1.v, t1._row_id, t2._row_id, t2.v] } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
         ├── StreamExchange Hash([0]) from 2
         └── StreamExchange Hash([0]) from 3

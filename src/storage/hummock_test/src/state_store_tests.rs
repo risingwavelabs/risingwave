@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::FragmentId;
 use risingwave_common::util::epoch::{EpochExt, INVALID_EPOCH, MAX_EPOCH, test_epoch};
 use risingwave_hummock_sdk::key::{FullKey, TableKeyRange, prefixed_range_with_vnode};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo, SyncResult};
@@ -1289,6 +1290,7 @@ async fn test_replicated_local_hummock_storage() {
     let mut local_hummock_storage = hummock_storage
         .new_local(NewLocalOptions::new_replicated(
             TEST_TABLE_ID,
+            FragmentId::default(),
             OpConsistencyLevel::Inconsistent,
             TableOption {
                 retention_seconds: None,
@@ -1454,6 +1456,7 @@ async fn test_iter_log() {
     let mut in_memory_local = in_memory_state_store
         .new_local(NewLocalOptions {
             table_id,
+            fragment_id: FragmentId::default(),
             op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
                 check_old_value: CHECK_BYTES_EQUAL.clone(),
                 is_log_store: true,
@@ -1470,6 +1473,7 @@ async fn test_iter_log() {
     let mut hummock_local = hummock_storage
         .new_local(NewLocalOptions {
             table_id,
+            fragment_id: FragmentId::default(),
             op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
                 check_old_value: CHECK_BYTES_EQUAL.clone(),
                 is_log_store: true,
@@ -1596,6 +1600,7 @@ async fn test_read_log_next_epoch() {
     let mut hummock_local = hummock_storage
         .new_local(NewLocalOptions {
             table_id,
+            fragment_id: FragmentId::default(),
             op_consistency_level: OpConsistencyLevel::ConsistentOldValue {
                 check_old_value: CHECK_BYTES_EQUAL.clone(),
                 is_log_store: true,

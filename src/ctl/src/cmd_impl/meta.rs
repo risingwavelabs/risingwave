@@ -19,6 +19,7 @@ mod pause_resume;
 mod reschedule;
 mod resume_backfill;
 mod serving;
+mod source_props;
 
 pub use backup_meta::*;
 pub use cluster_info::*;
@@ -27,3 +28,4 @@ pub use pause_resume::*;
 pub use reschedule::*;
 pub use resume_backfill::*;
 pub use serving::*;
+pub use source_props::*;

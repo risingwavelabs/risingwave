@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{DatabaseId, UserId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -22,9 +23,9 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwDatabases {
     #[primary_key]
-    id: i32,
+    id: DatabaseId,
     name: String,
-    owner: i32,
+    owner: UserId,
     acl: Vec<String>,
     resource_group: String,
     barrier_interval_ms: Option<i32>,
@@ -41,9 +42,9 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDatabases>> {
     Ok(catalog_reader
         .iter_databases()
         .map(|db| RwDatabases {
-            id: db.id().as_i32_id(),
+            id: db.id(),
             name: db.name().into(),
-            owner: db.owner() as i32,
+            owner: db.owner(),
             acl: get_acl_items(db.id(), false, &users, username_map),
             resource_group: db.resource_group.clone(),
             barrier_interval_ms: db.barrier_interval_ms.map(|v| v as i32),

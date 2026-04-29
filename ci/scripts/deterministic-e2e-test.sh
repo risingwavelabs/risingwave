@@ -27,6 +27,7 @@ git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snaps
 popd
 
 export LOGDIR=.risingwave/log
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn,risingwave_storage::hummock::compactor=error,risingwave_hummock_sdk::compaction_group::hummock_version_ext=error"
 
 mkdir -p $LOGDIR
 
@@ -52,4 +53,4 @@ echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queri
 timeout 20m seq 64 | parallel RUST_MIN_STACK=4194304 'MADSIM_TEST_SEED={} $RW_SIM  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/sqlsmith-query-snapshots/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, e2e extended mode test"
-seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} RUST_LOG=info $RW_SIM -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} $RW_SIM -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'

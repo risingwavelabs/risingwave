@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::common::Uint32Vector;
+use risingwave_pb::id::RelationId;
 use risingwave_pb::stream_plan::BackfillOrder;
 use risingwave_sqlparser::ast::BackfillOrderStrategy;
 
@@ -21,14 +23,11 @@ use crate::optimizer::backfill_order_strategy::fixed::plan_fixed_strategy;
 use crate::optimizer::plan_node::StreamPlanRef;
 use crate::session::SessionImpl;
 
-type ObjectId = u32;
-
 pub mod auto {
     use std::collections::{HashMap, HashSet};
 
-    use risingwave_pb::common::Uint32Vector;
+    use risingwave_pb::id::RelationId;
 
-    use super::ObjectId;
     use crate::optimizer::backfill_order_strategy::common::has_cycle;
     use crate::optimizer::plan_node::{StreamPlanNodeType, StreamPlanRef};
     use crate::session::SessionImpl;
@@ -40,7 +39,7 @@ pub mod auto {
             rhs: Box<BackfillTreeNode>,
         },
         Scan {
-            id: ObjectId,
+            id: RelationId,
         },
         Union {
             children: Vec<BackfillTreeNode>,
@@ -66,12 +65,12 @@ pub mod auto {
             }
             StreamPlanNodeType::StreamTableScan => {
                 let table_scan = plan.as_stream_table_scan().expect("table scan");
-                let relation_id = table_scan.core().table_catalog.id().as_raw_id();
+                let relation_id = table_scan.core().table_catalog.id().as_relation_id();
                 Some(BackfillTreeNode::Scan { id: relation_id })
             }
             StreamPlanNodeType::StreamSourceScan => {
                 let source_scan = plan.as_stream_source_scan().expect("source scan");
-                let relation_id = source_scan.source_catalog().id.as_raw_id();
+                let relation_id = source_scan.source_catalog().id.as_relation_id();
                 Some(BackfillTreeNode::Scan { id: relation_id })
             }
             StreamPlanNodeType::StreamUnion => {
@@ -162,17 +161,17 @@ pub mod auto {
     /// I -> H
     fn fold_backfill_tree_to_partial_order(
         tree: BackfillTreeNode,
-    ) -> HashMap<ObjectId, Uint32Vector> {
-        let mut order: HashMap<ObjectId, HashSet<ObjectId>> = HashMap::new();
+    ) -> HashMap<RelationId, HashSet<RelationId>> {
+        let mut order: HashMap<RelationId, HashSet<RelationId>> = HashMap::new();
 
         // Returns terminal nodes of the subtree
         // This is recursive algorithm we use to traverse the tree and compute partial orders.
         fn traverse_backfill_tree(
             tree: BackfillTreeNode,
-            order: &mut HashMap<ObjectId, HashSet<ObjectId>>,
+            order: &mut HashMap<RelationId, HashSet<RelationId>>,
             is_leftmost_child: bool,
-            mut prior_terminal_nodes: HashSet<ObjectId>,
-        ) -> HashSet<ObjectId> {
+            mut prior_terminal_nodes: HashSet<RelationId>,
+        ) -> HashSet<RelationId> {
             match tree {
                 BackfillTreeNode::Ignored => HashSet::new(),
                 BackfillTreeNode::Scan { id } => {
@@ -208,18 +207,12 @@ pub mod auto {
         traverse_backfill_tree(tree, &mut order, false, HashSet::new());
 
         order
-            .into_iter()
-            .map(|(k, v)| {
-                let data = v.into_iter().collect();
-                (k, Uint32Vector { data })
-            })
-            .collect()
     }
 
     pub(super) fn plan_auto_strategy(
         session: &SessionImpl,
         plan: StreamPlanRef,
-    ) -> HashMap<ObjectId, Uint32Vector> {
+    ) -> HashMap<RelationId, HashSet<RelationId>> {
         if let Some(tree) = plan_graph_to_backfill_tree(session, plan) {
             let order = fold_backfill_tree_to_partial_order(tree);
             if has_cycle(&order) {
@@ -237,10 +230,9 @@ mod fixed {
     use std::collections::{HashMap, HashSet};
 
     use risingwave_common::bail;
-    use risingwave_pb::common::Uint32Vector;
+    use risingwave_pb::id::RelationId;
     use risingwave_sqlparser::ast::ObjectName;
 
-    use super::ObjectId;
     use crate::error::Result;
     use crate::optimizer::backfill_order_strategy::common::{
         bind_backfill_relation_id_by_name, has_cycle,
@@ -249,19 +241,19 @@ mod fixed {
     use crate::session::SessionImpl;
 
     /// Collect all relation IDs (tables and sources) that are scanned in the plan.
-    fn collect_scanned_relation_ids(plan: StreamPlanRef) -> HashSet<ObjectId> {
+    fn collect_scanned_relation_ids(plan: StreamPlanRef) -> HashSet<RelationId> {
         let mut relation_ids = HashSet::new();
 
-        fn visit(plan: StreamPlanRef, relation_ids: &mut HashSet<ObjectId>) {
+        fn visit(plan: StreamPlanRef, relation_ids: &mut HashSet<RelationId>) {
             match plan.node_type() {
                 StreamPlanNodeType::StreamTableScan => {
                     let table_scan = plan.as_stream_table_scan().expect("table scan");
-                    let relation_id = table_scan.core().table_catalog.id().as_raw_id();
+                    let relation_id = table_scan.core().table_catalog.id().as_relation_id();
                     relation_ids.insert(relation_id);
                 }
                 StreamPlanNodeType::StreamSourceScan => {
                     let source_scan = plan.as_stream_source_scan().expect("source scan");
-                    let relation_id = source_scan.source_catalog().id.as_raw_id();
+                    let relation_id = source_scan.source_catalog().id.as_relation_id();
                     relation_ids.insert(relation_id);
                 }
                 _ => {}
@@ -281,11 +273,11 @@ mod fixed {
         session: &SessionImpl,
         orders: Vec<(ObjectName, ObjectName)>,
         plan: StreamPlanRef,
-    ) -> Result<HashMap<ObjectId, Uint32Vector>> {
+    ) -> Result<HashMap<RelationId, HashSet<RelationId>>> {
         // Collect all scanned relation IDs from the plan
         let scanned_relation_ids = collect_scanned_relation_ids(plan);
 
-        let mut order: HashMap<ObjectId, Uint32Vector> = HashMap::new();
+        let mut order: HashMap<RelationId, HashSet<RelationId>> = HashMap::new();
         for (start_name, end_name) in orders {
             let start_relation_id = bind_backfill_relation_id_by_name(session, start_name.clone())?;
             let end_relation_id = bind_backfill_relation_id_by_name(session, end_name.clone())?;
@@ -307,8 +299,7 @@ mod fixed {
             order
                 .entry(start_relation_id)
                 .or_default()
-                .data
-                .push(end_relation_id);
+                .insert(end_relation_id);
         }
         if has_cycle(&order) {
             bail!("Backfill order strategy has a cycle");
@@ -320,10 +311,9 @@ mod fixed {
 mod common {
     use std::collections::{HashMap, HashSet};
 
-    use risingwave_pb::common::Uint32Vector;
+    use risingwave_pb::id::RelationId;
     use risingwave_sqlparser::ast::ObjectName;
 
-    use super::ObjectId;
     use crate::Binder;
     use crate::catalog::CatalogError;
     use crate::catalog::root_catalog::SchemaPath;
@@ -332,12 +322,12 @@ mod common {
     use crate::session::SessionImpl;
 
     /// Check if the backfill order has a cycle.
-    pub(super) fn has_cycle(order: &HashMap<ObjectId, Uint32Vector>) -> bool {
+    pub(super) fn has_cycle(order: &HashMap<RelationId, HashSet<RelationId>>) -> bool {
         fn dfs(
-            node: ObjectId,
-            order: &HashMap<ObjectId, Uint32Vector>,
-            visited: &mut HashSet<ObjectId>,
-            stack: &mut HashSet<ObjectId>,
+            node: RelationId,
+            order: &HashMap<RelationId, HashSet<RelationId>>,
+            visited: &mut HashSet<RelationId>,
+            stack: &mut HashSet<RelationId>,
         ) -> bool {
             if stack.contains(&node) {
                 return true; // Cycle detected
@@ -346,7 +336,7 @@ mod common {
             if visited.insert(node) {
                 stack.insert(node);
                 if let Some(downstreams) = order.get(&node) {
-                    for neighbor in &downstreams.data {
+                    for neighbor in downstreams {
                         if dfs(*neighbor, order, visited, stack) {
                             return true;
                         }
@@ -371,7 +361,7 @@ mod common {
     pub(super) fn bind_backfill_relation_id_by_name(
         session: &SessionImpl,
         name: ObjectName,
-    ) -> Result<ObjectId> {
+    ) -> Result<RelationId> {
         let (db_name, schema_name, rel_name) = Binder::resolve_db_schema_qualified_name(&name)?;
         let db_name = db_name.unwrap_or(session.database());
 
@@ -386,8 +376,8 @@ mod common {
                 let search_path = session.config().search_path();
                 let user_name = session.user_name();
                 let schema_path = SchemaPath::Path(&search_path, &user_name);
-                let result: crate::error::Result<Option<(ObjectId, &str)>> =
-                    schema_path.try_find(|schema_name| {
+                let result: crate::error::Result<Option<(RelationId, &str)>> = schema_path
+                    .try_find(|schema_name| {
                         if let Ok(schema_catalog) = reader.get_schema_by_name(&db_name, schema_name)
                             && let Ok(relation_id) = bind_table(schema_catalog, &rel_name)
                         {
@@ -404,11 +394,14 @@ mod common {
         }
     }
 
-    fn bind_table(schema_catalog: &SchemaCatalog, name: &String) -> crate::error::Result<ObjectId> {
+    fn bind_table(
+        schema_catalog: &SchemaCatalog,
+        name: &String,
+    ) -> crate::error::Result<RelationId> {
         if let Some(table) = schema_catalog.get_created_table_by_name(name) {
-            Ok(table.id().as_raw_id())
+            Ok(table.id().as_relation_id())
         } else if let Some(source) = schema_catalog.get_source_by_name(name) {
-            Ok(source.id.as_raw_id())
+            Ok(source.id.as_relation_id())
         } else {
             Err(CatalogError::not_found("table or source", name).into())
         }
@@ -418,10 +411,9 @@ mod common {
 pub mod display {
     use risingwave_pb::stream_plan::BackfillOrder;
 
-    use super::ObjectId;
     use crate::session::SessionImpl;
 
-    fn get_table_name(session: &SessionImpl, id: ObjectId) -> crate::error::Result<String> {
+    fn get_table_name(session: &SessionImpl, id: u32) -> crate::error::Result<String> {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let table_catalog = catalog_reader.get_any_table_by_id(id.into())?;
         let table_name = table_catalog.name();
@@ -443,7 +435,7 @@ pub mod display {
         // so our planner tests are deterministic.
         let mut edges = vec![];
         for (start, end) in order.order {
-            let start_name = get_table_name(session, start)?;
+            let start_name = get_table_name(session, start.as_raw_id())?;
             for end in end.data {
                 let end_name = get_table_name(session, end)?;
                 edges.push(format!("  \"{}\" -> \"{}\";\n", start_name, end_name));
@@ -476,7 +468,22 @@ pub fn plan_backfill_order(
         BackfillOrderStrategy::Auto => plan_auto_strategy(session, plan),
         BackfillOrderStrategy::Fixed(orders) => plan_fixed_strategy(session, orders, plan)?,
     };
-    Ok(BackfillOrder { order })
+    Ok(BackfillOrder {
+        order: order
+            .into_iter()
+            .map(|(relation_id, dependencies)| {
+                (
+                    relation_id,
+                    Uint32Vector {
+                        data: dependencies
+                            .into_iter()
+                            .map(RelationId::as_raw_id)
+                            .collect(),
+                    },
+                )
+            })
+            .collect(),
+    })
 }
 
 /// Plan the backfill order, and also output the backfill tree.

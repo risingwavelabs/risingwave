@@ -26,11 +26,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::id::WorkerId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
-use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
+use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::PbFragment;
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::stream_plan::StreamNode;
 
 use self::predicate::BoxedPredicate;
@@ -289,42 +288,6 @@ impl Cluster {
         Ok(res)
     }
 
-    // update node schedulability
-    #[cfg_or_panic(madsim)]
-    async fn update_worker_node_schedulability(
-        &self,
-        worker_ids: Vec<WorkerId>,
-        target: Schedulability,
-    ) -> Result<()> {
-        let worker_ids = worker_ids
-            .into_iter()
-            .map(|id| id.to_string())
-            .collect_vec();
-
-        let _ = self
-            .ctl
-            .spawn(async move {
-                risingwave_ctl::cmd_impl::scale::update_schedulability(
-                    &risingwave_ctl::common::CtlContext::default(),
-                    worker_ids,
-                    target,
-                )
-                .await
-            })
-            .await?;
-        Ok(())
-    }
-
-    pub async fn cordon_worker(&self, id: WorkerId) -> Result<()> {
-        self.update_worker_node_schedulability(vec![id], Schedulability::Unschedulable)
-            .await
-    }
-
-    pub async fn uncordon_worker(&self, id: WorkerId) -> Result<()> {
-        self.update_worker_node_schedulability(vec![id], Schedulability::Schedulable)
-            .await
-    }
-
     /// Pause all data sources in the cluster.
     #[cfg_or_panic(madsim)]
     pub async fn pause(&mut self) -> Result<()> {
@@ -366,7 +329,7 @@ impl Cluster {
     pub async fn split_compaction_group(
         &mut self,
         compaction_group_id: CompactionGroupId,
-        table_id: HummockSstableId,
+        table_id: TableId,
     ) -> Result<()> {
         self.ctl
             .spawn(async move {
@@ -408,7 +371,7 @@ impl Cluster {
 }
 
 #[cfg_attr(not(madsim), allow(dead_code))]
-async fn start_ctl<S, I>(args: I) -> Result<()>
+pub(crate) async fn start_ctl<S, I>(args: I) -> Result<()>
 where
     S: Into<OsString>,
     I: IntoIterator<Item = S>,

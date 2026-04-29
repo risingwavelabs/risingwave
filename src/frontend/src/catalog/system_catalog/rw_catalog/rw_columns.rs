@@ -14,6 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::RelationId;
 
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -24,7 +25,7 @@ use crate::user::user_catalog::UserCatalog;
 #[derive(Fields)]
 #[primary_key(relation_id, name)]
 struct RwColumn {
-    relation_id: i32,
+    relation_id: RelationId,
     // belonged relation id
     name: String,
     // column name
@@ -62,7 +63,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(|(index, column)| RwColumn {
-                relation_id: view.id.as_i32_id(),
+                relation_id: view.id.as_relation_id(),
                 name: column.name.clone(),
                 position: index as i32 + 1,
                 is_hidden: false,
@@ -83,7 +84,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(|(index, column)| RwColumn {
-                relation_id: sink.id.as_i32_id(),
+                relation_id: sink.id.as_relation_id(),
                 name: column.name().into(),
                 position: index as i32 + 1,
                 is_hidden: column.is_hidden,
@@ -107,7 +108,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
             .iter()
             .enumerate()
             .map(move |(index, column)| RwColumn {
-                relation_id: table.id.as_i32_id(),
+                relation_id: table.id.as_relation_id(),
                 name: column.name().into(),
                 position: index as i32 + 1,
                 is_hidden: column.is_hidden,
@@ -132,7 +133,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 .iter()
                 .enumerate()
                 .map(move |(index, column)| RwColumn {
-                    relation_id: table.id.as_i32_id(),
+                    relation_id: table.id.as_relation_id(),
                     name: column.name().into(),
                     position: index as i32 + 1,
                     is_hidden: column.is_hidden,
@@ -164,7 +165,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 .iter()
                 .enumerate()
                 .map(move |(index, column)| RwColumn {
-                    relation_id: source.id.as_i32_id(),
+                    relation_id: source.id.as_relation_id(),
                     name: column.name().into(),
                     position: index as i32 + 1,
                     is_hidden: column.is_hidden,

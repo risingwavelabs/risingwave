@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::{SinkId, TableId};
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,8 +22,8 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwSinkLogStoreTable {
     #[primary_key]
-    sink_id: i32,
-    internal_table_id: i32,
+    sink_id: SinkId,
+    internal_table_id: TableId,
 }
 
 #[system_catalog(table, "rw_catalog.rw_sink_log_store_tables")]
@@ -33,8 +34,8 @@ async fn read_rw_sink_log_store_tables(
     Ok(tables
         .into_iter()
         .map(|table| RwSinkLogStoreTable {
-            sink_id: table.sink_id as i32,
-            internal_table_id: table.internal_table_id as i32,
+            sink_id: table.sink_id.into(),
+            internal_table_id: table.internal_table_id.into(),
         })
         .collect())
 }

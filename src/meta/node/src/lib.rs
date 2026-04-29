@@ -356,7 +356,7 @@ pub fn start(
             max_timeout_ms / 1000
         } + MIN_TIMEOUT_INTERVAL_SEC;
 
-        rpc_serve(
+        Box::pin(rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
@@ -389,10 +389,21 @@ pub fn start(
                     .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
+                iceberg_compaction_report_timeout_sec: config
+                    .meta
+                    .iceberg_compaction_report_timeout_sec,
+                iceberg_compaction_config_refresh_interval_sec: config
+                    .meta
+                    .iceberg_compaction_config_refresh_interval_sec,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
                 enable_hummock_data_archive: config.meta.enable_hummock_data_archive,
+                checkpoint_compression_algorithm: config.meta.checkpoint_compression_algorithm,
+                checkpoint_read_chunk_size: config.meta.checkpoint_read_chunk_size,
+                checkpoint_read_max_in_flight_chunks: config
+                    .meta
+                    .checkpoint_read_max_in_flight_chunks,
                 hummock_time_travel_snapshot_interval: config
                     .meta
                     .hummock_time_travel_snapshot_interval,
@@ -408,6 +419,10 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_epoch_version_insert_batch_size,
+                hummock_time_travel_delta_fetch_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_delta_fetch_batch_size,
                 hummock_gc_history_insert_batch_size: config
                     .meta
                     .developer
@@ -460,6 +475,8 @@ pub fn start(
                 periodic_scheduling_compaction_group_split_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_split_interval_sec,
+                enable_compaction_group_normalize: config.meta.enable_compaction_group_normalize,
+                max_normalize_splits_per_round: config.meta.max_normalize_splits_per_round,
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
@@ -486,6 +503,7 @@ pub fn start(
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_task_max_progress_interval_secs,
+                compaction_task_id_refill_capacity: config.meta.compaction_task_id_refill_capacity,
                 compaction_config: Some(config.meta.compaction_config),
                 hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
@@ -535,6 +553,14 @@ pub fn start(
                     .meta
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
+                table_change_log_insert_batch_size: config
+                    .meta
+                    .developer
+                    .table_change_log_insert_batch_size,
+                table_change_log_delete_batch_size: config
+                    .meta
+                    .developer
+                    .table_change_log_delete_batch_size,
                 license_key_path: opts.license_key_path,
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
@@ -562,7 +588,7 @@ pub fn start(
             config.system.into_init_system_params(),
             Default::default(),
             shutdown,
-        )
+        ))
         .await
         .unwrap();
     })
@@ -577,6 +603,36 @@ fn validate_config(config: &RwConfig) {
 
     if config.meta.parallelism_control_batch_size == 0 {
         let error_msg = "parallelism control batch size should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.checkpoint_read_chunk_size == 0 {
+        let error_msg = "checkpoint read chunk size should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.checkpoint_read_max_in_flight_chunks == 0 {
+        let error_msg = "checkpoint read max in flight chunks should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.compaction_task_id_refill_capacity == 0 {
+        let error_msg = "compaction task id refill capacity should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.iceberg_compaction_report_timeout_sec == 0 {
+        let error_msg = "iceberg compaction report timeout sec should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.iceberg_compaction_config_refresh_interval_sec == 0 {
+        let error_msg = "iceberg compaction config refresh interval sec should be larger than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

@@ -377,6 +377,25 @@
   expected_outputs:
     - stream_plan
     - stream_dist_plan
+- name: Separate consecutive StreamHashJoin should preserve join predicate bindings
+  sql: |
+    set streaming_separate_consecutive_join = true;
+    create table p (merchant_id int, product_id int, payload int);
+    create table pe (merchant_id int, product_id int, supplier_id int, extra int);
+    create table s (merchant_id int, supplier_id int, ts1 int, ts2 int);
+    select pj.merchant_id, pj.product_id, s.supplier_id
+    from (
+      select p.merchant_id, p.product_id, pe.supplier_id
+      from p
+      left join pe
+      on p.merchant_id = pe.merchant_id
+      and p.product_id = pe.product_id
+    ) as pj
+    left join s
+    on pj.merchant_id = s.merchant_id
+    and pj.supplier_id = s.supplier_id;
+  expected_outputs:
+  - stream_plan
 - name: Repro stream join dist_key / stream_key mismatch (other_cond=false), issue 24434
   sql: |
     create table t1 (k int, v int);

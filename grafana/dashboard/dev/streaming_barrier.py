@@ -10,34 +10,8 @@ def _(outer_panels: Panels):
             [
                 panels.subheader(
                     "Barrier",
-                    "More fine-grained barrier metrics here. Core metrics like **Barrier Number** are in **Cluster Essential** section.",
+                    "More fine-grained barrier metrics here. Core metrics like **Barrier Number** and **Barrier Latency** are in **Cluster Essential** section.",
                     height=2.2,
-                ),
-                panels.timeseries_latency(
-                    "Barrier Latency",
-                    "The time that the data between two consecutive barriers gets fully processed, i.e. the computation "
-                    "results are made durable into materialized views or sink to external systems. This metric shows to users "
-                    "the freshness of materialized views.",
-                    quantile(
-                        lambda quantile, legend: panels.target(
-                            f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le, database_id))",
-                            f"barrier_latency_p{legend} " + " (database {{database_id}})",
-                        ),
-                        [50, 90, 99, 999, "max"],
-                    )
-                    + [
-                        panels.target(
-                            f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval]) > 0",
-                            "barrier_latency_avg (database {{database_id}})",
-                        ),
-                    ]
-                    + quantile(
-                        lambda quantile, legend: panels.target(
-                            f"histogram_quantile({quantile}, sum(rate({metric('meta_snapshot_backfill_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le, table_id, barrier_type))",
-                            f"snapshot_backfill_barrier_latency_p{legend} table_id[{{{{table_id}}}}] {{{{barrier_type}}}}",
-                        ),
-                        [50, 90, 99, 999, "max"],
-                    ),
                 ),
                 panels.timeseries_latency(
                     "Barrier Send Latency",

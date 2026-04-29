@@ -94,9 +94,18 @@ impl S3FileScanExecutor {
                 bucket.clone(),
                 self.s3_endpoint.clone(),
             )?;
-            let chunk_stream =
-                read_parquet_file(op, file_name, None, None, self.batch_size, 0, None, None)
-                    .await?;
+            let chunk_stream = read_parquet_file(
+                op,
+                file_name,
+                None,
+                None,
+                false,
+                self.batch_size,
+                0,
+                None,
+                None,
+            )
+            .await?;
             #[for_await]
             for stream_chunk in chunk_stream {
                 let stream_chunk = stream_chunk?;

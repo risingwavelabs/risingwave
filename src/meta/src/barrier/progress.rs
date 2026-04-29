@@ -722,7 +722,11 @@ impl CreateMviewProgressTracker {
     ///
     /// If the actors to track are empty, return the given command as it can be finished immediately.
     /// For CDC sources, mark as `CdcSourceInit` instead of Finished.
-    pub fn new(info: &CreateStreamingJobCommandInfo, version_stats: &HummockVersionStats) -> Self {
+    pub fn new(
+        info: &CreateStreamingJobCommandInfo,
+        version_stats: &HummockVersionStats,
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+    ) -> Self {
         tracing::trace!(?info, "add job to track");
         let CreateStreamingJobCommandInfo {
             stream_job_fragments,
@@ -732,7 +736,7 @@ impl CreateMviewProgressTracker {
             ..
         } = info;
         let job_id = stream_job_fragments.stream_job_id();
-        let actors = stream_job_fragments.tracking_progress_actor_ids();
+        let actors = InflightStreamingJobInfo::tracking_progress_actor_ids(fragment_infos);
         let tracking_job = TrackingJob::new(&info.stream_job_fragments);
         if actors.is_empty() {
             // NOTE: This CDC source detection uses hardcoded property checks and should be replaced
@@ -768,7 +772,7 @@ impl CreateMviewProgressTracker {
 
         let backfill_order_state = BackfillOrderState::new(
             fragment_backfill_ordering,
-            stream_job_fragments,
+            fragment_infos,
             locality_fragment_state_table_mapping.clone(),
         );
         let progress = Progress::new(
@@ -1067,6 +1071,7 @@ mod tests {
     fn test_cdc_source_initialized_as_cdc_source_init() {
         use std::collections::BTreeMap;
 
+        use risingwave_meta_model::streaming_job;
         use risingwave_pb::catalog::{CreateType, PbSource, StreamSourceInfo};
 
         use crate::barrier::command::CreateStreamingJobCommandInfo;
@@ -1101,13 +1106,33 @@ mod tests {
             job_type: StreamingJobType::Source,
             create_type: CreateType::Foreground,
             streaming_job: StreamingJob::Source(source),
+            database_resource_group: risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP
+                .to_owned(),
             fragment_backfill_ordering: Default::default(),
             cdc_table_snapshot_splits: None,
             locality_fragment_state_table_mapping: Default::default(),
             is_serverless: false,
+            streaming_job_model: streaming_job::Model {
+                job_id: JobId::new(100),
+                job_status: risingwave_meta_model::JobStatus::Creating,
+                create_type: risingwave_meta_model::CreateType::Foreground,
+                timezone: None,
+                config_override: None,
+                adaptive_parallelism_strategy: None,
+                parallelism: risingwave_meta_model::StreamingParallelism::Adaptive,
+                backfill_parallelism: None,
+                backfill_orders: None,
+                max_parallelism: 256,
+                specific_resource_group: None,
+                is_serverless_backfill: false,
+            },
         };
 
-        let tracker = CreateMviewProgressTracker::new(&info, &HummockVersionStats::default());
+        let tracker = CreateMviewProgressTracker::new(
+            &info,
+            &HummockVersionStats::default(),
+            &HashMap::new(),
+        );
 
         // CDC source should be in CdcSourceInit state
         assert!(matches!(tracker.status, CreateMviewStatus::CdcSourceInit));

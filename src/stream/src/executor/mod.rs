@@ -153,6 +153,7 @@ pub use filter::{FilterExecutor, UpsertFilterExecutor};
 pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
+pub use join::asof_join::{AsOfCpuEncoding, AsOfMemoryEncoding};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
 pub use lookup::*;
@@ -387,6 +388,11 @@ pub enum Mutation {
     ResetSource {
         source_id: SourceId,
     },
+    InjectSourceOffsets {
+        source_id: SourceId,
+        /// Split ID -> offset (JSON-encoded based on connector type)
+        split_offsets: HashMap<String, String>,
+    },
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -566,7 +572,8 @@ impl Barrier {
             | Mutation::RefreshStart { .. }
             | Mutation::ListFinish { .. }
             | Mutation::LoadFinish { .. }
-            | Mutation::ResetSource { .. } => false,
+            | Mutation::ResetSource { .. }
+            | Mutation::InjectSourceOffsets { .. } => false,
         }
     }
 
@@ -929,6 +936,15 @@ impl Mutation {
                     source_id: source_id.as_raw_id(),
                 })
             }
+            Mutation::InjectSourceOffsets {
+                source_id,
+                split_offsets,
+            } => PbMutation::InjectSourceOffsets(
+                risingwave_pb::stream_plan::InjectSourceOffsetsMutation {
+                    source_id: source_id.as_raw_id(),
+                    split_offsets: split_offsets.clone(),
+                },
+            ),
         }
     }
 
@@ -1100,6 +1116,10 @@ impl Mutation {
             },
             PbMutation::ResetSource(reset_source) => Mutation::ResetSource {
                 source_id: SourceId::from(reset_source.source_id),
+            },
+            PbMutation::InjectSourceOffsets(inject) => Mutation::InjectSourceOffsets {
+                source_id: SourceId::from(inject.source_id),
+                split_offsets: inject.split_offsets.clone(),
             },
         };
         Ok(mutation)

@@ -363,6 +363,7 @@ fn convert_agg_func_fallback(
     let signature = Signature {
         type_signature: TypeSignature::Any(agg.inputs.len()),
         volatility: Volatility::Volatile,
+        parameter_names: None,
     };
     let cast = build_cast_executor(agg, input_columns)?;
 

@@ -180,6 +180,12 @@ impl StreamGraphFormatter {
         if let Some(vnode_col_idx) = tb.vnode_col_index {
             fields.push(("vnode column idx", Pretty::debug(&vnode_col_idx)));
         }
+        if !tb.clean_watermark_indices.is_empty() {
+            fields.push((
+                "clean watermark indices",
+                Pretty::debug(&tb.clean_watermark_indices),
+            ));
+        }
         Pretty::childless_record(name, fields)
     }
 

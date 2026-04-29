@@ -92,8 +92,8 @@ impl HummockUploader {
 }
 
 pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
-    let mut version = HummockVersion::from_persisted_protobuf(&PbHummockVersion {
-        id: epoch,
+    let mut version = HummockVersion::from_persisted_protobuf_owned(PbHummockVersion {
+        id: epoch.into(),
         ..Default::default()
     });
     version.state_table_info.apply_delta(
@@ -101,7 +101,7 @@ pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
             TEST_TABLE_ID,
             StateTableInfoDelta {
                 committed_epoch: epoch,
-                compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                compaction_group_id: StaticCompactionGroupId::StateDefault,
             },
         )]),
         &HashSet::new(),

@@ -35,6 +35,7 @@ use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
 use risingwave_storage::compaction_catalog_manager::{
@@ -243,7 +244,12 @@ pub async fn compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(&opts, config.clone(), system_params_reader.clone()).await;
+    ) = Box::pin(prepare_start_parameters(
+        &opts,
+        config.clone(),
+        system_params_reader.clone(),
+    ))
+    .await;
 
     let compaction_catalog_manager_ref = Arc::new(CompactionCatalogManager::new(Box::new(
         RemoteTableAccessor::new(meta_client.clone()),
@@ -320,7 +326,9 @@ pub async fn compactor_serve(
     let monitor_srv = MonitorServiceImpl::new(await_tree_reg, config.server.clone());
     let server = tonic::transport::Server::builder()
         .add_service(CompactorServiceServer::new(compactor_srv))
-        .add_service(MonitorServiceServer::new(monitor_srv))
+        .add_service(configured_monitor_service_server(
+            MonitorServiceServer::new(monitor_srv),
+        ))
         .monitored_serve_with_shutdown(
             listen_addr,
             "grpc-compactor-node-service",
@@ -377,7 +385,12 @@ pub async fn shared_compactor_serve(
         await_tree_reg,
         storage_opts,
         compactor_metrics,
-    ) = prepare_start_parameters(&opts, config.clone(), system_params.into()).await;
+    ) = Box::pin(prepare_start_parameters(
+        &opts,
+        config.clone(),
+        system_params.into(),
+    ))
+    .await;
     let (sender, receiver) = mpsc::unbounded_channel();
     let compactor_srv: CompactorServiceImpl = CompactorServiceImpl::new(sender);
 
@@ -422,7 +435,9 @@ pub async fn shared_compactor_serve(
                 .max_decoding_message_size(rpc_max_decoding_message_size_bytes)
                 .max_encoding_message_size(rpc_max_encoding_message_size_bytes),
         )
-        .add_service(MonitorServiceServer::new(monitor_srv))
+        .add_service(configured_monitor_service_server(
+            MonitorServiceServer::new(monitor_srv),
+        ))
         .monitored_serve_with_shutdown(
             listen_addr,
             "grpc-compactor-node-service",

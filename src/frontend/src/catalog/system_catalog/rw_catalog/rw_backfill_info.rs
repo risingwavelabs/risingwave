@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use risingwave_common::catalog::FragmentTypeFlag;
+use risingwave_common::id::{FragmentId, JobId, TableId};
 use risingwave_common::types::Fields;
 use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node_source_backfill, visit_stream_node_stream_scan,
+    visit_stream_node_body, visit_stream_node_source_backfill, visit_stream_node_stream_scan,
 };
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::RelationId;
 use risingwave_pb::meta::FragmentDistribution;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::catalog::system_catalog::rw_catalog::common::CatalogBackfillType;
@@ -26,32 +29,36 @@ use crate::error::Result;
 
 #[derive(Fields)]
 struct RwBackfillInfo {
-    job_id: i32,
+    job_id: JobId,
     #[primary_key]
-    fragment_id: i32,
-    backfill_state_table_id: i32,
-    backfill_target_relation_id: i32,
+    fragment_id: FragmentId,
+    backfill_state_table_id: TableId,
+    backfill_target_relation_id: RelationId,
     backfill_type: String,
     backfill_epoch: i64,
 }
 
 fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<RwBackfillInfo> {
-    let backfill_type =
-        if fragment_distribution.fragment_type_mask & (FragmentTypeFlag::SourceScan as u32) != 0 {
-            CatalogBackfillType::Source
-        } else if fragment_distribution.fragment_type_mask
-            & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32
-                | FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
-            != 0
-        {
-            CatalogBackfillType::SnapshotBackfill
-        } else if fragment_distribution.fragment_type_mask & (FragmentTypeFlag::StreamScan as u32)
-            != 0
-        {
-            CatalogBackfillType::ArrangementOrNoShuffle
-        } else {
-            return None;
-        };
+    let fragment_type_mask = fragment_distribution.fragment_type_mask;
+    let is_source_backfill = fragment_type_mask & (FragmentTypeFlag::SourceScan as u32) != 0;
+    let is_snapshot_backfill = fragment_type_mask
+        & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32
+            | FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
+        != 0;
+    let is_arrangement_or_no_shuffle =
+        fragment_type_mask & (FragmentTypeFlag::StreamScan as u32) != 0;
+    let is_locality_backfill =
+        fragment_type_mask & (FragmentTypeFlag::LocalityProvider as u32) != 0;
+
+    let backfill_type = if is_source_backfill {
+        CatalogBackfillType::Source
+    } else if is_snapshot_backfill {
+        CatalogBackfillType::SnapshotBackfill
+    } else if is_arrangement_or_no_shuffle || is_locality_backfill {
+        CatalogBackfillType::ArrangementOrNoShuffle
+    } else {
+        return None;
+    };
 
     let stream_node = fragment_distribution.node.as_ref()?;
 
@@ -60,34 +67,63 @@ fn extract_stream_scan(fragment_distribution: &FragmentDistribution) -> Option<R
         CatalogBackfillType::Source => {
             visit_stream_node_source_backfill(stream_node, |node| {
                 scan = Some(RwBackfillInfo {
-                    job_id: fragment_distribution.table_id.as_i32_id(),
-                    fragment_id: fragment_distribution.fragment_id.as_i32_id(),
+                    job_id: fragment_distribution.table_id,
+                    fragment_id: fragment_distribution.fragment_id,
                     backfill_state_table_id: node
                         .state_table
                         .as_ref()
-                        .map(|table| table.id.as_i32_id())
-                        .unwrap_or(0),
-                    backfill_target_relation_id: node.upstream_source_id.as_i32_id(),
+                        .map(|table| table.id)
+                        .unwrap_or(TableId::placeholder()),
+                    backfill_target_relation_id: node.upstream_source_id.as_relation_id(),
                     backfill_type: backfill_type.to_string(),
                     backfill_epoch: 0,
                 });
             });
         }
         CatalogBackfillType::SnapshotBackfill | CatalogBackfillType::ArrangementOrNoShuffle => {
-            visit_stream_node_stream_scan(stream_node, |node| {
-                scan = Some(RwBackfillInfo {
-                    job_id: fragment_distribution.table_id.as_i32_id(),
-                    fragment_id: fragment_distribution.fragment_id.as_i32_id(),
-                    backfill_state_table_id: node
-                        .state_table
-                        .as_ref()
-                        .map(|table| table.id.as_i32_id())
-                        .unwrap_or(0),
-                    backfill_target_relation_id: node.table_id.as_i32_id(),
-                    backfill_type: backfill_type.to_string(),
-                    backfill_epoch: node.snapshot_backfill_epoch() as _,
+            if is_locality_backfill {
+                let mut backfill_state_table_id = None;
+                visit_stream_node_body(stream_node, |body| {
+                    if let NodeBody::LocalityProvider(node) = body
+                        && backfill_state_table_id.is_none()
+                    {
+                        backfill_state_table_id =
+                            node.progress_table.as_ref().map(|table| table.id);
+                    }
                 });
-            });
+
+                let mut backfill_target_relation_id = None;
+                visit_stream_node_stream_scan(stream_node, |node| {
+                    if backfill_target_relation_id.is_none() {
+                        backfill_target_relation_id = Some(node.table_id.as_relation_id());
+                    }
+                });
+
+                scan = Some(RwBackfillInfo {
+                    job_id: fragment_distribution.table_id,
+                    fragment_id: fragment_distribution.fragment_id,
+                    backfill_state_table_id: backfill_state_table_id
+                        .unwrap_or(TableId::placeholder()),
+                    backfill_target_relation_id: backfill_target_relation_id?,
+                    backfill_type: backfill_type.to_string(),
+                    backfill_epoch: 0,
+                });
+            } else {
+                visit_stream_node_stream_scan(stream_node, |node| {
+                    scan = Some(RwBackfillInfo {
+                        job_id: fragment_distribution.table_id,
+                        fragment_id: fragment_distribution.fragment_id,
+                        backfill_state_table_id: node
+                            .state_table
+                            .as_ref()
+                            .map(|table| table.id)
+                            .unwrap_or(TableId::placeholder()),
+                        backfill_target_relation_id: node.table_id.as_relation_id(),
+                        backfill_type: backfill_type.to_string(),
+                        backfill_epoch: node.snapshot_backfill_epoch() as _,
+                    });
+                });
+            }
         }
     }
 

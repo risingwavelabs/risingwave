@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
+use educe::Educe;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, StrAssocArr};
@@ -52,11 +53,14 @@ fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
 pub const LOCAL_PHASE_VNODE_COLUMN_NAME: &str = "_vnode";
 
 /// [`Project`] computes a set of expressions from its input relation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 #[allow(clippy::manual_non_exhaustive)]
 pub struct Project<PlanRef> {
     pub exprs: Vec<ExprImpl>,
     /// Mapping from expr index to field name. May not contain all exprs.
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub field_names: BTreeMap<usize, String>,
     pub input: PlanRef,
     // we need some check when construct the `Project::new`

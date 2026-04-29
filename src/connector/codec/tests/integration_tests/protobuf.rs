@@ -249,200 +249,212 @@ fn test_any_schema() -> anyhow::Result<()> {
     {
         let value1 = DynamicMessage::decode(message_descriptor.clone(), ANY_DATA_1).unwrap();
         expect![[r#"
-        [
-            I32(
-                12345,
-            ),
-            Message(
-                DynamicMessage {
-                    desc: MessageDescriptor {
-                        name: "Any",
-                        full_name: "google.protobuf.Any",
-                        is_map_entry: false,
-                        fields: [
-                            FieldDescriptor {
-                                name: "type_url",
-                                full_name: "google.protobuf.Any.type_url",
-                                json_name: "typeUrl",
-                                number: 1,
-                                kind: string,
-                                cardinality: Optional,
-                                containing_oneof: None,
-                                default_value: None,
-                                is_group: false,
-                                is_list: false,
-                                is_map: false,
-                                is_packed: false,
-                                supports_presence: false,
-                            },
-                            FieldDescriptor {
-                                name: "value",
-                                full_name: "google.protobuf.Any.value",
-                                json_name: "value",
-                                number: 2,
-                                kind: bytes,
-                                cardinality: Optional,
-                                containing_oneof: None,
-                                default_value: None,
-                                is_group: false,
-                                is_list: false,
-                                is_map: false,
-                                is_packed: false,
-                                supports_presence: false,
-                            },
-                        ],
-                        oneofs: [],
-                    },
-                    fields: DynamicMessageFieldSet {
-                        fields: {
-                            1: Value(
-                                String(
-                                    "type.googleapis.com/test.Int32Value",
+            [
+                I32(
+                    12345,
+                ),
+                Message(
+                    DynamicMessage {
+                        desc: MessageDescriptor {
+                            name: "Any",
+                            full_name: "google.protobuf.Any",
+                            is_map_entry: false,
+                            fields: [
+                                FieldDescriptor {
+                                    name: "type_url",
+                                    full_name: "google.protobuf.Any.type_url",
+                                    json_name: "typeUrl",
+                                    number: 1,
+                                    kind: string,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: String(
+                                        "",
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                                FieldDescriptor {
+                                    name: "value",
+                                    full_name: "google.protobuf.Any.value",
+                                    json_name: "value",
+                                    number: 2,
+                                    kind: bytes,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: Bytes(
+                                        b"",
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                            ],
+                            oneofs: [],
+                        },
+                        fields: DynamicMessageFieldSet {
+                            fields: {
+                                1: Value(
+                                    String(
+                                        "type.googleapis.com/test.Int32Value",
+                                    ),
                                 ),
-                            ),
-                            2: Value(
-                                Bytes(
-                                    b"\x08\xd2\xfe\x06",
+                                2: Value(
+                                    Bytes(
+                                        b"\x08\xd2\xfe\x06",
+                                    ),
                                 ),
-                            ),
+                            },
                         },
                     },
-                },
-            ),
-        ]
-    "#]]
+                ),
+            ]
+        "#]]
         .assert_debug_eq(&value1.fields().map(|f| f.1).collect_vec());
 
         let value2 = DynamicMessage::decode(message_descriptor.clone(), ANY_DATA_2).unwrap();
         expect![[r#"
-        [
-            I32(
-                12345,
-            ),
-            Message(
-                DynamicMessage {
-                    desc: MessageDescriptor {
-                        name: "Any",
-                        full_name: "google.protobuf.Any",
-                        is_map_entry: false,
-                        fields: [
-                            FieldDescriptor {
-                                name: "type_url",
-                                full_name: "google.protobuf.Any.type_url",
-                                json_name: "typeUrl",
-                                number: 1,
-                                kind: string,
-                                cardinality: Optional,
-                                containing_oneof: None,
-                                default_value: None,
-                                is_group: false,
-                                is_list: false,
-                                is_map: false,
-                                is_packed: false,
-                                supports_presence: false,
-                            },
-                            FieldDescriptor {
-                                name: "value",
-                                full_name: "google.protobuf.Any.value",
-                                json_name: "value",
-                                number: 2,
-                                kind: bytes,
-                                cardinality: Optional,
-                                containing_oneof: None,
-                                default_value: None,
-                                is_group: false,
-                                is_list: false,
-                                is_map: false,
-                                is_packed: false,
-                                supports_presence: false,
-                            },
-                        ],
-                        oneofs: [],
-                    },
-                    fields: DynamicMessageFieldSet {
-                        fields: {
-                            1: Value(
-                                String(
-                                    "type.googleapis.com/test.AnyValue",
+            [
+                I32(
+                    12345,
+                ),
+                Message(
+                    DynamicMessage {
+                        desc: MessageDescriptor {
+                            name: "Any",
+                            full_name: "google.protobuf.Any",
+                            is_map_entry: false,
+                            fields: [
+                                FieldDescriptor {
+                                    name: "type_url",
+                                    full_name: "google.protobuf.Any.type_url",
+                                    json_name: "typeUrl",
+                                    number: 1,
+                                    kind: string,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: String(
+                                        "",
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                                FieldDescriptor {
+                                    name: "value",
+                                    full_name: "google.protobuf.Any.value",
+                                    json_name: "value",
+                                    number: 2,
+                                    kind: bytes,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: Bytes(
+                                        b"",
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                            ],
+                            oneofs: [],
+                        },
+                        fields: DynamicMessageFieldSet {
+                            fields: {
+                                1: Value(
+                                    String(
+                                        "type.googleapis.com/test.AnyValue",
+                                    ),
                                 ),
-                            ),
-                            2: Value(
-                                Bytes(
-                                    b"\n0\n$type.googleapis.com/test.StringValue\x12\x08\n\x06114514\x12+\n#type.googleapis.com/test.Int32Value\x12\x04\x08\xd2\xfe\x06",
+                                2: Value(
+                                    Bytes(
+                                        b"\n0\n$type.googleapis.com/test.StringValue\x12\x08\n\x06114514\x12+\n#type.googleapis.com/test.Int32Value\x12\x04\x08\xd2\xfe\x06",
+                                    ),
                                 ),
-                            ),
+                            },
                         },
                     },
-                },
-            ),
-        ]
-    "#]]
+                ),
+            ]
+        "#]]
     .assert_debug_eq(&value2.fields().map(|f| f.1).collect_vec());
 
         let value3 = DynamicMessage::decode(message_descriptor.clone(), ANY_DATA_INVALID).unwrap();
         expect![[r#"
-        [
-            I32(
-                12345,
-            ),
-            Message(
-                DynamicMessage {
-                    desc: MessageDescriptor {
-                        name: "Any",
-                        full_name: "google.protobuf.Any",
-                        is_map_entry: false,
-                        fields: [
-                            FieldDescriptor {
-                                name: "type_url",
-                                full_name: "google.protobuf.Any.type_url",
-                                json_name: "typeUrl",
-                                number: 1,
-                                kind: string,
-                                cardinality: Optional,
-                                containing_oneof: None,
-                                default_value: None,
-                                is_group: false,
-                                is_list: false,
-                                is_map: false,
-                                is_packed: false,
-                                supports_presence: false,
-                            },
-                            FieldDescriptor {
-                                name: "value",
-                                full_name: "google.protobuf.Any.value",
-                                json_name: "value",
-                                number: 2,
-                                kind: bytes,
-                                cardinality: Optional,
-                                containing_oneof: None,
-                                default_value: None,
-                                is_group: false,
-                                is_list: false,
-                                is_map: false,
-                                is_packed: false,
-                                supports_presence: false,
-                            },
-                        ],
-                        oneofs: [],
-                    },
-                    fields: DynamicMessageFieldSet {
-                        fields: {
-                            1: Value(
-                                String(
-                                    "type.googleapis.com/test.StringXalue",
+            [
+                I32(
+                    12345,
+                ),
+                Message(
+                    DynamicMessage {
+                        desc: MessageDescriptor {
+                            name: "Any",
+                            full_name: "google.protobuf.Any",
+                            is_map_entry: false,
+                            fields: [
+                                FieldDescriptor {
+                                    name: "type_url",
+                                    full_name: "google.protobuf.Any.type_url",
+                                    json_name: "typeUrl",
+                                    number: 1,
+                                    kind: string,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: String(
+                                        "",
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                                FieldDescriptor {
+                                    name: "value",
+                                    full_name: "google.protobuf.Any.value",
+                                    json_name: "value",
+                                    number: 2,
+                                    kind: bytes,
+                                    cardinality: Optional,
+                                    containing_oneof: None,
+                                    default_value: Bytes(
+                                        b"",
+                                    ),
+                                    is_group: false,
+                                    is_list: false,
+                                    is_map: false,
+                                    is_packed: false,
+                                    supports_presence: false,
+                                },
+                            ],
+                            oneofs: [],
+                        },
+                        fields: DynamicMessageFieldSet {
+                            fields: {
+                                1: Value(
+                                    String(
+                                        "type.googleapis.com/test.StringXalue",
+                                    ),
                                 ),
-                            ),
-                            2: Value(
-                                Bytes(
-                                    b"\n\x08John Doe",
+                                2: Value(
+                                    Bytes(
+                                        b"\n\x08John Doe",
+                                    ),
                                 ),
-                            ),
+                            },
                         },
                     },
-                },
-            ),
-        ]
-    "#]]
+                ),
+            ]
+        "#]]
         .assert_debug_eq(&value3.fields().map(|f| f.1).collect_vec());
     }
 

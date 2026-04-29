@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::TableId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -21,7 +22,7 @@ use crate::error::Result;
 #[derive(Fields)]
 #[primary_key(table_id)]
 struct RwRefreshTableState {
-    table_id: i32,
+    table_id: TableId,
     current_status: String,
     last_trigger_time: Option<String>,
     last_success_time: Option<String>,
@@ -36,7 +37,7 @@ async fn read_rw_refresh_table_state(
     Ok(refresh_table_states
         .into_iter()
         .map(|state| RwRefreshTableState {
-            table_id: state.table_id.as_raw_id() as i32,
+            table_id: state.table_id,
             current_status: state.current_status,
             last_trigger_time: state.last_trigger_time,
             trigger_interval_secs: state.trigger_interval_secs,

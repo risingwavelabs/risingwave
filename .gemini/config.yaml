@@ -1,0 +1,7 @@
+# Config for the Gemini Pull Request Review Bot.
+# https://developers.google.com/gemini-code-assist/docs/customize-gemini-behavior-github#config.yaml-schema
+code_review:
+  # No automatic code review and summary for pull requests.
+  pull_request_opened:
+    summary: false
+    code_review: false

@@ -18,6 +18,8 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 -->
 
+- Closes #[ISSUE_NUMBER]
+
 ## Checklist
 
 - [ ] I have written necessary rustdoc comments.

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::UserId;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
@@ -24,7 +25,7 @@ use crate::user::user_authentication::encrypted_raw_password;
 #[derive(Fields)]
 struct RwUserSecret {
     #[primary_key]
-    id: i32,
+    id: UserId,
     password: Option<String>,
 }
 
@@ -53,7 +54,7 @@ fn read_rw_user_secrets_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwUser
     Ok(users
         .into_iter()
         .map(|user| RwUserSecret {
-            id: user.id as i32,
+            id: user.id,
             password: user.auth_info.as_ref().map(encrypted_raw_password),
         })
         .collect())

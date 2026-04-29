@@ -15,6 +15,8 @@
 use std::alloc::{AllocError, Allocator, Global, Layout};
 use std::ptr::NonNull;
 
+use allocator_api2::alloc::{AllocError as AllocErrorApi2, Allocator as AllocatorApi2};
+
 use crate::memory::MemoryContext;
 
 pub type MonitoredGlobalAlloc = MonitoredAlloc<Global>;
@@ -44,6 +46,22 @@ unsafe impl<A: Allocator> Allocator for MonitoredAlloc<A> {
     fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
         let ret = self.alloc.allocate(layout)?;
         // We don't throw an AllocError if the memory context is out of memory, otherwise the whole process will crash.
+        self.ctx.add(layout.size() as i64);
+        Ok(ret)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        unsafe {
+            self.alloc.deallocate(ptr, layout);
+            self.ctx.add(-(layout.size() as i64));
+        }
+    }
+}
+
+unsafe impl<A: Allocator> AllocatorApi2 for MonitoredAlloc<A> {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocErrorApi2> {
+        let ret = self.alloc.allocate(layout).map_err(|_| AllocErrorApi2)?;
+        // Keep memory accounting behavior consistent with the std::alloc::Allocator path.
         self.ctx.add(layout.size() as i64);
         Ok(ret)
     }

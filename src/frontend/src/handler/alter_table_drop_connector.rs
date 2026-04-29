@@ -160,13 +160,13 @@ pub async fn handle_alter_table_drop_connector(
     let original_definition = table_def.create_sql_ast_purified()?;
 
     let new_statement = rewrite_table_definition(&table_def, &source_def, original_definition)?;
-    let (_, table, graph, _) = get_replace_table_plan(
+    let (_, table, graph, _) = Box::pin(get_replace_table_plan(
         &session,
         table_name,
         new_statement,
         &table_def,
         SqlColumnStrategy::FollowUnchecked,
-    )
+    ))
     .await?;
 
     let catalog_writer = session.catalog_writer()?;

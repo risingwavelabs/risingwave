@@ -31,14 +31,15 @@ const RESERVED_MEMORY_LEVELS: [usize; 2] = [16 << 30, usize::MAX];
 
 const RESERVED_MEMORY_PROPORTIONS: [f64; 2] = [0.3, 0.2];
 
-const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
+const STORAGE_MEMORY_DEFAULT_PROPORTION: f64 = 0.3;
+const STORAGE_MEMORY_MAX_PROPORTION: f64 = 0.9;
 
-const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
+const COMPACTOR_MEMORY_DEFAULT_PROPORTION: f64 = 0.1;
 
 const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 
 const STORAGE_SHARED_BUFFER_MAX_MEMORY_MB: usize = 4096;
-const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
+const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.4;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 
 /// The proportion of compute memory used for batch processing.
@@ -109,16 +110,37 @@ pub fn storage_memory_config(
     storage_config: &StorageConfig,
     is_serving: bool,
 ) -> StorageMemoryConfig {
-    let (storage_memory_proportion, compactor_memory_proportion) = if embedded_compactor_enabled {
-        (STORAGE_MEMORY_PROPORTION, COMPACTOR_MEMORY_PROPORTION)
-    } else {
-        (STORAGE_MEMORY_PROPORTION + COMPACTOR_MEMORY_PROPORTION, 0.0)
-    };
+    let (default_storage_memory_proportion, default_compactor_memory_proportion) =
+        if embedded_compactor_enabled {
+            (
+                STORAGE_MEMORY_DEFAULT_PROPORTION,
+                COMPACTOR_MEMORY_DEFAULT_PROPORTION,
+            )
+        } else {
+            (
+                STORAGE_MEMORY_DEFAULT_PROPORTION + COMPACTOR_MEMORY_DEFAULT_PROPORTION,
+                0.0,
+            )
+        };
 
-    let storage_memory_bytes = non_reserved_memory_bytes as f64 * storage_memory_proportion;
+    let default_storage_memory_bytes =
+        (non_reserved_memory_bytes as f64 * default_storage_memory_proportion).ceil();
+    let max_storage_memory_bytes =
+        (non_reserved_memory_bytes as f64 * STORAGE_MEMORY_MAX_PROPORTION).ceil();
 
-    // Only if the all cache capacities are specified and their sum doesn't exceed the max allowed storage_memory_bytes, will we use them.
-    // Other invalid combination of the cache capacities config will be ignored.
+    let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
+        ((non_reserved_memory_bytes as f64 * default_compactor_memory_proportion).ceil() as usize)
+            >> 20,
+    );
+    tracing::debug!(
+        "default_storage_memory_bytes={} max_storage_memory_bytes={} compactor_memory_limit_mb={}",
+        default_storage_memory_bytes,
+        max_storage_memory_bytes,
+        compactor_memory_limit_mb
+    );
+
+    // Only if all cache capacities and compactor memory are specified and their sum doesn't exceed the max allowed storage_memory_bytes, will we use them.
+    // Other invalid combinations of the cache capacities and compactor memory config will be ignored.
     let (
         config_block_cache_capacity_mb,
         config_meta_cache_capacity_mb,
@@ -133,17 +155,20 @@ pub fn storage_memory_config(
             Some(meta_cache_capacity_mb),
             Some(shared_buffer_capacity_mb),
         ) => {
-            let config_storage_memory_bytes =
-                (block_cache_capacity_mb + meta_cache_capacity_mb + shared_buffer_capacity_mb)
-                    << 20;
-            if config_storage_memory_bytes as f64 > storage_memory_bytes {
+            let config_storage_memory_bytes = (block_cache_capacity_mb
+                + meta_cache_capacity_mb
+                + shared_buffer_capacity_mb
+                + compactor_memory_limit_mb)
+                << 20;
+            if config_storage_memory_bytes as f64 > max_storage_memory_bytes {
                 tracing::warn!(
-                    "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {} = {} exceeds allowed storage_memory_bytes {}. These configs will be ignored.",
+                    "config block_cache_capacity_mb {} + meta_cache_capacity_mb {} + shared_buffer_capacity_mb {} + compactor_memory_limit_mb {} = {} exceeds allowed storage_memory_bytes {}. These configs will be ignored.",
                     block_cache_capacity_mb,
                     meta_cache_capacity_mb,
                     shared_buffer_capacity_mb,
+                    compactor_memory_limit_mb,
                     convert(config_storage_memory_bytes as _),
-                    convert(storage_memory_bytes as _)
+                    convert(max_storage_memory_bytes as _)
                 );
                 (None, None, None)
             } else {
@@ -164,9 +189,11 @@ pub fn storage_memory_config(
     };
 
     let mut default_block_cache_capacity_mb =
-        ((storage_memory_bytes * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION).ceil() as usize) >> 20;
+        ((default_storage_memory_bytes * STORAGE_BLOCK_CACHE_MEMORY_PROPORTION).ceil() as usize)
+            >> 20;
     let default_meta_cache_capacity_mb =
-        ((storage_memory_bytes * STORAGE_META_CACHE_MEMORY_PROPORTION).ceil() as usize) >> 20;
+        ((default_storage_memory_bytes * STORAGE_META_CACHE_MEMORY_PROPORTION).ceil() as usize)
+            >> 20;
     let meta_cache_capacity_mb = config_meta_cache_capacity_mb.unwrap_or(
         // adapt to old version
         storage_config
@@ -185,7 +212,8 @@ pub fn storage_memory_config(
     }
 
     let default_shared_buffer_capacity_mb =
-        ((storage_memory_bytes * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION).ceil() as usize) >> 20;
+        ((default_storage_memory_bytes * STORAGE_SHARED_BUFFER_MEMORY_PROPORTION).ceil() as usize)
+            >> 20;
     let mut shared_buffer_capacity_mb = config_shared_buffer_capacity_mb.unwrap_or(std::cmp::min(
         default_shared_buffer_capacity_mb,
         STORAGE_SHARED_BUFFER_MAX_MEMORY_MB,
@@ -204,10 +232,6 @@ pub fn storage_memory_config(
         storage_config
             .block_cache_capacity_mb
             .unwrap_or(default_block_cache_capacity_mb),
-    );
-
-    let compactor_memory_limit_mb = storage_config.compactor_memory_limit_mb.unwrap_or(
-        ((non_reserved_memory_bytes as f64 * compactor_memory_proportion).ceil() as usize) >> 20,
     );
 
     // The file cache flush buffer threshold is used as a emergency limitation.
@@ -232,10 +256,7 @@ pub fn storage_memory_config(
         + meta_cache_capacity_mb
         + shared_buffer_capacity_mb
         + compactor_memory_limit_mb;
-    let soft_limit_mb = (non_reserved_memory_bytes as f64
-        * (storage_memory_proportion + compactor_memory_proportion).ceil())
-        as usize
-        >> 20;
+    let soft_limit_mb = max_storage_memory_bytes as usize >> 20;
     // + 5 because ceil is used when calculating `total_bytes`.
     if total_calculated_mb > soft_limit_mb + 5 {
         tracing::warn!(
@@ -414,7 +435,7 @@ mod tests {
             false,
         );
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
@@ -426,7 +447,7 @@ mod tests {
             true,
         );
         assert_eq!(memory_config.block_cache_capacity_mb, 1966);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 1146);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 1310);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1);
         assert_eq!(memory_config.compactor_memory_limit_mb, 0);
 
@@ -440,7 +461,7 @@ mod tests {
             false,
         );
         assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
 
@@ -458,6 +479,34 @@ mod tests {
         assert_eq!(memory_config.block_cache_capacity_mb, 512);
         assert_eq!(memory_config.meta_cache_capacity_mb, 128);
         assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
+        assert_eq!(memory_config.compactor_memory_limit_mb, 512);
+
+        // Total storage memory is high but below proportion limit
+        // Check that specified config is correctly applied
+        storage_config.cache.meta_cache_capacity_mb = Some(5120);
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            true,
+            &storage_config,
+            false,
+        );
+        assert_eq!(memory_config.block_cache_capacity_mb, 512);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 5120);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 1024);
+        assert_eq!(memory_config.compactor_memory_limit_mb, 512);
+
+        // Total storage memory exceed proportion limit
+        // Check that specified config is ignored and fallback to defaults
+        storage_config.cache.meta_cache_capacity_mb = Some(10240);
+        let memory_config = storage_memory_config(
+            total_non_reserved_memory_bytes,
+            true,
+            &storage_config,
+            false,
+        );
+        assert_eq!(memory_config.block_cache_capacity_mb, 737);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.compactor_memory_limit_mb, 512);
     }
 

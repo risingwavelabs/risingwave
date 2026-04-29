@@ -47,6 +47,7 @@ impl From<PbSinkType> for SinkType {
     fn from(sink_type: PbSinkType) -> Self {
         match sink_type {
             // `ForceAppendOnly` is now denoted by `AppendOnly` + `ignore_delete`.
+            #[expect(deprecated)]
             PbSinkType::AppendOnly | PbSinkType::ForceAppendOnly => Self::AppendOnly,
             PbSinkType::Upsert => Self::Upsert,
             PbSinkType::Retract => Self::Retract,
