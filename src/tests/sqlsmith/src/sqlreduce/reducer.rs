@@ -104,6 +104,13 @@ impl Reducer {
         reduced_sqls.push_str(&reduced_sql);
         reduced_sqls.push_str(";\n");
 
+        // Reconstruct a clean post-setup database state before running EXPLAIN.
+        // After the reduction loop, the connection's schema state is an
+        // implementation artifact of the last `is_failure_preserved` call,
+        // not an explicitly-prepared environment. Reset and replay setup so
+        // the logged plan is tied to a deliberately-reconstructed state.
+        self.checker.reset_and_replay_setup().await;
+
         // Log the EXPLAIN plan for the reduced failing query before schema is dropped.
         // This must run before drop_schema() so the referenced tables/views still exist.
         let last_stmt = parse_sql(&reduced_sqls).into_iter().last();
