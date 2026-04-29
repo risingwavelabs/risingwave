@@ -16,7 +16,6 @@ use std::ops::{Bound, Deref, DerefMut};
 use std::sync::Arc;
 
 use anyhow::Context;
-use futures::StreamExt;
 use futures_async_stream::for_await;
 use join_row_set::JoinRowSet;
 use risingwave_common::bitmap::Bitmap;
@@ -267,38 +266,58 @@ pub(crate) async fn into_stream<'a, K: HashKey, S: StateStore>(
     pk_serializer: &'a OrderedRowSerde,
     state_table: &'a StateTable<S>,
     key: &'a K,
-    degrees: Option<Vec<DegreeType>>,
+    degrees: Option<Vec<(PkType, DegreeType)>>,
 ) {
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let decoded_key = key.deserialize(join_key_data_types)?;
     let table_iter = state_table
-        .iter_with_prefix_respecting_watermark(&decoded_key, sub_range, PrefetchOptions::default())
+        .iter_keyed_row_with_prefix(&decoded_key, sub_range, PrefetchOptions::default())
         .await?;
 
+    // Merge-join cursor over state rows and pre-fetched degrees, paired by storage key.
+    // Orphans on either side are skipped.
+    let mut degree_cursor = 0usize;
+
     #[for_await]
-    for (i, entry) in table_iter.enumerate() {
-        let encoded_row = entry?;
+    for entry in table_iter {
+        let keyed_row = entry?;
+        let storage_pk = keyed_row.key().to_vec();
+        let degree = match degrees.as_ref() {
+            None => 0,
+            Some(degrees) => {
+                while degree_cursor < degrees.len() && degrees[degree_cursor].0 < storage_pk {
+                    degree_cursor += 1;
+                }
+                if degree_cursor < degrees.len() && degrees[degree_cursor].0 == storage_pk {
+                    let d = degrees[degree_cursor].1;
+                    degree_cursor += 1;
+                    d
+                } else {
+                    continue;
+                }
+            }
+        };
+        let encoded_row = keyed_row.into_owned_row();
         let encoded_pk = encoded_row
             .as_ref()
             .project(pk_indices)
             .memcmp_serialize(pk_serializer);
-        let join_row = JoinRow::new(encoded_row, degrees.as_ref().map_or(0, |d| d[i]));
+        let join_row = JoinRow::new(encoded_row, degree);
         yield (encoded_pk, join_row);
     }
 }
 
-/// We use this to fetch ALL degrees into memory.
+/// We use this to fetch ALL degrees into memory paired with their pk.
 /// We use this instead of a streaming interface.
 /// It is necessary because we must update the `degree_state_table` concurrently.
 /// If we obtain the degrees in a stream,
 /// we will need to hold an immutable reference to the state table for the entire lifetime,
 /// preventing us from concurrently updating the state table.
 ///
-/// The cost of fetching all degrees upfront is acceptable. We currently already do so
-/// in `fetch_cached_state`.
-/// The memory use should be limited since we only store a u64.
+/// The storage key is kept so `into_stream` can pair each state row with the matching degree by
+/// storage key, which tolerates row-level eviction (e.g. TTL) on either side.
 ///
-/// Let's say we have amplification of 1B, we will have 1B * 8 bytes ~= 8GB
+/// Memory: roughly `pk_size + 8 B` per row, still bounded by join key amplification.
 ///
 /// We can also have further optimization, to permit breaking the streaming update,
 /// to flush the in-memory degrees, if this is proven to have high memory consumption.
@@ -314,25 +333,27 @@ async fn fetch_degrees<K: HashKey, S: StateStore>(
     key: &K,
     join_key_data_types: &[DataType],
     degree_state_table: &StateTable<S>,
-) -> StreamExecutorResult<Vec<DegreeType>> {
+) -> StreamExecutorResult<Vec<(PkType, DegreeType)>> {
     let key = key.deserialize(join_key_data_types)?;
     let mut degrees = vec![];
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
     let table_iter = degree_state_table
-        .iter_with_prefix_respecting_watermark(key, sub_range, PrefetchOptions::default())
+        .iter_keyed_row_with_prefix(key, sub_range, PrefetchOptions::default())
         .await?;
     let degree_col_idx = degree_col_idx_in_row(degree_state_table);
     #[for_await]
     for entry in table_iter {
-        let degree_row = entry?;
+        let keyed_row = entry?;
+        let pk = keyed_row.key().to_vec();
+        let degree_row = keyed_row.row();
         debug_assert!(
             degree_row.len() > degree_col_idx,
-            "degree row should have at least pk_len + 1 columns"
+            "degree value row should include the _degree column"
         );
         let degree_i64 = degree_row
             .datum_at(degree_col_idx)
             .expect("degree should not be NULL");
-        degrees.push(degree_i64.into_int64() as u64);
+        degrees.push((pk, degree_i64.into_int64() as u64));
     }
     Ok(degrees)
 }
