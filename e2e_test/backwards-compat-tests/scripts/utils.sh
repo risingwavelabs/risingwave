@@ -20,10 +20,8 @@ RECOVERY_DURATION=20
 # Setup test directory
 TEST_DIR=.risingwave/e2e_test/backwards-compat-tests/
 # Keep this case on recently verified releases. It relies on Hummock system tables and
-# background compaction group merge/compaction to build a mixed-table SST.
+# risectl commands to build a mixed-table SST deterministically.
 HUMMOCK_STALE_TABLE_IDS_MIN_VERSION=2.8.0
-HUMMOCK_STALE_TABLE_IDS_AUTO_MERGE_TIMEOUT_SEC=180
-HUMMOCK_STALE_TABLE_IDS_CONFIG="$TEST_DIR/hummock-stale-table-ids/config.toml"
 mkdir -p $TEST_DIR
 cp -r e2e_test/backwards-compat-tests/slt/* $TEST_DIR
 
@@ -74,6 +72,14 @@ run_sql_scalar() {
   psql -h localhost -p 4566 -d dev -U root -At -c "$@" | tr -d '[:space:]'
 }
 
+run_risectl() (
+  set -euo pipefail
+  set -a
+  source .risingwave/config/risedev-env
+  set +a
+  .risingwave/bin/risingwave/risectl "$@"
+)
+
 check_version() {
   local VERSION=$1
   local raw_version=$(run_sql "SELECT version();")
@@ -111,19 +117,6 @@ seed_json_kafka() {
   insert_json_kafka '{"user_id": 9},{"timestamp": "2023-07-28 06:54:00", "user_id": 9, "page_id": 4, "action": "yjtyjtyyy"}'
 }
 
-write_hummock_stale_table_ids_config() {
-  mkdir -p "$(dirname "$HUMMOCK_STALE_TABLE_IDS_CONFIG")"
-  cat <<EOF > "$HUMMOCK_STALE_TABLE_IDS_CONFIG"
-[meta]
-# Merge often so the two test tables join quickly, but keep compaction less
-# frequent. Once the mixed SST is observed, this leaves enough time to drop the
-# table and shut down the old cluster before the next compaction can rewrite it.
-periodic_scheduling_compaction_group_merge_interval_sec = 1
-periodic_scheduling_compaction_group_split_interval_sec = 0
-periodic_compaction_interval_sec = 60
-EOF
-}
-
 seed_hummock_stale_table_ids() {
   rm -f "$TEST_DIR/hummock-stale-table-ids/enabled" \
     "$TEST_DIR/hummock-stale-table-ids/dropped_table_id"
@@ -145,8 +138,27 @@ seed_hummock_stale_table_ids() {
     exit 1
   fi
 
-  local mixed_sst_count=0
-  for _ in $(seq 1 "$HUMMOCK_STALE_TABLE_IDS_AUTO_MERGE_TIMEOUT_SEC"); do
+  local live_compaction_group_id
+  live_compaction_group_id=$(run_sql_scalar "SELECT compaction_group_id FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${live_table_id}]'::jsonb LIMIT 1;")
+  local dropped_compaction_group_id
+  dropped_compaction_group_id=$(run_sql_scalar "SELECT compaction_group_id FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb LIMIT 1;")
+  if [[ -z "$live_compaction_group_id" || -z "$dropped_compaction_group_id" ]]; then
+    echo "Failed to capture hummock compaction groups: live=${live_compaction_group_id}, dropped=${dropped_compaction_group_id}"
+    exit 1
+  fi
+
+  if [[ "$live_compaction_group_id" != "$dropped_compaction_group_id" ]]; then
+    run_risectl hummock merge-compaction-group \
+      --left-group-id "$live_compaction_group_id" \
+      --right-group-id "$dropped_compaction_group_id"
+  fi
+
+  run_risectl hummock trigger-manual-compaction \
+    --compaction-group-id "$live_compaction_group_id" \
+    --level 0
+
+  local mixed_sst_count
+  for _ in $(seq 1 60); do
     mixed_sst_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${live_table_id}]'::jsonb AND table_ids @> '[${dropped_table_id}]'::jsonb;")
     if [[ "$mixed_sst_count" != "0" ]]; then
       break

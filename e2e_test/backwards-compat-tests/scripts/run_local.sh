@@ -16,16 +16,9 @@ configure_rw() {
   VERSION="$1"
 
   echo "--- Setting up cluster config"
-  local hummock_stale_table_ids_config=""
-  if ! version_lt "$VERSION" "$HUMMOCK_STALE_TABLE_IDS_MIN_VERSION"; then
-    write_hummock_stale_table_ids_config
-    hummock_stale_table_ids_config="  config-path: $HUMMOCK_STALE_TABLE_IDS_CONFIG"
-  fi
-
   if version_le "$VERSION" "1.9.0"; then
     cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
-${hummock_stale_table_ids_config}
   steps:
     - use: minio
     - use: etcd
@@ -41,7 +34,6 @@ EOF
   elif version_lt "$VERSION" "$HUMMOCK_STALE_TABLE_IDS_MIN_VERSION"; then
     cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
-${hummock_stale_table_ids_config}
   steps:
     - use: minio
     - use: etcd
@@ -58,7 +50,6 @@ EOF
   else
     cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
-${hummock_stale_table_ids_config}
   steps:
     - use: minio
     - use: sqlite
