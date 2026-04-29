@@ -109,6 +109,18 @@ impl Checker {
             let _ = self.client.simple_query(&stmt.to_string()).await;
         }
     }
+
+    /// Reset the schema and replay setup statements to reconstruct a clean,
+    /// deterministic post-setup database state.
+    ///
+    /// This is intended to be used by callers that want to run a follow-up
+    /// query (e.g. `EXPLAIN`) against a known, fully-replayed environment,
+    /// rather than relying on whatever connection state happened to be left
+    /// behind by the last call to [`Self::is_failure_preserved`].
+    pub async fn reset_and_replay_setup(&self) {
+        self.reset_schema().await;
+        self.replay_setup().await;
+    }
 }
 
 /// Executes a single SQL query string and returns (`is_ok`, `error_message_if_any`)
