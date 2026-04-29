@@ -6017,6 +6017,9 @@ impl Parser<'_> {
         let Some(kind) = kind else {
             return Ok(None);
         };
+        if !self.peek_nth_any_of_keywords(1, &[Keyword::OPTION]) {
+            return Ok(None);
+        }
         self.next_token();
         self.expect_keyword(Keyword::OPTION)?;
         self.expect_keyword(Keyword::FOR)?;
