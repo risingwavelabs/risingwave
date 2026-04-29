@@ -146,7 +146,7 @@ axum-extra = "0.10"
 chrono = { version = "0.4.40", default-features = false }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
-deltalake = { version = "0.31", features = ["s3", "gcs"] }
+deltalake = { version = "0.32.0", features = ["s3", "gcs"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 foyer = { version = "0.21.2", features = ["serde", "tracing"] }
 futures-async-stream = "0.2.13"
@@ -170,8 +170,8 @@ iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f
 iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef" }
 iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef" }
 
-adbc_core = { version = "0.22" }
-adbc_snowflake = { version = "0.22", default-features = false }
+adbc_core = { version = "0.23" }
+adbc_snowflake = { version = "0.23", default-features = false }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }

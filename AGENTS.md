@@ -66,6 +66,18 @@ When sandboxing is enabled, these commands need `require_escalated` because they
 - `./risedev slt './path/to/e2e-test-file.slt'` (connects to local TCP via psql protocol)
 - Any command that checks running services via local TCP (for example, health checks or custom SQL clients)
 
+## Pull Request Submission Labels
+
+PR labels in this repository can affect CI coverage and documentation follow-up. To keep normal coding work lightweight, load the detailed label protocol only at PR submission time.
+
+When opening or updating a pull request, changing PR labels, or marking a PR ready for review:
+
+1. Read `.agents/PR_LABELING.md`.
+2. Inspect the current PR labels and draft state before adding anything:
+   `gh pr view <PR> --json isDraft,labels,title,body,files`
+3. Add only validated missing labels. Do not remove existing labels unless explicitly instructed by a maintainer.
+4. In the final PR report, list labels added, labels intentionally not added, local tests run, and CI labels requested.
+
 ## Connector Development
 
 See `docs/dev/src/connector/intro.md`.
