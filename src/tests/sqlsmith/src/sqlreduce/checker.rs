@@ -69,6 +69,17 @@ impl Checker {
             .await;
     }
 
+    /// Resets the schema and replays all setup statements to reconstruct a clean
+    /// execution environment.
+    ///
+    /// Use this after path-based reduction finishes to ensure EXPLAIN runs in a
+    /// deliberately-reconstructed state (same sequence as any `is_failure_preserved`
+    /// check) rather than in whatever session state was left by the last check.
+    pub async fn reset_and_replay_setup(&self) {
+        self.reset_schema().await;
+        self.replay_setup().await;
+    }
+
     /// Determines if the transformation preserved the original failure behavior.
     ///
     /// Each test run resets the schema, replays setup, and runs the query.
