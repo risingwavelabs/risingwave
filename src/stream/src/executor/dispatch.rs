@@ -516,6 +516,8 @@ impl DispatchExecutor {
     }
 }
 
+/// Dispatches a message batch downstream and returns the barriers that should be yielded by the
+/// barrier stream.
 async fn dispatch_message_batch(
     inner: &mut DispatchExecutorInner,
     batch: MessageBatch,

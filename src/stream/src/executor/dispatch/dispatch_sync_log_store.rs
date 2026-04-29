@@ -143,14 +143,19 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
 
 type DispatchingFuture = BoxFuture<'static, (DispatchExecutorInner, StreamResult<Option<Barrier>>)>;
 
+/// State machine for the consumer side, which reads chunks from the log store and dispatches
+/// chunks or barriers downstream.
 enum ConsumerFuture {
-    ReadingChunk {
-        inner: DispatchExecutorInner,
-    },
+    /// Polls the log store for the next chunk. The read future is kept outside this state machine
+    /// so both meaningful states can share it.
+    ReadingChunk { inner: DispatchExecutorInner },
+    /// Dispatches the current message downstream. Any barrier received while dispatching is queued
+    /// here and dispatched before reading another chunk.
     Dispatching {
         future: DispatchingFuture,
         barrier_queue: VecDeque<Message>,
     },
+    /// Temporary placeholder used while moving fields out during state transitions.
     PlaceHolder,
 }
 
@@ -304,7 +309,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
 
             let first_barrier = expect_first_barrier(&mut input).await?;
             let first_write_epoch = first_barrier.epoch;
-            yield first_barrier.clone();
 
             // Dispatch the first barrier before initializing the log store states
             let first_barrier_batch = dispatch_message_batch(
@@ -318,6 +322,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                     .map(|barrier_batch| barrier_batch.len()),
                 Some(1)
             );
+            yield first_barrier.clone();
 
             let (read_state, initial_write_state) =
                 SyncedKvLogStoreExecutor::<S>::init_local_log_store_state(
@@ -466,6 +471,8 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
 
                                         let is_stop_barrier = barrier.is_stop(actor_id);
                                         if is_stop_barrier {
+                                            // Stop polling upstream after the stop barrier is
+                                            // written into the log store.
                                             end_of_stream = true;
                                             write_future_state = WriteFuture::Empty;
                                         } else {
@@ -477,6 +484,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                         consumer_future_state.push_barrier(barrier);
                                     }
                                 }
+                                // TODO: handle upstream watermark in sync log store dispatch.
                                 Message::Watermark(_watermark) => {
                                     write_future_state =
                                         WriteFuture::receive_from_upstream(stream, write_state);

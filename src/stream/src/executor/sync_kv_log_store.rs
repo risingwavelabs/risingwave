@@ -874,8 +874,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                 seq_id = new_seq_id;
                                 write_future_state = next_write_future;
                             }
-                            // FIXME(kwannoel): This should truncate the logstore,
-                            // it will not bypass like barrier.
+                            // TODO: handle upstream watermark in sync log store.
                             Message::Watermark(_watermark) => {
                                 write_future_state =
                                     WriteFuture::receive_from_upstream(stream, write_state);
