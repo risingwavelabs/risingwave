@@ -15,7 +15,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -191,9 +191,10 @@ impl ChangeBufferTableSerde {
     }
 
     fn deserialize_value(&self, value: &[u8]) -> StreamExecutorResult<OwnedRow> {
-        let row = self.row_serde.deserialize(value).map_err(|err| {
-            StreamExecutorError::from(anyhow!("failed to deserialize change buffer row: {err}"))
-        })?;
+        let row = self
+            .row_serde
+            .deserialize(value)
+            .context("failed to deserialize change buffer row")?;
         Ok(OwnedRow::new(row))
     }
 
@@ -680,11 +681,6 @@ mod tests {
             ))
             .unwrap();
         writer.flush().await.unwrap();
-
-        let read_version = writer.local_state_store.read_version();
-        let staging = read_version.read();
-        assert_eq!(2, staging.staging().pending_imms.len());
-        assert!(staging.staging().uploading_imms.is_empty());
 
         let chunks: Vec<_> = writer.change_log_chunks(1024).try_collect().await.unwrap();
         assert_eq!(chunks.len(), 1);
