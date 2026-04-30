@@ -104,13 +104,14 @@ fn should_trivial_reclaim_sst_by_watermark(
         .key_filter_by_watermark(max_seen_watermark, table_watermark)
 }
 
+// Returns the lower bound watermark across all vnodes.
 fn table_watermark_for_reclaim(watermarks: &ReadTableWatermark) -> Option<&bytes::Bytes> {
     match watermarks.direction {
         risingwave_hummock_sdk::table_watermark::WatermarkDirection::Ascending => {
-            watermarks.vnode_watermarks.values().max()
+            watermarks.vnode_watermarks.values().min()
         }
         risingwave_hummock_sdk::table_watermark::WatermarkDirection::Descending => {
-            watermarks.vnode_watermarks.values().min()
+            watermarks.vnode_watermarks.values().max()
         }
     }
 }
@@ -221,7 +222,7 @@ mod tests {
         };
         assert_eq!(
             table_watermark_for_reclaim(&ascending),
-            Some(&Bytes::from_static(b"key_9"))
+            Some(&Bytes::from_static(b"key_8"))
         );
 
         let descending = ReadTableWatermark {
@@ -233,7 +234,7 @@ mod tests {
         };
         assert_eq!(
             table_watermark_for_reclaim(&descending),
-            Some(&Bytes::from_static(b"key_8"))
+            Some(&Bytes::from_static(b"key_9"))
         );
     }
 

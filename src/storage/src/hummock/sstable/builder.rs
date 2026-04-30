@@ -153,6 +153,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         writer: W,
         options: SstableBuilderOptions,
         table_id_to_vnode: HashMap<impl Into<TableId>, usize>,
+        table_id_to_watermark_type: HashMap<impl Into<TableId>, WatermarkSerdeType>,
         table_id_to_watermark_serde: HashMap<
             impl Into<TableId>,
             Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
@@ -177,7 +178,10 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
             Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
             compaction_catalog_agent_ref,
-            HashMap::default(),
+            table_id_to_watermark_type
+                .into_iter()
+                .map(|(table_id, watermark_type)| (table_id.into(), watermark_type))
+                .collect(),
             None,
         )
     }
@@ -977,12 +981,14 @@ pub(super) mod tests {
         };
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type = HashMap::<TableId, WatermarkSerdeType>::new();
         let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let b = SstableBuilder::for_test(
             0,
             mock_sst_writer(&opt),
             opt,
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
 
@@ -997,6 +1003,8 @@ pub(super) mod tests {
         let opt = default_builder_opt_for_test();
         let table_id = TableId::new(1);
         let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type =
+            HashMap::from_iter(vec![(table_id, WatermarkSerdeType::NonPkPrefix)]);
 
         // watermark column is the second column in PK (index 1)
         let pk_serde = OrderedRowSerde::new(
@@ -1014,6 +1022,7 @@ pub(super) mod tests {
             mock_sst_writer(&opt),
             opt,
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
 
@@ -1061,6 +1070,8 @@ pub(super) mod tests {
         let opt = default_builder_opt_for_test();
         let table_id = TableId::new(1);
         let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type =
+            HashMap::from_iter(vec![(table_id, WatermarkSerdeType::NonPkPrefix)]);
 
         // watermark column is the second column in PK (index 1), descending
         let pk_serde = OrderedRowSerde::new(
@@ -1078,6 +1089,7 @@ pub(super) mod tests {
             mock_sst_writer(&opt),
             opt,
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
 
@@ -1104,11 +1116,10 @@ pub(super) mod tests {
         let output = b.finish().await.unwrap();
         let sst_info = output.sst_info.sst_info;
 
-        // for descending, 10 is more advanced than 20
         let mut expected_watermark = vec![];
         let watermark_col_serde =
             OrderedRowSerde::new(vec![DataType::Int32], vec![OrderType::descending()]);
-        watermark_col_serde.serialize(&[Some(ScalarImpl::Int32(10))], &mut expected_watermark);
+        watermark_col_serde.serialize(&[Some(ScalarImpl::Int32(20))], &mut expected_watermark);
 
         assert_eq!(
             sst_info.max_seen_watermark,
@@ -1124,6 +1135,8 @@ pub(super) mod tests {
         let opt = default_builder_opt_for_test();
         let table_id = TableId::new(1);
         let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type =
+            HashMap::from_iter(vec![(table_id, WatermarkSerdeType::PkPrefix)]);
 
         // watermark column is the first column in PK (index 0)
         let pk_serde = OrderedRowSerde::new(
@@ -1141,6 +1154,7 @@ pub(super) mod tests {
             mock_sst_writer(&opt),
             opt,
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
 
@@ -1188,6 +1202,8 @@ pub(super) mod tests {
         opt.bloom_false_positive = 0.0;
         let table_id = TableId::new(1);
         let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type =
+            HashMap::from_iter(vec![(table_id, WatermarkSerdeType::NonPkPrefix)]);
 
         let pk_serde = OrderedRowSerde::new(
             vec![DataType::Int32, DataType::Int32],
@@ -1216,6 +1232,7 @@ pub(super) mod tests {
             mock_sst_writer(&opt),
             opt.clone(),
             HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]),
+            table_id_to_watermark_type.clone(),
             table_id_to_watermark_serde.clone(),
         );
         source_builder
@@ -1235,6 +1252,7 @@ pub(super) mod tests {
             mock_sst_writer(&opt),
             opt,
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
         builder
@@ -1499,12 +1517,14 @@ pub(super) mod tests {
         let opt = default_builder_opt_for_test();
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type = HashMap::<TableId, WatermarkSerdeType>::new();
         let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let mut b = SstableBuilder::for_test(
             0,
             mock_sst_writer(&opt),
             opt,
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
 

@@ -26,6 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use tokio::task::JoinHandle;
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
@@ -395,6 +396,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             TableId::default().as_raw_id(),
             VirtualNode::COUNT_FOR_TEST,
         )]);
+        let table_id_to_watermark_type = HashMap::<u32, WatermarkSerdeType>::new();
         let table_id_to_watermark_serde =
             HashMap::from_iter(vec![(TableId::default().as_raw_id(), None)]);
         let builder = SstableBuilder::for_test(
@@ -402,6 +404,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             writer,
             self.options.clone(),
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
 
