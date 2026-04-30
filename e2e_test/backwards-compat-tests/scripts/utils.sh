@@ -147,16 +147,41 @@ seed_hummock_stale_table_ids() {
     exit 1
   fi
 
+  # Put both tables into one compaction group so a manual L0 compaction can
+  # rewrite their SST metadata into one mixed-table SST.
   if [[ "$live_compaction_group_id" != "$dropped_compaction_group_id" ]]; then
     run_risectl hummock merge-compaction-group \
       --left-group-id "$live_compaction_group_id" \
       --right-group-id "$dropped_compaction_group_id"
   fi
 
+  # Target the exact L0 SSTs that contain either table id. This avoids depending
+  # on the default manual selector deciding that there is enough data to compact.
+  local target_sst_ids
+  target_sst_ids=$(run_sql_scalar "
+    SELECT string_agg(sstable_id::varchar, ',' ORDER BY sub_level_id, sstable_id)
+    FROM rw_catalog.rw_hummock_sstables
+    WHERE compaction_group_id = ${live_compaction_group_id}
+      AND level_id = 0
+      AND (
+        table_ids @> '[${live_table_id}]'::jsonb
+        OR table_ids @> '[${dropped_table_id}]'::jsonb
+      );
+  ")
+  if [[ -z "$target_sst_ids" ]]; then
+    echo "Failed to find L0 SSTs for hummock stale table ids test: live_table_id=${live_table_id}, dropped_table_id=${dropped_table_id}, compaction_group_id=${live_compaction_group_id}"
+    exit 1
+  fi
+
+  # `risectl` does not expose a reliable shell exit status for "no task picked",
+  # so the test verifies success by observing the resulting SST metadata below.
   run_risectl hummock trigger-manual-compaction \
     --compaction-group-id "$live_compaction_group_id" \
-    --level 0
+    --level 0 \
+    --sst-ids "$target_sst_ids"
 
+  # Fail closed unless the current Hummock version really contains an SST whose
+  # metadata references both the live table and the table that will be dropped.
   local mixed_sst_count
   for _ in $(seq 1 60); do
     mixed_sst_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${live_table_id}]'::jsonb AND table_ids @> '[${dropped_table_id}]'::jsonb;")
@@ -172,6 +197,8 @@ seed_hummock_stale_table_ids() {
 
   echo "$dropped_table_id" > "$TEST_DIR/hummock-stale-table-ids/dropped_table_id"
 
+  # Simulate the old-version upgrade state: the dropped table is unregistered
+  # from compaction group configs, while old SST metadata can still contain it.
   run_sql "DROP TABLE hummock_stale_dropped;"
   run_sql "FLUSH;"
 
