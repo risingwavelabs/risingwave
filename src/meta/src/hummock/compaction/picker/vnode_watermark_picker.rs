@@ -87,7 +87,7 @@ fn should_trivial_reclaim_sst_by_watermark(
     sst_info: &SstableInfo,
     table_watermarks: &BTreeMap<TableId, ReadTableWatermark>,
 ) -> bool {
-    let Some(max_seen_watermark) = sst_info.max_seen_watermark.as_ref() else {
+    let Some(max_watermark_column_value) = sst_info.max_watermark_column_value.as_ref() else {
         return false;
     };
     let [table_id] = sst_info.table_ids.as_slice() else {
@@ -101,7 +101,7 @@ fn should_trivial_reclaim_sst_by_watermark(
     };
     watermarks
         .direction
-        .key_filter_by_watermark(max_seen_watermark, table_watermark)
+        .key_filter_by_watermark(max_watermark_column_value, table_watermark)
 }
 
 // Returns the lower bound watermark across all vnodes.
@@ -149,7 +149,7 @@ mod tests {
             object_id: 1.into(),
             sst_id: 1.into(),
             table_ids: vec![2.into()],
-            max_seen_watermark: Some(Bytes::from_static(b"some_watermark_key_1")),
+            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_1")),
             ..Default::default()
         }
         .into();
@@ -162,46 +162,46 @@ mod tests {
             object_id: 1.into(),
             sst_id: 1.into(),
             table_ids: vec![1.into(), 2.into()],
-            max_seen_watermark: Some(Bytes::from_static(b"some_watermark_key_1")),
+            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_1")),
             ..Default::default()
         }
         .into();
         assert!(
             !should_trivial_reclaim_sst_by_watermark(&sst_info, &table_watermarks),
-            "should fail because max_seen_watermark is only tracked for single-table SSTs"
+            "should fail because max_watermark_column_value is only tracked for single-table SSTs"
         );
 
         let sst_info = SstableInfoInner {
             object_id: 1.into(),
             sst_id: 1.into(),
             table_ids: vec![1.into()],
-            max_seen_watermark: None,
+            max_watermark_column_value: None,
             ..Default::default()
         }
         .into();
         assert!(
             !should_trivial_reclaim_sst_by_watermark(&sst_info, &table_watermarks),
-            "should fail because max_seen_watermark is absent"
+            "should fail because max_watermark_column_value is absent"
         );
 
         let sst_info = SstableInfoInner {
             object_id: 1.into(),
             sst_id: 1.into(),
             table_ids: vec![1.into()],
-            max_seen_watermark: Some(Bytes::from_static(b"some_watermark_key_9")),
+            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_9")),
             ..Default::default()
         }
         .into();
         assert!(
             !should_trivial_reclaim_sst_by_watermark(&sst_info, &table_watermarks),
-            "should fail because max_seen_watermark is not filtered by the table watermark"
+            "should fail because max_watermark_column_value is not filtered by the table watermark"
         );
 
         let sst_info = SstableInfoInner {
             object_id: 1.into(),
             sst_id: 1.into(),
             table_ids: vec![1.into()],
-            max_seen_watermark: Some(Bytes::from_static(b"some_watermark_key_8")),
+            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_8")),
             ..Default::default()
         }
         .into();
@@ -241,17 +241,17 @@ mod tests {
     #[test]
     fn test_pick_compaction_scans_all_levels() {
         let level_2_sst = SstableInfoInner {
-            max_seen_watermark: Some(Bytes::from_static(b"key_8")),
+            max_watermark_column_value: Some(Bytes::from_static(b"key_8")),
             ..generate_table_impl(1, 1, 0, 100, 1)
         }
         .into();
         let level_3_sst = SstableInfoInner {
-            max_seen_watermark: Some(Bytes::from_static(b"key_8")),
+            max_watermark_column_value: Some(Bytes::from_static(b"key_8")),
             ..generate_table_impl(2, 1, 101, 200, 1)
         }
         .into();
         let level_4_sst = SstableInfoInner {
-            max_seen_watermark: Some(Bytes::from_static(b"key_9")),
+            max_watermark_column_value: Some(Bytes::from_static(b"key_9")),
             ..generate_table_impl(3, 1, 201, 300, 1)
         }
         .into();

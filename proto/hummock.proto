@@ -52,7 +52,7 @@ message SstableInfo {
   // Only emitted when SST contains multiple vnodes to avoid redundancy with key_range.
   VnodeStatistics vnode_statistics = 15;
 
-  optional bytes max_seen_watermark = 16;
+  optional bytes max_watermark_column_value = 16;
 }
 
 enum LevelType {

@@ -1526,7 +1526,7 @@ mod tests {
             bloom_filter_kind: PbBloomFilterType::Sstable,
             sst_size: 1,
             vnode_statistics: Some(vnode_stats),
-            max_seen_watermark: None,
+            max_watermark_column_value: None,
         }
         .into();
         let pb_level = PbLevel {

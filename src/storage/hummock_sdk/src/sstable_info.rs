@@ -55,7 +55,7 @@ pub struct SstableInfoInner {
     pub bloom_filter_kind: PbBloomFilterType,
     pub sst_size: u64,
     pub vnode_statistics: Option<VnodeStatistics>,
-    pub max_seen_watermark: Option<Bytes>,
+    pub max_watermark_column_value: Option<Bytes>,
 }
 
 impl SstableInfoInner {
@@ -79,8 +79,8 @@ impl SstableInfoInner {
                 basic += size_of::<u32>() + min_key.encoded_len() + max_key.encoded_len();
             }
         }
-        if let Some(max_seen_watermark) = &self.max_seen_watermark {
-            basic += max_seen_watermark.len();
+        if let Some(max_watermark_column_value) = &self.max_watermark_column_value {
+            basic += max_watermark_column_value.len();
         }
 
         basic
@@ -182,7 +182,7 @@ impl From<PbSstableInfo> for SstableInfoInner {
                 .vnode_statistics
                 .as_ref()
                 .map(VnodeStatistics::from),
-            max_seen_watermark: pb_sstable_info.max_seen_watermark.map(Into::into),
+            max_watermark_column_value: pb_sstable_info.max_watermark_column_value.map(Into::into),
         }
     }
 }
@@ -224,7 +224,7 @@ impl From<&PbSstableInfo> for SstableInfoInner {
                 .vnode_statistics
                 .as_ref()
                 .map(VnodeStatistics::from),
-            max_seen_watermark: pb_sstable_info.max_seen_watermark.clone().map(Into::into),
+            max_watermark_column_value: pb_sstable_info.max_watermark_column_value.clone().map(Into::into),
         }
     }
 }
@@ -267,7 +267,7 @@ impl From<SstableInfoInner> for PbSstableInfo {
                 .vnode_statistics
                 .as_ref()
                 .map(PbVnodeStatistics::from),
-            max_seen_watermark: sstable_info.max_seen_watermark.map(Into::into),
+            max_watermark_column_value: sstable_info.max_watermark_column_value.map(Into::into),
         }
     }
 }
@@ -307,7 +307,7 @@ impl From<&SstableInfoInner> for PbSstableInfo {
                 .vnode_statistics
                 .as_ref()
                 .map(PbVnodeStatistics::from),
-            max_seen_watermark: sstable_info.max_seen_watermark.clone().map(Into::into),
+            max_watermark_column_value: sstable_info.max_watermark_column_value.clone().map(Into::into),
         }
     }
 }

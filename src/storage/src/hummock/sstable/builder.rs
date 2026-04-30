@@ -143,7 +143,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     block_size_vec: Vec<usize>, // for statistics
     vnode_range_collector: Option<VnodeUserKeyRangeCollector>,
     has_raw_block: bool,
-    max_seen_watermark: Option<Bytes>,
+    max_watermark_column_value: Option<Bytes>,
     table_id_to_watermark_type: HashMap<TableId, WatermarkSerdeType>,
 }
 
@@ -224,7 +224,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             memory_limiter,
             block_size_vec: Vec::new(),
             has_raw_block: false,
-            max_seen_watermark: None,
+            max_watermark_column_value: None,
             table_id_to_watermark_type,
         }
     }
@@ -253,7 +253,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     ) -> HummockResult<bool> {
         // Values cannot be accessed from raw blocks.
         self.has_raw_block = true;
-        self.max_seen_watermark = None;
+        self.max_watermark_column_value = None;
 
         let table_id = smallest_key.user_key.table_id;
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
@@ -458,15 +458,15 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     .compaction_catalog_agent_ref
                     .extract_watermark(table_id, *watermark_type, full_key, value)
             {
-                if let Some(current) = self.max_seen_watermark.as_ref() {
+                if let Some(current) = self.max_watermark_column_value.as_ref() {
                     if self
                         .compaction_catalog_agent_ref
                         .should_update_max_watermark(direction, current, &watermark)
                     {
-                        self.max_seen_watermark = Some(watermark);
+                        self.max_watermark_column_value = Some(watermark);
                     }
                 } else {
-                    self.max_seen_watermark = Some(watermark);
+                    self.max_watermark_column_value = Some(watermark);
                 }
             }
         }
@@ -620,7 +620,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .take()
             .and_then(|collector| collector.finish(&self.last_full_key));
         if self.table_ids.len() > 1 || self.has_raw_block {
-            self.max_seen_watermark = None;
+            self.max_watermark_column_value = None;
         }
         let sst_info: SstableInfo = SstableInfoInner {
             object_id: self.sst_object_id,
@@ -643,7 +643,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
             vnode_statistics: vnode_user_key_ranges,
-            max_seen_watermark: self.max_seen_watermark,
+            max_watermark_column_value: self.max_watermark_column_value,
         }
         .into();
 
@@ -996,7 +996,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn test_max_seen_watermark() {
+    async fn test_max_watermark_column_value() {
         use risingwave_common::types::DataType;
         use risingwave_common::util::sort_util::OrderType;
 
@@ -1057,13 +1057,13 @@ pub(super) mod tests {
         watermark_col_serde.serialize(&[Some(ScalarImpl::Int32(20))], &mut expected_watermark);
 
         assert_eq!(
-            sst_info.max_seen_watermark,
+            sst_info.max_watermark_column_value,
             Some(Bytes::from(expected_watermark))
         );
     }
 
     #[tokio::test]
-    async fn test_max_seen_watermark_descending() {
+    async fn test_max_watermark_column_value_descending() {
         use risingwave_common::types::DataType;
         use risingwave_common::util::sort_util::OrderType;
 
@@ -1122,13 +1122,13 @@ pub(super) mod tests {
         watermark_col_serde.serialize(&[Some(ScalarImpl::Int32(20))], &mut expected_watermark);
 
         assert_eq!(
-            sst_info.max_seen_watermark,
+            sst_info.max_watermark_column_value,
             Some(Bytes::from(expected_watermark))
         );
     }
 
     #[tokio::test]
-    async fn test_max_seen_watermark_pk_prefix() {
+    async fn test_max_watermark_column_value_pk_prefix() {
         use risingwave_common::types::DataType;
         use risingwave_common::util::sort_util::OrderType;
 
@@ -1188,13 +1188,13 @@ pub(super) mod tests {
         watermark_col_serde.serialize(&[Some(ScalarImpl::Int32(20))], &mut expected_watermark);
 
         assert_eq!(
-            sst_info.max_seen_watermark,
+            sst_info.max_watermark_column_value,
             Some(Bytes::from(expected_watermark))
         );
     }
 
     #[tokio::test]
-    async fn test_max_seen_watermark_none_after_add_raw_block() {
+    async fn test_max_watermark_column_value_none_after_add_raw_block() {
         use risingwave_common::types::DataType;
         use risingwave_common::util::sort_util::OrderType;
 
@@ -1274,7 +1274,7 @@ pub(super) mod tests {
             .unwrap();
 
         let output = builder.finish().await.unwrap();
-        assert_eq!(output.sst_info.sst_info.max_seen_watermark, None);
+        assert_eq!(output.sst_info.sst_info.max_watermark_column_value, None);
     }
 
     fn encode_full_key(vnode: VirtualNode, table_key_suffix: &[u8]) -> Vec<u8> {
