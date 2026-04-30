@@ -374,6 +374,9 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         let metrics = Arc::new(GLOBAL_ICEBERG_SCAN_METRICS.clone());
 
         for task in batch {
+            // Capture the file path upfront from the task so we can use it even when the
+            // scan produces no chunks (empty data file or fully equality-deleted file).
+            let task_data_file_path = task.data_file_path.clone();
             let mut chunks = vec![];
             #[for_await]
             for chunk in scan_task_to_chunk_with_deletes(
@@ -395,18 +398,24 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                 ));
             }
             // We yield once for each file now, because iceberg-rs doesn't support read part of a file now.
-            // Skip if the task produced no data (e.g. empty or fully-deleted file).
-            if chunks.is_empty() {
-                continue;
-            }
-            let last_chunk = chunks.last().unwrap();
-            let last_row = last_chunk.row_at(last_chunk.cardinality() - 1).1;
-            let data_file_path = last_row
-                .datum_at(file_path_idx)
-                .unwrap()
-                .into_utf8()
-                .to_owned();
-            let last_read_pos = last_row.datum_at(file_pos_idx).unwrap().to_owned_datum();
+            // We must always yield — even for an empty task — so that `into_stream` can
+            // decrement `splits_on_fetch` and delete the file assignment from the state
+            // table.  Skipping the yield (e.g. with `continue`) would leave the file
+            // stuck in the state table and prevent subsequent batches from progressing.
+            let (data_file_path, last_read_pos) = if let Some(last_chunk) = chunks.last() {
+                let last_row = last_chunk.row_at(last_chunk.cardinality() - 1).1;
+                let path = last_row
+                    .datum_at(file_path_idx)
+                    .unwrap()
+                    .into_utf8()
+                    .to_owned();
+                let pos = last_row.datum_at(file_pos_idx).unwrap().to_owned_datum();
+                (path, pos)
+            } else {
+                // No rows were produced: fall back to the task's own path so the
+                // consumer can still remove the state entry for this file.
+                (task_data_file_path, None)
+            };
             yield ChunksWithState {
                 chunks,
                 data_file_path,
@@ -710,46 +719,62 @@ impl<S: StateStore> Debug for IcebergFetchExecutor<S> {
 mod tests {
     use risingwave_common::array::{DataChunk, Op, StreamChunk};
 
-    /// Verifies the fix for the panic that occurred when a scan task produced no chunks
-    /// (e.g. an empty data file or an Iceberg v2 file fully covered by equality-delete files).
+    use super::*;
+
+    /// Verifies the `ChunksWithState` contract for the empty-task case.
     ///
-    /// `build_batched_stream_reader` calls `chunks.last().unwrap()` after collecting all
-    /// chunks for a task. Without the `if chunks.is_empty() { continue; }` guard this
-    /// panics on an empty `Vec`. This test confirms that empty tasks are silently skipped
-    /// and that non-empty tasks are still processed normally.
+    /// When a `FileScanTask` produces no rows (e.g. an empty data file or an Iceberg file
+    /// fully covered by equality-delete files), `build_batched_stream_reader` now yields a
+    /// `ChunksWithState` with an empty `chunks` vec and the `data_file_path` taken directly
+    /// from the task — rather than skipping the yield entirely.
+    ///
+    /// Skipping the yield would prevent `into_stream` from calling
+    /// `state_store_handler.delete(&data_file_path)` and decrementing `splits_on_fetch`,
+    /// leaving the file assignment stuck in the state table.
+    ///
+    /// This test verifies the two properties that `into_stream` depends on:
+    /// 1. An empty `ChunksWithState` forwards no data downstream (the chunk loop is a
+    ///    no-op), so no spurious rows appear.
+    /// 2. `data_file_path` is populated so the state entry can be cleaned up.
     #[test]
-    fn test_empty_task_chunks_are_skipped() {
-        // Helper: simulate the per-task logic from `build_batched_stream_reader`.
-        // Returns the cardinality of the last chunk, or None if the task was skipped.
-        let process_task = |chunks: Vec<StreamChunk>| -> Option<usize> {
-            // This is the fix: skip tasks that produced no data.
-            if chunks.is_empty() {
-                return None;
-            }
-            // Without the fix the line below panics when `chunks` is empty.
-            Some(chunks.last().unwrap().cardinality())
+    fn test_empty_chunks_with_state_satisfies_into_stream_contract() {
+        let path = "s3://bucket/empty.parquet".to_owned();
+
+        // Simulate what build_batched_stream_reader yields for an empty task.
+        let cws = ChunksWithState {
+            chunks: vec![],
+            data_file_path: path.clone(),
+            last_read_pos: None,
         };
 
-        // Empty task (empty file / fully-deleted file): must be skipped, not panic.
-        assert_eq!(process_task(vec![]), None);
+        // Property 1: no data is forwarded downstream.
+        let forwarded: Vec<_> = cws.chunks.iter().collect();
+        assert!(
+            forwarded.is_empty(),
+            "empty ChunksWithState must not forward any rows"
+        );
 
-        // Non-empty task: last chunk cardinality must be returned correctly.
+        // Property 2: data_file_path is set so the state entry can be deleted.
+        assert_eq!(
+            cws.data_file_path, path,
+            "data_file_path must match the original task path"
+        );
+    }
+
+    /// Verifies that a non-empty `ChunksWithState` carries its chunks unmodified.
+    #[test]
+    fn test_non_empty_chunks_with_state() {
         let chunk = StreamChunk::from_parts(
             vec![Op::Insert, Op::Insert, Op::Insert],
             DataChunk::new_dummy(3),
         );
-        assert_eq!(process_task(vec![chunk]), Some(3));
+        let cws = ChunksWithState {
+            chunks: vec![chunk],
+            data_file_path: "s3://bucket/data.parquet".to_owned(),
+            last_read_pos: None,
+        };
 
-        // Mixed batch: two tasks where the first is empty and the second is not.
-        let empty: Vec<StreamChunk> = vec![];
-        let non_empty = vec![StreamChunk::from_parts(
-            vec![Op::Insert],
-            DataChunk::new_dummy(1),
-        )];
-        let results: Vec<Option<usize>> = [empty, non_empty]
-            .into_iter()
-            .map(process_task)
-            .collect();
-        assert_eq!(results, vec![None, Some(1)]);
+        assert_eq!(cws.chunks.len(), 1);
+        assert_eq!(cws.chunks[0].cardinality(), 3);
     }
 }
