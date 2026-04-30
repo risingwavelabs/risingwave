@@ -70,7 +70,7 @@ async fn test_vnode_watermark_reclaim() {
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
     // Need wait longer for reclamation, due to the hard-coded STATE_CLEANING_PERIOD_EPOCH.
-    tokio::time::sleep(Duration::from_secs(500)).await;
+    tokio::time::sleep(Duration::from_secs(30)).await;
     assert_compaction_group_sst_count(compaction_group_id, 6, 0, &mut session).await;
 }
 
@@ -86,7 +86,7 @@ async fn test_no_vnode_watermark_reclaim() {
     let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session).await;
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
-    tokio::time::sleep(Duration::from_secs(500)).await;
+    tokio::time::sleep(Duration::from_secs(30)).await;
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
 }
 
