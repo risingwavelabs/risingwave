@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::future::pending;
+use std::future::{Future, pending};
 use std::mem::replace;
+use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::FutureExt;
-use futures::future::{BoxFuture, Either, select};
+use futures::future::{Either, select};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan;
@@ -141,7 +141,26 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
     }
 }
 
-type DispatchingFuture = BoxFuture<'static, (DispatchExecutorInner, StreamResult<Option<Barrier>>)>;
+type DispatchingFuture =
+    impl Future<Output = (DispatchExecutorInner, StreamResult<Option<Barrier>>)> + 'static;
+
+#[define_opaque(DispatchingFuture)]
+fn dispatching_future(mut inner: DispatchExecutorInner, message: Message) -> DispatchingFuture {
+    async move {
+        let batch = message.into_batch();
+        let r = dispatch_message_batch(&mut inner, batch)
+            .await
+            .map(|barrier_batch| {
+                barrier_batch.map(|mut barrier_batch| {
+                    debug_assert_eq!(barrier_batch.len(), 1);
+                    barrier_batch
+                        .pop()
+                        .expect("barrier batch should contain one barrier")
+                })
+            });
+        (inner, r)
+    }
+}
 
 /// State machine for the consumer side, which reads chunks from the log store and dispatches
 /// chunks or barriers downstream.
@@ -152,7 +171,7 @@ enum ConsumerFuture {
     /// Dispatches the current message downstream. Any barrier received while dispatching is queued
     /// here and dispatched before reading another chunk.
     Dispatching {
-        future: DispatchingFuture,
+        future: Pin<Box<DispatchingFuture>>,
         barrier_queue: VecDeque<Message>,
     },
     /// Temporary placeholder used while moving fields out during state transitions.
@@ -166,29 +185,13 @@ enum ConsumerFutureEvent {
 
 impl ConsumerFuture {
     fn dispatch(
-        mut inner: DispatchExecutorInner,
+        inner: DispatchExecutorInner,
         message: Message,
         barrier_queue: VecDeque<Message>,
     ) -> Self {
         tracing::trace!("consumer_future: dispatching future created");
-        let batch = message.into_batch();
-        let fut = async move {
-            let r = dispatch_message_batch(&mut inner, batch)
-                .await
-                .map(|barrier_batch| {
-                    barrier_batch.map(|mut barrier_batch| {
-                        debug_assert_eq!(barrier_batch.len(), 1);
-                        barrier_batch
-                            .pop()
-                            .expect("barrier batch should contain one barrier")
-                    })
-                });
-            (inner, r)
-        }
-        .boxed();
-
         Self::Dispatching {
-            future: fut,
+            future: Box::pin(dispatching_future(inner, message)),
             barrier_queue,
         }
     }
