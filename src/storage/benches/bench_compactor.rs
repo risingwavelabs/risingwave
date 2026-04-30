@@ -140,7 +140,7 @@ async fn build_table(
     );
     let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
     let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
-    let table_id_to_watermark_type = HashMap::new();
+    let table_id_to_watermark_type: HashMap<u32, _> = HashMap::new();
     let mut builder = SstableBuilder::<_, Xor16FilterBuilder>::for_test(
         sstable_object_id,
         writer,
@@ -194,7 +194,7 @@ async fn build_table_2(
 
     let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
     let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
-    let table_id_to_watermark_type = HashMap::new();
+    let table_id_to_watermark_type: HashMap<u32, _> = HashMap::new();
 
     let mut builder = SstableBuilder::<_, Xor16FilterBuilder>::for_test(
         sstable_object_id,
