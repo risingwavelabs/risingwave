@@ -70,7 +70,8 @@ async fn test_pk_prefix_column_vnode_watermark_reclaim() {
         ts timestamp primary key,
         watermark for ts as ts - interval '1 minute' with ttl
     );";
-    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+    let compaction_group_id =
+        test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
     session
@@ -94,7 +95,8 @@ async fn test_pk_prefix_column_no_vnode_watermark_reclaim() {
         ts timestamp primary key,
         watermark for ts as ts - interval '1 minute' with ttl
     );";
-    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+    let compaction_group_id =
+        test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
     session
@@ -132,7 +134,8 @@ async fn test_pk_non_prefix_column_vnode_watermark_reclaim() {
         primary key (id, ts),
         watermark for ts as ts - interval '1 minute' with ttl
     );";
-    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+    let compaction_group_id =
+        test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
     session
@@ -157,7 +160,8 @@ async fn test_pk_non_prefix_column_no_vnode_watermark_reclaim() {
         primary key (id, ts),
         watermark for ts as ts - interval '1 minute' with ttl
     );";
-    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+    let compaction_group_id =
+        test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
     session
@@ -181,7 +185,8 @@ async fn test_value_column_vnode_watermark_reclaim() {
         ts timestamp,
         watermark for ts as ts - interval '1 minute' with ttl
     );";
-    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+    let compaction_group_id =
+        test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
     session
@@ -205,7 +210,8 @@ async fn test_value_column_no_vnode_watermark_reclaim() {
         ts timestamp,
         watermark for ts as ts - interval '1 minute' with ttl
     );";
-    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+    let compaction_group_id =
+        test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
     session
@@ -221,10 +227,7 @@ async fn test_vnode_watermark_reclaim_impl(
     session: &mut Session,
     table_definition: &str,
 ) -> CompactionGroupId {
-    session
-        .run(table_definition)
-        .await
-        .unwrap();
+    session.run(table_definition).await.unwrap();
 
     let table_id = session
         .run("SELECT id FROM rw_tables limit 1;")

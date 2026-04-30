@@ -201,13 +201,13 @@ mod tests {
             object_id: 1.into(),
             sst_id: 1.into(),
             table_ids: vec![1.into()],
-            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_8")),
+            max_watermark_column_value: Some(Bytes::from_static(b"some_watermark_key_7")),
             ..Default::default()
         }
         .into();
         assert!(
             should_trivial_reclaim_sst_by_watermark(&sst_info, &table_watermarks),
-            "should use the max watermark across all vnodes of the table"
+            "should use the lower bound watermark across all vnodes of the table"
         );
     }
 
