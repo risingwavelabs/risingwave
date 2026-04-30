@@ -24,7 +24,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::expr_visitable::ExprVisitable;
 use super::generic::{AliasedExpr, GenericPlanRef, PhysicalPlanRef};
 use super::stream::StreamPlanNodeMetadata;
-use super::utils::{Distill, TableCatalogBuilder, childless_record, watermark_pretty};
+use super::utils::{
+    Distill, TableCatalogBuilder, WithSessionInternalRetention, childless_record, watermark_pretty,
+};
 use super::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
@@ -201,7 +203,9 @@ impl StreamMaterializedExprs {
         });
 
         let read_prefix_len_hint = pk_indices.len();
-        let mut catalog = catalog_builder.build(dist_keys, read_prefix_len_hint);
+        let mut catalog = catalog_builder
+            .build(dist_keys, read_prefix_len_hint)
+            .with_session_internal_retention(&self.base.ctx());
 
         if let Some(idx) = clean_wtmk_in_pk {
             catalog.clean_watermark_index_in_pk = Some(idx);

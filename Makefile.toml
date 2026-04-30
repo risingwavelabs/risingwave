@@ -1479,6 +1479,16 @@ extend = "slt"
 args = ["${@}", "./e2e_test/streaming/**/*.slt"]
 description = "Run all streaming e2e tests"
 
+[tasks.slt-streaming-ttl-chaos]
+category = "RiseDev - Test - SQLLogicTest"
+extend = "slt"
+args = [
+    "--options=-c streaming_inconsistent_internal_table_retention_seconds=5",
+    "${@}",
+    "./e2e_test/streaming/**/*.slt",
+]
+description = "Run all streaming e2e tests with internal-table TTL on. Result mismatches are expected; grep compute-node logs for `panic` / `InconsistentOperation` / `actor exit with error` to verify no actor crashed."
+
 [tasks.slt-batch]
 category = "RiseDev - Test - SQLLogicTest"
 extend = "slt"

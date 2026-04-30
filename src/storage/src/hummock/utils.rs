@@ -373,6 +373,14 @@ pub fn check_subset_preserve_order<T: Eq>(
 
 static SANITY_CHECK_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
 
+tokio::task_local! {
+    /// Per-task override for the global sanity check. The streaming actor scopes this to a
+    /// shared `Arc<AtomicBool>` and flips it to `true` when any state table on the actor has
+    /// TTL set; under that flag the storage layer skips its `do_*_sanity_check` flush-time
+    /// reads as well as the `MemTableError::InconsistentOperation` raise in `mem_table.rs`.
+    pub static SANITY_CHECK_DISABLED_PER_TASK: Arc<AtomicBool>;
+}
+
 /// This function is intended to be called during compute node initialization if the storage
 /// sanity check is not desired. This controls a global flag so only need to be called once
 /// if need to disable the sanity check.
@@ -381,7 +389,12 @@ pub fn disable_sanity_check() {
 }
 
 pub(crate) fn sanity_check_enabled() -> bool {
-    SANITY_CHECK_ENABLED.load(AtomicOrdering::Acquire)
+    if !SANITY_CHECK_ENABLED.load(AtomicOrdering::Acquire) {
+        return false;
+    }
+    !SANITY_CHECK_DISABLED_PER_TASK
+        .try_with(|f| f.load(AtomicOrdering::Relaxed))
+        .unwrap_or(false)
 }
 
 async fn get_from_state_store(

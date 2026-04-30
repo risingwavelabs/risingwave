@@ -15,6 +15,7 @@
 use core::time::Duration;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use async_recursion::async_recursion;
 use futures::{FutureExt, TryFutureExt};
@@ -489,6 +490,8 @@ impl StreamActorManager {
         let handle = {
             let trace_span = format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
             let barrier_manager = local_barrier_manager;
+            // Scope wraps both construction (where state-table builders flip it) and run.
+            let ttl_flag = Arc::new(AtomicBool::new(false));
             // wrap the future of `create_actor` with `boxed` to avoid stack overflow
             let actor = self
                 .clone()
@@ -510,6 +513,9 @@ impl StreamActorManager {
                         barrier_manager.notify_failure(actor_id, err);
                     }
                 });
+            let actor = crate::ACTOR_HAS_TTL_STATE.scope(ttl_flag.clone(), actor);
+            let actor = risingwave_storage::hummock::utils::SANITY_CHECK_DISABLED_PER_TASK
+                .scope(ttl_flag, actor);
             let traced = match &self.await_tree_reg {
                 Some(m) => m
                     .register(await_tree_key::Actor(actor_id), trace_span)

@@ -30,7 +30,8 @@ use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
 use super::stream_join_common::StreamJoinCommon;
 use super::utils::{
-    Distill, TableCatalogBuilder, childless_record, plan_node_name, watermark_pretty,
+    Distill, TableCatalogBuilder, WithSessionInternalRetention, childless_record, plan_node_name,
+    watermark_pretty,
 };
 use super::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamDeltaJoin, StreamPlanRef as PlanRef,
@@ -436,9 +437,14 @@ impl StreamHashJoin {
         };
         degree_table_catalog_builder.set_clean_watermark_indices(degree_clean_watermark_indices);
 
+        let ctx = self.base.ctx();
         Ok((
-            internal_table_catalog_builder.build(internal_table_dist_keys, join_key_len),
-            degree_table_catalog_builder.build(degree_table_dist_keys, join_key_len),
+            internal_table_catalog_builder
+                .build(internal_table_dist_keys, join_key_len)
+                .with_session_internal_retention(&ctx),
+            degree_table_catalog_builder
+                .build(degree_table_dist_keys, join_key_len)
+                .with_session_internal_retention(&ctx),
             deduped_input_pk_indices,
         ))
     }

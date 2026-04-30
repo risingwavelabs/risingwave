@@ -36,6 +36,7 @@
 #![feature(try_blocks)]
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use risingwave_common::config::StreamingConfig;
 
@@ -55,6 +56,8 @@ risingwave_expr_impl::enable!();
 
 tokio::task_local! {
     pub(crate) static CONFIG: Arc<StreamingConfig>;
+    /// True iff this actor owns at least one state table with TTL; consistency macros stay silent.
+    pub(crate) static ACTOR_HAS_TTL_STATE: Arc<AtomicBool>;
 }
 
 mod config {
@@ -85,8 +88,17 @@ mod consistency {
         *INSANE_MODE
     }
 
+    pub(crate) fn actor_has_ttl_state() -> bool {
+        crate::ACTOR_HAS_TTL_STATE
+            .try_with(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+            .unwrap_or(false)
+    }
+
     /// Check if strict consistency is required.
     pub(crate) fn enable_strict_consistency() -> bool {
+        if actor_has_ttl_state() {
+            return false;
+        }
         let res = crate::CONFIG.try_with(|config| !config.unsafe_disable_strict_consistency);
         if res.is_err() && cfg!(not(test)) {
             tracing::warn!("streaming CONFIG is not set, which is probably a bug");
@@ -98,14 +110,16 @@ mod consistency {
     /// The log message will be suppressed if it is called too frequently.
     macro_rules! consistency_error {
         ($($arg:tt)*) => {
-            debug_assert!(!crate::consistency::enable_strict_consistency());
+            if !crate::consistency::actor_has_ttl_state() {
+                debug_assert!(!crate::consistency::enable_strict_consistency());
 
-            use std::sync::LazyLock;
-            use risingwave_common::log::LogSuppressor;
+                use std::sync::LazyLock;
+                use risingwave_common::log::LogSuppressor;
 
-            static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
-            if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
-                tracing::error!(suppressed_count, $($arg)*);
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                    tracing::error!(suppressed_count, $($arg)*);
+                }
             }
         };
     }

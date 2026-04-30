@@ -24,7 +24,9 @@ use crate::expr::{ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
-use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
+use crate::optimizer::plan_node::utils::{
+    Distill, TableCatalogBuilder, WithSessionInternalRetention, childless_record,
+};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
@@ -121,18 +123,21 @@ impl StreamNode for StreamGlobalApproxPercentile {
         let mut count_table_builder = TableCatalogBuilder::default();
         count_table_builder.add_column(&Field::with_name(DataType::Int64, "total_count"));
 
+        let ctx = self.base.ctx();
         let body = GlobalApproxPercentileNode {
             base,
             quantile,
             bucket_state_table: Some(
                 bucket_table_builder
                     .build(vec![], 0)
+                    .with_session_internal_retention(&ctx)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
             count_state_table: Some(
                 count_table_builder
                     .build(vec![], 0)
+                    .with_session_internal_retention(&ctx)
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),

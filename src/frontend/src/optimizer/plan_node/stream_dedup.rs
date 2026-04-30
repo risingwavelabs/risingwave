@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
-use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
+use super::utils::{TableCatalogBuilder, WithSessionInternalRetention, impl_distill_by_unit};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, generic};
 use crate::TableCatalog;
 use crate::optimizer::plan_node::StreamPlanRef as PlanRef;
@@ -64,10 +64,12 @@ impl StreamDedup {
 
         let read_prefix_len_hint = builder.get_current_pk_len();
 
-        builder.build(
-            self.base.distribution().dist_column_indices().to_vec(),
-            read_prefix_len_hint,
-        )
+        builder
+            .build(
+                self.base.distribution().dist_column_indices().to_vec(),
+                read_prefix_len_hint,
+            )
+            .with_session_internal_retention(&self.base.ctx())
     }
 }
 

@@ -17,7 +17,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
 use super::stream::prelude::*;
-use super::utils::{Distill, plan_node_name, watermark_pretty};
+use super::utils::{Distill, WithSessionInternalRetention, plan_node_name, watermark_pretty};
 use super::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
 };
@@ -115,6 +115,7 @@ impl StreamNode for StreamGroupTopN {
                 input.expect_stream_key(),
                 self.vnode_col_idx,
             )
+            .with_session_internal_retention(&self.base.ctx())
             .with_id(state.gen_table_id_wrapped());
         assert!(!self.group_key().is_empty());
         let group_topn_node = GroupTopNNode {

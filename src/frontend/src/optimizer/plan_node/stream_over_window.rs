@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{GenericPlanNode, PlanWindowFunction};
 use super::stream::prelude::*;
-use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
+use super::utils::{TableCatalogBuilder, WithSessionInternalRetention, impl_distill_by_unit};
 use super::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
 };
@@ -81,7 +81,9 @@ impl StreamOverWindow {
         }
 
         let in_dist_key = self.core.input.distribution().dist_column_indices();
-        tbl_builder.build(in_dist_key.to_vec(), read_prefix_len_hint)
+        tbl_builder
+            .build(in_dist_key.to_vec(), read_prefix_len_hint)
+            .with_session_internal_retention(&self.base.ctx())
     }
 }
 
