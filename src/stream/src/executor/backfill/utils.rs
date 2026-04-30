@@ -41,6 +41,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::table::collect_data_chunk_with_builder;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
+use crate::consistency::consistency_panic;
 use crate::executor::{Message, StreamExecutorError, StreamExecutorResult, Watermark};
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
@@ -433,8 +434,20 @@ fn normalize_unmatched_updates(
     current_op_index: usize,
     current_op: &Op,
 ) {
+    // Orphan U-: previous row was U- but current isn't the paired U+. Demote the previous
+    // U- to plain Delete and re-process current_op as a fresh op.
+    if *unmatched_update_delete && *current_op != Op::UpdateInsert {
+        consistency_panic!(
+            ?current_op,
+            "U- not followed by U+; demoting orphan U- to Delete",
+        );
+        let ops = normalized_ops.to_mut();
+        ops[current_op_index - 1] = Op::Delete;
+        *unmatched_update_delete = false;
+    }
+
     if *unmatched_update_delete {
-        assert_eq!(*current_op, Op::UpdateInsert);
+        // Paired U-/U+ (current is U+).
         let visible_update_insert = current_visibility;
         match (visible_update_delete, visible_update_insert) {
             (true, false) => {
@@ -457,7 +470,9 @@ fn normalize_unmatched_updates(
                 *visible_update_delete = current_visibility;
             }
             Op::UpdateInsert => {
-                unreachable!("UpdateInsert should not be present without UpdateDelete")
+                consistency_panic!("orphan U+ without preceding U-; demoting to Insert");
+                let ops = normalized_ops.to_mut();
+                ops[current_op_index] = Op::Insert;
             }
             _ => {}
         }

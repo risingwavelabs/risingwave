@@ -27,7 +27,7 @@ use risingwave_storage::StateStore;
 
 use super::{GroupKey, ManagedTopNState};
 use crate::common::change_buffer::ChangeBuffer;
-use crate::consistency::{consistency_error, enable_strict_consistency};
+use crate::consistency::{ConsistentCounter, consistency_error, consistency_panic};
 use crate::executor::error::StreamExecutorResult;
 
 /// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
@@ -378,14 +378,11 @@ impl TopNCacheTrait for TopNCache<false> {
         row: impl Row,
         staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
-        if !enable_strict_consistency() && self.table_row_count == Some(0) {
-            // If strict consistency is disabled, and we receive a `DELETE` but the row count is 0, we
-            // should not panic. Instead, we pretend that we don't know about the actually row count.
-            consistency_error!("table row count is 0, but we receive a DELETE operation");
+        if let Some(row_count) = self.table_row_count.as_mut()
+            && !row_count.consistent_dec("table_row_count below 0 on delete")
+        {
+            // Drop the count so we'll re-read it from state on next access.
             self.table_row_count = None;
-        }
-        if let Some(row_count) = self.table_row_count.as_mut() {
-            *row_count -= 1;
         }
 
         if self.middle_is_full() && &cache_key > self.middle.last_key_value().unwrap().0 {
@@ -591,13 +588,11 @@ impl TopNCacheTrait for TopNCache<true> {
         row: impl Row,
         staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
-        if !enable_strict_consistency() && self.table_row_count == Some(0) {
-            // If strict consistency is disabled, and we receive a `DELETE` but the row count is 0, we
-            // should not panic. Instead, we pretend that we don't know about the actually row count.
+        if let Some(row_count) = self.table_row_count.as_mut()
+            && !row_count.consistent_dec("table_row_count below 0 on delete")
+        {
+            // Drop the count so we'll re-read it from state on next access.
             self.table_row_count = None;
-        }
-        if let Some(row_count) = self.table_row_count.as_mut() {
-            *row_count -= 1;
         }
 
         assert!(
@@ -646,7 +641,18 @@ impl TopNCacheTrait for TopNCache<true> {
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
                 let high_first_sort_key = (high_first.0).0.clone();
-                assert!(high_first_sort_key > middle_last_sort_key);
+                if high_first_sort_key <= middle_last_sort_key {
+                    // Cache vs state divergence (e.g. TTL skew on the order-key column):
+                    // `fill_high_cache` returned a row not strictly greater than the boundary
+                    // we saved before refill. Skip the move; correctness will recover on the
+                    // next barrier-driven cache rebuild.
+                    consistency_panic!(
+                        ?high_first_sort_key,
+                        ?middle_last_sort_key,
+                        "high cache first key not greater than middle last; skipping promotion",
+                    );
+                    return Ok(());
+                }
 
                 self.middle
                     .insert(high_first.0.clone(), high_first.1.clone());

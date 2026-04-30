@@ -35,6 +35,7 @@ use super::join::{JoinType, JoinTypePrimitive};
 use super::monitor::TemporalJoinMetrics;
 use crate::cache::{ManagedLruCache, keyed_cache_may_stale};
 use crate::common::metrics::MetricsInfo;
+use crate::consistency::consistency_panic;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::prelude::*;
 
@@ -80,11 +81,18 @@ impl JoinEntry {
     pub fn insert(&mut self, key: OwnedRow, value: OwnedRow) {
         // Lookup might refill the cache before the `insert` messages from the temporal side
         // upstream.
-        if let Entry::Vacant(e) = self.cached.entry(key) {
-            self.kv_heap_size.add(e.key(), &value);
-            e.insert(value);
-        } else {
-            panic!("value {:?} double insert", value);
+        match self.cached.entry(key) {
+            Entry::Vacant(e) => {
+                self.kv_heap_size.add(e.key(), &value);
+                e.insert(value);
+            }
+            Entry::Occupied(mut e) => {
+                consistency_panic!(?value, "double insert into temporal join cache entry");
+                // Non-strict mode: overwrite (last write wins) and rebalance size.
+                let old = e.insert(value);
+                self.kv_heap_size.sub(e.key(), &old);
+                self.kv_heap_size.add(e.key(), e.get());
+            }
         }
     }
 
@@ -93,7 +101,7 @@ impl JoinEntry {
         if let Some(value) = self.cached.remove(key) {
             self.kv_heap_size.sub(key, &value);
         } else {
-            panic!("key {:?} should be in the cache", key);
+            consistency_panic!(?key, "missing temporal join cache entry on remove");
         }
     }
 

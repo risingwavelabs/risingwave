@@ -23,6 +23,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
+use crate::consistency::consistency_panic;
 use crate::executor::StreamExecutorResult;
 use crate::executor::prelude::*;
 
@@ -159,15 +160,27 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
         self.output_changed = true;
 
+        // Saturating add that clamps at 0 if the new value would go negative (typically due to
+        // a Delete arriving for a count that was TTLed away upstream).
+        let apply_delta = |old: i64, label: &'static str| -> i64 {
+            let raw = old.saturating_add(delta as i64);
+            if raw < 0 {
+                consistency_panic!(?old, ?delta, "{}", label);
+                0
+            } else {
+                raw
+            }
+        };
+
         // Updates
-        self.row_count = self.row_count.checked_add(delta as i64).unwrap();
+        self.row_count = apply_delta(self.row_count, "approx percentile row_count below 0");
         tracing::debug!("updated row_count: {}", self.row_count);
 
         let (is_new_entry, old_count, new_count) = match sign {
             -1 => {
                 let count_entry = self.cache.neg_buckets.get(&bucket_id).copied();
                 let old_count = count_entry.unwrap_or(0);
-                let new_count = old_count.checked_add(delta as i64).unwrap();
+                let new_count = apply_delta(old_count, "approx percentile neg bucket below 0");
                 let is_new_entry = count_entry.is_none();
                 if new_count != 0 {
                     self.cache.neg_buckets.insert(bucket_id, new_count);
@@ -178,7 +191,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
             }
             0 => {
                 let old_count = self.cache.zeros;
-                let new_count = old_count.checked_add(delta as i64).unwrap();
+                let new_count = apply_delta(old_count, "approx percentile zero bucket below 0");
                 let is_new_entry = old_count == 0;
                 if new_count != 0 {
                     self.cache.zeros = new_count;
@@ -188,7 +201,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
             1 => {
                 let count_entry = self.cache.pos_buckets.get(&bucket_id).copied();
                 let old_count = count_entry.unwrap_or(0);
-                let new_count = old_count.checked_add(delta as i64).unwrap();
+                let new_count = apply_delta(old_count, "approx percentile pos bucket below 0");
                 let is_new_entry = count_entry.is_none();
                 if new_count != 0 {
                     self.cache.pos_buckets.insert(bucket_id, new_count);
@@ -218,9 +231,9 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
             } else {
                 self.bucket_state_table.update(old_row, new_row);
             }
-        } else {
-            bail!("invalid state, new_count = 0 and is_new_entry is true")
         }
+        // Else: new_count == 0 && is_new_entry — only reachable when apply_delta clamped a
+        // would-be-negative count to 0 (logged via consistency_panic). Nothing to write.
 
         Ok(())
     }

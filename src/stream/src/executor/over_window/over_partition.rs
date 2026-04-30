@@ -34,7 +34,7 @@ use risingwave_storage::store::PrefetchOptions;
 use super::general::{Calls, RowConverter};
 use super::range_cache::{CacheKey, PartitionCache};
 use crate::common::table::state_table::StateTable;
-use crate::consistency::{consistency_error, enable_strict_consistency};
+use crate::consistency::{consistency_error, consistency_panic, enable_strict_consistency};
 use crate::executor::StreamExecutorResult;
 use crate::executor::over_window::frame_finder::*;
 
@@ -177,10 +177,16 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
         // `part_with_delta` in the next step.
         for (key, change) in delta {
             if change.is_delete() {
+                // Under TTL or upstream inconsistency, the row backing this delete may be
+                // missing from the cache/state. Skip the phantom delete instead of panicking.
+                let Some(old_row) = snapshot.get(key) else {
+                    consistency_panic!(?key, "phantom delete: row missing from snapshot");
+                    continue;
+                };
                 part_changes.insert(
                     key.as_normal_expect().clone(),
                     Record::Delete {
-                        old_row: snapshot.get(key).unwrap().clone(),
+                        old_row: old_row.clone(),
                     },
                 );
             }
@@ -372,6 +378,12 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
 
         self.ensure_delta_in_cache(table, delta).await?;
         let delta = &*delta; // let's make it immutable
+
+        if delta.is_empty() {
+            // All entries were filtered out as inconsistent (e.g. phantom deletes under
+            // non-strict mode). Treat as no-op to avoid downstream unwrap panics.
+            return Ok((DeltaBTreeMap::new(self.range_cache.inner(), delta), vec![]));
+        }
 
         let delta_first = delta.first_key_value().unwrap().0.as_normal_expect();
         let delta_last = delta.last_key_value().unwrap().0.as_normal_expect();

@@ -37,6 +37,7 @@ use super::join::hash_join::*;
 use super::join::row::{JoinEncoding, JoinRow};
 use super::join::*;
 use super::watermark::*;
+use crate::consistency::{consistency_panic, consistent_assert};
 use crate::executor::CachedJoinRow;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::join::hash_join::CacheResult;
@@ -1283,6 +1284,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         .await;
 
         if join_condition_satisfied {
+            // Phantom-delete pre-check: under TTL or upstream inconsistency, a Delete may
+            // arrive for a (probe, build) pair whose prior Insert was never counted here.
+            // The matched row's persisted degree is then 0; proceeding would emit spurious
+            // outer/anti/semi transitions (see `with_match_on_delete` zero-degree branches),
+            // so skip emission, cache update and degree-table mutation entirely.
+            if matches!(JOIN_OP, JoinOp::Delete)
+                && match_degree_table.is_some()
+                && matched_row.degree == 0
+            {
+                consistency_panic!("phantom delete on hash join: matched-row degree already zero");
+                return chunk_opt;
+            }
+
             // update degree
             *update_row_degree += 1;
             // send matched row downstream
@@ -1340,8 +1354,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         if append_only_optimize {
             assert_matches!(JOIN_OP, JoinOp::Insert);
             // Since join key contains pk and pk is unique, there should be only
-            // one row if matched.
-            assert!(append_only_matched_row.is_none());
+            // one row if matched. Under upstream inconsistency (TTL skew producing a
+            // duplicate Insert for the same pk), last-write-wins keeps progress.
+            consistent_assert!(
+                append_only_matched_row.is_none(),
+                "append-only join: duplicate match for the same pk",
+            );
             *append_only_matched_row = Some(matched_row.map(map_output));
         } else if need_state_clean {
             debug_assert!(

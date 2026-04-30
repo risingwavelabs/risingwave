@@ -26,6 +26,7 @@ use risingwave_expr::aggregate::AggCall;
 use super::agg_group::GroupKey;
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
+use crate::consistency::ConsistentCounter;
 use crate::executor::monitor::AggDistinctDedupMetrics;
 use crate::executor::prelude::*;
 
@@ -142,8 +143,7 @@ impl<S: StateStore> ColumnDeduplicater<S> {
                     // iterate over vis of each distinct agg call, count down for visible datum
                     for (i, vis) in visibilities.iter().enumerate() {
                         if vis.is_set(datum_idx) {
-                            counts[i] -= 1;
-                            debug_assert!(counts[i] >= 0);
+                            counts[i].consistent_dec("distinct dedup count went below 0");
                             if counts[i] > 0 {
                                 // still exists at least one duplicate, hide this one
                                 vis_masks_inv[i].set(datum_idx, true);

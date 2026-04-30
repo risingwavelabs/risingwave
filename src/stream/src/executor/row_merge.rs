@@ -18,6 +18,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::barrier_align::*;
+use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
 
 pub struct RowMergeExecutor {
@@ -88,15 +89,25 @@ impl RowMergeExecutor {
                             yield Message::Barrier(barrier);
                             continue;
                         }
-                        #[for_await]
-                        for output in Self::flush_buffers(
-                            &data_types,
-                            &lhs_mapping,
-                            &rhs_mapping,
-                            &mut lhs_buffer,
-                            &mut rhs_buffer,
-                        ) {
-                            yield output?;
+                        if lhs_buffer.is_empty() || rhs_buffer.is_empty() {
+                            consistency_panic!(
+                                lhs_len = lhs_buffer.len(),
+                                rhs_len = rhs_buffer.len(),
+                                "row merge: only one side has chunks at barrier; dropping unmerged"
+                            );
+                            lhs_buffer.clear();
+                            rhs_buffer.clear();
+                        } else {
+                            #[for_await]
+                            for output in Self::flush_buffers(
+                                &data_types,
+                                &lhs_mapping,
+                                &rhs_mapping,
+                                &mut lhs_buffer,
+                                &mut rhs_buffer,
+                            ) {
+                                yield output?;
+                            }
                         }
                         yield Message::Barrier(barrier);
                     }
@@ -119,22 +130,17 @@ impl RowMergeExecutor {
         lhs_buffer: &'a mut Vec<StreamChunk>,
         rhs_buffer: &'a mut Vec<StreamChunk>,
     ) {
-        if lhs_buffer.is_empty() {
-            bail!("lhs buffer should not be empty ");
-        };
-        if rhs_buffer.is_empty() {
-            bail!("rhs buffer should not be empty ");
-        };
-
         for lhs_chunk in lhs_buffer.drain(..) {
             for rhs_chunk in rhs_buffer.drain(..) {
-                yield Self::build_chunk(
+                if let Some(msg) = Self::build_chunk(
                     data_types,
                     lhs_mapping,
                     rhs_mapping,
                     lhs_chunk.clone(),
                     rhs_chunk,
-                )?;
+                )? {
+                    yield msg;
+                }
             }
         }
     }
@@ -145,15 +151,28 @@ impl RowMergeExecutor {
         rhs_mapping: &ColIndexMapping,
         lhs_chunk: StreamChunk,
         rhs_chunk: StreamChunk,
-    ) -> Result<Message, StreamExecutorError> {
+    ) -> Result<Option<Message>, StreamExecutorError> {
         if !(1..=2).contains(&lhs_chunk.cardinality()) {
-            bail!("lhs chunk cardinality should be 1 or 2");
+            consistency_panic!(
+                "row merge: lhs chunk cardinality {} not in 1..=2",
+                lhs_chunk.cardinality()
+            );
+            return Ok(None);
         }
         if !(1..=2).contains(&rhs_chunk.cardinality()) {
-            bail!("rhs chunk cardinality should be 1 or 2");
+            consistency_panic!(
+                "row merge: rhs chunk cardinality {} not in 1..=2",
+                rhs_chunk.cardinality()
+            );
+            return Ok(None);
         }
         if lhs_chunk.cardinality() != rhs_chunk.cardinality() {
-            bail!("lhs and rhs chunk cardinality should be the same");
+            consistency_panic!(
+                "row merge: lhs cardinality {} != rhs cardinality {}",
+                lhs_chunk.cardinality(),
+                rhs_chunk.cardinality()
+            );
+            return Ok(None);
         }
         let cardinality = lhs_chunk.cardinality();
         let mut ops = Vec::with_capacity(cardinality);
@@ -183,7 +202,7 @@ impl RowMergeExecutor {
         let mut builder = DataChunkBuilder::new(data_types.to_vec(), cardinality);
         for row in merged_rows {
             if let Some(chunk) = builder.append_one_row(&row[..]) {
-                return Ok(Message::Chunk(StreamChunk::from_parts(ops, chunk)));
+                return Ok(Some(Message::Chunk(StreamChunk::from_parts(ops, chunk))));
             }
         }
         bail!("builder should have yielded a chunk")

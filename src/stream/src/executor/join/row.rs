@@ -17,6 +17,7 @@ use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 use risingwave_common_estimate_size::EstimateSize;
 
+use crate::consistency::ConsistentCounter;
 use crate::executor::StreamExecutorResult;
 
 pub trait JoinEncoding: 'static + Send + Sync + Default {
@@ -141,7 +142,8 @@ impl CachedJoinRow for EncodedJoinRow {
     }
 
     fn decrease_degree(&mut self) {
-        self.degree -= 1;
+        self.degree
+            .consistent_dec("decreasing zero degree on a cached join row");
     }
 }
 
@@ -172,7 +174,8 @@ impl CachedJoinRow for JoinRow<OwnedRow> {
     }
 
     fn decrease_degree(&mut self) {
-        self.degree -= 1;
+        self.degree
+            .consistent_dec("decreasing zero degree on a cached join row");
     }
 }
 
