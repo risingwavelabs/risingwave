@@ -58,33 +58,49 @@ metrics_level = \"Disabled\"
 }
 
 #[tokio::test]
-async fn test_vnode_watermark_reclaim() {
+async fn test_pk_prefix_column_vnode_watermark_reclaim() {
     // The vnode watermark reclaim will be triggered, so the SST will be reclaimed.
     let config = crate::compaction::cluster_config(10);
     let mut cluster = Cluster::start(config).await.unwrap();
     // wait for the service to be ready
     tokio::time::sleep(Duration::from_secs(15)).await;
     let mut session = cluster.start_session();
-
-    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session).await;
+    let table_definition = "create table t (
+        id int,
+        ts timestamp primary key,
+        watermark for ts as ts - interval '1 minute' with ttl
+    );";
+    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
+    session
+        .run("INSERT INTO t values (1, '2025-10-01 01:45:00+00');")
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_secs(30)).await;
     assert_compaction_group_sst_count(compaction_group_id, 6, 0, &mut session).await;
 }
 
 #[tokio::test]
-async fn test_no_vnode_watermark_reclaim() {
+async fn test_pk_prefix_column_no_vnode_watermark_reclaim() {
     // The vnode watermark reclaim won't be triggered, so the SST won't be reclaimed.
     let config = crate::compaction::cluster_config(3600);
     let mut cluster = Cluster::start(config).await.unwrap();
     // wait for the service to be ready
     tokio::time::sleep(Duration::from_secs(15)).await;
     let mut session = cluster.start_session();
-
-    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session).await;
+    let table_definition = "create table t (
+        id int,
+        ts timestamp primary key,
+        watermark for ts as ts - interval '1 minute' with ttl
+    );";
+    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
 
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
+    session
+        .run("INSERT INTO t values (1, '2025-10-01 01:45:00+00');")
+        .await
+        .unwrap();
     tokio::time::sleep(Duration::from_secs(30)).await;
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
 }
@@ -102,21 +118,116 @@ async fn assert_compaction_group_sst_count(
     assert_eq!(count.parse::<usize>().unwrap(), expected);
 }
 
+#[tokio::test]
+async fn test_pk_non_prefix_column_vnode_watermark_reclaim() {
+    // The vnode watermark reclaim will be triggered, so the SST will be reclaimed.
+    let config = crate::compaction::cluster_config(10);
+    let mut cluster = Cluster::start(config).await.unwrap();
+    // wait for the service to be ready
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    let mut session = cluster.start_session();
+    let table_definition = "create table t (
+        id int,
+        ts timestamp,
+        primary key (id, ts),
+        watermark for ts as ts - interval '1 minute' with ttl
+    );";
+    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+
+    assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
+    session
+        .run("INSERT INTO t values (1, '2025-10-01 01:45:00+00');")
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert_compaction_group_sst_count(compaction_group_id, 6, 0, &mut session).await;
+}
+
+#[tokio::test]
+async fn test_pk_non_prefix_column_no_vnode_watermark_reclaim() {
+    // The vnode watermark reclaim won't be triggered, so the SST won't be reclaimed.
+    let config = crate::compaction::cluster_config(3600);
+    let mut cluster = Cluster::start(config).await.unwrap();
+    // wait for the service to be ready
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    let mut session = cluster.start_session();
+    let table_definition = "create table t (
+        id int,
+        ts timestamp,
+        primary key (id, ts),
+        watermark for ts as ts - interval '1 minute' with ttl
+    );";
+    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+
+    assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
+    session
+        .run("INSERT INTO t values (1, '2025-10-01 01:45:00+00');")
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
+}
+
+#[tokio::test]
+async fn test_value_column_vnode_watermark_reclaim() {
+    // The vnode watermark reclaim will be triggered, so the SST will be reclaimed.
+    let config = crate::compaction::cluster_config(10);
+    let mut cluster = Cluster::start(config).await.unwrap();
+    // wait for the service to be ready
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    let mut session = cluster.start_session();
+    let table_definition = "create table t (
+        id int primary key,
+        ts timestamp,
+        watermark for ts as ts - interval '1 minute' with ttl
+    );";
+    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+
+    assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
+    session
+        .run("INSERT INTO t values (1, '2025-10-01 01:45:00+00');")
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert_compaction_group_sst_count(compaction_group_id, 6, 0, &mut session).await;
+}
+
+#[tokio::test]
+async fn test_value_column_no_vnode_watermark_reclaim() {
+    // The vnode watermark reclaim won't be triggered, so the SST won't be reclaimed.
+    let config = crate::compaction::cluster_config(3600);
+    let mut cluster = Cluster::start(config).await.unwrap();
+    // wait for the service to be ready
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    let mut session = cluster.start_session();
+    let table_definition = "create table t (
+        id int primary key,
+        ts timestamp,
+        watermark for ts as ts - interval '1 minute' with ttl
+    );";
+    let compaction_group_id = test_vnode_watermark_reclaim_impl(&mut cluster, &mut session, table_definition).await;
+
+    assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
+    session
+        .run("INSERT INTO t values (1, '2025-10-01 01:45:00+00');")
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(30)).await;
+    assert_compaction_group_sst_count(compaction_group_id, 6, 1, &mut session).await;
+}
+
 async fn test_vnode_watermark_reclaim_impl(
     cluster: &mut Cluster,
     session: &mut Session,
+    table_definition: &str,
 ) -> CompactionGroupId {
     session
-        .run("CREATE TABLE t2 (ts timestamptz, v INT);")
-        .await
-        .unwrap();
-    session
-        .run("CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM t2 WHERE ts > now() - INTERVAL '10s';")
+        .run(table_definition)
         .await
         .unwrap();
 
     let table_id = session
-        .run("SELECT id FROM rw_internal_tables WHERE name LIKE '%dynamicfilterleft%';")
+        .run("SELECT id FROM rw_tables limit 1;")
         .await
         .unwrap()
         .parse::<TableId>()
@@ -131,7 +242,7 @@ async fn test_vnode_watermark_reclaim_impl(
         .unwrap();
     let compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
     session
-        .run("INSERT INTO t2 VALUES (now(), 1);")
+        .run("INSERT INTO t values (2, '2025-10-01 01:43:00+00');")
         .await
         .unwrap();
     session.run("FLUSH;").await.unwrap();
@@ -191,7 +302,7 @@ async fn test_pk_non_prefix_column_watermark_state_cleaning() {
 }
 
 #[tokio::test]
-async fn test_non_pk_column_watermark_state_cleaning() {
+async fn test_value_column_watermark_state_cleaning() {
     let config = crate::compaction::cluster_config(10);
     let mut cluster = Cluster::start(config).await.unwrap();
     // wait for the service to be ready
