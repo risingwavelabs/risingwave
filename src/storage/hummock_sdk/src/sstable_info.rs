@@ -224,7 +224,10 @@ impl From<&PbSstableInfo> for SstableInfoInner {
                 .vnode_statistics
                 .as_ref()
                 .map(VnodeStatistics::from),
-            max_watermark_column_value: pb_sstable_info.max_watermark_column_value.clone().map(Into::into),
+            max_watermark_column_value: pb_sstable_info
+                .max_watermark_column_value
+                .clone()
+                .map(Into::into),
         }
     }
 }
@@ -307,7 +310,10 @@ impl From<&SstableInfoInner> for PbSstableInfo {
                 .vnode_statistics
                 .as_ref()
                 .map(PbVnodeStatistics::from),
-            max_watermark_column_value: sstable_info.max_watermark_column_value.clone().map(Into::into),
+            max_watermark_column_value: sstable_info
+                .max_watermark_column_value
+                .clone()
+                .map(Into::into),
         }
     }
 }

@@ -143,7 +143,10 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     )
                     .into(),
                     sst_size: sst.sst_size as _,
-                    max_watermark_column_value: sst.max_watermark_column_value.as_ref().map(|b| b.to_vec()),
+                    max_watermark_column_value: sst
+                        .max_watermark_column_value
+                        .as_ref()
+                        .map(|b| b.to_vec()),
                 });
             }
         }

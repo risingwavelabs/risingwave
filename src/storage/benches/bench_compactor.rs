@@ -140,12 +140,14 @@ async fn build_table(
     );
     let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
     let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+    let table_id_to_watermark_type = HashMap::new();
     let mut builder = SstableBuilder::<_, Xor16FilterBuilder>::for_test(
         sstable_object_id,
         writer,
         opt,
         table_id_to_vnode,
         table_id_to_watermark_serde,
+        table_id_to_watermark_type,
     );
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch, TableId::new(0));
@@ -192,6 +194,7 @@ async fn build_table_2(
 
     let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
     let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+    let table_id_to_watermark_type = HashMap::new();
 
     let mut builder = SstableBuilder::<_, Xor16FilterBuilder>::for_test(
         sstable_object_id,
@@ -199,6 +202,7 @@ async fn build_table_2(
         opt,
         table_id_to_vnode,
         table_id_to_watermark_serde,
+        table_id_to_watermark_type,
     );
     let mut full_key = test_key_of(0, epoch, TableId::new(table_id));
     let table_key_len = full_key.user_key.table_key.len();
