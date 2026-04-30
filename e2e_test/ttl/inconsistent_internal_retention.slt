@@ -1,0 +1,198 @@
+# Verify that `streaming_inconsistent_internal_table_retention_seconds` keeps
+# stateful streaming actors running even when their internal state tables are
+# TTLed mid-flight. See the panic-class assertion policy in `CLAUDE.local.md`.
+
+statement ok
+set streaming_inconsistent_internal_table_retention_seconds = 5;
+
+# ---- Source tables ----
+
+statement ok
+create table t (id int primary key, k int, v int);
+
+statement ok
+create table u (id int primary key, k int, v int);
+
+statement ok
+create table threshold (id int primary key, val int);
+
+statement ok
+create table append_only_t (id int, k int, v int) APPEND ONLY;
+
+# ---- MVs covering major stateful operators ----
+
+# Hash aggregation: intermediate state + distinct dedup tables.
+statement ok
+create materialized view mv_hash_agg as
+    select k, count(*) as cnt, count(distinct v) as cnt_distinct,
+           sum(v) as sum_v, max(v) as max_v, min(v) as min_v
+    from t group by k;
+
+# Simple aggregation + global approx percentile.
+statement ok
+create materialized view mv_simple_agg as
+    select count(*) as cnt, sum(v) as sum_v, max(v) as max_v,
+           approx_percentile(0.5) within group (order by v) as p50
+    from t;
+
+# Hash join: state + degree tables on both sides.
+statement ok
+create materialized view mv_hash_join as
+    select t.id as tid, u.id as uid, t.v as tv, u.v as uv
+    from t join u on t.k = u.k;
+
+# Top-N.
+statement ok
+create materialized view mv_topn as
+    select * from t order by v desc limit 5;
+
+# Group top-N.
+statement ok
+create materialized view mv_group_topn as
+    select id, k, v from (
+        select *, row_number() over (partition by k order by v desc) as rn from t
+    ) where rn <= 2;
+
+# Over window (non-EOWC).
+statement ok
+create materialized view mv_over_window as
+    select id, k, v, sum(v) over (partition by k order by id) as running_sum from t;
+
+# Dynamic filter.
+statement ok
+create materialized view mv_dynamic_filter as
+    select id, k, v from t where v > (select max(val) from threshold);
+
+# Append-only dedup.
+statement ok
+create materialized view mv_dedup as select distinct k from append_only_t;
+
+# ---- Initial data ----
+
+statement ok
+insert into t values
+    (1, 1, 100), (2, 1, 200), (3, 2, 300),
+    (4, 2, 400), (5, 3, 500), (6, 3, 600);
+
+statement ok
+insert into u values (1, 1, 1000), (2, 2, 2000), (3, 3, 3000);
+
+statement ok
+insert into threshold values (1, 350);
+
+statement ok
+insert into append_only_t values (1, 1, 1), (2, 2, 2), (3, 1, 3);
+
+statement ok
+flush;
+
+# ---- Sleep past retention so internal state of early rows is TTLed ----
+
+statement ok
+select pg_sleep(10);
+
+# ---- Modifications that target keys whose state may have been TTLed.
+# These are the inputs that would otherwise trigger phantom-delete /
+# phantom-insert / degree-underflow paths in the operators above.
+
+statement ok
+delete from t where id = 1;
+
+statement ok
+update t set v = 999 where id = 2;
+
+statement ok
+insert into t values (7, 1, 700), (8, 4, 800);
+
+statement ok
+delete from u where id = 1;
+
+statement ok
+update threshold set val = 100;
+
+statement ok
+insert into append_only_t values (4, 1, 4), (5, 1, 5);
+
+statement ok
+flush;
+
+# Another wave after a second sleep to exercise inter-round TTL.
+statement ok
+select pg_sleep(8);
+
+statement ok
+delete from t where id = 4;
+
+statement ok
+update t set v = 1000 where k = 3;
+
+statement ok
+insert into t values (9, 2, 900);
+
+statement ok
+flush;
+
+# ---- Each MV must still be queryable; if any actor panicked the streaming
+# job would have failed and the query would error.
+
+statement ok
+select count(*) from mv_hash_agg;
+
+statement ok
+select count(*) from mv_simple_agg;
+
+statement ok
+select count(*) from mv_hash_join;
+
+statement ok
+select count(*) from mv_topn;
+
+statement ok
+select count(*) from mv_group_topn;
+
+statement ok
+select count(*) from mv_over_window;
+
+statement ok
+select count(*) from mv_dynamic_filter;
+
+statement ok
+select count(*) from mv_dedup;
+
+# ---- Cleanup ----
+
+statement ok
+drop materialized view mv_hash_agg;
+
+statement ok
+drop materialized view mv_simple_agg;
+
+statement ok
+drop materialized view mv_hash_join;
+
+statement ok
+drop materialized view mv_topn;
+
+statement ok
+drop materialized view mv_group_topn;
+
+statement ok
+drop materialized view mv_over_window;
+
+statement ok
+drop materialized view mv_dynamic_filter;
+
+statement ok
+drop materialized view mv_dedup;
+
+statement ok
+drop table threshold;
+
+statement ok
+drop table append_only_t;
+
+statement ok
+drop table u;
+
+statement ok
+drop table t;

@@ -46,10 +46,10 @@ use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
-use crate::optimizer::StreamScanType;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
+use crate::optimizer::{OptimizerContext, StreamScanType};
 use crate::utils::{Condition, IndexSet};
 
 #[derive(Default)]
@@ -232,6 +232,24 @@ impl TableCatalogBuilder {
 
     pub fn columns(&self) -> &[ColumnCatalog] {
         &self.columns
+    }
+}
+
+/// Apply session-configured retention to a non-watermark-bearing internal state table.
+pub trait WithSessionInternalRetention: Sized {
+    fn with_session_internal_retention(self, ctx: &OptimizerContext) -> Self;
+}
+
+impl WithSessionInternalRetention for TableCatalog {
+    fn with_session_internal_retention(mut self, ctx: &OptimizerContext) -> Self {
+        let secs = ctx
+            .session_ctx()
+            .config()
+            .streaming_inconsistent_internal_table_retention_seconds();
+        if secs > 0 {
+            self.retention_seconds = Some(secs);
+        }
+        self
     }
 }
 

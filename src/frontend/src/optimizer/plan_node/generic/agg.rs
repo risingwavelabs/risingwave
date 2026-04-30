@@ -27,7 +27,7 @@ use risingwave_expr::sig::{FUNCTION_REGISTRY, FuncBuilder};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{AggCallState as PbAggCallState, agg_call_state};
 
-use super::super::utils::TableCatalogBuilder;
+use super::super::utils::{TableCatalogBuilder, WithSessionInternalRetention};
 use super::{GenericPlanNode, GenericPlanRef, PhysicalPlanRef, impl_distill_unit_from_fields};
 use crate::TableCatalog;
 use crate::error::{ErrorCode, Result};
@@ -329,11 +329,27 @@ impl Agg<StreamPlanRef> {
         Vec<AggCallState>,
         HashMap<usize, TableCatalog>,
     ) {
-        (
-            self.infer_intermediate_state_table(&me, vnode_col_idx, window_col_idx),
-            self.infer_stream_agg_state(&me, vnode_col_idx, window_col_idx),
-            self.infer_distinct_dedup_tables(&me, vnode_col_idx, window_col_idx),
-        )
+        let ctx = me.ctx();
+        let intermediate = self
+            .infer_intermediate_state_table(&me, vnode_col_idx, window_col_idx)
+            .with_session_internal_retention(&ctx);
+        let agg_states = self
+            .infer_stream_agg_state(&me, vnode_col_idx, window_col_idx)
+            .into_iter()
+            .map(|s| match s {
+                AggCallState::MaterializedInput(mut m) => {
+                    m.table = m.table.with_session_internal_retention(&ctx);
+                    AggCallState::MaterializedInput(m)
+                }
+                AggCallState::Value => AggCallState::Value,
+            })
+            .collect();
+        let distinct_dedup_tables = self
+            .infer_distinct_dedup_tables(&me, vnode_col_idx, window_col_idx)
+            .into_iter()
+            .map(|(k, t)| (k, t.with_session_internal_retention(&ctx)))
+            .collect();
+        (intermediate, agg_states, distinct_dedup_tables)
     }
 
     fn get_ordered_group_key(&self, window_col_idx: Option<usize>) -> Vec<usize> {

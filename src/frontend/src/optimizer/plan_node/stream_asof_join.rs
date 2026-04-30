@@ -22,7 +22,8 @@ use risingwave_pb::stream_plan::{AsOfJoinNode, PbJoinEncodingType};
 
 use super::stream::prelude::*;
 use super::utils::{
-    Distill, TableCatalogBuilder, childless_record, plan_node_name, watermark_pretty,
+    Distill, TableCatalogBuilder, WithSessionInternalRetention, childless_record, plan_node_name,
+    watermark_pretty,
 };
 use super::{
     ExprRewritable, LogicalJoin, PlanBase, PlanTreeNodeBinary, StreamJoinCommon, StreamNode,
@@ -266,18 +267,21 @@ impl StreamNode for StreamAsOfJoin {
 
         let dk_indices_in_jk = self.derive_dist_key_in_join_key();
 
+        let ctx = self.base.ctx();
         let (left_table, left_deduped_input_pk_indices) = Self::infer_internal_table_catalog(
             self.left().plan_base(),
             left_jk_indices,
             dk_indices_in_jk.clone(),
             self.inequality_desc.left_idx as usize,
         );
+        let left_table = left_table.with_session_internal_retention(&ctx);
         let (right_table, right_deduped_input_pk_indices) = Self::infer_internal_table_catalog(
             self.right().plan_base(),
             right_jk_indices,
             dk_indices_in_jk,
             self.inequality_desc.right_idx as usize,
         );
+        let right_table = right_table.with_session_internal_retention(&ctx);
 
         let left_deduped_input_pk_indices = left_deduped_input_pk_indices
             .iter()

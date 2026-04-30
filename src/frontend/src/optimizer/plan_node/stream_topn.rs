@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
 use super::stream::prelude::*;
-use super::utils::{Distill, plan_node_name};
+use super::utils::{Distill, WithSessionInternalRetention, plan_node_name};
 use super::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
 };
@@ -108,6 +108,7 @@ impl StreamNode for StreamTopN {
                         input.expect_stream_key(),
                         None,
                     )
+                    .with_session_internal_retention(&self.base.ctx())
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),

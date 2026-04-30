@@ -20,7 +20,8 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use super::generic::{DynamicFilter, GenericPlanNode};
 use super::stream::prelude::*;
 use super::utils::{
-    Distill, childless_record, column_names_pretty, plan_node_name, watermark_pretty,
+    Distill, WithSessionInternalRetention, childless_record, column_names_pretty, plan_node_name,
+    watermark_pretty,
 };
 use super::{ExprRewritable, generic};
 use crate::expr::Expr;
@@ -171,10 +172,13 @@ impl StreamNode for StreamDynamicFilter {
             // always `InputRef <comparator> InputRef`.
             .map(|x| x.to_expr_proto());
         let left_index = self.core.left_index();
+        let ctx = self.base.ctx();
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)
+            .with_session_internal_retention(&ctx)
             .with_id(state.gen_table_id_wrapped());
         let right = self.right();
         let right_table = infer_right_internal_table_catalog(right.plan_base())
+            .with_session_internal_retention(&ctx)
             .with_id(state.gen_table_id_wrapped());
         #[allow(deprecated)]
         NodeBody::DynamicFilter(Box::new(DynamicFilterNode {

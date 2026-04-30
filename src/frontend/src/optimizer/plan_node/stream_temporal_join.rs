@@ -28,7 +28,9 @@ use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::plan_tree_node::PlanTreeNodeUnary;
-use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
+use crate::optimizer::plan_node::utils::{
+    IndicesDisplay, TableCatalogBuilder, WithSessionInternalRetention,
+};
 use crate::optimizer::plan_node::{
     EqJoinPredicate, EqJoinPredicateDisplay, StreamExchange, StreamTableScan, TryToStreamPb,
 };
@@ -172,7 +174,9 @@ impl StreamTemporalJoin {
 
         let internal_table_dist_keys =
             (right_scan_schema.len()..(right_scan_schema.len() + dist_key_len)).collect();
-        internal_table_catalog_builder.build(internal_table_dist_keys, read_prefix_len_hint)
+        internal_table_catalog_builder
+            .build(internal_table_dist_keys, read_prefix_len_hint)
+            .with_session_internal_retention(&self.base.ctx())
     }
 }
 

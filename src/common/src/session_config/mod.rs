@@ -484,6 +484,12 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     unsafe_enable_storage_retention_for_non_append_only_tables: bool,
 
+    /// Unsafe: stamp this retention (seconds) onto streaming-job internal state tables created
+    /// in this session, except watermark-bearing, backfill, and time-source state. Pair with
+    /// `unsafe_disable_strict_consistency = true`. Defaults to 0 (disabled).
+    #[parameter(default = 0u32)]
+    streaming_inconsistent_internal_table_retention_seconds: u32,
+
     /// Enable DataFusion Engine
     /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
     #[parameter(default = true)]

@@ -859,6 +859,10 @@ where
         };
 
         let table_option = TableOption::new(table_catalog.retention_seconds);
+        if table_catalog.retention_seconds.is_some() {
+            let _ = crate::ACTOR_HAS_TTL_STATE
+                .try_with(|f| f.store(true, std::sync::atomic::Ordering::Relaxed));
+        }
         let new_local_options = if IS_REPLICATED {
             NewLocalOptions::new_replicated(
                 table_id,
