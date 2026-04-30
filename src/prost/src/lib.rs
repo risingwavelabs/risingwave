@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(unfulfilled_lint_expectations)]
-#![expect(clippy::doc_overindented_list_items)]
-#![expect(clippy::doc_lazy_continuation)]
+#![allow(unfulfilled_lint_expectations)]
+#![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::doc_lazy_continuation)]
 // for derived code of `Message`
 #![expect(clippy::doc_markdown)]
 #![expect(clippy::upper_case_acronyms)]
@@ -584,7 +584,7 @@ impl catalog::Sink {
     /// Get `ignore_delete` with backward compatibility.
     ///
     /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
-    #[expect(deprecated)]
+    #[allow(deprecated)]
     pub fn ignore_delete(&self) -> bool {
         self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
     }
@@ -594,7 +594,7 @@ impl stream_plan::SinkDesc {
     /// Get `ignore_delete` with backward compatibility.
     ///
     /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
-    #[expect(deprecated)]
+    #[allow(deprecated)]
     pub fn ignore_delete(&self) -> bool {
         self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
     }
@@ -604,7 +604,7 @@ impl connector_service::SinkParam {
     /// Get `ignore_delete` with backward compatibility.
     ///
     /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
-    #[expect(deprecated)]
+    #[allow(deprecated)]
     pub fn ignore_delete(&self) -> bool {
         self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
     }

@@ -132,7 +132,6 @@ impl OptimizerContext {
         }
     }
 
-    // TODO(TaoWu): Remove the async.
     #[cfg(test)]
     pub fn mock() -> OptimizerContextRef {
         Self {

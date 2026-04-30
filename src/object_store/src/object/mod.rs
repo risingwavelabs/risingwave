@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(unexpected_cfgs)]
+#![allow(
+    unexpected_cfgs,
+    reason = "feature(hdfs-backend) is banned https://github.com/risingwavelabs/risingwave/pull/7875"
+)]
 
 pub mod sim;
 use std::ops::{Range, RangeBounds};

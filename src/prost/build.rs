@@ -1285,7 +1285,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs_err::write(
             &out_file,
             format!(
-                "#![expect(clippy::useless_conversion)]\nuse crate::{}::*;\n{}",
+                "#![allow(clippy::useless_conversion)]\nuse crate::{}::*;\n{}",
                 module_path_id, file_content
             ),
         )?;
