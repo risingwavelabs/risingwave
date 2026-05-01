@@ -26,7 +26,7 @@ dependencies = [
  "path-slash",
  "regex",
  "toml 1.1.2+spec-1.1.0",
- "windows-registry 0.6.1",
+ "windows-registry",
  "windows-sys 0.61.2",
 ]
 
@@ -15664,9 +15664,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-metrics"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb2bb07a8451c4c6fa8b3497ad198510d8b8dffa5df5cfb97a64102a58b113c8"
+checksum = "d9e81d53caf955549b1dec7af4ac2149e94cc25ed97b4a545151140281e2f528"
 dependencies = [
  "futures-util",
  "pin-project-lite",
