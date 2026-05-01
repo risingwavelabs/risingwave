@@ -26,7 +26,7 @@ dependencies = [
  "path-slash",
  "regex",
  "toml 1.1.2+spec-1.1.0",
- "windows-registry 0.6.1",
+ "windows-registry",
  "windows-sys 0.61.2",
 ]
 
@@ -3826,9 +3826,9 @@ dependencies = [
 
 [[package]]
 name = "datafusion-common"
-version = "53.0.0"
+version = "53.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d7663f3af955292f8004e74bcaf8f7ea3d66cc38438749615bb84815b61a293"
+checksum = "d72a11ca44a95e1081870d3abb80c717496e8a7acb467a1d3e932bb636af5cc2"
 dependencies = [
  "ahash 0.8.11",
  "arrow 58.1.0",
