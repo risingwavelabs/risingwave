@@ -15,14 +15,13 @@
 use std::borrow::Cow;
 use std::env;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 
 use either::Either;
 use fastrace_opentelemetry::OpenTelemetryReporter;
 use opentelemetry::InstrumentationScope;
-use opentelemetry::trace::TracerProvider;
 use opentelemetry_otlp::SpanExporter;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::trace::TracerProviderBuilder;
 use risingwave_common::metrics::MetricsLayer;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
@@ -36,7 +35,7 @@ use tracing_subscriber::fmt::format::DefaultFields;
 use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{EnvFilter, filter, reload};
+use tracing_subscriber::{EnvFilter, filter};
 
 /// Parse a comma-separated list of `key=value` pairs into `OpenTelemetry` `KeyValue` attributes.
 ///
@@ -179,11 +178,6 @@ impl LoggerSettings {
         self.tracing_endpoint = Some(endpoint.into());
         self
     }
-}
-
-/// Create a filter that disables all events or spans.
-fn disabled_filter() -> filter::Targets {
-    filter::Targets::new()
 }
 
 /// Init logger for RisingWave binaries.
@@ -352,7 +346,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         layers.push(
             fmt_layer
-                .with_filter(default_filter.clone().with_target("rw_tracing", Level::OFF)) // filter-out tracing-only events
+                .with_filter(default_filter.with_target("rw_tracing", Level::OFF)) // filter-out tracing-only events
                 .boxed(),
         );
     };
@@ -459,7 +453,18 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         });
     };
 
-    // Tracing layer
+    // Tracing layer — fastrace-native OTLP export.
+    //
+    // This replaces the previous `tracing-opentelemetry` layer + reload filter.
+    // All distributed tracing now flows through fastrace spans created at
+    // migrated call sites (grpc_serve, batch_execute, actor, epoch, grpc_client,
+    // etc.), plus the pre-existing fastrace usage in foyer/tiered-cache.
+    //
+    // Runtime enable/disable is driven by the `enable_tracing` system parameter,
+    // wired through `set_toggle_otel_layer_fn` → `ToggleableReporter`. When
+    // disabled, spans are dropped at the reporter boundary without incurring
+    // per-span-recording work in the rest of the process (fastrace collection
+    // is always on; the toggle only affects OTLP export).
     #[cfg(not(madsim))]
     if let Some(endpoint) = settings.tracing_endpoint {
         println!("opentelemetry tracing will be exported to `{endpoint}` if enabled");
@@ -488,7 +493,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             );
         }
 
-        let (otel_tracer, exporter) = {
+        let exporter = {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .thread_name("rw-otel")
@@ -500,109 +505,49 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             // Installing the exporter requires a tokio runtime.
             let _entered = runtime.enter();
 
-            // TODO(bugen): better service name
-            // https://github.com/jaegertracing/jaeger-ui/issues/336
-            let service_name = format!("{}-{}", settings.name, id);
-
-            let mut resource_attrs = vec![
-                KeyValue::new(resource::SERVICE_NAME, service_name.clone()),
-                KeyValue::new(resource::SERVICE_INSTANCE_ID, id.clone()),
-                KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
-                KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
-            ];
-            resource_attrs.extend(extra_attributes.iter().cloned());
-
-            let otel_tracer = TracerProviderBuilder::default()
-                .with_batch_exporter(
-                    SpanExporter::builder()
-                        .with_tonic()
-                        .with_endpoint(&endpoint)
-                        .build()
-                        .unwrap(),
-                )
-                .with_resource(Resource::builder().with_attributes(resource_attrs).build())
-                .build()
-                .tracer(service_name);
-
-            let exporter = SpanExporter::builder()
+            SpanExporter::builder()
                 .with_tonic()
                 .with_endpoint(&endpoint)
                 .with_protocol(opentelemetry_otlp::Protocol::Grpc)
                 .with_timeout(opentelemetry_otlp::OTEL_EXPORTER_OTLP_TIMEOUT_DEFAULT)
                 .build()
-                .unwrap();
-
-            (otel_tracer, exporter)
+                .unwrap()
         };
 
-        // Disable by filtering out all events or spans by default.
-        //
-        // It'll be enabled with `toggle_otel_layer` based on the system parameter `enable_tracing` later.
-        let (reload_filter, reload_handle) = reload::Layer::new(disabled_filter());
+        // TODO(bugen): better service name
+        // https://github.com/jaegertracing/jaeger-ui/issues/336
+        let service_name = format!("{}-{}", settings.name, id);
 
+        let mut resource_attrs = vec![
+            KeyValue::new(resource::SERVICE_NAME, service_name),
+            KeyValue::new(resource::SERVICE_INSTANCE_ID, id),
+            KeyValue::new(resource::SERVICE_VERSION, env!("CARGO_PKG_VERSION")),
+            KeyValue::new(resource::PROCESS_PID, std::process::id().to_string()),
+        ];
+        resource_attrs.extend(extra_attributes.iter().cloned());
+
+        let inner_reporter = OpenTelemetryReporter::new(
+            exporter,
+            Cow::Owned(Resource::builder().with_attributes(resource_attrs).build()),
+            InstrumentationScope::builder("risingwave-fastrace").build(),
+        );
+
+        let (reporter, enabled_flag) =
+            crate::toggleable_reporter::ToggleableReporter::new(inner_reporter);
+
+        // Wire the `enable_tracing` system-parameter toggle to the reporter's
+        // atomic flag. With fastrace-native export there is no span-level
+        // filter to reload anymore — the toggle simply gates OTLP export on/off.
         set_toggle_otel_layer_fn(move |enabled: bool| {
-            let result = reload_handle.modify(|f| {
-                *f = if enabled {
-                    default_filter.clone()
-                } else {
-                    disabled_filter()
-                }
-            });
-
-            match result {
-                Ok(_) => tracing::info!(
-                    "opentelemetry tracing {}",
-                    if enabled { "enabled" } else { "disabled" },
-                ),
-
-                Err(error) => tracing::error!(
-                    error = %error.as_report(),
-                    "failed to {} opentelemetry tracing",
-                    if enabled { "enable" } else { "disable" },
-                ),
-            }
+            enabled_flag.store(enabled, Ordering::Relaxed);
+            tracing::info!(
+                "opentelemetry tracing {}",
+                if enabled { "enabled" } else { "disabled" },
+            );
         });
 
-        let layer = tracing_opentelemetry::layer()
-            .with_tracer(otel_tracer)
-            .with_filter(reload_filter);
-
-        layers.push(layer.boxed());
-
-        // The reporter is used by fastrace in foyer for dynamically tail-based tracing.
-        //
-        // Code here only setup the OpenTelemetry reporter. To enable/disable the function, please use risectl.
-        //
-        // e.g.
-        //
-        // ```bash
-        // risectl hummock tiered-cache-tracing -h
-        // ```
-        let mut fastrace_resource_attrs: Vec<opentelemetry::KeyValue> =
-            vec![opentelemetry::KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                format!("fastrace-{id}"),
-            )];
-        fastrace_resource_attrs.extend(extra_attributes.iter().cloned());
-
-        let reporter = OpenTelemetryReporter::new(
-            exporter,
-            Cow::Owned(
-                Resource::builder()
-                    .with_attributes(fastrace_resource_attrs)
-                    .build(),
-            ),
-            InstrumentationScope::builder("opentelemetry-instrumentation-foyer").build(),
-        );
         fastrace::set_reporter(reporter, fastrace::collector::Config::default());
-        tracing::info!("opentelemetry exporter for fastrace is set at {endpoint}");
-    }
-
-    #[cfg(all(feature = "fastrace-bridge", not(madsim)))]
-    {
-        // Phase-A migration proof only: this bridge is gated by the Cargo feature and
-        // its own target allow-list, not by the runtime `enable_tracing` reload filter.
-        layers.push(crate::fastrace_bridge::compat_layer().boxed());
+        tracing::info!("fastrace opentelemetry reporter is set at {endpoint}");
     }
 
     // Metrics layer

@@ -5423,19 +5423,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastrace-tracing"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e26ee74fc06c6a7b49cce575ccd4e4ce2c8992c35d83e5c2f41babcbef862712"
-dependencies = [
- "fastrace",
- "take_mut",
- "tracing",
- "tracing-core",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12927,7 +12914,6 @@ dependencies = [
  "either",
  "fastrace",
  "fastrace-opentelemetry",
- "fastrace-tracing",
  "futures",
  "hostname",
  "madsim-tokio",
@@ -12945,7 +12931,6 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "tracing-opentelemetry",
  "tracing-subscriber",
  "workspace-hack",
 ]
@@ -16154,25 +16139,6 @@ dependencies = [
  "log",
  "once_cell",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-opentelemetry"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e6e5658463dd88089aba75c7791e1d3120633b1bfde22478b28f625a9bb1b8e"
-dependencies = [
- "js-sys",
- "opentelemetry",
- "opentelemetry_sdk",
- "rustversion",
- "smallvec",
- "thiserror 2.0.17",
- "tracing",
- "tracing-core",
- "tracing-log",
- "tracing-subscriber",
- "web-time",
 ]
 
 [[package]]
