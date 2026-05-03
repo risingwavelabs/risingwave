@@ -14,7 +14,6 @@
 
 pub mod layer;
 
-#[cfg(test)]
 pub mod test_util;
 
 use std::borrow::Cow;

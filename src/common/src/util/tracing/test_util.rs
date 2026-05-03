@@ -131,11 +131,7 @@ impl MemoryReporter {
     pub fn spans_with_property(&self, key: &str, value: &str) -> Vec<SpanRecord> {
         self.snapshot()
             .into_iter()
-            .filter(|span| {
-                span.properties
-                    .iter()
-                    .any(|(k, v)| k == key && v == value)
-            })
+            .filter(|span| span.properties.iter().any(|(k, v)| k == key && v == value))
             .collect()
     }
 
@@ -211,8 +207,7 @@ mod tests {
     #[test]
     fn memory_reporter_name_filter_drops_non_matching() {
         let _guard = FASTRACE_REPORTER_LOCK.lock();
-        let sink = MemoryReporter::install(Duration::from_millis(10))
-            .with_name_filter("kept");
+        let sink = MemoryReporter::install(Duration::from_millis(10)).with_name_filter("kept");
 
         with_root("dropped_root", || {
             let _guard = fastrace::Span::enter_with_local_parent("kept_child");

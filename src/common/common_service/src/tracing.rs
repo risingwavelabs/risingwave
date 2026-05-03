@@ -35,37 +35,19 @@ impl TracingExtractLayer {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, LazyLock, Mutex};
     use std::time::Duration;
 
-    use fastrace::collector::{Config, Reporter, SpanContext, SpanRecord};
+    use fastrace::collector::SpanContext;
+    use risingwave_common::util::tracing::test_util::{FASTRACE_REPORTER_LOCK, MemoryReporter};
     use tower::{Layer as _, Service as _, ServiceExt as _, service_fn};
 
     use super::*;
 
-    static FASTRACE_REPORTER_LOCK: LazyLock<Mutex<()>> = LazyLock::new(Mutex::default);
-
-    #[derive(Clone)]
-    struct CapturingReporter {
-        spans: Arc<Mutex<Vec<SpanRecord>>>,
-    }
-
-    impl Reporter for CapturingReporter {
-        fn report(&mut self, mut spans: Vec<SpanRecord>) {
-            self.spans.lock().unwrap().append(&mut spans);
-        }
-    }
-
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // Lock must be held for entire test to prevent reporter interference
     async fn tracing_extract_uses_fastrace_parent_on_async_handler_future() {
-        let _guard = FASTRACE_REPORTER_LOCK.lock().unwrap();
-        let spans = Arc::new(Mutex::new(Vec::new()));
-        fastrace::set_reporter(
-            CapturingReporter {
-                spans: spans.clone(),
-            },
-            Config::default().report_interval(Duration::from_millis(1)),
-        );
+        let _guard = FASTRACE_REPORTER_LOCK.lock();
+        let sink = MemoryReporter::install(Duration::from_millis(1));
 
         let parent = fastrace::Span::root("client_root", SpanContext::random());
         let parent_context = TracingContext::from_fastrace_span(&parent);
@@ -86,9 +68,8 @@ mod tests {
 
         service.ready().await.unwrap().call(req).await.unwrap();
         drop(parent);
-        fastrace::flush();
 
-        let spans = spans.lock().unwrap().clone();
+        let spans = sink.snapshot();
         let grpc_span = spans
             .iter()
             .find(|span| span.name == "grpc_serve")
