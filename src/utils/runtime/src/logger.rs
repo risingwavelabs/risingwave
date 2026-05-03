@@ -598,6 +598,13 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         tracing::info!("opentelemetry exporter for fastrace is set at {endpoint}");
     }
 
+    #[cfg(all(feature = "fastrace-bridge", not(madsim)))]
+    {
+        // Phase-A migration proof only: this bridge is gated by the Cargo feature and
+        // its own target allow-list, not by the runtime `enable_tracing` reload filter.
+        layers.push(crate::fastrace_bridge::compat_layer().boxed());
+    }
+
     // Metrics layer
     {
         let filter = filter::Targets::new().with_target("aws_smithy_client::retry", Level::DEBUG);

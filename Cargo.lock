@@ -26,7 +26,7 @@ dependencies = [
  "path-slash",
  "regex",
  "toml 1.1.2+spec-1.1.0",
- "windows-registry 0.6.1",
+ "windows-registry",
  "windows-sys 0.61.2",
 ]
 
@@ -5420,6 +5420,19 @@ dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
  "pollster",
+]
+
+[[package]]
+name = "fastrace-tracing"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e26ee74fc06c6a7b49cce575ccd4e4ce2c8992c35d83e5c2f41babcbef862712"
+dependencies = [
+ "fastrace",
+ "take_mut",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -12912,6 +12925,7 @@ dependencies = [
  "either",
  "fastrace",
  "fastrace-opentelemetry",
+ "fastrace-tracing",
  "futures",
  "hostname",
  "madsim-tokio",
