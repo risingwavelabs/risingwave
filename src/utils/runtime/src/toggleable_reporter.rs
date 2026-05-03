@@ -21,9 +21,13 @@ use fastrace::collector::{Reporter, SpanRecord};
 
 /// A fastrace reporter that can be toggled on/off at runtime via an `Arc<AtomicBool>`.
 ///
-/// When disabled, spans are dropped without being reported. When enabled, spans are
-/// forwarded to the inner reporter. This preserves the `enable_tracing` system parameter
-/// semantics without needing to swap reporters via `fastrace::set_reporter`.
+/// When disabled, collected spans are dropped at the **export boundary** without being
+/// forwarded to the inner reporter (e.g. OTLP). Note that fastrace still records spans
+/// in-process even when the reporter gate is off — this toggle only controls whether
+/// recorded spans are exported. When enabled, spans are forwarded to the inner reporter.
+///
+/// This preserves the `enable_tracing` system parameter semantics without needing to
+/// swap reporters via `fastrace::set_reporter`.
 pub(crate) struct ToggleableReporter<R> {
     inner: R,
     enabled: Arc<AtomicBool>,
