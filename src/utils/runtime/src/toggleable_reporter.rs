@@ -56,3 +56,65 @@ impl<R: Reporter> Reporter for ToggleableReporter<R> {
         // Otherwise drop spans silently (disabled state).
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering;
+
+    use fastrace::collector::SpanRecord;
+
+    use super::*;
+
+    /// A minimal reporter that records how many spans it received.
+    #[derive(Default)]
+    struct CountingReporter {
+        count: usize,
+    }
+
+    impl Reporter for CountingReporter {
+        fn report(&mut self, spans: Vec<SpanRecord>) {
+            self.count += spans.len();
+        }
+    }
+
+    #[test]
+    fn disabled_reporter_drops_spans() {
+        let inner = CountingReporter::default();
+        let (mut reporter, _flag) = ToggleableReporter::new(inner);
+
+        // Default is disabled — spans should be dropped
+        reporter.report(vec![SpanRecord::default()]);
+        assert_eq!(reporter.inner.count, 0);
+    }
+
+    #[test]
+    fn enabled_reporter_forwards_spans() {
+        let inner = CountingReporter::default();
+        let (mut reporter, flag) = ToggleableReporter::new(inner);
+
+        flag.store(true, Ordering::Relaxed);
+        reporter.report(vec![SpanRecord::default(), SpanRecord::default()]);
+        assert_eq!(reporter.inner.count, 2);
+    }
+
+    #[test]
+    fn toggle_on_then_off() {
+        let inner = CountingReporter::default();
+        let (mut reporter, flag) = ToggleableReporter::new(inner);
+
+        // Enable, send 1 span
+        flag.store(true, Ordering::Relaxed);
+        reporter.report(vec![SpanRecord::default()]);
+        assert_eq!(reporter.inner.count, 1);
+
+        // Disable, send 1 span — should be dropped
+        flag.store(false, Ordering::Relaxed);
+        reporter.report(vec![SpanRecord::default()]);
+        assert_eq!(reporter.inner.count, 1);
+
+        // Re-enable, send 1 span
+        flag.store(true, Ordering::Relaxed);
+        reporter.report(vec![SpanRecord::default()]);
+        assert_eq!(reporter.inner.count, 2);
+    }
+}
