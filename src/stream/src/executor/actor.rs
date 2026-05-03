@@ -18,6 +18,7 @@ use std::sync::{Arc, LazyLock};
 
 use anyhow::anyhow;
 use await_tree::InstrumentAwait;
+use fastrace::future::FutureExt as _;
 use futures::FutureExt;
 use futures::future::join_all;
 use hytra::TrAdder;
@@ -27,6 +28,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, IntGaugeExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_expr::ExprError;
 use risingwave_expr::expr_context::{FRAGMENT_ID, VNODE_COUNT, expr_context_scope};
 use risingwave_pb::id::SubscriberId;
@@ -241,7 +243,7 @@ where
         let id = self.actor_context.id;
         let span_name = format!("Actor {id}");
 
-        let new_span = |epoch: Option<EpochPair>| {
+        let new_tracing_span = |epoch: Option<EpochPair>| {
             tracing::info_span!(
                 parent: None,
                 "actor",
@@ -251,7 +253,26 @@ where
                 curr_epoch = epoch.map(|e| e.curr),
             )
         };
-        let mut span = new_span(None);
+        let new_fastrace_span = |epoch: Option<EpochPair>, context: Option<&TracingContext>| {
+            let span =
+                context.map_or_else(fastrace::Span::noop, |context| context.root_span("actor"));
+            span.with_property(|| ("otel.name", span_name.clone()))
+                .with_property(|| ("actor_id", id.to_string()))
+                .with_property(|| {
+                    (
+                        "prev_epoch",
+                        epoch.map(|e| e.prev.to_string()).unwrap_or_default(),
+                    )
+                })
+                .with_property(|| {
+                    (
+                        "curr_epoch",
+                        epoch.map(|e| e.curr.to_string()).unwrap_or_default(),
+                    )
+                })
+        };
+        let mut span = new_tracing_span(None);
+        let mut fastrace_span = new_fastrace_span(None, None);
 
         let actor_count = self
             .actor_context
@@ -274,9 +295,12 @@ where
 
         // Drive the streaming task with an infinite loop
         let result = loop {
+            let current_fastrace_span =
+                std::mem::replace(&mut fastrace_span, fastrace::Span::noop());
             let barrier = match stream
                 .try_next()
                 .instrument(span.clone())
+                .in_span(current_fastrace_span)
                 .instrument_await(
                     last_epoch.map_or(await_tree::span!("Epoch <initial>"), |e| {
                         await_tree::span!("Epoch {}", e.curr)
@@ -307,7 +331,10 @@ where
 
             // Tracing related work
             last_epoch = Some(barrier.epoch);
-            span = barrier.tracing_context().attach(new_span(last_epoch));
+            span = barrier
+                .tracing_context()
+                .attach(new_tracing_span(last_epoch));
+            fastrace_span = new_fastrace_span(last_epoch, Some(barrier.tracing_context()));
         };
 
         spawn_blocking_drop_stream(stream).await;

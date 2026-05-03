@@ -148,6 +148,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
 deltalake = { version = "0.32.0", features = ["s3", "gcs"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
+fastrace = { version = "0.7", features = ["enable"] }
 fastrace-tracing = "0.1.1"
 foyer = { version = "0.21.2", features = ["serde", "tracing"] }
 futures-async-stream = "0.2.13"
