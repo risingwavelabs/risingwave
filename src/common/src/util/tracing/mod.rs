@@ -14,6 +14,9 @@
 
 pub mod layer;
 
+#[cfg(test)]
+pub mod test_util;
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::pin::Pin;
