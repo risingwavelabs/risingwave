@@ -4297,7 +4297,7 @@ fn parse_revoke_role() {
 
 #[test]
 fn parse_grant_role_membership_options() {
-    let sql = "GRANT role_a TO user_a WITH INHERIT FALSE, SET FALSE";
+    let sql = "GRANT role_a TO user_a WITH ADMIN OPTION, INHERIT OPTION, SET FALSE";
     match verified_stmt(sql) {
         Statement::GrantRole {
             roles,
@@ -4311,8 +4311,12 @@ fn parse_grant_role_membership_options() {
                 role_options,
                 vec![
                     RoleOptionSpec {
+                        kind: RoleOptionKind::Admin,
+                        value: true
+                    },
+                    RoleOptionSpec {
                         kind: RoleOptionKind::Inherit,
-                        value: false
+                        value: true
                     },
                     RoleOptionSpec {
                         kind: RoleOptionKind::Set,
@@ -4321,6 +4325,23 @@ fn parse_grant_role_membership_options() {
                 ]
             );
             assert_eq!(granted_by, None);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_grant_role_set_option_synonym() {
+    let sql = "GRANT role_a TO user_a WITH SET OPTION";
+    match verified_stmt(sql) {
+        Statement::GrantRole { role_options, .. } => {
+            assert_eq!(
+                role_options,
+                vec![RoleOptionSpec {
+                    kind: RoleOptionKind::Set,
+                    value: true
+                }]
+            );
         }
         _ => unreachable!(),
     }

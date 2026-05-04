@@ -6024,8 +6024,7 @@ impl Parser<'_> {
             "set" => RoleOptionKind::Set,
             _ => parser_err!("expected ADMIN, INHERIT or SET, found {}", option),
         };
-        let value = if matches!(kind, RoleOptionKind::Admin) && self.parse_keyword(Keyword::OPTION)
-        {
+        let value = if self.parse_keyword(Keyword::OPTION) {
             true
         } else {
             self.parse_boolean()?

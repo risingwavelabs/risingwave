@@ -27,6 +27,10 @@
   formatted_sql: GRANT analyst TO login_role
 - input: GRANT analyst TO login_role WITH ADMIN OPTION
   formatted_sql: GRANT analyst TO login_role WITH ADMIN OPTION
+- input: GRANT analyst TO login_role WITH INHERIT OPTION
+  formatted_sql: GRANT analyst TO login_role WITH INHERIT TRUE
+- input: GRANT analyst TO login_role WITH SET OPTION
+  formatted_sql: GRANT analyst TO login_role WITH SET TRUE
 - input: GRANT analyst TO login_role WITH INHERIT FALSE, SET FALSE
   formatted_sql: GRANT analyst TO login_role WITH INHERIT FALSE, SET FALSE
 - input: GRANT analyst TO login_role GRANTED BY current_user
