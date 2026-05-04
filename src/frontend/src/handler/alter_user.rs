@@ -309,6 +309,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_alter_user_rejects_role_options() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("CREATE USER role_option_user")
+            .await
+            .unwrap();
+
+        for option in ["CREATEROLE", "NOCREATEROLE", "INHERIT", "NOINHERIT"] {
+            let err = frontend
+                .run_sql(&format!("ALTER USER role_option_user WITH {option}"))
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("role options are not supported yet"), "{err}");
+        }
+    }
+
+    #[tokio::test]
     async fn test_alter_admin_user() {
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();

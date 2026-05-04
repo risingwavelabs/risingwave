@@ -245,6 +245,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_user_rejects_role_options() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        for (idx, option) in ["CREATEROLE", "NOCREATEROLE", "INHERIT", "NOINHERIT"]
+            .into_iter()
+            .enumerate()
+        {
+            let err = frontend
+                .run_sql(&format!("CREATE USER role_option_user_{idx} WITH {option}"))
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("role options are not supported yet"), "{err}");
+        }
+    }
+
+    #[tokio::test]
     async fn test_create_admin_user() {
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
