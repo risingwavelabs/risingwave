@@ -5668,24 +5668,7 @@ impl Parser<'_> {
 
     /// Parse a GRANT statement.
     pub fn parse_grant(&mut self) -> ModalResult<Statement> {
-        if !self.peek_nth_any_of_keywords(
-            0,
-            &[
-                Keyword::ALL,
-                Keyword::CONNECT,
-                Keyword::CREATE,
-                Keyword::DELETE,
-                Keyword::EXECUTE,
-                Keyword::INSERT,
-                Keyword::REFERENCES,
-                Keyword::SELECT,
-                Keyword::TEMPORARY,
-                Keyword::TRIGGER,
-                Keyword::TRUNCATE,
-                Keyword::UPDATE,
-                Keyword::USAGE,
-            ],
-        ) {
+        if !self.grant_revoke_looks_like_object_privilege(Keyword::TO) {
             let roles = self.parse_comma_separated(Parser::parse_identifier)?;
             self.expect_keyword(Keyword::TO)?;
             let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
@@ -5728,6 +5711,30 @@ impl Parser<'_> {
             with_grant_option,
             granted_by,
         })
+    }
+
+    fn grant_revoke_looks_like_object_privilege(&self, role_separator: Keyword) -> bool {
+        let mut paren_depth = 0usize;
+        let mut index = 0usize;
+
+        loop {
+            match self.peek_nth_token(index).token {
+                Token::EOF | Token::SemiColon => return false,
+                Token::LParen => paren_depth += 1,
+                Token::RParen => paren_depth = paren_depth.saturating_sub(1),
+                Token::Word(word) if paren_depth == 0 => {
+                    if word.keyword == Keyword::ON {
+                        return true;
+                    }
+                    if word.keyword == role_separator {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+
+            index += 1;
+        }
     }
 
     fn parse_privileges(&mut self) -> ModalResult<Privileges> {
@@ -5928,24 +5935,7 @@ impl Parser<'_> {
             None
         };
 
-        let starts_with_privilege = self.peek_nth_any_of_keywords(
-            0,
-            &[
-                Keyword::ALL,
-                Keyword::CONNECT,
-                Keyword::CREATE,
-                Keyword::DELETE,
-                Keyword::EXECUTE,
-                Keyword::INSERT,
-                Keyword::REFERENCES,
-                Keyword::SELECT,
-                Keyword::TEMPORARY,
-                Keyword::TRIGGER,
-                Keyword::TRUNCATE,
-                Keyword::UPDATE,
-                Keyword::USAGE,
-            ],
-        );
+        let starts_with_privilege = self.grant_revoke_looks_like_object_privilege(Keyword::FROM);
         if revoke_grant_option && !starts_with_privilege {
             parser_err!(
                 "GRANT OPTION FOR is not valid for role membership revokes; use ADMIN OPTION FOR"

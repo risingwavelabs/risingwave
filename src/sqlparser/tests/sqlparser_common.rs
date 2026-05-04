@@ -4436,6 +4436,45 @@ fn parse_revoke_role_named_option_words_without_option_clause() {
 }
 
 #[test]
+fn parse_grant_revoke_role_named_privilege_words() {
+    for role in ["connect", "create", "select", "usage"] {
+        let grant_sql = format!("GRANT {role} TO user_a");
+        match verified_stmt(&grant_sql) {
+            Statement::GrantRole {
+                roles,
+                grantees,
+                role_options,
+                granted_by,
+            } => {
+                assert_eq!(roles, vec![Ident::new_unchecked(role)]);
+                assert_eq!(grantees, vec![Ident::new_unchecked("user_a")]);
+                assert!(role_options.is_empty());
+                assert_eq!(granted_by, None);
+            }
+            _ => unreachable!(),
+        }
+
+        let revoke_sql = format!("REVOKE {role} FROM user_a RESTRICT");
+        match verified_stmt(&revoke_sql) {
+            Statement::RevokeRole {
+                roles,
+                grantees,
+                revoke_role_option,
+                granted_by,
+                cascade,
+            } => {
+                assert_eq!(roles, vec![Ident::new_unchecked(role)]);
+                assert_eq!(grantees, vec![Ident::new_unchecked("user_a")]);
+                assert_eq!(revoke_role_option, None);
+                assert_eq!(granted_by, None);
+                assert!(!cascade);
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
 fn parse_set_role() {
     let sql = "SET LOCAL ROLE analytics";
     match verified_stmt(sql) {
