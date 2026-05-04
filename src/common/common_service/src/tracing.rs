@@ -75,6 +75,8 @@ mod tests {
             .find(|span| span.name == "grpc_serve")
             .expect("grpc_serve span not collected");
         assert_eq!(grpc_span.parent_id, parent_span_id);
+        sink.assert_has_span_shape("grpc_serve", &["otel.name", "uri"]);
+        sink.assert_no_property_keys(&["traceparent", "tracestate"]);
 
         let child_span = spans
             .iter()

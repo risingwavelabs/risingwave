@@ -54,6 +54,44 @@ use std::time::Duration;
 use fastrace::collector::{Config, Reporter, SpanRecord};
 use parking_lot::Mutex;
 
+/// Stable, value-free shape of a captured span.
+///
+/// This intentionally records property keys but not property values, so tests
+/// can lock down semantic span shape without depending on high-cardinality
+/// identifiers, timestamps, or other per-run values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpanShape {
+    pub name: String,
+    pub property_keys: Vec<String>,
+    pub event_names: Vec<String>,
+    pub link_count: usize,
+}
+
+impl SpanShape {
+    fn from_record(span: &SpanRecord) -> Self {
+        let mut property_keys = span
+            .properties
+            .iter()
+            .map(|(key, _)| key.to_string())
+            .collect::<Vec<_>>();
+        property_keys.sort();
+
+        let mut event_names = span
+            .events
+            .iter()
+            .map(|event| event.name.to_string())
+            .collect::<Vec<_>>();
+        event_names.sort();
+
+        Self {
+            name: span.name.to_string(),
+            property_keys,
+            event_names,
+            link_count: span.links.len(),
+        }
+    }
+}
+
 /// Process-global lock that tests MUST hold while installing a reporter and
 /// making assertions about collected spans.
 ///
@@ -133,6 +171,54 @@ impl MemoryReporter {
             .into_iter()
             .filter(|span| span.properties.iter().any(|(k, v)| k == key && v == value))
             .collect()
+    }
+
+    /// Return stable, value-free shapes for all captured spans.
+    pub fn span_shapes(&self) -> Vec<SpanShape> {
+        self.snapshot().iter().map(SpanShape::from_record).collect()
+    }
+
+    /// Return stable, value-free shapes for spans whose name equals `name`.
+    pub fn span_shapes_named(&self, name: &str) -> Vec<SpanShape> {
+        self.snapshot()
+            .iter()
+            .filter(|span| span.name == name)
+            .map(SpanShape::from_record)
+            .collect()
+    }
+
+    /// Assert that at least one span with `name` has exactly the given set of
+    /// property keys, independent of property values.
+    #[track_caller]
+    pub fn assert_has_span_shape(&self, name: &str, property_keys: &[&str]) {
+        let mut expected = property_keys
+            .iter()
+            .map(|key| (*key).to_owned())
+            .collect::<Vec<_>>();
+        expected.sort();
+
+        let shapes = self.span_shapes_named(name);
+        assert!(
+            shapes.iter().any(|shape| shape.property_keys == expected),
+            "expected span `{name}` with property keys {expected:#?}; captured shapes: {shapes:#?}",
+        );
+    }
+
+    /// Assert that no captured span has any of the given property keys.
+    #[track_caller]
+    pub fn assert_no_property_keys(&self, forbidden_keys: &[&str]) {
+        let spans = self.snapshot();
+        for span in spans {
+            for (key, value) in &span.properties {
+                assert!(
+                    !forbidden_keys.iter().any(|forbidden| key == forbidden),
+                    "span `{}` unexpectedly contains forbidden property key `{}` with value `{}`",
+                    span.name,
+                    key,
+                    value,
+                );
+            }
+        }
     }
 
     /// Assert that at least one span with the given name was captured.
@@ -226,5 +312,20 @@ mod tests {
         let _ = sink.snapshot();
         sink.clear();
         sink.assert_empty();
+    }
+
+    #[test]
+    fn memory_reporter_reports_value_free_span_shapes() {
+        let _guard = FASTRACE_REPORTER_LOCK.lock();
+        let sink = MemoryReporter::install(Duration::from_millis(10));
+
+        with_root("shape_root", || {
+            let _guard = fastrace::Span::enter_with_local_parent("shape_child")
+                .with_property(|| ("b_key", "run-specific-value"))
+                .with_property(|| ("a_key", "another-run-specific-value"));
+        });
+
+        sink.assert_has_span_shape("shape_child", &["a_key", "b_key"]);
+        sink.assert_no_property_keys(&["traceparent", "tracestate"]);
     }
 }
