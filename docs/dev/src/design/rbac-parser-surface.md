@@ -47,9 +47,8 @@ The worker verification for this lane covers both unit-style parser assertions a
 parser-test YAML contracts:
 
 - `sqlparser_common` role-focused tests
-- `create.yaml`
-- `privilege.yaml`
-- `set.yaml`
+- `role.yaml`
+- `drop.yaml`
 
 These suites are the source of truth for the accepted SQL spellings and formatter
 output of the parser surface described above.
