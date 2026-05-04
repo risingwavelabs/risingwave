@@ -17,18 +17,20 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG};
 use risingwave_meta_model::object::ObjectType;
-use risingwave_meta_model::prelude::{Object, User, UserDefaultPrivilege, UserPrivilege};
+use risingwave_meta_model::prelude::{
+    Object, User, UserDefaultPrivilege, UserPrivilege, UserRoleMembership,
+};
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
     AuthInfo, DatabaseId, DefaultPrivilegeId, PrivilegeId, SchemaId, UserId, object, user,
-    user_default_privilege, user_privilege,
+    user_default_privilege, user_privilege, user_role_membership,
 };
 use risingwave_pb::common::PbObjectType;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::user::update_user_request::PbUpdateField;
-use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
+use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbRoleMembership, PbUserInfo};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{OnConflict, SimpleExpr, Value};
 use sea_orm::{
@@ -127,6 +129,7 @@ impl CatalogController {
             }
             PbUpdateField::Rename => user.name = Set(update_user.name.clone()),
             PbUpdateField::Admin => user.is_admin = Set(update_user.is_admin),
+            PbUpdateField::Inherit => user.can_inherit = Set(update_user.can_inherit),
         });
 
         let user = user.update(&inner.db).await?;
@@ -140,6 +143,22 @@ impl CatalogController {
             .await;
 
         Ok(version)
+    }
+
+    pub async fn list_role_memberships(
+        &self,
+        member_ids: &[UserId],
+    ) -> MetaResult<Vec<PbRoleMembership>> {
+        let inner = self.inner.read().await;
+        let memberships = if member_ids.is_empty() {
+            UserRoleMembership::find().all(&inner.db).await?
+        } else {
+            UserRoleMembership::find()
+                .filter(user_role_membership::Column::MemberId.is_in(member_ids.iter().copied()))
+                .all(&inner.db)
+                .await?
+        };
+        Ok(memberships.into_iter().map(Into::into).collect())
     }
 
     #[cfg(test)]
