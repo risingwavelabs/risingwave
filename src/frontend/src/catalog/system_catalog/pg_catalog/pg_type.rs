@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::Fields;
+use risingwave_common::types::{DataType, Fields};
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::id::SchemaId;
 
@@ -100,9 +100,43 @@ fn read_pg_type(reader: &SysCatalogReaderImpl) -> Result<Vec<PgType>> {
             typdelim: ',',
             typrelid: 0,
             typdefault: None,
-            typcategory: None,
+            typcategory: infer_pg_type_category(rw_type.id, rw_type.typelem),
             typreceive: None,
         });
     }
     Ok(rows)
+}
+
+fn infer_pg_type_category(oid: i32, typelem: i32) -> Option<String> {
+    if typelem != 0 {
+        return Some("A".into());
+    }
+
+    let category = match DataType::from_oid(oid) {
+        Ok(DataType::Boolean) => "B",
+        Ok(
+            DataType::Int16
+            | DataType::Int32
+            | DataType::Int64
+            | DataType::Float32
+            | DataType::Float64
+            | DataType::Decimal
+            | DataType::Serial
+            | DataType::Int256,
+        ) => "N",
+        Ok(DataType::Varchar) => "S",
+        Ok(DataType::Date | DataType::Time | DataType::Timestamp | DataType::Timestamptz) => "D",
+        Ok(DataType::Interval) => "T",
+        Ok(
+            DataType::Bytea
+            | DataType::Jsonb
+            | DataType::List(_)
+            | DataType::Map(_)
+            | DataType::Struct(_)
+            | DataType::Vector(_),
+        )
+        | Err(_) => "U",
+    };
+
+    Some(category.into())
 }

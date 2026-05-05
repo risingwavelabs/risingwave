@@ -18,3 +18,24 @@
     select pg_catalog.pg_relation_is_updatable('hasura_s'::regclass, true);
   expected_outputs:
   - batch_plan
+- sql: |
+    create table hasura_defaults (
+      id int primary key,
+      required_v int not null,
+      optional_v int default 42,
+      required_default_v int not null default 7
+    );
+    select attname, attnotnull, atthasdef
+    from pg_catalog.pg_attribute
+    where attrelid = 'hasura_defaults'::regclass
+      and attname in ('id', 'required_v', 'optional_v', 'required_default_v')
+    order by attnum;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select typname, typcategory
+    from pg_catalog.pg_type
+    where typname in ('int4', '_int4', 'varchar', 'interval')
+    order by typname;
+  expected_outputs:
+  - batch_plan
