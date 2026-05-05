@@ -556,6 +556,7 @@ impl Binder {
                 ("current_user", current_user()),
                 ("user", current_user()),
                 ("pg_get_userbyid", raw_call(ExprType::PgGetUserbyid)),
+                ("pg_get_functiondef", raw_call(ExprType::PgGetFunctiondef)),
                 ("pg_get_indexdef", raw_call(ExprType::PgGetIndexdef)),
                 ("pg_get_viewdef", raw_call(ExprType::PgGetViewdef)),
                 ("pg_index_column_has_property", raw_call(ExprType::PgIndexColumnHasProperty)),

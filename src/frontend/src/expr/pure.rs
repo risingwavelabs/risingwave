@@ -384,6 +384,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ColDescription
             | Type::PgGetViewdef
             | Type::PgGetUserbyid
+            | Type::PgGetFunctiondef
             | Type::PgIndexesSize
             | Type::PgRelationSize
             | Type::PgGetSerialSequence

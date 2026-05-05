@@ -49,3 +49,30 @@
     BatchSort { order: [pg_type.typname ASC] }
     └─BatchFilter { predicate: In(pg_type.typname, 'int4':Varchar, '_int4':Varchar, 'varchar':Varchar, 'bool':Varchar, 'timestamp':Varchar, 'interval':Varchar, 'jsonb':Varchar) }
       └─BatchSysScan { table: pg_type, columns: [pg_type.typname, pg_type.typcategory], distribution: Single }
+- sql: |
+    select proname,
+           provolatile,
+           proretset,
+           proargtypes,
+           proargnames,
+           pronargdefaults
+    from pg_catalog.pg_proc
+    limit 10;
+  batch_plan: |-
+    BatchProject { exprs: [pg_proc.proname, pg_proc.provolatile, pg_proc.proretset, pg_proc.proargtypes, pg_proc.proargnames, pg_proc.pronargdefaults] }
+    └─BatchLimit { limit: 10, offset: 0 }
+      └─BatchSysScan { table: pg_proc, columns: [pg_proc.proname, pg_proc.pronargdefaults, pg_proc.proargtypes, pg_proc.proargnames, pg_proc.provolatile, pg_proc.proretset], distribution: Single }
+- sql: |
+    select aggfnoid
+    from pg_catalog.pg_aggregate
+    limit 10;
+  batch_plan: |-
+    BatchProject { exprs: [pg_proc.oid] }
+    └─BatchLimit { limit: 10, offset: 0 }
+      └─BatchFilter { predicate: (pg_proc.prokind = 'a':Varchar) }
+        └─BatchSysScan { table: pg_proc, columns: [pg_proc.oid, pg_proc.prokind], distribution: Single }
+- sql: |
+    select pg_catalog.pg_get_functiondef(42);
+  batch_plan: |-
+    BatchProject { exprs: [PgGetFunctiondef(42:Int32) as $expr1] }
+    └─BatchValues { rows: [[]] }
