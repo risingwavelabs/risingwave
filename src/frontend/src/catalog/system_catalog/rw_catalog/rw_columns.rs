@@ -16,7 +16,6 @@ use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::id::RelationId;
-use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
@@ -198,8 +197,5 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
 }
 
 fn has_default(column: &ColumnCatalog) -> bool {
-    matches!(
-        &column.column_desc.generated_or_default_column,
-        Some(GeneratedOrDefaultColumn::DefaultColumn(_))
-    )
+    column.column_desc.generated_or_default_column.is_some()
 }
