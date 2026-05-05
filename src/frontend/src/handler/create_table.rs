@@ -120,6 +120,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::DefaultValue(_) => {}
             ColumnOption::DefaultValueInternal { .. } => {}
             ColumnOption::Unique { is_primary: true } => {}
+            ColumnOption::ForeignKey { .. } => {}
             ColumnOption::Null => {}
             ColumnOption::NotNull => {}
             _ => bail_not_implemented!("column constraints \"{}\"", option_def),
@@ -381,6 +382,7 @@ pub fn bind_table_constraints(table_constraints: &[TableConstraint]) -> Result<V
                 }
                 pk_column_names = columns.iter().map(|c| c.real_value()).collect_vec();
             }
+            TableConstraint::ForeignKey { .. } => {}
             _ => bail_not_implemented!("table constraint \"{}\"", constraint),
         }
     }
