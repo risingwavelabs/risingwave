@@ -345,6 +345,7 @@ impl Strong {
             | ExprType::ColDescription
             | ExprType::PgGetViewdef
             | ExprType::PgGetUserbyid
+            | ExprType::PgGetFunctiondef
             | ExprType::PgIndexesSize
             | ExprType::PgRelationSize
             | ExprType::PgGetSerialSequence

@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cast_regclass;
-mod col_description;
-pub mod context;
-mod has_privilege;
-mod pg_get_functiondef;
-mod pg_get_indexdef;
-mod pg_get_userbyid;
-mod pg_get_viewdef;
-mod pg_index_column_has_property;
-mod pg_indexes_size;
-mod pg_relation_is_updatable;
-mod pg_relation_size;
-mod pg_table_is_visible;
-mod rw_actor_vnodes;
-mod rw_cluster_id;
-mod rw_epoch_to_ts;
-mod rw_fragment_vnodes;
-mod rw_recovery_status;
+use risingwave_common::types::Fields;
+use risingwave_frontend_macro::system_catalog;
+
+/// The catalog `pg_aggregate` stores aggregate-function metadata.
+/// Hasura only uses it to filter aggregate routines out of function tracking.
+#[system_catalog(
+    view,
+    "pg_catalog.pg_aggregate",
+    "SELECT oid AS aggfnoid FROM pg_catalog.pg_proc WHERE prokind = 'a'"
+)]
+#[derive(Fields)]
+struct PgAggregate {
+    aggfnoid: i32,
+}

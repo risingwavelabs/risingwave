@@ -1,0 +1,102 @@
+// Copyright 2026 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+statement ok
+create function hasura_add(a int, b int) returns int language sql as $$select a + b$$;
+
+statement ok
+create function hasura_series(n int) returns table (x int) language python as $$
+def hasura_series(n):
+    for i in range(n):
+        yield i
+$$;
+
+statement ok
+create aggregate hasura_sum(value int) returns int language python as $$
+def create_state():
+    return 0
+def accumulate(state, value):
+    if value is None:
+        return state
+    return state + value
+def finish(state):
+    return state
+$$;
+
+query T
+select proname,
+       prokind,
+       ret.typname,
+       proargtypes::varchar,
+       proargnames::varchar,
+       provolatile,
+       proretset::varchar
+from pg_catalog.pg_proc proc
+join pg_catalog.pg_type ret on ret.oid = proc.prorettype
+where proname = 'hasura_add';
+----
+hasura_add f int4 {23,23} {a,b} s false
+
+query T
+select proname,
+       prokind,
+       proretset::varchar
+from pg_catalog.pg_proc
+where proname = 'hasura_series';
+----
+hasura_series f true
+
+query T
+select proname,
+       prokind
+from pg_catalog.pg_proc
+where proname = 'hasura_sum';
+----
+hasura_sum a
+
+query T
+select p.proname
+from pg_catalog.pg_aggregate a
+join pg_catalog.pg_proc p on p.oid = a.aggfnoid
+where p.proname = 'hasura_sum';
+----
+hasura_sum
+
+query T
+select count(*)::varchar
+from pg_catalog.pg_aggregate a
+join pg_catalog.pg_proc p on p.oid = a.aggfnoid
+where p.proname = 'hasura_add';
+----
+0
+
+query T
+select position('CREATE FUNCTION public.hasura_add(a integer, b integer) RETURNS integer LANGUAGE sql AS $$' in pg_catalog.pg_get_functiondef(oid))::varchar,
+       position('select a + b' in pg_catalog.pg_get_functiondef(oid))::varchar
+from pg_catalog.pg_proc
+where proname = 'hasura_add';
+----
+1 87
+
+statement error function does not exist
+select pg_catalog.pg_get_functiondef(2147483647);
+
+statement ok
+drop aggregate hasura_sum(int);
+
+statement ok
+drop function hasura_series(int);
+
+statement ok
+drop function hasura_add(int, int);

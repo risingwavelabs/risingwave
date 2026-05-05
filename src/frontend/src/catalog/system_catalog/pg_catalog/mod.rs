@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod pg_aggregate;
 mod pg_am;
 mod pg_attrdef;
 mod pg_attribute;

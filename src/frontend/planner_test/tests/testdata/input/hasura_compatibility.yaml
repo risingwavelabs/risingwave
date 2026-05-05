@@ -39,3 +39,24 @@
     order by typname;
   expected_outputs:
   - batch_plan
+- sql: |
+    select proname,
+           provolatile,
+           proretset,
+           proargtypes,
+           proargnames,
+           pronargdefaults
+    from pg_catalog.pg_proc
+    limit 10;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select aggfnoid
+    from pg_catalog.pg_aggregate
+    limit 10;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    select pg_catalog.pg_get_functiondef(42);
+  expected_outputs:
+  - batch_plan
