@@ -1,0 +1,86 @@
+# Copyright 2026 RisingWave Labs
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+statement ok
+set rw_implicit_flush = true;
+
+statement ok
+create table hasura_runtime_cte (
+  id int primary key,
+  required_v int not null,
+  generated_v int as required_v + 1
+);
+
+query II
+insert into hasura_runtime_cte values (10, 2) returning id, generated_v;
+----
+10 3
+
+query II
+update hasura_runtime_cte set required_v = 4 where id = 10 returning id, generated_v;
+----
+10 5
+
+query II
+delete from hasura_runtime_cte where id = 10 returning id, generated_v;
+----
+10 5
+
+query T
+with ins as (
+  insert into hasura_runtime_cte values (1, 7)
+  returning *
+)
+select row_to_json(ins)::varchar from ins;
+----
+{"id":1,"required_v":7,"generated_v":8}
+
+query I
+select generated_v from hasura_runtime_cte where id = 1;
+----
+8
+
+query T
+with upd as (
+  update hasura_runtime_cte
+  set required_v = 9
+  where id = 1
+  returning *
+)
+select row_to_json(upd)::varchar from upd;
+----
+{"id":1,"required_v":9,"generated_v":10}
+
+query I
+select generated_v from hasura_runtime_cte where id = 1;
+----
+10
+
+query T
+with del as (
+  delete from hasura_runtime_cte
+  where id = 1
+  returning *
+)
+select row_to_json(del)::varchar from del;
+----
+{"id":1,"required_v":9,"generated_v":10}
+
+query I
+select count(*) from hasura_runtime_cte;
+----
+0
+
+statement ok
+drop table hasura_runtime_cte;

@@ -116,6 +116,7 @@ pub async fn handle_parse(
         let bound_result = BoundResult {
             stmt_type: StatementType::FETCH_CURSOR,
             must_dist: false,
+            has_write_side_effects: false,
             bound: BoundStatement::FetchCursor(Box::new(bound)),
             param_types: binder.export_param_types()?,
             parsed_params: None,

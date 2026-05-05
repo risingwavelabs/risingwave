@@ -1017,6 +1017,7 @@ impl SubscriptionCursor {
             query_mode,
             schema,
             stmt_type: StatementType::SELECT,
+            has_write_side_effects: false,
             dependent_relations: vec![],
             dependent_secrets: vec![],
         })

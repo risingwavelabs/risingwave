@@ -26,7 +26,7 @@ use risingwave_common::catalog::{FunctionId, Schema, SecretId};
 use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_sqlparser::ast::{SetExpr, Statement};
+use risingwave_sqlparser::ast::{CteInner, Query as AstQuery, SetExpr, Statement};
 
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{PgResponseStream, RwPgResponse, create_mv, declare_cursor};
@@ -269,6 +269,7 @@ pub fn gen_batch_plan_by_statement(
 pub struct BoundResult {
     pub(crate) stmt_type: StatementType,
     pub(crate) must_dist: bool,
+    pub(crate) has_write_side_effects: bool,
     pub(crate) bound: BoundStatement,
     pub(crate) param_types: Vec<DataType>,
     pub(crate) parsed_params: Option<Vec<Datum>>,
@@ -282,12 +283,14 @@ fn gen_bound(mut binder: Binder, stmt: Statement) -> Result<BoundResult> {
     let stmt_type = StatementType::infer_from_statement(&stmt)
         .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
     let must_dist = must_run_in_distributed_mode(&stmt)?;
+    let has_write_side_effects = statement_has_write_side_effects(&stmt)?;
 
     let bound = binder.bind(stmt)?;
 
     Ok(BoundResult {
         stmt_type,
         must_dist,
+        has_write_side_effects,
         bound,
         param_types: binder.export_param_types()?,
         parsed_params: None,
@@ -302,6 +305,7 @@ pub struct RwBatchQueryPlanResult {
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
+    pub(crate) has_write_side_effects: bool,
     // Note that these relations are only resolved in the binding phase, and it may only be a
     // subset of the final one. i.e. the final one may contain more implicit dependencies on
     // indices.
@@ -317,6 +321,7 @@ fn gen_batch_query_plan(
     let BoundResult {
         stmt_type,
         must_dist,
+        has_write_side_effects,
         bound,
         dependent_relations,
         dependent_secrets,
@@ -393,30 +398,58 @@ fn gen_batch_query_plan(
         query_mode,
         schema,
         stmt_type,
+        has_write_side_effects,
         dependent_relations: dependent_relations.into_iter().collect_vec(),
         dependent_secrets: dependent_secrets.into_iter().collect_vec(),
     };
     Ok(BatchPlanChoice::Rw(result))
 }
 
-fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
-    fn is_insert_using_select(stmt: &Statement) -> bool {
-        fn has_select_query(set_expr: &SetExpr) -> bool {
-            match set_expr {
-                SetExpr::Select(_) => true,
-                SetExpr::Query(query) => has_select_query(&query.body),
-                SetExpr::SetOperation { left, right, .. } => {
-                    has_select_query(left) || has_select_query(right)
-                }
-                SetExpr::Values(_) => false,
-            }
-        }
+fn query_contains_modifying_cte(query: &AstQuery) -> bool {
+    query.with.as_ref().is_some_and(|with| {
+        with.cte_tables.iter().any(|cte| match &cte.cte_inner {
+            CteInner::Statement(statement) => statement_requires_distributed_mode(statement),
+            CteInner::Query(query) => query_contains_modifying_cte(query),
+            CteInner::ChangeLog(_) => false,
+        })
+    })
+}
 
-        matches!(
-            stmt,
-            Statement::Insert {source, ..} if has_select_query(&source.body)
-        )
+fn statement_requires_distributed_mode(stmt: &Statement) -> bool {
+    if StatementType::infer_from_statement(stmt).is_ok_and(|stmt_type| stmt_type.is_dml()) {
+        return true;
     }
+
+    matches!(stmt, Statement::Query(query) if query_contains_modifying_cte(query))
+        || is_insert_using_select(stmt)
+}
+
+fn is_insert_using_select(stmt: &Statement) -> bool {
+    fn has_select_query(set_expr: &SetExpr) -> bool {
+        match set_expr {
+            SetExpr::Select(_) => true,
+            SetExpr::Query(query) => has_select_query(&query.body),
+            SetExpr::SetOperation { left, right, .. } => {
+                has_select_query(left) || has_select_query(right)
+            }
+            SetExpr::Values(_) => false,
+        }
+    }
+
+    matches!(
+        stmt,
+        Statement::Insert {source, ..} if has_select_query(&source.body)
+    )
+}
+
+fn statement_has_write_side_effects(stmt: &Statement) -> Result<bool> {
+    let stmt_type = StatementType::infer_from_statement(stmt)
+        .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
+
+    Ok(stmt_type.is_dml() || matches!(stmt, Statement::Query(query) if query_contains_modifying_cte(query)))
+}
+
+fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
 
     let stmt_type = StatementType::infer_from_statement(stmt)
         .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
@@ -427,7 +460,8 @@ fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
             | StatementType::DELETE
             | StatementType::UPDATE_RETURNING
             | StatementType::DELETE_RETURNING
-    ) | is_insert_using_select(stmt))
+    ) || is_insert_using_select(stmt)
+        || matches!(stmt, Statement::Query(query) if query_contains_modifying_cte(query)))
 }
 
 fn must_run_in_local_mode(batch_plan: &BatchPlanRoot) -> bool {
@@ -447,6 +481,7 @@ pub struct BatchPlanFragmenterResult {
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
+    pub(crate) has_write_side_effects: bool,
 }
 
 pub fn gen_batch_plan_fragmenter(
@@ -458,6 +493,7 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
+        has_write_side_effects,
         ..
     } = plan_result;
 
@@ -482,6 +518,7 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
+        has_write_side_effects,
     })
 }
 
@@ -494,23 +531,15 @@ pub async fn create_stream(
         plan_fragmenter,
         query_mode,
         schema,
-        stmt_type,
+        has_write_side_effects,
         ..
     } = plan_fragmenter_result;
 
     let mut can_timeout_cancel = true;
     // Acquire the write guard for DML statements.
-    match stmt_type {
-        StatementType::INSERT
-        | StatementType::INSERT_RETURNING
-        | StatementType::DELETE
-        | StatementType::DELETE_RETURNING
-        | StatementType::UPDATE
-        | StatementType::UPDATE_RETURNING => {
-            session.txn_write_guard()?;
-            can_timeout_cancel = false;
-        }
-        _ => {}
+    if has_write_side_effects {
+        session.txn_write_guard()?;
+        can_timeout_cancel = false;
     }
 
     let query = plan_fragmenter.generate_complete_query().await?;
@@ -554,6 +583,7 @@ async fn execute_risingwave_plan(
     let first_field_format = formats.first().copied().unwrap_or(Format::Text);
     let query_mode = plan_fragmenter_result.query_mode;
     let stmt_type = plan_fragmenter_result.stmt_type;
+    let has_write_side_effects = plan_fragmenter_result.has_write_side_effects;
 
     let query_start_time = Instant::now();
     let (row_stream, pg_descs) =
@@ -563,7 +593,7 @@ async fn execute_risingwave_plan(
     // it sent. This is achieved by the `callback` in `PgResponse`.
     let callback = async move {
         // Implicitly flush the writes.
-        if session.config().implicit_flush() && stmt_type.is_dml() {
+        if session.config().implicit_flush() && has_write_side_effects {
             do_flush(&session).await?;
         }
 

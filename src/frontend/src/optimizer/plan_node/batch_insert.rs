@@ -106,6 +106,17 @@ impl ToBatchPb for BatchInsert {
                 })
                 .collect(),
         };
+        let generated_columns = &self.core.generated_columns;
+        let has_generated_columns = !generated_columns.is_empty();
+        let generated_columns = DefaultColumns {
+            default_columns: generated_columns
+                .iter()
+                .map(|(i, expr)| IndexAndExpr {
+                    index: *i as u32,
+                    expr: Some(expr.to_expr_proto()),
+                })
+                .collect(),
+        };
         NodeBody::Insert(InsertNode {
             table_id: self.core.table_id,
             table_version_id: self.core.table_version_id,
@@ -118,6 +129,11 @@ impl ToBatchPb for BatchInsert {
             row_id_index: self.core.row_id_index.map(|index| index as _),
             returning: self.core.returning,
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
+            generated_columns: if has_generated_columns {
+                Some(generated_columns)
+            } else {
+                None
+            },
         })
     }
 }

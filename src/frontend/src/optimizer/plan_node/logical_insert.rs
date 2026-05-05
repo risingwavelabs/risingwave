@@ -59,6 +59,11 @@ impl LogicalInsert {
     }
 
     #[must_use]
+    pub fn generated_columns(&self) -> Vec<(usize, ExprImpl)> {
+        self.core.generated_columns.clone()
+    }
+
+    #[must_use]
     pub fn table_id(&self) -> TableId {
         self.core.table_id
     }
@@ -130,6 +135,12 @@ impl ExprRewritable<Logical> for LogicalInsert {
             .into_iter()
             .map(|(c, e)| (c, r.rewrite_expr(e)))
             .collect();
+        new.core.generated_columns = new
+            .core
+            .generated_columns
+            .into_iter()
+            .map(|(c, e)| (c, r.rewrite_expr(e)))
+            .collect();
         new.into()
     }
 }
@@ -138,6 +149,10 @@ impl ExprVisitable for LogicalInsert {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.core
             .default_columns
+            .iter()
+            .for_each(|(_, e)| v.visit_expr(e));
+        self.core
+            .generated_columns
             .iter()
             .for_each(|(_, e)| v.visit_expr(e));
     }

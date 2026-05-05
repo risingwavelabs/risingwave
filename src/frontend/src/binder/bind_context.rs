@@ -28,7 +28,7 @@ use crate::expr::ExprImpl;
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
-use crate::binder::{BoundQuery, COLUMN_GROUP_PREFIX, ShareId};
+use crate::binder::{BoundQuery, BoundStatement, COLUMN_GROUP_PREFIX, ShareId};
 
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
@@ -87,6 +87,10 @@ pub enum BindingCteState {
     /// We get the whole bound result of the CTE.
     Bound {
         query: BoundQuery,
+    },
+
+    Statement {
+        stmt: BoundStatement,
     },
 
     ChangeLog {

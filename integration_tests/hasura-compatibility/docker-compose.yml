@@ -1,0 +1,27 @@
+services:
+  metadata-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: hasura_metadata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hasura_metadata"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  hasura:
+    image: hasura/graphql-engine:v2.44.0
+    depends_on:
+      metadata-db:
+        condition: service_healthy
+    environment:
+      HASURA_GRAPHQL_METADATA_DATABASE_URL: postgres://postgres:postgres@metadata-db:5432/hasura_metadata
+      HASURA_GRAPHQL_ADMIN_SECRET: rw-hasura
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "false"
+      HASURA_GRAPHQL_DEV_MODE: "true"
+      RW_DATABASE_URL: ${RW_DATABASE_URL:-postgres://root@host.docker.internal:4566/dev?options=-c%20rw_implicit_flush%3Dtrue}
+    ports:
+      - "18080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -152,6 +152,14 @@ impl Binder {
             );
         }
 
+        let func_name = match func_name.as_str() {
+            "json_agg" => "jsonb_agg".to_owned(),
+            "json_object_agg" => "jsonb_object_agg".to_owned(),
+            "json_build_array" => "jsonb_build_array".to_owned(),
+            "json_build_object" => "jsonb_build_object".to_owned(),
+            _ => func_name,
+        };
+
         // Bind function arguments. Secret references are bound as ExprImpl::SecretRef first,
         // and then restricted to UDF calls below.
         let has_secret_ref_arg = arg_list.args.iter().any(|arg| {

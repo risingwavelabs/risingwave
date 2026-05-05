@@ -43,6 +43,7 @@ pub struct UpdateExecutor {
     child: BoxedExecutor,
     old_exprs: Vec<BoxedExpression>,
     new_exprs: Vec<BoxedExpression>,
+    returning_exprs: Vec<BoxedExpression>,
     chunk_size: usize,
     schema: Schema,
     identity: String,
@@ -61,6 +62,7 @@ impl UpdateExecutor {
         child: BoxedExecutor,
         old_exprs: Vec<BoxedExpression>,
         new_exprs: Vec<BoxedExpression>,
+        returning_exprs: Vec<BoxedExpression>,
         chunk_size: usize,
         identity: String,
         returning: bool,
@@ -68,7 +70,18 @@ impl UpdateExecutor {
         upsert: bool,
     ) -> Self {
         let chunk_size = chunk_size.next_multiple_of(2);
-        let table_schema = child.schema().clone();
+        let table_schema = if returning {
+            Schema::new(
+                returning_exprs
+                    .iter()
+                    .map(|expr| Field::unnamed(expr.return_type()))
+                    .collect(),
+            )
+        } else {
+            Schema {
+                fields: vec![Field::unnamed(DataType::Int64)],
+            }
+        };
         let txn_id = dml_manager.gen_txn_id();
 
         Self {
@@ -78,14 +91,9 @@ impl UpdateExecutor {
             child,
             old_exprs,
             new_exprs,
+            returning_exprs,
             chunk_size,
-            schema: if returning {
-                table_schema
-            } else {
-                Schema {
-                    fields: vec![Field::unnamed(DataType::Int64)],
-                }
-            },
+            schema: table_schema,
             identity,
             returning,
             txn_id,
@@ -174,7 +182,12 @@ impl UpdateExecutor {
             };
 
             if self.returning {
-                yield updated_data_chunk.clone();
+                let mut columns = Vec::with_capacity(self.returning_exprs.len());
+                for expr in &self.returning_exprs {
+                    let column = expr.eval(&input).await?;
+                    columns.push(column);
+                }
+                yield DataChunk::new(columns, input.visibility().clone());
             }
 
             for (row_delete, row_insert) in
@@ -248,6 +261,11 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             .iter()
             .map(build_from_prost)
             .try_collect()?;
+        let returning_exprs: Vec<_> = update_node
+            .get_returning_exprs()
+            .iter()
+            .map(build_from_prost)
+            .try_collect()?;
 
         Ok(Box::new(Self::new(
             table_id,
@@ -256,6 +274,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             child,
             old_exprs,
             new_exprs,
+            returning_exprs,
             source.context().get_config().developer.chunk_size,
             source.plan_node().get_identity().clone(),
             update_node.returning,

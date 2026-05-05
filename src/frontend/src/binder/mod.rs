@@ -119,6 +119,7 @@ pub struct Binder {
     next_share_id: ShareId,
 
     session_config: Arc<RwLock<SessionConfig>>,
+    custom_session_config: Arc<RwLock<HashMap<String, String>>>,
 
     search_path: SearchPath,
     /// The type of binding statement.
@@ -258,6 +259,7 @@ impl Binder {
             next_values_id: 0,
             next_share_id: 0,
             session_config: session.shared_config(),
+            custom_session_config: session.shared_custom_config(),
             search_path: session.config().search_path(),
             bind_for,
             shared_views: HashMap::new(),
