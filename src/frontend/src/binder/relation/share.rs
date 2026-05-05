@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Field;
 
 use crate::binder::statement::RewriteExprsRecursive;
-use crate::binder::{BoundQuery, Relation, ShareId};
+use crate::binder::{BoundQuery, BoundStatement, Relation, ShareId};
 use crate::error::{ErrorCode, Result};
 use crate::optimizer::plan_node::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP};
 
@@ -26,6 +26,7 @@ use crate::optimizer::plan_node::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP};
 #[derive(Debug, Clone)]
 pub enum BoundShareInput {
     Query(BoundQuery),
+    Statement(BoundStatement),
     ChangeLog(Relation),
 }
 impl BoundShareInput {
@@ -36,6 +37,11 @@ impl BoundShareInput {
                 .fields()
                 .iter()
                 .cloned()
+                .map(|f| (false, f))
+                .collect_vec()),
+            BoundShareInput::Statement(stmt) => Ok(stmt
+                .output_fields()
+                .into_iter()
                 .map(|f| (false, f))
                 .collect_vec()),
             BoundShareInput::ChangeLog(r) => {
@@ -95,6 +101,16 @@ impl RewriteExprsRecursive for BoundShare {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         match &mut self.input {
             BoundShareInput::Query(q) => q.rewrite_exprs_recursive(rewriter),
+            BoundShareInput::Statement(stmt) => match stmt {
+                BoundStatement::Insert(i) => i.rewrite_exprs_recursive(rewriter),
+                BoundStatement::Delete(d) => d.rewrite_exprs_recursive(rewriter),
+                BoundStatement::Update(u) => u.rewrite_exprs_recursive(rewriter),
+                BoundStatement::Query(q) => q.rewrite_exprs_recursive(rewriter),
+                BoundStatement::DeclareCursor(d) => d.rewrite_exprs_recursive(rewriter),
+                BoundStatement::DeclareSubscriptionCursor(_) => {}
+                BoundStatement::FetchCursor(_) => {}
+                BoundStatement::CreateView(c) => c.rewrite_exprs_recursive(rewriter),
+            },
             BoundShareInput::ChangeLog(r) => r.rewrite_exprs_recursive(rewriter),
         };
     }

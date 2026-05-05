@@ -364,6 +364,7 @@ impl fmt::Display for Cte {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.cte_inner {
             CteInner::Query(query) => write!(f, "{} AS ({})", self.alias, query)?,
+            CteInner::Statement(statement) => write!(f, "{} AS ({})", self.alias, statement)?,
             CteInner::ChangeLog(obj_name) => {
                 write!(f, "{} AS changelog from {}", self.alias, obj_name)?
             }
@@ -375,6 +376,7 @@ impl fmt::Display for Cte {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CteInner {
     Query(Box<Query>),
+    Statement(Box<Statement>),
     ChangeLog(ObjectName),
 }
 

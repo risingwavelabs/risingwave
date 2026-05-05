@@ -147,8 +147,9 @@ pub(crate) fn find_ddl_references_for_query(query: &Query, ddl_references: &mut 
     let Query { with, body, .. } = query;
     if let Some(With { cte_tables, .. }) = with {
         for Cte { cte_inner, .. } in cte_tables {
-            if let CteInner::Query(query) = cte_inner {
-                find_ddl_references_for_query(query, ddl_references)
+            match cte_inner {
+                CteInner::Query(query) => find_ddl_references_for_query(query, ddl_references),
+                CteInner::Statement(_) | CteInner::ChangeLog(_) => {}
             }
         }
     }

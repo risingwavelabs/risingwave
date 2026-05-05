@@ -170,6 +170,7 @@ pub fn handle_bind(
             let BoundResult {
                 stmt_type,
                 must_dist,
+                has_write_side_effects,
                 bound,
                 param_types,
                 dependent_relations,
@@ -182,6 +183,7 @@ pub fn handle_bind(
             let new_bound_result = BoundResult {
                 stmt_type,
                 must_dist,
+                has_write_side_effects,
                 param_types,
                 parsed_params: Some(parsed_params),
                 dependent_relations,

@@ -114,6 +114,7 @@ impl ToBatch for LogicalUpdate {
             input: new_input,
             old_exprs: self.core.old_exprs.clone(),
             new_exprs: self.core.new_exprs.clone(),
+            returning_exprs: self.core.returning_exprs.clone(),
             returning: self.core.returning,
         };
         Ok(BatchUpdate::new(core, self.schema().clone()).into())

@@ -92,6 +92,12 @@ impl ToBatchPb for BatchUpdate {
             .iter()
             .map(|x| x.to_expr_proto())
             .collect();
+        let returning_exprs = self
+            .core
+            .returning_exprs
+            .iter()
+            .map(|x| x.to_expr_proto())
+            .collect();
 
         NodeBody::Update(UpdateNode {
             table_id: self.core.table_id,
@@ -99,6 +105,7 @@ impl ToBatchPb for BatchUpdate {
             returning: self.core.returning,
             old_exprs,
             new_exprs,
+            returning_exprs,
             upsert: self.base.ctx().session_ctx().config().upsert_dml(),
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })

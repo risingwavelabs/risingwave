@@ -18,11 +18,13 @@ use educe::Educe;
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema, TableVersionId};
 use risingwave_common::types::DataType;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::OptimizerContextRef;
 use crate::catalog::TableId;
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::property::FunctionalDependencySet;
 
 #[derive(Debug, Clone, Educe)]
@@ -37,6 +39,7 @@ pub struct Insert<PlanRef: Eq + Hash> {
     pub input: PlanRef,
     pub column_indices: Vec<usize>, // columns in which to insert
     pub default_columns: Vec<(usize, ExprImpl)>, // columns to be set to default
+    pub generated_columns: Vec<(usize, ExprImpl)>, // generated columns for RETURNING only
     pub row_id_index: Option<usize>,
     pub returning: bool,
 }
@@ -83,6 +86,7 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
             input,
             column_indices: self.column_indices.clone(),
             default_columns: self.default_columns.clone(),
+            generated_columns: self.generated_columns.clone(),
             row_id_index: self.row_id_index,
             returning: self.returning,
         }
@@ -106,6 +110,9 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
             if !self.default_columns.is_empty() {
                 capacity += 1;
             }
+            if !self.generated_columns.is_empty() {
+                capacity += 1;
+            }
         }
         let mut vec = Vec::with_capacity(capacity);
         vec.push(("table", Pretty::from(self.table_name.clone())));
@@ -125,6 +132,14 @@ impl<PlanRef: GenericPlanRef> Insert<PlanRef> {
                     .collect();
                 vec.push(("default", Pretty::Array(collect)));
             }
+            if !self.generated_columns.is_empty() {
+                let collect = self
+                    .generated_columns
+                    .iter()
+                    .map(|(k, v)| Pretty::from(format!("{}<-{:?}", k, v)))
+                    .collect();
+                vec.push(("generated", Pretty::Array(collect)));
+            }
         }
         vec
     }
@@ -141,9 +156,49 @@ impl<PlanRef: Eq + Hash> Insert<PlanRef> {
         table_visible_columns: Vec<ColumnCatalog>,
         column_indices: Vec<usize>,
         default_columns: Vec<(usize, ExprImpl)>,
+        generated_columns: Vec<(usize, ExprImpl)>,
         row_id_index: Option<usize>,
         returning: bool,
     ) -> Self {
+        let generated_columns = if generated_columns.is_empty() {
+            let visible_non_generated_indices = table_visible_columns
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, col)| (!col.is_generated()).then_some(idx))
+                .collect::<Vec<_>>();
+            let generated_column_input_ref_mapping = ColIndexMapping::with_remaining_columns(
+                &visible_non_generated_indices,
+                table_visible_columns.len(),
+            );
+            table_visible_columns
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, col)| {
+                    col.column_desc
+                        .generated_or_default_column
+                        .as_ref()
+                        .and_then(|generated_or_default| match generated_or_default {
+                            GeneratedOrDefaultColumn::GeneratedColumn(generated) => {
+                                Some((idx, generated))
+                            }
+                            GeneratedOrDefaultColumn::DefaultColumn(_) => None,
+                        })
+                })
+                .map(|(idx, generated)| {
+                    (
+                        idx,
+                        generated_column_input_ref_mapping
+                            .clone()
+                            .rewrite_expr(
+                                ExprImpl::from_expr_proto(generated.expr.as_ref().unwrap())
+                                    .expect("expr in generated columns corrupted"),
+                            ),
+                    )
+                })
+                .collect()
+        } else {
+            generated_columns
+        };
         Self {
             table_name,
             table_id,
@@ -152,6 +207,7 @@ impl<PlanRef: Eq + Hash> Insert<PlanRef> {
             input,
             column_indices,
             default_columns,
+            generated_columns,
             row_id_index,
             returning,
         }

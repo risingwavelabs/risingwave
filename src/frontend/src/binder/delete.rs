@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 use super::statement::RewriteExprsRecursive;
 use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::Result;
 use crate::expr::ExprImpl;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::user::UserId;
@@ -87,11 +87,6 @@ impl Binder {
             table_catalog.database_id,
         )?;
 
-        if !returning_items.is_empty() && table_catalog.has_generated_column() {
-            return Err(RwError::from(ErrorCode::BindError(
-                "`RETURNING` clause is not supported for tables with generated columns".to_owned(),
-            )));
-        }
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");

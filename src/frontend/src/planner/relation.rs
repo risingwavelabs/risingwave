@@ -455,6 +455,18 @@ source: {:?}",
                     Some(result) => Ok(result.clone()),
                 }
             }
+            BoundShareInput::Statement(stmt) => {
+                let id = share.share_id;
+                match self.share_cache.get(&id) {
+                    None => {
+                        let result = self.plan_statement(stmt)?.into_unordered_subplan();
+                        let logical_share = LogicalShare::create(result);
+                        self.share_cache.insert(id, logical_share.clone());
+                        Ok(logical_share)
+                    }
+                    Some(result) => Ok(result.clone()),
+                }
+            }
             BoundShareInput::ChangeLog(relation) => {
                 let id = share.share_id;
                 let result = self.plan_changelog(relation)?;

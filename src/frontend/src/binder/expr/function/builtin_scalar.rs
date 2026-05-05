@@ -410,8 +410,12 @@ impl Binder {
                 ("jsonb_delete_path", raw_call(ExprType::JsonbDeletePath)),
                 ("jsonb_strip_nulls", raw_call(ExprType::JsonbStripNulls)),
                 ("to_jsonb", raw_call(ExprType::ToJsonb)),
+                ("to_json", raw_call(ExprType::ToJsonb)),
+                ("row_to_json", raw_call(ExprType::ToJsonb)),
                 ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
                 ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
+                ("json_build_array", raw_call(ExprType::JsonbBuildArray)),
+                ("json_build_object", raw_call(ExprType::JsonbBuildObject)),
                 ("jsonb_populate_record", raw_call(ExprType::JsonbPopulateRecord)),
                 ("jsonb_path_match", raw_call(ExprType::JsonbPathMatch)),
                 ("jsonb_path_exists", raw_call(ExprType::JsonbPathExists)),
@@ -608,6 +612,15 @@ impl Binder {
                         )
                             .into());
                     };
+                    if input.starts_with("hasura.") {
+                        let value = binder
+                            .custom_session_config
+                            .read()
+                            .get(input.as_ref())
+                            .cloned()
+                            .unwrap_or_default();
+                        return Ok(ExprImpl::literal_varchar(value));
+                    }
                     let session_config = binder.session_config.read();
                     Ok(ExprImpl::literal_varchar(session_config.get(input.as_ref())?))
                 })),
@@ -644,6 +657,14 @@ impl Binder {
                             "`is_local = true` is not supported now.".into(),
                         )
                             .into());
+                    }
+
+                    if setting_name.starts_with("hasura.") {
+                        binder
+                            .custom_session_config
+                            .write()
+                            .insert(setting_name.to_string(), new_value.to_string());
+                        return Ok(ExprImpl::literal_varchar(new_value.to_string()));
                     }
 
                     let mut session_config = binder.session_config.write();
