@@ -655,6 +655,20 @@ impl Binder {
                 ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_call(ExprType::PgTableIsVisible)),
                 ("pg_type_is_visible", raw_literal(ExprImpl::literal_bool(true))),
+                ("pg_relation_is_updatable", raw(|_binder, mut inputs| {
+                    // Conservative compatibility stub for Hasura metadata introspection:
+                    // tables are handled separately by Hasura, and views/matviews report non-updatable until we expose real mutability semantics.
+                    if inputs.len() != 2 {
+                        return Err(ErrorCode::ExprError(
+                            "function pg_relation_is_updatable() does not exist".into(),
+                        )
+                            .into());
+                    }
+
+                    inputs[0].cast_to_regclass_mut()?;
+
+                    Ok(ExprImpl::literal_int(0))
+                })),
                 ("pg_get_constraintdef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_get_partkeydef", raw_literal(ExprImpl::literal_null(DataType::Varchar))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
