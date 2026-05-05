@@ -1828,7 +1828,8 @@ impl Session for SessionImpl {
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
     ) -> Result<Portal> {
-        handle_bind(prepare_statement, params, param_formats, result_formats)
+        let session_timezone = self.config().timezone();
+        handle_bind(prepare_statement, params, param_formats, result_formats, session_timezone)
     }
 
     async fn execute(self: Arc<Self>, portal: Portal) -> Result<PgResponse<PgResponseStream>> {
