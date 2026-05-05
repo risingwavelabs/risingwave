@@ -25,7 +25,7 @@ prost = { workspace = true, features = ["no-recursion-limit"] }
 prost-reflect = { workspace = true }
 prost-types = { workspace = true }
 protox = "0.9.1"
-reqwest = { version = "0.12.2", features = ["json"] }
+reqwest = { version = "0.13.2", features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = "1"
