@@ -550,6 +550,32 @@ fn render_actors(
 
         let assignment = assigner.assign_hierarchical(&available_workers, &actors, &vnodes)?;
 
+        let entry_fragment_details = entry_fragments
+            .iter()
+            .map(|fragment| {
+                (
+                    fragment.fragment_id,
+                    FragmentTypeMask::from(fragment.fragment_type_mask),
+                    fragment_source_ids.get(&fragment.fragment_id).copied(),
+                    fragment.parallelism.clone(),
+                )
+            })
+            .collect_vec();
+        let component_fragment_details = components
+            .iter()
+            .filter_map(|fragment_id| {
+                fragment_map.get(fragment_id).map(|fragment| {
+                    (
+                        fragment.fragment_id,
+                        fragment.job_id,
+                        FragmentTypeMask::from(fragment.fragment_type_mask),
+                        fragment_source_ids.get(&fragment.fragment_id).copied(),
+                        fragment.distribution_type,
+                    )
+                })
+            })
+            .collect_vec();
+
         let source_entry_fragment = entry_fragments.iter().find(|f| {
             let mask = FragmentTypeMask::from(f.fragment_type_mask);
             if mask.contains(FragmentTypeFlag::Source) {
@@ -624,12 +650,32 @@ fn render_actors(
                     let actor_id = actor_idx + actor_id_base;
 
                     let splits = if let Some(source_id) = fragment_source_ids.get(&fragment_id) {
-                        assert_eq!(shared_source_id, Some(*source_id));
-
-                        fragment_splits
-                            .get(&(actor_idx))
-                            .cloned()
-                            .unwrap_or_default()
+                        if shared_source_id == Some(*source_id) {
+                            fragment_splits
+                                .get(&(actor_idx))
+                                .cloned()
+                                .unwrap_or_default()
+                        } else {
+                            tracing::warn!(
+                                job_id = %job_id,
+                                fragment_id = %fragment_id,
+                                component_fragment_id = %component_fragment_id,
+                                actor_idx = %actor_idx,
+                                actor_id = %actor_id,
+                                worker_id = %worker_id,
+                                expected_shared_source_id = ?shared_source_id,
+                                actual_source_id = ?source_id,
+                                source_entry_fragment_id = ?source_entry_fragment.map(|fragment| fragment.fragment_id),
+                                ?entries,
+                                ?components,
+                                ?entry_fragment_details,
+                                ?component_fragment_details,
+                                ?assignment,
+                                fragment_split_actor_ids = ?fragment_splits.keys().copied().collect_vec(),
+                                "source id mismatch in no-shuffle ensemble during actor rendering; skip assigning source splits to avoid propagating inconsistent metadata"
+                            );
+                            vec![]
+                        }
                     } else {
                         vec![]
                     };

@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
+use std::future::pending;
 use std::mem::replace;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,6 +25,7 @@ use futures::TryFutureExt;
 use itertools::Itertools;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::streaming_control_stream_response::Response;
@@ -54,6 +56,9 @@ use crate::manager::{
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
+
+const RW_GLOBAL_BARRIER_PENDING_ON_BOOTSTRAP_RECOVERY: &str =
+    "RW_GLOBAL_BARRIER_PENDING_ON_BOOTSTRAP_RECOVERY";
 
 /// [`crate::barrier::worker::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
 /// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
@@ -194,6 +199,10 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         Ok(paused)
     }
 
+    fn should_block_bootstrap_recovery() -> bool {
+        env_var_is_true(RW_GLOBAL_BARRIER_PENDING_ON_BOOTSTRAP_RECOVERY)
+    }
+
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(mut self, shutdown_rx: Receiver<()>) {
         tracing::info!(
@@ -223,6 +232,14 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             // consistency.
             // Even if there's no actor to recover, we still go through the recovery process to
             // inject the first `Initial` barrier.
+            if Self::should_block_bootstrap_recovery() {
+                warn!(
+                    env_var = RW_GLOBAL_BARRIER_PENDING_ON_BOOTSTRAP_RECOVERY,
+                    "bootstrap recovery is blocked by environment variable; global barrier worker will stay pending before entering recovery"
+                );
+                pending::<()>().await;
+            }
+
             let span = tracing::info_span!("bootstrap_recovery");
             crate::telemetry::report_event(
                 risingwave_pb::telemetry::TelemetryEventStage::Recovery,
