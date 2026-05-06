@@ -147,7 +147,7 @@ fn read_pg_constraint_in_schema(
     database: &str,
     schema: &SchemaCatalog,
 ) -> Vec<PgConstraint> {
-    // Note: We only support primary key constraints now.
+    // We expose primary-key and foreign-key metadata for PostgreSQL compatibility.
     let system_table_rows = schema
         .iter_system_tables()
         .map(|table| PgConstraint::from_system_table(schema, table.as_ref()));
