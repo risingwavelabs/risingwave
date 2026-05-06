@@ -299,10 +299,7 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
 
     let mut session = cluster.start_session();
     session
-        .run("alter system set adaptive_parallelism_strategy to AUTO")
-        .await?;
-    session
-        .run("set streaming_parallelism_for_table = adaptive")
+        .run("set streaming_parallelism_for_table = default")
         .await?;
 
     session.run("create table t (v1 int);").await?;

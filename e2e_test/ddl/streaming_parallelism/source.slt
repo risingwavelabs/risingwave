@@ -1,7 +1,7 @@
 control substitution on
 
 # `onlyif` is sqllogictest conditional syntax.
-# This file is executed by `ci/scripts/e2e-source-test.sh` with
+# This file is executed by `ci/scripts/e2e-source-kafka-test.sh` with
 # `--label streaming_parallelism_source_kafka`.
 onlyif streaming_parallelism_source_kafka
 statement ok
