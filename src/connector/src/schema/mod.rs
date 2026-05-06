@@ -68,4 +68,6 @@ pub enum SchemaFetchError {
         #[backtrace]
         ConnectorError,
     ),
+    #[error("schema registry client error: {0}")]
+    Client(#[from] schema_registry::SchemaRegistryClientError),
 }
