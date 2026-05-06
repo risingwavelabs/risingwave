@@ -50,7 +50,8 @@ impl MonitorClient {
             .wrapped();
 
         Ok(Self {
-            monitor_client: MonitorServiceClient::new(channel),
+            monitor_client: MonitorServiceClient::new(channel)
+                .max_decoding_message_size(usize::MAX),
         })
     }
 
