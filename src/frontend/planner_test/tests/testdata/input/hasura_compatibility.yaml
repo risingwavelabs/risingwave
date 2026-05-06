@@ -35,7 +35,7 @@
 - sql: |
     select typname, typcategory
     from pg_catalog.pg_type
-    where typname in ('int4', '_int4', 'varchar', 'interval')
+    where typname in ('int4', '_int4', 'varchar', 'bool', 'timestamp', 'interval', 'jsonb')
     order by typname;
   expected_outputs:
   - batch_plan
