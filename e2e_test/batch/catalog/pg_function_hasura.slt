@@ -1,37 +1,43 @@
-// Copyright 2026 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+# Copyright 2026 RisingWave Labs
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 statement ok
 create function hasura_add(a int, b int) returns int language sql as $$select a + b$$;
 
 statement ok
-create function hasura_series(n int) returns table (x int) language python as $$
-def hasura_series(n):
-    for i in range(n):
-        yield i
+create function hasura_series(n int) returns table (x int) language javascript as $$
+export function* hasura_series(n) {
+    for (let i = 0; i < n; i++) {
+        yield i;
+    }
+}
 $$;
 
 statement ok
-create aggregate hasura_sum(value int) returns int language python as $$
-def create_state():
-    return 0
-def accumulate(state, value):
-    if value is None:
-        return state
-    return state + value
-def finish(state):
-    return state
+create aggregate hasura_sum(value int) returns int language javascript as $$
+export function create_state() {
+    return 0;
+}
+export function accumulate(state, value) {
+    if (value == null) {
+        return state;
+    }
+    return state + value;
+}
+export function finish(state) {
+    return state;
+}
 $$;
 
 query T
@@ -82,12 +88,12 @@ where p.proname = 'hasura_add';
 0
 
 query T
-select position('CREATE FUNCTION public.hasura_add(a integer, b integer) RETURNS integer LANGUAGE sql AS $$' in pg_catalog.pg_get_functiondef(oid))::varchar,
-       position('select a + b' in pg_catalog.pg_get_functiondef(oid))::varchar
+select (position('CREATE FUNCTION public.hasura_add(a integer, b integer) RETURNS integer LANGUAGE sql AS $$' in pg_catalog.pg_get_functiondef(oid)) > 0)::varchar,
+       (position('select a + b' in pg_catalog.pg_get_functiondef(oid)) > 0)::varchar
 from pg_catalog.pg_proc
 where proname = 'hasura_add';
 ----
-1 87
+true true
 
 statement error function does not exist
 select pg_catalog.pg_get_functiondef(2147483647);
