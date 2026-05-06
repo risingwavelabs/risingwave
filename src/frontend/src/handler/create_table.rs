@@ -129,6 +129,20 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
     Ok(())
 }
 
+fn contains_foreign_key_constraints(
+    column_defs: &[ColumnDef],
+    table_constraints: &[TableConstraint],
+) -> bool {
+    column_defs.iter().any(|column| {
+        column
+            .options
+            .iter()
+            .any(|option| matches!(option.option, ColumnOption::ForeignKey { .. }))
+    }) || table_constraints
+        .iter()
+        .any(|constraint| matches!(constraint, TableConstraint::ForeignKey { .. }))
+}
+
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
@@ -1471,6 +1485,12 @@ pub async fn handle_create_table(
 
     if append_only {
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
+    }
+
+    if contains_foreign_key_constraints(&column_defs, &constraints) {
+        session.notice_to_user(
+            "FOREIGN KEY constraints are accepted for compatibility but not enforced at runtime.",
+        );
     }
 
     session.check_cluster_limits().await?;

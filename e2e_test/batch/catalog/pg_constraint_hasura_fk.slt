@@ -1,0 +1,75 @@
+# Copyright 2026 RisingWave Labs
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+statement ok
+create table hasura_parent (
+    id int primary key
+);
+
+statement ok
+create table hasura_parent_composite (
+    tenant_id int,
+    parent_id int,
+    primary key (tenant_id, parent_id)
+);
+
+statement ok
+create table hasura_child (
+    id int primary key,
+    parent_id int references hasura_parent on delete cascade on update set null,
+    tenant_id int,
+    composite_parent_id int,
+    constraint hasura_child_composite_fkey foreign key (tenant_id, composite_parent_id)
+        references hasura_parent_composite (tenant_id, parent_id)
+        on delete restrict on update no action
+);
+
+query TTTTTTTT
+select
+    conname,
+    contype,
+    conrelid = 'hasura_child'::regclass,
+    confrelid = 'hasura_parent'::regclass,
+    conkey,
+    confkey,
+    confdeltype,
+    confupdtype
+from pg_catalog.pg_constraint
+where conname = 'hasura_child_parent_id_fkey';
+----
+hasura_child_parent_id_fkey f t t {2} {1} c n
+
+query TTTTTTTT
+select
+    conname,
+    contype,
+    conrelid = 'hasura_child'::regclass,
+    confrelid = 'hasura_parent_composite'::regclass,
+    conkey,
+    confkey,
+    confdeltype,
+    confupdtype
+from pg_catalog.pg_constraint
+where conname = 'hasura_child_composite_fkey';
+----
+hasura_child_composite_fkey f t t {3,4} {1,2} r a
+
+statement ok
+drop table hasura_child;
+
+statement ok
+drop table hasura_parent_composite;
+
+statement ok
+drop table hasura_parent;
