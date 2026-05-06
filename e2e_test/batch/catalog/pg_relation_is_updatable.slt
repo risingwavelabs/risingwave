@@ -1,4 +1,4 @@
-# Copyright 2026 RisingWave Labs
+# Copyright 2025 RisingWave Labs
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -47,3 +47,15 @@ query I
 select pg_catalog.pg_relation_is_updatable('hasura_s'::regclass, true);
 ----
 0
+
+statement ok
+drop materialized view hasura_mv;
+
+statement ok
+drop view hasura_v;
+
+statement ok
+drop source hasura_s;
+
+statement ok
+drop table hasura_t;
