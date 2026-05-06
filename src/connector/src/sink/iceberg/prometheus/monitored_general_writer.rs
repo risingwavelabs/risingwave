@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use iceberg::Result;
 use iceberg::spec::{DataFile, PartitionKey};
-use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
+use iceberg::writer::{IcebergWriter, IcebergWriterBuilder, PositionDeleteInput};
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 
@@ -70,6 +70,15 @@ impl<F: IcebergWriter> IcebergWriter for MonitoredGeneralWriter<F> {
         self.write_qps.inc();
         let _timer = self.write_latency.start_timer();
         self.inner.write(record).await
+    }
+
+    async fn write_with_position(
+        &mut self,
+        record: RecordBatch,
+    ) -> Result<Vec<PositionDeleteInput>> {
+        self.write_qps.inc();
+        let _timer = self.write_latency.start_timer();
+        self.inner.write_with_position(record).await
     }
 
     async fn close(&mut self) -> Result<Vec<DataFile>> {
