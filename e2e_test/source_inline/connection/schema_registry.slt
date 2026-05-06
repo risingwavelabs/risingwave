@@ -53,4 +53,48 @@ drop table t;
 statement ok
 drop connection schema_registry_conn;
 
+# Verify connection SHOW visibility and secret-ref redaction in the schema-registry docker environment.
+statement ok
+CREATE USER show_acl_conn_user WITH PASSWORD 'password';
 
+statement ok
+CREATE SCHEMA show_acl_conn;
+
+statement ok
+GRANT USAGE ON SCHEMA show_acl_conn TO show_acl_conn_user;
+
+statement ok
+CREATE SECRET show_acl_conn.hidden_registry WITH (backend = 'meta') AS '${RISEDEV_SCHEMA_REGISTRY_URL}';
+
+statement ok
+CREATE CONNECTION show_acl_conn.visible_conn WITH (
+    type = 'schema_registry',
+    schema.registry = secret show_acl_conn.hidden_registry
+);
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_conn_user -d dev -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); ! grep -q "visible_conn" <<<"$out"'
+
+statement ok
+GRANT USAGE ON CONNECTION show_acl_conn.visible_conn TO show_acl_conn_user;
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_conn_user -d dev -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "visible_conn" <<<"$out"; grep -q "<redacted>" <<<"$out"; ! grep -q "hidden_registry" <<<"$out"'
+
+statement ok
+GRANT USAGE ON SECRET show_acl_conn.hidden_registry TO show_acl_conn_user;
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_conn_user -d dev -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "hidden_registry" <<<"$out"'
+
+statement ok
+DROP CONNECTION show_acl_conn.visible_conn;
+
+statement ok
+DROP SECRET show_acl_conn.hidden_registry;
+
+statement ok
+DROP SCHEMA show_acl_conn;
+
+statement ok
+DROP USER show_acl_conn_user;
