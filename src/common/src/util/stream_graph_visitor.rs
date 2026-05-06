@@ -326,6 +326,11 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "LocalityProviderState");
                 always!(node.progress_table, "LocalityProviderProgress");
             }
+
+            NodeBody::IcebergWithPkIndexWriter(node) => {
+                always!(node.pk_index_table, "IcebergWithPkIndexWriter");
+            }
+
             _ => {}
         }
     };

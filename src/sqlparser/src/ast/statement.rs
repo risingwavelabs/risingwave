@@ -146,9 +146,7 @@ impl Format {
             "UPSERT" => Format::Upsert,
             "NATIVE" => Format::Native,
             "NONE" => Format::None,
-            _ => parser_err!(
-                "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE | NONE after FORMAT"
-            ),
+            _ => parser_err!("expected PROTOBUF | DEBEZIUM | PLAIN | NATIVE | NONE after FORMAT"),
         })
     }
 }

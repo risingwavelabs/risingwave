@@ -35,6 +35,34 @@ risedev slt './e2e_test/sink/sink_into_table/*.slt'
 risedev slt './e2e_test/sink/sink_vector_columns.slt'
 risedev slt './e2e_test/sink/force_compaction_sink.slt'
 
+echo "--- e2e, http sink"
+HTTP_SINK_OUTPUT=$(mktemp)
+HTTP_SINK_HEADERS=$(mktemp)
+python3 e2e_test/sink/http_sink_mock_server.py "$HTTP_SINK_OUTPUT" 18081 "$HTTP_SINK_HEADERS" &
+HTTP_SINK_SERVER_PID=$!
+# Wait for the server to be ready
+for i in $(seq 1 20); do curl -sf http://localhost:18081/ && break; sleep 0.5; done
+
+risedev slt './e2e_test/sink/http_sink.slt'
+
+# Allow a moment for in-flight requests to complete
+sleep 1
+# Verify bodies reached the mock server
+grep -Fx 'before update' "$HTTP_SINK_OUTPUT"
+grep -Fx 'hello world' "$HTTP_SINK_OUTPUT"
+grep -Fx '{"key":"value"}' "$HTTP_SINK_OUTPUT"
+grep -q '"event"' "$HTTP_SINK_OUTPUT"
+# Exactly 1 line from ignore_delete test + 2 from varchar test (NULL was skipped) + 1 from jsonb
+test "$(wc -l < "$HTTP_SINK_OUTPUT")" -eq 4
+# Verify the custom header set via header.x_test = 'rw-http-sink' was sent
+grep -q '"x_test": "rw-http-sink"' "$HTTP_SINK_HEADERS"
+# Verify inferred default content types for varchar and jsonb payloads
+grep -q '"content-type": "text/plain"' "$HTTP_SINK_HEADERS"
+grep -q '"content-type": "application/json"' "$HTTP_SINK_HEADERS"
+
+kill "$HTTP_SINK_SERVER_PID" || true
+rm -f "$HTTP_SINK_OUTPUT" "$HTTP_SINK_HEADERS"
+
 echo "--- Kill cluster"
 risedev ci-kill
 

@@ -283,6 +283,12 @@ seed_old_cluster() {
   echo "--- SINK INTO TABLE TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_original.slt"
 
+  echo "--- ASOF JOIN TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/asof-join/seed.slt"
+
+  echo "--- ASOF JOIN TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/asof-join/validate_original.slt"
+
   echo "--- CDC TEST: Seeding old cluster with data"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/seed.slt"
 
@@ -342,6 +348,9 @@ validate_new_cluster() {
 
   echo "--- SINK INTO TABLE TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_restart.slt"
+
+  echo "--- ASOF JOIN TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/asof-join/validate_restart.slt"
 
   echo "--- CDC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_restart.slt"

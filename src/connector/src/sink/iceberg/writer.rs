@@ -348,7 +348,7 @@ impl IcebergSinkWriterInner {
 
         let parquet_writer_properties = WriterProperties::builder()
             .set_compression(config.get_parquet_compression())
-            .set_max_row_group_size(config.write_parquet_max_row_group_rows())
+            .set_max_row_group_bytes(config.write_parquet_max_row_group_bytes())
             .set_created_by(PARQUET_CREATED_BY.to_owned())
             .build();
 
@@ -458,7 +458,7 @@ impl IcebergSinkWriterInner {
 
         let parquet_writer_properties = WriterProperties::builder()
             .set_compression(config.get_parquet_compression())
-            .set_max_row_group_size(config.write_parquet_max_row_group_rows())
+            .set_max_row_group_bytes(config.write_parquet_max_row_group_bytes())
             .set_created_by(PARQUET_CREATED_BY.to_owned())
             .build();
 

@@ -41,29 +41,21 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes, Encode::Csv],
                     Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Debezium => vec![Encode::Json, Encode::Avro],
-                    Format::Maxwell => vec![Encode::Json],
-                    Format::Canal => vec![Encode::Json],
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
                 PULSAR_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
-                    Format::Maxwell => vec![Encode::Json],
-                    Format::Canal => vec![Encode::Json],
                 ),
                 KINESIS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes, Encode::Csv],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
-                    Format::Maxwell => vec![Encode::Json],
-                    Format::Canal => vec![Encode::Json],
                 ),
                 GOOGLE_PUBSUB_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
-                    Format::Maxwell => vec![Encode::Json],
-                    Format::Canal => vec![Encode::Json],
                 ),
                 NEXMARK_CONNECTOR => hashmap!(
                     Format::Native => vec![Encode::Native],
@@ -98,9 +90,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
                 ),
-                CITUS_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
-                ),
                 MONGODB_CDC_CONNECTOR => hashmap!(
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
@@ -108,7 +97,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Bytes],
                 ),
                 MQTT_CONNECTOR => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Bytes],
+                    Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Bytes],
                 ),
                 TEST_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],

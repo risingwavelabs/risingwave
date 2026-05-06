@@ -265,6 +265,13 @@ impl Sink for IcebergSink {
             bail!("`compaction.write_parquet_max_row_group_rows` must be greater than 0");
         }
 
+        // Validate parquet max row group bytes
+        if let Some(max_row_group_bytes) = iceberg_config.write_parquet_max_row_group_bytes
+            && max_row_group_bytes == 0
+        {
+            bail!("`compaction.write_parquet_max_row_group_bytes` must be greater than 0");
+        }
+
         // Validate parquet compression codec
         if let Some(ref compression) = iceberg_config.write_parquet_compression {
             let valid_codecs = [

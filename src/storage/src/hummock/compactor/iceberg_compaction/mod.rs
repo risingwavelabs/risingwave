@@ -12,9 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use self::iceberg_compactor_runner::create_task_execution;
+pub(crate) use self::report::{
+    IcebergPlanCompletion, IcebergTaskReport, IcebergTaskTracker, ReportSendResult,
+    build_iceberg_task_report, flush_pending_iceberg_task_reports,
+    send_or_buffer_iceberg_task_report,
+};
 use crate::hummock::compactor::iceberg_compaction::iceberg_compactor_runner::IcebergCompactionPlanRunner;
 
 pub(crate) mod iceberg_compactor_runner;
+pub(crate) mod report;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

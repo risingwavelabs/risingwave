@@ -23,6 +23,8 @@ mod recovery;
 #[cfg(madsim)]
 mod scale;
 #[cfg(madsim)]
+mod schema_change;
+#[cfg(madsim)]
 mod utils;
 
 #[cfg(madsim)]

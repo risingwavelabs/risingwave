@@ -26,7 +26,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::{
-    Arrow57FromArrow, arrow_array_57 as arrow, arrow_schema_57 as arrow_schema,
+    Arrow58FromArrow, arrow_array_58 as arrow, arrow_schema_58 as arrow_schema,
 };
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
@@ -45,21 +45,21 @@ mod schema;
 #[derive(Default)]
 pub struct AdbcSnowflakeArrowConvert;
 
-impl Arrow57FromArrow for AdbcSnowflakeArrowConvert {}
+impl Arrow58FromArrow for AdbcSnowflakeArrowConvert {}
 
 impl AdbcSnowflakeArrowConvert {
     pub fn chunk_from_record_batch(
         &self,
         batch: &arrow::RecordBatch,
     ) -> Result<risingwave_common::array::DataChunk, risingwave_common::array::ArrayError> {
-        Arrow57FromArrow::from_record_batch(self, batch)
+        Arrow58FromArrow::from_record_batch(self, batch)
     }
 
     pub fn type_from_field(
         &self,
         field: &arrow_schema::Field,
     ) -> Result<risingwave_common::types::DataType, risingwave_common::array::ArrayError> {
-        Arrow57FromArrow::from_field(self, field)
+        Arrow58FromArrow::from_field(self, field)
     }
 }
 

@@ -149,11 +149,15 @@ pub struct Binder {
     secure_compare_context: Option<SecureCompareContext>,
 }
 
-// There's one more hidden name, `HEADERS`, which is a reserved identifier for HTTP headers. Its type is `JSONB`.
+pub const WEBHOOK_PAYLOAD_FIELD_NAME: &str = "payload";
+
+// There are hidden names reserved for webhook validation expressions:
+// - `headers`, whose type is `JSONB`
+// - `payload`, whose type is `BYTEA`
 #[derive(Default, Clone, Debug)]
 pub struct SecureCompareContext {
-    /// The column name to store the whole payload in `JSONB`, but during validation it will be used as `bytea`
-    pub column_name: String,
+    /// The identifier used to reference the raw webhook payload during validation.
+    pub payload_name: String,
     /// The secret (usually a token provided by the webhook source user) to validate the calls
     pub secret_name: Option<String>,
 }
