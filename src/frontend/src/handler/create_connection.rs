@@ -37,6 +37,8 @@ use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
+use crate::user::has_access_to_object;
+use crate::user::user_catalog::UserCatalog;
 use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
@@ -154,16 +156,49 @@ pub fn print_connection_params(
     params: &PbConnectionParams,
     catalog_reader: &CatalogReadGuard,
 ) -> String {
+    print_connection_params_impl(db_name, params, catalog_reader, None)
+}
+
+pub fn print_connection_params_with_secret_visibility(
+    db_name: &str,
+    params: &PbConnectionParams,
+    catalog_reader: &CatalogReadGuard,
+    current_user: &UserCatalog,
+) -> String {
+    print_connection_params_impl(db_name, params, catalog_reader, Some(current_user))
+}
+
+fn print_connection_params_impl(
+    db_name: &str,
+    params: &PbConnectionParams,
+    catalog_reader: &CatalogReadGuard,
+    current_user: Option<&UserCatalog>,
+) -> String {
     let print_secret_ref = |secret_ref: &SecretRef| -> String {
-        // the lookup across all schemas in the database but should guarantee the secret exists
-        let (schema_name, secret_name) = catalog_reader
-            .find_schema_secret_by_secret_id(db_name, SecretId::from(secret_ref.secret_id))
-            .unwrap();
         let maybe_print_as = match secret_ref.get_ref_as().unwrap() {
             RefAsType::Text => "",
             RefAsType::File => " AS FILE",
             RefAsType::Unspecified => "",
         };
+
+        let secret_id = SecretId::from(secret_ref.secret_id);
+        let (schema_name, secret) = catalog_reader
+            .iter_schemas(db_name)
+            .unwrap()
+            .find_map(|schema| {
+                schema
+                    .get_secret_by_id(secret_id)
+                    .map(|secret| (schema.name.clone(), secret.clone()))
+            })
+            .unwrap();
+
+        if let Some(current_user) = current_user
+            && !has_access_to_object(current_user, secret.id, secret.owner)
+        {
+            return format!("SECRET <redacted>{}", maybe_print_as);
+        }
+
+        let secret_name = secret.name.clone();
         format!("SECRET {}.{}{}", schema_name, secret_name, maybe_print_as,)
     };
     let deref_secrets = params
