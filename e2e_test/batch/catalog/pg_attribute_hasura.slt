@@ -1,0 +1,56 @@
+# Copyright 2026 RisingWave Labs
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+statement ok
+create table hasura_defaults (
+    id int primary key,
+    required_v int not null,
+    nullable_v int,
+    optional_v int default 42,
+    required_default_v int not null default 7,
+    gen_v int as id + 1
+);
+
+query TTT rowsort
+select attname, attnotnull, atthasdef
+from pg_catalog.pg_attribute
+where attrelid = 'hasura_defaults'::regclass
+  and attname in ('id', 'required_v', 'nullable_v', 'optional_v', 'required_default_v')
+order by attname;
+----
+id t f
+nullable_v f f
+optional_v f t
+required_default_v t t
+required_v t f
+
+query TT rowsort
+select attname, atthasdef
+from pg_catalog.pg_attribute
+where attrelid = 'hasura_defaults'::regclass
+  and attname = 'gen_v'
+order by attname;
+----
+gen_v t
+
+query TT
+select attname, attgenerated
+from pg_catalog.pg_attribute
+where attrelid = 'hasura_defaults'::regclass
+  and attname = 'gen_v';
+----
+gen_v s
+
+statement ok
+drop table hasura_defaults;

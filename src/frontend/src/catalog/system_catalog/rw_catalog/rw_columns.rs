@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 use risingwave_pb::id::RelationId;
@@ -36,6 +37,7 @@ struct RwColumn {
     is_distribution_key: bool,
     is_generated: bool,
     is_nullable: bool,
+    has_default: bool,
     generation_expression: Option<String>,
     data_type: String,
     type_oid: i32,
@@ -71,6 +73,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 is_distribution_key: false,
                 is_generated: false,
                 is_nullable: true,
+                has_default: false,
                 generation_expression: None,
                 data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
@@ -94,6 +97,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 is_distribution_key: sink.distribution_key.contains(&index),
                 is_generated: false,
                 is_nullable: column.nullable(),
+                has_default: has_default(column),
                 generation_expression: None,
                 data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
@@ -116,6 +120,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                 is_distribution_key: false,
                 is_generated: false,
                 is_nullable: column.nullable(),
+                has_default: has_default(column),
                 generation_expression: None,
                 data_type: column.data_type().to_string(),
                 type_oid: column.data_type().to_oid(),
@@ -141,6 +146,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                     is_distribution_key: table.distribution_key.contains(&index),
                     is_generated: column.is_generated(),
                     is_nullable: column.nullable(),
+                    has_default: has_default(column),
                     generation_expression: column.generated_expr().map(|expr_node| {
                         let expr = ExprImpl::from_expr_proto(expr_node).unwrap();
                         let expr_display = ExprDisplay {
@@ -173,6 +179,7 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
                     is_distribution_key: false,
                     is_generated: false,
                     is_nullable: column.nullable(),
+                    has_default: has_default(column),
                     generation_expression: None,
                     data_type: column.data_type().to_string(),
                     type_oid: column.data_type().to_oid(),
@@ -187,4 +194,8 @@ fn read_rw_columns_in_schema(current_user: &UserCatalog, schema: &SchemaCatalog)
         .chain(table_rows)
         .chain(schema_rows)
         .collect()
+}
+
+fn has_default(column: &ColumnCatalog) -> bool {
+    column.column_desc.generated_or_default_column.is_some()
 }

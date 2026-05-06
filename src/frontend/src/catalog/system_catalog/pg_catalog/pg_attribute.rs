@@ -34,8 +34,8 @@ use risingwave_frontend_macro::system_catalog;
             END AS attndims,
             c.type_len AS attlen,
             c.position::smallint AS attnum,
-            false AS attnotnull,
-            false AS atthasdef,
+            (NOT c.is_nullable OR c.is_primary_key) AS attnotnull,
+            c.has_default AS atthasdef,
             false AS attisdropped,
             ''::varchar AS attidentity,
             CASE
