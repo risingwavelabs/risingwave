@@ -602,7 +602,6 @@ impl LogicalPlanRef {
 }
 
 impl ColPrunable for LogicalPlanRef {
-
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> LogicalPlanRef {
         let res = self.prune_col_inner(required_cols, ctx);
         #[cfg(debug_assertions)]
@@ -616,7 +615,6 @@ impl ColPrunable for LogicalPlanRef {
 }
 
 impl PredicatePushdown for LogicalPlanRef {
-
     fn predicate_pushdown(
         &self,
         predicate: Condition,

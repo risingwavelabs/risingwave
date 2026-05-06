@@ -310,7 +310,6 @@ impl<R: Rng> SqlGenerator<'_, R> {
         }
     }
 
-
     /// GROUPING SETS will constrain the generated columns.
     fn gen_grouping_sets(&mut self) -> Vec<Expr> {
         let grouping_num = self.rng.random_range(0..=5);

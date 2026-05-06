@@ -228,7 +228,7 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
         )
     }
 
-    #[expect(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn new_inner(
         store: S,
         table_id: TableId,
@@ -1221,7 +1221,7 @@ struct BatchTableInnerIterLogInner<S: StateStore, SD: ValueRowSerde> {
 
 impl<S: StateStore, SD: ValueRowSerde> BatchTableInnerIterLogInner<S, SD> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
-
+    #[allow(clippy::too_many_arguments)]
     async fn new(
         store: &S,
         mapping: Arc<ColumnMapping>,

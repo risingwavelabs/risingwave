@@ -1435,7 +1435,7 @@ mod tests {
             vnode_partition_count: 0,
         };
 
-        #[expect(deprecated)]
+        #[allow(deprecated)]
         let levels = Levels {
             levels: vec![level],
             l0: OverlappingLevel::default(),
@@ -1485,7 +1485,7 @@ mod tests {
     }
 
     /// Build a committed version containing a single SST with custom vnode stats.
-    #[expect(deprecated)]
+    #[allow(deprecated)]
     fn build_version_with_vnode_stats(
         table_id: TableId,
         vnode_stats: VnodeStatistics,
@@ -1587,7 +1587,7 @@ mod tests {
     }
 
     /// Build a committed version from an existing SST (with real object in the store).
-    #[expect(deprecated)]
+    #[allow(deprecated)]
     fn build_version_from_sstables(
         table_id: TableId,
         sstable_infos: Vec<SstableInfo>,
@@ -1656,7 +1656,7 @@ mod tests {
     }
 
     /// Build a committed version from one existing non-overlapping SST.
-
+    #[allow(deprecated)]
     fn build_version_from_sstable(
         table_id: TableId,
         sstable_info: SstableInfo,

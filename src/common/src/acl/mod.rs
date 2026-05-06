@@ -123,7 +123,6 @@ lazy_acl_modes!(ALL_AVAILABLE_CONNECTION_MODES, { Usage });
 lazy_acl_modes!(ALL_AVAILABLE_SECRET_MODES, { Usage });
 
 impl AclModeSet {
-
     pub fn empty() -> Self {
         Self {
             modes: BitFlags::empty(),

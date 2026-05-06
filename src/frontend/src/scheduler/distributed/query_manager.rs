@@ -259,7 +259,6 @@ impl QueryManager {
 }
 
 impl QueryResultFetcher {
-
     pub fn new(
         task_output_id: TaskOutputId,
         task_host: HostAddress,

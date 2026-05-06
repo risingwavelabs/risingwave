@@ -207,7 +207,6 @@ pub mod tests {
         }
     }
 
-
     pub fn generate_table_with_ids_and_epochs(
         id: u64,
         table_prefix: u64,

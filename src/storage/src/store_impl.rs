@@ -681,7 +681,6 @@ pub mod verify {
 
 impl StateStoreImpl {
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
-
     #[expect(clippy::borrowed_box)]
     pub async fn new(
         s: &str,

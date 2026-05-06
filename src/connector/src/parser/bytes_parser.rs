@@ -25,7 +25,6 @@ pub struct BytesAccessBuilder {
 }
 
 impl AccessBuilder for BytesAccessBuilder {
-
     async fn generate_accessor(
         &mut self,
         payload: Vec<u8>,

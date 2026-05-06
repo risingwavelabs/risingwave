@@ -70,6 +70,7 @@ impl ProfileServiceImpl {
         }
     }
 
+    #[expect(clippy::unused_async)]
     pub async fn heap_profiling(
         &self,
         request: Request<HeapProfilingRequest>,
@@ -120,6 +121,7 @@ impl ProfileServiceImpl {
         }
     }
 
+    #[expect(clippy::unused_async)]
     pub async fn list_heap_profiling(
         &self,
         _request: Request<ListHeapProfilingRequest>,

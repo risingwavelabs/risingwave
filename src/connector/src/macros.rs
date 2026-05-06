@@ -148,8 +148,9 @@ macro_rules! dispatch_source_enum_inner {
             $(
                 $enum_type::$source_variant($inner_name) => {
 
+                    #[allow(dead_code)]
                     type PropType = $prop_name;
-                    #[expect(dead_code)]
+                    #[allow(dead_code)]
                     type SplitType = $split;
                     {
                         $body

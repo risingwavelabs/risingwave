@@ -64,7 +64,6 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
     type Properties = CdcProperties<T>;
     type Split = DebeziumCdcSplit<T>;
 
-
     async fn new(
         conn_props: CdcProperties<T>,
         splits: Vec<DebeziumCdcSplit<T>>,

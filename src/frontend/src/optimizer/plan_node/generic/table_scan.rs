@@ -254,7 +254,7 @@ impl TableScan {
     }
 
     /// Create a `LogicalScan` node. Used internally by optimizer.
-
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         output_col_idx: Vec<usize>, // the column index in the table
         table_catalog: Arc<TableCatalog>,

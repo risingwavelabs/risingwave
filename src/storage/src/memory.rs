@@ -53,7 +53,6 @@ use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
 
-
 pub trait RangeKv: Clone + Send + Sync + 'static {
     fn range(
         &self,
@@ -434,7 +433,6 @@ mod batched_iter {
     }
 
     impl<R: RangeKv> Iter<R> {
-
         pub fn next(&mut self) -> StorageResult<Option<(BytesFullKey, Option<Bytes>)>> {
             match self.current.next() {
                 Some((key, value)) => Ok(Some((key, value))),

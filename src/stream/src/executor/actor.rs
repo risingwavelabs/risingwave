@@ -106,7 +106,6 @@ impl ActorContext {
         })
     }
 
-
     pub fn create(
         stream_actor: &BuildActorInfo,
         fragment_id: FragmentId,

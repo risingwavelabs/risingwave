@@ -33,7 +33,6 @@ impl ComputeTelemetryCreator {
 
 #[async_trait::async_trait]
 impl TelemetryReportCreator for ComputeTelemetryCreator {
-
     async fn create_report(
         &self,
         tracking_id: String,

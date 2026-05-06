@@ -69,7 +69,7 @@ fn register_hummock_java_binding_native_methods(
 }
 
 #[unsafe(no_mangle)]
-
+#[allow(non_snake_case)]
 pub extern "system" fn JNI_OnLoad(jvm: JavaVM, _reserved: *mut c_void) -> jint {
     let result: Result<(), jni::errors::Error> = try {
         let mut env = jvm_env(&jvm)?;

@@ -102,7 +102,6 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
 }
 
 impl HopWindowExecutor {
-
     fn new(
         child: BoxedExecutor,
         schema: Schema,

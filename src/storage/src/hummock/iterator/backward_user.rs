@@ -885,7 +885,6 @@ mod tests {
         )
     }
 
-
     async fn chaos_test_case(
         handle: TableHolder,
         start_bound: Bound<UserKey<Bytes>>,

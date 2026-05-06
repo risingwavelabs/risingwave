@@ -50,7 +50,6 @@ pub struct DatagenMeta {
 }
 
 impl DatagenEventGenerator {
-
     pub fn new(
         fields_vec: Vec<FieldDesc>,
         field_names: Vec<String>,

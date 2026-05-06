@@ -14,7 +14,6 @@
 
 //! Encoding and decoding between external data formats and RisingWave datum (i.e., type mappings).
 
-
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]

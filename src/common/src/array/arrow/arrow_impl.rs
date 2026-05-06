@@ -39,7 +39,6 @@
 // Is this a bug? Why do we have these lints?
 #![allow(unused_imports)]
 
-
 use std::fmt::Write;
 
 use arrow_array::array;

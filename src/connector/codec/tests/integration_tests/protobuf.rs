@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #[rustfmt::skip]
-
+#[allow(clippy::all)]
 mod recursive;
 #[rustfmt::skip]
 #[allow(clippy::all)]

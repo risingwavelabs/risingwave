@@ -241,7 +241,6 @@ pub struct IcebergSinkWriterInner {
     uncommitted_write_bytes: u64,
 }
 
-
 enum IcebergWriterDispatch {
     Append {
         writer: Option<Box<dyn IcebergWriter>>,

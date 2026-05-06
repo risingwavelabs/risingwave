@@ -643,7 +643,7 @@ mod tests {
         };
         ($( $pk:literal ),*) => {
             {
-
+                #[allow(unused_mut)]
                 let mut cache = BTreeMap::new();
                 $(
                     cache.insert(
@@ -685,7 +685,7 @@ mod tests {
         };
         ($ord_type:expr, [$( ( $ord:literal, $pk:literal ) ),*]) => {
             {
-
+                #[allow(unused_mut)]
                 let mut cache = BTreeMap::new();
                 $(
                     cache.insert(

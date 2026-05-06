@@ -535,7 +535,6 @@ pub async fn get_partition_compute_info(
     }
 }
 
-
 async fn get_partition_compute_info_for_iceberg(
     _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {

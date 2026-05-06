@@ -151,7 +151,7 @@ pub fn get_committed_read_version_tuple(
 
 impl HummockStorage {
     /// Creates a [`HummockStorage`].
-
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,

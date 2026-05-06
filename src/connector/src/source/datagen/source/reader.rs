@@ -48,7 +48,6 @@ impl SplitReader for DatagenSplitReader {
     type Properties = DatagenProperties;
     type Split = DatagenSplit;
 
-
     async fn new(
         properties: DatagenProperties,
         splits: Vec<DatagenSplit>,

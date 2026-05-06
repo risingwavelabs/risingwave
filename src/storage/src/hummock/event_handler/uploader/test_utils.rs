@@ -250,14 +250,12 @@ pub(super) fn dummy_success_upload_output() -> UploadTaskOutput {
     }
 }
 
-
 pub(super) async fn dummy_success_upload_future(
     _: UploadTaskPayload,
     _: UploadTaskInfo,
 ) -> HummockResult<UploadTaskOutput> {
     Ok(dummy_success_upload_output())
 }
-
 
 pub(super) async fn dummy_fail_upload_future(
     _: UploadTaskPayload,

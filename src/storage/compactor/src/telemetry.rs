@@ -55,7 +55,6 @@ impl CompactorTelemetryCreator {
 
 #[async_trait::async_trait]
 impl TelemetryReportCreator for CompactorTelemetryCreator {
-
     async fn create_report(
         &self,
         tracking_id: String,

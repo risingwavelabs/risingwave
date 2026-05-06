@@ -41,7 +41,6 @@ pub struct ProtobufAccessBuilder {
 }
 
 impl AccessBuilder for ProtobufAccessBuilder {
-
     async fn generate_accessor(
         &mut self,
         payload: Vec<u8>,

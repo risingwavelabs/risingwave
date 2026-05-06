@@ -684,7 +684,6 @@ struct QueryStageBuilder {
 }
 
 impl QueryStageBuilder {
-
     fn new(
         id: StageId,
         parallelism: Option<u32>,

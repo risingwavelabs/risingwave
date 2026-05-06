@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #![feature(trait_alias)]
 #![feature(exact_size_is_empty)]
 #![feature(type_alias_impl_trait)]

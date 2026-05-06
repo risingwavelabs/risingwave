@@ -59,7 +59,6 @@ impl SplitReader for NexmarkSplitReader {
     type Properties = NexmarkProperties;
     type Split = NexmarkSplit;
 
-
     async fn new(
         properties: NexmarkProperties,
         splits: Vec<NexmarkSplit>,

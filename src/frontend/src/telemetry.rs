@@ -54,7 +54,6 @@ impl FrontendTelemetryCreator {
 
 #[async_trait::async_trait]
 impl TelemetryReportCreator for FrontendTelemetryCreator {
-
     async fn create_report(
         &self,
         tracking_id: String,

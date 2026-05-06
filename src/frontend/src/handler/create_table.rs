@@ -461,7 +461,7 @@ pub fn bind_pk_and_row_id_on_relation(
 
 /// `gen_create_table_plan_with_source` generates the plan for creating a table with an external
 /// stream source.
-#[expect(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn gen_create_table_plan_with_source(
     mut handler_args: HandlerArgs,
     explain_options: ExplainOptions,
@@ -553,7 +553,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
 /// source.
-
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan(
     context: OptimizerContext,
     table_name: ObjectName,
@@ -586,7 +586,7 @@ pub(crate) fn gen_create_table_plan(
     )
 }
 
-
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan_without_source(
     context: OptimizerContext,
     table_name: ObjectName,
@@ -738,7 +738,7 @@ pub struct CreateTableProps {
     pub engine: Engine,
 }
 
-
+#[allow(clippy::too_many_arguments)]
 fn gen_table_plan_inner(
     context: OptimizerContextRef,
     schema_name: Option<String>,
@@ -827,7 +827,7 @@ fn gen_table_plan_inner(
 /// Generate stream plan for cdc table based on shared source.
 /// In replace workflow, the `table_id` is the id of the table to be replaced
 /// in create table workflow, the `table_id` is a placeholder will be filled in the Meta
-#[expect(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan_for_cdc_table(
     context: OptimizerContextRef,
     source: Arc<SourceCatalog>,
@@ -1100,7 +1100,7 @@ fn derive_with_options_for_cdc_table(
     unreachable!("All valid CDC connectors should have returned by now")
 }
 
-#[expect(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_create_table_plan(
     handler_args: HandlerArgs,
     explain_options: ExplainOptions,
@@ -1447,7 +1447,7 @@ fn bind_cdc_table_schema(
     Ok((columns, pk_names))
 }
 
-#[expect(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
     handler_args: HandlerArgs,
     table_name: ObjectName,
@@ -1575,7 +1575,7 @@ pub async fn handle_create_table(
 /// 4. create an iceberg source
 ///
 /// See <https://github.com/risingwavelabs/risingwave/issues/21586> for an architecture diagram.
-
+#[allow(clippy::too_many_arguments)]
 pub async fn create_iceberg_engine_table(
     session: Arc<SessionImpl>,
     handler_args: HandlerArgs,
@@ -2508,7 +2508,7 @@ fn ensure_partition_columns_are_prefix_of_primary_key(
     Ok(())
 }
 
-
+#[allow(clippy::too_many_arguments)]
 pub async fn generate_stream_graph_for_replace_table(
     _session: &Arc<SessionImpl>,
     table_name: ObjectName,

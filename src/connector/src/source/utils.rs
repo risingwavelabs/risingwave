@@ -20,7 +20,6 @@
 /// When the feature is disabled, this macro generates standalone dummy implementations for the source,
 /// which return errors indicating the feature is not enabled. The generated types are concrete structs
 /// (not type aliases) to avoid conflicts with macro-generated `TryFrom`/`From` impls in `impl_split`.
-
 macro_rules! feature_gated_source_mod {
     ($mod_name:ident, $source_name:literal) => {
         crate::source::utils::feature_gated_source_mod!($mod_name, $mod_name, $source_name);

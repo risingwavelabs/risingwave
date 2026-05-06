@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use risingwave_common::array::*;
 use risingwave_common::types::ToText;
 use risingwave_expr::expr::Context;
