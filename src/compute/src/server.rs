@@ -454,6 +454,8 @@ pub async fn compute_node_serve(
         SpillOp::clean_spill_directory().await.unwrap();
     }
 
+    const MONITOR_SERVICE_MESSAGE_SIZE_LIMIT: usize = 64 * 1024 * 1024;
+
     let server = tonic::transport::Server::builder()
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
         .initial_stream_window_size(STREAM_WINDOW_SIZE)
@@ -481,7 +483,10 @@ pub async fn compute_node_serve(
                 AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
             }
         })
-        .add_service(MonitorServiceServer::new(monitor_srv))
+        .add_service(
+            MonitorServiceServer::new(monitor_srv)
+                .max_decoding_message_size(MONITOR_SERVICE_MESSAGE_SIZE_LIMIT),
+        )
         .add_service(ConfigServiceServer::new(config_srv))
         .add_service(HealthServer::new(health_srv))
         .monitored_serve_with_shutdown(
