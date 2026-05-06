@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(refining_impl_trait)]
+#![expect(
+    refining_impl_trait,
+    reason = "Some of the Row::iter() implementations returns ExactSizeIterator. Is this reasonable?"
+)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
@@ -23,6 +26,7 @@
 #![feature(error_generic_member_access)]
 #![feature(portable_simd)]
 #![feature(once_cell_try)]
+#![allow(incomplete_features)]
 #![feature(iterator_try_collect)]
 #![feature(iter_order_by)]
 #![feature(binary_heap_into_iter_sorted)]

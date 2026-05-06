@@ -147,7 +147,6 @@ macro_rules! dispatch_source_enum_inner {
         match $enum_value {
             $(
                 $enum_type::$source_variant($inner_name) => {
-
                     #[allow(dead_code)]
                     type PropType = $prop_name;
                     #[allow(dead_code)]

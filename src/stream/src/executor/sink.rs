@@ -232,8 +232,7 @@ macro_rules! dispatch_output_kind {
 
 impl<F: LogStoreFactory> SinkExecutor<F> {
     #[expect(clippy::too_many_arguments)]
-    #[expect(clippy::unused_async)]
-    pub async fn new(
+    pub fn new(
         actor_context: ActorContextRef,
         info: ExecutorInfo,
         input: Executor,
@@ -965,7 +964,6 @@ mod test {
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
             None,
         )
-        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();
@@ -1104,7 +1102,6 @@ mod test {
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             None,
         )
-        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();
@@ -1212,7 +1209,6 @@ mod test {
             vec![DataType::Int64, DataType::Int64],
             None,
         )
-        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();
@@ -1335,7 +1331,6 @@ mod test {
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             None,
         )
-        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();

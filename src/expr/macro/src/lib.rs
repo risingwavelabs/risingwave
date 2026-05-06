@@ -573,18 +573,18 @@ struct AggregateImpl {
     struct_name: String,
     accumulate: UserFunctionAttr,
     retract: Option<UserFunctionAttr>,
-    #[expect(dead_code)] // TODO(wrj): add merge to trait
+    #[allow(dead_code)] // TODO(wrj): add merge to trait
     merge: Option<UserFunctionAttr>,
     finalize: Option<UserFunctionAttr>,
     create_state: Option<UserFunctionAttr>,
-    #[expect(dead_code)] // TODO(wrj): support encode
+    #[allow(dead_code)] // TODO(wrj): support encode
     encode_state: Option<UserFunctionAttr>,
-    #[expect(dead_code)] // TODO(wrj): support decode
+    #[allow(dead_code)] // TODO(wrj): support decode
     decode_state: Option<UserFunctionAttr>,
 }
 
 #[derive(Debug, Clone)]
-#[expect(clippy::large_enum_variant)]
+#[allow(clippy::large_enum_variant)]
 enum AggregateFnOrImpl {
     /// A simple accumulate/retract function.
     Fn(UserFunctionAttr),

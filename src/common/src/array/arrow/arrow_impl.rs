@@ -38,6 +38,7 @@
 
 // Is this a bug? Why do we have these lints?
 #![allow(unused_imports)]
+#![allow(dead_code)]
 
 use std::fmt::Write;
 
@@ -506,7 +507,7 @@ pub trait ToArrow {
 }
 
 /// Defines how to convert Arrow arrays to RisingWave arrays.
-#[expect(clippy::wrong_self_convention)]
+#[allow(clippy::wrong_self_convention)]
 pub trait FromArrow {
     /// Converts Arrow `RecordBatch` to RisingWave `DataChunk`.
     fn from_record_batch(&self, batch: &arrow_array::RecordBatch) -> Result<DataChunk, ArrayError> {
@@ -1247,7 +1248,7 @@ impl FromIntoArrow for F64 {
 impl FromIntoArrow for Date {
     type ArrowType = i32;
 
-    #[expect(deprecated)]
+    #[allow(deprecated)]
     fn from_arrow(value: Self::ArrowType) -> Self {
         Date(arrow_array::types::Date32Type::to_naive_date(value))
     }

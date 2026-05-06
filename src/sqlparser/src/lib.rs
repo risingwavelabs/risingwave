@@ -30,8 +30,8 @@
 //! println!("AST: {:?}", ast);
 //! ```
 
-#![allow(clippy::doc_markdown)]
-#![allow(clippy::upper_case_acronyms)]
+#![expect(clippy::doc_markdown)]
+#![expect(clippy::upper_case_acronyms)]
 #![feature(register_tool)]
 #![register_tool(rw)]
 #![expect(rw::format_error)] // external crate

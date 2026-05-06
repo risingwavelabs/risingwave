@@ -66,8 +66,7 @@ mod old_json_parser {
             })
         }
 
-        #[expect(clippy::unused_async)]
-        pub async fn parse_inner(
+        pub fn parse_inner(
             &self,
             mut payload: Vec<u8>,
             mut writer: SourceStreamChunkRowWriter<'_>,
@@ -170,7 +169,7 @@ fn bench_plain_parser_and_json_parser(c: &mut Criterion) {
                 );
                 for record in records {
                     let writer = builder.row_writer();
-                    parser.parse_inner(record, writer).await.unwrap();
+                    parser.parse_inner(record, writer).unwrap();
                 }
             },
             BatchSize::SmallInput,

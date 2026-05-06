@@ -14,7 +14,10 @@
 
 //! This module provide jni catalog.
 
-#![expect(clippy::disallowed_types)]
+#![expect(
+    clippy::disallowed_types,
+    reason = "construct iceberg::Error to implement the trait"
+)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;

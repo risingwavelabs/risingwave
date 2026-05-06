@@ -235,6 +235,7 @@ impl FunctionAttr {
             _ => (0..num_args).collect_vec(),
         };
         let children_indices = match optimize_const {
+            #[allow(clippy::redundant_clone)] // false-positive
             true => non_prebuilt_indices.clone(),
             false => (0..num_args).collect_vec(),
         };
@@ -362,7 +363,7 @@ impl FunctionAttr {
 
         let record_error = {
             // Uniform arguments into `DatumRef`.
-            #[expect(clippy::disallowed_methods)] // allow zip
+            #[allow(clippy::disallowed_methods)] // allow zip
             let inputs_args = inputs
                 .iter()
                 .zip(user_fn.args_option.iter())
@@ -439,7 +440,7 @@ impl FunctionAttr {
                 }
             };
         } else {
-            #[expect(clippy::disallowed_methods)] // allow zip
+            #[allow(clippy::disallowed_methods)] // allow zip
             let some_inputs = inputs
                 .iter()
                 .zip(user_fn.args_option.iter())
@@ -554,7 +555,7 @@ impl FunctionAttr {
                 },
                 2 => quote! {
                     // allow using `zip` for performance
-                    #[expect(clippy::disallowed_methods)]
+                    #[allow(clippy::disallowed_methods)]
                     let c = #ret_array_type::from_iter_bitmap(
                         a0.raw_iter()
                             .zip(a1.raw_iter())
@@ -1134,7 +1135,7 @@ impl FunctionAttr {
                 .map(|i| quote! { self.context.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
         };
-        #[expect(clippy::disallowed_methods)]
+        #[allow(clippy::disallowed_methods)]
         let optioned_outputs = user_fn
             .core_return_type
             .split(',')
@@ -1202,7 +1203,7 @@ impl FunctionAttr {
         };
         // if user function accepts non-option arguments, we assume the function
         // returns empty on null input, so we need to unwrap the inputs before calling.
-        #[expect(clippy::disallowed_methods)] // allow zip
+        #[allow(clippy::disallowed_methods)] // allow zip
         let some_inputs = inputs
             .iter()
             .zip(user_fn.args_option.iter())
