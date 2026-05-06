@@ -140,7 +140,7 @@ async fn test_backfill_parallelism_switches_to_normal_after_completion() -> Resu
 
     session.run("set streaming_parallelism = 3;").await?;
     session
-        .run("set streaming_parallelism_for_backfill = 'bounded(2)';")
+        .run("set streaming_parallelism_for_backfill = 2;")
         .await?;
     session.run("create table t(v int);").await?;
     session
@@ -275,7 +275,7 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
 
     session.run("set streaming_parallelism = 4;").await?;
     session
-        .run("set streaming_parallelism_for_backfill = 'bounded(2)';")
+        .run("set streaming_parallelism_for_backfill = 2;")
         .await?;
     session.run("set backfill_rate_limit = 1;").await?;
     session.run("set background_ddl = true;").await?;

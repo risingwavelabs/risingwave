@@ -257,9 +257,7 @@ async fn test_parallelism_exceed_virtual_node_max_alter_adaptive() -> Result<()>
     session
         .run("select distinct parallelism from rw_fragment_parallelism where name = 't'")
         .await?
-        // The default system adaptive strategy is BOUNDED(64), so adaptive
-        // alter is capped before reaching the vnode upper bound.
-        .assert_result_eq("64");
+        .assert_result_eq(format!("{}", vnode_max));
 
     Ok(())
 }
