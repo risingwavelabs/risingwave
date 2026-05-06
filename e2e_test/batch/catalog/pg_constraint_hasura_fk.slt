@@ -35,6 +35,12 @@ create table hasura_child (
         on delete restrict on update no action
 );
 
+statement ok
+create table hasura_default_fk_child (
+    id int primary key,
+    parent_id int references hasura_parent(id)
+);
+
 query TTTTTTTT
 select
     conname,
@@ -65,8 +71,26 @@ where conname = 'hasura_child_composite_fkey';
 ----
 hasura_child_composite_fkey f t t {3,4} {1,2} r a
 
+query TTTTTTTT
+select
+    conname,
+    contype,
+    conrelid = 'hasura_default_fk_child'::regclass,
+    confrelid = 'hasura_parent'::regclass,
+    conkey,
+    confkey,
+    confdeltype,
+    confupdtype
+from pg_catalog.pg_constraint
+where conname = 'hasura_default_fk_child_parent_id_fkey';
+----
+hasura_default_fk_child_parent_id_fkey f t t {2} {1} a a
+
 statement ok
 drop table hasura_child;
+
+statement ok
+drop table hasura_default_fk_child;
 
 statement ok
 drop table hasura_parent_composite;
