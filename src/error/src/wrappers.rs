@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::disallowed_types)]
+#![expect(clippy::disallowed_types)]
 
 #[derive(::std::fmt::Debug)]
 pub struct IcebergError(iceberg::Error);

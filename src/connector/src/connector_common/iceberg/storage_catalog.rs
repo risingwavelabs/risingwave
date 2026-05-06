@@ -14,7 +14,7 @@
 
 //! This module provide storage catalog.
 
-#![allow(clippy::disallowed_types)]
+#![expect(clippy::disallowed_types)]
 
 use std::collections::HashMap;
 

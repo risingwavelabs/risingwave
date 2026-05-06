@@ -14,7 +14,7 @@
 
 //! This module provide jni catalog.
 
-#![allow(clippy::disallowed_types)]
+#![expect(clippy::disallowed_types)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;
