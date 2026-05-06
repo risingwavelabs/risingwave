@@ -16,6 +16,7 @@ statement ok
 create table hasura_defaults (
     id int primary key,
     required_v int not null,
+    nullable_v int,
     optional_v int default 42,
     required_default_v int not null default 7,
     gen_v int as id + 1
@@ -25,10 +26,11 @@ query TTT rowsort
 select attname, attnotnull, atthasdef
 from pg_catalog.pg_attribute
 where attrelid = 'hasura_defaults'::regclass
-  and attname in ('id', 'required_v', 'optional_v', 'required_default_v')
+  and attname in ('id', 'required_v', 'nullable_v', 'optional_v', 'required_default_v')
 order by attname;
 ----
 id t f
+nullable_v f f
 optional_v f t
 required_default_v t t
 required_v t f
