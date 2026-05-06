@@ -46,6 +46,7 @@ use crate::webhook::payload::{build_json_access_builder, owned_row_from_payload_
 use crate::webhook::utils::{Result, authenticate_webhook_payload, err, header_map_to_json};
 pub(crate) mod payload;
 pub(crate) mod utils;
+pub(crate) mod websocket;
 use risingwave_rpc_client::ComputeClient;
 
 pub type Service = Arc<WebhookService>;
@@ -301,6 +302,8 @@ pub(super) mod handlers {
     }
 }
 
+pub(crate) use handlers::acquire_table_info;
+
 impl WebhookService {
     pub fn new(webhook_addr: SocketAddr, tls_config: Option<TlsConfig>) -> Self {
         Self {
@@ -318,7 +321,7 @@ impl WebhookService {
             .allow_origin(cors::Any)
             .allow_methods(vec![Method::POST]);
 
-        let api_router: Router = Router::new()
+        let webhook_router: Router = Router::new()
             .route("/{database}/{schema}/{table}", post(handle_post_request))
             .layer(
                 ServiceBuilder::new()
@@ -327,8 +330,13 @@ impl WebhookService {
             )
             .layer(cors_layer);
 
+        // The ingest WebSocket endpoint shares the same listener as the webhook service.
+        let ingest_svc = Arc::new(websocket::IngestService::new());
+        let ingest_router = websocket::build_router(ingest_svc);
+
         let app: Router = Router::new()
-            .nest("/webhook", api_router)
+            .nest("/webhook", webhook_router)
+            .nest("/ingest", ingest_router)
             .layer(CompressionLayer::new());
 
         #[cfg(not(madsim))]

@@ -79,7 +79,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = { version = "0.28.0", optional = true }
 glob = "0.3"
-google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.4", features = [
+google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.6", features = [
     "auth",
 ], optional = true }
 google-cloud-gax = { package = "gcloud-gax", version = "1" }
