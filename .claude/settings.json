@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s 'https://raw.githubusercontent.com/debezium/debezium/v3.2.4.Final/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/connection/PostgresReplicationConnection.java' -o /tmp/PostgresReplicationConnection.java)",
+      "Bash(curl -s 'https://raw.githubusercontent.com/debezium/debezium/v3.2.4.Final/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresConnectorConfig.java' -o /tmp/PostgresConnectorConfig.java)",
+      "Bash(curl -s 'https://raw.githubusercontent.com/postgres/postgres/master/src/backend/replication/pgoutput/pgoutput.c')",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/debezium/debezium/v3.2.4.Final/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresStreamingChangeEventSource.java\" -o /tmp/dbz_pg_streaming.java)",
+      "WebSearch",
+      "Bash(curl -sL \"https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/server-parameters-table-lock-management\" -o /tmp/azure_lock_mgmt.html)",
+      "Bash(curl -sL --tls-max 1.2 \"https://docs.azure.cn/en-us/postgresql/flexible-server/server-parameters-table-lock-management\" -o /tmp/azure_lock_mgmt.html)",
+      "Bash(curl -sIL \"https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/server-parameters-table-lock-management\")",
+      "Bash(curl --version)",
+      "Bash(curl -sIL -v \"https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/server-parameters-table-lock-management\")",
+      "Bash(grep -A 9 -E \"^### \\(wal_sender_timeout|max_replication_slots|max_wal_senders\\)$\")",
+      "Bash(grep -A 9 -E \"^### \\(tcp_keepalives_idle|tcp_keepalives_interval|tcp_keepalives_count|client_connection_check_interval\\)$\")",
+      "Bash(curl -sL 'https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/server-parameters-table-lock-management')",
+      "Bash(curl -sLI 'https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/server-parameters-table-lock-management')",
+      "Bash(curl -v -sL 'https://learn.microsoft.com/en-us/azure/postgresql/flexible-server/server-parameters-table-lock-management' -o /tmp/azure_lock.html)",
+      "WebFetch(domain:postgresqlco.nf)",
+      "WebFetch(domain:web.archive.org)"
+    ]
+  }
+}
