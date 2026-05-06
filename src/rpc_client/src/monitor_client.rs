@@ -19,6 +19,7 @@ use async_trait::async_trait;
 use risingwave_common::config::RpcClientConfig;
 use risingwave_common::monitor::EndpointExt as _;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::configured_monitor_service_client;
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
@@ -50,7 +51,7 @@ impl MonitorClient {
             .wrapped();
 
         Ok(Self {
-            monitor_client: MonitorServiceClient::new(channel),
+            monitor_client: configured_monitor_service_client(MonitorServiceClient::new(channel)),
         })
     }
 
