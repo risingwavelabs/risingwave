@@ -1,0 +1,124 @@
+# Copyright 2026 RisingWave Labs
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# JS UDFs are unavailable in deterministic simulation builds, so keep this
+# catalog coverage in the UDF-enabled e2e lanes only.
+
+skipif madsim
+statement ok
+create function hasura_add(a int, b int) returns int language sql as $$select a + b$$;
+
+skipif madsim
+statement ok
+create function hasura_series(n int) returns table (x int) language javascript as $$
+export function* hasura_series(n) {
+    for (let i = 0; i < n; i++) {
+        yield i;
+    }
+}
+$$;
+
+skipif madsim
+statement ok
+create aggregate hasura_sum(value int) returns int language javascript as $$
+export function create_state() {
+    return 0;
+}
+export function accumulate(state, value) {
+    if (value == null) {
+        return state;
+    }
+    return state + value;
+}
+export function finish(state) {
+    return state;
+}
+$$;
+
+skipif madsim
+query T
+select proname,
+       prokind,
+       ret.typname,
+       proargtypes::varchar,
+       proargnames::varchar,
+       provolatile,
+       proretset::varchar
+from pg_catalog.pg_proc proc
+join pg_catalog.pg_type ret on ret.oid = proc.prorettype
+where proname = 'hasura_add';
+----
+hasura_add f int4 {23,23} {a,b} s false
+
+skipif madsim
+query T
+select proname,
+       prokind,
+       proretset::varchar
+from pg_catalog.pg_proc
+where proname = 'hasura_series';
+----
+hasura_series f true
+
+skipif madsim
+query T
+select proname,
+       prokind
+from pg_catalog.pg_proc
+where proname = 'hasura_sum';
+----
+hasura_sum a
+
+skipif madsim
+query T
+select p.proname
+from pg_catalog.pg_aggregate a
+join pg_catalog.pg_proc p on p.oid = a.aggfnoid
+where p.proname = 'hasura_sum';
+----
+hasura_sum
+
+skipif madsim
+query T
+select count(*)::varchar
+from pg_catalog.pg_aggregate a
+join pg_catalog.pg_proc p on p.oid = a.aggfnoid
+where p.proname = 'hasura_add';
+----
+0
+
+skipif madsim
+query T
+select (position('CREATE FUNCTION public.hasura_add(a integer, b integer) RETURNS integer LANGUAGE sql AS $$' in pg_catalog.pg_get_functiondef(oid)) > 0)::varchar,
+       (position('select a + b' in pg_catalog.pg_get_functiondef(oid)) > 0)::varchar
+from pg_catalog.pg_proc
+where proname = 'hasura_add';
+----
+true true
+
+skipif madsim
+statement error function does not exist
+select pg_catalog.pg_get_functiondef(2147483647);
+
+skipif madsim
+statement ok
+drop aggregate hasura_sum(int);
+
+skipif madsim
+statement ok
+drop function hasura_series(int);
+
+skipif madsim
+statement ok
+drop function hasura_add(int, int);
