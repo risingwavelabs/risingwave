@@ -76,3 +76,11 @@
   batch_plan: |-
     BatchProject { exprs: [PgGetFunctiondef(42:Int32) as $expr1] }
     └─BatchValues { rows: [[]] }
+- name: hasura tracked-table recordset parser path
+  sql: |
+    select tracked.name
+    from jsonb_to_recordset('[{"schema":"public","name":"hasura_defaults"}]'::jsonb) as tracked(schema text, name text);
+  batch_plan: |-
+    BatchProject { exprs: [Field(JsonbToRecordset('[{"name": "hasura_defaults", "schema": "public"}]':Jsonb), 1:Int32) as $expr1] }
+    └─BatchProjectSet { select_list: [JsonbToRecordset('[{"name": "hasura_defaults", "schema": "public"}]':Jsonb)] }
+      └─BatchValues { rows: [[]] }

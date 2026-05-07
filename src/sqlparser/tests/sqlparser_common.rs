@@ -2901,7 +2901,16 @@ fn parse_cte_renamed_columns() {
     let sql = "WITH cte (col1, col2) AS (SELECT foo, bar FROM baz) SELECT * FROM cte";
     let query = verified_query(sql);
     assert_eq!(
-        vec![Ident::new_unchecked("col1"), Ident::new_unchecked("col2")],
+        vec![
+            TableAliasColumn {
+                name: Ident::new_unchecked("col1"),
+                data_type: None,
+            },
+            TableAliasColumn {
+                name: Ident::new_unchecked("col2"),
+                data_type: None,
+            },
+        ],
         query
             .with
             .unwrap()
@@ -2916,7 +2925,16 @@ fn parse_cte_renamed_columns() {
 
     let query_changelog = verified_query(sql_changelog);
     assert_eq!(
-        vec![Ident::new_unchecked("col1"), Ident::new_unchecked("col2")],
+        vec![
+            TableAliasColumn {
+                name: Ident::new_unchecked("col1"),
+                data_type: None,
+            },
+            TableAliasColumn {
+                name: Ident::new_unchecked("col2"),
+                data_type: None,
+            },
+        ],
         query_changelog
             .with
             .unwrap()
@@ -2945,11 +2963,41 @@ fn parse_recursive_cte() {
     let expected = Cte {
         alias: TableAlias {
             name: Ident::new_unchecked("nums"),
-            columns: vec![Ident::new_unchecked("val")],
+            columns: vec![TableAliasColumn {
+                name: Ident::new_unchecked("val"),
+                data_type: None,
+            }],
         },
         cte_inner: CteInner::Query(Box::new(cte_query)),
     };
     assert_eq!(with.cte_tables.first().unwrap(), &expected);
+}
+
+#[test]
+fn parse_table_function_typed_alias_columns() {
+    let sql = "SELECT tracked.name FROM jsonb_to_recordset('[{\"schema\":\"public\",\"name\":\"foo\"}]') AS tracked (schema TEXT, name TEXT)";
+    let select = verified_only_select(sql);
+    let from = only(select.from);
+    let TableFactor::TableFunction {
+        alias: Some(alias), ..
+    } = &from.relation
+    else {
+        panic!("expected table function with alias");
+    };
+    assert_eq!(alias.name.real_value(), "tracked");
+    assert_eq!(
+        alias.columns,
+        vec![
+            TableAliasColumn {
+                name: Ident::new_unchecked("schema"),
+                data_type: Some(DataType::Text),
+            },
+            TableAliasColumn {
+                name: "name".into(),
+                data_type: Some(DataType::Text),
+            },
+        ]
+    );
 }
 
 #[test]
