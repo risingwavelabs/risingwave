@@ -30,11 +30,23 @@ use crate::types::{
 };
 use crate::util::iter_util::ZipEqDebug;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonbVal(pub(crate) Value);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct JsonbRef<'a>(pub(crate) ValueRef<'a>);
+
+impl Hash for JsonbVal {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_scalar_ref().hash(state)
+    }
+}
+
+impl Hash for JsonbRef<'_> {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {
+        unreachable!("jsonb shall not be hashed")
+    }
+}
 
 impl EstimateSize for JsonbVal {
     fn estimated_heap_size(&self) -> usize {
