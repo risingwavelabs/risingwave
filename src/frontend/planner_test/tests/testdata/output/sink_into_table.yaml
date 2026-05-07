@@ -21,6 +21,31 @@
     └─StreamSink { type: upsert, columns: [a, b], downstream_pk: [t2.a] }
       └─StreamExchange { dist: HashShard(t2.a) }
         └─StreamTableScan { table: t2, columns: [a, b] }
+- id: create sink into table with target table locality backfill
+  sql: |
+    set enable_locality_backfill = true;
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    explain create sink s into t1 from t2;
+  explain_output: |
+    StreamProject { exprs: [t2.a, t2.b] }
+    └─StreamSink { type: upsert, columns: [a, b], downstream_pk: [t2.a] }
+      └─StreamLocalityProvider { locality_columns: [t2.a] }
+        └─StreamExchange { dist: HashShard(t2.a) }
+          └─StreamTableScan { table: t2, columns: [a, b] }
+- id: create sink into table with target table locality backfill and explicit column mapping
+  sql: |
+    set enable_locality_backfill = true;
+    create table t1 (a int, b int, c int default 0, primary key (b, a));
+    create table t2 (x int primary key, y int);
+    explain create sink s into t1(b, a) as select y, x from t2;
+  explain_output: |
+    StreamProject { exprs: [t2.x, t2.y, 0:Int32] }
+    └─StreamSink { type: upsert, columns: [b, a], downstream_pk: [t2.y, t2.x] }
+      └─StreamLocalityProvider { locality_columns: [t2.y, t2.x] }
+        └─StreamExchange { dist: HashShard(t2.y, t2.x) }
+          └─StreamProject { exprs: [t2.y, t2.x] }
+            └─StreamTableScan { table: t2, columns: [x, y] }
 - sql: |
     create table t1 (a int primary key, b int);
     create table t2 (a int, b int primary key);

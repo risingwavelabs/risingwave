@@ -15,6 +15,22 @@
     explain create sink s into t1 from t2;
   expected_outputs:
     - explain_output
+- id: create sink into table with target table locality backfill
+  sql: |
+    set enable_locality_backfill = true;
+    create table t1 (a int primary key, b int);
+    create table t2 (a int, b int primary key);
+    explain create sink s into t1 from t2;
+  expected_outputs:
+    - explain_output
+- id: create sink into table with target table locality backfill and explicit column mapping
+  sql: |
+    set enable_locality_backfill = true;
+    create table t1 (a int, b int, c int default 0, primary key (b, a));
+    create table t2 (x int primary key, y int);
+    explain create sink s into t1(b, a) as select y, x from t2;
+  expected_outputs:
+    - explain_output
 - sql: |
     create table t1 (a int primary key, b int);
     create table t2 (a int, b int primary key);

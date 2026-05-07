@@ -69,7 +69,7 @@ use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
     BatchProject, LogicalProject, LogicalSource, PartitionComputeInfo, StreamDml,
     StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
-    ToStreamContext, stream_enforce_eowc_requirement,
+    ToStreamContext, stream_enforce_eowc_requirement, try_enforce_locality_requirement,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -523,6 +523,53 @@ impl BatchPlanRoot {
 }
 
 impl LogicalPlanRoot {
+    fn target_table_locality_columns(
+        &self,
+        target_table: &TableCatalog,
+        user_specified_columns: bool,
+    ) -> Option<Vec<usize>> {
+        // A table with an implicit row id has no user-defined key to preserve locality for.
+        if target_table.row_id_index.is_some() {
+            return None;
+        }
+
+        let target_columns = target_table.columns_without_rw_timestamp();
+        let target_columns_to_plan_mapping =
+            self.target_columns_to_plan_mapping(&target_columns, user_specified_columns);
+
+        let mut target_column_mapping = vec![None; target_table.columns().len()];
+        let mut dml_column_mappings = target_columns_to_plan_mapping.into_iter();
+        for (idx, column) in target_table.columns().iter().enumerate() {
+            if column.is_rw_timestamp_column() {
+                continue;
+            }
+            if column.can_dml() {
+                target_column_mapping[idx] = dml_column_mappings.next()?;
+            }
+        }
+        debug_assert!(dml_column_mappings.next().is_none());
+
+        let mut locality_columns = Vec::with_capacity(target_table.pk().len());
+        for pk_column in target_table.pk() {
+            let plan_column_idx = target_column_mapping
+                .get(pk_column.column_index)
+                .copied()
+                .flatten()?;
+            if !locality_columns.contains(&plan_column_idx) {
+                locality_columns.push(plan_column_idx);
+            }
+        }
+
+        (!locality_columns.is_empty()).then_some(locality_columns)
+    }
+
+    fn enforce_locality(mut self, locality_columns: Option<&[usize]>) -> Self {
+        if let Some(locality_columns) = locality_columns {
+            self.plan = try_enforce_locality_requirement(self.plan, locality_columns);
+        }
+        self
+    }
+
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(
         self,
@@ -544,10 +591,24 @@ impl LogicalPlanRoot {
         emit_on_window_close: bool,
         backfill_type: BackfillType,
     ) -> Result<StreamOptimizedLogicalPlanRoot> {
+        self.gen_optimized_stream_plan_inner_with_locality(
+            emit_on_window_close,
+            backfill_type,
+            None,
+        )
+    }
+
+    fn gen_optimized_stream_plan_inner_with_locality(
+        self,
+        emit_on_window_close: bool,
+        backfill_type: BackfillType,
+        locality_columns: Option<Vec<usize>>,
+    ) -> Result<StreamOptimizedLogicalPlanRoot> {
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
-        let optimized_plan = self.gen_stream_plan(emit_on_window_close, backfill_type)?;
+        let optimized_plan =
+            self.gen_stream_plan(emit_on_window_close, backfill_type, locality_columns)?;
 
         let mut plan = optimized_plan
             .plan
@@ -654,6 +715,7 @@ impl LogicalPlanRoot {
         self,
         emit_on_window_close: bool,
         backfill_type: BackfillType,
+        locality_columns: Option<Vec<usize>>,
     ) -> Result<StreamOptimizedLogicalPlanRoot> {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -673,6 +735,7 @@ impl LogicalPlanRoot {
                     ).into());
                 }
                 let mut optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
+                optimized_plan = optimized_plan.enforce_locality(locality_columns.as_deref());
                 let (plan, out_col_change) = {
                     let (plan, out_col_change) = optimized_plan
                         .plan
@@ -1169,8 +1232,14 @@ impl LogicalPlanRoot {
             ))
             .into());
         }
-        let stream_plan =
-            self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)?;
+        let locality_columns = target_table
+            .as_ref()
+            .and_then(|table| self.target_table_locality_columns(table, user_specified_columns));
+        let stream_plan = self.gen_optimized_stream_plan_inner_with_locality(
+            emit_on_window_close,
+            backfill_type,
+            locality_columns,
+        )?;
         let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
             let columns = t.columns_without_rw_timestamp();
             stream_plan.target_columns_to_plan_mapping(&columns, user_specified_columns)
