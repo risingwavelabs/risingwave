@@ -19,6 +19,28 @@ from jsonb_to_recordset('[{"schema":"public","name":"hasura_defaults"}]'::jsonb)
 ----
 public hasura_defaults
 
+query ITT
+select recordset.id, recordset.name, recordset.active
+from jsonb_to_recordset('[{"id":1,"name":"foo","active":true}]'::jsonb)
+  as recordset(id integer, name text, active boolean);
+----
+1 foo t
+
+query TT rowsort
+select tracked.schema, tracked.name
+from jsonb_to_recordset('[{"schema":"public","name":"t1"},{"schema":"public","name":"t2"}]'::jsonb)
+  as tracked(schema text, name text);
+----
+public t1
+public t2
+
+query TT
+select recordset.name, recordset.missing_col
+from jsonb_to_recordset('[{"name":"foo"}]'::jsonb)
+  as recordset(name text, missing_col text);
+----
+foo NULL
+
 statement error table alias column "name" is missing a type
 select tracked.name
 from jsonb_to_recordset('[{"schema":"public","name":"hasura_defaults"}]'::jsonb)
