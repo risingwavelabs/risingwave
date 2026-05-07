@@ -20,7 +20,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId};
 use risingwave_sqlparser::ast::{
     AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
-    TableFactor,
+    TableAliasColumn, TableFactor,
 };
 use thiserror::Error;
 use thiserror_ext::AsReport;
@@ -343,7 +343,7 @@ impl Binder {
         schema_name: Option<String>,
         alias: Option<&TableAlias>,
     ) -> Result<()> {
-        const EMPTY: [Ident; 0] = [];
+        const EMPTY: [TableAliasColumn; 0] = [];
         let (resolved_schema_name, table_name, column_aliases, table_alias) = match alias {
             None => (schema_name.clone(), table_name, &EMPTY[..], None),
             Some(TableAlias { name, columns }) => (
@@ -366,7 +366,7 @@ impl Binder {
                 true => field.name.clone(),
                 false => alias_iter
                     .next()
-                    .map(|t| t.real_value())
+                    .map(|t| t.name.real_value())
                     .unwrap_or_else(|| field.name.clone()),
             };
             field.name.clone_from(&name);

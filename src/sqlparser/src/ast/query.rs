@@ -534,7 +534,13 @@ impl fmt::Display for TableFactor {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TableAlias {
     pub name: Ident,
-    pub columns: Vec<Ident>,
+    pub columns: Vec<TableAliasColumn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TableAliasColumn {
+    pub name: Ident,
+    pub data_type: Option<DataType>,
 }
 
 impl fmt::Display for TableAlias {
@@ -542,6 +548,16 @@ impl fmt::Display for TableAlias {
         write!(f, "{}", self.name)?;
         if !self.columns.is_empty() {
             write!(f, " ({})", display_comma_separated(&self.columns))?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for TableAliasColumn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)?;
+        if let Some(data_type) = &self.data_type {
+            write!(f, " {}", data_type)?;
         }
         Ok(())
     }

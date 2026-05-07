@@ -60,3 +60,9 @@
     select pg_catalog.pg_get_functiondef(42);
   expected_outputs:
   - batch_plan
+- name: hasura tracked-table recordset parser path
+  sql: |
+    select tracked.name
+    from jsonb_to_recordset('[{"schema":"public","name":"hasura_defaults"}]'::jsonb) as tracked(schema text, name text);
+  expected_outputs:
+  - batch_plan

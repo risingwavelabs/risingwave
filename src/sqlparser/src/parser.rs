@@ -4303,7 +4303,7 @@ impl Parser<'_> {
     ) -> ModalResult<Option<TableAlias>> {
         match self.parse_optional_alias(reserved_kwds)? {
             Some(name) => {
-                let columns = self.parse_parenthesized_column_list(Optional)?;
+                let columns = self.parse_parenthesized_table_alias_columns(Optional)?;
                 Ok(Some(TableAlias { name, columns }))
             }
             None => Ok(None),
@@ -4478,6 +4478,30 @@ impl Parser<'_> {
             Ok(vec![])
         } else {
             self.expected("a list of columns in parentheses")
+        }
+    }
+
+    /// Parse a parenthesized comma-separated list of table alias column definitions.
+    /// PostgreSQL allows `FROM f() AS t(col1, col2)` and also `AS t(col1 text, col2 int)`.
+    pub fn parse_parenthesized_table_alias_columns(
+        &mut self,
+        optional: IsOptional,
+    ) -> ModalResult<Vec<TableAliasColumn>> {
+        if self.consume_token(&Token::LParen) {
+            let cols = self.parse_comma_separated(|parser| {
+                let name = parser.parse_identifier_non_reserved()?;
+                let data_type = match parser.peek_token().token {
+                    Token::Comma | Token::RParen => None,
+                    _ => Some(parser.parse_data_type()?),
+                };
+                Ok(TableAliasColumn { name, data_type })
+            })?;
+            self.expect_token(&Token::RParen)?;
+            Ok(cols)
+        } else if optional == Optional {
+            Ok(vec![])
+        } else {
+            self.expected("a list of table alias columns in parentheses")
         }
     }
 
@@ -4813,7 +4837,16 @@ impl Parser<'_> {
             let columns = self.parse_parenthesized_column_list(Optional)?;
             self.expect_keyword(Keyword::AS)?;
             let cte_inner = self.parse_cte_inner()?;
-            let alias = TableAlias { name, columns };
+            let alias = TableAlias {
+                name,
+                columns: columns
+                    .into_iter()
+                    .map(|name| TableAliasColumn {
+                        name,
+                        data_type: None,
+                    })
+                    .collect(),
+            };
             Cte { alias, cte_inner }
         };
         Ok(cte)
