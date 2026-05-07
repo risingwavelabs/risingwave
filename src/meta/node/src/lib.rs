@@ -237,6 +237,11 @@ pub fn start(
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
         let meta_store_config = config.meta.meta_store_config.clone();
+        let (init_session_config, explicit_session_init_params) = config
+            .session_init
+            .clone()
+            .into_init_session_config()
+            .unwrap_or_else(|e| panic!("invalid session_init config: {e}"));
         let backend = match config.meta.backend {
             MetaBackend::Mem => {
                 if opts.sql_endpoint.is_some() {
@@ -586,7 +591,8 @@ pub fn start(
                 pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
             },
             config.system.into_init_system_params(),
-            Default::default(),
+            init_session_config,
+            explicit_session_init_params,
             shutdown,
         ))
         .await
