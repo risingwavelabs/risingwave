@@ -89,7 +89,6 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
-        options.max_vnode_key_range_bytes = task.effective_max_vnode_key_range_bytes();
         let use_block_based_filter = task.should_use_block_based_filter();
 
         let key_range = KeyRange {

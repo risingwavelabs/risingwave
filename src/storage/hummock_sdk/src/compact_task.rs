@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::size_of;
 
 use itertools::Itertools;
@@ -213,7 +213,7 @@ impl CompactTask {
     // The compact task may need to reclaim key with split sst
     pub fn contains_split_sst(&self) -> bool {
         self.read_input_ssts()
-            .any(|sst| sst.sst_id.as_raw_id() != sst.object_id.as_raw_id())
+            .any(|sst| sst.sst_id.inner() != sst.object_id.inner())
     }
 
     /// Returns sorted and deduplicated table ids from this task's normalized input SST metadata.
@@ -224,6 +224,15 @@ impl CompactTask {
             .flat_map(|sst| sst.table_ids.iter().copied())
             .sorted()
             .dedup()
+    }
+
+    // filter the table-id that in existing_table_ids with the table-id in compact-task
+    pub fn build_compact_table_ids(&self) -> Vec<StateTableId> {
+        let existing_table_ids: HashSet<TableId> =
+            HashSet::from_iter(self.existing_table_ids.iter().copied());
+        self.get_table_ids_from_input_ssts()
+            .filter(|table_id| existing_table_ids.contains(table_id))
+            .collect()
     }
 
     pub fn is_expired(&self, compaction_group_version_id_expected: u64) -> bool {
@@ -362,7 +371,7 @@ impl From<PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
-            max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
+            max_vnode_key_range_bytes: None,
         }
     }
 }
@@ -428,7 +437,7 @@ impl From<&PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
-            max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
+            max_vnode_key_range_bytes: None,
         }
     }
 }
@@ -484,7 +493,6 @@ impl From<CompactTask> for PbCompactTask {
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
-            max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -540,7 +548,6 @@ impl From<&CompactTask> for PbCompactTask {
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
-            max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -559,7 +566,11 @@ impl From<PbValidationTask> for ValidationTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            sst_id_to_worker_id: pb_validation_task.sst_id_to_worker_id.into_iter().collect(),
+            sst_id_to_worker_id: pb_validation_task
+                .sst_id_to_worker_id
+                .into_iter()
+                .map(|(object_id, worker_id)| (object_id.into(), worker_id.into()))
+                .collect(),
         }
     }
 }
@@ -572,7 +583,11 @@ impl From<ValidationTask> for PbValidationTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            sst_id_to_worker_id: validation_task.sst_id_to_worker_id,
+            sst_id_to_worker_id: validation_task
+                .sst_id_to_worker_id
+                .into_iter()
+                .map(|(object_id, worker_id)| (object_id.inner(), worker_id.as_raw_id()))
+                .collect(),
         }
     }
 }
@@ -608,7 +623,11 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            object_timestamps: value.object_timestamps,
+            object_timestamps: value
+                .object_timestamps
+                .into_iter()
+                .map(|(object_id, timestamp)| (object_id.into(), timestamp))
+                .collect(),
         }
     }
 }
@@ -624,7 +643,11 @@ impl From<ReportTask> for PbReportTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            object_timestamps: value.object_timestamps,
+            object_timestamps: value
+                .object_timestamps
+                .into_iter()
+                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                .collect(),
         }
     }
 }

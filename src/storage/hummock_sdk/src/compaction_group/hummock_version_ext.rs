@@ -3108,7 +3108,7 @@ mod tests {
         let stale_table_id = TableId::new(200);
         let mut version = HummockVersion {
             id: HummockVersionId::new(0),
-            levels: HashMap::from_iter([(1.into(), {
+            levels: HashMap::from_iter([(1, {
                 #[expect(deprecated)]
                 let levels = Levels {
                     l0: OverlappingLevel {
@@ -3136,28 +3136,26 @@ mod tests {
                         uncompressed_file_size: 120,
                         ..Default::default()
                     }],
-                    group_id: 1.into(),
-                    parent_group_id: 0.into(),
+                    group_id: 1,
+                    parent_group_id: 0,
                     member_table_ids: vec![],
                     compaction_group_version_id: 0,
                 };
                 levels
             })]),
-            state_table_info: HummockVersionStateTableInfo::from_protobuf_owned(
-                HashMap::from_iter([(
-                    live_table_id,
-                    StateTableInfo {
-                        committed_epoch: 1,
-                        compaction_group_id: 1.into(),
-                    },
-                )]),
-            ),
+            state_table_info: HummockVersionStateTableInfo::from_protobuf(&HashMap::from_iter([(
+                live_table_id,
+                StateTableInfo {
+                    committed_epoch: 1,
+                    compaction_group_id: 1,
+                },
+            )])),
             ..Default::default()
         };
 
         assert_eq!(version.prune_stale_table_ids_from_ssts(), 1);
 
-        let cg = version.get_compaction_group_levels(1.into());
+        let cg = version.get_compaction_group_levels(1);
         assert_eq!(cg.l0.sub_levels.len(), 1);
         assert_eq!(cg.l0.sub_levels[0].table_infos.len(), 1);
         assert_eq!(cg.l0.sub_levels[0].table_infos[0].sst_id, 1);
@@ -3173,7 +3171,7 @@ mod tests {
     fn test_prune_stale_table_ids_from_ssts_skips_legacy_member_table_ids() {
         let mut version = HummockVersion {
             id: HummockVersionId::new(0),
-            levels: HashMap::from_iter([(1.into(), {
+            levels: HashMap::from_iter([(1, {
                 #[expect(deprecated)]
                 let levels = Levels {
                     l0: OverlappingLevel {
@@ -3189,8 +3187,8 @@ mod tests {
                         total_file_size: 50,
                         uncompressed_file_size: 100,
                     },
-                    group_id: 1.into(),
-                    parent_group_id: 0.into(),
+                    group_id: 1,
+                    parent_group_id: 0,
                     member_table_ids: vec![100, 200],
                     compaction_group_version_id: 0,
                     ..Default::default()
@@ -3202,7 +3200,7 @@ mod tests {
 
         assert_eq!(version.prune_stale_table_ids_from_ssts(), 0);
 
-        let cg = version.get_compaction_group_levels(1.into());
+        let cg = version.get_compaction_group_levels(1);
         assert_eq!(
             cg.l0.sub_levels[0].table_infos[0].table_ids,
             vec![TableId::new(100), TableId::new(200)]
