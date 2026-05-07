@@ -33,6 +33,10 @@ pub enum VnodeCount {
 
 impl VnodeCount {
     /// Creates a `VnodeCount` set to the given value.
+    ///
+    /// Note that `VnodeCount::set(1)` is still different from [`VnodeCount::Singleton`].
+    /// The former means hash-distributed with a single vnode, while the latter means true
+    /// singleton semantics and must be interpreted together with distribution metadata.
     pub fn set(v: impl TryInto<usize> + Copy + std::fmt::Debug) -> Self {
         let v = v.try_into().ok();
         if v == Some(0) {
@@ -159,5 +163,26 @@ impl IsSingleton for risingwave_pb::plan_common::StorageTableDesc {
 impl VnodeCountCompat for risingwave_pb::plan_common::StorageTableDesc {
     fn vnode_count_inner(&self) -> VnodeCount {
         VnodeCount::from_protobuf(self.maybe_vnode_count, || self.is_singleton())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VnodeCount;
+
+    #[test]
+    fn test_vnode_count_one_is_not_singleton_for_non_singleton_objects() {
+        assert_eq!(
+            VnodeCount::from_protobuf(Some(1), || false),
+            VnodeCount::set(1)
+        );
+    }
+
+    #[test]
+    fn test_singleton_objects_ignore_numeric_vnode_count_semantics() {
+        assert_eq!(
+            VnodeCount::from_protobuf(Some(1), || true),
+            VnodeCount::Singleton
+        );
     }
 }

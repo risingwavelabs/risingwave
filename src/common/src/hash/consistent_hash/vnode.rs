@@ -58,7 +58,6 @@ impl VirtualNode {
     /// - As the default value for the session configuration.
     /// - As the vnode count for all streaming jobs, fragments, and tables that were created before
     ///   the variable vnode count support was introduced.
-    /// - As the vnode count for singletons.
     pub const COUNT_FOR_COMPAT: usize = 1 << 8;
 }
 
