@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 source ci/scripts/common.sh
 
 while getopts 'p:' opt; do
@@ -23,8 +25,6 @@ download_and_prepare_rw "$profile" source
 echo "--- starting risingwave cluster"
 cargo make ci-start ci-sink-test
 sleep 1
-
-set -euo pipefail
 
 export MQTT_URL="tcp://mqtt-server:1883"
 export RISEDEV_MQTT_URL="tcp://mqtt-server:1883"

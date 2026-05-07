@@ -24,8 +24,18 @@ fi
 work_dir="${repo_root}/.risingwave/.deltalake"
 mkdir -p "${work_dir}"
 
+if [[ "${RISEDEV_DELTALAKE_LOCATION}" != s3a://*/* ]]; then
+  echo "unsupported deltalake location: ${RISEDEV_DELTALAKE_LOCATION}" >&2
+  exit 1
+fi
+deltalake_path="${RISEDEV_DELTALAKE_LOCATION#s3a://}"
+deltalake_bucket="${deltalake_path%%/*}"
+
 echo "--- creating minio bucket"
-(cd "${repo_root}" && ./risedev mc mb hummock-minio/deltalake) || true
+(cd "${repo_root}" && ./risedev mc mb --ignore-existing "hummock-minio/${deltalake_bucket}")
+
+echo "--- cleaning existing deltalake table at ${RISEDEV_DELTALAKE_LOCATION}"
+(cd "${repo_root}" && ./risedev mc rm --recursive --force "hummock-minio/${deltalake_path}") || true
 
 spark_tgz="spark-3.3.1-bin-hadoop3.tgz"
 spark_dir="${work_dir}/spark-3.3.1-bin-hadoop3"
@@ -35,7 +45,7 @@ if [ ! -x "${spark_sql}" ]; then
   echo "--- downloading spark (once)"
   cd "${work_dir}"
   if [ ! -f "${spark_tgz}" ]; then
-    curl -fL -o "${spark_tgz}" "https://rw-ci-deps-dist.s3.amazonaws.com/${spark_tgz}"
+    curl -fLsS -o "${spark_tgz}" "https://rw-ci-deps-dist.s3.amazonaws.com/${spark_tgz}"
   fi
   tar -xf "${spark_tgz}" --no-same-owner
 fi
