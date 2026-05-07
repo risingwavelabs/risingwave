@@ -22,7 +22,9 @@ use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
-use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::{
+    CompressionAlgorithm, SstableFilterKind, SstableFilterLayout,
+};
 use risingwave_pb::id::{CompactionGroupId, FragmentId, HummockSstableId, JobId, TableId};
 use thiserror_ext::AsReport;
 
@@ -196,6 +198,22 @@ enum HummockCommands {
         compression_level: Option<u32>,
         #[clap(long)]
         compression_algorithm: Option<String>,
+        /// LSM level index to update, e.g. 0 for L0, 6 for L6.
+        #[clap(long, requires = "sstable_filter_kind")]
+        sstable_filter_kind_level: Option<u32>,
+        /// Xor filter family to use for this level. Supported values: "xor16", "xor8".
+        #[clap(long, requires = "sstable_filter_kind_level")]
+        sstable_filter_kind: Option<String>,
+        /// LSM level index to update, e.g. 0 for L0, 6 for L6.
+        #[clap(long, requires = "sstable_filter_layout")]
+        sstable_filter_layout_level: Option<u32>,
+        /// Filter layout for this level.
+        ///
+        /// Supported values:
+        /// - "auto": decide by heuristics (currently by kv-count threshold)
+        /// - "plain" / "normal": always use a single non-blocked filter, ignoring kv-count threshold
+        #[clap(long, requires = "sstable_filter_layout_level")]
+        sstable_filter_layout: Option<String>,
         #[clap(long)]
         max_l0_compact_level: Option<u32>,
         #[clap(long)]
@@ -216,8 +234,12 @@ enum HummockCommands {
         level0_stop_write_threshold_max_size: Option<u64>,
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
+        /// KV-count threshold for using blocked xor filters when output layout is "auto".
+        ///
+        /// Note: shared-buffer flush does not read compaction group config, so this setting only
+        /// applies to compaction tasks.
         #[clap(long)]
-        max_kv_count_for_xor16: Option<u64>,
+        blocked_xor_filter_kv_count_threshold: Option<u64>,
         #[clap(long)]
         max_vnode_key_range_bytes: Option<u64>,
     },
@@ -700,6 +722,10 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             tombstone_reclaim_ratio,
             compression_level,
             compression_algorithm,
+            sstable_filter_kind_level,
+            sstable_filter_kind,
+            sstable_filter_layout_level,
+            sstable_filter_layout,
             max_l0_compact_level,
             sst_allowed_trivial_move_min_size,
             disable_auto_group_scheduling,
@@ -710,7 +736,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
-            max_kv_count_for_xor16,
+            blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes,
         }) => {
             cmd_impl::hummock::update_compaction_config(
@@ -741,6 +767,20 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     } else {
                         None
                     },
+                    if let (Some(level), Some(filter_kind)) =
+                        (sstable_filter_kind_level, sstable_filter_kind)
+                    {
+                        Some(SstableFilterKind { level, filter_kind })
+                    } else {
+                        None
+                    },
+                    if let (Some(level), Some(layout)) =
+                        (sstable_filter_layout_level, sstable_filter_layout)
+                    {
+                        Some(SstableFilterLayout { level, layout })
+                    } else {
+                        None
+                    },
                     max_l0_compact_level,
                     sst_allowed_trivial_move_min_size,
                     disable_auto_group_scheduling,
@@ -751,7 +791,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
-                    max_kv_count_for_xor16,
+                    blocked_xor_filter_kv_count_threshold,
                     max_vnode_key_range_bytes,
                 ),
             )

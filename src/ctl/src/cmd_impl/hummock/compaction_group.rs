@@ -18,8 +18,10 @@ use comfy_table::{Row, Table};
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::{
+    CompressionAlgorithm, SstableFilterKind, SstableFilterLayout,
+};
 use risingwave_pb::id::TableId;
 
 use crate::CtlContext;
@@ -65,6 +67,8 @@ pub fn build_compaction_config_vec(
     enable_emergency_picker: Option<bool>,
     tombstone_reclaim_ratio: Option<u32>,
     compress_algorithm: Option<CompressionAlgorithm>,
+    sstable_filter_kind: Option<SstableFilterKind>,
+    sstable_filter_layout: Option<SstableFilterLayout>,
     max_l0_compact_level: Option<u32>,
     sst_allowed_trivial_move_min_size: Option<u64>,
     disable_auto_group_scheduling: Option<bool>,
@@ -75,7 +79,7 @@ pub fn build_compaction_config_vec(
     level0_stop_write_threshold_max_sst_count: Option<u32>,
     level0_stop_write_threshold_max_size: Option<u64>,
     enable_optimize_l0_interval_selection: Option<bool>,
-    max_kv_count_for_xor16: Option<u64>,
+    blocked_xor_filter_kv_count_threshold: Option<u64>,
     max_vnode_key_range_bytes: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
@@ -127,6 +131,12 @@ pub fn build_compaction_config_vec(
     if let Some(c) = compress_algorithm {
         configs.push(MutableConfig::CompressionAlgorithm(c))
     }
+    if let Some(c) = sstable_filter_kind {
+        configs.push(MutableConfig::SstableFilterKind(c))
+    }
+    if let Some(c) = sstable_filter_layout {
+        configs.push(MutableConfig::SstableFilterLayout(c))
+    }
     if let Some(c) = max_l0_compact_level {
         configs.push(MutableConfig::MaxL0CompactLevelCount(c))
     }
@@ -157,8 +167,8 @@ pub fn build_compaction_config_vec(
     if let Some(c) = enable_optimize_l0_interval_selection {
         configs.push(MutableConfig::EnableOptimizeL0IntervalSelection(c))
     }
-    if let Some(c) = max_kv_count_for_xor16 {
-        configs.push(MutableConfig::MaxKvCountForXor16(c))
+    if let Some(c) = blocked_xor_filter_kv_count_threshold {
+        configs.push(MutableConfig::BlockedXorFilterKvCountThreshold(c))
     }
     if let Some(c) = max_vnode_key_range_bytes {
         configs.push(MutableConfig::MaxVnodeKeyRangeBytes(c))

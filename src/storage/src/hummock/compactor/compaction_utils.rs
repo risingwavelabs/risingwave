@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, can_concat};
 use risingwave_pb::hummock::compact_task::PbTaskType;
-use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbTableSchema};
+use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbSstableFilterType, PbTableSchema};
 use tokio::time::Instant;
 
 pub use super::context::CompactorContext;
@@ -130,6 +130,7 @@ pub struct TaskConfig {
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub(crate) stats_target_table_ids: Option<HashSet<TableId>>,
     pub(crate) use_block_based_filter: bool,
+    pub(crate) sstable_filter_kind: PbSstableFilterType,
 
     pub(crate) table_vnode_partition: BTreeMap<TableId, u32>,
     /// `TableId` -> `TableSchema`
@@ -156,6 +157,7 @@ impl TaskConfig {
             retain_multiple_version: false,
             stats_target_table_ids: None,
             use_block_based_filter,
+            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
             table_vnode_partition: BTreeMap::default(),
             table_schemas,
             disable_drop_column_optimization: false,
@@ -555,6 +557,14 @@ fn optimize_by_copy_block_with_input(
         .sstable_infos
         .iter()
         .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked);
+    let current_filter_type = compact_task.sstable_filter_kind;
+    let all_ssts_match_filter_family = sstable_infos
+        .iter()
+        .all(|table_info| table_info.filter_type_compatible_with(current_filter_type));
+    // Fast compaction path can only preserve blocked filters by copying block payloads (and their
+    // per-block filter bytes). If the task wants a plain filter (either explicitly configured, or
+    // decided by heuristics), fall back to the normal compaction path to rebuild filters.
+    let output_wants_blocked_filter = compact_task.should_use_block_based_filter();
 
     let delete_key_count = task_input
         .sstable_infos
@@ -575,7 +585,10 @@ fn optimize_by_copy_block_with_input(
     );
     let single_table = input_table_ids.len() == 1;
     context.storage_opts.enable_fast_compaction
+        && current_filter_type == PbSstableFilterType::SstableFilterXor16
         && all_ssts_are_blocked_filter
+        && all_ssts_match_filter_family
+        && output_wants_blocked_filter
         && !compact_task.contains_range_tombstone()
         && !compact_task.contains_ttl()
         && !compact_task.contains_split_sst()
@@ -707,4 +720,103 @@ pub fn calculate_task_parallelism_impl(
 ) -> usize {
     let parallelism = compaction_size.div_ceil(parallel_compact_size);
     worker_num.min(parallelism.min(max_sub_compaction as u64) as usize)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::level::InputLevel;
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
+    use risingwave_pb::hummock::compact_task::PbTaskType;
+    use risingwave_pb::hummock::{
+        PbBloomFilterType, PbLevelType, PbSstableFilterLayout, PbSstableFilterType,
+    };
+
+    use super::{CompactTask, CompactorContext, optimize_by_copy_block};
+    use crate::hummock::compactor::new_compaction_await_tree_reg_ref;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::monitor::CompactorMetrics;
+    use crate::opts::StorageOpts;
+
+    fn test_sstable(
+        table_id: TableId,
+        total_key_count: u64,
+    ) -> risingwave_hummock_sdk::sstable_info::SstableInfo {
+        SstableInfoInner {
+            object_id: 1.into(),
+            sst_id: 1.into(),
+            table_ids: vec![table_id],
+            total_key_count,
+            sst_size: 1024,
+            bloom_filter_kind: PbBloomFilterType::Blocked,
+            filter_type: PbSstableFilterType::SstableFilterXor16,
+            ..Default::default()
+        }
+        .into()
+    }
+
+    async fn test_context() -> CompactorContext {
+        CompactorContext::new_local_compact_context(
+            Arc::new(StorageOpts::default()),
+            mock_sstable_store().await,
+            Arc::new(CompactorMetrics::unused()),
+            Some(new_compaction_await_tree_reg_ref(
+                await_tree::Config::default(),
+            )),
+        )
+    }
+
+    fn test_compact_task(
+        layout: PbSstableFilterLayout,
+        blocked_xor_filter_kv_count_threshold: Option<u64>,
+    ) -> CompactTask {
+        let table_id = TableId::new(1);
+        CompactTask {
+            input_ssts: vec![
+                InputLevel {
+                    level_idx: 1,
+                    level_type: PbLevelType::Nonoverlapping,
+                    table_infos: vec![test_sstable(table_id, 10)],
+                },
+                InputLevel {
+                    level_idx: 2,
+                    level_type: PbLevelType::Nonoverlapping,
+                    table_infos: vec![test_sstable(table_id, 10)],
+                },
+            ],
+            existing_table_ids: vec![table_id],
+            target_level: 2,
+            task_type: PbTaskType::Dynamic,
+            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+            sstable_filter_layout: layout,
+            blocked_xor_filter_kv_count_threshold,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_optimize_by_copy_block_respects_plain_layout() {
+        let context = test_context().await;
+        let compact_task = test_compact_task(PbSstableFilterLayout::Plain, Some(1));
+
+        assert!(!optimize_by_copy_block(&compact_task, &context));
+    }
+
+    #[tokio::test]
+    async fn test_optimize_by_copy_block_respects_auto_threshold() {
+        let context = test_context().await;
+        let compact_task = test_compact_task(PbSstableFilterLayout::Auto, Some(1024));
+
+        assert!(!optimize_by_copy_block(&compact_task, &context));
+    }
+
+    #[tokio::test]
+    async fn test_optimize_by_copy_block_keeps_blocked_output_when_requested() {
+        let context = test_context().await;
+        let compact_task = test_compact_task(PbSstableFilterLayout::Auto, Some(1));
+
+        assert!(optimize_by_copy_block(&compact_task, &context));
+    }
 }

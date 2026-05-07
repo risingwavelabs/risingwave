@@ -30,6 +30,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
+use risingwave_pb::hummock::PbSstableFilterType;
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
@@ -378,6 +379,16 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         options.max_vnode_key_range_bytes = None;
         let get_id_time = Arc::new(AtomicU64::new(0));
 
+        debug_assert_eq!(
+            task.sstable_filter_kind,
+            PbSstableFilterType::SstableFilterXor16,
+            "fast compaction only supports blocked xor16 filter today"
+        );
+        debug_assert!(
+            task.should_use_block_based_filter(),
+            "fast compaction can only preserve blocked filters; expected blocked output"
+        );
+
         let key_range = KeyRange::inf();
 
         let task_config = TaskConfig {
@@ -388,6 +399,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
+            sstable_filter_kind: task.sstable_filter_kind,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
         };

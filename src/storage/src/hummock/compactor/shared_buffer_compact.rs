@@ -28,6 +28,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{EPOCH_LEN, FullKey, FullKeyTracker, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, LocalSstableInfo};
+use risingwave_pb::hummock::PbSstableFilterType;
 use thiserror_ext::AsReport;
 use tracing::{error, warn};
 
@@ -183,7 +184,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     // Shared buffer compaction always goes to L0. Use block_based_filter when kv_count is large.
     // Use None to apply the default threshold since shared buffer flush doesn't have a CompactTask.
     let use_block_based_filter =
-        risingwave_hummock_sdk::filter_utils::is_kv_count_too_large_for_xor16(
+        risingwave_hummock_sdk::filter_utils::should_use_blocked_xor_filter_by_kv_count(
             total_key_count as u64,
             None,
         );
@@ -566,6 +567,8 @@ impl SharedBufferCompactRunner {
                 stats_target_table_ids: None,
                 table_vnode_partition,
                 use_block_based_filter,
+                // L0 flush writes overlapping SSTs, so keep a conservative filter family here.
+                sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
             },
