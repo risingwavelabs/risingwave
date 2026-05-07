@@ -118,17 +118,11 @@ impl HummockManager {
                 tracing::warn!("`mv_table` {} found in `internal_tables`", mv_table);
             }
             // materialized_view
-            pairs.push((
-                mv_table,
-                CompactionGroupId::from(StaticCompactionGroupId::MaterializedView),
-            ));
+            pairs.push((mv_table, StaticCompactionGroupId::MaterializedView));
         }
         // internal states
         for table_id in internal_tables {
-            pairs.push((
-                table_id,
-                CompactionGroupId::from(StaticCompactionGroupId::StateDefault),
-            ));
+            pairs.push((table_id, StaticCompactionGroupId::StateDefault));
         }
         self.register_table_ids_for_test(&pairs).await?;
         Ok(())
@@ -198,9 +192,11 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            &mut versioning.table_change_log,
             self.env.notification_manager(),
             None,
             &self.metrics,
+            &self.env.opts,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -216,7 +212,7 @@ impl HummockManager {
         for (table_id, raw_group_id) in pairs {
             let table_id = (*table_id).into();
             let mut group_id = *raw_group_id;
-            if group_id == StaticCompactionGroupId::NewCompactionGroup as u64 {
+            if group_id == StaticCompactionGroupId::NewCompactionGroup {
                 let mut is_group_init = false;
                 group_id = *new_compaction_group_id
                     .get_or_try_init(|| async {
@@ -295,67 +291,70 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            &mut versioning.table_change_log,
             self.env.notification_manager(),
             None,
             &self.metrics,
+            &self.env.opts,
         );
         let mut new_version_delta = version.new_delta();
-        let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
-            HashMap::new();
+        struct UnregisterGroupChange {
+            remaining_member_count: usize,
+            removed_table_ids: HashSet<TableId>,
+        }
+        let mut group_changes: HashMap<CompactionGroupId, UnregisterGroupChange> = HashMap::new();
         // Remove member tables
         for table_id in table_ids.into_iter().unique() {
             let version = new_version_delta.latest_version();
             let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
             };
+            let compaction_group_id = info.compaction_group_id;
 
-            modified_groups
-                .entry(info.compaction_group_id)
-                .and_modify(|count| *count -= 1)
-                .or_insert(
-                    version
-                        .state_table_info
-                        .compaction_group_member_tables()
-                        .get(&info.compaction_group_id)
-                        .expect("should exist")
-                        .len() as u64
-                        - 1,
-                );
+            let group_change =
+                group_changes
+                    .entry(compaction_group_id)
+                    .or_insert_with(|| UnregisterGroupChange {
+                        remaining_member_count: version
+                            .state_table_info
+                            .compaction_group_member_tables()
+                            .get(&compaction_group_id)
+                            .expect("should exist")
+                            .len(),
+                        removed_table_ids: HashSet::new(),
+                    });
+            group_change.remaining_member_count = group_change
+                .remaining_member_count
+                .checked_sub(1)
+                .expect("member table count should be positive");
+            assert!(group_change.removed_table_ids.insert(table_id));
             new_version_delta.removed_table_ids.insert(table_id);
         }
 
-        let groups_to_remove = modified_groups
-            .into_iter()
-            .filter_map(|(group_id, member_count)| {
-                if member_count == 0 && group_id > StaticCompactionGroupId::End as CompactionGroupId
-                {
-                    return Some((
-                        group_id,
-                        new_version_delta
-                            .latest_version()
-                            .get_compaction_group_levels(group_id)
-                            .levels
-                            .len(),
-                    ));
-                }
-                None
-            })
-            .collect_vec();
-        for (group_id, _) in &groups_to_remove {
-            let group_deltas = &mut new_version_delta
-                .group_deltas
-                .entry(*group_id)
-                .or_default()
-                .group_deltas;
-
-            let group_delta = GroupDelta::GroupDestroy(PbGroupDestroy {});
-            group_deltas.push(group_delta);
-        }
-
-        for (group_id, max_level) in groups_to_remove {
-            remove_compaction_group_in_sst_stat(&self.metrics, group_id, max_level);
-            // clean up compaction schedule state for the removed group
-            self.compaction_state.remove_compaction_group(group_id);
+        for (group_id, change) in group_changes {
+            if change.remaining_member_count == 0 && group_id > StaticCompactionGroupId::End {
+                let max_level = new_version_delta
+                    .latest_version()
+                    .get_compaction_group_levels(group_id)
+                    .levels
+                    .len();
+                new_version_delta
+                    .group_deltas
+                    .entry(group_id)
+                    .or_default()
+                    .group_deltas
+                    .push(GroupDelta::GroupDestroy(PbGroupDestroy {}));
+                remove_compaction_group_in_sst_stat(&self.metrics, group_id, max_level);
+                // clean up compaction schedule state for the removed group
+                self.compaction_state.remove_compaction_group(group_id);
+            } else {
+                new_version_delta
+                    .group_deltas
+                    .entry(group_id)
+                    .or_default()
+                    .group_deltas
+                    .push(GroupDelta::PruneTableIdsFromSsts(change.removed_table_ids));
+            }
         }
 
         new_version_delta.pre_apply();
@@ -525,9 +524,11 @@ impl CompactionGroupManager {
     /// Tries to get compaction group config for `compaction_group_id`.
     pub(crate) fn try_get_compaction_group_config(
         &self,
-        compaction_group_id: CompactionGroupId,
+        compaction_group_id: impl Into<CompactionGroupId>,
     ) -> Option<CompactionGroup> {
-        self.compaction_groups.get(&compaction_group_id).cloned()
+        self.compaction_groups
+            .get(&compaction_group_id.into())
+            .cloned()
     }
 
     /// Tries to get compaction group config for `compaction_group_id`.
@@ -621,12 +622,15 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::EnableOptimizeL0IntervalSelection(c) => {
                 target.enable_optimize_l0_interval_selection = Some(*c);
             }
-            MutableConfig::VnodeAlignedLevelSizeThreshold(c) => {
-                target.vnode_aligned_level_size_threshold =
-                    (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+            #[allow(deprecated)]
+            MutableConfig::VnodeAlignedLevelSizeThreshold(_) => {
+                // Deprecated. Keep accepting the field for old clients but do not apply it.
             }
             MutableConfig::MaxKvCountForXor16(c) => {
                 target.max_kv_count_for_xor16 = (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+            }
+            MutableConfig::MaxVnodeKeyRangeBytes(c) => {
+                target.max_vnode_key_range_bytes = (*c > 0).then_some(*c);
             }
         }
     }
@@ -716,6 +720,7 @@ mod tests {
 
     use itertools::Itertools;
     use risingwave_common::id::JobId;
+    use risingwave_hummock_sdk::CompactionGroupId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 
     use crate::controller::SqlMetaStore;
@@ -734,11 +739,12 @@ mod tests {
         async fn update_compaction_config(
             meta: &SqlMetaStore,
             inner: &mut CompactionGroupManager,
-            cg_ids: &[u64],
+            cg_ids: &[impl Into<CompactionGroupId> + Copy],
             config_to_update: &[MutableConfig],
         ) -> Result<()> {
+            let cg_ids = cg_ids.iter().copied().map_into().collect_vec();
             let mut compaction_groups_txn = inner.start_compaction_groups_txn();
-            compaction_groups_txn.update_compaction_config(cg_ids, config_to_update)?;
+            compaction_groups_txn.update_compaction_config(&cg_ids, config_to_update)?;
             commit_multi_var!(meta, compaction_groups_txn)
         }
 
@@ -749,7 +755,10 @@ mod tests {
         ) {
             let default_config = inner.default_compaction_config();
             let mut compaction_groups_txn = inner.start_compaction_groups_txn();
-            if compaction_groups_txn.try_create_compaction_groups(cg_ids, default_config) {
+            if compaction_groups_txn.try_create_compaction_groups(
+                &cg_ids.iter().copied().map_into().collect_vec(),
+                default_config,
+            ) {
                 commit_multi_var!(meta, compaction_groups_txn).unwrap();
             }
         }
