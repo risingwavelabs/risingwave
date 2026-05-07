@@ -17,16 +17,43 @@ use std::str::FromStr;
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, RW_INTERNAL_TABLE_FUNCTION_NAME, Schema};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, StructType};
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgList, ObjectName, TableAlias};
 
 use super::watermark::is_watermark_func;
 use super::{Binder, Relation, Result, WindowTableFunctionKind};
 use crate::binder::bind_context::Clause;
+use crate::binder::bind_data_type;
 use crate::error::ErrorCode;
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, TableFunction, TableFunctionType};
 
 impl Binder {
+    fn typed_table_alias_return_type(alias: &TableAlias) -> Result<Option<DataType>> {
+        if alias
+            .columns
+            .iter()
+            .all(|column| column.data_type.is_none())
+        {
+            return Ok(None);
+        }
+
+        let fields: Vec<(String, DataType)> = alias
+            .columns
+            .iter()
+            .map(|column| -> Result<(String, DataType)> {
+                let Some(data_type) = column.data_type.as_ref() else {
+                    return Err(ErrorCode::BindError(format!(
+                        "table alias column \"{}\" is missing a type",
+                        column.name
+                    ))
+                    .into());
+                };
+                Ok((column.name.real_value(), bind_data_type(data_type)?))
+            })
+            .try_collect()?;
+        Ok(Some(DataType::Struct(StructType::new(fields))))
+    }
+
     /// Binds a table function AST, which is a function call in a relation position.
     ///
     /// Besides [`crate::expr::TableFunction`] expr, it can also be other things like window table
@@ -90,6 +117,52 @@ impl Binder {
                 self.bind_watermark(alias, args)?,
             )));
         };
+
+        if func_name.eq_ignore_ascii_case("jsonb_to_recordset")
+            && let Some(alias) = alias
+            && let Some(return_type) = Self::typed_table_alias_return_type(alias)?
+        {
+            self.push_context();
+            let mut clause = Some(Clause::From);
+            std::mem::swap(&mut self.context.clause, &mut clause);
+            let args = args
+                .iter()
+                .map(|arg| self.bind_function_arg(arg))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect_vec();
+            self.context.clause = clause;
+            self.pop_context()?;
+
+            if args.iter().any(|arg| arg.has_subquery()) {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "Only table-in-out functions can have subquery parameters. The table function has subquery parameters is jsonb_to_recordset"
+                        .to_owned(),
+                )
+                .into());
+            }
+
+            let func = TableFunction {
+                args,
+                return_type,
+                function_type: TableFunctionType::JsonbToRecordset,
+                user_defined: None,
+            };
+            self.bind_table_to_context(
+                Schema::from(func.return_type().as_struct())
+                    .fields
+                    .into_iter()
+                    .map(|field| (false, field)),
+                func_name.clone(),
+                None,
+                Some(alias),
+            )?;
+            return Ok(Relation::TableFunction {
+                expr: func.into(),
+                with_ordinality,
+            });
+        }
 
         self.push_context();
         let mut clause = Some(Clause::From);
