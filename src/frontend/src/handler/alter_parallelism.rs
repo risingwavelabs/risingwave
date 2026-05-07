@@ -284,6 +284,10 @@ mod tests {
 
     #[test]
     fn test_extract_table_parallelism_adaptive_variants() {
+        let (parallelism, strategy) = extract_table_parallelism(SetVariableValue::Default).unwrap();
+        assert_eq!(parallelism, adaptive_parallelism());
+        assert_eq!(strategy.as_deref(), Some("AUTO"));
+
         let (parallelism, strategy) = extract_table_parallelism(SetVariableValue::Single(
             SetVariableValueSingle::Ident(Ident::new_unchecked("adaptive")),
         ))
@@ -318,6 +322,17 @@ mod tests {
 
     #[test]
     fn test_extract_fragment_parallelism_does_not_support_bounded_ratio() {
+        assert_eq!(
+            extract_fragment_parallelism(SetVariableValue::Default).unwrap(),
+            None
+        );
+        assert_eq!(
+            extract_fragment_parallelism(SetVariableValue::Single(
+                SetVariableValueSingle::Literal(Value::Number("0".into())),
+            ))
+            .unwrap(),
+            Some(adaptive_parallelism())
+        );
         assert!(
             extract_fragment_parallelism(SetVariableValue::Single(SetVariableValueSingle::Raw(
                 "bounded(4)".to_owned()
@@ -350,5 +365,16 @@ mod tests {
             extract_backfill_parallelism(SetVariableValue::Default).unwrap();
         assert_eq!(parallelism, None);
         assert_eq!(strategy, None);
+    }
+
+    #[test]
+    fn test_extract_table_parallelism_rejects_list_values() {
+        assert!(
+            extract_table_parallelism(SetVariableValue::List(vec![
+                SetVariableValueSingle::Literal(Value::Number("1".into())),
+                SetVariableValueSingle::Literal(Value::Number("2".into())),
+            ]))
+            .is_err()
+        );
     }
 }

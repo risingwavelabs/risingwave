@@ -2438,6 +2438,62 @@ mod tests {
     }
 
     #[test]
+    fn test_parallelism_policy_with_custom_strategy() {
+        #[expect(deprecated)]
+        let fragment = fragment::Model {
+            fragment_id: 6.into(),
+            job_id: TEST_JOB_ID,
+            fragment_type_mask: 0,
+            distribution_type: DistributionType::Hash,
+            stream_node: StreamNode::from(&PbStreamNode::default()),
+            state_table_ids: TableIdArray::default(),
+            upstream_fragment_id: Default::default(),
+            vnode_count: 0,
+            parallelism: None,
+        };
+
+        let job_parallelism = StreamingParallelism::Custom;
+
+        let policy = super::CatalogController::format_fragment_parallelism_policy(
+            fragment.distribution_type,
+            fragment.parallelism.as_ref(),
+            Some(&job_parallelism),
+            Some("BOUNDED(8)"),
+            &[],
+        );
+
+        assert_eq!(policy, "inherit(bounded(8))");
+    }
+
+    #[test]
+    fn test_parallelism_policy_with_invalid_adaptive_strategy_falls_back() {
+        #[expect(deprecated)]
+        let fragment = fragment::Model {
+            fragment_id: 7.into(),
+            job_id: TEST_JOB_ID,
+            fragment_type_mask: 0,
+            distribution_type: DistributionType::Hash,
+            stream_node: StreamNode::from(&PbStreamNode::default()),
+            state_table_ids: TableIdArray::default(),
+            upstream_fragment_id: Default::default(),
+            vnode_count: 0,
+            parallelism: None,
+        };
+
+        let job_parallelism = StreamingParallelism::Adaptive;
+
+        let policy = super::CatalogController::format_fragment_parallelism_policy(
+            fragment.distribution_type,
+            fragment.parallelism.as_ref(),
+            Some(&job_parallelism),
+            Some("NOT_A_STRATEGY"),
+            &[],
+        );
+
+        assert_eq!(policy, "inherit(adaptive)");
+    }
+
+    #[test]
     fn test_parallelism_policy_with_upstream_roots() {
         #[expect(deprecated)]
         let fragment = fragment::Model {

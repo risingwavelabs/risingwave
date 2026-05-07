@@ -2837,4 +2837,89 @@ mod tests {
             "Backfill strategy BOUNDED(2) should override the job strategy during backfill"
         );
     }
+
+    #[test]
+    fn render_actors_created_job_ignores_backfill_strategy() {
+        let actor_id_counter = AtomicU32::new(0);
+        let fragment_id: FragmentId = 1.into();
+        let job_id: JobId = 105.into();
+        let database_id: DatabaseId = DatabaseId::new(15);
+
+        let fragment_model = build_fragment(
+            fragment_id,
+            job_id,
+            0,
+            DistributionType::Hash,
+            16,
+            StreamingParallelism::Adaptive,
+        );
+
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Foreground,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: Some("BOUNDED(4)".to_owned()),
+            parallelism: StreamingParallelism::Adaptive,
+            backfill_parallelism: Some(StreamingParallelism::Adaptive),
+            backfill_adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
+            backfill_orders: None,
+            max_parallelism: 16,
+            specific_resource_group: None,
+            is_serverless_backfill: false,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "test_db".into(),
+            resource_group: "default".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([fragment_id]),
+            components: HashSet::from([fragment_id]),
+        }];
+
+        let fragment_map =
+            HashMap::from([(job_id, HashMap::from([(fragment_id, fragment_model)]))]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        let worker_map = HashMap::from([
+            (1.into(), build_worker_node(1, 1, "default")),
+            (2.into(), build_worker_node(2, 1, "default")),
+            (3.into(), build_worker_node(3, 1, "default")),
+            (4.into(), build_worker_node(4, 1, "default")),
+        ]);
+
+        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
+        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let state = collect_actor_state(&result[&database_id][&job_id][&fragment_id]);
+        assert_eq!(
+            state.len(),
+            4,
+            "created jobs should use the main job strategy before any backfill override applies"
+        );
+    }
 }
