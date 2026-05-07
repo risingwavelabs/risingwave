@@ -12,9 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# JS UDFs are unavailable in deterministic simulation builds, so keep this
+# catalog coverage in the UDF-enabled e2e lanes only.
+
+skipif madsim
 statement ok
 create function hasura_add(a int, b int) returns int language sql as $$select a + b$$;
 
+skipif madsim
 statement ok
 create function hasura_series(n int) returns table (x int) language javascript as $$
 export function* hasura_series(n) {
@@ -24,6 +29,7 @@ export function* hasura_series(n) {
 }
 $$;
 
+skipif madsim
 statement ok
 create aggregate hasura_sum(value int) returns int language javascript as $$
 export function create_state() {
@@ -40,6 +46,7 @@ export function finish(state) {
 }
 $$;
 
+skipif madsim
 query T
 select proname,
        prokind,
@@ -54,6 +61,7 @@ where proname = 'hasura_add';
 ----
 hasura_add f int4 {23,23} {a,b} s false
 
+skipif madsim
 query T
 select proname,
        prokind,
@@ -63,6 +71,7 @@ where proname = 'hasura_series';
 ----
 hasura_series f true
 
+skipif madsim
 query T
 select proname,
        prokind
@@ -71,6 +80,7 @@ where proname = 'hasura_sum';
 ----
 hasura_sum a
 
+skipif madsim
 query T
 select p.proname
 from pg_catalog.pg_aggregate a
@@ -79,6 +89,7 @@ where p.proname = 'hasura_sum';
 ----
 hasura_sum
 
+skipif madsim
 query T
 select count(*)::varchar
 from pg_catalog.pg_aggregate a
@@ -87,6 +98,7 @@ where p.proname = 'hasura_add';
 ----
 0
 
+skipif madsim
 query T
 select (position('CREATE FUNCTION public.hasura_add(a integer, b integer) RETURNS integer LANGUAGE sql AS $$' in pg_catalog.pg_get_functiondef(oid)) > 0)::varchar,
        (position('select a + b' in pg_catalog.pg_get_functiondef(oid)) > 0)::varchar
@@ -95,14 +107,18 @@ where proname = 'hasura_add';
 ----
 true true
 
+skipif madsim
 statement error function does not exist
 select pg_catalog.pg_get_functiondef(2147483647);
 
+skipif madsim
 statement ok
 drop aggregate hasura_sum(int);
 
+skipif madsim
 statement ok
 drop function hasura_series(int);
 
+skipif madsim
 statement ok
 drop function hasura_add(int, int);
