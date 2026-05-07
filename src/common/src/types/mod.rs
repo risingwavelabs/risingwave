@@ -1710,7 +1710,7 @@ mod tests {
             )),
             MapType::from_kv(
                 DataType::Varchar,
-                StructType::new([("a", DataType::Int32)])
+                StructType::new([("b", DataType::Int32)])
                     .with_ids([ColumnId::new(1)])
                     .into(),
             )
