@@ -87,7 +87,7 @@ macro_rules! feature_gated_executor_mod {
                 }
 
                 impl<S: StateStore> $executor_name<S> {
-                    #[expect(clippy::too_many_arguments)]
+                    #[allow(clippy::too_many_arguments)]
                     pub fn new( $( $param_name : $param_type ),* ) -> Self {
                         // Suppress unused variable warnings
                         $( let _ = $param_name; )*

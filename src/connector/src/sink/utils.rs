@@ -46,7 +46,7 @@ pub(crate) mod dummy {
     use crate::sink::prelude::*;
     use crate::sink::{LogSinker, SinkCommitCoordinator, SinkLogReader};
 
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub fn err_feature_not_enabled(sink_name: &'static str) -> SinkError {
         SinkError::Config(anyhow!(
             "RisingWave is not compiled with feature `sink-{}`",
@@ -56,12 +56,12 @@ pub(crate) mod dummy {
 
     /// Implement this trait will bring a dummy `impl Sink` for the type which always returns an error.
     pub trait FeatureNotEnabledSinkMarker: Send + 'static {
-        #[expect(dead_code)]
+        #[allow(dead_code)]
         const SINK_NAME: &'static str;
     }
 
     /// A dummy coordinator that always returns an error.
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub struct FeatureNotEnabledLogSinker<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
     #[async_trait::async_trait]
     impl<S: FeatureNotEnabledSinkMarker> LogSinker for FeatureNotEnabledLogSinker<S> {
@@ -71,7 +71,7 @@ pub(crate) mod dummy {
     }
 
     /// A dummy sink that always returns an error.
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub struct FeatureNotEnabledSink<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
 
     impl<S: FeatureNotEnabledSinkMarker> Debug for FeatureNotEnabledSink<S> {

@@ -551,7 +551,7 @@ use crate::sink::Sink;
 macro_rules! use_source_properties {{
     ({{ $({{ $variant_name:ident, $prop_name:ty, $split:ty }}),* }}) => {{
         $(
-            #[expect(unused_imports)]
+            #[allow(unused_imports)]
             pub(super) use $prop_name;
         )*
     }};

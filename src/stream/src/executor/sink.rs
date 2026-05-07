@@ -216,7 +216,7 @@ fn compact_output_kind(sink_type: SinkType) -> OutputKind {
 /// Dispatch the code block to different output kinds for chunk compaction based on sink type.
 macro_rules! dispatch_output_kind {
     ($sink_type:expr, $KIND:ident, $body:tt) => {
-        #[expect(unused_braces)]
+        #[allow(unused_braces)]
         match compact_output_kind($sink_type) {
             output_kind::UPSERT => {
                 const KIND: OutputKind = output_kind::UPSERT;

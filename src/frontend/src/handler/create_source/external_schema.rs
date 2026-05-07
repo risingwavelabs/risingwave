@@ -45,7 +45,7 @@ macro_rules! feature_gated_function {
         use $mod_name::$func_name;
 
         #[cfg(not(feature = $feature_name))]
-        #[expect(unused_variables)]
+        #[allow(unused_variables)]
         pub async fn $func_name( $( $param_name : $param_type ),* ) -> $ret_type {
             Err(anyhow::anyhow!(
                 "Feature `{}` is not enabled at compile time. \
