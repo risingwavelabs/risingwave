@@ -20,14 +20,10 @@ use risingwave_expr::sig::{
     CreateFunctionOutput, CreateOptions, UDF_IMPLS, UdfImpl, UdfImplDescriptor,
 };
 
-#[cfg(feature = "udf")]
 #[cfg(not(madsim))]
 mod external;
-#[cfg(feature = "udf")]
 mod python;
-#[cfg(feature = "udf")]
 mod quickjs;
-#[cfg(feature = "udf")]
 mod wasm;
 
 /// Download wasm binary from a link.

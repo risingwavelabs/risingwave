@@ -31,6 +31,7 @@
 mod aggregate;
 mod scalar;
 mod table_function;
+#[cfg(feature = "udf")]
 mod udf;
 mod window_function;
 
