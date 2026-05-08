@@ -237,6 +237,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "InsertExecutor".to_owned(),
         vec![0], // ignore insertion order
         vec![],
+        vec![],
         Some(row_id_index),
         false,
         0,
