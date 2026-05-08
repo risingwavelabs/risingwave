@@ -120,7 +120,7 @@ pub async fn handle_alter_table_column(
     operation: AlterTableOperation,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let (original_catalog, has_incoming_sinks) =
+    let (original_catalog, _, has_non_auto_refresh_schema_incoming_sinks) =
         fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     if original_catalog.webhook_info.is_some() {
@@ -135,7 +135,9 @@ pub async fn handle_alter_table_column(
         panic!("unexpected statement: {:?}", definition);
     };
 
-    if has_incoming_sinks && matches!(operation, AlterTableOperation::DropColumn { .. }) {
+    if matches!(operation, AlterTableOperation::DropColumn { .. })
+        && has_non_auto_refresh_schema_incoming_sinks
+    {
         return Err(ErrorCode::InvalidInputSyntax(
             "dropping columns in target table of sinks is not supported".to_owned(),
         ))?;
@@ -311,7 +313,7 @@ pub async fn handle_alter_table_column(
 pub fn fetch_table_catalog_for_alter(
     session: &SessionImpl,
     table_name: &ObjectName,
-) -> Result<(Arc<TableCatalog>, bool)> {
+) -> Result<(Arc<TableCatalog>, bool, bool)> {
     let db_name = &session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -335,13 +337,28 @@ pub fn fetch_table_catalog_for_alter(
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
-        let has_incoming_sinks = reader
-            .get_schema_by_id(table.database_id, table.schema_id)?
+        let schema = reader.get_schema_by_id(table.database_id, table.schema_id)?;
+        let (has_incoming_sinks, has_non_auto_refresh_schema_incoming_sinks) = schema
             .table_incoming_sinks(table.id)
-            .map(|sinks| !sinks.is_empty())
-            .unwrap_or(false);
+            .map(|sinks| {
+                let has_non_auto_refresh_schema_incoming_sinks = sinks.iter().any(|sink_id| {
+                    schema
+                        .get_sink_by_id(*sink_id)
+                        .and_then(|sink| sink.auto_refresh_schema_from_table)
+                        != Some(table.id)
+                });
+                (
+                    !sinks.is_empty(),
+                    has_non_auto_refresh_schema_incoming_sinks,
+                )
+            })
+            .unwrap_or((false, false));
 
-        Ok((table.clone(), has_incoming_sinks))
+        Ok((
+            table.clone(),
+            has_incoming_sinks,
+            has_non_auto_refresh_schema_incoming_sinks,
+        ))
     }
 }
 
