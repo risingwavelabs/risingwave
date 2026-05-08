@@ -203,7 +203,7 @@ impl InsertExecutor {
 
             write_handle.write_chunk(stream_chunk).await?;
 
-            Result::Ok(returning_chunk)
+            Result::Ok((returning_chunk, cap))
         };
 
         let mut rows_inserted = 0;
@@ -212,8 +212,8 @@ impl InsertExecutor {
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
             for chunk in builder.append_chunk(data_chunk) {
-                let chunk = write_txn_data(chunk).await?;
-                rows_inserted += chunk.cardinality();
+                let (chunk, inserted_rows) = write_txn_data(chunk).await?;
+                rows_inserted += inserted_rows;
                 if self.returning {
                     yield chunk;
                 }
@@ -221,8 +221,8 @@ impl InsertExecutor {
         }
 
         if let Some(chunk) = builder.consume_all() {
-            let chunk = write_txn_data(chunk).await?;
-            rows_inserted += chunk.cardinality();
+            let (chunk, inserted_rows) = write_txn_data(chunk).await?;
+            rows_inserted += inserted_rows;
             if self.returning {
                 yield chunk;
             }

@@ -756,7 +756,7 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: Arc<RwLock<SessionConfig>>,
-    /// Stores custom session-scoped config entries that are not part of SessionConfig.
+    /// Stores custom session-scoped config entries that are not part of `SessionConfig`.
     custom_config_map: Arc<RwLock<HashMap<String, String>>>,
 
     /// Channel sender for frontend handler to send notices.
