@@ -187,12 +187,10 @@ impl<PlanRef: Eq + Hash> Insert<PlanRef> {
                 .map(|(idx, generated)| {
                     (
                         idx,
-                        generated_column_input_ref_mapping
-                            .clone()
-                            .rewrite_expr(
-                                ExprImpl::from_expr_proto(generated.expr.as_ref().unwrap())
-                                    .expect("expr in generated columns corrupted"),
-                            ),
+                        generated_column_input_ref_mapping.clone().rewrite_expr(
+                            ExprImpl::from_expr_proto(generated.expr.as_ref().unwrap())
+                                .expect("expr in generated columns corrupted"),
+                        ),
                     )
                 })
                 .collect()

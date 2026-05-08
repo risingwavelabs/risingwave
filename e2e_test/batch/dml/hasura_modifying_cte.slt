@@ -86,4 +86,31 @@ select count(*) from hasura_runtime_cte;
 0
 
 statement ok
+drop table if exists hasura_runtime_hidden_rowid;
+
+statement ok
+create table hasura_runtime_hidden_rowid (
+  required_v int not null,
+  generated_v int as required_v + 1
+);
+
+query I
+insert into hasura_runtime_hidden_rowid values (3) returning generated_v;
+----
+4
+
+query I
+update hasura_runtime_hidden_rowid set required_v = 5 returning generated_v;
+----
+6
+
+query I
+delete from hasura_runtime_hidden_rowid returning generated_v;
+----
+6
+
+statement ok
+drop table hasura_runtime_hidden_rowid;
+
+statement ok
 drop table hasura_runtime_cte;

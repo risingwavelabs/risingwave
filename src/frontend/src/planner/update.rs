@@ -63,17 +63,11 @@ impl Planner {
             LogicalProject::new(plan, exprs).into()
         };
 
-        let visible_columns: Vec<_> = update
-            .table
-            .table_catalog
-            .columns()
-            .iter()
-            .filter(|col| !col.is_hidden())
-            .collect_vec();
-        let mut visible_olds = Vec::with_capacity(visible_columns.len());
-        let mut visible_base_news = Vec::with_capacity(visible_columns.len());
+        let all_columns: Vec<_> = update.table.table_catalog.columns().iter().collect_vec();
+        let mut all_olds = Vec::with_capacity(all_columns.len());
+        let mut all_base_news = Vec::with_capacity(all_columns.len());
 
-        for (i, col) in visible_columns.iter().enumerate() {
+        for (i, col) in all_columns.iter().enumerate() {
             let data_type = col.data_type();
 
             let old: ExprImpl = InputRef::new(i, data_type.clone()).into();
@@ -107,34 +101,57 @@ impl Planner {
                     data_type.clone(),
                 )
                 .into();
-                visible_base_news.push(new);
+                all_base_news.push(new);
             } else {
-                visible_base_news.push(new);
+                all_base_news.push(new);
             }
 
-            visible_olds.push(old);
+            all_olds.push(old);
         }
 
-        let mut visible_news = Vec::with_capacity(visible_base_news.len());
-        for (i, col) in visible_columns.iter().enumerate() {
+        let mut all_news = Vec::with_capacity(all_base_news.len());
+        for (i, col) in all_columns.iter().enumerate() {
             if let Some(generated_expr) = col.generated_expr() {
                 let mut substitute = Substitute {
-                    mapping: visible_base_news.clone(),
+                    mapping: all_base_news.clone(),
                 };
                 let expr = substitute.rewrite_expr(ExprImpl::from_expr_proto(generated_expr)?);
-                visible_news.push(expr);
+                all_news.push(expr);
             } else {
-                visible_news.push(visible_base_news[i].clone());
+                all_news.push(all_base_news[i].clone());
             }
         }
 
-        let mut olds = Vec::with_capacity(visible_columns.len());
-        let mut news = Vec::with_capacity(visible_columns.len());
-        for (idx, col) in visible_columns.iter().enumerate() {
-            if !col.is_generated() {
-                olds.push(visible_olds[idx].clone());
-                news.push(visible_news[idx].clone());
+        let mut olds = Vec::with_capacity(all_columns.len());
+        let mut news = Vec::with_capacity(all_columns.len());
+        let mut returning_exprs = Vec::with_capacity(all_columns.len());
+        for (idx, col) in all_columns.iter().enumerate() {
+            if (!col.is_hidden() || col.is_row_id_column())
+                && !col.is_generated()
+                && !col.is_rw_timestamp_column()
+            {
+                olds.push(all_olds[idx].clone());
+                news.push(all_news[idx].clone());
             }
+            if !col.is_hidden() {
+                returning_exprs.push(all_news[idx].clone());
+            }
+        }
+
+        let has_row_id_in_catalog = all_columns.iter().any(|col| col.is_row_id_column());
+        if !has_row_id_in_catalog
+            && let Some((row_id_index, row_id_field)) = with_new
+                .schema()
+                .fields()
+                .iter()
+                .take(old_schema_len)
+                .enumerate()
+                .find(|(_, field)| field.name.ends_with("._row_id") || field.name == "_row_id")
+        {
+            let row_id_expr: ExprImpl =
+                InputRef::new(row_id_index, row_id_field.data_type.clone()).into();
+            olds.push(row_id_expr.clone());
+            news.push(row_id_expr);
         }
 
         let mut plan: PlanRef = LogicalUpdate::from(generic::Update::new(
@@ -144,7 +161,7 @@ impl Planner {
             update.table_version_id,
             olds,
             news,
-            visible_news,
+            returning_exprs,
             returning,
         ))
         .into();

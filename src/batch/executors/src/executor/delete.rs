@@ -105,7 +105,7 @@ impl Executor for DeleteExecutor {
 impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
-        let pk_indices: HashSet<_> = self.pk_indices.into_iter().collect();
+        let pk_indices: HashSet<_> = self.pk_indices.iter().copied().collect();
 
         let table_dml_handle = self
             .dml_manager
@@ -122,24 +122,62 @@ impl DeleteExecutor {
             .iter()
             .map(|&i| table_dml_handle.column_descs()[i].data_type.clone())
             .collect_vec();
+        let child_write_column_indices = if self.returning {
+            table_dml_handle
+                .column_descs()
+                .iter()
+                .map(|column_desc| {
+                    self.child
+                        .schema()
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .find_map(|(idx, field)| {
+                            (field.name == column_desc.name
+                                || field
+                                    .name
+                                    .rsplit('.')
+                                    .next()
+                                    .is_some_and(|name| name == column_desc.name))
+                            .then_some(idx)
+                        })
+                        .expect("delete returning column should exist in child schema")
+                })
+                .collect_vec()
+        } else {
+            write_column_indices.clone()
+        };
         let mut builder = DataChunkBuilder::new(write_data_types.clone(), self.chunk_size);
 
         if self.returning {
-            let projected_write_types = self
-                .child
-                .schema()
-                .data_types()
+            let projected_write_types = child_write_column_indices
                 .iter()
-                .enumerate()
-                .filter_map(|(i, ty)| write_column_indices.contains(&i).then_some(ty.clone()))
+                .map(|&i| self.child.schema().data_types()[i].clone())
                 .collect_vec();
             assert_eq!(write_data_types, projected_write_types, "bad delete schema");
         } else {
-            assert_eq!(write_data_types, self.child.schema().data_types(), "bad delete schema");
+            assert_eq!(
+                write_data_types,
+                self.child.schema().data_types(),
+                "bad delete schema"
+            );
         }
         let mut write_handle = table_dml_handle.write_handle(self.session_id, self.txn_id)?;
 
         write_handle.begin()?;
+
+        let projected_pk_indices = if self.returning {
+            self.pk_indices
+                .iter()
+                .filter_map(|pk_index| {
+                    child_write_column_indices
+                        .iter()
+                        .position(|&child_idx| child_idx == *pk_index)
+                })
+                .collect::<HashSet<_>>()
+        } else {
+            pk_indices
+        };
 
         // Transform the data chunk to a stream chunk, then write to the source.
         let write_txn_data = |chunk: DataChunk| async {
@@ -164,7 +202,7 @@ impl DeleteExecutor {
                 yield data_chunk.clone();
             }
             if self.returning {
-                data_chunk = data_chunk.project(&write_column_indices);
+                data_chunk = data_chunk.project(&child_write_column_indices);
             }
             if self.upsert {
                 let (cols, vis) = data_chunk.into_parts();
@@ -172,7 +210,7 @@ impl DeleteExecutor {
                 let mut new_cols = Vec::with_capacity(cols.len());
                 // Only keep the primary key columns, pad the rest with null.
                 for (i, col) in cols.into_iter().enumerate() {
-                    if pk_indices.contains(&i) {
+                    if projected_pk_indices.contains(&i) {
                         new_cols.push(col);
                     } else {
                         let mut builder = col.create_builder(cap);
