@@ -1337,3 +1337,44 @@ fn parse_variadic_argument() {
             .contains("VARIADIC argument must be the last"),
     );
 }
+
+#[test]
+fn parse_dollar_quoted_string_with_inner_different_tag() {
+    let sql = "SELECT $foo$the content with $bar$nested$bar$ usage$foo$";
+
+    let projection = verified_only_select(sql).projection;
+
+    assert_eq!(
+        expr_from_projection(&projection[0]),
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: Some("foo".into()),
+            value: "the content with $bar$nested$bar$ usage".into(),
+        }))
+    );
+}
+
+#[test]
+fn parse_dollar_quoted_string_followed_by_alias_with_dollar() {
+    let sql = "SELECT $go$o$not nesting just $ sign$go$o$";
+
+    let stmt = parse_sql_statements(sql).unwrap();
+
+    let projection = match stmt.first().unwrap() {
+        Statement::Query(query) => match &query.body {
+            SetExpr::Select(select) => &select.projection,
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
+    };
+
+    assert_eq!(
+        projection[0],
+        SelectItem::ExprWithAlias {
+            expr: Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+                tag: Some("go".into()),
+                value: "o$not nesting just $ sign".into(),
+            })),
+            alias: Ident::new_unchecked("o$"),
+        }
+    );
+}

@@ -663,76 +663,53 @@ impl<'a> Tokenizer<'a> {
         self.next();
 
         if let Some('$') = self.peek() {
+            // syntax: $$......$$
             self.next();
 
-            let mut is_terminated = false;
-            let mut prev: Option<char> = None;
-
-            while let Some(ch) = self.peek() {
-                if prev == Some('$') {
-                    if ch == '$' {
+            let delimiter = "$$";
+            while self.peek().is_some() {
+                if self.starts_with(delimiter) {
+                    for _ in delimiter.chars() {
                         self.next();
-                        is_terminated = true;
-                        break;
-                    } else {
-                        s.push('$');
-                        s.push(ch);
                     }
-                } else if ch != '$' {
-                    s.push(ch);
+                    return Ok(Token::DollarQuotedString(DollarQuotedString {
+                        value: s,
+                        tag: None,
+                    }));
                 }
-
-                prev = Some(ch);
-                self.next();
+                s.push(self.next().unwrap());
             }
 
-            return if self.peek().is_none() && !is_terminated {
-                self.error("Unterminated dollar-quoted string")
-            } else {
-                Ok(Token::DollarQuotedString(DollarQuotedString {
-                    value: s,
-                    tag: None,
-                }))
-            };
+            self.error("Unterminated dollar-quoted string")
         } else {
+            // syntax: $SomeTag$.....$SomeTag$
             value.push_str(&self.peeking_take_while(|ch| ch.is_alphanumeric() || ch == '_'));
 
             if let Some('$') = self.peek() {
                 self.next();
-                s.push_str(&self.peeking_take_while(|ch| ch != '$'));
 
-                match self.peek() {
-                    Some('$') => {
-                        self.next();
-                        for c in value.chars() {
-                            let next_char = self.next();
-                            if Some(c) != next_char {
-                                return self.error(format!(
-                                    "Unterminated dollar-quoted string at or near \"{}\"",
-                                    value
-                                ));
-                            }
-                        }
-
-                        if let Some('$') = self.peek() {
+                let delimiter = format!("${}$", value);
+                while self.peek().is_some() {
+                    if self.starts_with(&delimiter) {
+                        for _ in delimiter.chars() {
                             self.next();
-                        } else {
-                            return self.error("Unterminated dollar-quoted string, expected $");
                         }
+                        return Ok(Token::DollarQuotedString(DollarQuotedString {
+                            value: s,
+                            tag: Some(value),
+                        }));
                     }
-                    _ => {
-                        return self.error("Unterminated dollar-quoted, expected $");
-                    }
+                    s.push(self.next().unwrap());
                 }
+
+                self.error(format!(
+                    "Unterminated dollar-quoted string at or near \"{}\"",
+                    value
+                ))
             } else {
-                return Ok(Token::Parameter(value));
+                Ok(Token::Parameter(value))
             }
         }
-
-        Ok(Token::DollarQuotedString(DollarQuotedString {
-            value: s,
-            tag: if value.is_empty() { None } else { Some(value) },
-        }))
     }
 
     fn error<R>(&self, message: impl Into<String>) -> Result<R, TokenizerError> {
@@ -1002,6 +979,16 @@ impl<'a> Tokenizer<'a> {
         Ok(Some(t))
     }
 
+    fn starts_with(&self, expected: &str) -> bool {
+        let mut chars = self.chars.clone();
+        for expected_char in expected.chars() {
+            if chars.next() != Some(expected_char) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Read from `self` until `predicate` returns `false` or EOF is hit.
     /// Return the characters read as String, and keep the first non-matching
     /// char available as `self.next()`.
@@ -1146,6 +1133,43 @@ mod tests {
             Token::Whitespace(Whitespace::Space),
             Token::make_word("three", None),
         ];
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_tagged_dollar_quoted_string_with_inner_different_tag() {
+        let sql = String::from("SELECT $foo$the content with $bar$nested$bar$ usage$foo$");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::DollarQuotedString(DollarQuotedString {
+                tag: Some("foo".into()),
+                value: "the content with $bar$nested$bar$ usage".into(),
+            }),
+        ];
+
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_tagged_dollar_quoted_string_followed_by_alias_with_dollar() {
+        let sql = String::from("SELECT $go$o$not nesting just $ sign$go$o$");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::DollarQuotedString(DollarQuotedString {
+                tag: Some("go".into()),
+                value: "o$not nesting just $ sign".into(),
+            }),
+            Token::make_word("o$", None),
+        ];
+
         compare(expected, tokens);
     }
 
