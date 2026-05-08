@@ -37,6 +37,7 @@ use crate::catalog::{CatalogError, DatabaseId, IndexCatalog, TableId};
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::privilege::ObjectCheckItem;
+use crate::user::effective_privilege::catalog_user_has_privilege;
 
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
@@ -299,23 +300,34 @@ impl Binder {
                     .into());
                 }
                 if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
-                    if user.is_super || user.id == item.owner {
-                        return Ok(());
-                    }
-                    if !user.has_privilege(item.object, item.mode) {
+                    if !catalog_user_has_privilege(
+                        &self.user,
+                        user,
+                        &self.role_memberships,
+                        item.owner,
+                        item.object,
+                        item.mode,
+                    ) {
                         return Err(PermissionDenied(item.error_message()).into());
                     }
 
                     // check CONNECT privilege for cross-db access
-                    if self.database_id != database_id
-                        && !user.has_privilege(database_id, AclMode::Connect)
-                    {
-                        let db_name = self.catalog.get_database_by_id(database_id)?.name.clone();
-
-                        return Err(PermissionDenied(format!(
-                            "permission denied for database \"{db_name}\""
-                        ))
-                        .into());
+                    if self.database_id != database_id {
+                        let db = self.catalog.get_database_by_id(database_id)?;
+                        if !catalog_user_has_privilege(
+                            &self.user,
+                            user,
+                            &self.role_memberships,
+                            db.owner,
+                            database_id,
+                            AclMode::Connect,
+                        ) {
+                            return Err(PermissionDenied(format!(
+                                "permission denied for database \"{}\"",
+                                db.name
+                            ))
+                            .into());
+                        }
                     }
                 } else {
                     return Err(PermissionDenied("Session user is invalid".to_owned()).into());
