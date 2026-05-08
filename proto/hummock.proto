@@ -51,6 +51,8 @@ message SstableInfo {
   // Optional per-vnode statistics for query pruning when the SST spans only a small set of vnodes.
   // Only emitted when SST contains multiple vnodes to avoid redundancy with key_range.
   VnodeStatistics vnode_statistics = 15;
+
+  optional bytes max_watermark_column_value = 16;
 }
 
 enum LevelType {

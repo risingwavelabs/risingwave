@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, TABLE_PREFIX_LEN, UserKe
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeStatistics};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::hummock::BloomFilterType;
 
@@ -141,6 +142,9 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
 
     block_size_vec: Vec<usize>, // for statistics
     vnode_range_collector: Option<VnodeUserKeyRangeCollector>,
+    has_raw_block: bool,
+    max_watermark_column_value: Option<Bytes>,
+    table_id_to_watermark_type: HashMap<TableId, WatermarkSerdeType>,
 }
 
 impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
@@ -149,6 +153,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         writer: W,
         options: SstableBuilderOptions,
         table_id_to_vnode: HashMap<impl Into<TableId>, usize>,
+        table_id_to_watermark_type: HashMap<impl Into<TableId>, WatermarkSerdeType>,
         table_id_to_watermark_serde: HashMap<
             impl Into<TableId>,
             Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
@@ -173,6 +178,10 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
             Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             options,
             compaction_catalog_agent_ref,
+            table_id_to_watermark_type
+                .into_iter()
+                .map(|(table_id, watermark_type)| (table_id.into(), watermark_type))
+                .collect(),
             None,
         )
     }
@@ -185,6 +194,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         filter_builder: F,
         options: SstableBuilderOptions,
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+        table_id_to_watermark_type: HashMap<TableId, WatermarkSerdeType>,
         memory_limiter: Option<Arc<MemoryLimiter>>,
     ) -> Self {
         let sst_object_id = sst_object_id.into();
@@ -213,6 +223,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             epoch_set: BTreeSet::default(),
             memory_limiter,
             block_size_vec: Vec::new(),
+            has_raw_block: false,
+            max_watermark_column_value: None,
+            table_id_to_watermark_type,
         }
     }
 
@@ -238,6 +251,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         largest_key: Vec<u8>,
         mut meta: BlockMeta,
     ) -> HummockResult<bool> {
+        // Values cannot be accessed from raw blocks.
+        self.has_raw_block = true;
+        self.max_watermark_column_value = None;
+
         let table_id = smallest_key.user_key.table_id;
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             if !self.block_builder.is_empty() {
@@ -434,6 +451,26 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.last_full_key.clear();
         self.last_full_key.extend_from_slice(&self.raw_key);
 
+        if !self.has_raw_block && self.table_ids.len() == 1 {
+            let table_id = *self.table_ids.first().unwrap();
+            if let Some(watermark_type) = self.table_id_to_watermark_type.get(&table_id)
+                && let Ok(Some((watermark, direction))) = self
+                    .compaction_catalog_agent_ref
+                    .extract_watermark(table_id, *watermark_type, full_key, value)
+            {
+                if let Some(current) = self.max_watermark_column_value.as_ref() {
+                    if self
+                        .compaction_catalog_agent_ref
+                        .should_update_max_watermark(direction, current, &watermark)
+                    {
+                        self.max_watermark_column_value = Some(watermark);
+                    }
+                } else {
+                    self.max_watermark_column_value = Some(watermark);
+                }
+            }
+        }
+
         self.raw_key.clear();
         self.raw_value.clear();
         Ok(())
@@ -582,7 +619,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .vnode_range_collector
             .take()
             .and_then(|collector| collector.finish(&self.last_full_key));
-
+        if self.table_ids.len() > 1 || self.has_raw_block {
+            self.max_watermark_column_value = None;
+        }
         let sst_info: SstableInfo = SstableInfoInner {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
@@ -604,6 +643,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
             vnode_statistics: vnode_user_key_ranges,
+            max_watermark_column_value: self.max_watermark_column_value,
         }
         .into();
 
@@ -912,6 +952,7 @@ pub(super) mod tests {
 
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::key::UserKey;
 
@@ -940,16 +981,300 @@ pub(super) mod tests {
         };
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type = HashMap::<TableId, WatermarkSerdeType>::new();
         let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let b = SstableBuilder::for_test(
             0,
             mock_sst_writer(&opt),
             opt,
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
 
         b.finish().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_max_watermark_column_value() {
+        use risingwave_common::types::DataType;
+        use risingwave_common::util::sort_util::OrderType;
+
+        let opt = default_builder_opt_for_test();
+        let table_id = TableId::new(1);
+        let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type =
+            HashMap::from_iter(vec![(table_id, WatermarkSerdeType::NonPkPrefix)]);
+
+        // watermark column is the second column in PK (index 1)
+        let pk_serde = OrderedRowSerde::new(
+            vec![DataType::Int32, DataType::Int32],
+            vec![OrderType::ascending(), OrderType::ascending()],
+        );
+        let watermark_col_serde = pk_serde.index(1).into_owned();
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(
+            table_id,
+            Some((pk_serde.clone(), watermark_col_serde, 1)),
+        )]);
+
+        let mut b = SstableBuilder::for_test(
+            0,
+            mock_sst_writer(&opt),
+            opt,
+            table_id_to_vnode,
+            table_id_to_watermark_type,
+            table_id_to_watermark_serde,
+        );
+
+        let vnode = VirtualNode::from_index(1);
+
+        let add_record = |b: &mut SstableBuilder<_, _>, col1: i32, col2: i32| {
+            let mut table_key = vnode.to_be_bytes().to_vec();
+            pk_serde.serialize(
+                &[Some(ScalarImpl::Int32(col1)), Some(ScalarImpl::Int32(col2))],
+                &mut table_key,
+            );
+            let full_key = FullKey::for_test(table_id, table_key, test_epoch(1));
+            let value = HummockValue::Put(b"value".to_vec());
+            let b = b as *mut SstableBuilder<_, _>;
+            unsafe {
+                // Use block_on or make add_record async. Here we just use a closure.
+                futures::executor::block_on((*b).add(full_key.to_ref(), value.as_slice())).unwrap();
+            }
+        };
+
+        add_record(&mut b, 1, 10);
+        add_record(&mut b, 1, 15);
+        add_record(&mut b, 1, 20);
+
+        let output = b.finish().await.unwrap();
+        let sst_info = output.sst_info.sst_info;
+
+        // max watermark should be 20
+        let mut expected_watermark = vec![];
+        let watermark_col_serde =
+            OrderedRowSerde::new(vec![DataType::Int32], vec![OrderType::ascending()]);
+        watermark_col_serde.serialize(&[Some(ScalarImpl::Int32(20))], &mut expected_watermark);
+
+        assert_eq!(
+            sst_info.max_watermark_column_value,
+            Some(Bytes::from(expected_watermark))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_max_watermark_column_value_descending() {
+        use risingwave_common::types::DataType;
+        use risingwave_common::util::sort_util::OrderType;
+
+        let opt = default_builder_opt_for_test();
+        let table_id = TableId::new(1);
+        let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type =
+            HashMap::from_iter(vec![(table_id, WatermarkSerdeType::NonPkPrefix)]);
+
+        // watermark column is the second column in PK (index 1), descending
+        let pk_serde = OrderedRowSerde::new(
+            vec![DataType::Int32, DataType::Int32],
+            vec![OrderType::ascending(), OrderType::descending()],
+        );
+        let watermark_col_serde = pk_serde.index(1).into_owned();
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(
+            table_id,
+            Some((pk_serde.clone(), watermark_col_serde, 1)),
+        )]);
+
+        let mut b = SstableBuilder::for_test(
+            0,
+            mock_sst_writer(&opt),
+            opt,
+            table_id_to_vnode,
+            table_id_to_watermark_type,
+            table_id_to_watermark_serde,
+        );
+
+        let vnode = VirtualNode::from_index(1);
+
+        let add_record = |b: &mut SstableBuilder<_, _>, col1: i32, col2: i32| {
+            let mut table_key = vnode.to_be_bytes().to_vec();
+            pk_serde.serialize(
+                &[Some(ScalarImpl::Int32(col1)), Some(ScalarImpl::Int32(col2))],
+                &mut table_key,
+            );
+            let full_key = FullKey::for_test(table_id, table_key, test_epoch(1));
+            let value = HummockValue::Put(b"value".to_vec());
+            let b = b as *mut SstableBuilder<_, _>;
+            unsafe {
+                futures::executor::block_on((*b).add(full_key.to_ref(), value.as_slice())).unwrap();
+            }
+        };
+
+        add_record(&mut b, 1, 20);
+        add_record(&mut b, 1, 15);
+        add_record(&mut b, 1, 10);
+
+        let output = b.finish().await.unwrap();
+        let sst_info = output.sst_info.sst_info;
+
+        let mut expected_watermark = vec![];
+        let watermark_col_serde =
+            OrderedRowSerde::new(vec![DataType::Int32], vec![OrderType::descending()]);
+        watermark_col_serde.serialize(&[Some(ScalarImpl::Int32(20))], &mut expected_watermark);
+
+        assert_eq!(
+            sst_info.max_watermark_column_value,
+            Some(Bytes::from(expected_watermark))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_max_watermark_column_value_pk_prefix() {
+        use risingwave_common::types::DataType;
+        use risingwave_common::util::sort_util::OrderType;
+
+        let opt = default_builder_opt_for_test();
+        let table_id = TableId::new(1);
+        let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type =
+            HashMap::from_iter(vec![(table_id, WatermarkSerdeType::PkPrefix)]);
+
+        // watermark column is the first column in PK (index 0)
+        let pk_serde = OrderedRowSerde::new(
+            vec![DataType::Int32, DataType::Int32],
+            vec![OrderType::ascending(), OrderType::ascending()],
+        );
+        let watermark_col_serde = pk_serde.index(0).into_owned();
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(
+            table_id,
+            Some((pk_serde.clone(), watermark_col_serde, 0)),
+        )]);
+
+        let mut b = SstableBuilder::for_test(
+            0,
+            mock_sst_writer(&opt),
+            opt,
+            table_id_to_vnode,
+            table_id_to_watermark_type,
+            table_id_to_watermark_serde,
+        );
+
+        let vnode = VirtualNode::from_index(1);
+
+        let add_record = |b: &mut SstableBuilder<_, _>, col1: i32, col2: i32| {
+            let mut table_key = vnode.to_be_bytes().to_vec();
+            pk_serde.serialize(
+                &[Some(ScalarImpl::Int32(col1)), Some(ScalarImpl::Int32(col2))],
+                &mut table_key,
+            );
+            let full_key = FullKey::for_test(table_id, table_key, test_epoch(1));
+            let value = HummockValue::Put(b"value".to_vec());
+            let b = b as *mut SstableBuilder<_, _>;
+            unsafe {
+                futures::executor::block_on((*b).add(full_key.to_ref(), value.as_slice())).unwrap();
+            }
+        };
+
+        add_record(&mut b, 10, 1);
+        add_record(&mut b, 15, 1);
+        add_record(&mut b, 20, 1);
+
+        let output = b.finish().await.unwrap();
+        let sst_info = output.sst_info.sst_info;
+
+        // max watermark should be 20
+        let mut expected_watermark = vec![];
+        let watermark_col_serde =
+            OrderedRowSerde::new(vec![DataType::Int32], vec![OrderType::ascending()]);
+        watermark_col_serde.serialize(&[Some(ScalarImpl::Int32(20))], &mut expected_watermark);
+
+        assert_eq!(
+            sst_info.max_watermark_column_value,
+            Some(Bytes::from(expected_watermark))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_max_watermark_column_value_none_after_add_raw_block() {
+        use risingwave_common::types::DataType;
+        use risingwave_common::util::sort_util::OrderType;
+
+        let mut opt = default_builder_opt_for_test();
+        opt.bloom_false_positive = 0.0;
+        let table_id = TableId::new(1);
+        let table_id_to_vnode = HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type =
+            HashMap::from_iter(vec![(table_id, WatermarkSerdeType::NonPkPrefix)]);
+
+        let pk_serde = OrderedRowSerde::new(
+            vec![DataType::Int32, DataType::Int32],
+            vec![OrderType::ascending(), OrderType::ascending()],
+        );
+        let watermark_col_serde = pk_serde.index(1).into_owned();
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(
+            table_id,
+            Some((pk_serde.clone(), watermark_col_serde, 1)),
+        )]);
+
+        let vnode = VirtualNode::from_index(1);
+        let full_key_with_watermark = |col1: i32, col2: i32| {
+            let mut table_key = vnode.to_be_bytes().to_vec();
+            pk_serde.serialize(
+                &[Some(ScalarImpl::Int32(col1)), Some(ScalarImpl::Int32(col2))],
+                &mut table_key,
+            );
+            FullKey::for_test(table_id, table_key, test_epoch(1))
+        };
+
+        let source_key = full_key_with_watermark(1, 10);
+        let source_value = HummockValue::Put(b"value".to_vec());
+        let mut source_builder = SstableBuilder::for_test(
+            0,
+            mock_sst_writer(&opt),
+            opt.clone(),
+            HashMap::from_iter(vec![(table_id, VirtualNode::COUNT_FOR_TEST)]),
+            table_id_to_watermark_type.clone(),
+            table_id_to_watermark_serde.clone(),
+        );
+        source_builder
+            .add(source_key.to_ref(), source_value.as_slice())
+            .await
+            .unwrap();
+        let source_output = source_builder.finish().await.unwrap();
+        let (source_data, source_meta) = source_output.writer_output;
+        let source_block_meta = source_meta.block_metas[0].clone();
+        let source_block = source_data.slice(
+            source_block_meta.offset as usize
+                ..source_block_meta.offset as usize + source_block_meta.len as usize,
+        );
+
+        let mut builder = SstableBuilder::for_test(
+            1,
+            mock_sst_writer(&opt),
+            opt,
+            table_id_to_vnode,
+            table_id_to_watermark_type,
+            table_id_to_watermark_serde,
+        );
+        builder
+            .add_raw_block(
+                source_block,
+                vec![],
+                FullKey::decode(&source_block_meta.smallest_key).to_vec(),
+                source_meta.largest_key,
+                source_block_meta,
+            )
+            .await
+            .unwrap();
+
+        let next_key = full_key_with_watermark(1, 20);
+        let next_value = HummockValue::Put(b"value".to_vec());
+        builder
+            .add(next_key.to_ref(), next_value.as_slice())
+            .await
+            .unwrap();
+
+        let output = builder.finish().await.unwrap();
+        assert_eq!(output.sst_info.sst_info.max_watermark_column_value, None);
     }
 
     fn encode_full_key(vnode: VirtualNode, table_key_suffix: &[u8]) -> Vec<u8> {
@@ -1192,12 +1517,14 @@ pub(super) mod tests {
         let opt = default_builder_opt_for_test();
 
         let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_type = HashMap::<TableId, WatermarkSerdeType>::new();
         let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
         let mut b = SstableBuilder::for_test(
             0,
             mock_sst_writer(&opt),
             opt,
             table_id_to_vnode,
+            table_id_to_watermark_type,
             table_id_to_watermark_serde,
         );
 
@@ -1326,6 +1653,7 @@ pub(super) mod tests {
             BlockedXor16FilterBuilder::new(1024),
             opts,
             compaction_catalog_agent_ref,
+            HashMap::default(),
             None,
         );
 

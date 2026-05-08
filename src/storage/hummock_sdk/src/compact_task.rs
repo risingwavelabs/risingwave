@@ -261,6 +261,23 @@ impl CompactTask {
             .iter()
             .flat_map(|level| level.read_sstable_infos())
     }
+
+    pub fn build_table_watermark_serde_types(&self) -> HashMap<StateTableId, WatermarkSerdeType> {
+        self.pk_prefix_table_watermarks
+            .keys()
+            .map(|table_id| (*table_id, WatermarkSerdeType::PkPrefix))
+            .chain(
+                self.non_pk_prefix_table_watermarks
+                    .keys()
+                    .map(|table_id| (*table_id, WatermarkSerdeType::NonPkPrefix)),
+            )
+            .chain(
+                self.value_table_watermarks
+                    .keys()
+                    .map(|table_id| (*table_id, WatermarkSerdeType::Value)),
+            )
+            .collect()
+    }
 }
 
 fn split_watermark_serde_types(

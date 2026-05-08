@@ -388,6 +388,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             gc_delete_keys: task.gc_delete_keys,
             retain_multiple_version: false,
             table_vnode_partition: task.table_vnode_partition.clone(),
+            table_id_to_watermark_type: task.build_table_watermark_serde_types(),
             use_block_based_filter: true,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
@@ -401,6 +402,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             policy: task_config.cache_policy,
             remote_rpc_cost: get_id_time,
             compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
+            table_id_to_watermark_type: task_config.table_id_to_watermark_type.clone(),
             sstable_writer_factory: factory,
             _phantom: PhantomData,
         };

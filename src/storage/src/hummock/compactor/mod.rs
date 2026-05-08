@@ -305,6 +305,7 @@ impl Compactor {
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),
             compaction_catalog_agent_ref: compaction_catalog_agent_ref.clone(),
+            table_id_to_watermark_type: self.task_config.table_id_to_watermark_type.clone(),
             sstable_writer_factory: writer_factory,
             _phantom: PhantomData,
         };

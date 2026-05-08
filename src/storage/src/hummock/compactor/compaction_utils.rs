@@ -27,6 +27,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
+use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::{EpochWithGap, KeyComparator, can_concat};
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::{BloomFilterType, PbLevelType, PbTableSchema};
@@ -57,6 +58,7 @@ pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
     pub policy: CachePolicy,
     pub remote_rpc_cost: Arc<AtomicU64>,
     pub compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    pub table_id_to_watermark_type: HashMap<StateTableId, WatermarkSerdeType>,
     pub sstable_writer_factory: W,
     pub _phantom: PhantomData<F>,
 }
@@ -89,6 +91,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
             ),
             self.options.clone(),
             self.compaction_catalog_agent_ref.clone(),
+            self.table_id_to_watermark_type.clone(),
             Some(self.limiter.clone()),
         );
         Ok(builder)
@@ -126,6 +129,7 @@ pub struct TaskConfig {
     pub(crate) use_block_based_filter: bool,
 
     pub(crate) table_vnode_partition: BTreeMap<TableId, u32>,
+    pub(crate) table_id_to_watermark_type: HashMap<StateTableId, WatermarkSerdeType>,
     /// `TableId` -> `TableSchema`
     /// Schemas in `table_schemas` are at least as new as the one used to create `input_ssts`.
     /// For a table with schema existing in `table_schemas`, its columns not in `table_schemas` but in `input_ssts` can be safely dropped.
@@ -150,6 +154,7 @@ impl TaskConfig {
             retain_multiple_version: false,
             use_block_based_filter,
             table_vnode_partition: BTreeMap::default(),
+            table_id_to_watermark_type: HashMap::default(),
             table_schemas,
             disable_drop_column_optimization: false,
         }

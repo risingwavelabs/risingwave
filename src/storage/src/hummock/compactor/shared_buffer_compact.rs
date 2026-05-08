@@ -563,6 +563,7 @@ impl SharedBufferCompactRunner {
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 retain_multiple_version: true,
                 table_vnode_partition,
+                table_id_to_watermark_type: HashMap::default(),
                 use_block_based_filter,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,

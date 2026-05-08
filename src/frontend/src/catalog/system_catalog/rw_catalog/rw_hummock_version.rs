@@ -58,6 +58,7 @@ struct RwHummockSstable {
     bloom_filter_kind: i32,
     table_ids: JsonbVal,
     sst_size: i64,
+    max_watermark_column_value: Option<Vec<u8>>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_hummock_current_version")]
@@ -142,6 +143,10 @@ fn version_to_sstable_rows(version: HummockVersion) -> Vec<RwHummockSstable> {
                     )
                     .into(),
                     sst_size: sst.sst_size as _,
+                    max_watermark_column_value: sst
+                        .max_watermark_column_value
+                        .as_ref()
+                        .map(|b| b.to_vec()),
                 });
             }
         }
