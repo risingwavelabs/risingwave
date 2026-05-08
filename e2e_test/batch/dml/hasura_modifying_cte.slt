@@ -16,6 +16,9 @@ statement ok
 set rw_implicit_flush = true;
 
 statement ok
+drop table if exists hasura_runtime_cte;
+
+statement ok
 create table hasura_runtime_cte (
   id int primary key,
   required_v int not null,
@@ -44,7 +47,7 @@ with ins as (
 )
 select row_to_json(ins)::varchar from ins;
 ----
-{"id":1,"required_v":7,"generated_v":8}
+{"generated_v": 8, "id": 1, "required_v": 7}
 
 query I
 select generated_v from hasura_runtime_cte where id = 1;
@@ -60,7 +63,7 @@ with upd as (
 )
 select row_to_json(upd)::varchar from upd;
 ----
-{"id":1,"required_v":9,"generated_v":10}
+{"generated_v": 10, "id": 1, "required_v": 9}
 
 query I
 select generated_v from hasura_runtime_cte where id = 1;
@@ -75,7 +78,7 @@ with del as (
 )
 select row_to_json(del)::varchar from del;
 ----
-{"id":1,"required_v":9,"generated_v":10}
+{"generated_v": 10, "id": 1, "required_v": 9}
 
 query I
 select count(*) from hasura_runtime_cte;

@@ -84,3 +84,19 @@
     BatchProject { exprs: [Field(JsonbToRecordset('[{"name": "hasura_defaults", "schema": "public"}]':Jsonb), 1:Int32) as $expr1] }
     └─BatchProjectSet { select_list: [JsonbToRecordset('[{"name": "hasura_defaults", "schema": "public"}]':Jsonb)] }
       └─BatchValues { rows: [[]] }
+- name: hasura modifying cte returning path
+  sql: |
+    create table hasura_runtime_cte (
+      id int primary key,
+      required_v int not null,
+      generated_v int as required_v + 1
+    );
+    with ins as (
+      insert into hasura_runtime_cte values (1, 7) returning *
+    )
+    select id, generated_v from ins;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [id, generated_v] }
+      └─BatchInsert { table: hasura_runtime_cte, returning: true, mapping: [0:0, 1:1], generated: [2<-($1 + 1:Int32)] }
+        └─BatchValues { rows: [[1:Int32, 7:Int32]] }

@@ -145,7 +145,7 @@ impl Binder {
             .filter(|c| !c.is_hidden())
             .cloned()
             .collect_vec();
-        let (cols_to_insert_in_table, row_id_index) = table_catalog.columns_to_insert();
+        let (cols_to_insert_in_table, _row_id_index) = table_catalog.columns_to_insert();
         let cols_to_insert_in_table = cols_to_insert_in_table
             .map(|(column, _)| column.clone())
             .collect_vec();
