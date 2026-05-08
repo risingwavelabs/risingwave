@@ -95,13 +95,21 @@ fn alter_prost_user_info(
                 user_info.can_create_db = false;
                 update_fields.insert(UpdateField::CreateDb);
             }
-            UserOption::CreateUser => {
+            UserOption::CreateRole | UserOption::CreateUser => {
                 user_info.can_create_user = true;
                 update_fields.insert(UpdateField::CreateUser);
             }
-            UserOption::NoCreateUser => {
+            UserOption::NoCreateRole | UserOption::NoCreateUser => {
                 user_info.can_create_user = false;
                 update_fields.insert(UpdateField::CreateUser);
+            }
+            UserOption::Inherit => {
+                user_info.can_inherit = true;
+                update_fields.insert(UpdateField::Inherit);
+            }
+            UserOption::NoInherit => {
+                user_info.can_inherit = false;
+                update_fields.insert(UpdateField::Inherit);
             }
             UserOption::Login => {
                 user_info.can_login = true;
@@ -118,15 +126,6 @@ fn alter_prost_user_info(
             UserOption::NoAdmin => {
                 user_info.is_admin = false;
                 update_fields.insert(UpdateField::Admin);
-            }
-            UserOption::CreateRole
-            | UserOption::NoCreateRole
-            | UserOption::Inherit
-            | UserOption::NoInherit => {
-                return Err(ErrorCode::InvalidParameterValue(
-                    "role options are not supported yet".to_owned(),
-                )
-                .into());
             }
             UserOption::EncryptedPassword(p) => {
                 if !p.0.is_empty() {
@@ -251,6 +250,13 @@ pub async fn handle_alter_user(
         response_builder = response_builder.notice(notice);
     }
     Ok(response_builder.into())
+}
+
+pub async fn handle_alter_role(
+    handler_args: HandlerArgs,
+    stmt: AlterUserStatement,
+) -> Result<RwPgResponse> {
+    handle_alter_user(handler_args, stmt).await
 }
 
 #[cfg(test)]
