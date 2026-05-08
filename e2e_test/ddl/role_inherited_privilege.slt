@@ -1,0 +1,119 @@
+# Test that actual query privilege checks honor role inheritance, not only
+# pg_catalog.has_table_privilege.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+DROP TABLE IF EXISTS role_inherited_privilege_t;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_user;
+
+statement ok
+DROP ROLE IF EXISTS role_noinherit_privilege_user;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_app;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_select;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_update;
+
+statement ok
+CREATE TABLE role_inherited_privilege_t (id int PRIMARY KEY, v int);
+
+statement ok
+INSERT INTO role_inherited_privilege_t VALUES (1, 10), (2, 20);
+
+statement ok
+CREATE ROLE role_inherited_privilege_select;
+
+statement ok
+CREATE ROLE role_inherited_privilege_update;
+
+statement ok
+CREATE ROLE role_inherited_privilege_app;
+
+statement ok
+CREATE USER role_inherited_privilege_user WITH PASSWORD 'secret';
+
+statement ok
+CREATE USER role_noinherit_privilege_user WITH PASSWORD 'secret';
+
+statement ok
+GRANT SELECT ON TABLE role_inherited_privilege_t TO role_inherited_privilege_select;
+
+statement ok
+GRANT UPDATE ON TABLE role_inherited_privilege_t TO role_inherited_privilege_update;
+
+statement ok
+GRANT role_inherited_privilege_select TO role_inherited_privilege_app;
+
+statement ok
+GRANT role_inherited_privilege_update TO role_inherited_privilege_app;
+
+statement ok
+GRANT role_inherited_privilege_app TO role_inherited_privilege_user;
+
+statement ok
+GRANT role_inherited_privilege_app TO role_noinherit_privilege_user WITH INHERIT FALSE;
+
+# Actual SELECT should also honor role-to-role inheritance after SET ROLE.
+statement ok
+SET ROLE role_inherited_privilege_app;
+
+query II
+SELECT id, v FROM role_inherited_privilege_t ORDER BY id;
+----
+1 10
+2 20
+
+statement ok
+UPDATE role_inherited_privilege_t SET v = v + 1 WHERE id = 1;
+
+statement ok
+RESET ROLE;
+
+query II
+SELECT id, v FROM role_inherited_privilege_t ORDER BY id;
+----
+1 11
+2 20
+
+# Actual SELECT/UPDATE should honor role-to-user inheritance for a login user.
+system ok
+PGPASSWORD=secret psql -h localhost -p 4566 -d dev -U role_inherited_privilege_user -v ON_ERROR_STOP=1 -c "SELECT id, v FROM role_inherited_privilege_t ORDER BY id;" | grep -q "1.*11"
+
+system ok
+PGPASSWORD=secret psql -h localhost -p 4566 -d dev -U role_inherited_privilege_user -v ON_ERROR_STOP=1 -c "SET RW_IMPLICIT_FLUSH TO true; UPDATE role_inherited_privilege_t SET v = v + 1 WHERE id = 2;"
+
+query II
+SELECT id, v FROM role_inherited_privilege_t ORDER BY id;
+----
+1 11
+2 21
+
+# INHERIT FALSE remains a denial for implicit role-to-user privileges.
+system ok
+PGPASSWORD=secret psql -h localhost -p 4566 -d dev -U role_noinherit_privilege_user -v ON_ERROR_STOP=1 -c "SELECT id, v FROM role_inherited_privilege_t ORDER BY id;" 2>&1 | grep -q "Permission denied"
+
+statement ok
+DROP TABLE role_inherited_privilege_t;
+
+statement ok
+DROP ROLE role_inherited_privilege_user;
+
+statement ok
+DROP ROLE role_noinherit_privilege_user;
+
+statement ok
+DROP ROLE role_inherited_privilege_app;
+
+statement ok
+DROP ROLE role_inherited_privilege_select;
+
+statement ok
+DROP ROLE role_inherited_privilege_update;
