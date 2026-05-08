@@ -20,12 +20,12 @@ select to_json(42)::varchar;
 query T
 select json_build_array(1, 'foo')::varchar;
 ----
-[1,"foo"]
+[1, "foo"]
 
 query T
 select json_build_object('id', 1, 'name', 'foo')::varchar;
 ----
-{"id":1,"name":"foo"}
+{"id": 1, "name": "foo"}
 
 query T
 select set_config('hasura.user', 'alice', false);

@@ -106,21 +106,37 @@ impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let pk_indices: HashSet<_> = self.pk_indices.into_iter().collect();
-        let data_types = self.child.schema().data_types();
-        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         let table_dml_handle = self
             .dml_manager
             .table_dml_handle(self.table_id, self.table_version_id)?;
-        assert_eq!(
-            table_dml_handle
-                .column_descs()
+        let write_column_indices = table_dml_handle
+            .column_descs()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| (!c.is_generated()).then_some(i))
+            .collect_vec();
+        // `RETURNING *` may include generated columns, but the DML handle still writes only
+        // the table's non-generated columns into the internal change stream.
+        let write_data_types = write_column_indices
+            .iter()
+            .map(|&i| table_dml_handle.column_descs()[i].data_type.clone())
+            .collect_vec();
+        let mut builder = DataChunkBuilder::new(write_data_types.clone(), self.chunk_size);
+
+        if self.returning {
+            let projected_write_types = self
+                .child
+                .schema()
+                .data_types()
                 .iter()
-                .filter_map(|c| (!c.is_generated()).then_some(c.data_type.clone()))
-                .collect_vec(),
-            self.child.schema().data_types(),
-            "bad delete schema"
-        );
+                .enumerate()
+                .filter_map(|(i, ty)| write_column_indices.contains(&i).then_some(ty.clone()))
+                .collect_vec();
+            assert_eq!(write_data_types, projected_write_types, "bad delete schema");
+        } else {
+            assert_eq!(write_data_types, self.child.schema().data_types(), "bad delete schema");
+        }
         let mut write_handle = table_dml_handle.write_handle(self.session_id, self.txn_id)?;
 
         write_handle.begin()?;
@@ -146,6 +162,9 @@ impl DeleteExecutor {
             let mut data_chunk = data_chunk?;
             if self.returning {
                 yield data_chunk.clone();
+            }
+            if self.returning {
+                data_chunk = data_chunk.project(&write_column_indices);
             }
             if self.upsert {
                 let (cols, vis) = data_chunk.into_parts();

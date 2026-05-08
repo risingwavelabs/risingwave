@@ -3047,6 +3047,25 @@ fn parse_derived_tables() {
 }
 
 #[test]
+fn parse_modifying_cte_statement() {
+    let mut statements = parse_sql_statements(
+        "WITH ins AS (INSERT INTO t VALUES (1) RETURNING *) SELECT * FROM ins",
+    )
+    .expect("expected statement to parse");
+    let Statement::Query(query) = statements.pop().expect("expected statement") else {
+        panic!("expected query statement");
+    };
+
+    let with = query.with.expect("expected WITH clause");
+    let cte = only(with.cte_tables);
+    assert_eq!(cte.alias.name.real_value(), "ins");
+    let CteInner::Statement(statement) = cte.cte_inner else {
+        panic!("expected statement-backed CTE");
+    };
+    assert_matches!(*statement, Statement::Insert { .. });
+}
+
+#[test]
 fn parse_union() {
     // TODO: add assertions
     verified_stmt("SELECT 1 UNION SELECT 2");
