@@ -1,0 +1,19 @@
+query T
+select $$hello$$;
+----
+hello
+
+query T
+select $foo$the content with $bar$nested$bar$ usage$foo$;
+----
+the content with $bar$nested$bar$ usage
+
+query T
+select $fo$o$not nesting just $ sign$fo$o$;
+----
+o$not nesting just $ sign
+
+query T
+select $$hel$$lo$$;
+----
+hel
