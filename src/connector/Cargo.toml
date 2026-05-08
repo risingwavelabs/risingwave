@@ -180,7 +180,7 @@ thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 # To easiy get the type_name and impl IntoSql for rust_decimal, we fork the crate.
 # Another reason is that we are planning to refactor their IntoSql trait to allow specifying the type to convert.
-tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "59350b92775a61611cf1fc3a5d0ff38bf264e6ac", default-features = false, features = [
+tiberius = { git = "https://github.com/risingwavelabs/tiberius.git", rev = "3133b49dc22915266ae22bb83a32e10b4cdfb988", default-features = false, features = [
     "chrono",
     "sql-browser-tokio",
     "rustls",
