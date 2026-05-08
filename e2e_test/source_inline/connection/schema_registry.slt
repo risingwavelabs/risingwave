@@ -73,19 +73,19 @@ CREATE CONNECTION show_acl_conn.visible_conn WITH (
 );
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_conn_user -d dev -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); ! grep -q "visible_conn" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); ! grep -q "visible_conn" <<<"$out"'
 
 statement ok
 GRANT USAGE ON CONNECTION show_acl_conn.visible_conn TO show_acl_conn_user;
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_conn_user -d dev -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "visible_conn" <<<"$out"; grep -q "<redacted>" <<<"$out"; ! grep -q "hidden_registry" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "visible_conn" <<<"$out"; grep -q "<redacted>" <<<"$out"; ! grep -q "hidden_registry" <<<"$out"'
 
 statement ok
 GRANT USAGE ON SECRET show_acl_conn.hidden_registry TO show_acl_conn_user;
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_conn_user -d dev -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "hidden_registry" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_conn_user -d "$SLT_DB" -Atc "SHOW CONNECTIONS FROM show_acl_conn;"); grep -q "hidden_registry" <<<"$out"'
 
 statement ok
 DROP CONNECTION show_acl_conn.visible_conn;

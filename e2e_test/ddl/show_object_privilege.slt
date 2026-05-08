@@ -27,54 +27,54 @@ CREATE SECRET show_acl.hidden_secret WITH (backend = 'meta') AS 'http://example.
 
 # Schema USAGE alone should not reveal object names.
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW SECRETS FROM show_acl;"); ! grep -q "hidden_secret" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW SECRETS FROM show_acl;"); ! grep -q "hidden_secret" <<<"$out"'
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW SECRETS FROM show_acl LIKE '\''hidden_secret'\'';"); ! grep -q "hidden_secret" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW SECRETS FROM show_acl LIKE '\''hidden_secret'\'';"); ! grep -q "hidden_secret" <<<"$out"'
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW TABLES FROM show_acl;"); ! grep -q "hidden_table" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW TABLES FROM show_acl;"); ! grep -q "hidden_table" <<<"$out"'
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW VIEWS FROM show_acl;"); ! grep -q "hidden_view" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW VIEWS FROM show_acl;"); ! grep -q "hidden_view" <<<"$out"'
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW MATERIALIZED VIEWS FROM show_acl;"); ! grep -q "hidden_mv" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW MATERIALIZED VIEWS FROM show_acl;"); ! grep -q "hidden_mv" <<<"$out"'
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW INTERNAL TABLES FROM show_acl;"); test -z "$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW INTERNAL TABLES FROM show_acl;"); test -z "$out"'
 
 # Known-name probes should not return metadata for hidden tables.
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW COLUMNS FROM show_acl.hidden_table;" 2>&1 || true); ! grep -q "v1.*integer" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW COLUMNS FROM show_acl.hidden_table;" 2>&1 || true); ! grep -q "v1.*integer" <<<"$out"'
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW INDEXES FROM show_acl.hidden_table;" 2>&1 || true); ! grep -q "hidden_idx" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW INDEXES FROM show_acl.hidden_table;" 2>&1 || true); ! grep -q "hidden_idx" <<<"$out"'
 
 # Once the object itself becomes visible, SHOW should include it.
 statement ok
 GRANT USAGE ON SECRET show_acl.hidden_secret TO show_acl_user;
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW SECRETS FROM show_acl;"); grep -q "show_acl.hidden_secret" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW SECRETS FROM show_acl;"); grep -q "show_acl.hidden_secret" <<<"$out"'
 
 statement ok
 GRANT SELECT ON TABLE show_acl.hidden_table TO show_acl_user;
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW TABLES FROM show_acl;"); grep -q "show_acl.hidden_table" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW TABLES FROM show_acl;"); grep -q "show_acl.hidden_table" <<<"$out"'
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW COLUMNS FROM show_acl.hidden_table;"); grep -q "v1.*integer" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW COLUMNS FROM show_acl.hidden_table;"); grep -q "v1.*integer" <<<"$out"'
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW INDEXES FROM show_acl.hidden_table;"); grep -q "hidden_idx" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW INDEXES FROM show_acl.hidden_table;"); grep -q "hidden_idx" <<<"$out"'
 
 statement ok
 GRANT SELECT ON VIEW show_acl.hidden_view TO show_acl_user;
 
 system ok
-bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -U show_acl_user -d dev -Atc "SHOW VIEWS FROM show_acl;"); grep -q "show_acl.hidden_view" <<<"$out"'
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW VIEWS FROM show_acl;"); grep -q "show_acl.hidden_view" <<<"$out"'
 
 statement ok
 DROP SECRET show_acl.hidden_secret;
