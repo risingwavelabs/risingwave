@@ -35,6 +35,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt, VnodeCountCompat};
+use risingwave_common::id::FragmentId;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -51,6 +52,7 @@ use risingwave_hummock_sdk::table_watermark::{
     VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_pb::catalog::Table;
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::StateStore;
 use risingwave_storage::error::{ErrorKind, StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
@@ -569,8 +571,24 @@ pub enum StateTableOpConsistencyLevel {
     LogStoreEnabled,
 }
 
-pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, PreloadAllRow> {
-    table_catalog: &'a Table,
+pub struct StateTableBuilder<S, SD, const IS_REPLICATED: bool, PreloadAllRow> {
+    // Extracted intermediate fields (source-agnostic)
+    table_id: TableId,
+    table_name_for_debug: String,
+    table_columns: Vec<ColumnDesc>,
+    order_types: Vec<OrderType>,
+    pk_indices: Vec<usize>,
+    dist_key_in_pk_indices: Vec<usize>,
+    vnode_col_idx_in_pk: Option<usize>,
+    expected_vnode_count: usize,
+    value_indices: Vec<usize>,
+    prefix_hint_len: usize,
+    retention_seconds: Option<u32>,
+    versioned: bool,
+    fragment_id: FragmentId,
+    clean_watermark_index: Option<usize>,
+
+    // Builder configuration fields
     store: S,
     vnodes: Option<Arc<Bitmap>>,
     op_consistency_level: Option<StateTableOpConsistencyLevel>,
@@ -585,30 +603,28 @@ pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, PreloadAllRow
     _serde: PhantomData<SD>,
 }
 
-impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
-    StateTableBuilder<'a, S, SD, IS_REPLICATED, ()>
+impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
+    StateTableBuilder<S, SD, IS_REPLICATED, ()>
 {
-    pub fn new(table_catalog: &'a Table, store: S, vnodes: Option<Arc<Bitmap>>) -> Self {
-        Self {
-            table_catalog,
-            store,
-            vnodes,
-            op_consistency_level: None,
-            output_column_ids: None,
-            preload_all_rows: (),
-            enable_vnode_key_stats: None,
-            enable_state_table_vnode_stats_pruning: false,
-            metrics: None,
-            _serde: Default::default(),
-        }
-    }
-
     fn with_preload_all_rows(
         self,
         preload_all_rows: bool,
-    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, bool> {
+    ) -> StateTableBuilder<S, SD, IS_REPLICATED, bool> {
         StateTableBuilder {
-            table_catalog: self.table_catalog,
+            table_id: self.table_id,
+            table_name_for_debug: self.table_name_for_debug,
+            table_columns: self.table_columns,
+            order_types: self.order_types,
+            pk_indices: self.pk_indices,
+            dist_key_in_pk_indices: self.dist_key_in_pk_indices,
+            vnode_col_idx_in_pk: self.vnode_col_idx_in_pk,
+            expected_vnode_count: self.expected_vnode_count,
+            value_indices: self.value_indices,
+            prefix_hint_len: self.prefix_hint_len,
+            retention_seconds: self.retention_seconds,
+            versioned: self.versioned,
+            fragment_id: self.fragment_id,
+            clean_watermark_index: self.clean_watermark_index,
             store: self.store,
             vnodes: self.vnodes,
             op_consistency_level: self.op_consistency_level,
@@ -624,27 +640,27 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
     pub fn enable_preload_all_rows_by_config(
         self,
         config: &StreamingConfig,
-    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, bool> {
+    ) -> StateTableBuilder<S, SD, IS_REPLICATED, bool> {
         let developer = &config.developer;
         let preload_all_rows = if developer.default_enable_mem_preload_state_table {
             !developer
                 .mem_preload_state_table_ids_blacklist
-                .contains(&self.table_catalog.id.as_raw_id())
+                .contains(&self.table_id.as_raw_id())
         } else {
             developer
                 .mem_preload_state_table_ids_whitelist
-                .contains(&self.table_catalog.id.as_raw_id())
+                .contains(&self.table_id.as_raw_id())
         };
         self.with_preload_all_rows(preload_all_rows)
     }
 
-    pub fn forbid_preload_all_rows(self) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, bool> {
+    pub fn forbid_preload_all_rows(self) -> StateTableBuilder<S, SD, IS_REPLICATED, bool> {
         self.with_preload_all_rows(false)
     }
 }
 
-impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAllRow>
-    StateTableBuilder<'a, S, SD, IS_REPLICATED, PreloadAllRow>
+impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAllRow>
+    StateTableBuilder<S, SD, IS_REPLICATED, PreloadAllRow>
 {
     pub fn with_op_consistency_level(
         mut self,
@@ -672,8 +688,8 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAll
     }
 }
 
-impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
-    StateTableBuilder<'a, S, SD, IS_REPLICATED, bool>
+impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
+    StateTableBuilder<S, SD, IS_REPLICATED, bool>
 {
     pub async fn build(self) -> StateTableInner<S, SD, IS_REPLICATED> {
         let mut preload_all_rows = self.preload_all_rows;
@@ -681,7 +697,7 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             && let Err(e) =
                 risingwave_common::license::Feature::StateTableMemoryPreload.check_available()
         {
-            warn!(table_id=%self.table_catalog.id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
+            warn!(table_id=%self.table_id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
             preload_all_rows = false;
         }
 
@@ -693,20 +709,8 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
         } else {
             self.enable_vnode_key_stats.unwrap_or(false)
         };
-
-        StateTableInner::from_table_catalog_inner(
-            self.table_catalog,
-            self.store,
-            self.vnodes,
-            self.op_consistency_level
-                .unwrap_or(StateTableOpConsistencyLevel::ConsistentOldValue),
-            self.output_column_ids.unwrap_or_default(),
-            preload_all_rows,
-            should_enable_vnode_key_stats,
-            self.enable_state_table_vnode_stats_pruning,
-            self.metrics,
-        )
-        .await
+        self.build_inner(preload_all_rows, should_enable_vnode_key_stats)
+            .await
     }
 }
 
@@ -746,36 +750,17 @@ where
             .build()
             .await
     }
+}
 
-    /// Create state table from table catalog and store.
-    #[allow(clippy::too_many_arguments)]
-    async fn from_table_catalog_inner(
-        table_catalog: &Table,
-        store: S,
-        vnodes: Option<Arc<Bitmap>>,
-        op_consistency_level: StateTableOpConsistencyLevel,
-        output_column_ids: Vec<ColumnId>,
-        preload_all_rows: bool,
-        enable_vnode_key_stats: bool,
-        enable_state_table_vnode_stats_pruning: bool,
-        metrics: Option<StateTableMetrics>,
-    ) -> Self {
+impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
+    StateTableBuilder<S, SD, IS_REPLICATED, ()>
+{
+    pub fn new(table_catalog: &Table, store: S, vnodes: Option<Arc<Bitmap>>) -> Self {
         let table_id = table_catalog.id;
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
             .map(|col| col.column_desc.as_ref().unwrap().into())
-            .collect();
-        let data_types: Vec<DataType> = table_catalog
-            .columns
-            .iter()
-            .map(|col| {
-                col.get_column_desc()
-                    .unwrap()
-                    .get_column_type()
-                    .unwrap()
-                    .into()
-            })
             .collect();
         let order_types: Vec<OrderType> = table_catalog
             .pk
@@ -809,14 +794,93 @@ where
             let vnode_col_idx = *idx as usize;
             pk_indices.iter().position(|&i| vnode_col_idx == i)
         });
+        let value_indices = table_catalog
+            .value_indices
+            .iter()
+            .map(|val| *val as usize)
+            .collect_vec();
+        let clean_watermark_indices = table_catalog.get_clean_watermark_column_indices();
+        if clean_watermark_indices.len() > 1 {
+            unimplemented!("multiple clean watermark columns are not supported yet")
+        }
+        let clean_watermark_index = clean_watermark_indices.first().map(|&i| i as usize);
+
+        Self {
+            table_id,
+            table_name_for_debug: table_catalog.name.clone(),
+            table_columns,
+            order_types,
+            pk_indices,
+            dist_key_in_pk_indices,
+            vnode_col_idx_in_pk,
+            expected_vnode_count: table_catalog.vnode_count(),
+            value_indices,
+            prefix_hint_len: table_catalog.read_prefix_len_hint as usize,
+            retention_seconds: table_catalog.retention_seconds,
+            versioned: table_catalog.version.is_some(),
+            fragment_id: table_catalog.fragment_id,
+            clean_watermark_index,
+            store,
+            vnodes,
+            op_consistency_level: None,
+            output_column_ids: None,
+            preload_all_rows: (),
+            enable_vnode_key_stats: None,
+            enable_state_table_vnode_stats_pruning: false,
+            metrics: None,
+            _serde: Default::default(),
+        }
+    }
+}
+
+impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
+    StateTableBuilder<S, SD, IS_REPLICATED, bool>
+{
+    async fn build_inner(
+        self,
+        preload_all_rows: bool,
+        should_enable_vnode_key_stats: bool,
+    ) -> StateTableInner<S, SD, IS_REPLICATED> {
+        let table_id = self.table_id;
+        let table_columns = self.table_columns;
+        let order_types = self.order_types;
+        let pk_indices = self.pk_indices;
+        let dist_key_in_pk_indices = self.dist_key_in_pk_indices;
+        let vnode_col_idx_in_pk = self.vnode_col_idx_in_pk;
+        let prefix_hint_len = self.prefix_hint_len;
+        let metrics = self.metrics;
+
+        let op_consistency_level = self
+            .op_consistency_level
+            .unwrap_or(StateTableOpConsistencyLevel::ConsistentOldValue);
+
+        let output_column_ids = self.output_column_ids.unwrap_or_default();
+
+        let data_types: Vec<DataType> = table_columns
+            .iter()
+            .map(|col| col.data_type.clone())
+            .collect();
+
+        // For replicated state tables (used in hash temporal join), the join key (pk_prefix) is
+        // guaranteed by the optimizer to cover the distribution key, which is required by
+        // `compute_prefix_vnode`. Assert this invariant at build time.
+        if IS_REPLICATED && prefix_hint_len > 0 {
+            assert!(
+                dist_key_in_pk_indices.iter().all(|&d| d < prefix_hint_len),
+                "replicated state table: distribution key indices {:?} must all be covered by \
+                 prefix_hint_len {}",
+                dist_key_in_pk_indices,
+                prefix_hint_len,
+            );
+        }
 
         let distribution =
-            TableDistribution::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
+            TableDistribution::new(self.vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
         assert_eq!(
             distribution.vnode_count(),
-            table_catalog.vnode_count(),
+            self.expected_vnode_count,
             "vnode count mismatch, scanning table {} under wrong distribution?",
-            table_catalog.name,
+            self.table_name_for_debug,
         );
 
         let pk_data_types = pk_indices
@@ -825,11 +889,7 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let input_value_indices = table_catalog
-            .value_indices
-            .iter()
-            .map(|val| *val as usize)
-            .collect_vec();
+        let input_value_indices = self.value_indices;
 
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
@@ -838,17 +898,16 @@ where
             && input_value_indices == no_shuffle_value_indices
         {
             true => None,
-            false => Some(input_value_indices),
+            false => Some(input_value_indices.clone()),
         };
-        let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
 
         let row_serde = Arc::new(SD::new(
-            Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
+            Arc::from_iter(input_value_indices.iter().copied()),
             Arc::from(table_columns.clone().into_boxed_slice()),
         ));
 
         let state_table_op_consistency_level = op_consistency_level;
-        let op_consistency_level = match op_consistency_level {
+        let op_consistency_level = match state_table_op_consistency_level {
             StateTableOpConsistencyLevel::Inconsistent => OpConsistencyLevel::Inconsistent,
             StateTableOpConsistencyLevel::ConsistentOldValue => {
                 consistent_old_value_op(row_serde.clone(), false)
@@ -858,11 +917,11 @@ where
             }
         };
 
-        let table_option = TableOption::new(table_catalog.retention_seconds);
+        let table_option = TableOption::new(self.retention_seconds);
         let new_local_options = if IS_REPLICATED {
             NewLocalOptions::new_replicated(
                 table_id,
-                table_catalog.fragment_id,
+                self.fragment_id,
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),
@@ -870,24 +929,21 @@ where
         } else {
             NewLocalOptions::new(
                 table_id,
-                table_catalog.fragment_id,
+                self.fragment_id,
                 op_consistency_level,
                 table_option,
                 distribution.vnodes().clone(),
                 true,
             )
         };
-        let local_state_store = store.new_local(new_local_options).await;
+        let local_state_store = self.store.new_local(new_local_options).await;
 
         // If state table has versioning, that means it supports
         // Schema change. In that case, the row encoding should be column aware as well.
         // Otherwise both will be false.
         // NOTE(kwannoel): Replicated table will follow upstream table's versioning. I'm not sure
         // If ALTER TABLE will propagate to this replicated table as well. Ideally it won't
-        assert_eq!(
-            table_catalog.version.is_some(),
-            row_serde.kind().is_column_aware()
-        );
+        assert_eq!(self.versioned, row_serde.kind().is_column_aware());
 
         // Get info for replicated state table.
         let output_column_ids_to_input_idx = output_column_ids
@@ -896,12 +952,7 @@ where
             .map(|(pos, id)| (*id, pos))
             .collect::<HashMap<_, _>>();
 
-        // Compute column descriptions
-        let columns: Vec<ColumnDesc> = table_catalog
-            .columns
-            .iter()
-            .map(|c| c.column_desc.as_ref().unwrap().into())
-            .collect_vec();
+        let columns = table_columns;
 
         // Compute i2o mapping
         // Note that this can be a partial mapping, since we use the i2o mapping to get
@@ -917,11 +968,19 @@ where
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
-        let clean_watermark_indices = table_catalog.get_clean_watermark_column_indices();
-        if clean_watermark_indices.len() > 1 {
-            unimplemented!("multiple clean watermark columns are not supported yet")
+
+        // For replicated state tables, pk columns must be explicitly provided by the write caller
+        // rather than being filled with None internally via i2o_mapping.
+        if IS_REPLICATED {
+            assert!(
+                pk_indices
+                    .iter()
+                    .all(|&pk_idx| output_indices.contains(&pk_idx)),
+                "all pk columns must be included in output_column_ids for replicated state table"
+            );
         }
-        let clean_watermark_index = clean_watermark_indices.first().map(|&i| i as usize);
+
+        let clean_watermark_index = self.clean_watermark_index;
         let watermark_serde = clean_watermark_index.map(|idx| {
             let pk_idx = pk_indices.iter().position(|&i| i == idx);
             let (watermark_serde, watermark_serde_type) = match pk_idx {
@@ -966,7 +1025,7 @@ where
             None
         };
 
-        Self {
+        StateTableInner {
             table_id,
             row_store: StateTableRowStore {
                 all_rows: preload_all_rows.then(HashMap::new),
@@ -975,11 +1034,11 @@ where
                 pk_serde: pk_serde.clone(),
                 table_id,
                 // Need to maintain vnode min/max key stats when vnode key pruning is enabled
-                vnode_stats: enable_vnode_key_stats.then(HashMap::new),
-                enable_state_table_vnode_stats_pruning,
+                vnode_stats: should_enable_vnode_key_stats.then(HashMap::new),
+                enable_state_table_vnode_stats_pruning: self.enable_state_table_vnode_stats_pruning,
                 metrics,
             },
-            store,
+            store: self.store,
             epoch: None,
             pk_serde,
             pk_indices,
@@ -997,7 +1056,77 @@ where
             on_post_commit: false,
         }
     }
+}
 
+impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
+    StateTableBuilder<S, SD, IS_REPLICATED, ()>
+{
+    pub fn new_from_storage_table_desc(
+        table_desc: &StorageTableDesc,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+        fragment_id: u32,
+    ) -> Self {
+        let table_id = table_desc.table_id;
+        let table_columns: Vec<ColumnDesc> =
+            table_desc.columns.iter().map(ColumnDesc::from).collect();
+        let order_types: Vec<OrderType> = table_desc
+            .pk
+            .iter()
+            .map(|col_order| OrderType::from_protobuf(col_order.get_order_type().unwrap()))
+            .collect();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|col_order| col_order.column_index as usize)
+            .collect_vec();
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
+            .iter()
+            .map(|&idx| idx as usize)
+            .collect();
+        // StorageTableDesc provides vnode_col_idx_in_pk directly (already pk-relative),
+        // unlike Table which has an absolute column index that needs conversion.
+        let vnode_col_idx_in_pk = table_desc.vnode_col_idx_in_pk.map(|k| k as usize);
+        let raw_value_indices = table_desc
+            .value_indices
+            .iter()
+            .map(|val| *val as usize)
+            .collect_vec();
+
+        Self {
+            table_id,
+            table_name_for_debug: table_id.to_string(),
+            table_columns,
+            order_types,
+            pk_indices,
+            dist_key_in_pk_indices,
+            vnode_col_idx_in_pk,
+            expected_vnode_count: table_desc.vnode_count(),
+            value_indices: raw_value_indices,
+            prefix_hint_len: table_desc.read_prefix_len_hint as usize,
+            retention_seconds: table_desc.retention_seconds,
+            versioned: table_desc.versioned,
+            fragment_id: fragment_id.into(),
+            clean_watermark_index: None,
+            store,
+            vnodes,
+            op_consistency_level: None,
+            output_column_ids: None,
+            preload_all_rows: (),
+            enable_vnode_key_stats: None,
+            enable_state_table_vnode_stats_pruning: false,
+            metrics: None,
+            _serde: Default::default(),
+        }
+    }
+}
+
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
     pub fn get_data_types(&self) -> &[DataType] {
         &self.data_types
     }
@@ -2142,11 +2271,11 @@ where
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
-        if self.prefix_hint_len != 0 {
+        if self.prefix_hint_len != 0 && !IS_REPLICATED {
             debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
         }
         let prefix_hint = {
-            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
+            if self.prefix_hint_len == 0 || self.prefix_hint_len != pk_prefix.len() {
                 None
             } else {
                 let encoded_prefix_len = self
