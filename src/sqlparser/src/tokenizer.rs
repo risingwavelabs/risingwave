@@ -484,17 +484,8 @@ impl<'a> Tokenizer<'a> {
                 }
                 // delimited (quoted) identifier
                 quote_start if is_delimited_identifier_start(quote_start) => {
-                    self.next(); // consume the opening quote
-                    let quote_end = Word::matching_end_quote(quote_start);
-                    let s = self.peeking_take_while(|ch| ch != quote_end);
-                    if self.next() == Some(quote_end) {
-                        Ok(Some(Token::make_word(&s, Some(quote_start))))
-                    } else {
-                        self.error(format!(
-                            "Expected close delimiter '{}' before EOF.",
-                            quote_end
-                        ))
-                    }
+                    let s = self.tokenize_delimited_identifier(quote_start)?;
+                    Ok(Some(Token::make_word(&s, Some(quote_start))))
                 }
                 // numbers and period
                 '0'..='9' | '.' => {
@@ -653,6 +644,36 @@ impl<'a> Tokenizer<'a> {
             },
             None => Ok(None),
         }
+    }
+
+    fn tokenize_delimited_identifier(
+        &mut self,
+        quote_start: char,
+    ) -> Result<String, TokenizerError> {
+        let quote_end = Word::matching_end_quote(quote_start);
+        let mut s = String::new();
+
+        self.next(); // consume opening quote
+
+        while let Some(ch) = self.peek() {
+            self.next(); // consume ch
+
+            if ch == quote_end {
+                if self.peek() == Some(quote_end) {
+                    self.next(); // consume escaped quote
+                    s.push(quote_end);
+                } else {
+                    return Ok(s);
+                }
+            } else {
+                s.push(ch);
+            }
+        }
+
+        self.error(format!(
+            "Expected close delimiter '{}' before EOF.",
+            quote_end
+        ))
     }
 
     /// Tokenize dollar preceded value (i.e: a string/placeholder)
