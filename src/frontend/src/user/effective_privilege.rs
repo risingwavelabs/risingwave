@@ -20,6 +20,7 @@ use risingwave_pb::user::RoleMembership;
 use crate::session::AuthContext;
 use crate::user::UserId;
 use crate::user::user_catalog::UserCatalog;
+use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{RoleMembershipInfoReader, UserInfoReader};
 
 fn reachable_role_ids(
@@ -82,23 +83,10 @@ pub fn session_has_privilege(
 ) -> bool {
     let current_user_id = auth_context.current_user_id();
     let reader = user_info_reader.read_guard();
-    if let Some(user) = reader.get_user_by_id(&current_user_id)
-        && has_direct_privilege_for_catalog_user(user, owner, object, mode)
-    {
-        return true;
-    }
-
-    for role_id in reachable_role_ids([current_user_id], memberships, |membership| {
-        membership.inherit_option
-    }) {
-        let Some(role) = reader.get_user_by_id(&role_id) else {
-            continue;
-        };
-        if has_inherited_privilege_for_catalog_user(role, owner, object, mode) {
-            return true;
-        }
-    }
-    false
+    let Some(user) = reader.get_user_by_id(&current_user_id) else {
+        return false;
+    };
+    catalog_user_has_privilege(&reader, user, memberships, owner, object, mode)
 }
 
 #[allow(dead_code)]
@@ -111,6 +99,17 @@ pub fn principal_has_privilege(
     mode: AclMode,
 ) -> bool {
     let reader = user_info_reader.read_guard();
+    catalog_user_has_privilege(&reader, principal, memberships, owner, object, mode)
+}
+
+pub fn catalog_user_has_privilege(
+    user_info: &UserInfoManager,
+    principal: &UserCatalog,
+    memberships: &[RoleMembership],
+    owner: UserId,
+    object: impl Copy + Into<risingwave_pb::user::grant_privilege::Object>,
+    mode: AclMode,
+) -> bool {
     if has_direct_privilege_for_catalog_user(principal, owner, object, mode) {
         return true;
     }
@@ -118,7 +117,7 @@ pub fn principal_has_privilege(
     for role_id in reachable_role_ids([principal.id], memberships, |membership| {
         membership.inherit_option
     }) {
-        let Some(role) = reader.get_user_by_id(&role_id) else {
+        let Some(role) = user_info.get_user_by_id(&role_id) else {
             continue;
         };
         if has_inherited_privilege_for_catalog_user(role, owner, object, mode) {

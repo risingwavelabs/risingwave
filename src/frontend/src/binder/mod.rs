@@ -62,6 +62,7 @@ pub use relation::{
 // Re-export common types
 pub use risingwave_common::gap_fill::FillStrategy;
 use risingwave_common::id::ObjectId;
+use risingwave_pb::user::RoleMembership;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
@@ -75,6 +76,7 @@ use crate::catalog::{CatalogResult, DatabaseId, SecretId, ViewId};
 use crate::error::ErrorCode;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
+use crate::user::effective_privilege::role_memberships_snapshot;
 use crate::user::user_service::UserInfoReadGuard;
 
 pub type ShareId = usize;
@@ -101,6 +103,7 @@ pub struct Binder {
     session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
+    role_memberships: Vec<RoleMembership>,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
     /// subquery.
@@ -257,6 +260,9 @@ impl Binder {
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
+            role_memberships: role_memberships_snapshot(
+                session.env().role_membership_info_reader(),
+            ),
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,

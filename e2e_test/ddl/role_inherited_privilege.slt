@@ -1,0 +1,281 @@
+# Test that actual query privilege checks honor role inheritance, not only
+# pg_catalog.has_table_privilege.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+DROP TABLE IF EXISTS role_inherited_privilege_t;
+
+statement ok
+DROP TABLE IF EXISTS role_inherited_owner_t;
+
+statement ok
+DROP TABLE IF EXISTS role_inherited_multi_grantor_t;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_user;
+
+statement ok
+DROP ROLE IF EXISTS role_noinherit_privilege_user;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_app;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_select;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_update;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_target;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_delegator;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_grantable;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_privilege_owner;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_multi_grantor_owner;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_multi_grantor_grantable;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_multi_grantor_delegator;
+
+statement ok
+DROP ROLE IF EXISTS role_inherited_multi_grantor_target;
+
+statement ok
+CREATE TABLE role_inherited_privilege_t (id int PRIMARY KEY, v int);
+
+statement ok
+CREATE TABLE role_inherited_owner_t (id int PRIMARY KEY, v int);
+
+statement ok
+CREATE TABLE role_inherited_multi_grantor_t (id int PRIMARY KEY, v int);
+
+statement ok
+INSERT INTO role_inherited_privilege_t VALUES (1, 10), (2, 20);
+
+statement ok
+INSERT INTO role_inherited_owner_t VALUES (1, 100), (2, 200);
+
+statement ok
+INSERT INTO role_inherited_multi_grantor_t VALUES (1, 1000), (2, 2000);
+
+statement ok
+CREATE ROLE role_inherited_privilege_select;
+
+statement ok
+CREATE ROLE role_inherited_privilege_update;
+
+statement ok
+CREATE ROLE role_inherited_privilege_app;
+
+statement ok
+CREATE USER role_inherited_privilege_user WITH PASSWORD 'secret';
+
+statement ok
+CREATE USER role_noinherit_privilege_user WITH PASSWORD 'secret';
+
+statement ok
+CREATE ROLE role_inherited_privilege_grantable;
+
+statement ok
+CREATE ROLE role_inherited_privilege_owner;
+
+statement ok
+CREATE ROLE role_inherited_multi_grantor_owner;
+
+statement ok
+CREATE ROLE role_inherited_multi_grantor_grantable;
+
+statement ok
+CREATE USER role_inherited_privilege_delegator WITH PASSWORD 'secret';
+
+statement ok
+CREATE USER role_inherited_privilege_target WITH PASSWORD 'secret';
+
+statement ok
+CREATE USER role_inherited_multi_grantor_delegator WITH PASSWORD 'secret';
+
+statement ok
+CREATE USER role_inherited_multi_grantor_target WITH PASSWORD 'secret';
+
+statement ok
+ALTER TABLE role_inherited_owner_t OWNER TO role_inherited_privilege_owner;
+
+statement ok
+ALTER TABLE role_inherited_multi_grantor_t OWNER TO role_inherited_multi_grantor_owner;
+
+statement ok
+GRANT SELECT ON TABLE role_inherited_privilege_t TO role_inherited_privilege_select;
+
+statement ok
+GRANT SELECT ON TABLE role_inherited_privilege_t TO role_inherited_privilege_grantable WITH GRANT OPTION;
+
+statement ok
+GRANT SELECT ON TABLE role_inherited_multi_grantor_t TO role_inherited_multi_grantor_grantable WITH GRANT OPTION;
+
+statement ok
+GRANT UPDATE ON TABLE role_inherited_privilege_t TO role_inherited_privilege_update;
+
+statement ok
+GRANT role_inherited_privilege_select TO role_inherited_privilege_app;
+
+statement ok
+GRANT role_inherited_privilege_update TO role_inherited_privilege_app;
+
+statement ok
+GRANT role_inherited_privilege_grantable TO role_inherited_privilege_delegator;
+
+statement ok
+GRANT role_inherited_multi_grantor_grantable TO role_inherited_multi_grantor_delegator;
+
+statement ok
+GRANT role_inherited_privilege_owner TO role_inherited_privilege_delegator;
+
+statement ok
+GRANT role_inherited_privilege_app TO role_inherited_privilege_user;
+
+statement ok
+GRANT role_inherited_privilege_app TO role_noinherit_privilege_user WITH INHERIT FALSE;
+
+# Actual SELECT should also honor role-to-role inheritance after SET ROLE.
+statement ok
+SET ROLE role_inherited_privilege_app;
+
+query II
+SELECT id, v FROM role_inherited_privilege_t ORDER BY id;
+----
+1 10
+2 20
+
+statement ok
+UPDATE role_inherited_privilege_t SET v = v + 1 WHERE id = 1;
+
+statement ok
+RESET ROLE;
+
+query II
+SELECT id, v FROM role_inherited_privilege_t ORDER BY id;
+----
+1 11
+2 20
+
+# Actual SELECT/UPDATE should honor role-to-user inheritance for a login user.
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_user -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FROM role_inherited_privilege_t WHERE id = 1 AND v = 11;" | grep -qx "1"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_user -v ON_ERROR_STOP=1 -c "SET RW_IMPLICIT_FLUSH TO true; UPDATE role_inherited_privilege_t SET v = v + 1 WHERE id = 2;"
+
+query II
+SELECT id, v FROM role_inherited_privilege_t ORDER BY id;
+----
+1 11
+2 21
+
+# Inherited WITH GRANT OPTION should let a login user delegate object privileges.
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_delegator -v ON_ERROR_STOP=1 -c "GRANT SELECT ON TABLE role_inherited_privilege_t TO role_inherited_privilege_target;"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_target -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FROM role_inherited_privilege_t WHERE id = 2 AND v = 21;" | grep -qx "1"
+
+# The same inherited grant-option path should also revoke the grant recorded under the effective role.
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_delegator -v ON_ERROR_STOP=1 -c "REVOKE SELECT ON TABLE role_inherited_privilege_t FROM role_inherited_privilege_target;"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_target -v ON_ERROR_STOP=1 -c "SELECT id, v FROM role_inherited_privilege_t ORDER BY id;" 2>&1 | grep -qi "permission denied"
+
+# Inherited object ownership should also grant and revoke through the effective owner role.
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_delegator -v ON_ERROR_STOP=1 -c "GRANT SELECT ON TABLE role_inherited_owner_t TO role_inherited_privilege_target;"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_target -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FROM role_inherited_owner_t WHERE id = 2 AND v = 200;" | grep -qx "1"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_delegator -v ON_ERROR_STOP=1 -c "REVOKE SELECT ON TABLE role_inherited_owner_t FROM role_inherited_privilege_target;"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_privilege_target -v ON_ERROR_STOP=1 -c "SELECT id, v FROM role_inherited_owner_t ORDER BY id;" 2>&1 | grep -qi "permission denied"
+
+# REVOKE should match every effective grantor the revoker can act as, not only
+# the first principal. The grant below is recorded under the grantable role;
+# after adding the owner role, the revoker can act as both owner and grantable.
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_multi_grantor_delegator -v ON_ERROR_STOP=1 -c "GRANT SELECT ON TABLE role_inherited_multi_grantor_t TO role_inherited_multi_grantor_target;"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_multi_grantor_target -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FROM role_inherited_multi_grantor_t WHERE id = 2 AND v = 2000;" | grep -qx "1"
+
+statement ok
+GRANT role_inherited_multi_grantor_owner TO role_inherited_multi_grantor_delegator;
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_multi_grantor_delegator -v ON_ERROR_STOP=1 -c "REVOKE SELECT ON TABLE role_inherited_multi_grantor_t FROM role_inherited_multi_grantor_target;"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_inherited_multi_grantor_target -v ON_ERROR_STOP=1 -c "SELECT id, v FROM role_inherited_multi_grantor_t ORDER BY id;" 2>&1 | grep -qi "permission denied"
+
+# INHERIT FALSE remains a denial for implicit role-to-user privileges.
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_noinherit_privilege_user -v ON_ERROR_STOP=1 -c "SELECT id, v FROM role_inherited_privilege_t ORDER BY id;" 2>&1 | grep -qi "permission denied"
+
+statement ok
+DROP TABLE role_inherited_privilege_t;
+
+statement ok
+DROP TABLE role_inherited_owner_t;
+
+statement ok
+DROP TABLE role_inherited_multi_grantor_t;
+
+statement ok
+DROP ROLE role_inherited_privilege_user;
+
+statement ok
+DROP ROLE role_noinherit_privilege_user;
+
+statement ok
+DROP ROLE role_inherited_privilege_app;
+
+statement ok
+DROP ROLE role_inherited_privilege_select;
+
+statement ok
+DROP ROLE role_inherited_privilege_update;
+
+statement ok
+DROP ROLE role_inherited_privilege_target;
+
+statement ok
+DROP ROLE role_inherited_privilege_delegator;
+
+statement ok
+DROP ROLE role_inherited_privilege_grantable;
+
+statement ok
+DROP ROLE role_inherited_privilege_owner;
+
+statement ok
+DROP ROLE role_inherited_multi_grantor_owner;
+
+statement ok
+DROP ROLE role_inherited_multi_grantor_grantable;
+
+statement ok
+DROP ROLE role_inherited_multi_grantor_delegator;
+
+statement ok
+DROP ROLE role_inherited_multi_grantor_target;
