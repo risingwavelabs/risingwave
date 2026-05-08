@@ -584,15 +584,18 @@ pub(crate) mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
-        // assert compact_task
-        assert_eq!(
-            compact_task
-                .input_ssts
+        // The dropped table has already been pruned from version SST metadata before task picking.
+        let compact_input_ssts = compact_task
+            .input_ssts
+            .iter()
+            .filter(|level| level.level_idx != compact_task.target_level)
+            .flat_map(|level| level.table_infos.iter())
+            .collect_vec();
+        assert_eq!(compact_input_ssts.len(), kv_count / 2);
+        assert!(
+            compact_input_ssts
                 .iter()
-                .filter(|level| level.level_idx != compact_task.target_level)
-                .map(|level| level.table_infos.len())
-                .sum::<usize>(),
-            kv_count
+                .all(|sst| sst.table_ids == vec![existing_table_id])
         );
 
         // 4. compact
@@ -1366,6 +1369,13 @@ pub(crate) mod tests {
         let output = builder.finish().await.unwrap();
         output.writer_output.await.unwrap().unwrap();
         output.sst_info.sst_info
+    }
+
+    fn with_table_ids(mut sst: SstableInfo, table_ids: Vec<TableId>) -> SstableInfo {
+        let mut inner = sst.get_inner();
+        inner.table_ids = table_ids;
+        sst.set_inner(inner);
+        sst
     }
 
     async fn test_fast_compact_impl(data: Vec<Vec<KeyValue>>) {
@@ -2400,15 +2410,15 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn test_fast_compactor_existing_table_ids_filter_in_rest_stage() {
+    async fn test_fast_compactor_input_table_ids_filter_in_rest_stage() {
         let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_id,
         ));
 
-        let existing_table_id = TableId::new(1);
-        let filtered_table_id = TableId::new(2);
+        let read_table_id = TableId::new(1);
+        let dropped_table_id = TableId::new(2);
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
@@ -2420,14 +2430,15 @@ pub(crate) mod tests {
             )
             .await,
             &hummock_manager_ref,
-            &[existing_table_id, filtered_table_id],
+            &[read_table_id, dropped_table_id],
         )
         .await;
 
         hummock_manager_ref.get_new_object_ids(10).await.unwrap();
         let compact_ctx = get_compactor_context(&storage);
-        let compaction_catalog_agent_ref =
-            CompactionCatalogAgent::for_test(vec![existing_table_id, filtered_table_id]);
+        let build_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![read_table_id, dropped_table_id]);
+        let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![read_table_id]);
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let options = SstableBuilderOptions {
@@ -2445,25 +2456,17 @@ pub(crate) mod tests {
             vec![
                 vec![
                     (
-                        FullKey::new(
-                            existing_table_id,
-                            TableKey(b"a-left".to_vec()),
-                            test_epoch(100),
-                        ),
+                        FullKey::new(read_table_id, TableKey(b"a-left".to_vec()), test_epoch(100)),
                         HummockValue::put(b"a-left-value".to_vec()),
                     ),
                     (
-                        FullKey::new(
-                            existing_table_id,
-                            TableKey(b"c-left".to_vec()),
-                            test_epoch(100),
-                        ),
+                        FullKey::new(read_table_id, TableKey(b"c-left".to_vec()), test_epoch(100)),
                         HummockValue::put(b"c-left-value".to_vec()),
                     ),
                 ],
                 vec![(
                     FullKey::new(
-                        filtered_table_id,
+                        dropped_table_id,
                         TableKey(b"skip-me".to_vec()),
                         test_epoch(100),
                     ),
@@ -2472,14 +2475,17 @@ pub(crate) mod tests {
             ],
             options.clone(),
             sstable_store.clone(),
-            compaction_catalog_agent_ref.clone(),
+            build_catalog_agent_ref.clone(),
         )
         .await;
+        // Simulate meta-side task normalization: physical blocks still include the dropped table,
+        // while task input metadata exposes only readable table ids.
+        let sst = with_table_ids(sst, vec![read_table_id]);
         let right_sst = build_test_sstable_with_blocks(
             2,
             vec![vec![(
                 FullKey::new(
-                    existing_table_id,
+                    read_table_id,
                     TableKey(b"b-right".to_vec()),
                     test_epoch(100),
                 ),
@@ -2487,7 +2493,7 @@ pub(crate) mod tests {
             )]],
             options,
             sstable_store.clone(),
-            compaction_catalog_agent_ref.clone(),
+            build_catalog_agent_ref.clone(),
         )
         .await;
 
@@ -2504,7 +2510,7 @@ pub(crate) mod tests {
                     table_infos: vec![right_sst],
                 },
             ],
-            existing_table_ids: vec![existing_table_id],
+            existing_table_ids: vec![read_table_id],
             task_id: 1,
             splits: vec![KeyRange::inf()],
             target_level: 6,
@@ -2521,15 +2527,15 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn test_fast_compactor_existing_table_ids_filter_in_merge_raw_copy_stage() {
+    async fn test_fast_compactor_input_table_ids_filter_in_merge_raw_copy_stage() {
         let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
         let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_id,
         ));
 
-        let filtered_table_id = TableId::new(1);
-        let existing_table_id = TableId::new(2);
+        let dropped_table_id = TableId::new(1);
+        let read_table_id = TableId::new(2);
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
             get_notification_client_for_test(
@@ -2540,14 +2546,15 @@ pub(crate) mod tests {
             )
             .await,
             &hummock_manager_ref,
-            &[filtered_table_id, existing_table_id],
+            &[dropped_table_id, read_table_id],
         )
         .await;
 
         hummock_manager_ref.get_new_object_ids(10).await.unwrap();
         let compact_ctx = get_compactor_context(&storage);
-        let compaction_catalog_agent_ref =
-            CompactionCatalogAgent::for_test(vec![filtered_table_id, existing_table_id]);
+        let build_catalog_agent_ref =
+            CompactionCatalogAgent::for_test(vec![dropped_table_id, read_table_id]);
+        let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![read_table_id]);
 
         let sstable_store = compact_ctx.sstable_store.clone();
         let options = SstableBuilderOptions {
@@ -2565,39 +2572,34 @@ pub(crate) mod tests {
             vec![
                 vec![(
                     FullKey::new(
-                        filtered_table_id,
+                        dropped_table_id,
                         TableKey(b"filtered".to_vec()),
                         test_epoch(200),
                     ),
                     HummockValue::put(b"filtered-value".to_vec()),
                 )],
                 vec![(
-                    FullKey::new(
-                        existing_table_id,
-                        TableKey(b"left".to_vec()),
-                        test_epoch(200),
-                    ),
+                    FullKey::new(read_table_id, TableKey(b"left".to_vec()), test_epoch(200)),
                     HummockValue::put(b"left-value".to_vec()),
                 )],
             ],
             options.clone(),
             sstable_store.clone(),
-            compaction_catalog_agent_ref.clone(),
+            build_catalog_agent_ref.clone(),
         )
         .await;
+        // Simulate meta-side task normalization: physical blocks still include the dropped table,
+        // while task input metadata exposes only readable table ids.
+        let left_sst = with_table_ids(left_sst, vec![read_table_id]);
         let right_sst = build_test_sstable_with_blocks(
             2,
             vec![vec![(
-                FullKey::new(
-                    existing_table_id,
-                    TableKey(b"right".to_vec()),
-                    test_epoch(100),
-                ),
+                FullKey::new(read_table_id, TableKey(b"right".to_vec()), test_epoch(100)),
                 HummockValue::put(b"right-value".to_vec()),
             )]],
             options,
             sstable_store.clone(),
-            compaction_catalog_agent_ref.clone(),
+            build_catalog_agent_ref.clone(),
         )
         .await;
 
@@ -2614,7 +2616,7 @@ pub(crate) mod tests {
                     table_infos: vec![right_sst],
                 },
             ],
-            existing_table_ids: vec![existing_table_id],
+            existing_table_ids: vec![read_table_id],
             task_id: 1,
             splits: vec![KeyRange::inf()],
             target_level: 6,

@@ -2900,12 +2900,40 @@ impl CatalogController {
                         .map(|secret_ref| secret_ref.to_protobuf())
                         .unwrap_or_default(),
                 );
-                let (_source_to_add_secret_dep, _source_to_remove_secret_dep) =
+                let (source_to_add_secret_dep, source_to_remove_secret_dep) =
                     source_options_with_secret
                         .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
 
                 // Validate the updated source properties
                 let _ = ConnectorProperties::extract(source_options_with_secret.clone(), true)?;
+
+                // Keep source-level secret dependencies in sync with the source properties that
+                // are rewritten from the altered connection.
+                let source_used_by_id = source
+                    .optional_associated_table_id
+                    .map(|table_id| table_id.as_object_id())
+                    .unwrap_or_else(|| source_id.as_object_id());
+                if !source_to_add_secret_dep.is_empty() {
+                    ObjectDependency::insert_many(source_to_add_secret_dep.into_iter().map(
+                        |secret_id| object_dependency::ActiveModel {
+                            oid: Set(secret_id.into()),
+                            used_by: Set(source_used_by_id),
+                            ..Default::default()
+                        },
+                    ))
+                    .exec(&txn)
+                    .await?;
+                }
+                if !source_to_remove_secret_dep.is_empty() {
+                    let _ = ObjectDependency::delete_many()
+                        .filter(
+                            object_dependency::Column::Oid
+                                .is_in(source_to_remove_secret_dep)
+                                .and(object_dependency::Column::UsedBy.eq(source_used_by_id)),
+                        )
+                        .exec(&txn)
+                        .await?;
+                }
 
                 // Prepare source update
                 let active_source = source::ActiveModel {

@@ -513,6 +513,14 @@ impl HummockManager {
             }
         }
         tracing::info!("Finish redo Hummock version.");
+        let pruned_stale_table_id_count = redo_state.prune_stale_table_ids_from_ssts();
+        if pruned_stale_table_id_count > 0 {
+            tracing::warn!(
+                pruned_stale_table_id_count,
+                version_id = ?redo_state.id,
+                "Pruned stale table ids from recovered Hummock SST metadata."
+            );
+        }
         versioning_guard.version_stats = hummock_version_stats::Entity::find()
             .one(&meta_store.conn)
             .await
