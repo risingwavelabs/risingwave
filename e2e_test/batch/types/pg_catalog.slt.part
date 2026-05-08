@@ -45,3 +45,112 @@ val	NULL
 
 statement ok
 drop table myy_table;
+
+statement ok
+create schema rw_visible_s1;
+
+statement ok
+create schema rw_visible_s2;
+
+statement ok
+create table rw_visible_s1.t(v int);
+
+statement ok
+create table rw_visible_s2.t(v int);
+
+statement ok
+set search_path = rw_visible_s1, rw_visible_s2;
+
+query TB
+select n.nspname, pg_table_is_visible(c.oid)
+from pg_class c
+join pg_namespace n on c.relnamespace = n.oid
+where n.nspname in ('rw_visible_s1', 'rw_visible_s2')
+  and c.relname = 't'
+order by n.nspname;
+----
+rw_visible_s1 t
+rw_visible_s2 f
+
+statement ok
+set search_path = rw_visible_s1;
+
+query TB
+select n.nspname, pg_table_is_visible(c.oid)
+from pg_class c
+join pg_namespace n on c.relnamespace = n.oid
+where n.nspname = 'rw_visible_s2'
+  and c.relname = 't';
+----
+rw_visible_s2 f
+
+statement ok
+set search_path to default;
+
+statement ok
+create schema rw_visible_private;
+
+statement ok
+create schema rw_visible_accessible;
+
+statement ok
+create table rw_visible_private.usage_shadow(v int);
+
+statement ok
+create table rw_visible_accessible.usage_shadow(v int);
+
+statement ok
+create user rw_visible_user with password '';
+
+statement ok
+grant usage on schema rw_visible_accessible to rw_visible_user;
+
+statement ok
+set search_path = rw_visible_private, rw_visible_accessible;
+
+statement ok
+set role rw_visible_user;
+
+query TB
+select n.nspname, pg_table_is_visible(c.oid)
+from pg_class c
+join pg_namespace n on c.relnamespace = n.oid
+where n.nspname in ('rw_visible_private', 'rw_visible_accessible')
+  and c.relname = 'usage_shadow'
+order by n.nspname;
+----
+rw_visible_accessible t
+rw_visible_private f
+
+statement ok
+reset role;
+
+statement ok
+set search_path to default;
+
+statement ok
+drop table rw_visible_private.usage_shadow;
+
+statement ok
+drop table rw_visible_accessible.usage_shadow;
+
+statement ok
+drop schema rw_visible_private;
+
+statement ok
+drop schema rw_visible_accessible;
+
+statement ok
+drop user rw_visible_user;
+
+statement ok
+drop table rw_visible_s1.t;
+
+statement ok
+drop table rw_visible_s2.t;
+
+statement ok
+drop schema rw_visible_s1;
+
+statement ok
+drop schema rw_visible_s2;

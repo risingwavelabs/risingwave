@@ -36,7 +36,7 @@ fn read_rw_secret_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSecret>> {
     let user_reader = reader.user_info_reader.read_guard();
     let users = user_reader.get_all_users();
     let current_user = user_reader
-        .get_user_by_name(&reader.auth_context.user_name)
+        .get_user_by_name(reader.auth_context.current_user_name())
         .expect("user not found");
     let username_map = user_reader.get_user_name_map();
 

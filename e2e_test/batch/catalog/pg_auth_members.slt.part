@@ -1,0 +1,113 @@
+statement ok
+DROP SCHEMA IF EXISTS rw_role_owned_schema CASCADE;
+
+statement ok
+DROP ROLE IF EXISTS rw_role_member_test;
+
+statement ok
+DROP ROLE IF EXISTS rw_role_option_test;
+
+statement ok
+DROP ROLE IF EXISTS rw_role_catalog_test;
+
+statement ok
+CREATE ROLE rw_role_catalog_test;
+
+statement ok
+CREATE ROLE rw_role_option_test;
+
+statement ok
+CREATE ROLE rw_role_member_test;
+
+statement ok
+GRANT rw_role_catalog_test TO rw_role_member_test WITH ADMIN OPTION;
+
+statement ok
+GRANT rw_role_option_test TO rw_role_member_test WITH INHERIT FALSE, SET FALSE;
+
+query TTTTTTT
+SELECT (auth.oid > 0)::text AS oid_present,
+       role_role.rolname,
+       member_role.rolname,
+       grantor_role.rolname,
+       auth.admin_option::text,
+       auth.inherit_option::text,
+       auth.set_option::text
+FROM pg_catalog.pg_auth_members auth
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = auth.roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = auth.member
+JOIN pg_catalog.pg_roles grantor_role ON grantor_role.oid = auth.grantor
+WHERE role_role.rolname IN ('rw_role_catalog_test', 'rw_role_option_test')
+  AND member_role.rolname = 'rw_role_member_test'
+ORDER BY role_role.rolname;
+----
+true rw_role_catalog_test rw_role_member_test root true true true
+true rw_role_option_test rw_role_member_test root false false false
+
+query TTT
+SELECT count(*)::text,
+       count(DISTINCT auth.oid)::text,
+       (min(auth.oid) > 0)::text
+FROM pg_catalog.pg_auth_members auth
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = auth.roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = auth.member
+WHERE role_role.rolname IN ('rw_role_catalog_test', 'rw_role_option_test')
+  AND member_role.rolname = 'rw_role_member_test';
+----
+2 2 true
+
+statement ok
+CREATE SCHEMA rw_role_owned_schema;
+
+statement ok
+ALTER SCHEMA rw_role_owned_schema OWNER TO rw_role_catalog_test;
+
+statement ok
+SET ROLE rw_role_catalog_test;
+
+query TTT
+SELECT session_user, current_user, current_role;
+----
+postgres rw_role_catalog_test rw_role_catalog_test
+
+statement ok
+CREATE TABLE rw_role_owned_schema.owned_by_active_role(v int);
+
+statement ok
+RESET ROLE;
+
+query T
+SELECT owner_role.rolname
+FROM pg_catalog.pg_class cls
+JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = cls.relowner
+WHERE cls.relname = 'owned_by_active_role';
+----
+rw_role_catalog_test
+
+statement ok
+REVOKE rw_role_catalog_test FROM rw_role_member_test;
+
+statement ok
+REVOKE rw_role_option_test FROM rw_role_member_test;
+
+query I
+SELECT count(*)
+FROM pg_catalog.pg_auth_members auth
+JOIN pg_catalog.pg_roles role_role ON role_role.oid = auth.roleid
+JOIN pg_catalog.pg_roles member_role ON member_role.oid = auth.member
+WHERE role_role.rolname IN ('rw_role_catalog_test', 'rw_role_option_test')
+  AND member_role.rolname = 'rw_role_member_test';
+----
+0
+
+statement ok
+DROP SCHEMA rw_role_owned_schema CASCADE;
+
+statement ok
+DROP ROLE rw_role_member_test;
+
+statement ok
+DROP ROLE rw_role_option_test;
+
+statement ok
+DROP ROLE rw_role_catalog_test;

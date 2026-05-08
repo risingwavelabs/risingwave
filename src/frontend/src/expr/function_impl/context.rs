@@ -23,6 +23,7 @@ use crate::session::AuthContext;
 define_context! {
     pub(super) CATALOG_READER: crate::catalog::CatalogReader,
     pub(super) USER_INFO_READER: crate::user::user_service::UserInfoReader,
+    pub(super) ROLE_MEMBERSHIP_INFO_READER: crate::user::user_service::RoleMembershipInfoReader,
     pub(super) AUTH_CONTEXT: Arc<AuthContext>,
     pub(super) DB_NAME: String,
     pub(super) SEARCH_PATH: SearchPath,

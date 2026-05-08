@@ -22,12 +22,16 @@ use risingwave_pb::user::Action;
 use risingwave_sqlparser::parser::Parser;
 use thiserror_ext::AsReport;
 
-use super::context::{AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH, USER_INFO_READER};
+use super::context::{
+    AUTH_CONTEXT, CATALOG_READER, DB_NAME, ROLE_MEMBERSHIP_INFO_READER, SEARCH_PATH,
+    USER_INFO_READER,
+};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::system_catalog::is_system_catalog;
 use crate::catalog::{CatalogReader, DatabaseId, OwnedGrantObject, SchemaId};
 use crate::session::AuthContext;
-use crate::user::user_service::UserInfoReader;
+use crate::user::effective_privilege::{principal_has_privilege, role_memberships_snapshot};
+use crate::user::user_service::{RoleMembershipInfoReader, UserInfoReader};
 use crate::{Binder, bind_data_type};
 
 #[inline(always)]
@@ -212,9 +216,10 @@ fn has_function_privilege_3(user_id: i32, function_name: &str, privileges: &str)
     has_function_privilege_impl(user_name.as_str(), function_oid, privileges)
 }
 
-#[capture_context(USER_INFO_READER)]
+#[capture_context(USER_INFO_READER, ROLE_MEMBERSHIP_INFO_READER)]
 fn has_privilege_impl(
     user_info_reader: &UserInfoReader,
+    role_membership_info_reader: &RoleMembershipInfoReader,
     user_name: &str,
     object: &OwnedGrantObject,
     actions: &Vec<(Action, bool)>,
@@ -225,11 +230,21 @@ fn has_privilege_impl(
         .ok_or(user_not_found_err(
             format!("User {} not found", user_name).as_str(),
         ))?;
-    if user_catalog.id == object.owner {
-        // if the user is the owner of the object, they have all privileges
-        return Ok(true);
-    }
-    Ok(user_catalog.check_privilege_with_grant_option(&object.object, actions))
+    let memberships = role_memberships_snapshot(role_membership_info_reader);
+    Ok(actions.iter().all(|(action, require_grant_option)| {
+        if *require_grant_option {
+            user_catalog.check_privilege_with_grant_option(&object.object, &vec![(*action, true)])
+        } else {
+            principal_has_privilege(
+                user_info_reader,
+                &memberships,
+                user_catalog,
+                object.owner,
+                object.object,
+                (*action).into(),
+            )
+        }
+    }))
 }
 
 #[capture_context(USER_INFO_READER)]
@@ -364,7 +379,11 @@ fn get_function_id_by_name(
                 reason: e.to_report_string().into(),
             }
         })?;
-    let schema_path = SchemaPath::new(schema.as_deref(), search_path, &auth_context.user_name);
+    let schema_path = SchemaPath::new(
+        schema.as_deref(),
+        search_path,
+        auth_context.current_user_name(),
+    );
 
     let reader = &catalog_reader.read_guard();
     Ok(reader

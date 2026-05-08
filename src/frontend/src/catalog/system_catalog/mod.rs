@@ -363,4 +363,31 @@ mod tests {
             frontend.query_formatted_result(sql).await;
         }
     }
+
+    #[tokio::test]
+    async fn test_identity_and_role_catalog_queries() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let identity_rows = frontend
+            .query_formatted_result("SELECT session_user, current_user, current_role")
+            .await;
+        assert_eq!(
+            identity_rows,
+            vec!["Row([Some(b\"root\"), Some(b\"root\"), Some(b\"root\")])".to_owned()]
+        );
+
+        let role_rows = frontend
+            .query_formatted_result(
+                "SELECT rolname, rolcanlogin, rolsuper, rolcreatedb, rolcreaterole \
+                 FROM pg_catalog.pg_roles WHERE rolname = 'root'",
+            )
+            .await;
+        assert_eq!(
+            role_rows,
+            vec![
+                "Row([Some(b\"root\"), Some(b\"t\"), Some(b\"t\"), Some(b\"t\"), Some(b\"t\")])"
+                    .to_owned()
+            ]
+        );
+    }
 }
