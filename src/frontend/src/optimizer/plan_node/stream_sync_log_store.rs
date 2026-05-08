@@ -81,9 +81,9 @@ impl StreamNode for StreamSyncLogStore {
             aligned: false,
 
             // The following fields should now be read from per-job config override.
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             pause_duration_ms: None,
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             buffer_size: None,
         }))
     }

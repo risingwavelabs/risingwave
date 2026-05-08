@@ -65,7 +65,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
 
         // Previously, the `cache_policy` is persisted in the plan node.
         // Now it's always `Unspecified` and we should refer to the job's config override.
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         let cache_policy = (node.get_cache_policy())
             .map_or(params.config.developer.over_window_cache_policy, |v| {
                 OverWindowCachePolicy::from_protobuf(v)

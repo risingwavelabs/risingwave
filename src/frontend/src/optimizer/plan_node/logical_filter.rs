@@ -252,7 +252,7 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),
@@ -319,7 +319,7 @@ mod tests {
     ///     TableScan(v1, v2)
     /// ```
     async fn test_prune_filter_with_order_required() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),
@@ -386,7 +386,7 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter_no_project() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
@@ -444,7 +444,7 @@ mod tests {
         // Condition: v1 = 0 AND v2 = v3
         // output: [v1, v2, v3, v4],
         // FD: v4 --> { v2, v3 }, {} --> v1, v2 --> v3, v3 --> v2
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),

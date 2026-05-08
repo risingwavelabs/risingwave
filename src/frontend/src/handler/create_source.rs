@@ -244,7 +244,7 @@ pub(crate) fn bind_all_columns(
             .cloned()
             .collect_vec();
 
-        #[allow(clippy::collapsible_else_if)]
+        #[expect(clippy::collapsible_else_if)]
         match sql_column_strategy {
             // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
             SqlColumnStrategy::FollowUnchecked => {
@@ -833,7 +833,7 @@ pub enum SqlColumnStrategy {
 
 /// Entrypoint for binding source connector.
 /// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
     full_name: ObjectName,

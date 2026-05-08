@@ -72,7 +72,6 @@ impl FastInsertExecutor {
         ))
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
         table_version_id: TableVersionId,

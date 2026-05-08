@@ -76,7 +76,6 @@ pub struct DdlServiceImpl {
 }
 
 impl DdlServiceImpl {
-    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,

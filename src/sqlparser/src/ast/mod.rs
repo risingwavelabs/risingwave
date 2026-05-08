@@ -1256,7 +1256,7 @@ pub enum WaitTarget {
 }
 
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
-#[allow(clippy::large_enum_variant)]
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Statement {
     /// Analyze (Hive)
@@ -1773,7 +1773,7 @@ impl Statement {
     //
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
-    #[allow(clippy::cognitive_complexity)]
+    #[expect(clippy::cognitive_complexity)]
     fn fmt_unchecked(&self, mut f: impl std::fmt::Write) -> fmt::Result {
         match self {
             Statement::Explain {
