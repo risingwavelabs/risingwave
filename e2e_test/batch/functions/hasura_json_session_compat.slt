@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+statement ok
+set rw_implicit_flush = true;
+
 query T
 select to_json(42)::varchar;
 ----
@@ -46,3 +49,26 @@ query T
 select current_setting('hasura.user');
 ----
 bob
+
+
+statement ok
+drop table if exists hasura_json_agg_test;
+
+statement ok
+create table hasura_json_agg_test (id int, name varchar);
+
+statement ok
+insert into hasura_json_agg_test values (1, 'a'), (2, 'b');
+
+query T
+select json_agg(name order by id)::varchar from hasura_json_agg_test;
+----
+["a", "b"]
+
+query T
+select json_object_agg(id::varchar, name order by id)::varchar from hasura_json_agg_test;
+----
+{"1": "a", "2": "b"}
+
+statement ok
+drop table hasura_json_agg_test;
