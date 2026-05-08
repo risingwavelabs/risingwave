@@ -194,12 +194,10 @@ impl Binder {
                     })
             })
             .map(|(idx, generated)| {
-                let expr = generated_column_input_ref_mapping
-                    .clone()
-                    .rewrite_expr(
-                        ExprImpl::from_expr_proto(generated.expr.as_ref().unwrap())
-                            .expect("expr in generated columns corrupted"),
-                    );
+                let expr = generated_column_input_ref_mapping.clone().rewrite_expr(
+                    ExprImpl::from_expr_proto(generated.expr.as_ref().unwrap())
+                        .expect("expr in generated columns corrupted"),
+                );
                 (idx, expr)
             })
             .collect_vec();

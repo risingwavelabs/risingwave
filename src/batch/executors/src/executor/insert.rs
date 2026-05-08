@@ -76,8 +76,9 @@ impl InsertExecutor {
                 .map(|(i, idx)| (*idx, child.schema().fields[i].clone()))
                 .collect_vec();
 
-            ordered_fields
-                .reserve(ordered_fields.len() + sorted_default_columns.len() + generated_columns.len());
+            ordered_fields.reserve(
+                ordered_fields.len() + sorted_default_columns.len() + generated_columns.len(),
+            );
             for (idx, expr) in &sorted_default_columns {
                 ordered_fields.push((*idx, Field::unnamed(expr.return_type())));
             }
@@ -399,6 +400,7 @@ mod tests {
             1024,
             "InsertExecutor".to_owned(),
             vec![0, 1, 2], // Ignoring insertion order
+            vec![],
             vec![],
             row_id_index,
             false,

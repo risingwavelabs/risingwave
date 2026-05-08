@@ -30,9 +30,7 @@ impl Planner {
             .columns()
             .iter()
             .enumerate()
-            .filter_map(|(i, c)| {
-                ((returning && !c.is_hidden()) || c.can_dml()).then_some(i)
-            })
+            .filter_map(|(i, c)| ((returning && !c.is_hidden()) || c.can_dml()).then_some(i))
             .collect();
         let table_to_dml = ColIndexMapping::with_remaining_columns(
             &dml_output_indices,

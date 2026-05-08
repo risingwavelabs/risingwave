@@ -446,11 +446,11 @@ fn statement_has_write_side_effects(stmt: &Statement) -> Result<bool> {
     let stmt_type = StatementType::infer_from_statement(stmt)
         .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
 
-    Ok(stmt_type.is_dml() || matches!(stmt, Statement::Query(query) if query_contains_modifying_cte(query)))
+    Ok(stmt_type.is_dml()
+        || matches!(stmt, Statement::Query(query) if query_contains_modifying_cte(query)))
 }
 
 fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
-
     let stmt_type = StatementType::infer_from_statement(stmt)
         .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
 

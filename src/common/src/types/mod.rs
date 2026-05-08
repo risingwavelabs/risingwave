@@ -1068,12 +1068,9 @@ impl ScalarImpl {
             ),
             DataType::Interval => Self::Interval(Interval::from_sql(&Type::INTERVAL, bytes)?),
             DataType::Jsonb => Self::Jsonb(
-                JsonbVal::value_deserialize(bytes).or_else(|| {
-                    std::str::from_utf8(bytes)
-                        .ok()
-                        .and_then(|s| s.parse().ok())
-                })
-                .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
+                JsonbVal::value_deserialize(bytes)
+                    .or_else(|| std::str::from_utf8(bytes).ok().and_then(|s| s.parse().ok()))
+                    .ok_or_else(|| "invalid value of Jsonb".to_owned())?,
             ),
             DataType::Int256 => Self::Int256(Int256::from_binary(bytes)?),
             DataType::Vector(_) | DataType::Struct(_) | DataType::List(_) | DataType::Map(_) => {

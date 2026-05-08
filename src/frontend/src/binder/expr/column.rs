@@ -226,17 +226,19 @@ impl Binder {
 
             match chosen_ranges.as_slice() {
                 [] => {
-                    return Err(
-                        ErrorCode::ItemNotFound(format!("missing FROM-clause entry for table \"{}\"", table_name))
-                            .into(),
-                    )
+                    return Err(ErrorCode::ItemNotFound(format!(
+                        "missing FROM-clause entry for table \"{}\"",
+                        table_name
+                    ))
+                    .into());
                 }
                 [range] => *range,
                 _ => {
-                    return Err(
-                        ErrorCode::InvalidReference(format!("table reference \"{}\" is ambiguous", table_name))
-                            .into(),
-                    )
+                    return Err(ErrorCode::InvalidReference(format!(
+                        "table reference \"{}\" is ambiguous",
+                        table_name
+                    ))
+                    .into());
                 }
             }
         };
