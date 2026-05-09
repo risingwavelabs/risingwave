@@ -1146,6 +1146,24 @@ mod tests {
     }
 
     #[test]
+    fn tokenize_escaped_double_quote_in_delimited_identifier() {
+        let sql = String::from(r###"SELECT "a""b", "x""""y""###);
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::make_word("a\"b", Some('"')),
+            Token::Comma,
+            Token::Whitespace(Whitespace::Space),
+            Token::make_word("x\"\"y", Some('"')),
+        ];
+
+        compare(expected, tokens);
+    }
+
+    #[test]
     fn tokenize_bitwise_op() {
         let sql = String::from("SELECT one | two ^ three");
         let mut tokenizer = Tokenizer::new(&sql);
