@@ -21,8 +21,7 @@ mod statement;
 mod value;
 
 use std::collections::HashSet;
-use std::fmt;
-use std::fmt::Display;
+use std::fmt::{self, Display};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -178,7 +177,7 @@ impl Ident {
         let needs_quotes = QuoteIdent::needs_quotes(value);
 
         if needs_quotes {
-            Self::with_quote_unchecked('"', value.replace('"', "\"\""))
+            Self::with_quote_unchecked('"', value)
         } else {
             Self::new_unchecked(value)
         }
@@ -204,7 +203,8 @@ impl ParseTo for Ident {
 impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
-            Some(q) if q == '"' || q == '\'' || q == '`' => write!(f, "{}{}{}", q, self.value, q),
+            Some(q) if q == '\'' || q == '`' => write!(f, "{}{}{}", q, self.value, q),
+            Some('"') => write!(f, "\"{}\"", self.value.replace('"', "\"\"")),
             Some('[') => write!(f, "[{}]", self.value),
             None => f.write_str(&self.value),
             _ => panic!("unexpected quote style"),
