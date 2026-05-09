@@ -123,7 +123,7 @@ fn inner<S>(state_store: &Monitored<S>) -> &S {
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 pub enum StateStoreImpl {
     /// The Hummock state store, which operates on an S3-like service. URLs beginning with
     /// `hummock` will be automatically recognized as Hummock state store.
@@ -681,7 +681,6 @@ pub mod verify {
 
 impl StateStoreImpl {
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
-    #[allow(clippy::too_many_arguments)]
     #[expect(clippy::borrowed_box)]
     pub async fn new(
         s: &str,

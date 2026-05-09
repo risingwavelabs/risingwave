@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]

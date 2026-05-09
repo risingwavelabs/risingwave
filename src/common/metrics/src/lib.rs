@@ -92,7 +92,7 @@ where
 }
 
 impl MetricsLayer {
-    #[allow(clippy::new_without_default)]
+    #[expect(clippy::new_without_default)]
     pub fn new() -> Self {
         static AWS_SDK_RETRY_COUNTS: LazyLock<GenericCounter<AtomicU64>> = LazyLock::new(|| {
             let registry = crate::monitor::GLOBAL_METRICS_REGISTRY.deref();

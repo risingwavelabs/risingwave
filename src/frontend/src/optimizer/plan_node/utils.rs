@@ -356,7 +356,7 @@ pub(crate) fn sum_affected_row(dml: BatchPlanRef) -> Result<BatchPlanRef> {
 macro_rules! plan_node_name {
     ($name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
         {
-            #[allow(unused_mut)]
+
             let mut properties: Vec<&str> = vec![];
             $( if $cond { properties.push($prop); } )*
             let mut name = $name.to_string();

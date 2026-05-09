@@ -19,6 +19,9 @@ RECOVERY_DURATION=20
 
 # Setup test directory
 TEST_DIR=.risingwave/e2e_test/backwards-compat-tests/
+# Keep this case on recently verified releases. It relies on Hummock system tables and
+# risectl commands to build a mixed-table SST deterministically.
+HUMMOCK_STALE_TABLE_IDS_MIN_VERSION=2.8.0
 mkdir -p $TEST_DIR
 cp -r e2e_test/backwards-compat-tests/slt/* $TEST_DIR
 
@@ -65,6 +68,18 @@ run_sql() {
   psql -h localhost -p 4566 -d dev -U root -c "$@"
 }
 
+run_sql_scalar() {
+  psql -h localhost -p 4566 -d dev -U root -At -c "$@" | tr -d '[:space:]'
+}
+
+run_risectl() (
+  set -euo pipefail
+  set -a
+  source .risingwave/config/risedev-env
+  set +a
+  .risingwave/bin/risingwave/risectl "$@"
+)
+
 check_version() {
   local VERSION=$1
   local raw_version=$(run_sql "SELECT version();")
@@ -102,6 +117,129 @@ seed_json_kafka() {
   insert_json_kafka '{"user_id": 9},{"timestamp": "2023-07-28 06:54:00", "user_id": 9, "page_id": 4, "action": "yjtyjtyyy"}'
 }
 
+seed_hummock_stale_table_ids() {
+  rm -f "$TEST_DIR/hummock-stale-table-ids/enabled" \
+    "$TEST_DIR/hummock-stale-table-ids/dropped_table_id"
+
+  if version_lt "$OLD_VERSION" "$HUMMOCK_STALE_TABLE_IDS_MIN_VERSION"; then
+    echo "--- HUMMOCK STALE TABLE IDS TEST: Skipped for old version ${OLD_VERSION}"
+    return
+  fi
+
+  echo "--- HUMMOCK STALE TABLE IDS TEST: Seeding old cluster with mixed-table SST"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/hummock-stale-table-ids/seed.slt"
+
+  local live_table_id
+  live_table_id=$(run_sql_scalar "SELECT id FROM rw_catalog.rw_tables WHERE name = 'hummock_stale_live';")
+  local dropped_table_id
+  dropped_table_id=$(run_sql_scalar "SELECT id FROM rw_catalog.rw_tables WHERE name = 'hummock_stale_dropped';")
+  if [[ -z "$live_table_id" || -z "$dropped_table_id" ]]; then
+    echo "Failed to capture hummock stale table ids: live=${live_table_id}, dropped=${dropped_table_id}"
+    exit 1
+  fi
+
+  local live_compaction_group_id
+  live_compaction_group_id=$(run_sql_scalar "SELECT compaction_group_id FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${live_table_id}]'::jsonb LIMIT 1;")
+  local dropped_compaction_group_id
+  dropped_compaction_group_id=$(run_sql_scalar "SELECT compaction_group_id FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb LIMIT 1;")
+  if [[ -z "$live_compaction_group_id" || -z "$dropped_compaction_group_id" ]]; then
+    echo "Failed to capture hummock compaction groups: live=${live_compaction_group_id}, dropped=${dropped_compaction_group_id}"
+    exit 1
+  fi
+
+  # Put both tables into one compaction group so a manual L0 compaction can
+  # rewrite their SST metadata into one mixed-table SST.
+  if [[ "$live_compaction_group_id" != "$dropped_compaction_group_id" ]]; then
+    run_risectl hummock merge-compaction-group \
+      --left-group-id "$live_compaction_group_id" \
+      --right-group-id "$dropped_compaction_group_id"
+  fi
+
+  # Target the exact L0 SSTs that contain either table id. This avoids depending
+  # on the default manual selector deciding that there is enough data to compact.
+  local target_sst_ids
+  target_sst_ids=$(run_sql_scalar "
+    SELECT string_agg(sstable_id::varchar, ',' ORDER BY sub_level_id, sstable_id)
+    FROM rw_catalog.rw_hummock_sstables
+    WHERE compaction_group_id = ${live_compaction_group_id}
+      AND level_id = 0
+      AND (
+        table_ids @> '[${live_table_id}]'::jsonb
+        OR table_ids @> '[${dropped_table_id}]'::jsonb
+      );
+  ")
+  if [[ -z "$target_sst_ids" ]]; then
+    echo "Failed to find L0 SSTs for hummock stale table ids test: live_table_id=${live_table_id}, dropped_table_id=${dropped_table_id}, compaction_group_id=${live_compaction_group_id}"
+    exit 1
+  fi
+
+  # `risectl` does not expose a reliable shell exit status for "no task picked",
+  # so the test verifies success by observing the resulting SST metadata below.
+  run_risectl hummock trigger-manual-compaction \
+    --compaction-group-id "$live_compaction_group_id" \
+    --level 0 \
+    --sst-ids "$target_sst_ids"
+
+  # Fail closed unless the current Hummock version really contains an SST whose
+  # metadata references both the live table and the table that will be dropped.
+  local mixed_sst_count
+  for _ in $(seq 1 60); do
+    mixed_sst_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${live_table_id}]'::jsonb AND table_ids @> '[${dropped_table_id}]'::jsonb;")
+    if [[ "$mixed_sst_count" != "0" ]]; then
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$mixed_sst_count" == "0" ]]; then
+    echo "Failed to build mixed-table SST for hummock stale table ids test"
+    exit 1
+  fi
+
+  echo "$dropped_table_id" > "$TEST_DIR/hummock-stale-table-ids/dropped_table_id"
+
+  # Simulate the old-version upgrade state: the dropped table is unregistered
+  # from compaction group configs, while old SST metadata can still contain it.
+  run_sql "DROP TABLE hummock_stale_dropped;"
+  run_sql "FLUSH;"
+
+  local registered_stale_table_count
+  registered_stale_table_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_compaction_group_configs WHERE member_tables @> '[${dropped_table_id}]'::jsonb;")
+  if [[ "$registered_stale_table_count" != "0" ]]; then
+    echo "Old cluster did not unregister dropped table id ${dropped_table_id}"
+    exit 1
+  fi
+
+  local stale_sst_count
+  stale_sst_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb;")
+  if [[ "$stale_sst_count" == "0" ]]; then
+    echo "Old cluster did not retain stale SST table id ${dropped_table_id}; the backwards compatibility test would be ineffective"
+    exit 1
+  fi
+
+  echo "--- HUMMOCK STALE TABLE IDS TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/hummock-stale-table-ids/validate_original.slt"
+  touch "$TEST_DIR/hummock-stale-table-ids/enabled"
+}
+
+validate_hummock_stale_table_ids() {
+  if [[ ! -f "$TEST_DIR/hummock-stale-table-ids/enabled" ]]; then
+    echo "--- HUMMOCK STALE TABLE IDS TEST: Skipped"
+    return
+  fi
+
+  echo "--- HUMMOCK STALE TABLE IDS TEST: Validating new cluster before compaction"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/hummock-stale-table-ids/validate_restart.slt"
+
+  local dropped_table_id
+  dropped_table_id=$(cat "$TEST_DIR/hummock-stale-table-ids/dropped_table_id")
+  local stale_sst_count
+  stale_sst_count=$(run_sql_scalar "SELECT count(*) FROM rw_catalog.rw_hummock_sstables WHERE table_ids @> '[${dropped_table_id}]'::jsonb;")
+  if [[ "$stale_sst_count" != "0" ]]; then
+    echo "Recovered new cluster still has SST metadata containing dropped table id ${dropped_table_id}"
+    exit 1
+  fi
+}
+
 # https://stackoverflow.com/a/4024263
 version_le() {
   printf '%s\n' "$1" "$2" | sort -C -V
@@ -117,7 +255,7 @@ get_old_version() {
   # For backwards compat test we assume we are testing the latest version of RW (i.e. latest main commit)
   # against the Nth latest release candidate, where N > 1. N can be larger,
   # in case some old cluster did not upgrade.
-  if [[ -z $VERSION_OFFSET ]]; then
+  if [[ -z ${VERSION_OFFSET:-} ]]; then
     local VERSION_OFFSET=1
   fi
 
@@ -299,6 +437,8 @@ seed_old_cluster() {
   echo "--- wait for a version checkpoint"
   sleep 60
 
+  seed_hummock_stale_table_ids
+
   echo "--- Killing cluster"
   kill_cluster
   echo "--- Killed cluster"
@@ -354,6 +494,8 @@ validate_new_cluster() {
 
   echo "--- CDC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_restart.slt"
+
+  validate_hummock_stale_table_ids
 
   kill_cluster
 }

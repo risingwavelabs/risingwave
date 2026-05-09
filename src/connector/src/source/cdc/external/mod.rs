@@ -239,7 +239,7 @@ pub trait ExternalTableReader: Sized {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
 
     // Currently, MySQL cdc uses a connection pool to manage connections to MySQL, and other CDC processes do not require the disconnect step for now.
-    #[allow(clippy::unused_async)]
+
     async fn disconnect(self) -> ConnectorResult<()> {
         Ok(())
     }

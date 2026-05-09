@@ -267,7 +267,7 @@ impl StreamSink {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create(
         StreamOptimizedLogicalPlanRoot {
             plan: mut input,

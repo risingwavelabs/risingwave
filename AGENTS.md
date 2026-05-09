@@ -45,7 +45,7 @@ You may need to learn how to build and test RisingWave when implementing feature
 - Use `./risedev d` to run a RisingWave instance in the background via tmux.
   - It builds RisingWave binaries if necessary. The build process can take up to 10 minutes, depending on the incremental build results. Use a large timeout for this step, and be patient.
   - It kills the previous instance, if exists.
-  - Optionally pass a profile name (see `risedev.yml`) to choose external services or components. By default it uses `default`.
+  - Optionally pass a profile name (see `risedev.yml` and for local profile see `risedev-profiles.user.yml`) to choose external services or components. By default it uses `default`.
   - This runs in the background so you do not need a separate terminal.
   - You can connect right after the command finishes.
   - Logs are written to files in `.risingwave/log` folder.
