@@ -40,7 +40,7 @@ use crate::executor::sync_kv_log_store::{
     ReadFuture, SyncKvLogStoreContext, SyncedKvLogStoreExecutor, SyncedLogStoreBuffer, WriteFuture,
     WriteFutureEvent,
 };
-use crate::executor::{StreamConsumer, SyncedKvLogStoreMetrics};
+use crate::executor::{MessageBatch, StreamConsumer, SyncedKvLogStoreMetrics};
 use crate::task::NewOutputRequest;
 
 /// Executor that pairs a synced KV log store with a dispatcher so the log store can
@@ -79,20 +79,11 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
             .as_ref()
             .ok_or_else(|| anyhow!("missing log_store_table in SyncLogStoreNode"))?;
 
-        #[allow(deprecated)]
-        let pause_duration_ms = sync.pause_duration_ms.map_or(
-            actor_context
-                .config
-                .developer
-                .sync_log_store_pause_duration_ms,
-            |v| v as usize,
-        );
-
-        #[allow(deprecated)]
-        let max_buffer_size = sync.buffer_size.map_or(
-            actor_context.config.developer.sync_log_store_buffer_size,
-            |v| v as usize,
-        );
+        let pause_duration_ms = actor_context
+            .config
+            .developer
+            .sync_log_store_pause_duration_ms;
+        let max_buffer_size = actor_context.config.developer.sync_log_store_buffer_size;
 
         let serde =
             LogStoreRowSerde::new(table, vnode_bitmap.map(Into::into), &KV_LOG_STORE_V2_INFO);
@@ -147,7 +138,7 @@ type DispatchingFuture =
 #[define_opaque(DispatchingFuture)]
 fn dispatching_future(mut inner: DispatchExecutorInner, message: Message) -> DispatchingFuture {
     async move {
-        let batch = message.into_batch();
+        let batch: MessageBatch = message.into();
         let r = dispatch_message_batch(&mut inner, batch)
             .await
             .map(|barrier_batch| {
@@ -184,15 +175,11 @@ enum ConsumerFutureEvent {
 }
 
 impl ConsumerFuture {
-    fn dispatch(
-        inner: DispatchExecutorInner,
-        message: Message,
-        barrier_queue: VecDeque<Message>,
-    ) -> Self {
+    fn dispatch(inner: DispatchExecutorInner, message: Message) -> Self {
         tracing::trace!("consumer_future: dispatching future created");
         Self::Dispatching {
             future: Box::pin(dispatching_future(inner, message)),
-            barrier_queue,
+            barrier_queue: VecDeque::new(),
         }
     }
 
@@ -209,7 +196,7 @@ impl ConsumerFuture {
                     replace(self, ConsumerFuture::PlaceHolder),
                     ConsumerFuture::ReadingChunk { inner } => inner
                 );
-                *self = Self::dispatch(inner, message, VecDeque::new());
+                *self = Self::dispatch(inner, message);
             }
             ConsumerFuture::Dispatching { barrier_queue, .. } => {
                 barrier_queue.push_front(message);
@@ -236,7 +223,7 @@ impl ConsumerFuture {
     }
 
     #[expect(clippy::too_many_arguments)]
-    async fn next_dispatched_barrier<S: StateStoreRead>(
+    async fn next_event<S: StateStoreRead>(
         &mut self,
         read_future: &mut ReadFuture<S>,
         read_paused: bool,
@@ -249,13 +236,10 @@ impl ConsumerFuture {
         loop {
             match self {
                 ConsumerFuture::ReadingChunk { .. } => {
-                    if Self::mark_clean_state(clean_state, read_future, buffer, metrics) {
-                        return Ok(ConsumerFutureEvent::CleanStateReached);
-                    }
                     if read_paused {
                         pending().await
                     }
-
+                    
                     let chunk = read_future
                         .next_chunk(progress, read_state, buffer, metrics)
                         .await?;
@@ -267,22 +251,22 @@ impl ConsumerFuture {
                         replace(self, ConsumerFuture::PlaceHolder),
                         ConsumerFuture::ReadingChunk { inner } => inner
                     );
-                    *self = Self::dispatch(inner, Message::Chunk(chunk), VecDeque::new());
+                    *self = Self::dispatch(inner, Message::Chunk(chunk));
 
                     if clean_state_reached {
                         return Ok(ConsumerFutureEvent::CleanStateReached);
                     }
                 }
-                ConsumerFuture::Dispatching { future, .. } => {
-                    let (inner, result) = future.await;
+                ConsumerFuture::Dispatching {
+                    future,
+                    barrier_queue,
+                } => {
+                    let (inner, result) = future.as_mut().await;
                     let barrier = result?;
-                    let mut barrier_queue = must_match!(
-                        replace(self, ConsumerFuture::PlaceHolder),
-                        ConsumerFuture::Dispatching { barrier_queue, .. } => barrier_queue
-                    );
 
                     if let Some(next_barrier) = barrier_queue.pop_back() {
-                        *self = Self::dispatch(inner, next_barrier, barrier_queue);
+                        tracing::trace!("consumer_future: dispatching future created");
+                        *future = Box::pin(dispatching_future(inner, next_barrier));
                     } else {
                         *self = Self::read_chunk(inner);
                     }
@@ -316,7 +300,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
             // Dispatch the first barrier before initializing the log store states
             let first_barrier_batch = dispatch_message_batch(
                 &mut self.inner,
-                Message::Barrier(first_barrier.clone()).into_batch(),
+                Message::Barrier(first_barrier.clone()).into(),
             )
             .await?;
             debug_assert_eq!(
@@ -350,7 +334,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 #[for_await]
                 for message in aligned_stream {
                     if let Some(barrier_batch) =
-                        dispatch_message_batch(&mut self.inner, message?.into_batch()).await?
+                        dispatch_message_batch(&mut self.inner, message?.into()).await?
                     {
                         // Now Synclogstoredispatchexecutor only support sending out single barrier
                         debug_assert_eq!(barrier_batch.len(), 1);
@@ -393,7 +377,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 let select_result = {
                     let consumer_future = async {
                         consumer_future_state
-                            .next_dispatched_barrier(
+                            .next_event(
                                 &mut read_future_state,
                                 pause_stream,
                                 &mut clean_state,
