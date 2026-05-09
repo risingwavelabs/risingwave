@@ -151,6 +151,51 @@ impl Relation {
                 BoundShareInput::Query(query) => {
                     query.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
                 }
+                BoundShareInput::Statement(stmt) => match stmt {
+                    crate::binder::BoundStatement::Insert(i) => i
+                        .source
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                    crate::binder::BoundStatement::Delete(d) => d
+                        .selection
+                        .iter_mut()
+                        .flat_map(|expr| {
+                            expr.collect_correlated_indices_by_depth_and_assign_id(
+                                depth,
+                                correlated_id,
+                            )
+                        })
+                        .collect(),
+                    crate::binder::BoundStatement::Update(u) => {
+                        let mut indices: Vec<usize> = u
+                            .selection
+                            .iter_mut()
+                            .flat_map(|expr| {
+                                expr.collect_correlated_indices_by_depth_and_assign_id(
+                                    depth,
+                                    correlated_id,
+                                )
+                            })
+                            .collect();
+                        indices.extend(u.exprs.iter_mut().flat_map(|expr| {
+                            expr.collect_correlated_indices_by_depth_and_assign_id(
+                                depth,
+                                correlated_id,
+                            )
+                        }));
+                        indices
+                    }
+                    crate::binder::BoundStatement::Query(q) => {
+                        q.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+                    }
+                    crate::binder::BoundStatement::DeclareCursor(d) => d
+                        .query
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                    crate::binder::BoundStatement::DeclareSubscriptionCursor(_) => vec![],
+                    crate::binder::BoundStatement::FetchCursor(_) => vec![],
+                    crate::binder::BoundStatement::CreateView(c) => c
+                        .query
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                },
                 BoundShareInput::ChangeLog(change_log) => change_log
                     .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
             },
@@ -475,6 +520,16 @@ impl Binder {
                     )?;
                     // we could always share the cte,
                     // no matter it's recursive or not.
+                    Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
+                }
+                BindingCteState::Statement { stmt } => {
+                    let input = BoundShareInput::Statement(stmt);
+                    self.bind_table_to_context(
+                        input.fields()?,
+                        table_name,
+                        None,
+                        Some(&original_alias),
+                    )?;
                     Ok(Relation::Share(Box::new(BoundShare { share_id, input })))
                 }
                 BindingCteState::ChangeLog { table } => {

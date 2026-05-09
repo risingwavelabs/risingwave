@@ -756,6 +756,8 @@ pub struct SessionImpl {
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: Arc<RwLock<SessionConfig>>,
+    /// Stores custom session-scoped config entries that are not part of `SessionConfig`.
+    custom_config_map: Arc<RwLock<HashMap<String, String>>>,
 
     /// Channel sender for frontend handler to send notices.
     notice_tx: UnboundedSender<String>,
@@ -891,6 +893,7 @@ impl SessionImpl {
             auth_context: Arc::new(RwLock::new(auth_context)),
             user_authenticator,
             config_map: Arc::new(RwLock::new(session_config)),
+            custom_config_map: Default::default(),
             id,
             peer_addr,
             txn: Default::default(),
@@ -919,6 +922,7 @@ impl SessionImpl {
             ))),
             user_authenticator: UserAuthenticator::None,
             config_map: Default::default(),
+            custom_config_map: Default::default(),
             // Mock session use non-sense id.
             id: (0, 0),
             txn: Default::default(),
@@ -981,7 +985,33 @@ impl SessionImpl {
         self.config_map.read()
     }
 
+    pub fn shared_custom_config(&self) -> Arc<RwLock<HashMap<String, String>>> {
+        Arc::clone(&self.custom_config_map)
+    }
+
+    fn is_custom_config_key(key: &str) -> bool {
+        key.starts_with("hasura.")
+    }
+
+    pub fn get_config_value(&self, key: &str) -> Result<String> {
+        if Self::is_custom_config_key(key) {
+            return Ok(self
+                .custom_config_map
+                .read()
+                .get(key)
+                .cloned()
+                .unwrap_or_default());
+        }
+        self.config().get(key).map_err(Into::into)
+    }
+
     pub fn set_config(&self, key: &str, value: String) -> Result<String> {
+        if Self::is_custom_config_key(key) {
+            self.custom_config_map
+                .write()
+                .insert(key.to_owned(), value.clone());
+            return Ok(value);
+        }
         self.config_map
             .write()
             .set(key, value, &mut ())
@@ -989,6 +1019,10 @@ impl SessionImpl {
     }
 
     pub fn reset_config(&self, key: &str) -> Result<String> {
+        if Self::is_custom_config_key(key) {
+            self.custom_config_map.write().remove(key);
+            return Ok(String::new());
+        }
         self.config_map
             .write()
             .reset(key, &mut ())
@@ -1001,6 +1035,16 @@ impl SessionImpl {
         value: Option<String>,
         mut reporter: impl ConfigReporter,
     ) -> Result<String> {
+        if Self::is_custom_config_key(key) {
+            if let Some(value) = value {
+                self.custom_config_map
+                    .write()
+                    .insert(key.to_owned(), value.clone());
+                return Ok(value);
+            }
+            self.custom_config_map.write().remove(key);
+            return Ok(String::new());
+        }
         if let Some(value) = value {
             self.config_map
                 .write()
@@ -1872,7 +1916,7 @@ impl Session for SessionImpl {
     }
 
     fn get_config(&self, key: &str) -> Result<String> {
-        self.config().get(key).map_err(Into::into)
+        self.get_config_value(key)
     }
 
     fn set_config(&self, key: &str, value: String) -> Result<String> {

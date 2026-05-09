@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, SerialArray, StreamChunk,
 };
-use risingwave_common::catalog::{Schema, TableId, TableVersionId};
+use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_dml::dml_manager::DmlManagerRef;
@@ -45,6 +45,7 @@ pub struct InsertExecutor {
     identity: String,
     column_indices: Vec<usize>,
     sorted_default_columns: Vec<(usize, BoxedExpression)>,
+    generated_columns: Vec<(usize, BoxedExpression)>,
 
     row_id_index: Option<usize>,
     returning: bool,
@@ -63,11 +64,35 @@ impl InsertExecutor {
         identity: String,
         column_indices: Vec<usize>,
         sorted_default_columns: Vec<(usize, BoxedExpression)>,
+        generated_columns: Vec<(usize, BoxedExpression)>,
         row_id_index: Option<usize>,
         returning: bool,
         session_id: u32,
     ) -> Self {
-        let table_schema = child.schema().clone();
+        let table_schema = if returning {
+            let mut ordered_fields = column_indices
+                .iter()
+                .enumerate()
+                .map(|(i, idx)| (*idx, child.schema().fields[i].clone()))
+                .collect_vec();
+
+            ordered_fields.reserve(
+                ordered_fields.len() + sorted_default_columns.len() + generated_columns.len(),
+            );
+            for (idx, expr) in &sorted_default_columns {
+                ordered_fields.push((*idx, Field::unnamed(expr.return_type())));
+            }
+            for (idx, expr) in &generated_columns {
+                ordered_fields.push((*idx, Field::unnamed(expr.return_type())));
+            }
+
+            ordered_fields.sort_unstable_by_key(|(idx, _)| *idx);
+            Schema::new(ordered_fields.into_iter().map(|(_, field)| field).collect())
+        } else {
+            Schema {
+                fields: vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
+            }
+        };
         let txn_id = dml_manager.gen_txn_id();
         Self {
             table_id,
@@ -79,6 +104,7 @@ impl InsertExecutor {
             identity,
             column_indices,
             sorted_default_columns,
+            generated_columns,
             row_id_index,
             returning,
             txn_id,
@@ -118,7 +144,7 @@ impl InsertExecutor {
         // Return the returning chunk.
         let write_txn_data = |chunk: DataChunk| async {
             let cap = chunk.capacity();
-            let (mut columns, vis) = chunk.into_parts();
+            let (input_columns, vis) = chunk.into_parts();
 
             let dummy_chunk = DataChunk::new_dummy(cap);
 
@@ -126,7 +152,7 @@ impl InsertExecutor {
                 .column_indices
                 .iter()
                 .enumerate()
-                .map(|(i, idx)| (*idx, columns[i].clone()))
+                .map(|(i, idx)| (*idx, input_columns[i].clone()))
                 .collect_vec();
 
             ordered_columns.reserve(ordered_columns.len() + self.sorted_default_columns.len());
@@ -137,13 +163,31 @@ impl InsertExecutor {
             }
 
             ordered_columns.sort_unstable_by_key(|(idx, _)| *idx);
-            columns = ordered_columns
-                .into_iter()
-                .map(|(_, column)| column)
+            let mut columns = ordered_columns
+                .iter()
+                .map(|(_, column)| column.clone())
                 .collect_vec();
 
-            // Construct the returning chunk, without the `row_id` column.
-            let returning_chunk = DataChunk::new(columns.clone(), vis.clone());
+            let returning_chunk = if self.returning {
+                let mut returning_columns = ordered_columns;
+                if !self.generated_columns.is_empty() {
+                    let eval_chunk = DataChunk::new(columns.clone(), vis.clone());
+                    for (idx, expr) in &self.generated_columns {
+                        let column = expr.eval(&eval_chunk).await?;
+                        returning_columns.push((*idx, column));
+                    }
+                    returning_columns.sort_unstable_by_key(|(idx, _)| *idx);
+                }
+                DataChunk::new(
+                    returning_columns
+                        .into_iter()
+                        .map(|(_, column)| column)
+                        .collect_vec(),
+                    vis.clone(),
+                )
+            } else {
+                DataChunk::new_dummy(0)
+            };
 
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
@@ -159,7 +203,7 @@ impl InsertExecutor {
 
             write_handle.write_chunk(stream_chunk).await?;
 
-            Result::Ok(returning_chunk)
+            Result::Ok((returning_chunk, cap))
         };
 
         let mut rows_inserted = 0;
@@ -168,8 +212,8 @@ impl InsertExecutor {
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
             for chunk in builder.append_chunk(data_chunk) {
-                let chunk = write_txn_data(chunk).await?;
-                rows_inserted += chunk.cardinality();
+                let (chunk, inserted_rows) = write_txn_data(chunk).await?;
+                rows_inserted += inserted_rows;
                 if self.returning {
                     yield chunk;
                 }
@@ -177,8 +221,8 @@ impl InsertExecutor {
         }
 
         if let Some(chunk) = builder.consume_all() {
-            let chunk = write_txn_data(chunk).await?;
-            rows_inserted += chunk.cardinality();
+            let (chunk, inserted_rows) = write_txn_data(chunk).await?;
+            rows_inserted += inserted_rows;
             if self.returning {
                 yield chunk;
             }
@@ -235,6 +279,24 @@ impl BoxedExecutorBuilder for InsertExecutor {
         } else {
             vec![]
         };
+        let generated_columns = if let Some(generated_columns) = &insert_node.generated_columns {
+            let mut generated_columns = generated_columns
+                .get_default_columns()
+                .iter()
+                .cloned()
+                .map(|IndexAndExpr { index: i, expr: e }| {
+                    Ok((
+                        i as usize,
+                        build_from_prost(&e.context("expression is None")?)
+                            .context("failed to build expression")?,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            generated_columns.sort_unstable_by_key(|(i, _)| *i);
+            generated_columns
+        } else {
+            vec![]
+        };
 
         Ok(Box::new(Self::new(
             table_id,
@@ -245,6 +307,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source.plan_node().get_identity().clone(),
             column_indices,
             sorted_default_columns,
+            generated_columns,
             insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
             insert_node.session_id,
@@ -337,6 +400,7 @@ mod tests {
             1024,
             "InsertExecutor".to_owned(),
             vec![0, 1, 2], // Ignoring insertion order
+            vec![],
             vec![],
             row_id_index,
             false,

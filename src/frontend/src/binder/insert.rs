@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{ColumnCatalog, Schema, TableVersionId};
 use risingwave_common::types::DataType;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::plan_common::DefaultColumnDesc;
@@ -30,7 +31,7 @@ use super::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, Clause};
 use crate::catalog::TableId;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr, ExprImpl, FunctionCall, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::user::UserId;
 use crate::utils::ordinal;
@@ -67,6 +68,10 @@ pub struct BoundInsert {
     /// Will set to default value (current null)
     pub default_columns: Vec<(usize, ExprImpl)>,
 
+    /// Generated columns that should be materialized for `RETURNING`, but not written through the
+    /// DML path because streaming computes them later.
+    pub generated_columns: Vec<(usize, ExprImpl)>,
+
     pub source: BoundQuery,
 
     /// Used as part of an extra `Project` when the column types of the query does not match
@@ -91,6 +96,12 @@ impl RewriteExprsRecursive for BoundInsert {
             .map(|expr| rewriter.rewrite_expr(expr))
             .collect::<Vec<_>>();
         self.cast_exprs = new_cast_exprs;
+
+        let new_generated_columns = std::mem::take(&mut self.generated_columns)
+            .into_iter()
+            .map(|(idx, expr)| (idx, rewriter.rewrite_expr(expr)))
+            .collect::<Vec<_>>();
+        self.generated_columns = new_generated_columns;
 
         let new_returning_list = std::mem::take(&mut self.returning_list)
             .into_iter()
@@ -134,7 +145,7 @@ impl Binder {
             .filter(|c| !c.is_hidden())
             .cloned()
             .collect_vec();
-        let (cols_to_insert_in_table, row_id_index) = table_catalog.columns_to_insert();
+        let (cols_to_insert_in_table, _row_id_index) = table_catalog.columns_to_insert();
         let cols_to_insert_in_table = cols_to_insert_in_table
             .map(|(column, _)| column.clone())
             .collect_vec();
@@ -158,6 +169,38 @@ impl Binder {
                 }
             })
             .collect::<HashMap<_, _>>();
+
+        let visible_non_generated_indices = table_visible_columns
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, col)| (!col.is_generated()).then_some(idx))
+            .collect_vec();
+        let generated_column_input_ref_mapping = ColIndexMapping::with_remaining_columns(
+            &visible_non_generated_indices,
+            table_visible_columns.len(),
+        );
+        let generated_columns = table_visible_columns
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, col)| {
+                col.column_desc
+                    .generated_or_default_column
+                    .as_ref()
+                    .and_then(|generated_or_default| match generated_or_default {
+                        GeneratedOrDefaultColumn::GeneratedColumn(generated) => {
+                            Some((idx, generated))
+                        }
+                        GeneratedOrDefaultColumn::DefaultColumn(_) => None,
+                    })
+            })
+            .map(|(idx, generated)| {
+                let expr = generated_column_input_ref_mapping.clone().rewrite_expr(
+                    ExprImpl::from_expr_proto(generated.expr.as_ref().unwrap())
+                        .expect("expr in generated columns corrupted"),
+                );
+                (idx, expr)
+            })
+            .collect_vec();
 
         let generated_column_names = table_catalog
             .generated_column_names()
@@ -192,11 +235,22 @@ impl Binder {
             check_generated_insert_violation(None)?;
         }
 
-        if !generated_column_names.is_empty() && !returning_items.is_empty() {
-            return Err(RwError::from(ErrorCode::BindError(
-                "`RETURNING` clause is not supported for tables with generated columns".to_owned(),
-            )));
-        }
+        // TODO(yuhao): refine this if row_id is always the last column.
+        //
+        // `row_id_index` in insert operation should rule out generated column
+        let row_id_index = {
+            if let Some(row_id_index) = table_catalog.row_id_index {
+                let mut cnt = 0;
+                for col in table_catalog.columns().iter().take(row_id_index + 1) {
+                    if col.is_generated() {
+                        cnt += 1;
+                    }
+                }
+                Some(row_id_index - cnt)
+            } else {
+                None
+            }
+        };
 
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let is_returning = !returning_list.is_empty();
@@ -380,6 +434,7 @@ impl Binder {
             row_id_index,
             column_indices: col_indices_to_insert,
             default_columns,
+            generated_columns,
             source: bound_query,
             cast_exprs,
             returning_list,

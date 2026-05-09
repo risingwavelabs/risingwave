@@ -13,19 +13,21 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_pb::expr::expr_node::Type;
 
 use super::Planner;
 use crate::binder::{BoundUpdate, UpdateProject};
 use crate::error::Result;
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalPlanRef as PlanRef, LogicalProject, LogicalUpdate, generic,
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRoot, PlanRoot};
+use crate::utils::Substitute;
 
 impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<LogicalPlanRoot> {
@@ -61,35 +63,35 @@ impl Planner {
             LogicalProject::new(plan, exprs).into()
         };
 
-        let mut olds = Vec::new();
-        let mut news = Vec::new();
+        let all_columns: Vec<_> = update.table.table_catalog.columns().iter().collect_vec();
+        let mut all_olds = Vec::with_capacity(all_columns.len());
+        let mut all_base_news = Vec::with_capacity(all_columns.len());
 
-        for (i, col) in update.table.table_catalog.columns().iter().enumerate() {
-            // Skip generated columns and system columns.
-            if !col.can_dml() {
-                continue;
-            }
+        for (i, col) in all_columns.iter().enumerate() {
             let data_type = col.data_type();
 
             let old: ExprImpl = InputRef::new(i, data_type.clone()).into();
 
-            let mut new: ExprImpl = match (update.projects.get(&i)).map(|p| p.offset(old_schema_len)) {
-                Some(UpdateProject::Simple(j)) => InputRef::new(j, data_type.clone()).into(),
-                Some(UpdateProject::Composite(j, field)) => FunctionCall::new_unchecked(
-                    Type::Field,
-                    vec![
-                        InputRef::new(j, with_new.schema().data_types()[j].clone()).into(), // struct
-                        Literal::new(Some((field as i32).to_scalar_value()), DataType::Int32)
-                            .into(),
-                    ],
-                    data_type.clone(),
-                )
-                .into(),
-
-                None => old.clone(),
+            let new: ExprImpl = if col.is_generated() {
+                old.clone()
+            } else {
+                match (update.projects.get(&i)).map(|p| p.offset(old_schema_len)) {
+                    Some(UpdateProject::Simple(j)) => InputRef::new(j, data_type.clone()).into(),
+                    Some(UpdateProject::Composite(j, field)) => FunctionCall::new_unchecked(
+                        Type::Field,
+                        vec![
+                            InputRef::new(j, with_new.schema().data_types()[j].clone()).into(),
+                            Literal::new(Some((field as i32).to_scalar_value()), DataType::Int32)
+                                .into(),
+                        ],
+                        data_type.clone(),
+                    )
+                    .into(),
+                    None => old.clone(),
+                }
             };
             if !col.nullable() {
-                new = FunctionCall::new_unchecked(
+                let new = FunctionCall::new_unchecked(
                     ExprType::CheckNotNull,
                     vec![
                         new,
@@ -99,10 +101,57 @@ impl Planner {
                     data_type.clone(),
                 )
                 .into();
+                all_base_news.push(new);
+            } else {
+                all_base_news.push(new);
             }
 
-            olds.push(old);
-            news.push(new);
+            all_olds.push(old);
+        }
+
+        let mut all_news = Vec::with_capacity(all_base_news.len());
+        for (i, col) in all_columns.iter().enumerate() {
+            if let Some(generated_expr) = col.generated_expr() {
+                let mut substitute = Substitute {
+                    mapping: all_base_news.clone(),
+                };
+                let expr = substitute.rewrite_expr(ExprImpl::from_expr_proto(generated_expr)?);
+                all_news.push(expr);
+            } else {
+                all_news.push(all_base_news[i].clone());
+            }
+        }
+
+        let mut olds = Vec::with_capacity(all_columns.len());
+        let mut news = Vec::with_capacity(all_columns.len());
+        let mut returning_exprs = Vec::with_capacity(all_columns.len());
+        for (idx, col) in all_columns.iter().enumerate() {
+            if (!col.is_hidden() || col.is_row_id_column())
+                && !col.is_generated()
+                && !col.is_rw_timestamp_column()
+            {
+                olds.push(all_olds[idx].clone());
+                news.push(all_news[idx].clone());
+            }
+            if !col.is_hidden() {
+                returning_exprs.push(all_news[idx].clone());
+            }
+        }
+
+        let has_row_id_in_catalog = all_columns.iter().any(|col| col.is_row_id_column());
+        if !has_row_id_in_catalog
+            && let Some((row_id_index, row_id_field)) = with_new
+                .schema()
+                .fields()
+                .iter()
+                .take(old_schema_len)
+                .enumerate()
+                .find(|(_, field)| field.name.ends_with("._row_id") || field.name == "_row_id")
+        {
+            let row_id_expr: ExprImpl =
+                InputRef::new(row_id_index, row_id_field.data_type.clone()).into();
+            olds.push(row_id_expr.clone());
+            news.push(row_id_expr);
         }
 
         let mut plan: PlanRef = LogicalUpdate::from(generic::Update::new(
@@ -112,6 +161,7 @@ impl Planner {
             update.table_version_id,
             olds,
             news,
+            returning_exprs,
             returning,
         ))
         .into();

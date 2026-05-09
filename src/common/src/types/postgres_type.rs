@@ -98,6 +98,9 @@ impl DataType {
                     // workaround to support text in extended mode.
                     25 => Ok(DataType::Varchar),
                     1009 => Ok(DataType::Varchar.list()),
+                    // allow PostgreSQL json OIDs to bind to RisingWave jsonb.
+                    114 => Ok(DataType::Jsonb),
+                    199 => Ok(DataType::Jsonb.list()),
                     _ => Err(UnsupportedOid(oid)),
                 }
             }

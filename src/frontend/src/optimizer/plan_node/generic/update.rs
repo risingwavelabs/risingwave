@@ -37,13 +37,14 @@ pub struct Update<PlanRef: Eq + Hash> {
     pub input: PlanRef,
     pub old_exprs: Vec<ExprImpl>,
     pub new_exprs: Vec<ExprImpl>,
+    pub returning_exprs: Vec<ExprImpl>,
     pub returning: bool,
 }
 
 impl<PlanRef: GenericPlanRef> Update<PlanRef> {
     pub fn output_len(&self) -> usize {
         if self.returning {
-            self.new_exprs.len()
+            self.returning_exprs.len()
         } else {
             1
         }
@@ -57,7 +58,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Update<PlanRef> {
     fn schema(&self) -> Schema {
         if self.returning {
             Schema::new(
-                self.new_exprs
+                self.returning_exprs
                     .iter()
                     .map(|e| Field::unnamed(e.return_type()))
                     .collect(),
@@ -84,6 +85,7 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
         table_version_id: TableVersionId,
         old_exprs: Vec<ExprImpl>,
         new_exprs: Vec<ExprImpl>,
+        returning_exprs: Vec<ExprImpl>,
         returning: bool,
     ) -> Self {
         Self {
@@ -93,18 +95,23 @@ impl<PlanRef: Eq + Hash> Update<PlanRef> {
             input,
             old_exprs,
             new_exprs,
+            returning_exprs,
             returning,
         }
     }
 
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
-        for exprs in [&mut self.old_exprs, &mut self.new_exprs] {
+        for exprs in [
+            &mut self.old_exprs,
+            &mut self.new_exprs,
+            &mut self.returning_exprs,
+        ] {
             *exprs = exprs.iter().map(|e| r.rewrite_expr(e.clone())).collect();
         }
     }
 
     pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        for exprs in [&self.old_exprs, &self.new_exprs] {
+        for exprs in [&self.old_exprs, &self.new_exprs, &self.returning_exprs] {
             exprs.iter().for_each(|e| v.visit_expr(e));
         }
     }
@@ -116,6 +123,7 @@ impl<PlanRef: Eq + Hash> DistillUnit for Update<PlanRef> {
         vec.push(("table", Pretty::from(self.table_name.clone())));
         vec.push(("exprs", Pretty::debug(&self.new_exprs)));
         if self.returning {
+            vec.push(("returning_exprs", Pretty::debug(&self.returning_exprs)));
             vec.push(("returning", Pretty::display(&true)));
         }
         childless_record(name, vec)

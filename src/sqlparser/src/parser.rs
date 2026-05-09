@@ -4855,9 +4855,19 @@ impl Parser<'_> {
     fn parse_cte_inner(&mut self) -> ModalResult<CteInner> {
         match self.expect_token(&Token::LParen) {
             Ok(()) => {
-                let query = self.parse_query()?;
+                let cte_inner = match self.peek_token().token {
+                    Token::Word(w)
+                        if matches!(
+                            w.keyword,
+                            Keyword::INSERT | Keyword::UPDATE | Keyword::DELETE
+                        ) =>
+                    {
+                        CteInner::Statement(Box::new(self.parse_statement()?))
+                    }
+                    _ => CteInner::Query(Box::new(self.parse_query()?)),
+                };
                 self.expect_token(&Token::RParen)?;
-                Ok(CteInner::Query(Box::new(query)))
+                Ok(cte_inner)
             }
             _ => {
                 let changelog = self.parse_identifier_non_reserved()?;

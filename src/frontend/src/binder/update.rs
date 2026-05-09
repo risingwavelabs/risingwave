@@ -26,7 +26,7 @@ use super::statement::RewriteExprsRecursive;
 use super::{Binder, BoundBaseTable};
 use crate::TableCatalog;
 use crate::catalog::TableId;
-use crate::error::{ErrorCode, Result, RwError, bail_bind_error, bind_error};
+use crate::error::{ErrorCode, Result, bail_bind_error, bind_error};
 use crate::expr::{Expr as _, ExprImpl, SubqueryKind};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::user::UserId;
@@ -146,12 +146,6 @@ impl Binder {
 
         let default_columns_from_catalog =
             table_catalog.default_columns().collect::<BTreeMap<_, _>>();
-        if !returning_items.is_empty() && table_catalog.has_generated_column() {
-            return Err(RwError::from(ErrorCode::BindError(
-                "`RETURNING` clause is not supported for tables with generated columns".to_owned(),
-            )));
-        }
-
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");

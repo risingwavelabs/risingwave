@@ -398,6 +398,32 @@ impl Binder {
                         })),
                     );
                 }
+                CteInner::Statement(stmt) => {
+                    self.push_context();
+                    let bound_stmt = self.bind_statement((**stmt).clone())?;
+                    self.pop_context()?;
+                    match bound_stmt {
+                        crate::binder::BoundStatement::Insert(_)
+                        | crate::binder::BoundStatement::Delete(_)
+                        | crate::binder::BoundStatement::Update(_) => {
+                            self.context.cte_to_relation.insert(
+                                table_name,
+                                Rc::new(RefCell::new(BindingCte {
+                                    share_id,
+                                    state: BindingCteState::Statement { stmt: bound_stmt },
+                                    alias: alias.clone(),
+                                })),
+                            );
+                        }
+                        _ => {
+                            return Err(ErrorCode::BindError(
+                                "Only INSERT/UPDATE/DELETE statements are supported in a CTE"
+                                    .to_owned(),
+                            )
+                            .into());
+                        }
+                    }
+                }
                 CteInner::ChangeLog(from_table_name) => {
                     self.push_context();
                     let from_table_relation =

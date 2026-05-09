@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, StructType};
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::{Binder, Clause};
@@ -92,6 +92,13 @@ impl Binder {
                     return Err(e.into());
                 }
             }
+        }
+
+        if schema_name.is_none()
+            && table_name.is_none()
+            && let Ok(row_expr) = self.bind_relation_row_reference(&column_name)
+        {
+            return Ok(row_expr);
         }
 
         // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
@@ -194,5 +201,59 @@ impl Binder {
         }
 
         Err(err.into())
+    }
+
+    fn bind_relation_row_reference(&self, table_name: &String) -> Result<ExprImpl> {
+        let range = {
+            let mut alias_ranges = Vec::new();
+            let mut base_ranges = Vec::new();
+
+            for ((rel_schema, rel_name), range) in &self.context.range_of {
+                if rel_name != table_name || rel_schema.is_some() {
+                    continue;
+                }
+                match self.context.columns[range.0].table_alias {
+                    Some(_) => alias_ranges.push(*range),
+                    None => base_ranges.push(*range),
+                }
+            }
+
+            let chosen_ranges = if alias_ranges.is_empty() {
+                base_ranges
+            } else {
+                alias_ranges
+            };
+
+            match chosen_ranges.as_slice() {
+                [] => {
+                    return Err(ErrorCode::ItemNotFound(format!(
+                        "missing FROM-clause entry for table \"{}\"",
+                        table_name
+                    ))
+                    .into());
+                }
+                [range] => *range,
+                _ => {
+                    return Err(ErrorCode::InvalidReference(format!(
+                        "table reference \"{}\" is ambiguous",
+                        table_name
+                    ))
+                    .into());
+                }
+            }
+        };
+
+        let mut exprs = Vec::new();
+        let mut fields = Vec::new();
+        for column in &self.context.columns[range.0..range.1] {
+            if column.is_hidden {
+                continue;
+            }
+            exprs.push(InputRef::new(column.index, column.field.data_type.clone()).into());
+            fields.push((column.field.name.clone(), column.field.data_type.clone()));
+        }
+
+        let data_type = DataType::Struct(StructType::new(fields));
+        Ok(FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into())
     }
 }

@@ -1120,6 +1120,8 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
                 "text" => DataType::Varchar,
+                "json" => DataType::Jsonb,
+                "oid" => DataType::Int32,
                 "serial" => {
                     return Err(ErrorCode::NotSupported(
                         "Column type SERIAL is not supported".into(),

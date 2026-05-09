@@ -66,3 +66,17 @@
     from jsonb_to_recordset('[{"schema":"public","name":"hasura_defaults"}]'::jsonb) as tracked(schema text, name text);
   expected_outputs:
   - batch_plan
+
+- name: hasura modifying cte returning path
+  sql: |
+    create table hasura_runtime_cte (
+      id int primary key,
+      required_v int not null,
+      generated_v int as required_v + 1
+    );
+    with ins as (
+      insert into hasura_runtime_cte values (1, 7) returning *
+    )
+    select id, generated_v from ins;
+  expected_outputs:
+  - batch_plan

@@ -25,11 +25,12 @@ use crate::utils::ColIndexMapping;
 impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<LogicalPlanRoot> {
         let table_catalog = &delete.table.table_catalog;
+        let returning = !delete.returning_list.is_empty();
         let dml_output_indices: Vec<usize> = table_catalog
             .columns()
             .iter()
             .enumerate()
-            .filter_map(|(i, c)| c.can_dml().then_some(i))
+            .filter_map(|(i, c)| ((returning && !c.is_hidden()) || c.can_dml()).then_some(i))
             .collect();
         let table_to_dml = ColIndexMapping::with_remaining_columns(
             &dml_output_indices,
@@ -56,7 +57,6 @@ impl Planner {
         } else {
             input
         };
-        let returning = !delete.returning_list.is_empty();
         let mut plan: PlanRef = LogicalDelete::from(generic::Delete::new(
             input,
             delete.table_name.clone(),
