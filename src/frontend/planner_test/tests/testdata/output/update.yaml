@@ -64,14 +64,14 @@
     update t set (v1, v2) = (v2 + 1, v1 - 1) where v1 != v2 returning *, v2+1, v1-1;
   logical_plan: |-
     LogicalProject { exprs: [, , ( + 1:Int32) as $expr3, ( - 1:Int32) as $expr4] }
-    └─LogicalUpdate { table: t, exprs: [$4, $5, $2], returning: true }
+    └─LogicalUpdate { table: t, exprs: [$4, $5, $2], returning_exprs: [$4, $5], returning: true }
       └─LogicalProject { exprs: [t.v1, t.v2, t._row_id, t._rw_timestamp, (t.v2 + 1:Int32) as $expr1, (t.v1 - 1:Int32) as $expr2] }
         └─LogicalFilter { predicate: (t.v1 <> t.v2) }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [, , ( + 1:Int32) as $expr3, ( - 1:Int32) as $expr4] }
-      └─BatchUpdate { table: t, exprs: [$4, $5, $2], returning: true }
+      └─BatchUpdate { table: t, exprs: [$4, $5, $2], returning_exprs: [$4, $5], returning: true }
         └─BatchExchange { order: [], dist: Single }
           └─BatchProject { exprs: [t.v1, t.v2, t._row_id, t._rw_timestamp, (t.v2 + 1:Int32) as $expr1, (t.v1 - 1:Int32) as $expr2] }
             └─BatchFilter { predicate: (t.v1 <> t.v2) }
@@ -82,13 +82,13 @@
     update t set v = 114 returning 514;
   logical_plan: |-
     LogicalProject { exprs: [514:Int32] }
-    └─LogicalUpdate { table: t, exprs: [$3, $1], returning: true }
+    └─LogicalUpdate { table: t, exprs: [$3, $1], returning_exprs: [$3], returning: true }
       └─LogicalProject { exprs: [t.v, t._row_id, t._rw_timestamp, 114:Int32] }
         └─LogicalScan { table: t, columns: [t.v, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [514:Int32] }
-      └─BatchUpdate { table: t, exprs: [$3, $1], returning: true }
+      └─BatchUpdate { table: t, exprs: [$3, $1], returning_exprs: [$3], returning: true }
         └─BatchExchange { order: [], dist: Single }
           └─BatchProject { exprs: [t.v, t._row_id, t._rw_timestamp, 114:Int32] }
             └─BatchScan { table: t, columns: [t.v, t._row_id, t._rw_timestamp], distribution: UpstreamHashShard(t._row_id) }
