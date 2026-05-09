@@ -80,3 +80,15 @@
     select id, generated_v from ins;
   expected_outputs:
   - batch_plan
+- sql: |
+    create table hasura_parent (id int primary key);
+    create table hasura_child (
+      id int primary key,
+      parent_id int references hasura_parent(id) on delete cascade on update set null
+    );
+    select conname, contype, confdeltype, confupdtype
+    from pg_catalog.pg_constraint
+    where conrelid = 'hasura_child'::regclass
+      and contype = 'f';
+  expected_outputs:
+  - batch_plan
