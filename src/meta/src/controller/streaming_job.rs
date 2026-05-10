@@ -32,7 +32,9 @@ use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
 use risingwave_common::{bail, current_cluster_version};
-use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
+use risingwave_connector::allow_alter_on_fly_fields::{
+    check_sink_allow_alter_on_fly_fields, check_source_allow_alter_on_fly_fields,
+};
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
@@ -2891,6 +2893,9 @@ impl CatalogController {
 
             for (source, _obj) in sources_with_objs {
                 let source_id = source.source_id;
+
+                let connector = source.with_properties.0.get_connector().unwrap();
+                check_source_allow_alter_on_fly_fields(&connector, &prop_keys)?;
 
                 let mut source_options_with_secret = WithOptionsSecResolved::new(
                     source.with_properties.0.clone(),
