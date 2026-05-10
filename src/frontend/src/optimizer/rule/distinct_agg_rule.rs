@@ -149,9 +149,16 @@ impl DistinctAggRule {
             }
         });
 
+        // Use the same deduplication key as column_subsets to determine if Expand is needed.
+        // The key is the full subset: group_keys + agg_call.input_indices().
         let n_different_distinct = distinct_aggs
             .iter()
-            .unique_by(|agg_call| agg_call.input_indices()[0])
+            .map(|agg_call| {
+                let mut subset = group_keys.clone();
+                subset.extend(agg_call.input_indices());
+                subset.to_vec()
+            })
+            .unique()
             .count();
         assert_ne!(n_different_distinct, 0); // since `distinct_aggs` is not empty here
         if n_different_distinct == 1 {
