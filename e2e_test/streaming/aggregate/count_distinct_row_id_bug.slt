@@ -27,5 +27,12 @@ select count(foo), count(distinct foo), count(distinct bar) from t;
 ----
 3 2 2
 
+-- Test with GROUP BY to exercise group_keys in the deduplication logic
+query IIII rowsort
+select bar, count(foo), count(distinct foo), count(distinct _row_id) from t group by bar;
+----
+1 2 1 2
+2 1 1 1
+
 statement ok
 drop table t;
