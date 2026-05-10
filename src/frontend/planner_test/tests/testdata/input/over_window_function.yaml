@@ -245,6 +245,62 @@
     - stream_plan
     - optimized_logical_plan_for_batch
     - batch_plan
+- id: TopN by row_number with arithmetic rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank - 1 = 0;
+  expected_outputs:
+    - stream_plan
+- id: TopN by row_number with mirrored arithmetic rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 0 = rank - 1;
+  expected_outputs:
+    - stream_plan
+- id: TopN by row_number with mirrored arithmetic rank inequality
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 0 < rank - 1 AND rank <= 3;
+  expected_outputs:
+    - stream_plan
+- id: TopN by row_number with mirrored arithmetic rank upper bound
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 >= rank + 1;
+  expected_outputs:
+    - stream_plan
+- id: TopN by row_number with mirrored commuted addition rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 2 = 1 + rank;
+  expected_outputs:
+    - stream_plan
+- id: TopN by row_number with nested arithmetic rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where (rank - 1) - 1 = 0;
+  expected_outputs:
+    - stream_plan
+- id: TopN by row_number with mirrored nested arithmetic rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 0 = (rank - 1) - 1;
+  expected_outputs:
+    - stream_plan
 - id: TopN by rank without rank output
   sql: |
     create table t(x int, y int);
