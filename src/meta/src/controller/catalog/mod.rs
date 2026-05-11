@@ -146,6 +146,14 @@ pub struct ReleaseContext {
     pub(crate) removed_iceberg_table_sinks: Vec<PbSink>,
 }
 
+#[derive(Default)]
+pub(crate) struct CleanedDirtyStreamingJobs {
+    pub(crate) streaming_job_ids: Vec<JobId>,
+    /// Only populated for per-database recovery.
+    pub(crate) dropped_table_ids: Vec<TableId>,
+    pub(crate) source_ids: Vec<SourceId>,
+}
+
 impl CatalogController {
     pub async fn new(env: MetaSrvEnv) -> MetaResult<Self> {
         let meta_store = env.meta_store();
@@ -440,11 +448,11 @@ impl CatalogController {
     }
 
     /// `clean_dirty_creating_jobs` cleans up creating jobs that are creating in Foreground mode or in Initial status.
-    pub async fn clean_dirty_creating_jobs(
+    pub(crate) async fn clean_dirty_creating_jobs(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<Vec<SourceId>> {
-        let inner = self.inner.write().await;
+    ) -> MetaResult<CleanedDirtyStreamingJobs> {
+        let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let filter_condition = streaming_job::Column::JobStatus.eq(JobStatus::Initial).or(
@@ -461,7 +469,6 @@ impl CatalogController {
 
         let mut dirty_job_objs: Vec<PartialObject> = streaming_job::Entity::find()
             .select_only()
-            .column(streaming_job::Column::JobId)
             .columns([
                 object::Column::Oid,
                 object::Column::ObjType,
@@ -483,12 +490,19 @@ impl CatalogController {
         Self::clean_dirty_sink_downstreams(&txn).await?;
 
         if dirty_job_objs.is_empty() {
-            return Ok(vec![]);
+            return Ok(CleanedDirtyStreamingJobs::default());
         }
 
         self.log_cleaned_dirty_jobs(&dirty_job_objs, &txn).await?;
 
-        let dirty_job_ids = dirty_job_objs.iter().map(|obj| obj.oid).collect::<Vec<_>>();
+        let dirty_job_ids = dirty_job_objs
+            .iter()
+            .map(|obj| obj.oid.as_job_id())
+            .collect_vec();
+        let dirty_job_table_ids = dirty_job_ids
+            .iter()
+            .map(|job_id| job_id.as_mv_table_id())
+            .collect_vec();
 
         // Filter out dummy objs for replacement.
         // todo: we'd better introduce a new dummy object type for replacement.
@@ -508,12 +522,12 @@ impl CatalogController {
             .into_iter()
             .collect();
 
-        let dirty_background_jobs: HashSet<ObjectId> = streaming_job::Entity::find()
+        let dirty_background_jobs: HashSet<JobId> = streaming_job::Entity::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
                 streaming_job::Column::JobId
-                    .is_in(dirty_job_ids.clone())
+                    .is_in(dirty_job_ids.iter().copied())
                     .and(streaming_job::Column::CreateType.eq(CreateType::Background)),
             )
             .into_tuple()
@@ -524,13 +538,14 @@ impl CatalogController {
 
         // notify delete for failed materialized views and background jobs.
         let to_notify_objs = dirty_job_objs
-            .into_iter()
+            .iter()
             .filter(|obj| {
                 matches!(
                     dirty_table_type_map.get(&obj.oid),
                     Some(TableType::MaterializedView)
-                ) || dirty_background_jobs.contains(&obj.oid)
+                ) || dirty_background_jobs.contains(&obj.oid.as_job_id())
             })
+            .cloned()
             .collect_vec();
 
         // The source ids for dirty tables with connector.
@@ -540,20 +555,25 @@ impl CatalogController {
             .column(table::Column::OptionalAssociatedSourceId)
             .filter(
                 table::Column::TableId
-                    .is_in(dirty_job_ids.clone())
+                    .is_in(dirty_job_table_ids)
                     .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
             )
             .into_tuple()
             .all(&txn)
             .await?;
 
-        let dirty_state_table_ids: Vec<TableId> = Table::find()
+        let dirty_internal_state_table_ids: Vec<TableId> = Table::find()
             .select_only()
             .column(table::Column::TableId)
-            .filter(table::Column::BelongsToJobId.is_in(dirty_job_ids.clone()))
+            .filter(table::Column::BelongsToJobId.is_in(dirty_job_ids.iter().copied()))
             .into_tuple()
             .all(&txn)
             .await?;
+        let dirty_state_table_ids = dirty_job_ids
+            .iter()
+            .map(|job_id| job_id.as_mv_table_id())
+            .chain(dirty_internal_state_table_ids.iter().copied())
+            .collect_vec();
 
         let dirty_internal_table_objs = Object::find()
             .select_only()
@@ -570,11 +590,12 @@ impl CatalogController {
             .await?;
 
         let to_delete_objs: HashSet<ObjectId> = dirty_job_ids
-            .clone()
-            .into_iter()
+            .iter()
+            .map(|job_id| job_id.as_object_id())
             .chain(
                 dirty_state_table_ids
-                    .into_iter()
+                    .iter()
+                    .copied()
                     .map(|table_id| table_id.as_object_id()),
             )
             .chain(
@@ -584,6 +605,22 @@ impl CatalogController {
             )
             .collect();
 
+        // Per-database recovery does not run the global Hummock purge. Keep table catalogs so the
+        // caller can reuse the normal dropped-table cleanup path after the catalog rows are deleted.
+        let dropped_tables = if database_id.is_some() {
+            Table::find()
+                .find_also_related(Object)
+                .filter(table::Column::TableId.is_in(dirty_state_table_ids.iter().copied()))
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)))
+                .collect_vec()
+        } else {
+            vec![]
+        };
+        let dropped_table_ids = dropped_tables.iter().map(|table| table.id).collect_vec();
+
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(to_delete_objs))
             .exec(&txn)
@@ -591,6 +628,9 @@ impl CatalogController {
         assert!(res.rows_affected > 0);
 
         txn.commit().await?;
+        inner
+            .dropped_tables
+            .extend(dropped_tables.into_iter().map(|t| (t.id, t)));
 
         let object_group = build_object_group_for_delete(
             to_notify_objs
@@ -603,7 +643,11 @@ impl CatalogController {
             .notify_frontend(NotificationOperation::Delete, object_group)
             .await;
 
-        Ok(dirty_associated_source_ids)
+        Ok(CleanedDirtyStreamingJobs {
+            streaming_job_ids: dirty_job_ids,
+            dropped_table_ids,
+            source_ids: dirty_associated_source_ids,
+        })
     }
 
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
