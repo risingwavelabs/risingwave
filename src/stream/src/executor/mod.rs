@@ -131,7 +131,7 @@ mod utils;
 mod vector;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 pub use approx_percentile::global::GlobalApproxPercentileExecutor;
 pub use approx_percentile::local::LocalApproxPercentileExecutor;
 pub use backfill::arrangement_backfill::*;
@@ -145,7 +145,7 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use changelog::ChangeLogExecutor;
 pub use dedup::AppendOnlyDedupExecutor;
-pub use dispatch::DispatchExecutor;
+pub use dispatch::{DispatchExecutor, SyncLogStoreDispatchExecutor};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
@@ -664,6 +664,13 @@ impl Barrier {
                 }
                 _ => None,
             })
+    }
+
+    pub fn assume_no_update_vnode_bitmap(&self, actor_id: ActorId) -> StreamExecutorResult<()> {
+        if self.as_update_vnode_bitmap(actor_id).is_some() {
+            return Err(anyhow!("updating vnode bitmap in place is not supported").into());
+        }
+        Ok(())
     }
 
     pub fn as_sink_schema_change(&self, sink_id: SinkId) -> Option<PbSinkSchemaChange> {
@@ -1304,12 +1311,12 @@ pub type MessageBatch = MessageBatchInner<BarrierMutationType>;
 pub type DispatcherBarriers = Vec<DispatcherBarrier>;
 pub type DispatcherMessageBatch = MessageBatchInner<()>;
 
-impl From<DispatcherMessage> for DispatcherMessageBatch {
-    fn from(m: DispatcherMessage) -> Self {
+impl<M> From<MessageInner<M>> for MessageBatchInner<M> {
+    fn from(m: MessageInner<M>) -> Self {
         match m {
-            DispatcherMessage::Chunk(c) => Self::Chunk(c),
-            DispatcherMessage::Barrier(b) => Self::BarrierBatch(vec![b]),
-            DispatcherMessage::Watermark(w) => Self::Watermark(w),
+            MessageInner::Chunk(c) => Self::Chunk(c),
+            MessageInner::Barrier(b) => Self::BarrierBatch(vec![b]),
+            MessageInner::Watermark(w) => Self::Watermark(w),
         }
     }
 }
