@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::XmlNode;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::ChangeBufferNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::StreamPlanNodeMetadata;
-use super::utils::{Distill, TableCatalogBuilder, childless_record};
+use super::utils::{Distill, IndicesDisplay, TableCatalogBuilder, childless_record};
 use super::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
 use crate::catalog::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::PhysicalPlanRef;
+use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
+use crate::optimizer::property::DistributionDisplay;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -84,7 +85,21 @@ impl StreamChangeBuffer {
 
 impl Distill for StreamChangeBuffer {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        childless_record("StreamChangeBuffer", vec![])
+        let mut vec = Vec::with_capacity(2);
+        if self.base.ctx().is_explain_verbose() {
+            let schema = self.input.schema();
+            let pk = IndicesDisplay {
+                indices: self.input.stream_key().unwrap_or_default(),
+                schema,
+            };
+            vec.push(("pk", pk.distill()));
+            let dist = Pretty::display(&DistributionDisplay {
+                distribution: self.input.distribution(),
+                input_schema: schema,
+            });
+            vec.push(("dist", dist));
+        }
+        childless_record("StreamChangeBuffer", vec)
     }
 }
 

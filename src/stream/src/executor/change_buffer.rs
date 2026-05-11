@@ -336,6 +336,14 @@ impl<L> ChangeBufferStateWriter<L>
 where
     L: LocalStateStore,
 {
+    /// Replays the buffered changes for the current epoch as a sequence of
+    /// `StreamChunk`s.
+    ///
+    /// Must be called exactly once per epoch (at barrier time, after `flush`
+    /// and before `seal_current_epoch`). The `dirty` flag short-circuits empty
+    /// epochs but is not reset here; `seal_current_epoch` resets it, so calling
+    /// after the epoch has been sealed yields nothing, and calling twice within
+    /// the same epoch would re-emit the same data.
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn change_log_chunks(&self, chunk_size: usize) {
         if !self.dirty {
@@ -803,6 +811,89 @@ mod tests {
                 + 1 40
                 + 2 30"
             )
+        );
+        assert_eq!(executor.expect_barrier().await.epoch.curr, next_epoch);
+    }
+
+    /// Drives multiple buffer-overflow spills inside a single epoch with
+    /// keys that overlap across spills, and verifies the post-barrier replay
+    /// emits the correctly compacted result.
+    #[tokio::test]
+    async fn test_change_buffer_executor_multi_spill_within_epoch() {
+        let actor_context = ActorContext::for_test(0);
+        let table = gen_change_buffer_table(TableId::new(236));
+        let (test_env, vnodes, curr_epoch, writer) =
+            prepare_hummock_writer(&actor_context, &table).await;
+        drop(writer);
+        let next_epoch = curr_epoch.next_epoch();
+        test_env
+            .storage
+            .start_epoch(next_epoch, HashSet::from_iter([table.id]));
+
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        // buffer_max_size = 3 (rows). The first two chunks together hold 4 rows,
+        // forcing a spill+flush; the third chunk (4 rows) updates and deletes
+        // keys from the prior spill, forcing another spill+flush; the fourth
+        // chunk fits under the threshold and is drained at barrier.
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(curr_epoch)),
+            Message::Chunk(StreamChunk::from_pretty(
+                " i i
+                + 1 10
+                + 2 20",
+            )),
+            Message::Chunk(StreamChunk::from_pretty(
+                " i i
+                + 3 30
+                + 4 40",
+            )),
+            Message::Chunk(StreamChunk::from_pretty(
+                " i  i
+                U- 1 10
+                U+ 1 11
+                -  4 40
+                +  5 50",
+            )),
+            Message::Chunk(StreamChunk::from_pretty(
+                " i i
+                + 6 60",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(next_epoch)),
+        ])
+        .into_executor(schema, StreamKey::from(vec![0]));
+
+        let mut executor = ChangeBufferExecutor::new(
+            actor_context,
+            source,
+            test_env.storage.clone(),
+            table,
+            vnodes,
+            3,
+        )
+        .unwrap()
+        .boxed()
+        .execute();
+
+        assert_eq!(executor.expect_barrier().await.epoch.curr, curr_epoch);
+
+        // After cross-spill compaction, key 4 is cancelled out (insert+delete)
+        // and key 1's later Update collapses with its initial Insert. The
+        // change buffer replays per vnode, so compare via `sort_rows` to make
+        // the assertion order-independent.
+        assert_eq!(
+            executor.expect_chunk().await.compact_vis().sort_rows(),
+            StreamChunk::from_pretty(
+                " i i
+                + 1 11
+                + 2 20
+                + 3 30
+                + 5 50
+                + 6 60"
+            )
+            .sort_rows(),
         );
         assert_eq!(executor.expect_barrier().await.epoch.curr, next_epoch);
     }

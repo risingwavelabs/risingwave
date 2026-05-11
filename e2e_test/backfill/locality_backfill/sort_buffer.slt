@@ -66,8 +66,69 @@ select * from mv_sort_buffer;
 statement ok
 drop materialized view mv_sort_buffer;
 
+# Same query with the sort buffer disabled must produce the same final result.
+statement ok
+set enable_locality_sort_buffer=false;
+
+statement ok
+create materialized view mv_no_sort_buffer as select count(*) from t1 join t2 on t1.a = t2.a group by t1.b;
+
+query ?
+select * from mv_no_sort_buffer;
+----
+1001
+
+statement ok
+drop materialized view mv_no_sort_buffer;
+
 statement ok
 drop table t1;
 
 statement ok
 drop table t2;
+
+# Correctness under churn with the sort buffer enabled: drive update / delete /
+# re-insert sequences against the same keys and verify the aggregate is
+# unaffected. Guards against gross corruption (dropped or duplicated rows) in
+# the change buffer's incremental processing path.
+statement ok
+set enable_locality_sort_buffer=true;
+
+statement ok
+create table t3(a int primary key, b int);
+
+statement ok
+insert into t3 select i, i * 10 from generate_series(1, 1000, 1) i;
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv_compaction as
+  select count(*) as n, sum(b) as s from (select a, b from t3) sub group by (a % 4);
+
+statement ok
+update t3 set b = b + 1 where a <= 100;
+
+statement ok
+update t3 set b = b - 1 where a <= 100;
+
+statement ok
+delete from t3 where a <= 50;
+
+statement ok
+insert into t3 select i, i * 10 from generate_series(1, 50, 1) i;
+
+statement ok
+flush;
+
+query II
+select sum(n), sum(s) from mv_compaction;
+----
+1000 5005000
+
+statement ok
+drop materialized view mv_compaction;
+
+statement ok
+drop table t3;
