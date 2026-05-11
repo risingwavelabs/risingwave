@@ -37,6 +37,10 @@ AzblobConfig:
     field_type: String
     required: false
     default: Default::default
+  - name: event_time_field
+    field_type: String
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -382,6 +386,10 @@ FsConfig:
     field_type: String
     required: false
     default: Default::default
+  - name: event_time_field
+    field_type: String
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -416,6 +424,10 @@ GcsConfig:
     required: false
     default: Default::default
   - name: path_partition_format
+    field_type: String
+    required: false
+    default: Default::default
+  - name: event_time_field
     field_type: String
     required: false
     default: Default::default
@@ -1608,6 +1620,10 @@ SnowflakeConfig:
     field_type: String
     required: false
     default: Default::default
+  - name: event_time_field
+    field_type: String
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -1840,6 +1856,10 @@ WebhdfsConfig:
     required: false
     default: Default::default
   - name: path_partition_format
+    field_type: String
+    required: false
+    default: Default::default
+  - name: event_time_field
     field_type: String
     required: false
     default: Default::default
