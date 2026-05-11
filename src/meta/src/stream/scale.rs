@@ -1049,11 +1049,11 @@ mod tests {
             [
                 (
                     ActorId::new(101),
-                    actor(1, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                    actor(1, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
                 ),
                 (
                     ActorId::new(102),
-                    actor(2, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                    actor(2, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
                 ),
             ],
         );
@@ -1062,11 +1062,11 @@ mod tests {
             [
                 (
                     ActorId::new(201),
-                    actor(3, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                    actor(3, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
                 ),
                 (
                     ActorId::new(202),
-                    actor(4, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                    actor(4, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
                 ),
             ],
         );
@@ -1079,11 +1079,11 @@ mod tests {
                     [
                         (
                             ActorId::new(1001),
-                            actor(1, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                            actor(1, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
                         ),
                         (
                             ActorId::new(1002),
-                            actor(2, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                            actor(2, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
                         ),
                     ],
                 ),
@@ -1095,11 +1095,11 @@ mod tests {
                     [
                         (
                             ActorId::new(2001),
-                            actor(3, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                            actor(3, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
                         ),
                         (
                             ActorId::new(2002),
-                            actor(4, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                            actor(4, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
                         ),
                     ],
                 ),
@@ -1121,11 +1121,11 @@ mod tests {
             [
                 (
                     ActorId::new(101),
-                    actor(1, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                    actor(1, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
                 ),
                 (
                     ActorId::new(102),
-                    actor(2, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                    actor(2, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
                 ),
             ],
         );
@@ -1134,11 +1134,11 @@ mod tests {
             [
                 (
                     ActorId::new(201),
-                    actor(3, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                    actor(3, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
                 ),
                 (
                     ActorId::new(202),
-                    actor(4, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                    actor(4, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
                 ),
             ],
         );
@@ -1151,11 +1151,11 @@ mod tests {
                     [
                         (
                             ActorId::new(1001),
-                            actor(1, Some(Bitmap::from_indices(8, &[0, 1, 2, 3]))),
+                            actor(1, Some(Bitmap::from_indices(8, [0, 1, 2, 3]))),
                         ),
                         (
                             ActorId::new(1002),
-                            actor(2, Some(Bitmap::from_indices(8, &[4, 5, 6, 7]))),
+                            actor(2, Some(Bitmap::from_indices(8, [4, 5, 6, 7]))),
                         ),
                     ],
                 ),
@@ -1167,11 +1167,11 @@ mod tests {
                     [
                         (
                             ActorId::new(2001),
-                            actor(3, Some(Bitmap::from_indices(8, &[0, 1, 2, 3, 4, 5]))),
+                            actor(3, Some(Bitmap::from_indices(8, [0, 1, 2, 3, 4, 5]))),
                         ),
                         (
                             ActorId::new(2002),
-                            actor(4, Some(Bitmap::from_indices(8, &[6, 7]))),
+                            actor(4, Some(Bitmap::from_indices(8, [6, 7]))),
                         ),
                     ],
                 ),
@@ -1195,7 +1195,7 @@ mod tests {
                 ActorId::new(101),
                 actor_with_splits(
                     1,
-                    Some(Bitmap::from_indices(8, &[0, 1, 2, 3])),
+                    Some(Bitmap::from_indices(8, [0, 1, 2, 3])),
                     vec![test_split("split-0", "100")],
                 ),
             )],
@@ -1208,7 +1208,7 @@ mod tests {
                     ActorId::new(1001),
                     actor_with_splits(
                         1,
-                        Some(Bitmap::from_indices(8, &[0, 1, 2, 3])),
+                        Some(Bitmap::from_indices(8, [0, 1, 2, 3])),
                         vec![test_split("split-0", "200")],
                     ),
                 )],

@@ -1105,6 +1105,13 @@ pub enum SinkError {
     ),
 }
 
+#[allow(clippy::disallowed_types)]
+impl From<::iceberg::Error> for SinkError {
+    fn from(err: ::iceberg::Error) -> Self {
+        SinkError::Iceberg(anyhow!(err))
+    }
+}
+
 impl From<sea_orm::DbErr> for SinkError {
     fn from(err: sea_orm::DbErr) -> Self {
         SinkError::Iceberg(anyhow!(err))
