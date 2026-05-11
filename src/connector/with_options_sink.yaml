@@ -33,6 +33,10 @@ AzblobConfig:
     field_type: PathPartitionPrefix
     required: false
     default: Default::default
+  - name: path_partition_format
+    field_type: String
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -374,6 +378,10 @@ FsConfig:
     field_type: PathPartitionPrefix
     required: false
     default: Default::default
+  - name: path_partition_format
+    field_type: String
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -405,6 +413,10 @@ GcsConfig:
     default: DEFAULT_ROLLOVER_SECONDS
   - name: path_partition_prefix
     field_type: PathPartitionPrefix
+    required: false
+    default: Default::default
+  - name: path_partition_format
+    field_type: String
     required: false
     default: Default::default
   - name: r#type
@@ -1592,6 +1604,10 @@ SnowflakeConfig:
     field_type: PathPartitionPrefix
     required: false
     default: Default::default
+  - name: path_partition_format
+    field_type: String
+    required: false
+    default: Default::default
   - name: r#type
     field_type: String
     required: true
@@ -1821,6 +1837,10 @@ WebhdfsConfig:
     default: DEFAULT_ROLLOVER_SECONDS
   - name: path_partition_prefix
     field_type: PathPartitionPrefix
+    required: false
+    default: Default::default
+  - name: path_partition_format
+    field_type: String
     required: false
     default: Default::default
   - name: r#type

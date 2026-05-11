@@ -305,6 +305,15 @@ impl OpenDalSinkWriter {
             .single()
             .expect("Failed to convert timestamp to DateTime<Utc>")
             .with_timezone(&Utc);
+        // `path_partition_format` (a chrono strftime-style template) takes precedence
+        // over the legacy enum-based `path_partition_prefix`. This lets users emit
+        // arbitrary Hive-style partition directories such as
+        // `year=2025/month=06/day=25/hour=13/`.
+        if let Some(fmt) = self.batching_strategy.path_partition_format.as_deref()
+            && !fmt.is_empty()
+        {
+            return datetime.format(fmt).to_string();
+        }
         let path_partition_prefix = self
             .batching_strategy
             .path_partition_prefix
@@ -416,7 +425,9 @@ impl OpenDalSinkWriter {
 
         // With batching in place, the file writing process is decoupled from checkpoints.
         // The current file naming convention is as follows:
-        // 1. A subdirectory is defined based on `path_partition_prefix` (e.g., by day、hour or month or none.).
+        // 1. A subdirectory is derived from either `path_partition_format` (a chrono
+        //    strftime template, used for Hive-style partitioning), or, if not set,
+        //    `path_partition_prefix` (the legacy day/month/hour/none enum).
         // 2. The file name includes a unique UUID (v7, which contains timestamp) and the creation time in seconds since the UNIX epoch.
         // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
         // 3. For the Snowflake Sink, the `write_path` parameter can be empty.
@@ -504,7 +515,16 @@ fn convert_rw_schema_to_arrow_schema(
 /// - `rollover_seconds`: Optional time interval (in seconds) to trigger a write,
 ///   regardless of the number of accumulated rows.
 /// - `path_partition_prefix`: Specifies how files are organized into directories
-///   based on creation time (e.g., by day, month, or hour).
+///   based on creation time (e.g., by day, month, or hour). Kept for backwards
+///   compatibility; prefer `path_partition_format` for arbitrary Hive-style
+///   partition layouts.
+/// - `path_partition_format`: An optional chrono `strftime`-style template applied
+///   to the file's creation time (UTC). When set, this overrides
+///   `path_partition_prefix` and lets users emit arbitrary Hive-style partition
+///   directories. Example:
+///   `path_partition_format = 'year=%Y/month=%m/day=%d/hour=%H/'`
+///   produces `year=2025/month=06/day=25/hour=13/`. The user is responsible for
+///   including a trailing `/` when a directory is desired.
 
 #[serde_as]
 #[derive(Default, Deserialize, Debug, Clone, WithOptions)]
@@ -518,6 +538,8 @@ pub struct BatchingStrategy {
     #[serde(default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub path_partition_prefix: Option<PathPartitionPrefix>,
+    #[serde(default)]
+    pub path_partition_format: Option<String>,
 }
 
 /// `PathPartitionPrefix` defines the granularity of file partitions based on creation time.
@@ -538,4 +560,87 @@ pub enum PathPartitionPrefix {
     Month = 2,
     #[serde(alias = "hour")]
     Hour = 3,
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::TimeZone;
+
+    use super::*;
+
+    /// Mirrors `OpenDalSinkWriter::path_partition_prefix` so we can unit test the
+    /// formatting logic without spinning up a real writer. Keep this in sync.
+    fn render(strategy: &BatchingStrategy, duration: Duration) -> String {
+        let datetime = Utc
+            .timestamp_opt(duration.as_secs() as i64, 0)
+            .single()
+            .expect("Failed to convert timestamp to DateTime<Utc>");
+        if let Some(fmt) = strategy.path_partition_format.as_deref()
+            && !fmt.is_empty()
+        {
+            return datetime.format(fmt).to_string();
+        }
+        let prefix = strategy
+            .path_partition_prefix
+            .as_ref()
+            .unwrap_or(&PathPartitionPrefix::None);
+        match prefix {
+            PathPartitionPrefix::None => "".to_owned(),
+            PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
+            PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
+            PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
+        }
+    }
+
+    fn ts(year: i32, month: u32, day: u32, hour: u32) -> Duration {
+        let dt = Utc.with_ymd_and_hms(year, month, day, hour, 0, 0).unwrap();
+        Duration::from_secs(dt.timestamp() as u64)
+    }
+
+    #[test]
+    fn path_partition_format_overrides_prefix() {
+        let strategy = BatchingStrategy {
+            max_row_count: 1,
+            rollover_seconds: 1,
+            path_partition_prefix: Some(PathPartitionPrefix::Hour),
+            path_partition_format: Some("year=%Y/month=%m/day=%d/hour=%H/".to_owned()),
+        };
+        assert_eq!(
+            render(&strategy, ts(2021, 6, 25, 13)),
+            "year=2021/month=06/day=25/hour=13/"
+        );
+    }
+
+    #[test]
+    fn path_partition_format_year_only() {
+        let strategy = BatchingStrategy {
+            max_row_count: 1,
+            rollover_seconds: 1,
+            path_partition_prefix: None,
+            path_partition_format: Some("year=%Y/".to_owned()),
+        };
+        assert_eq!(render(&strategy, ts(2021, 6, 25, 13)), "year=2021/");
+    }
+
+    #[test]
+    fn legacy_prefix_still_works() {
+        let strategy = BatchingStrategy {
+            max_row_count: 1,
+            rollover_seconds: 1,
+            path_partition_prefix: Some(PathPartitionPrefix::Day),
+            path_partition_format: None,
+        };
+        assert_eq!(render(&strategy, ts(2021, 6, 25, 13)), "2021-06-25/");
+    }
+
+    #[test]
+    fn empty_format_falls_back_to_prefix() {
+        let strategy = BatchingStrategy {
+            max_row_count: 1,
+            rollover_seconds: 1,
+            path_partition_prefix: Some(PathPartitionPrefix::Day),
+            path_partition_format: Some("".to_owned()),
+        };
+        assert_eq!(render(&strategy, ts(2021, 6, 25, 13)), "2021-06-25/");
+    }
 }
