@@ -430,11 +430,15 @@ message UnpinVersionBeforeResponse {
   common.Status status = 1;
 }
 
-message GetCurrentVersionRequest {}
+message GetCurrentVersionRequest {
+  // Set to true if the caller only needs the current Hummock version id.
+  bool version_id_only = 1;
+}
 
 message GetCurrentVersionResponse {
   common.Status status = 1;
   HummockVersion current_version = 2;
+  uint64 hummock_version_id = 3;
 }
 
 message GetTableChangeLogsRequest {

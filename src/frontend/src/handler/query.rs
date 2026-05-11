@@ -564,15 +564,15 @@ async fn execute_risingwave_plan(
         // The DML executor has waited for the transaction to be included in a checkpoint. Wait for
         // the frontend snapshot observer to catch up so later reads in this session can see it.
         if session.config().implicit_flush() && stmt_type.is_dml() {
-            let version = session
+            let version_id = session
                 .env()
                 .meta_client()
-                .get_hummock_checkpoint_version()
+                .get_hummock_current_version_id()
                 .await?;
             session
                 .env()
                 .hummock_snapshot_manager()
-                .wait(version.id)
+                .wait(version_id)
                 .await;
         }
 

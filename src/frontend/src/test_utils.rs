@@ -1239,6 +1239,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(HummockVersion::default())
     }
 
+    async fn get_hummock_current_version_id(&self) -> RpcResult<HummockVersionId> {
+        Ok(HummockVersionId::default())
+    }
+
     async fn get_hummock_checkpoint_version(&self) -> RpcResult<HummockVersion> {
         Ok(HummockVersion::default())
     }

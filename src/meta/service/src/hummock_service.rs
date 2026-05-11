@@ -92,16 +92,25 @@ impl HummockManagerService for HummockServiceImpl {
 
     async fn get_current_version(
         &self,
-        _request: Request<GetCurrentVersionRequest>,
+        request: Request<GetCurrentVersionRequest>,
     ) -> Result<Response<GetCurrentVersionResponse>, Status> {
-        let current_version = self
-            .hummock_manager
-            .on_current_version(|version| version.into())
-            .await;
-        Ok(Response::new(GetCurrentVersionResponse {
-            status: None,
-            current_version: Some(current_version),
-        }))
+        if request.into_inner().version_id_only {
+            Ok(Response::new(GetCurrentVersionResponse {
+                status: None,
+                current_version: None,
+                hummock_version_id: self.hummock_manager.get_version_id().await,
+            }))
+        } else {
+            let current_version: HummockVersion = self
+                .hummock_manager
+                .on_current_version(|version| version.into())
+                .await;
+            Ok(Response::new(GetCurrentVersionResponse {
+                status: None,
+                hummock_version_id: current_version.id,
+                current_version: Some(current_version),
+            }))
+        }
     }
 
     async fn replay_version_delta(

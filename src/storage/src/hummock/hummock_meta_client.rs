@@ -61,6 +61,10 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.get_current_version().await
     }
 
+    async fn get_current_version_id(&self) -> Result<HummockVersionId> {
+        self.meta_client.get_current_version_id().await
+    }
+
     async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange> {
         self.stats.get_new_sst_ids_counts.inc();
         let timer = self.stats.get_new_sst_ids_latency.start_timer();

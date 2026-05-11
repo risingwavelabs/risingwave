@@ -117,6 +117,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
 
+    async fn get_hummock_current_version_id(&self) -> Result<HummockVersionId>;
+
     async fn get_hummock_table_change_log(
         &self,
         start_epoch_inclusive: Option<u64>,
@@ -360,6 +362,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion> {
         self.0.get_current_version().await
+    }
+
+    async fn get_hummock_current_version_id(&self) -> Result<HummockVersionId> {
+        self.0.get_current_version_id().await
     }
 
     async fn get_hummock_table_change_log(
