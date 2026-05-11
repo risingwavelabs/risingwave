@@ -192,27 +192,19 @@ impl ConsumerFuture {
 
     fn push_barrier(mut self: Pin<&mut Self>, barrier: Barrier) {
         let message = Message::Barrier(barrier);
-        if matches!(
-            self.as_mut().project(),
-            ConsumerFutureProj::ReadingChunk { .. }
-        ) {
-            let inner = must_match!(
-                self.as_mut().project_replace(ConsumerFuture::PlaceHolder),
-                ConsumerFutureProjReplace::ReadingChunk { inner } => inner
-            );
-            self.set(Self::dispatch(inner, message));
-            return;
-        }
-
-        match self.project() {
+        match self.as_mut().project() {
+            ConsumerFutureProj::ReadingChunk { .. } => {
+                let inner = must_match!(
+                    self.as_mut().project_replace(ConsumerFuture::PlaceHolder),
+                    ConsumerFutureProjReplace::ReadingChunk { inner } => inner
+                );
+                self.set(Self::dispatch(inner, message));
+            }
             ConsumerFutureProj::Dispatching { barrier_queue, .. } => {
                 barrier_queue.push_front(message);
             }
             ConsumerFutureProj::PlaceHolder => {
                 unreachable!("ConsumerFuture::PlaceHolder should be handled!")
-            }
-            ConsumerFutureProj::ReadingChunk { .. } => {
-                unreachable!("ConsumerFuture::ReadingChunk should be handled!")
             }
         }
     }
@@ -229,66 +221,56 @@ impl ConsumerFuture {
         metrics: &SyncedKvLogStoreMetrics,
     ) -> StreamResult<ConsumerFutureEvent> {
         loop {
-            if matches!(
-                self.as_mut().project(),
-                ConsumerFutureProj::ReadingChunk { .. }
-            ) {
-                if read_paused {
-                    pending().await
+            match self.as_mut().project() {
+                ConsumerFutureProj::ReadingChunk { .. } => {
+                    if read_paused {
+                        pending().await
+                    }
+
+                    let chunk = read_future
+                        .next_chunk(progress, read_state, buffer, metrics)
+                        .await?;
+                    metrics.total_read_count.inc_by(chunk.cardinality() as _);
+
+                    let clean_state_reached =
+                        read_future.mark_clean_state(clean_state, buffer, metrics);
+                    let inner = must_match!(
+                        self.as_mut().project_replace(ConsumerFuture::PlaceHolder),
+                        ConsumerFutureProjReplace::ReadingChunk { inner } => inner
+                    );
+                    self.set(Self::dispatch(inner, Message::Chunk(chunk)));
+
+                    if clean_state_reached {
+                        return Ok(ConsumerFutureEvent::CleanStateReached);
+                    }
+                    continue;
                 }
+                ConsumerFutureProj::Dispatching {
+                    future,
+                    barrier_queue,
+                } => {
+                    let (inner, result) = future.await;
+                    let barrier = result?;
 
-                let chunk = read_future
-                    .next_chunk(progress, read_state, buffer, metrics)
-                    .await?;
-                metrics.total_read_count.inc_by(chunk.cardinality() as _);
+                    if let Some(next_barrier) = barrier_queue.pop_back() {
+                        tracing::trace!("consumer_future: dispatching future created");
+                        let ConsumerFutureProj::Dispatching { mut future, .. } =
+                            self.as_mut().project()
+                        else {
+                            unreachable!("ConsumerFuture::ReadingChunk should be handled!")
+                        };
+                        future.set(dispatching_future(inner, next_barrier));
+                    } else {
+                        self.set(Self::read_chunk(inner));
+                    }
 
-                let clean_state_reached =
-                    read_future.mark_clean_state(clean_state, buffer, metrics);
-                let inner = must_match!(
-                    self.as_mut().project_replace(ConsumerFuture::PlaceHolder),
-                    ConsumerFutureProjReplace::ReadingChunk { inner } => inner
-                );
-                self.set(Self::dispatch(inner, Message::Chunk(chunk)));
-
-                if clean_state_reached {
-                    return Ok(ConsumerFutureEvent::CleanStateReached);
+                    if let Some(barrier) = barrier {
+                        return Ok(ConsumerFutureEvent::BarrierDispatched(barrier));
+                    }
                 }
-                continue;
-            }
-
-            if matches!(self.as_mut().project(), ConsumerFutureProj::PlaceHolder) {
-                unreachable!("ConsumerFuture::PlaceHolder should be handled!")
-            }
-
-            let (inner, result) = {
-                let ConsumerFutureProj::Dispatching { future, .. } = self.as_mut().project() else {
-                    unreachable!("ConsumerFuture::ReadingChunk should be handled!")
-                };
-                future.await
-            };
-            let barrier = result?;
-
-            let next_barrier = {
-                let ConsumerFutureProj::Dispatching { barrier_queue, .. } = self.as_mut().project()
-                else {
-                    unreachable!("ConsumerFuture::ReadingChunk should be handled!")
-                };
-                barrier_queue.pop_back()
-            };
-
-            if let Some(next_barrier) = next_barrier {
-                tracing::trace!("consumer_future: dispatching future created");
-                let ConsumerFutureProj::Dispatching { mut future, .. } = self.as_mut().project()
-                else {
-                    unreachable!("ConsumerFuture::ReadingChunk should be handled!")
-                };
-                future.set(dispatching_future(inner, next_barrier));
-            } else {
-                self.set(Self::read_chunk(inner));
-            }
-
-            if let Some(barrier) = barrier {
-                return Ok(ConsumerFutureEvent::BarrierDispatched(barrier));
+                ConsumerFutureProj::PlaceHolder => {
+                    unreachable!("ConsumerFuture::PlaceHolder should be handled!")
+                }
             }
         }
     }
