@@ -125,10 +125,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(self.hummock_manager.get_current_version().await)
     }
 
-    async fn get_current_version_id(&self) -> Result<HummockVersionId> {
-        Ok(self.hummock_manager.get_current_version().await.id)
-    }
-
     async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange> {
         fail_point!("get_new_sst_ids_err", |_| Err(anyhow!(
             "failpoint get_new_sst_ids_err"

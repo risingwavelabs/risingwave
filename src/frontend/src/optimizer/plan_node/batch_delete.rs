@@ -81,6 +81,7 @@ impl ToDistributedBatch for BatchDelete {
 
 impl ToBatchPb for BatchDelete {
     fn to_batch_prost_body(&self) -> NodeBody {
+        let wait_for_persistence = self.base.ctx().batch_plan_dml_wait_persistence();
         NodeBody::Delete(DeleteNode {
             table_id: self.core.table_id,
             table_version_id: self.core.table_version_id,
@@ -88,7 +89,7 @@ impl ToBatchPb for BatchDelete {
             returning: self.core.returning,
             upsert: self.base.ctx().session_ctx().config().upsert_dml(),
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
-            wait_for_persistence: self.base.ctx().session_ctx().config().implicit_flush(),
+            wait_for_persistence,
         })
     }
 }

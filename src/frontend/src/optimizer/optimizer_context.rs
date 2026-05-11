@@ -302,6 +302,11 @@ impl OptimizerContext {
         &self.session_ctx
     }
 
+    pub fn batch_plan_dml_wait_persistence(&self) -> bool {
+        let session_config = self.session_ctx.config();
+        !session_config.implicit_flush() && session_config.dml_wait_persistence()
+    }
+
     /// Return the original SQL.
     pub fn sql(&self) -> &str {
         &self.sql

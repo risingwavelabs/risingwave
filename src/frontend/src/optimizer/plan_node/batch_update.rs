@@ -84,6 +84,7 @@ impl ToDistributedBatch for BatchUpdate {
 
 impl ToBatchPb for BatchUpdate {
     fn to_batch_prost_body(&self) -> NodeBody {
+        let wait_for_persistence = self.base.ctx().batch_plan_dml_wait_persistence();
         let old_exprs = (self.core.old_exprs)
             .iter()
             .map(|x| x.to_expr_proto())
@@ -101,7 +102,7 @@ impl ToBatchPb for BatchUpdate {
             new_exprs,
             upsert: self.base.ctx().session_ctx().config().upsert_dml(),
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
-            wait_for_persistence: self.base.ctx().session_ctx().config().implicit_flush(),
+            wait_for_persistence,
         })
     }
 }

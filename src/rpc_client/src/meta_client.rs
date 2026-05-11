@@ -2050,9 +2050,7 @@ impl HummockMetaClient for MetaClient {
     }
 
     async fn get_current_version(&self) -> Result<HummockVersion> {
-        let req = GetCurrentVersionRequest {
-            version_id_only: false,
-        };
+        let req = GetCurrentVersionRequest::default();
         Ok(HummockVersion::from_rpc_protobuf(
             &self
                 .inner
@@ -2061,17 +2059,6 @@ impl HummockMetaClient for MetaClient {
                 .current_version
                 .unwrap(),
         ))
-    }
-
-    async fn get_current_version_id(&self) -> Result<HummockVersionId> {
-        let req = GetCurrentVersionRequest {
-            version_id_only: true,
-        };
-        Ok(self
-            .inner
-            .get_current_version(req)
-            .await?
-            .hummock_version_id)
     }
 
     async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange> {

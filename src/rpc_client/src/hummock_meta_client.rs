@@ -42,7 +42,6 @@ pub type HummockMetaClientChangeLogInfo = Vec<u64>;
 pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()>;
     async fn get_current_version(&self) -> Result<HummockVersion>;
-    async fn get_current_version_id(&self) -> Result<HummockVersionId>;
     async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch_with_change_log(

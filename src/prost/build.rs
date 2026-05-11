@@ -387,9 +387,6 @@ for_all_wrapped_id_fields! (
         GetCompactionScoreResponse {
             compaction_group_id: CompactionGroupId,
         }
-        GetCurrentVersionResponse {
-            hummock_version_id: HummockVersionId,
-        }
         GetNewObjectIdsResponse {
             start_id: HummockRawObjectId,
             end_id: HummockRawObjectId,
