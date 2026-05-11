@@ -16,7 +16,6 @@ use std::cmp::min;
 use std::collections::VecDeque;
 use std::future::{Future, pending, ready};
 use std::mem::take;
-use std::ops::Bound;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,15 +28,14 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_pb::batch_plan::{ScanRange, scan_range};
+use risingwave_pb::batch_plan::ScanRange;
 use risingwave_pb::common::PbThrottleType;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::ChangeLogRow;
-use risingwave_storage::table::batch_table::BatchTable;
+use risingwave_storage::table::batch_table::{BatchTable, PkScanRange};
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::sleep;
@@ -56,89 +54,6 @@ use crate::executor::{
     expect_first_barrier,
 };
 use crate::task::CreateMviewProgressReporter;
-
-pub type PkRangeBounds = (Bound<OwnedRow>, Bound<OwnedRow>);
-
-pub struct PkScanRange {
-    pk_prefix: OwnedRow,
-    range_bounds: PkRangeBounds,
-}
-
-impl PkScanRange {
-    fn full() -> Self {
-        Self {
-            pk_prefix: OwnedRow::default(),
-            range_bounds: (Bound::Unbounded, Bound::Unbounded),
-        }
-    }
-
-    /// Decode a scan range (eq prefix + range bounds) from the scan range proto.
-    fn from_protobuf(
-        pb_scan_range: &ScanRange,
-        upstream_table: &BatchTable<impl StateStore>,
-    ) -> StreamExecutorResult<Self> {
-        let pk_types = upstream_table.pk_serializer().get_data_types();
-        let mut index = 0;
-        let pk_prefix = OwnedRow::new(
-            pb_scan_range
-                .eq_conds
-                .iter()
-                .map(|v| {
-                    let ty = pk_types
-                        .get(index)
-                        .ok_or_else(|| anyhow!("pk_prefix index out of bounds"))?;
-                    index += 1;
-                    Ok(deserialize_datum(v.as_slice(), ty)?)
-                })
-                .collect::<StreamExecutorResult<Vec<_>>>()?,
-        );
-
-        if pb_scan_range.lower_bound.is_none() && pb_scan_range.upper_bound.is_none() {
-            return Ok(Self {
-                pk_prefix,
-                range_bounds: (Bound::Unbounded, Bound::Unbounded),
-            });
-        }
-
-        let build_bound =
-            |bound: &scan_range::Bound, idx: usize| -> StreamExecutorResult<Bound<OwnedRow>> {
-                let mut i = idx;
-                let row = OwnedRow::new(
-                    bound
-                        .value
-                        .iter()
-                        .map(|v| {
-                            let ty = pk_types
-                                .get(i)
-                                .ok_or_else(|| anyhow!("range bound index out of bounds"))?;
-                            i += 1;
-                            Ok(deserialize_datum(v.as_slice(), ty)?)
-                        })
-                        .collect::<StreamExecutorResult<Vec<_>>>()?,
-                );
-                if bound.inclusive {
-                    Ok(Bound::Included(row))
-                } else {
-                    Ok(Bound::Excluded(row))
-                }
-            };
-
-        let range_bounds = match (
-            pb_scan_range.lower_bound.as_ref(),
-            pb_scan_range.upper_bound.as_ref(),
-        ) {
-            (Some(lb), Some(ub)) => (build_bound(lb, index)?, build_bound(ub, index)?),
-            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub, index)?),
-            (Some(lb), None) => (build_bound(lb, index)?, Bound::Unbounded),
-            (None, None) => unreachable!(),
-        };
-
-        Ok(Self {
-            pk_prefix,
-            range_bounds,
-        })
-    }
-}
 
 pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// Upstream table
@@ -173,9 +88,13 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         pb_scan_range: Option<&ScanRange>,
         upstream_table: &BatchTable<S>,
     ) -> StreamExecutorResult<PkScanRange> {
-        pb_scan_range
-            .map(|scan_range| PkScanRange::from_protobuf(scan_range, upstream_table))
-            .unwrap_or_else(|| Ok(PkScanRange::full()))
+        match pb_scan_range {
+            Some(scan_range) => Ok(PkScanRange::new(
+                scan_range.clone(),
+                upstream_table.pk_serializer().get_data_types().to_vec(),
+            )?),
+            None => Ok(PkScanRange::full()),
+        }
     }
 
     #[expect(clippy::too_many_arguments)]

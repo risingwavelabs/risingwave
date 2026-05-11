@@ -19,5 +19,5 @@ mod utils;
 mod vnode_stream;
 
 pub use consume_upstream::UpstreamTableExecutor;
-pub use executor::{PkRangeBounds, PkScanRange, SnapshotBackfillExecutor};
+pub use executor::SnapshotBackfillExecutor;
 use utils::*;
