@@ -16,11 +16,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
 use std::marker::PhantomData;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use bytes::BytesMut;
-use chrono::{TimeZone, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::basic::Compression;
@@ -28,7 +28,10 @@ use parquet::file::properties::WriterProperties;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
 use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
+use risingwave_common::types::ToText;
 use risingwave_pb::id::ExecutorId;
 use serde::Deserialize;
 use serde_json::Value;
@@ -58,6 +61,187 @@ pub fn default_rollover_seconds() -> usize {
 pub fn default_max_row_count() -> usize {
     DEFAULT_MAX_ROW_COUNR
 }
+
+/// A parsed `path_partition_format` template.
+///
+/// The template is split into segments so that each row can be routed to the
+/// correct Hive-style partition directory. Literal segments may contain chrono
+/// `strftime` tokens (e.g. `year=%Y/month=%m/`). Column segments reference a
+/// row column by name (e.g. `{symbol}`) and are substituted per-row.
+#[derive(Debug, Clone)]
+pub(crate) struct PartitionTemplate {
+    segments: Vec<PartitionSegment>,
+    has_column_refs: bool,
+}
+
+#[derive(Debug, Clone)]
+enum PartitionSegment {
+    /// Literal text that may contain chrono `strftime` tokens.
+    Literal(String),
+    /// Reference to a column by its (name, schema index). The name is kept
+    /// alongside the index for diagnostics and error messages.
+    Column {
+        #[allow(dead_code)]
+        name: String,
+        index: usize,
+    },
+}
+
+impl PartitionTemplate {
+    /// Parse a `path_partition_format` template, resolving `{column}` placeholders
+    /// against `rw_schema`.
+    pub(crate) fn parse(fmt: &str, rw_schema: &Schema) -> Result<Self> {
+        let mut segments = Vec::new();
+        let mut has_column_refs = false;
+        let mut buf = String::new();
+        let mut chars = fmt.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '{' => {
+                    if chars.peek() == Some(&'{') {
+                        // Escaped `{{` -> literal `{`.
+                        chars.next();
+                        buf.push('{');
+                        continue;
+                    }
+                    if !buf.is_empty() {
+                        segments.push(PartitionSegment::Literal(std::mem::take(&mut buf)));
+                    }
+                    let mut name = String::new();
+                    let mut closed = false;
+                    for nc in chars.by_ref() {
+                        if nc == '}' {
+                            closed = true;
+                            break;
+                        }
+                        name.push(nc);
+                    }
+                    if !closed {
+                        return Err(SinkError::Config(anyhow!(
+                            "unterminated column placeholder in path_partition_format: {fmt}"
+                        )));
+                    }
+                    let name = name.trim().to_owned();
+                    if name.is_empty() {
+                        return Err(SinkError::Config(anyhow!(
+                            "empty column placeholder in path_partition_format: {fmt}"
+                        )));
+                    }
+                    let index = rw_schema
+                        .fields
+                        .iter()
+                        .position(|f| f.name == name)
+                        .ok_or_else(|| {
+                            SinkError::Config(anyhow!(
+                                "path_partition_format references unknown column `{name}`; \
+                                 available columns: [{}]",
+                                rw_schema
+                                    .fields
+                                    .iter()
+                                    .map(|f| f.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ))
+                        })?;
+                    segments.push(PartitionSegment::Column { name, index });
+                    has_column_refs = true;
+                }
+                '}' if chars.peek() == Some(&'}') => {
+                    // Escaped `}}` -> literal `}`.
+                    chars.next();
+                    buf.push('}');
+                }
+                _ => buf.push(c),
+            }
+        }
+        if !buf.is_empty() {
+            segments.push(PartitionSegment::Literal(buf));
+        }
+        Ok(Self {
+            segments,
+            has_column_refs,
+        })
+    }
+
+    pub(crate) fn has_column_refs(&self) -> bool {
+        self.has_column_refs
+    }
+
+    pub(crate) fn render_with_row<R: Row>(&self, datetime: DateTime<Utc>, row: &R) -> String {
+        let mut out = String::new();
+        for segment in &self.segments {
+            match segment {
+                PartitionSegment::Literal(lit) => {
+                    // chrono's `format` accepts arbitrary literals; only `%`-prefixed
+                    // tokens are interpreted, so it is safe to feed both chrono tokens
+                    // and Hive-style fragments through here.
+                    let _ = write!(out, "{}", datetime.format(lit));
+                }
+                PartitionSegment::Column { index, .. } => match row.datum_at(*index) {
+                    Some(scalar) => sanitize_partition_value(&scalar.to_text(), &mut out),
+                    None => out.push_str("__HIVE_DEFAULT_PARTITION__"),
+                },
+            }
+        }
+        out
+    }
+
+    pub(crate) fn render_time_only(&self, datetime: DateTime<Utc>) -> String {
+        debug_assert!(!self.has_column_refs);
+        let mut out = String::new();
+        for segment in &self.segments {
+            if let PartitionSegment::Literal(lit) = segment {
+                let _ = write!(out, "{}", datetime.format(lit));
+            }
+        }
+        out
+    }
+
+    /// Group the visible rows of `chunk` by the partition path they render to.
+    /// Returns `path -> row_indices` so the writer can build a per-partition
+    /// sub-chunk for each entry.
+    pub(crate) fn group_chunk_rows(
+        &self,
+        chunk: &StreamChunk,
+        datetime: DateTime<Utc>,
+    ) -> HashMap<String, Vec<usize>> {
+        let data_chunk = chunk.data_chunk();
+        let capacity = data_chunk.capacity();
+        let visibility = data_chunk.visibility();
+        let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for idx in 0..capacity {
+            if !visibility.is_set(idx) {
+                continue;
+            }
+            let row = data_chunk.row_at_unchecked_vis(idx);
+            let path = if self.has_column_refs {
+                self.render_with_row(datetime, &row)
+            } else {
+                self.render_time_only(datetime)
+            };
+            groups.entry(path).or_default().push(idx);
+        }
+        groups
+    }
+}
+
+/// Replace characters that are problematic in object paths (`/` and control bytes)
+/// so that a column value with unexpected characters cannot escape its partition
+/// directory. We follow Hive's convention of percent-encoding the offending bytes.
+fn sanitize_partition_value(value: &str, out: &mut String) {
+    for ch in value.chars() {
+        match ch {
+            '/' => out.push_str("%2F"),
+            '\\' => out.push_str("%5C"),
+            '\0' => out.push_str("%00"),
+            c if (c as u32) < 0x20 => {
+                let _ = write!(out, "%{:02X}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+}
+
 /// The `FileSink` struct represents a file sink that uses the `OpendalSinkBackend` trait for its backend implementation.
 ///
 /// # Type Parameters
@@ -205,8 +389,14 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
 
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
+    /// The RisingWave-side schema. Held so future extensions (e.g. column
+    /// projection for Hive partition-column elision) can look up types.
+    #[allow(dead_code)]
+    rw_schema: Schema,
     operator: Operator,
-    sink_writer: Option<FileWriterEnum>,
+    /// Active writers keyed by their rendered partition path.
+    /// Empty when no chunk has been buffered since the last commit.
+    sink_writers: HashMap<String, FileWriterEnum>,
     write_path: String,
     executor_id: ExecutorId,
     unique_writer_id: Uuid,
@@ -214,6 +404,7 @@ pub struct OpenDalSinkWriter {
     row_encoder: JsonEncoder,
     engine_type: EngineType,
     pub(crate) batching_strategy: BatchingStrategy,
+    partition_template: Option<PartitionTemplate>,
     current_bached_row_num: usize,
     created_time: SystemTime,
     file_seq: u64,
@@ -239,30 +430,36 @@ enum FileWriterEnum {
 impl OpenDalSinkWriter {
     /// This method writes a chunk.
     pub async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.sink_writer.is_none() {
+        if self.sink_writers.is_empty() {
             assert_eq!(self.current_bached_row_num, 0);
-            self.create_sink_writer().await?;
-        };
+            self.created_time = SystemTime::now();
+        }
         self.append_only(chunk).await?;
         Ok(())
     }
 
-    /// This method close current writer, finish writing a file and returns whether the commit is successful.
+    /// This method closes every active writer, finishing any pending files, and
+    /// returns whether at least one file was committed.
     pub async fn commit(&mut self) -> Result<bool> {
-        if let Some(sink_writer) = self.sink_writer.take() {
-            match sink_writer {
+        if self.sink_writers.is_empty() {
+            return Ok(false);
+        }
+        let writers = std::mem::take(&mut self.sink_writers);
+        for (path, writer) in writers {
+            match writer {
                 FileWriterEnum::ParquetFileWriter(w) => {
                     let bytes_written = w.bytes_written();
                     if bytes_written > 0 {
                         w.close().await?;
                         tracing::debug!(
-                            "writer {} (executor_id: {}, created_time: {}) finish write file, bytes_written: {}",
+                            "writer {} (executor_id: {}, created_time: {}) finish write file at partition `{}`, bytes_written: {}",
                             self.unique_writer_id,
                             self.executor_id,
                             self.created_time
                                 .duration_since(UNIX_EPOCH)
                                 .expect("Time went backwards")
                                 .as_secs(),
+                            path,
                             bytes_written
                         );
                     }
@@ -271,15 +468,14 @@ impl OpenDalSinkWriter {
                     w.close().await?;
                 }
             };
-            self.current_bached_row_num = 0;
-            return Ok(true);
         }
-        Ok(false)
+        self.current_bached_row_num = 0;
+        Ok(true)
     }
 
-    /// Returns whether there is pending data (i.e., an active writer that has not been committed yet).
+    /// Returns whether there is pending data (i.e., any active writer that has not been committed yet).
     pub fn has_pending_data(&self) -> bool {
-        self.sink_writer.is_some()
+        !self.sink_writers.is_empty()
     }
 
     // Try commit if the batching condition is met.
@@ -299,28 +495,21 @@ impl OpenDalSinkWriter {
             || self.current_bached_row_num >= self.batching_strategy.max_row_count
     }
 
-    fn path_partition_prefix(&self, duration: &Duration) -> String {
-        let datetime = Utc
-            .timestamp_opt(duration.as_secs() as i64, 0)
-            .single()
-            .expect("Failed to convert timestamp to DateTime<Utc>")
-            .with_timezone(&Utc);
-        // `path_partition_format` (a chrono strftime-style template) takes precedence
-        // over the legacy enum-based `path_partition_prefix`. This lets users emit
-        // arbitrary Hive-style partition directories such as
-        // `year=2025/month=06/day=25/hour=13/`.
-        if let Some(fmt) = self.batching_strategy.path_partition_format.as_deref()
-            && !fmt.is_empty()
-        {
-            return datetime.format(fmt).to_string();
+    /// Render the partition path purely from the writer's creation time. Used
+    /// when no `{column}` placeholders are present (or for the legacy
+    /// `path_partition_prefix` enum).
+    fn time_only_partition_path(&self, datetime: DateTime<Utc>) -> String {
+        if let Some(template) = &self.partition_template {
+            debug_assert!(!template.has_column_refs());
+            return template.render_time_only(datetime);
         }
-        let path_partition_prefix = self
+        let prefix = self
             .batching_strategy
             .path_partition_prefix
             .as_ref()
             .unwrap_or(&PathPartitionPrefix::None);
-        match path_partition_prefix {
-            PathPartitionPrefix::None => "".to_owned(),
+        match prefix {
+            PathPartitionPrefix::None => String::new(),
             PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
             PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
             PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
@@ -336,11 +525,73 @@ impl OpenDalSinkWriter {
 
     // Method for writing chunk and update related batching condition.
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        match self
-            .sink_writer
-            .as_mut()
-            .ok_or_else(|| SinkError::File("Sink writer is not created.".to_owned()))?
+        let create_time = self
+            .created_time
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards");
+        let datetime = Utc
+            .timestamp_opt(create_time.as_secs() as i64, 0)
+            .single()
+            .expect("Failed to convert timestamp to DateTime<Utc>");
+
+        // Validate ops once; the rest of the writer assumes append-only chunks.
+        for &op in chunk.ops() {
+            assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
+        }
+
+        // Fast path: no per-row partitioning. Route the whole (visible) chunk to
+        // a single writer keyed by the time-only path.
+        if self
+            .partition_template
+            .as_ref()
+            .is_none_or(|t| !t.has_column_refs())
         {
+            let partition_path = self.time_only_partition_path(datetime);
+            self.write_chunk_to_partition(&partition_path, chunk)
+                .await?;
+            return Ok(());
+        }
+
+        // Column-based partitioning: bucket visible rows by their rendered path,
+        // then flush each bucket as a sub-chunk so we get one writer per partition.
+        let template = self.partition_template.as_ref().expect("checked above");
+        let capacity = chunk.data_chunk().capacity();
+        let groups = template.group_chunk_rows(&chunk, datetime);
+
+        for (path, indices) in groups {
+            let mut bits = BitmapBuilder::zeroed(capacity);
+            for idx in indices {
+                bits.set(idx, true);
+            }
+            let sub = chunk.clone().data_chunk().with_visibility(bits.finish());
+            // `compact_vis` is what `IcebergArrowConvert.to_record_batch` expects
+            // when only some rows are visible. It also keeps the JSON path simple
+            // by collapsing the chunk to its visible rows.
+            let compacted = sub.compact_vis();
+            // Reconstruct a StreamChunk with all-`Insert` ops matching the
+            // compacted cardinality. Ops were already validated as inserts.
+            let nrows = compacted.cardinality();
+            let columns: Vec<_> = compacted.columns().to_vec();
+            let sub_chunk = StreamChunk::new(vec![Op::Insert; nrows].into_boxed_slice(), columns);
+            self.write_chunk_to_partition(&path, sub_chunk).await?;
+        }
+        Ok(())
+    }
+
+    async fn write_chunk_to_partition(
+        &mut self,
+        partition_path: &str,
+        chunk: StreamChunk,
+    ) -> Result<()> {
+        if !self.sink_writers.contains_key(partition_path) {
+            let writer = self.create_partition_writer(partition_path).await?;
+            self.sink_writers.insert(partition_path.to_owned(), writer);
+        }
+        let writer = self
+            .sink_writers
+            .get_mut(partition_path)
+            .expect("just inserted");
+        match writer {
             FileWriterEnum::ParquetFileWriter(w) => {
                 let batch =
                     IcebergArrowConvert.to_record_batch(self.schema.clone(), chunk.data_chunk())?;
@@ -351,17 +602,14 @@ impl OpenDalSinkWriter {
             FileWriterEnum::FileWriter(w) => {
                 let mut chunk_buf = BytesMut::new();
                 let batch_row_nums = chunk.data_chunk().capacity();
-                // write the json representations of the row(s) in current chunk to `chunk_buf`
                 for (op, row) in chunk.rows() {
                     assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
-                    // to prevent temporary string allocation,
-                    // so we directly write to `chunk_buf` implicitly via `write_fmt`.
                     writeln!(
                         chunk_buf,
                         "{}",
                         Value::Object(self.row_encoder.encode(row)?)
                     )
-                    .unwrap(); // write to a `BytesMut` should never fail
+                    .unwrap();
                 }
                 w.write(chunk_buf.freeze()).await?;
                 self.current_bached_row_num += batch_row_nums;
@@ -385,7 +633,7 @@ impl OpenDalSinkWriter {
         let arrow_schema = convert_rw_schema_to_arrow_schema(rw_schema.clone())?;
         let jsonb_handling_mode = JsonbHandlingMode::from_options(&format_desc.options)?;
         let row_encoder = JsonEncoder::new(
-            rw_schema,
+            rw_schema.clone(),
             None,
             crate::sink::encoder::DateHandlingMode::String,
             TimestampHandlingMode::String,
@@ -393,24 +641,30 @@ impl OpenDalSinkWriter {
             TimeHandlingMode::String,
             jsonb_handling_mode,
         );
+        let partition_template = match batching_strategy.path_partition_format.as_deref() {
+            Some(fmt) if !fmt.is_empty() => Some(PartitionTemplate::parse(fmt, &rw_schema)?),
+            _ => None,
+        };
         Ok(Self {
             schema: Arc::new(arrow_schema),
+            rw_schema,
             write_path: write_path.to_owned(),
             operator,
-            sink_writer: None,
+            sink_writers: HashMap::new(),
             executor_id,
             unique_writer_id: Uuid::now_v7(),
             encode_type: format_desc.encode.clone(),
             row_encoder,
             engine_type,
             batching_strategy,
+            partition_template,
             current_bached_row_num: 0,
             created_time: SystemTime::now(),
             file_seq: 0,
         })
     }
 
-    async fn create_object_writer(&mut self) -> Result<OpendalWriter> {
+    async fn create_object_writer(&mut self, partition_path: &str) -> Result<OpendalWriter> {
         // Todo: specify more file suffixes based on encode_type.
         let suffix = match self.encode_type {
             SinkEncode::Parquet => "parquet",
@@ -424,18 +678,18 @@ impl OpenDalSinkWriter {
             .expect("Time went backwards");
 
         // With batching in place, the file writing process is decoupled from checkpoints.
-        // The current file naming convention is as follows:
-        // 1. A subdirectory is derived from either `path_partition_format` (a chrono
-        //    strftime template, used for Hive-style partitioning), or, if not set,
-        //    `path_partition_prefix` (the legacy day/month/hour/none enum).
-        // 2. The file name includes a unique UUID (v7, which contains timestamp) and the creation time in seconds since the UNIX epoch.
-        // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
-        // 3. For the Snowflake Sink, the `write_path` parameter can be empty.
-        // When the `write_path` is not specified, the data will be written to the root of the specified bucket.
+        // The current object naming convention is:
+        // 1. The subdirectory is `partition_path`, derived from `path_partition_format`
+        //    (which supports both chrono `strftime` tokens and `{column}` placeholders
+        //    for Hive-style partitioning) or the legacy `path_partition_prefix` enum.
+        // 2. The file name is `{uuid}_{unix_ts}_{seq}.{suffix}` so concurrent writers
+        //    and partitions never collide.
+        // If the engine type is `Fs`, the base path is empty so the host filesystem
+        // handles the path. For the Snowflake Sink the `write_path` may be empty.
         let object_name = {
             let base_path = match self.engine_type {
-                EngineType::Fs => "".to_owned(),
-                EngineType::Snowflake if self.write_path.is_empty() => "".to_owned(),
+                EngineType::Fs => String::new(),
+                EngineType::Snowflake if self.write_path.is_empty() => String::new(),
                 _ => format!("{}/", self.write_path),
             };
             let current_file_seq = self.file_seq;
@@ -444,7 +698,7 @@ impl OpenDalSinkWriter {
             format!(
                 "{}{}{}_{}_{}.{}",
                 base_path,
-                self.path_partition_prefix(&create_time),
+                partition_path,
                 self.unique_writer_id,
                 create_time.as_secs(),
                 current_file_seq,
@@ -458,31 +712,22 @@ impl OpenDalSinkWriter {
             .await?)
     }
 
-    async fn create_sink_writer(&mut self) -> Result<()> {
-        // Update the `created_time` to the current time when creating a new writer.
-        self.created_time = SystemTime::now();
-
-        let object_writer = self.create_object_writer().await?;
-        match self.encode_type {
+    async fn create_partition_writer(&mut self, partition_path: &str) -> Result<FileWriterEnum> {
+        let object_writer = self.create_object_writer(partition_path).await?;
+        let writer = match self.encode_type {
             SinkEncode::Parquet => {
                 let props = WriterProperties::builder().set_compression(Compression::SNAPPY);
                 let parquet_writer: tokio_util::compat::Compat<opendal::FuturesAsyncWriter> =
                     object_writer.into_futures_async_write().compat_write();
-                self.sink_writer = Some(FileWriterEnum::ParquetFileWriter(
-                    AsyncArrowWriter::try_new(
-                        parquet_writer,
-                        self.schema.clone(),
-                        Some(props.build()),
-                    )?,
-                ));
+                FileWriterEnum::ParquetFileWriter(AsyncArrowWriter::try_new(
+                    parquet_writer,
+                    self.schema.clone(),
+                    Some(props.build()),
+                )?)
             }
-            _ => {
-                self.sink_writer = Some(FileWriterEnum::FileWriter(object_writer));
-            }
-        }
-        self.current_bached_row_num = 0;
-
-        Ok(())
+            _ => FileWriterEnum::FileWriter(object_writer),
+        };
+        Ok(writer)
     }
 }
 
@@ -565,82 +810,265 @@ pub enum PathPartitionPrefix {
 #[cfg(test)]
 mod tests {
     use chrono::TimeZone;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
 
-    /// Mirrors `OpenDalSinkWriter::path_partition_prefix` so we can unit test the
-    /// formatting logic without spinning up a real writer. Keep this in sync.
-    fn render(strategy: &BatchingStrategy, duration: Duration) -> String {
-        let datetime = Utc
-            .timestamp_opt(duration.as_secs() as i64, 0)
-            .single()
-            .expect("Failed to convert timestamp to DateTime<Utc>");
-        if let Some(fmt) = strategy.path_partition_format.as_deref()
-            && !fmt.is_empty()
-        {
-            return datetime.format(fmt).to_string();
-        }
-        let prefix = strategy
-            .path_partition_prefix
-            .as_ref()
-            .unwrap_or(&PathPartitionPrefix::None);
-        match prefix {
-            PathPartitionPrefix::None => "".to_owned(),
-            PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
-            PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
-            PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
+    fn schema() -> Schema {
+        Schema {
+            fields: vec![
+                Field::with_name(DataType::Varchar, "exchange"),
+                Field::with_name(DataType::Varchar, "symbol"),
+                Field::with_name(DataType::Int64, "amount"),
+            ],
         }
     }
 
-    fn ts(year: i32, month: u32, day: u32, hour: u32) -> Duration {
-        let dt = Utc.with_ymd_and_hms(year, month, day, hour, 0, 0).unwrap();
-        Duration::from_secs(dt.timestamp() as u64)
+    fn ts(year: i32, month: u32, day: u32, hour: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(year, month, day, hour, 0, 0).unwrap()
     }
 
     #[test]
-    fn path_partition_format_overrides_prefix() {
-        let strategy = BatchingStrategy {
-            max_row_count: 1,
-            rollover_seconds: 1,
-            path_partition_prefix: Some(PathPartitionPrefix::Hour),
-            path_partition_format: Some("year=%Y/month=%m/day=%d/hour=%H/".to_owned()),
-        };
+    fn template_parses_time_only_format() {
+        let template =
+            PartitionTemplate::parse("year=%Y/month=%m/day=%d/hour=%H/", &schema()).unwrap();
+        assert!(!template.has_column_refs());
         assert_eq!(
-            render(&strategy, ts(2021, 6, 25, 13)),
+            template.render_time_only(ts(2021, 6, 25, 13)),
             "year=2021/month=06/day=25/hour=13/"
         );
     }
 
     #[test]
-    fn path_partition_format_year_only() {
+    fn template_parses_column_refs() {
+        let template = PartitionTemplate::parse(
+            "exchange={exchange}/symbol={symbol}/year=%Y/month=%m/day=%d/hour=%H/",
+            &schema(),
+        )
+        .unwrap();
+        assert!(template.has_column_refs());
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Utf8("binance-futures".into())),
+            Some(ScalarImpl::Utf8("BTC-USDT".into())),
+            Some(ScalarImpl::Int64(42)),
+        ]);
+        assert_eq!(
+            template.render_with_row(ts(2021, 6, 25, 13), &row),
+            "exchange=binance-futures/symbol=BTC-USDT/year=2021/month=06/day=25/hour=13/"
+        );
+    }
+
+    #[test]
+    fn template_rejects_unknown_column() {
+        let err =
+            PartitionTemplate::parse("exchange={exchange}/missing={does_not_exist}/", &schema())
+                .unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("does_not_exist"), "{msg}");
+    }
+
+    #[test]
+    fn template_rejects_unterminated_placeholder() {
+        let err = PartitionTemplate::parse("symbol={symbol", &schema()).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("unterminated"), "{msg}");
+    }
+
+    #[test]
+    fn template_handles_escaped_braces_and_null_column() {
+        let template = PartitionTemplate::parse("{{literal}}={symbol}/", &schema()).unwrap();
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Utf8("bnb".into())),
+            None,
+            Some(ScalarImpl::Int64(0)),
+        ]);
+        assert_eq!(
+            template.render_with_row(ts(2021, 6, 25, 13), &row),
+            "{literal}=__HIVE_DEFAULT_PARTITION__/"
+        );
+    }
+
+    #[test]
+    fn template_sanitizes_slashes_in_column_values() {
+        let template = PartitionTemplate::parse("symbol={symbol}/", &schema()).unwrap();
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Utf8("ex".into())),
+            // A bogus value containing `/` must not break out of the partition dir.
+            Some(ScalarImpl::Utf8("a/b".into())),
+            Some(ScalarImpl::Int64(0)),
+        ]);
+        assert_eq!(
+            template.render_with_row(ts(2021, 6, 25, 13), &row),
+            "symbol=a%2Fb/"
+        );
+    }
+
+    fn build_test_chunk(rows: &[(&str, &str, i64)]) -> StreamChunk {
+        let owned: Vec<(Op, OwnedRow)> = rows
+            .iter()
+            .map(|(exch, sym, amt)| {
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8((*exch).into())),
+                        Some(ScalarImpl::Utf8((*sym).into())),
+                        Some(ScalarImpl::Int64(*amt)),
+                    ]),
+                )
+            })
+            .collect();
+        let ref_rows: Vec<(Op, &OwnedRow)> = owned.iter().map(|(op, r)| (*op, r)).collect();
+        let data_types = [DataType::Varchar, DataType::Varchar, DataType::Int64];
+        StreamChunk::from_rows(&ref_rows, &data_types)
+    }
+
+    #[test]
+    fn group_chunk_rows_partitions_by_column_value() {
+        let template = PartitionTemplate::parse(
+            "exchange={exchange}/symbol={symbol}/year=%Y/month=%m/day=%d/hour=%H/",
+            &schema(),
+        )
+        .unwrap();
+        let chunk = build_test_chunk(&[
+            ("binance-futures", "BTC-USDT", 1),
+            ("binance-futures", "ETH-USDT", 2),
+            ("binance-futures", "BTC-USDT", 3),
+            ("okx-perps", "BTC-USDT", 4),
+        ]);
+        let groups = template.group_chunk_rows(&chunk, ts(2021, 6, 25, 13));
+        assert_eq!(groups.len(), 3);
+        let btc_binance = groups
+            .get("exchange=binance-futures/symbol=BTC-USDT/year=2021/month=06/day=25/hour=13/")
+            .expect("binance BTC bucket exists");
+        assert_eq!(btc_binance, &vec![0, 2]);
+        assert_eq!(
+            groups
+                .get("exchange=binance-futures/symbol=ETH-USDT/year=2021/month=06/day=25/hour=13/")
+                .map(|v| v.len()),
+            Some(1)
+        );
+        assert_eq!(
+            groups
+                .get("exchange=okx-perps/symbol=BTC-USDT/year=2021/month=06/day=25/hour=13/")
+                .map(|v| v.len()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn group_chunk_rows_returns_single_bucket_for_time_only() {
+        let template =
+            PartitionTemplate::parse("year=%Y/month=%m/day=%d/hour=%H/", &schema()).unwrap();
+        let chunk = build_test_chunk(&[
+            ("binance-futures", "BTC-USDT", 1),
+            ("okx-perps", "ETH-USDT", 2),
+        ]);
+        let groups = template.group_chunk_rows(&chunk, ts(2021, 6, 25, 13));
+        assert_eq!(groups.len(), 1);
+        let only = groups
+            .get("year=2021/month=06/day=25/hour=13/")
+            .expect("single time partition");
+        assert_eq!(only, &vec![0, 1]);
+    }
+
+    /// End-to-end test that wires up the real `OpenDalSinkWriter` with a local
+    /// filesystem opendal backend, pushes a chunk through it, and asserts that
+    /// the column-based partition directories are materialised on disk.
+    #[tokio::test]
+    async fn opendal_writer_emits_hive_partitions_on_local_fs() {
+        use opendal::services::Fs;
+
+        use crate::sink::SinkFormatDesc;
+        use crate::sink::catalog::{SinkEncode, SinkFormat};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().to_str().unwrap();
+        let operator = Operator::new(Fs::default().root(root))
+            .expect("build opendal Fs builder")
+            .finish();
+
+        let format_desc = SinkFormatDesc {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Json,
+            options: BTreeMap::new(),
+            secret_refs: BTreeMap::new(),
+            key_encode: None,
+            connection_id: None,
+        };
         let strategy = BatchingStrategy {
-            max_row_count: 1,
-            rollover_seconds: 1,
+            max_row_count: 1024,
+            rollover_seconds: 60,
             path_partition_prefix: None,
-            path_partition_format: Some("year=%Y/".to_owned()),
+            path_partition_format: Some(
+                "exchange={exchange}/symbol={symbol}/year=%Y/month=%m/day=%d/hour=%H/".to_owned(),
+            ),
         };
-        assert_eq!(render(&strategy, ts(2021, 6, 25, 13)), "year=2021/");
-    }
+        let mut writer = OpenDalSinkWriter::new(
+            operator,
+            "metrics",
+            schema(),
+            ExecutorId::new(1),
+            &format_desc,
+            EngineType::Fs,
+            strategy,
+        )
+        .expect("construct OpenDalSinkWriter");
 
-    #[test]
-    fn legacy_prefix_still_works() {
-        let strategy = BatchingStrategy {
-            max_row_count: 1,
-            rollover_seconds: 1,
-            path_partition_prefix: Some(PathPartitionPrefix::Day),
-            path_partition_format: None,
-        };
-        assert_eq!(render(&strategy, ts(2021, 6, 25, 13)), "2021-06-25/");
-    }
+        let chunk = build_test_chunk(&[
+            ("binance-futures", "BTC-USDT", 1),
+            ("binance-futures", "ETH-USDT", 2),
+            ("binance-futures", "BTC-USDT", 3),
+            ("okx-perps", "BTC-USDT", 4),
+        ]);
+        writer.write_batch(chunk).await.expect("write_batch");
+        assert!(writer.commit().await.expect("commit"));
 
-    #[test]
-    fn empty_format_falls_back_to_prefix() {
-        let strategy = BatchingStrategy {
-            max_row_count: 1,
-            rollover_seconds: 1,
-            path_partition_prefix: Some(PathPartitionPrefix::Day),
-            path_partition_format: Some("".to_owned()),
-        };
-        assert_eq!(render(&strategy, ts(2021, 6, 25, 13)), "2021-06-25/");
+        // Walk the tempdir and verify the three expected partition directories.
+        // The year/month/day/hour values come from the writer's wall clock at
+        // flush time, so we validate the structural pattern rather than fixed
+        // dates.
+        let mut dirs: Vec<String> = Vec::new();
+        for entry in walkdir::WalkDir::new(tmp.path())
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_file() {
+                let rel = entry
+                    .path()
+                    .strip_prefix(tmp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned();
+                dirs.push(rel);
+            }
+        }
+        dirs.sort();
+        assert_eq!(dirs.len(), 3, "one file per partition; got {dirs:?}");
+
+        let partition_re = regex::Regex::new(
+            r"^exchange=(binance-futures|okx-perps)/symbol=(BTC-USDT|ETH-USDT)/year=\d{4}/month=\d{2}/day=\d{2}/hour=\d{2}/[0-9a-f-]+_\d+_\d+\.json$",
+        )
+        .expect("regex compiles");
+        for path in &dirs {
+            assert!(
+                partition_re.is_match(path),
+                "path `{path}` does not match expected Hive layout"
+            );
+        }
+
+        let expected_partitions = [
+            ("binance-futures", "BTC-USDT"),
+            ("binance-futures", "ETH-USDT"),
+            ("okx-perps", "BTC-USDT"),
+        ];
+        for (exch, sym) in expected_partitions {
+            let prefix = format!("exchange={exch}/symbol={sym}/");
+            assert!(
+                dirs.iter().any(|p| p.starts_with(&prefix)),
+                "no file under partition `{prefix}` was written. got files: {dirs:?}"
+            );
+        }
     }
 }
