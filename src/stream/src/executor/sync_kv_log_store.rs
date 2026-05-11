@@ -892,13 +892,13 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                     }
                 }
                 Either::Right(result) => {
-                    if !clean_state
-                        && matches!(read_future_state, ReadFuture::Idle)
-                        && buffer.is_empty()
-                    {
-                        clean_state = true;
-                        self.logstore_context.metrics.clean_state.inc();
+                    let clean_state_reached = read_future_state.mark_clean_state(
+                        &mut clean_state,
+                        &buffer,
+                        &self.logstore_context.metrics,
+                    );
 
+                    if clean_state_reached {
                         // Let write future resume immediately
                         if let WriteFuture::Paused { sleep_future, .. } = &mut write_future_state {
                             tracing::trace!("resuming paused future");
@@ -933,6 +933,21 @@ pub(crate) enum ReadFuture<S: StateStoreRead> {
 
 // Read methods
 impl<S: StateStoreRead> ReadFuture<S> {
+    pub(crate) fn mark_clean_state(
+        &self,
+        clean_state: &mut bool,
+        buffer: &SyncedLogStoreBuffer,
+        metrics: &SyncedKvLogStoreMetrics,
+    ) -> bool {
+        if !*clean_state && matches!(self, ReadFuture::Idle) && buffer.is_empty() {
+            *clean_state = true;
+            metrics.clean_state.inc();
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) async fn next_chunk(
         &mut self,
         progress: &mut LogStoreVnodeProgress,

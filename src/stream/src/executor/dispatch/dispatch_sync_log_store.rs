@@ -217,21 +217,6 @@ impl ConsumerFuture {
         }
     }
 
-    fn mark_clean_state<S: StateStoreRead>(
-        clean_state: &mut bool,
-        read_future: &ReadFuture<S>,
-        buffer: &SyncedLogStoreBuffer,
-        metrics: &SyncedKvLogStoreMetrics,
-    ) -> bool {
-        if !*clean_state && matches!(read_future, ReadFuture::Idle) && buffer.is_empty() {
-            *clean_state = true;
-            metrics.clean_state.inc();
-            true
-        } else {
-            false
-        }
-    }
-
     #[expect(clippy::too_many_arguments)]
     async fn next_event<S: StateStoreRead>(
         mut self: Pin<&mut Self>,
@@ -258,7 +243,7 @@ impl ConsumerFuture {
                 metrics.total_read_count.inc_by(chunk.cardinality() as _);
 
                 let clean_state_reached =
-                    Self::mark_clean_state(clean_state, read_future, buffer, metrics);
+                    read_future.mark_clean_state(clean_state, buffer, metrics);
                 let inner = must_match!(
                     self.as_mut().project_replace(ConsumerFuture::PlaceHolder),
                     ConsumerFutureProjReplace::ReadingChunk { inner } => inner
