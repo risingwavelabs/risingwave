@@ -162,7 +162,7 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
             stmt.setString(2, tableName);
             var res = stmt.executeQuery();
             while (res.next()) {
-                if (res.getInt(1) != 1) {
+                if (res.getInt(1) < 1) {
                     throw ValidatorUtils.invalidArgument(
                             "Table '"
                                     + schemaName

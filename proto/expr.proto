@@ -4,9 +4,17 @@ package expr;
 
 import "common.proto";
 import "data.proto";
+import "secret.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
+
+// A reference to a secret, resolved at runtime via LocalSecretManager.
+// Only secret_id is serialized — the actual value never appears in plans.
+message SecretRefNode {
+  uint32 secret_id = 1;
+  secret.SecretRef.RefAsType ref_as = 2;
+}
 
 message ExprNode {
   message NowRexNode {}
@@ -384,6 +392,7 @@ message ExprNode {
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
     NowRexNode now = 8;
+    SecretRefNode secret_ref = 9;
   }
 }
 

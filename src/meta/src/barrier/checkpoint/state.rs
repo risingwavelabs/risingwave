@@ -41,7 +41,9 @@ use tracing::warn;
 
 use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
-use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
+use crate::barrier::checkpoint::{
+    CreatingStreamingJobControl, DatabaseCheckpointControl, IndependentCheckpointJobControl,
+};
 use crate::barrier::command::{CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -164,7 +166,7 @@ type ApplyCommandResult = (
 );
 
 /// Result of actor rendering for a create/replace streaming job.
-pub(super) struct RenderResult {
+pub(crate) struct RenderResult {
     /// Rendered actors grouped by fragment.
     pub stream_actors: HashMap<FragmentId, Vec<StreamActor>>,
     /// Worker placement for each actor.
@@ -559,7 +561,8 @@ impl DatabaseCheckpointControl {
                         &self.database_info,
                     )?;
 
-                    let Entry::Vacant(entry) = self.creating_streaming_job_controls.entry(job_id)
+                    let Entry::Vacant(entry) =
+                        self.independent_checkpoint_job_controls.entry(job_id)
                     else {
                         panic!("duplicated creating snapshot backfill job {job_id}");
                     };
@@ -582,9 +585,12 @@ impl DatabaseCheckpointControl {
                         &actors,
                     )?;
 
-                    self.database_info
-                        .shared_actor_infos
-                        .upsert(self.database_id, job.fragment_infos_with_job_id());
+                    if let Some(fragment_infos) = job.fragment_infos() {
+                        self.database_info.shared_actor_infos.upsert(
+                            self.database_id,
+                            fragment_infos.values().map(|f| (f, job_id)),
+                        );
+                    }
 
                     for upstream_mv_table_id in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
@@ -787,15 +793,19 @@ impl DatabaseCheckpointControl {
 
             Some(Command::Throttle { jobs, config }) => {
                 let mutation = Some(Command::throttle_to_mutation(&config));
+                for (fragment_id, throttle_config) in &config {
+                    self.database_info
+                        .pre_apply_throttle(*fragment_id, throttle_config);
+                }
                 throttle_for_creating_jobs = Some((jobs, config));
                 self.apply_simple_command(mutation, "Throttle")
             }
 
             Some(Command::DropStreamingJobs {
                 streaming_job_ids,
-                unregistered_state_table_ids,
                 unregistered_fragment_ids,
                 dropped_sink_fragment_by_targets,
+                ..
             }) => {
                 let actors = self
                     .database_info
@@ -829,10 +839,7 @@ impl DatabaseCheckpointControl {
                     table_ids,
                     None,
                     node_actors,
-                    PostCollectCommand::DropStreamingJobs {
-                        streaming_job_ids,
-                        unregistered_state_table_ids,
-                    },
+                    PostCollectCommand::DropStreamingJobs,
                 )
             }
 
@@ -1271,7 +1278,9 @@ impl DatabaseCheckpointControl {
             None => {
                 let mut finished_snapshot_backfill_job_info = HashMap::new();
                 if barrier_info.kind.is_checkpoint() {
-                    for (&job_id, creating_job) in &mut self.creating_streaming_job_controls {
+                    for (&job_id, job) in &mut self.independent_checkpoint_job_controls {
+                        let IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) =
+                            job;
                         if creating_job.should_merge_to_upstream() {
                             let info = creating_job
                                 .start_consume_upstream(partial_graph_manager, &barrier_info)?;
@@ -1499,8 +1508,9 @@ impl DatabaseCheckpointControl {
             }
         };
 
-        // Forward barrier to creating streaming job controls
-        for (job_id, creating_job) in &mut self.creating_streaming_job_controls {
+        // Forward barrier to independent checkpoint job controls
+        for (job_id, job) in &mut self.independent_checkpoint_job_controls {
+            let IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) = job;
             if !finished_snapshot_backfill_jobs.contains(job_id) {
                 let throttle_mutation = if let Some((ref jobs, ref config)) =
                     throttle_for_creating_jobs

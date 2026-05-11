@@ -112,6 +112,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map.try_insert(
@@ -120,6 +121,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map.try_insert(
@@ -128,7 +130,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
-
+            "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
 
@@ -162,6 +164,13 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.fetch.queue.backoff.ms".to_owned(),
             "properties.fetch.max.bytes".to_owned(),
             "properties.enable.auto.commit".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // PubsubProperties
+    map.try_insert(
+        std::any::type_name::<PubsubProperties>().to_owned(),
+        [
+            "pubsub.ack_deadline_seconds".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map
@@ -213,6 +222,7 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "compaction.type".to_owned(),
             "compaction.write_parquet_compression".to_owned(),
             "compaction.write_parquet_max_row_group_rows".to_owned(),
+            "compaction.write_parquet_max_row_group_bytes".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     // KafkaConfig

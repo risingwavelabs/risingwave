@@ -42,7 +42,7 @@ use crate::barrier::{
 use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
-use crate::stream::SourceChange;
+use crate::stream::{SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
@@ -150,13 +150,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 continue;
             }
 
-            // Find the database ID for this table
-            let database_id = self
-                .metadata_manager
-                .catalog_controller
-                .get_object_database_id(associated_source_id)
-                .await
-                .context("Failed to get database id for table")?;
+            let Some(database_id) = self
+                .get_source_database_id_for_refresh_stage(table_id, associated_source_id, "list")
+                .await?
+            else {
+                continue;
+            };
 
             // Create ListFinish command
             let list_finish_command = Command::ListFinish {
@@ -202,13 +201,12 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
                 continue;
             }
 
-            // Find the database ID for this table
-            let database_id = self
-                .metadata_manager
-                .catalog_controller
-                .get_object_database_id(associated_source_id)
-                .await
-                .context("Failed to get database id for table")?;
+            let Some(database_id) = self
+                .get_source_database_id_for_refresh_stage(table_id, associated_source_id, "load")
+                .await?
+            else {
+                continue;
+            };
 
             // Create LoadFinish command
             let load_finish_command = Command::LoadFinish {
@@ -246,6 +244,39 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    async fn get_source_database_id_for_refresh_stage(
+        &self,
+        table_id: TableId,
+        associated_source_id: SourceId,
+        stage: &'static str,
+    ) -> MetaResult<Option<DatabaseId>> {
+        match self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(associated_source_id)
+            .await
+        {
+            Ok(database_id) => Ok(Some(database_id)),
+            Err(err) if err.is_catalog_id_not_found("object") => {
+                tracing::warn!(
+                    %table_id,
+                    %associated_source_id,
+                    stage,
+                    "skip refresh finish command because associated source is already dropped"
+                );
+                Ok(None)
+            }
+            Err(err) => Err(err)
+                .with_context(|| {
+                    format!(
+                        "failed to get database id for refresh stage: table_id={}, associated_source_id={}, stage={stage}",
+                        table_id, associated_source_id
+                    )
+                })
+                .map_err(Into::into),
+        }
+    }
+
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
     }
@@ -269,26 +300,7 @@ impl PostCollectCommand {
                     .await?;
             }
 
-            PostCollectCommand::DropStreamingJobs {
-                streaming_job_ids,
-                unregistered_state_table_ids,
-            } => {
-                for job_id in streaming_job_ids {
-                    barrier_manager_context
-                        .refresh_manager
-                        .remove_progress_tracker(job_id.as_mv_table_id(), "drop_streaming_jobs");
-                }
-
-                barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
-                    .await?;
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .complete_dropped_tables(unregistered_state_table_ids.iter().copied())
-                    .await;
-            }
+            PostCollectCommand::DropStreamingJobs => {}
             PostCollectCommand::ConnectorPropsChange(obj_id_map_props) => {
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
                 barrier_manager_context
@@ -501,10 +513,15 @@ impl PostCollectCommand {
                         &replace_plan,
                     )
                     .await;
-                barrier_manager_context
-                    .hummock_manager
-                    .unregister_table_ids(to_drop_state_table_ids.iter().cloned())
-                    .await?;
+                cleanup_dropped_streaming_jobs(
+                    &barrier_manager_context.refresh_manager,
+                    &barrier_manager_context.hummock_manager,
+                    &barrier_manager_context.metadata_manager,
+                    [],
+                    to_drop_state_table_ids.clone(),
+                    "replace_streaming_job",
+                )
+                .await?;
             }
 
             PostCollectCommand::CreateSubscription { subscription_id } => {
@@ -517,5 +534,22 @@ impl PostCollectCommand {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_skip_refresh_finish_when_associated_source_missing() {
+        let err = MetaError::catalog_id_not_found("object", 42);
+        assert!(err.is_catalog_id_not_found("object"));
+    }
+
+    #[test]
+    fn test_do_not_skip_refresh_finish_for_other_not_found_types() {
+        let err = MetaError::catalog_id_not_found("table", 42);
+        assert!(!err.is_catalog_id_not_found("object"));
     }
 }

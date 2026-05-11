@@ -80,7 +80,7 @@ impl From<&StreamingJob> for StreamingJobType {
 }
 
 #[cfg(test)]
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for StreamingJobType {
     fn default() -> Self {
         // This should not be used by mock services,

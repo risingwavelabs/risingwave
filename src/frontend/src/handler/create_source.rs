@@ -244,7 +244,7 @@ pub(crate) fn bind_all_columns(
             .cloned()
             .collect_vec();
 
-        #[allow(clippy::collapsible_else_if)]
+        #[expect(clippy::collapsible_else_if)]
         match sql_column_strategy {
             // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
             SqlColumnStrategy::FollowUnchecked => {
@@ -833,7 +833,7 @@ pub enum SqlColumnStrategy {
 
 /// Entrypoint for binding source connector.
 /// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
     full_name: ObjectName,
@@ -893,15 +893,27 @@ pub async fn bind_create_source_or_table_with_connector(
 
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
-    // FIXME: ideally we can support it, but current way of handling iceberg additional columns are problematic.
-    // They are treated as normal user columns, so they will be lost if we allow user to specify columns.
-    // See `extract_iceberg_columns`
-    if with_properties.is_iceberg_connector() && !sql_columns_defs.is_empty() {
-        return Err(RwError::from(InvalidInputSyntax(
-            r#"Schema is automatically inferred for iceberg source and should not be specified
+    if with_properties.is_iceberg_connector() {
+        if is_create_source && !sql_pk_names.is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
+                    .to_owned(),
+                "Iceberg streaming ingestion only supports append-only sources. Remove the PRIMARY KEY clause."
+                    .to_owned(),
+            )
+            .into());
+        }
+
+        // FIXME: ideally we can support it, but current way of handling iceberg additional columns
+        // are problematic. They are treated as normal user columns, so they will be lost if we
+        // allow user to specify columns. See `extract_iceberg_columns`.
+        if !sql_columns_defs.is_empty() {
+            return Err(RwError::from(InvalidInputSyntax(
+                r#"Schema is automatically inferred for iceberg source and should not be specified
 
 HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
-        )));
+            )));
+        }
     }
 
     // Same for ADBC Snowflake connector - schema is automatically inferred
@@ -1231,6 +1243,7 @@ pub mod tests {
         DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
+    use risingwave_pb::plan_common::EncodeType;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::source_catalog::SourceCatalog;
@@ -1287,6 +1300,37 @@ pub mod tests {
             .into(),
         };
         assert_eq!(columns, expected_columns, "{columns:#?}");
+    }
+
+    #[tokio::test]
+    async fn test_create_mqtt_source_with_protobuf() {
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
+        let sql = format!(
+            r#"CREATE SOURCE t_mqtt
+    WITH (
+        connector = 'mqtt',
+        url = 'mqtt://localhost:1883',
+        topic = 'test_topic'
+    )
+    FORMAT PLAIN ENCODE PROTOBUF (
+        message = '.test.TestRecord',
+        schema.location = 'file://{}'
+    )"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t_mqtt")
+            .unwrap();
+
+        assert_eq!(source.name, "t_mqtt");
+        assert_eq!(source.info.row_encode, EncodeType::Protobuf as i32);
     }
 
     #[tokio::test]

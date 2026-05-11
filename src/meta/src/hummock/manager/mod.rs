@@ -51,6 +51,7 @@ use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::gc::{FullGcState, GcManager};
+use crate::hummock::manager::sequence::PrefetchedSequence;
 use crate::hummock::model::ext::to_table_change_log;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
@@ -112,7 +113,7 @@ impl TableCommittedEpochNotifiers {
 #[derive(Clone, Debug)]
 struct CompactionTaskReportResult {
     task_id: HummockCompactionTaskId,
-    #[allow(dead_code)]
+
     task_status: TaskStatus,
     reported: bool,
 }
@@ -188,6 +189,8 @@ pub struct HummockManager {
     inflight_time_travel_query: Semaphore,
     gc_manager: GcManager,
 
+    /// In-memory cache of prefetched compaction task ids to reduce per-task DB round-trips.
+    prefetched_compaction_task_ids: PrefetchedSequence,
     table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
 }
 
@@ -385,6 +388,7 @@ impl HummockManager {
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
             gc_manager,
+            prefetched_compaction_task_ids: PrefetchedSequence::new(),
             table_id_to_table_option: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);
@@ -509,6 +513,14 @@ impl HummockManager {
             }
         }
         tracing::info!("Finish redo Hummock version.");
+        let pruned_stale_table_id_count = redo_state.prune_stale_table_ids_from_ssts();
+        if pruned_stale_table_id_count > 0 {
+            tracing::warn!(
+                pruned_stale_table_id_count,
+                version_id = ?redo_state.id,
+                "Pruned stale table ids from recovered Hummock SST metadata."
+            );
+        }
         versioning_guard.version_stats = hummock_version_stats::Entity::find()
             .one(&meta_store.conn)
             .await

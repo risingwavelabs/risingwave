@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use dyn_clone::DynClone;
 use risingwave_common::catalog::TableId;
@@ -30,35 +30,6 @@ dyn_clone::clone_trait_object!(CompactionFilter);
 pub struct DummyCompactionFilter;
 
 impl CompactionFilter for DummyCompactionFilter {}
-
-#[derive(Clone)]
-pub struct StateCleanUpCompactionFilter {
-    existing_table_ids: HashSet<TableId>,
-    last_table: Option<(TableId, bool)>,
-}
-
-impl StateCleanUpCompactionFilter {
-    pub fn new(table_id_set: HashSet<TableId>) -> Self {
-        StateCleanUpCompactionFilter {
-            existing_table_ids: table_id_set,
-            last_table: None,
-        }
-    }
-}
-
-impl CompactionFilter for StateCleanUpCompactionFilter {
-    fn should_delete(&mut self, key: FullKey<&[u8]>) -> bool {
-        let table_id = key.user_key.table_id;
-        if let Some((last_table_id, removed)) = self.last_table.as_ref()
-            && *last_table_id == table_id
-        {
-            return *removed;
-        }
-        let removed = !self.existing_table_ids.contains(&table_id);
-        self.last_table = Some((table_id, removed));
-        removed
-    }
-}
 
 #[derive(Clone)]
 pub struct TtlCompactionFilter {

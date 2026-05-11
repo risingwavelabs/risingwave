@@ -21,12 +21,8 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
-
-echo "--- starting risingwave cluster"
-risedev ci-start ci-sink-test
+sink_test_env_setup "$profile"
 apt-get update -y && apt-get install -y redis-server
-sleep 1
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/redis_sink.slt'

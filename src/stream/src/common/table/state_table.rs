@@ -2101,6 +2101,18 @@ where
         )
     }
 
+    pub async fn rev_iter_keyed_row_with_prefix(
+        &self,
+        pk_prefix: impl Row,
+        sub_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl KeyedRowStream<'_>> {
+        Ok(
+            self.iter_with_prefix_inner::</* REVERSE */ true, Bytes>(pk_prefix, sub_range, prefetch_options)
+            .await?.map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)),
+        )
+    }
+
     /// This function scans the table just like `iter_with_prefix`, but in reverse order.
     pub async fn rev_iter_with_prefix(
         &self,

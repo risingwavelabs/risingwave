@@ -87,14 +87,14 @@ async fn test_passive_online_and_offline() -> Result<()> {
 
     let all_worker_slots = table_mat_fragment.all_worker_count();
     let used_worker_slots = table_mat_fragment.used_worker_count();
-    assert_eq!(all_worker_slots, used_worker_slots);
+    assert_eq!(
+        all_worker_slots.keys().copied().sorted().collect_vec(),
+        used_worker_slots.keys().copied().sorted().collect_vec()
+    );
 
     let initialized_parallelism = table_mat_fragment.parallelism();
 
-    assert_eq!(
-        initialized_parallelism,
-        config.compute_nodes * config.compute_node_cores
-    );
+    assert_eq!(initialized_parallelism, 4);
 
     cluster.simple_kill_nodes(vec![host_name.clone()]).await;
     // wait for a while
@@ -109,19 +109,13 @@ async fn test_passive_online_and_offline() -> Result<()> {
         ])
         .await?;
 
-    assert_eq!(
-        initialized_parallelism - config.compute_node_cores,
-        table_mat_fragment.parallelism()
-    );
+    assert_eq!(initialized_parallelism, table_mat_fragment.parallelism());
 
     let stream_scan_fragment = cluster
         .locate_one_fragment(vec![identity_contains("streamTableScan")])
         .await?;
 
-    assert_eq!(
-        initialized_parallelism - config.compute_node_cores,
-        stream_scan_fragment.parallelism()
-    );
+    assert_eq!(initialized_parallelism, stream_scan_fragment.parallelism());
 
     let single_agg_fragment = cluster
         .locate_one_fragment(vec![
@@ -176,13 +170,13 @@ async fn test_passive_online_and_offline() -> Result<()> {
         ])
         .await?;
 
-    assert_eq!(initialized_parallelism, table_mat_fragment.parallelism());
-
     let stream_scan_fragment = cluster
         .locate_one_fragment(vec![identity_contains("streamTableScan")])
         .await?;
 
-    assert_eq!(initialized_parallelism, stream_scan_fragment.parallelism());
+    let restored_parallelism = config.compute_nodes * config.compute_node_cores;
+    assert_eq!(initialized_parallelism, table_mat_fragment.parallelism());
+    assert_eq!(restored_parallelism, stream_scan_fragment.parallelism());
 
     session
         .run("select count(*) from t")
@@ -264,7 +258,10 @@ async fn test_active_online() -> Result<()> {
 
     let used_worker_slots = table_mat_fragment.used_worker_count();
 
-    assert_eq!(all_worker_slots, used_worker_slots);
+    assert_eq!(
+        all_worker_slots.keys().copied().sorted().collect_vec(),
+        used_worker_slots.keys().copied().sorted().collect_vec()
+    );
     assert_eq!(all_worker_slots.len(), config.compute_nodes);
 
     Ok(())
@@ -301,6 +298,12 @@ async fn test_auto_parallelism_control_with_fixed_and_auto_helper(
     .await;
 
     let mut session = cluster.start_session();
+    session
+        .run("alter system set adaptive_parallelism_strategy to AUTO")
+        .await?;
+    session
+        .run("set streaming_parallelism_for_table = adaptive")
+        .await?;
 
     session.run("create table t (v1 int);").await?;
 

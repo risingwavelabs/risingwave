@@ -630,11 +630,35 @@ impl TableCatalog {
         }
     }
 
-    /// Get columns excluding hidden columns and generated columns.
-    pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
-        self.columns
+    /// Get insertable columns together with the shifted `row_id_index` used by DML.
+    ///
+    /// The returned columns exclude hidden columns and generated columns. The shifted
+    /// `row_id_index` rules out generated columns before the row-id column, matching the DML
+    /// input schema.
+    pub fn columns_to_insert(
+        &self,
+    ) -> (
+        impl Iterator<Item = (&ColumnCatalog, bool)> + '_,
+        Option<usize>,
+    ) {
+        let pk_column_indices: HashSet<_> =
+            self.pk.iter().map(|column| column.column_index).collect();
+        let columns = self
+            .columns
             .iter()
-            .filter(|c| !c.is_hidden() && !c.is_generated())
+            .enumerate()
+            .filter(|(_, c)| !c.is_hidden() && !c.is_generated())
+            .map(move |(idx, column)| (column, pk_column_indices.contains(&idx)));
+        let row_id_index = self.row_id_index.map(|row_id_index| {
+            let generated_column_count = self
+                .columns()
+                .iter()
+                .take(row_id_index + 1)
+                .filter(|column| column.is_generated())
+                .count();
+            row_id_index - generated_column_count
+        });
+        (columns, row_id_index)
     }
 
     pub fn generated_column_names(&self) -> impl Iterator<Item = &str> {
@@ -642,6 +666,15 @@ impl TableCatalog {
             .iter()
             .filter(|c| c.is_generated())
             .map(|c| c.name())
+    }
+
+    pub fn first_generated_column(&self) -> Option<(usize, &str)> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_hidden())
+            .enumerate()
+            .find(|(_, c)| c.is_generated())
+            .map(|(idx, c)| (idx, c.name()))
     }
 
     pub fn generated_col_idxes(&self) -> impl Iterator<Item = usize> + '_ {

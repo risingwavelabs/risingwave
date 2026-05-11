@@ -1564,7 +1564,7 @@ mod tests {
     #[tokio::test]
     async fn test_create() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
             Field::with_name(ty.clone(), "v2"),
@@ -1574,7 +1574,7 @@ mod tests {
         let input = PlanRef::from(values);
         let input_ref_1 = InputRef::new(0, ty.clone());
         let input_ref_2 = InputRef::new(1, ty.clone());
-        let input_ref_3 = InputRef::new(2, ty.clone());
+        let input_ref_3 = InputRef::new(2, ty);
 
         let gen_internal_value = |select_exprs: Vec<ExprImpl>,
                                   group_exprs|
@@ -1716,14 +1716,14 @@ mod tests {
     /// Agg(min(input_ref(2))) group by (input_ref(1))
     ///   TableScan(v1, v2, v3)
     /// ```
-    async fn generate_agg_call(ty: DataType, fields: Vec<Field>) -> LogicalAgg {
-        let ctx = OptimizerContext::mock().await;
+    fn generate_agg_call(ty: DataType, fields: Vec<Field>) -> LogicalAgg {
+        let ctx = OptimizerContext::mock();
 
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let agg_call = PlanAggCall {
             agg_type: PbAggKind::Min.into(),
             return_type: ty.clone(),
-            inputs: vec![InputRef::new(2, ty.clone())],
+            inputs: vec![InputRef::new(2, ty)],
             distinct: false,
             order_by: vec![],
             filter: Condition::true_cond(),
@@ -1750,7 +1750,7 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let agg: PlanRef = generate_agg_call(ty.clone(), fields.clone()).await.into();
+        let agg: PlanRef = generate_agg_call(ty.clone(), fields.clone()).into();
         // Perform the prune
         let required_cols = vec![0, 1];
         let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
@@ -1789,7 +1789,7 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let agg: PlanRef = generate_agg_call(ty.clone(), fields.clone()).await.into();
+        let agg: PlanRef = generate_agg_call(ty.clone(), fields.clone()).into();
         // Perform the prune
         let required_cols = vec![1, 0];
         let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
@@ -1826,7 +1826,7 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_group_key() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
@@ -1889,7 +1889,7 @@ mod tests {
     /// ```
     async fn test_prune_agg() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
             Field::with_name(ty.clone(), "v2"),

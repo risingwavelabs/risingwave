@@ -60,6 +60,7 @@ use risingwave_meta_service::telemetry_service::TelemetryInfoServiceImpl;
 use risingwave_meta_service::user_service::UserServiceImpl;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -526,7 +527,9 @@ pub async fn start_service_as_election_leader(
             env.clone(),
             metadata_manager.clone(),
             barrier_scheduler.clone(),
+            hummock_manager.clone(),
             source_manager.clone(),
+            refresh_manager.clone(),
             scale_controller.clone(),
         )
         .unwrap(),
@@ -790,7 +793,9 @@ pub async fn start_service_as_election_leader(
         .add_service(HostedIcebergCatalogServiceServer::new(
             hosted_iceberg_catalog_srv,
         ))
-        .add_service(MonitorServiceServer::new(monitor_srv));
+        .add_service(configured_monitor_service_server(
+            MonitorServiceServer::new(monitor_srv),
+        ));
 
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));

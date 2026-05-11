@@ -215,7 +215,7 @@ mod tests {
     fn test_basic_grow_and_shrink() {
         let (pool, _) = create_pool(1024);
         let consumer = unspillable_consumer("test");
-        let mut reservation = consumer.register(&pool);
+        let reservation = consumer.register(&pool);
 
         reservation.grow(512);
         assert_eq!(pool.reserved(), 512);
@@ -231,7 +231,7 @@ mod tests {
     fn test_try_grow_within_limit_unspillable() {
         let (pool, _) = create_pool(1024);
         let consumer = unspillable_consumer("test");
-        let mut reservation = consumer.register(&pool);
+        let reservation = consumer.register(&pool);
 
         assert!(reservation.try_grow(512).is_ok());
         assert_eq!(pool.reserved(), 512);
@@ -245,7 +245,7 @@ mod tests {
         // limit=1024, spillable budget = floor(1024 * 0.9) = 921
         let (pool, _) = create_pool(1024);
         let consumer = spillable_consumer("test");
-        let mut reservation = consumer.register(&pool);
+        let reservation = consumer.register(&pool);
 
         assert!(reservation.try_grow(512).is_ok());
         assert_eq!(pool.reserved(), 512);
@@ -262,7 +262,7 @@ mod tests {
     fn test_try_grow_exceeds_limit() {
         let (pool, _) = create_pool(1024);
         let consumer = unspillable_consumer("test");
-        let mut reservation = consumer.register(&pool);
+        let reservation = consumer.register(&pool);
 
         reservation.grow(1024);
 
@@ -283,10 +283,10 @@ mod tests {
         let (pool, _) = create_pool(1024);
 
         let c1 = unspillable_consumer("consumer1");
-        let mut r1 = c1.register(&pool);
+        let r1 = c1.register(&pool);
 
         let c2 = unspillable_consumer("consumer2");
-        let mut r2 = c2.register(&pool);
+        let r2 = c2.register(&pool);
 
         assert!(r1.try_grow(600).is_ok());
         assert!(r2.try_grow(400).is_ok());
@@ -301,8 +301,8 @@ mod tests {
         // limit=1024, spillable budget = 921
         let (pool, _) = create_pool(1024);
 
-        let mut r_unspill = unspillable_consumer("unspillable").register(&pool);
-        let mut r_spill = spillable_consumer("spillable").register(&pool);
+        let r_unspill = unspillable_consumer("unspillable").register(&pool);
+        let r_spill = spillable_consumer("spillable").register(&pool);
 
         // Unspillable takes 103 (the reserved headroom is 1024 - 921 = 103)
         assert!(r_unspill.try_grow(103).is_ok());
@@ -325,8 +325,8 @@ mod tests {
         // limit=1000, spillable budget = floor(1000 * 0.9) = 900
         let (pool_a, pool_b, parent) = create_two_pools(1000);
 
-        let mut r_a = spillable_consumer("a").register(&pool_a);
-        let mut r_b = spillable_consumer("b").register(&pool_b);
+        let r_a = spillable_consumer("a").register(&pool_a);
+        let r_b = spillable_consumer("b").register(&pool_b);
 
         // Pool A takes 450
         assert!(r_a.try_grow(450).is_ok());
@@ -339,7 +339,7 @@ mod tests {
         assert!(r_b.try_grow(1).is_err());
 
         // But unspillable can still use the remaining 100
-        let mut r_unspill = unspillable_consumer("unspill").register(&pool_a);
+        let r_unspill = unspillable_consumer("unspill").register(&pool_a);
         assert!(r_unspill.try_grow(100).is_ok());
         assert_eq!(parent.get_bytes_used(), 1000);
     }
@@ -359,7 +359,7 @@ mod tests {
         let (pool, parent) = create_pool(4096);
 
         let consumer = unspillable_consumer("test");
-        let mut reservation = consumer.register(&pool);
+        let reservation = consumer.register(&pool);
 
         reservation.grow(1000);
         assert_eq!(parent.get_bytes_used(), 1000);

@@ -71,7 +71,7 @@ def _(outer_panels: Panels):
                         panels.target(
                             alert_threshold(
                                 'sum(rate(container_cpu_usage_seconds_total{namespace=~"$namespace",container=~"$component",pod=~"$pod"}[$__rate_interval])) by (namespace, pod) / '
-                                + 'sum(kube_pod_container_resource_limits{namespace=~"$namespace",pod=~"$pod",container=~"$component", resource="cpu"}) by (namespace, pod)',
+                                + 'sum by(namespace, pod) (topk(1, kube_pod_container_resource_limits{namespace=~"$namespace",pod=~"$pod",container=~"$component", resource="cpu"}) by (namespace, pod))',
                                 0.9,
                                 ">",
                             ),

@@ -124,9 +124,9 @@ async fn test_shared_source() -> Result<()> {
 
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
-        1 6 HASH {SOURCE} 6 256
+        1 6 HASH {SOURCE} 4 256
         2 8 HASH {MVIEW} 6 256
-        3 8 HASH {SOURCE_SCAN} 6 256"#]]
+        3 8 HASH {SOURCE_SCAN} 4 256"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
         6 CREATED ADAPTIVE 256
@@ -142,9 +142,9 @@ async fn test_shared_source() -> Result<()> {
         .await?;
 
     expect_test::expect![[r#"
-        1 6 HASH {SOURCE} 6 256
+        1 6 HASH {SOURCE} 4 256
         2 8 HASH {MVIEW} 5 256
-        3 8 HASH {SOURCE_SCAN} 6 256"#]]
+        3 8 HASH {SOURCE_SCAN} 4 256"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
 
     // source is the NoShuffle upstream. It can be scaled, and the downstream SourceBackfill will be scaled together.
@@ -213,8 +213,8 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
 
     validate_splits_aligned(&mut cluster).await?;
     expect_test::expect![[r#"
-        1 6 HASH {SOURCE} 6 256
-        2 8 HASH {MVIEW,SOURCE_SCAN} 6 256
+        1 6 HASH {SOURCE} 4 256
+        2 8 HASH {MVIEW,SOURCE_SCAN} 4 256
         3 8 SINGLE {NOW} 1 1
         4 8 SINGLE {NOW} 1 1"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);

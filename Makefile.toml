@@ -598,7 +598,6 @@ dependencies = [
     "download-minio",
     "download-lakekeeper",
     "download-prometheus",
-    "download-pubsub",
     "download-redis",
     "download-moat"
 ]
@@ -1511,7 +1510,18 @@ private = true
 category = "Misc"
 description = "Generate default config and write to src/config/example.toml"
 script = '''
-UPDATE_EXPECT=1 cargo test --package risingwave_common --lib -- config::tests::test_example_up_to_date
+#!/usr/bin/env bash
+set -euo pipefail
+
+# In git worktrees, a shared `CARGO_TARGET_DIR` can reuse binaries from another checkout and write
+# `UPDATE_EXPECT` outputs to the wrong directory. Pin paths to this checkout.
+WORKDIR="${CARGO_MAKE_WORKING_DIRECTORY:-$(pwd)}"
+
+UPDATE_EXPECT=1 \
+CARGO_WORKSPACE_DIR="${WORKDIR}" \
+CARGO_TARGET_DIR="${WORKDIR}/target" \
+cargo test --manifest-path "${WORKDIR}/Cargo.toml" --package risingwave_common --lib -- \
+  config::tests::test_example_up_to_date
 '''
 
 [tasks.generate-with-options]

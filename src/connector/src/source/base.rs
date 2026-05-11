@@ -21,7 +21,7 @@ use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::future::try_join_all;
 use futures::stream::BoxStream;
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
@@ -168,7 +168,7 @@ pub async fn create_split_readers<P: SourceProperties>(
     source_ctx: SourceContextRef,
     columns: Option<Vec<Column>>,
     opt: CreateSplitReaderOpt,
-) -> Result<(BoxSourceChunkStream, CreateSplitReaderResult)> {
+) -> Result<(BoxSourceReaderEventStream, CreateSplitReaderResult)> {
     let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
     let mut res = CreateSplitReaderResult {
         backfill_info: HashMap::new(),
@@ -187,7 +187,7 @@ pub async fn create_split_readers<P: SourceProperties>(
             res.latest_splits = Some(reader.seek_to_latest().await?);
         }
         res.backfill_info = reader.backfill_info();
-        Ok((reader.into_stream().boxed(), res))
+        Ok((reader.into_event_stream().boxed(), res))
     } else {
         let mut readers = try_join_all(splits.into_iter().map(|split| {
             // TODO: is this reader split across multiple threads...? Realistically, we want
@@ -210,7 +210,7 @@ pub async fn create_split_readers<P: SourceProperties>(
         }
         res.backfill_info = readers.iter().flat_map(|r| r.backfill_info()).collect();
         Ok((
-            select_all(readers.into_iter().map(|r| r.into_stream())).boxed(),
+            select_all(readers.into_iter().map(|r| r.into_event_stream())).boxed(),
             res,
         ))
     }
@@ -546,14 +546,32 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
 /// Stream of [`SourceMessage`]. Messages flow through the stream in the unit of a batch.
 pub type BoxSourceMessageStream =
     BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+/// Stream of source message events.
+pub type BoxSourceMessageEventStream =
+    BoxStream<'static, crate::error::ConnectorResult<SourceMessageEvent>>;
 /// Stream of [`StreamChunk`]s parsed from the messages from the external source.
 pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+/// Stream of source reader events.
+pub type BoxSourceReaderEventStream =
+    BoxStream<'static, crate::error::ConnectorResult<SourceReaderEvent>>;
 /// `StreamChunk` with the latest split state.
 /// The state is constructed in `StreamReaderBuilder::into_retry_stream`
 pub type StreamChunkWithState = (StreamChunk, HashMap<SplitId, SplitImpl>);
 /// See [`StreamChunkWithState`].
 pub type BoxSourceChunkWithStateStream =
     BoxStream<'static, crate::error::ConnectorResult<StreamChunkWithState>>;
+
+#[derive(Debug)]
+pub enum SourceMessageEvent {
+    Data(Vec<SourceMessage>),
+    SplitProgress(HashMap<SplitId, String>),
+}
+
+#[derive(Debug)]
+pub enum SourceReaderEvent {
+    DataChunk(StreamChunk),
+    SplitProgress(HashMap<SplitId, String>),
+}
 
 /// Stream of [`Option<StreamChunk>`]s parsed from the messages from the external source.
 pub type BoxStreamingFileSourceChunkStream =
@@ -588,6 +606,12 @@ pub trait SplitReader: Sized + Send {
     ) -> crate::error::ConnectorResult<Self>;
 
     fn into_stream(self) -> BoxSourceChunkStream;
+
+    fn into_event_stream(self) -> BoxSourceReaderEventStream {
+        self.into_stream()
+            .map_ok(SourceReaderEvent::DataChunk)
+            .boxed()
+    }
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()
@@ -676,13 +700,18 @@ impl ConnectorProperties {
         // enable split scale in just for Kinesis
         matches!(
             self,
-            ConnectorProperties::Kinesis(_) | ConnectorProperties::Nats(_)
+            ConnectorProperties::Kinesis(_)
+                | ConnectorProperties::Nats(_)
+                | ConnectorProperties::GooglePubsub(_)
         )
     }
 
     /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.
     pub fn enable_adaptive_splits(&self) -> bool {
-        matches!(self, ConnectorProperties::Nats(_))
+        matches!(
+            self,
+            ConnectorProperties::Nats(_) | ConnectorProperties::GooglePubsub(_)
+        )
     }
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
@@ -720,7 +749,10 @@ impl ConnectorProperties {
         source_ctx: SourceContextRef,
         columns: Option<Vec<Column>>,
         mut opt: crate::source::CreateSplitReaderOpt,
-    ) -> Result<(BoxSourceChunkStream, crate::source::CreateSplitReaderResult)> {
+    ) -> Result<(
+        BoxSourceReaderEventStream,
+        crate::source::CreateSplitReaderResult,
+    )> {
         opt.support_multiple_splits = self.support_multiple_splits();
         tracing::debug!(
             ?splits,

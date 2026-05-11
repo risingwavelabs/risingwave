@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::future::try_join_all;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode};
 
@@ -33,28 +34,26 @@ impl MergeExecutorBuilder {
         info: ExecutorInfo,
         node: &MergeNode,
         chunk_size: usize,
-    ) -> StreamResult<MergeExecutorInput> {
+    ) -> StreamResult<Option<MergeExecutorInput>> {
+        let Some(upstream_actors) = actor_context
+            .initial_upstream_actors
+            .get(&node.upstream_fragment_id)
+        else {
+            return Ok(None);
+        };
         let upstream_fragment_id = node.get_upstream_fragment_id();
 
-        let inputs: Vec<_> = try_join_all(
-            actor_context
-                .initial_upstream_actors
-                .get(&node.upstream_fragment_id)
-                .map(|actors| actors.actors.iter())
-                .into_iter()
-                .flatten()
-                .map(|upstream_actor| {
-                    new_input(
-                        &local_barrier_manager,
-                        executor_stats.clone(),
-                        actor_context.id,
-                        actor_context.fragment_id,
-                        upstream_actor,
-                        upstream_fragment_id,
-                        actor_context.config.clone(),
-                    )
-                }),
-        )
+        let inputs: Vec<_> = try_join_all(upstream_actors.actors.iter().map(|upstream_actor| {
+            new_input(
+                &local_barrier_manager,
+                executor_stats.clone(),
+                actor_context.id,
+                actor_context.fragment_id,
+                upstream_actor,
+                upstream_fragment_id,
+                actor_context.config.clone(),
+            )
+        }))
         .await?;
 
         // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
@@ -80,14 +79,14 @@ impl MergeExecutorBuilder {
             ))
         };
 
-        Ok(MergeExecutorInput::new(
+        Ok(Some(MergeExecutorInput::new(
             upstreams,
             actor_context,
             upstream_fragment_id,
             local_barrier_manager,
             executor_stats,
             info,
-        ))
+        )))
     }
 }
 
@@ -99,9 +98,9 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         node: &Self::Node,
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let barrier_rx = params
-            .local_barrier_manager
-            .subscribe_barrier(params.actor_context.id);
+        let actor_id = params.actor_context.id;
+        let fragment_id = params.actor_context.fragment_id;
+        let barrier_rx = params.local_barrier_manager.subscribe_barrier(actor_id);
         Ok(Self::new_input(
             params.local_barrier_manager,
             params.executor_stats,
@@ -111,6 +110,13 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             params.config.developer.chunk_size,
         )
         .await?
+        .ok_or_else(|| {
+            anyhow!(
+                "no upstream actors found for actor {} in fragment {}",
+                actor_id,
+                fragment_id
+            )
+        })?
         .into_executor(barrier_rx))
     }
 }

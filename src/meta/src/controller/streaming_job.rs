@@ -169,7 +169,7 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
 }
 
 impl CatalogController {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
@@ -599,6 +599,12 @@ impl CatalogController {
             .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
             .collect_vec();
 
+        // Collect fragment IDs before consuming `fragments` for serving mapping notification.
+        let inserted_fragment_ids: Vec<crate::model::FragmentId> = fragments
+            .iter()
+            .map(|f| f.fragment_id as crate::model::FragmentId)
+            .collect();
+
         if !fragments.is_empty() {
             let fragment_models = fragments
                 .into_iter()
@@ -681,6 +687,13 @@ impl CatalogController {
         }
 
         txn.commit().await?;
+
+        // Notify serving module about newly inserted fragments so it can establish
+        // serving vnode mappings. This is driven by the fragment model insertion,
+        // decoupled from the barrier-driven streaming mapping notifications.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_update(inserted_fragment_ids);
 
         // FIXME: there's a gap between the catalog creation and notification, which may lead to
         // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
@@ -887,41 +900,14 @@ impl CatalogController {
             objs.extend(internal_table_objs);
         }
 
-        // Check if the job is creating sink into table.
-        if table_obj.is_none()
-            && let Some(Some(target_table_id)) = Sink::find_by_id(job_id.as_sink_id())
-                .select_only()
-                .column(sink::Column::TargetTable)
-                .into_tuple::<Option<TableId>>()
-                .one(&txn)
-                .await?
-        {
-            let tmp_id: Option<ObjectId> = ObjectDependency::find()
-                .select_only()
-                .column(object_dependency::Column::UsedBy)
-                .join(
-                    JoinType::InnerJoin,
-                    object_dependency::Relation::Object1.def(),
-                )
-                .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-                .filter(
-                    object_dependency::Column::Oid
-                        .eq(target_table_id)
-                        .and(object::Column::ObjType.eq(ObjectType::Table))
-                        .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
-                )
-                .into_tuple()
-                .one(&txn)
-                .await?;
-            if let Some(tmp_id) = tmp_id {
-                tracing::warn!(
-                    id = %tmp_id,
-                    "aborting temp streaming job for sink into table"
-                );
-
-                Object::delete_by_id(tmp_id).exec(&txn).await?;
-            }
-        }
+        // Query fragment IDs before cascade-deleting them, for serving mapping cleanup.
+        let abort_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(job_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
 
         Object::delete_by_id(job_id).exec(&txn).await?;
         if !internal_table_ids.is_empty() {
@@ -953,6 +939,13 @@ impl CatalogController {
             let _ = tx.send(Err(abort_reason.clone()));
         }
         txn.commit().await?;
+
+        // Notify serving module about deleted fragments from the aborted job.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_delete(
+                abort_fragment_ids.iter().map(|id| *id as _).collect(),
+            );
 
         if !objs.is_empty() {
             // We also have notified the frontend about these objects,
@@ -1376,18 +1369,28 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        let (objects, delete_notification_objs) = Self::finish_replace_streaming_job_inner(
-            tmp_id,
-            replace_upstream,
-            sink_into_table_context,
-            &txn,
-            streaming_job,
-            drop_table_connector_ctx,
-            auto_refresh_schema_sinks,
-        )
-        .await?;
+        let (objects, delete_notification_objs, old_fragment_ids, new_fragment_ids) =
+            Self::finish_replace_streaming_job_inner(
+                tmp_id,
+                replace_upstream,
+                sink_into_table_context,
+                &txn,
+                streaming_job,
+                drop_table_connector_ctx,
+                auto_refresh_schema_sinks,
+            )
+            .await?;
 
         txn.commit().await?;
+
+        // Notify serving module: delete old fragment mappings, upsert new ones.
+        let notification_manager = self.env.notification_manager();
+        notification_manager.notify_serving_fragment_mapping_delete(
+            old_fragment_ids.iter().map(|id| *id as _).collect(),
+        );
+        notification_manager.notify_serving_fragment_mapping_update(
+            new_fragment_ids.iter().map(|id| *id as _).collect(),
+        );
 
         let mut version = self
             .notify_frontend(
@@ -1478,9 +1481,30 @@ impl CatalogController {
         streaming_job: StreamingJob,
         drop_table_connector_ctx: Option<&DropTableConnectorContext>,
         auto_refresh_schema_sinks: Option<Vec<FinishAutoRefreshSchemaSinkContext>>,
-    ) -> MetaResult<(Vec<PbObject>, Option<(Vec<PbUserInfo>, Vec<PartialObject>)>)> {
+    ) -> MetaResult<(
+        Vec<PbObject>,
+        Option<(Vec<PbUserInfo>, Vec<PartialObject>)>,
+        Vec<FragmentId>,
+        Vec<FragmentId>,
+    )> {
         let original_job_id = streaming_job.id();
         let job_type = streaming_job.job_type();
+
+        // Query old fragment IDs (will be deleted) and new fragment IDs (will be reassigned).
+        let old_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(original_job_id))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        let new_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.eq(tmp_id))
+            .into_tuple()
+            .all(txn)
+            .await?;
 
         let mut index_item_rewriter = None;
         let mut updated_iceberg_source_id: Option<SourceId> = None;
@@ -1798,11 +1822,12 @@ impl CatalogController {
                         ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job.clone()).into(),
                     )),
                 });
-                if let Some((log_store_table_id, new_log_store_table_columns)) =
-                    finish_sink_context.new_log_store_table
-                {
+                if let Some(new_log_store_table) = finish_sink_context.new_log_store_table {
+                    let log_store_table_id = new_log_store_table.id;
                     let new_log_store_table_columns: ColumnCatalogArray =
-                        new_log_store_table_columns.into();
+                        new_log_store_table.columns.clone().into();
+                    let new_log_store_table_value_indices =
+                        new_log_store_table.value_indices.clone();
                     let (mut table, table_obj) = Table::find_by_id(log_store_table_id)
                         .find_also_related(Object)
                         .one(txn)
@@ -1811,11 +1836,13 @@ impl CatalogController {
                     Table::update(table::ActiveModel {
                         table_id: Set(log_store_table_id),
                         columns: Set(new_log_store_table_columns.clone()),
+                        value_indices: Set(new_log_store_table_value_indices.clone().into()),
                         ..Default::default()
                     })
                     .exec(txn)
                     .await?;
                     table.columns = new_log_store_table_columns;
+                    table.value_indices = new_log_store_table_value_indices.into();
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
                             ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
@@ -1832,7 +1859,12 @@ impl CatalogController {
                 Some(Self::drop_table_associated_source(txn, drop_table_connector_ctx).await?);
         }
 
-        Ok((objects, notification_objs))
+        Ok((
+            objects,
+            notification_objs,
+            old_fragment_ids,
+            new_fragment_ids,
+        ))
     }
 
     /// Abort the replacing streaming job by deleting the temporary job object.
@@ -1843,6 +1875,20 @@ impl CatalogController {
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+
+        // Query fragment IDs of the temp job and temp sinks before cascade-deleting them.
+        let mut all_job_ids: Vec<ObjectId> = vec![tmp_job_id.into()];
+        if let Some(ref sink_ids) = tmp_sink_ids {
+            all_job_ids.extend(sink_ids.iter().copied());
+        }
+        let abort_fragment_ids: Vec<FragmentId> = Fragment::find()
+            .select_only()
+            .column(fragment::Column::FragmentId)
+            .filter(fragment::Column::JobId.is_in(all_job_ids))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
         Object::delete_by_id(tmp_job_id).exec(&txn).await?;
         if let Some(tmp_sink_ids) = tmp_sink_ids {
             for tmp_sink_id in tmp_sink_ids {
@@ -1850,6 +1896,14 @@ impl CatalogController {
             }
         }
         txn.commit().await?;
+
+        // Notify serving module about deleted fragments from the aborted replace job.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_delete(
+                abort_fragment_ids.iter().map(|id| *id as _).collect(),
+            );
+
         Ok(())
     }
 
@@ -2846,12 +2900,40 @@ impl CatalogController {
                         .map(|secret_ref| secret_ref.to_protobuf())
                         .unwrap_or_default(),
                 );
-                let (_source_to_add_secret_dep, _source_to_remove_secret_dep) =
+                let (source_to_add_secret_dep, source_to_remove_secret_dep) =
                     source_options_with_secret
                         .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
 
                 // Validate the updated source properties
                 let _ = ConnectorProperties::extract(source_options_with_secret.clone(), true)?;
+
+                // Keep source-level secret dependencies in sync with the source properties that
+                // are rewritten from the altered connection.
+                let source_used_by_id = source
+                    .optional_associated_table_id
+                    .map(|table_id| table_id.as_object_id())
+                    .unwrap_or_else(|| source_id.as_object_id());
+                if !source_to_add_secret_dep.is_empty() {
+                    ObjectDependency::insert_many(source_to_add_secret_dep.into_iter().map(
+                        |secret_id| object_dependency::ActiveModel {
+                            oid: Set(secret_id.into()),
+                            used_by: Set(source_used_by_id),
+                            ..Default::default()
+                        },
+                    ))
+                    .exec(&txn)
+                    .await?;
+                }
+                if !source_to_remove_secret_dep.is_empty() {
+                    let _ = ObjectDependency::delete_many()
+                        .filter(
+                            object_dependency::Column::Oid
+                                .is_in(source_to_remove_secret_dep)
+                                .and(object_dependency::Column::UsedBy.eq(source_used_by_id)),
+                        )
+                        .exec(&txn)
+                        .await?;
+                }
 
                 // Prepare source update
                 let active_source = source::ActiveModel {
@@ -3348,7 +3430,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
     pub tmp_sink_id: SinkId,
     pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
-    pub new_log_store_table: Option<(TableId, Vec<PbColumnCatalog>)>,
+    pub new_log_store_table: Option<Box<PbTable>>,
 }
 
 async fn update_connector_props_fragments<F>(

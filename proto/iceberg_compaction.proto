@@ -15,12 +15,29 @@ message SubscribeIcebergCompactionEventRequest {
     uint32 pull_task_count = 1;
   }
 
+  message ReportTask {
+    enum Status {
+      UNSPECIFIED = 0;
+      SUCCESS = 1;
+      FAILED = 2;
+    }
+
+    uint64 task_id = 1;
+    uint32 sink_id = 2;
+    Status status = 3;
+    reserved 4, 5;
+    optional string error_message = 6;
+  }
+
   oneof event {
     // Compactor will register its own context_id with Meta via Register and establish a bi-directional streaming rpc.
     Register register = 1;
 
     // Compactor will recalculate the number of tasks needed locally after receiving the PullTaskAck and get the next batch of tasks from Meta via PullTask.
     PullTask pull_task = 2;
+
+    // Compactor reports the final task result back to Meta after all plans in the task finish.
+    ReportTask report_task = 4;
   }
 
   uint64 create_at = 3;
@@ -44,6 +61,7 @@ message IcebergCompactionTask {
   }
 
   TaskType task_type = 3;
+  uint32 sink_id = 4;
 }
 
 message SubscribeIcebergCompactionEventResponse {

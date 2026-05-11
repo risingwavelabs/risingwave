@@ -558,7 +558,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 ) => {
                     match complete_result {
                         Ok(output) => {
-                            self.checkpoint_control.ack_completed(output);
+                            self.checkpoint_control.ack_completed(&mut self.partial_graph_manager, output);
                         }
                         Err(e) => {
                             self.failure_recovery(e).await;
@@ -807,11 +807,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         );
                     }
                     Ok(Ok(hummock_version_stats)) => {
-                        self.checkpoint_control
-                            .ack_completed(BarrierCompleteOutput {
+                        self.checkpoint_control.ack_completed(
+                            &mut self.partial_graph_manager,
+                            BarrierCompleteOutput {
                                 epochs_to_ack,
                                 hummock_version_stats,
-                            });
+                            },
+                        );
                     }
                 }
             }
@@ -1143,7 +1145,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else if let Some(database) = collected_databases.remove(&database_id) {
                                         warn!(%database_id, %worker_id, "database initialized but later reset during global recovery");
-                                        let resetting_partial_graphs: HashSet<_> = database_partial_graphs(database_id, database.creating_streaming_job_controls.keys().copied()).collect();
+                                        let resetting_partial_graphs: HashSet<_> = database_partial_graphs(database_id, database.independent_checkpoint_job_controls.keys().copied()).collect();
                                         partial_graph_manager.reset_partial_graphs(resetting_partial_graphs.iter().copied());
                                         assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else {

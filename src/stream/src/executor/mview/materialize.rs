@@ -213,7 +213,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         input: Executor,
         schema: Schema,
@@ -297,7 +297,13 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(op_consistency_level)
             .enable_preload_all_rows_by_config(&actor_context.config)
-            .enable_vnode_key_stats(true, &actor_context.config)
+            .enable_vnode_key_stats(
+                actor_context
+                    .config
+                    .developer
+                    .enable_vnode_key_stats_for_materialize,
+                &actor_context.config,
+            )
             .with_metrics(state_table_metrics)
             .build()
             .await;
@@ -1121,7 +1127,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     }
 
     #[cfg(any(test, feature = "test"))]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn for_test_with_stream_key(
         input: Executor,
         store: S,
@@ -1146,7 +1152,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     }
 
     #[cfg(any(test, feature = "test"))]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn for_test_inner(
         input: Executor,
         store: S,
