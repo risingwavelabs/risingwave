@@ -58,7 +58,87 @@ use crate::executor::{
 use crate::task::CreateMviewProgressReporter;
 
 pub type PkRangeBounds = (Bound<OwnedRow>, Bound<OwnedRow>);
-pub type PkScanRange = (OwnedRow, PkRangeBounds);
+
+pub struct PkScanRange {
+    pk_prefix: OwnedRow,
+    range_bounds: PkRangeBounds,
+}
+
+impl PkScanRange {
+    fn full() -> Self {
+        Self {
+            pk_prefix: OwnedRow::default(),
+            range_bounds: (Bound::Unbounded, Bound::Unbounded),
+        }
+    }
+
+    /// Decode a scan range (eq prefix + range bounds) from the scan range proto.
+    fn from_protobuf(
+        pb_scan_range: &ScanRange,
+        upstream_table: &BatchTable<impl StateStore>,
+    ) -> StreamExecutorResult<Self> {
+        let pk_types = upstream_table.pk_serializer().get_data_types();
+        let mut index = 0;
+        let pk_prefix = OwnedRow::new(
+            pb_scan_range
+                .eq_conds
+                .iter()
+                .map(|v| {
+                    let ty = pk_types
+                        .get(index)
+                        .ok_or_else(|| anyhow!("pk_prefix index out of bounds"))?;
+                    index += 1;
+                    Ok(deserialize_datum(v.as_slice(), ty)?)
+                })
+                .collect::<StreamExecutorResult<Vec<_>>>()?,
+        );
+
+        if pb_scan_range.lower_bound.is_none() && pb_scan_range.upper_bound.is_none() {
+            return Ok(Self {
+                pk_prefix,
+                range_bounds: (Bound::Unbounded, Bound::Unbounded),
+            });
+        }
+
+        let build_bound =
+            |bound: &scan_range::Bound, idx: usize| -> StreamExecutorResult<Bound<OwnedRow>> {
+                let mut i = idx;
+                let row = OwnedRow::new(
+                    bound
+                        .value
+                        .iter()
+                        .map(|v| {
+                            let ty = pk_types
+                                .get(i)
+                                .ok_or_else(|| anyhow!("range bound index out of bounds"))?;
+                            i += 1;
+                            Ok(deserialize_datum(v.as_slice(), ty)?)
+                        })
+                        .collect::<StreamExecutorResult<Vec<_>>>()?,
+                );
+                if bound.inclusive {
+                    Ok(Bound::Included(row))
+                } else {
+                    Ok(Bound::Excluded(row))
+                }
+            };
+
+        let range_bounds = match (
+            pb_scan_range.lower_bound.as_ref(),
+            pb_scan_range.upper_bound.as_ref(),
+        ) {
+            (Some(lb), Some(ub)) => (build_bound(lb, index)?, build_bound(ub, index)?),
+            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub, index)?),
+            (Some(lb), None) => (build_bound(lb, index)?, Bound::Unbounded),
+            (None, None) => unreachable!(),
+        };
+
+        Ok(Self {
+            pk_prefix,
+            range_bounds,
+        })
+    }
+}
 
 pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// Upstream table
@@ -85,73 +165,17 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
 
     snapshot_epoch: Option<u64>,
     /// (`eq_prefix`, `range_bounds`) for pk scan range pushdown.
-    pk_scan_range: Option<PkScanRange>,
+    pk_scan_range: PkScanRange,
 }
 
 impl<S: StateStore> SnapshotBackfillExecutor<S> {
-    /// Decode a scan range (eq prefix + range bounds) from the scan range proto.
-    fn decode_pk_scan_range(
+    fn build_pk_scan_range(
         pb_scan_range: Option<&ScanRange>,
         upstream_table: &BatchTable<S>,
-    ) -> StreamExecutorResult<Option<PkScanRange>> {
-        let Some(pb_scan_range) = pb_scan_range else {
-            return Ok(None);
-        };
-
-        let pk_types = upstream_table.pk_serializer().get_data_types();
-        let mut index = 0;
-        let pk_prefix = OwnedRow::new(
-            pb_scan_range
-                .eq_conds
-                .iter()
-                .map(|v| {
-                    let ty = pk_types
-                        .get(index)
-                        .ok_or_else(|| anyhow!("pk_prefix index out of bounds"))?;
-                    index += 1;
-                    Ok(deserialize_datum(v.as_slice(), ty)?)
-                })
-                .collect::<StreamExecutorResult<Vec<_>>>()?,
-        );
-
-        if pb_scan_range.lower_bound.is_none() && pb_scan_range.upper_bound.is_none() {
-            return Ok(Some((pk_prefix, (Bound::Unbounded, Bound::Unbounded))));
-        }
-
-        let build_bound =
-            |bound: &scan_range::Bound, idx: usize| -> StreamExecutorResult<Bound<OwnedRow>> {
-                let mut i = idx;
-                let row = OwnedRow::new(
-                    bound
-                        .value
-                        .iter()
-                        .map(|v| {
-                            let ty = pk_types
-                                .get(i)
-                                .ok_or_else(|| anyhow!("range bound index out of bounds"))?;
-                            i += 1;
-                            Ok(deserialize_datum(v.as_slice(), ty)?)
-                        })
-                        .collect::<StreamExecutorResult<Vec<_>>>()?,
-                );
-                if bound.inclusive {
-                    Ok(Bound::Included(row))
-                } else {
-                    Ok(Bound::Excluded(row))
-                }
-            };
-
-        let next_col_bounds: PkRangeBounds = match (
-            pb_scan_range.lower_bound.as_ref(),
-            pb_scan_range.upper_bound.as_ref(),
-        ) {
-            (Some(lb), Some(ub)) => (build_bound(lb, index)?, build_bound(ub, index)?),
-            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub, index)?),
-            (Some(lb), None) => (build_bound(lb, index)?, Bound::Unbounded),
-            (None, None) => unreachable!(),
-        };
-
-        Ok(Some((pk_prefix, next_col_bounds)))
+    ) -> StreamExecutorResult<PkScanRange> {
+        pb_scan_range
+            .map(|scan_range| PkScanRange::from_protobuf(scan_range, upstream_table))
+            .unwrap_or_else(|| Ok(PkScanRange::full()))
     }
 
     #[expect(clippy::too_many_arguments)]
@@ -180,7 +204,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 upstream_table.schema()
             )
         };
-        let pk_scan_range = Self::decode_pk_scan_range(pb_pk_scan_range, &upstream_table)?;
+        let pk_scan_range = Self::build_pk_scan_range(pb_pk_scan_range, &upstream_table)?;
         if !matches!(rate_limit, RateLimit::Disabled) {
             trace!(
                 ?rate_limit,
@@ -312,7 +336,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             first_recv_barrier_epoch,
                             initial_backfill_paused,
                             &self.actor_ctx,
-                            self.pk_scan_range.as_ref(),
+                            &self.pk_scan_range,
                         );
 
                         pin_mut!(snapshot_stream);
@@ -998,7 +1022,7 @@ async fn make_snapshot_stream(
     rate_limit: RateLimit,
     chunk_size: usize,
     snapshot_rebuild_interval: Duration,
-    pk_scan_range: Option<&PkScanRange>,
+    pk_scan_range: &PkScanRange,
 ) -> StreamExecutorResult<
     VnodeStream<Pin<Box<dyn Stream<Item = StreamExecutorResult<ChangeLogRow>> + Send>>>,
 > {
@@ -1021,38 +1045,21 @@ async fn make_snapshot_stream(
             };
             start_pk.map(|(start_pk, row_count)| {
                 async move {
-                    let stream: BoxedChangeLogRowStream =
-                        if let Some((pk_prefix, range_bounds)) = pk_scan_range {
-                            Box::pin(
-                                upstream_table
-                                    .batch_iter_vnode_with_pk_range(
-                                        HummockReadEpoch::Committed(snapshot_epoch),
-                                        start_pk,
-                                        pk_prefix,
-                                        range_bounds,
-                                        vnode,
-                                        PrefetchOptions::prefetch_for_large_range_scan(),
-                                        snapshot_rebuild_interval,
-                                    )
-                                    .await?
-                                    .map_ok(ChangeLogRow::Insert)
-                                    .map_err(Into::into),
+                    let stream: BoxedChangeLogRowStream = Box::pin(
+                        upstream_table
+                            .batch_iter_vnode_with_pk_range(
+                                HummockReadEpoch::Committed(snapshot_epoch),
+                                start_pk,
+                                &pk_scan_range.pk_prefix,
+                                &pk_scan_range.range_bounds,
+                                vnode,
+                                PrefetchOptions::prefetch_for_large_range_scan(),
+                                snapshot_rebuild_interval,
                             )
-                        } else {
-                            Box::pin(
-                                upstream_table
-                                    .batch_iter_vnode(
-                                        HummockReadEpoch::Committed(snapshot_epoch),
-                                        start_pk,
-                                        vnode,
-                                        PrefetchOptions::prefetch_for_large_range_scan(),
-                                        snapshot_rebuild_interval,
-                                    )
-                                    .await?
-                                    .map_ok(ChangeLogRow::Insert)
-                                    .map_err(Into::into),
-                            )
-                        };
+                            .await?
+                            .map_ok(ChangeLogRow::Insert)
+                            .map_err(Into::into),
+                    );
                     Ok::<_, StreamExecutorError>((vnode, stream, row_count))
                 }
                 .boxed()
@@ -1081,7 +1088,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     first_recv_barrier_epoch: EpochPair,
     initial_backfill_paused: bool,
     actor_ctx: &'a ActorContextRef,
-    pk_scan_range: Option<&'a PkScanRange>,
+    pk_scan_range: &'a PkScanRange,
 ) {
     let mut barrier_epoch = first_recv_barrier_epoch;
 
