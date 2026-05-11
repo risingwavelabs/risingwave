@@ -93,6 +93,11 @@ pub struct SessionConfig {
     #[parameter(default = false, alias = "rw_implicit_flush")]
     implicit_flush: bool,
 
+    /// If `DML_WAIT_PERSISTENCE` is on, then every INSERT/UPDATE/DELETE statement waits until
+    /// the transaction is included in a checkpoint. This is ignored when `IMPLICIT_FLUSH` is on.
+    #[parameter(default = false)]
+    dml_wait_persistence: bool,
+
     /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
     /// MV creation.
     #[parameter(default = false)]

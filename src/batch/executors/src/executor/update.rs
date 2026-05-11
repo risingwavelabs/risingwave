@@ -50,6 +50,7 @@ pub struct UpdateExecutor {
     txn_id: TxnId,
     session_id: u32,
     upsert: bool,
+    wait_for_persistence: bool,
 }
 
 impl UpdateExecutor {
@@ -66,6 +67,7 @@ impl UpdateExecutor {
         returning: bool,
         session_id: u32,
         upsert: bool,
+        wait_for_persistence: bool,
     ) -> Self {
         let chunk_size = chunk_size.next_multiple_of(2);
         let table_schema = child.schema().clone();
@@ -91,6 +93,7 @@ impl UpdateExecutor {
             txn_id,
             session_id,
             upsert,
+            wait_for_persistence,
         }
     }
 }
@@ -208,7 +211,11 @@ impl UpdateExecutor {
         if let Some(chunk) = builder.take() {
             write_txn_data(chunk).await?;
         }
-        write_handle.end().await?;
+        if self.wait_for_persistence {
+            write_handle.end_wait_persistence()?.await?;
+        } else {
+            write_handle.end().await?;
+        }
 
         // Create ret value
         if !self.returning {
@@ -261,6 +268,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             update_node.returning,
             update_node.session_id,
             update_node.upsert,
+            update_node.wait_for_persistence,
         )))
     }
 }
