@@ -14,12 +14,12 @@
 
 use std::collections::VecDeque;
 use std::future::{Future, pending};
-use std::mem::replace;
 use std::pin::Pin;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::future::{Either, select};
+use pin_project::pin_project;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan;
@@ -155,6 +155,7 @@ fn dispatching_future(mut inner: DispatchExecutorInner, message: Message) -> Dis
 
 /// State machine for the consumer side, which reads chunks from the log store and dispatches
 /// chunks or barriers downstream.
+#[pin_project(project = ConsumerFutureProj, project_replace = ConsumerFutureProjReplace)]
 enum ConsumerFuture {
     /// Polls the log store for the next chunk. The read future is kept outside this state machine
     /// so both meaningful states can share it.
@@ -162,7 +163,8 @@ enum ConsumerFuture {
     /// Dispatches the current message downstream. Any barrier received while dispatching is queued
     /// here and dispatched before reading another chunk.
     Dispatching {
-        future: Pin<Box<DispatchingFuture>>,
+        #[pin]
+        future: DispatchingFuture,
         barrier_queue: VecDeque<Message>,
     },
     /// Temporary placeholder used while moving fields out during state transitions.
@@ -178,7 +180,7 @@ impl ConsumerFuture {
     fn dispatch(inner: DispatchExecutorInner, message: Message) -> Self {
         tracing::trace!("consumer_future: dispatching future created");
         Self::Dispatching {
-            future: Box::pin(dispatching_future(inner, message)),
+            future: dispatching_future(inner, message),
             barrier_queue: VecDeque::new(),
         }
     }
@@ -188,21 +190,29 @@ impl ConsumerFuture {
         Self::ReadingChunk { inner }
     }
 
-    fn push_barrier(&mut self, barrier: Barrier) {
+    fn push_barrier(mut self: Pin<&mut Self>, barrier: Barrier) {
         let message = Message::Barrier(barrier);
-        match self {
-            ConsumerFuture::ReadingChunk { .. } => {
-                let inner = must_match!(
-                    replace(self, ConsumerFuture::PlaceHolder),
-                    ConsumerFuture::ReadingChunk { inner } => inner
-                );
-                *self = Self::dispatch(inner, message);
-            }
-            ConsumerFuture::Dispatching { barrier_queue, .. } => {
+        if matches!(
+            self.as_mut().project(),
+            ConsumerFutureProj::ReadingChunk { .. }
+        ) {
+            let inner = must_match!(
+                self.as_mut().project_replace(ConsumerFuture::PlaceHolder),
+                ConsumerFutureProjReplace::ReadingChunk { inner } => inner
+            );
+            self.set(Self::dispatch(inner, message));
+            return;
+        }
+
+        match self.project() {
+            ConsumerFutureProj::Dispatching { barrier_queue, .. } => {
                 barrier_queue.push_front(message);
             }
-            ConsumerFuture::PlaceHolder => {
+            ConsumerFutureProj::PlaceHolder => {
                 unreachable!("ConsumerFuture::PlaceHolder should be handled!")
+            }
+            ConsumerFutureProj::ReadingChunk { .. } => {
+                unreachable!("ConsumerFuture::ReadingChunk should be handled!")
             }
         }
     }
@@ -224,7 +234,7 @@ impl ConsumerFuture {
 
     #[expect(clippy::too_many_arguments)]
     async fn next_event<S: StateStoreRead>(
-        &mut self,
+        mut self: Pin<&mut Self>,
         read_future: &mut ReadFuture<S>,
         read_paused: bool,
         clean_state: &mut bool,
@@ -234,50 +244,66 @@ impl ConsumerFuture {
         metrics: &SyncedKvLogStoreMetrics,
     ) -> StreamResult<ConsumerFutureEvent> {
         loop {
-            match self {
-                ConsumerFuture::ReadingChunk { .. } => {
-                    if read_paused {
-                        pending().await
-                    }
-                    
-                    let chunk = read_future
-                        .next_chunk(progress, read_state, buffer, metrics)
-                        .await?;
-                    metrics.total_read_count.inc_by(chunk.cardinality() as _);
-
-                    let clean_state_reached =
-                        Self::mark_clean_state(clean_state, read_future, buffer, metrics);
-                    let inner = must_match!(
-                        replace(self, ConsumerFuture::PlaceHolder),
-                        ConsumerFuture::ReadingChunk { inner } => inner
-                    );
-                    *self = Self::dispatch(inner, Message::Chunk(chunk));
-
-                    if clean_state_reached {
-                        return Ok(ConsumerFutureEvent::CleanStateReached);
-                    }
+            if matches!(
+                self.as_mut().project(),
+                ConsumerFutureProj::ReadingChunk { .. }
+            ) {
+                if read_paused {
+                    pending().await
                 }
-                ConsumerFuture::Dispatching {
-                    future,
-                    barrier_queue,
-                } => {
-                    let (inner, result) = future.as_mut().await;
-                    let barrier = result?;
 
-                    if let Some(next_barrier) = barrier_queue.pop_back() {
-                        tracing::trace!("consumer_future: dispatching future created");
-                        *future = Box::pin(dispatching_future(inner, next_barrier));
-                    } else {
-                        *self = Self::read_chunk(inner);
-                    }
+                let chunk = read_future
+                    .next_chunk(progress, read_state, buffer, metrics)
+                    .await?;
+                metrics.total_read_count.inc_by(chunk.cardinality() as _);
 
-                    if let Some(barrier) = barrier {
-                        return Ok(ConsumerFutureEvent::BarrierDispatched(barrier));
-                    }
+                let clean_state_reached =
+                    Self::mark_clean_state(clean_state, read_future, buffer, metrics);
+                let inner = must_match!(
+                    self.as_mut().project_replace(ConsumerFuture::PlaceHolder),
+                    ConsumerFutureProjReplace::ReadingChunk { inner } => inner
+                );
+                self.set(Self::dispatch(inner, Message::Chunk(chunk)));
+
+                if clean_state_reached {
+                    return Ok(ConsumerFutureEvent::CleanStateReached);
                 }
-                ConsumerFuture::PlaceHolder => {
-                    unreachable!("ConsumerFuture::PlaceHolder should be handled!")
-                }
+                continue;
+            }
+
+            if matches!(self.as_mut().project(), ConsumerFutureProj::PlaceHolder) {
+                unreachable!("ConsumerFuture::PlaceHolder should be handled!")
+            }
+
+            let (inner, result) = {
+                let ConsumerFutureProj::Dispatching { future, .. } = self.as_mut().project() else {
+                    unreachable!("ConsumerFuture::ReadingChunk should be handled!")
+                };
+                future.await
+            };
+            let barrier = result?;
+
+            let next_barrier = {
+                let ConsumerFutureProj::Dispatching { barrier_queue, .. } = self.as_mut().project()
+                else {
+                    unreachable!("ConsumerFuture::ReadingChunk should be handled!")
+                };
+                barrier_queue.pop_back()
+            };
+
+            if let Some(next_barrier) = next_barrier {
+                tracing::trace!("consumer_future: dispatching future created");
+                let ConsumerFutureProj::Dispatching { mut future, .. } = self.as_mut().project()
+                else {
+                    unreachable!("ConsumerFuture::ReadingChunk should be handled!")
+                };
+                future.set(dispatching_future(inner, next_barrier));
+            } else {
+                self.set(Self::read_chunk(inner));
+            }
+
+            if let Some(barrier) = barrier {
+                return Ok(ConsumerFutureEvent::BarrierDispatched(barrier));
             }
         }
     }
@@ -367,7 +393,8 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
 
             let mut progress = LogStoreVnodeProgress::None;
             let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
-            let mut consumer_future_state = ConsumerFuture::ReadingChunk { inner: self.inner };
+            let consumer_future_state = ConsumerFuture::ReadingChunk { inner: self.inner };
+            pin_mut!(consumer_future_state);
 
             let mut write_future_state =
                 WriteFuture::receive_from_upstream(input, initial_write_state);
@@ -377,6 +404,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 let select_result = {
                     let consumer_future = async {
                         consumer_future_state
+                            .as_mut()
                             .next_event(
                                 &mut read_future_state,
                                 pause_stream,
@@ -468,7 +496,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                                 write_state,
                                             );
                                         }
-                                        consumer_future_state.push_barrier(barrier);
+                                        consumer_future_state.as_mut().push_barrier(barrier);
                                     }
                                 }
                                 // TODO: handle upstream watermark in sync log store dispatch.
