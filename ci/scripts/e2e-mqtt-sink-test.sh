@@ -20,15 +20,12 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-download_and_prepare_rw "$profile" source
+sink_test_env_setup "$profile" --risedev-profile ci-sink-mqtt-test
 
-echo "--- starting risingwave cluster"
-cargo make ci-start ci-sink-test
-sleep 1
-
-export MQTT_URL="tcp://mqtt-server:1883"
-export RISEDEV_MQTT_URL="tcp://mqtt-server:1883"
-export RISEDEV_MQTT_WITH_OPTIONS_COMMON="connector='mqtt',url='tcp://mqtt-server:1883'"
+set -a
+# shellcheck source=/dev/null
+source .risingwave/config/risedev-env
+set +a
 
 echo "--- testing mqtt sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/mqtt_sink.slt'
@@ -36,4 +33,4 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/mqtt_sink.slt'
 sleep 1
 
 echo "--- Kill cluster"
-cargo make ci-kill
+risedev ci-kill

@@ -30,11 +30,10 @@ use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
-    LakekeeperService, MetaNodeService, MinioService, MoatService, MySqlService, PostgresService,
-    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService, MqttService,
-    NatsService,
-    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
-    TempoService, generate_risedev_env, preflight_check,
+    LakekeeperService, MetaNodeService, MinioService, MoatService, MqttService, MySqlService,
+    NatsService, PostgresService, PrometheusService, PubsubService, PulsarService, RISEDEV_NAME,
+    RedisService, SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task,
+    TaskGroup, TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;

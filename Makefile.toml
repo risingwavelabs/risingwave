@@ -804,7 +804,7 @@ fi
 
 set -x
 target/debug/risedev-dev ${@}
-if [[ "${profile}" == "local-deltalake-sink-test" ]]; then
+if [[ "${profile}" == "deltalake-sink-test" ]]; then
   ./e2e_test/commands/deltalake_prepare
 fi
 '''
