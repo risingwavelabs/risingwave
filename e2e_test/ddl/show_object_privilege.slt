@@ -4,6 +4,10 @@
 statement ok
 CREATE USER show_acl_user WITH PASSWORD 'password';
 
+skipif madsim
+system ok
+bash -c 'set -euo pipefail; psql -h "$SLT_HOST" -p "$SLT_PORT" -U root -d "$SLT_DB" -c "GRANT CONNECT ON DATABASE \"$SLT_DB\" TO show_acl_user"'
+
 statement ok
 CREATE SCHEMA show_acl;
 
@@ -21,6 +25,16 @@ CREATE MATERIALIZED VIEW show_acl.hidden_mv AS SELECT v1 FROM show_acl.hidden_ta
 
 statement ok
 CREATE VIEW show_acl.hidden_view AS SELECT v1 FROM show_acl.hidden_table;
+
+statement ok
+CREATE SOURCE show_acl.hidden_source (v INT) WITH (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end = '10',
+    datagen.rows.per.second = '15',
+    datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE SECRET show_acl.hidden_secret WITH (backend = 'meta') AS 'http://example.invalid';
@@ -45,6 +59,10 @@ bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$S
 skipif madsim
 system ok
 bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW MATERIALIZED VIEWS FROM show_acl;"); ! grep -q "hidden_mv" <<<"$out"'
+
+skipif madsim
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW SOURCES FROM show_acl;"); ! grep -q "hidden_source" <<<"$out"'
 
 skipif madsim
 system ok
@@ -88,6 +106,13 @@ GRANT SELECT ON VIEW show_acl.hidden_view TO show_acl_user;
 skipif madsim
 system ok
 bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW VIEWS FROM show_acl;"); grep -q "show_acl.hidden_view" <<<"$out"'
+
+statement ok
+GRANT SELECT ON SOURCE show_acl.hidden_source TO show_acl_user;
+
+skipif madsim
+system ok
+bash -c 'set -euo pipefail; for i in {1..20}; do out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_user -d "$SLT_DB" -Atc "SHOW SOURCES FROM show_acl;"); grep -q "show_acl.hidden_source" <<<"$out" && exit 0; sleep 1; done; echo "$out"; exit 1'
 
 statement ok
 DROP SECRET show_acl.hidden_secret;

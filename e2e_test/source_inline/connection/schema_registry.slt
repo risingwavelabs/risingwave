@@ -57,6 +57,9 @@ drop connection schema_registry_conn;
 statement ok
 CREATE USER show_acl_conn_user WITH PASSWORD 'password';
 
+system ok
+bash -c 'set -euo pipefail; psql -h "$SLT_HOST" -p "$SLT_PORT" -U root -d "$SLT_DB" -c "GRANT CONNECT ON DATABASE \"$SLT_DB\" TO show_acl_conn_user"'
+
 statement ok
 CREATE SCHEMA show_acl_conn;
 
