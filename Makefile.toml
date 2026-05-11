@@ -598,7 +598,6 @@ dependencies = [
     "download-minio",
     "download-lakekeeper",
     "download-prometheus",
-    "download-pubsub",
     "download-redis",
     "download-moat"
 ]

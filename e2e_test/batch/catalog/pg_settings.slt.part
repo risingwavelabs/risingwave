@@ -71,6 +71,7 @@ user source_rate_limit
 user standard_conforming_strings
 user statement_timeout
 user streaming_allow_jsonb_in_stream_key
+user streaming_asof_join_use_cache
 user streaming_enable_bushy_join
 user streaming_enable_delta_join
 user streaming_enable_unaligned_join

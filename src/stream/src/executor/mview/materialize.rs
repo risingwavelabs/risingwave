@@ -213,7 +213,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         input: Executor,
         schema: Schema,
@@ -1127,7 +1127,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     }
 
     #[cfg(any(test, feature = "test"))]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn for_test_with_stream_key(
         input: Executor,
         store: S,
@@ -1152,7 +1152,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     }
 
     #[cfg(any(test, feature = "test"))]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn for_test_inner(
         input: Executor,
         store: S,

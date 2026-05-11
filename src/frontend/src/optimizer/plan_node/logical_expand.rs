@@ -198,7 +198,7 @@ mod tests {
         // FD: v1 --> { v2, v3 }
         // output: [v1, v2, v3, flag],
         // FD: { v1, flag } --> { v2, v3 }
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),

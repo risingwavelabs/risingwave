@@ -296,7 +296,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
             compaction_executor.spawn(async move {
                 match check_flush_result(
                     left_iter,
-                    Vec::from_iter(existing_table_ids.iter().cloned()),
                     sst_infos,
                     context,
                 )
@@ -563,7 +562,6 @@ impl SharedBufferCompactRunner {
                 cache_policy: CachePolicy::Fill(Hint::Normal),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 retain_multiple_version: true,
-                stats_target_table_ids: None,
                 table_vnode_partition,
                 use_block_based_filter,
                 table_schemas: Default::default(),

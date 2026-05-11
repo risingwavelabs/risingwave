@@ -185,6 +185,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             column_descs.clone(),
             1024,
             RateLimit::Disabled,
+            memory_state_store.clone(),
         )
         .boxed(),
     );

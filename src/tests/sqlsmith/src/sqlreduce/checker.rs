@@ -24,7 +24,7 @@ use tokio_postgres::{Client, NoTls};
 #[derive(Debug, Clone)]
 struct PanicInfo {
     component: String,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     message: String,
 }
 

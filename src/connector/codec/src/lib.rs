@@ -14,7 +14,6 @@
 
 //! Encoding and decoding between external data formats and RisingWave datum (i.e., type mappings).
 
-#![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]

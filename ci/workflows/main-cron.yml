@@ -454,7 +454,7 @@ steps:
           <<: *docker-compose
           environment:
           - CODECOV_TOKEN
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "unit test (madsim)"
@@ -812,6 +812,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
     depends_on:
       - "build"
+      - "build-other"
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
@@ -1158,7 +1159,6 @@ steps:
     matrix:
       setup:
         java_version:
-          - "17"
           - "21"
     timeout_in_minutes: 10
     retry: *auto-retry

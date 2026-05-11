@@ -67,7 +67,7 @@ pub struct BatchEnvironment {
 }
 
 impl BatchEnvironment {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         task_manager: Arc<BatchManager>,
         server_addr: HostAddr,
