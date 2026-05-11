@@ -1,0 +1,60 @@
+name: file-sink unit tests
+
+# Runs the `risingwave_connector` unit tests that cover the Hive-style
+# partitioning logic added by this fork. Scoped to the file_sink module
+# (and its config files / docs) so that PRs touching other crates do not
+# pay the connector build cost.
+
+on:
+  pull_request:
+    paths:
+      - 'src/connector/src/sink/file_sink/**'
+      - 'src/connector/src/sink/mod.rs'
+      - 'src/connector/with_options_sink.yaml'
+      - 'docs/dev/src/connector/file_sink_hive_partitioning.md'
+      - 'rust-toolchain'
+      - '.github/workflows/file-sink-tests.yml'
+  push:
+    branches:
+      - main
+      - 'claude/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            protobuf-compiler \
+            libsasl2-dev \
+            libopenblas-dev \
+            libomp-dev \
+            cmake \
+            pkg-config
+
+      - name: Rust toolchain (from rust-toolchain file)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-10
+          components: rustfmt
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: file-sink-tests
+          # The connector crate has a heavy dep graph; cache the workspace
+          # build artefacts across PRs to keep CI runtime tractable.
+          cache-on-failure: true
+
+      - name: Format check
+        run: cargo fmt --check -p risingwave_connector
+
+      - name: Run file_sink unit tests
+        run: |
+          cargo test -p risingwave_connector --lib \
+            sink::file_sink::opendal_sink::
