@@ -73,9 +73,13 @@ use tracing::Instrument;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
-use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
+use crate::controller::streaming_job::{
+    AbortCreatingStreamingJobReason, AbortCreatingStreamingJobResult,
+    FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext,
+};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
+use crate::hummock::HummockManagerRef;
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -92,10 +96,11 @@ use crate::stream::cdc::{
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
-    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
-    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalRefreshManagerRef,
+    GlobalStreamManagerRef, ReplaceStreamJobContext, ReschedulePolicy, SourceChange,
+    SourceManagerRef, StreamFragmentGraph, UpstreamSinkInfo,
+    check_sink_fragments_support_refresh_schema, cleanup_dropped_streaming_jobs,
+    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -348,6 +353,37 @@ impl CreatingStreamingJobPermit {
         });
 
         Self { semaphore }
+    }
+}
+
+/// Try to abort a creating streaming job and clean up Hummock state only if the abort happens.
+pub(crate) async fn try_abort_creating_streaming_job_and_cleanup(
+    metadata_manager: &MetadataManager,
+    refresh_manager: &GlobalRefreshManagerRef,
+    hummock_manager: &HummockManagerRef,
+    job_id: JobId,
+    reason: AbortCreatingStreamingJobReason,
+) -> MetaResult<bool> {
+    let abort_result = metadata_manager
+        .catalog_controller
+        .try_abort_creating_streaming_job(job_id, reason)
+        .await?;
+    match abort_result {
+        AbortCreatingStreamingJobResult::Aborted {
+            state_table_ids, ..
+        } => {
+            cleanup_dropped_streaming_jobs(
+                refresh_manager,
+                hummock_manager,
+                metadata_manager,
+                [job_id],
+                state_table_ids,
+                "abort_creating_streaming_job",
+            )
+            .await?;
+            Ok(true)
+        }
+        AbortCreatingStreamingJobResult::LeftForRecovery => Ok(false),
     }
 }
 
@@ -1113,14 +1149,16 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let (aborted, _) = self
-                    .metadata_manager
-                    .catalog_controller
-                    .try_abort_creating_streaming_job(job_id, false)
-                    .await?;
+                let aborted = try_abort_creating_streaming_job_and_cleanup(
+                    &self.metadata_manager,
+                    &self.stream_manager.refresh_manager,
+                    &self.stream_manager.hummock_manager,
+                    job_id,
+                    AbortCreatingStreamingJobReason::CreateFailed,
+                )
+                .await?;
                 if aborted {
                     tracing::warn!(id = %job_id, "aborted streaming job");
-                    // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
                         self.source_manager
                             .apply_source_change(SourceChange::DropSource {
@@ -1705,10 +1743,14 @@ impl DdlController {
             .await?;
         let version = match job_status {
             JobStatus::Initial => {
-                self.metadata_manager
-                    .catalog_controller
-                    .try_abort_creating_streaming_job(job_id.id(), true)
-                    .await?;
+                try_abort_creating_streaming_job_and_cleanup(
+                    &self.metadata_manager,
+                    &self.stream_manager.refresh_manager,
+                    &self.stream_manager.hummock_manager,
+                    job_id.id(),
+                    AbortCreatingStreamingJobReason::Cancelled,
+                )
+                .await?;
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {

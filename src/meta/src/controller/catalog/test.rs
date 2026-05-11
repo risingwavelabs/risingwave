@@ -14,12 +14,23 @@
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
     use tokio::sync::oneshot;
 
+    use crate::barrier::BarrierScheduler;
     use crate::controller::catalog::*;
+    use crate::controller::streaming_job::AbortCreatingStreamingJobReason;
+    use crate::hummock::HummockManagerRef;
+    use crate::hummock::test_utils::{register_table_ids_to_compaction_group, setup_compute_env};
+    use crate::manager::MetadataManager;
+    use crate::rpc::ddl_controller::try_abort_creating_streaming_job_and_cleanup;
+    use crate::stream::{GlobalRefreshManager, GlobalRefreshManagerRef};
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
     const TEST_SCHEMA_ID: SchemaId = SchemaId::new(2);
@@ -261,9 +272,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_abort_initial_materialized_view_reports_cancellation() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+    async fn test_abort_initial_materialized_views_unregister_hummock() -> MetaResult<()> {
+        let (env, hummock_manager, cluster_controller, _) = setup_compute_env(80).await;
+        let mgr = Arc::new(CatalogController::new(env.clone()).await?);
+        let metadata_manager = MetadataManager::new(cluster_controller, mgr.clone());
+        let (barrier_scheduler, _) =
+            BarrierScheduler::new_pair(hummock_manager.clone(), Arc::new(Default::default()));
+        let (refresh_manager, refresh_join_handle, refresh_shutdown_tx) =
+            GlobalRefreshManager::start(
+                metadata_manager.clone(),
+                barrier_scheduler,
+                &env,
+                Duration::from_secs(60),
+            )
+            .await?;
 
+        abort_initial_materialized_view_and_check_hummock_cleanup(
+            &mgr,
+            &metadata_manager,
+            &refresh_manager,
+            &hummock_manager,
+            CreateType::Foreground,
+            AbortCreatingStreamingJobReason::Cancelled,
+            "foreground_cancel",
+        )
+        .await?;
+        abort_initial_materialized_view_and_check_hummock_cleanup(
+            &mgr,
+            &metadata_manager,
+            &refresh_manager,
+            &hummock_manager,
+            CreateType::Background,
+            AbortCreatingStreamingJobReason::Cancelled,
+            "background_cancel",
+        )
+        .await?;
+        abort_initial_materialized_view_and_check_hummock_cleanup(
+            &mgr,
+            &metadata_manager,
+            &refresh_manager,
+            &hummock_manager,
+            CreateType::Foreground,
+            AbortCreatingStreamingJobReason::CreateFailed,
+            "foreground_failure",
+        )
+        .await?;
+
+        let _ = refresh_shutdown_tx.send(());
+        let _ = refresh_join_handle.await;
+        Ok(())
+    }
+
+    async fn abort_initial_materialized_view_and_check_hummock_cleanup(
+        mgr: &Arc<CatalogController>,
+        metadata_manager: &MetadataManager,
+        refresh_manager: &GlobalRefreshManagerRef,
+        hummock_manager: &HummockManagerRef,
+        create_type: CreateType,
+        reason: AbortCreatingStreamingJobReason,
+        name_suffix: &str,
+    ) -> MetaResult<()> {
         let mut inner = mgr.inner.write().await;
         let txn = inner.db.begin().await?;
         let obj = CatalogController::create_object(
@@ -278,7 +346,7 @@ mod tests {
 
         table::ActiveModel {
             table_id: Set(obj.oid.as_table_id()),
-            name: Set("mv_abort_initial".to_owned()),
+            name: Set(format!("mv_abort_initial_{name_suffix}")),
             optional_associated_source_id: Set(None),
             table_type: Set(TableType::MaterializedView),
             belongs_to_job_id: Set(None),
@@ -291,7 +359,9 @@ mod tests {
             vnode_col_index: Set(None),
             row_id_index: Set(None),
             value_indices: Set(Vec::<i32>::new().into()),
-            definition: Set("CREATE MATERIALIZED VIEW mv_abort_initial AS SELECT 1".to_owned()),
+            definition: Set(format!(
+                "CREATE MATERIALIZED VIEW mv_abort_initial_{name_suffix} AS SELECT 1"
+            )),
             handle_pk_conflict_behavior: Set(HandleConflictBehavior::NoCheck),
             version_column_indices: Set(None),
             read_prefix_len_hint: Set(0),
@@ -319,7 +389,7 @@ mod tests {
         streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Initial),
-            create_type: Set(CreateType::Foreground),
+            create_type: Set(create_type),
             timezone: Set(None),
             config_override: Set(None),
             adaptive_parallelism_strategy: Set(None),
@@ -338,15 +408,40 @@ mod tests {
         txn.commit().await?;
         drop(inner);
 
-        let (aborted, database_id) = mgr.try_abort_creating_streaming_job(job_id, true).await?;
+        let state_table_id = job_id.as_mv_table_id();
+        register_table_ids_to_compaction_group(
+            hummock_manager,
+            &[state_table_id],
+            StaticCompactionGroupId::StateDefault,
+        )
+        .await;
+        assert!(
+            hummock_manager
+                .get_current_version()
+                .await
+                .state_table_info
+                .compaction_group_member_table_ids(StaticCompactionGroupId::StateDefault)
+                .contains(&state_table_id)
+        );
+
+        let aborted = try_abort_creating_streaming_job_and_cleanup(
+            metadata_manager,
+            refresh_manager,
+            hummock_manager,
+            job_id,
+            reason,
+        )
+        .await?;
         assert!(aborted);
-        assert_eq!(database_id, Some(TEST_DATABASE_ID));
 
         let err = rx
             .await
             .expect("finish notifier should be notified")
-            .expect_err("initial job drop should cancel the create wait");
-        assert!(err.contains("cancelled"));
+            .expect_err("initial job abort should fail the create wait");
+        match reason {
+            AbortCreatingStreamingJobReason::Cancelled => assert!(err.contains("cancelled")),
+            AbortCreatingStreamingJobReason::CreateFailed => assert!(err.contains("not found")),
+        }
 
         let db = &mgr.inner.read().await.db;
         assert!(Object::find_by_id(job_id).one(db).await?.is_none());
@@ -356,6 +451,14 @@ mod tests {
                 .one(db)
                 .await?
                 .is_none()
+        );
+        assert!(
+            !hummock_manager
+                .get_current_version()
+                .await
+                .state_table_info
+                .compaction_group_member_table_ids(StaticCompactionGroupId::StateDefault)
+                .contains(&state_table_id)
         );
 
         Ok(())

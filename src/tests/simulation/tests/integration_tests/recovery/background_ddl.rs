@@ -17,9 +17,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use risingwave_common::catalog::TableId;
 use risingwave_common::error::AsReport;
-use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use tokio::time::sleep;
 
@@ -154,75 +152,6 @@ async fn wait_for_stream_job_and_member_tables(
     ))
 }
 
-async fn compaction_group_id_by_table_id(
-    session: &mut Session,
-    table_id: u32,
-) -> Result<CompactionGroupId> {
-    Ok(session
-        .run(format!(
-            "SELECT id FROM rw_hummock_compaction_group_configs WHERE member_tables @> '[{table_id}]'::jsonb;"
-        ))
-        .await?
-        .parse::<CompactionGroupId>()?)
-}
-
-async fn sstable_ids_by_table_id(session: &mut Session, table_id: u32) -> Result<Vec<u64>> {
-    let rows = session
-        .run(format!(
-            "SELECT sstable_id FROM rw_hummock_sstables WHERE table_ids @> '[{table_id}]'::jsonb ORDER BY sstable_id;"
-        ))
-        .await?;
-    rows.lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(|line| Ok(u64::from_str(line.trim())?))
-        .collect()
-}
-
-async fn wait_for_sstable_ids_by_table_id(
-    session: &mut Session,
-    table_id: u32,
-) -> Result<Vec<u64>> {
-    for _ in 0..60 {
-        let sstable_ids = sstable_ids_by_table_id(session, table_id).await?;
-        if !sstable_ids.is_empty() {
-            return Ok(sstable_ids);
-        }
-        sleep(Duration::from_secs(1)).await;
-    }
-    Err(anyhow!("failed to observe sstables for table {}", table_id))
-}
-
-async fn wait_for_compaction_group_sstable_count(
-    session: &mut Session,
-    compaction_group_id: CompactionGroupId,
-    expected_at_least: usize,
-) -> Result<usize> {
-    for _ in 0..60 {
-        let count = session
-            .run(format!(
-                "SELECT COUNT(*) FROM rw_hummock_sstables WHERE compaction_group_id = {compaction_group_id};"
-            ))
-            .await?
-            .parse::<usize>()?;
-        if count >= expected_at_least {
-            return Ok(count);
-        }
-        sleep(Duration::from_secs(1)).await;
-    }
-    Err(anyhow!(
-        "failed to observe at least {} sstables in compaction group {}",
-        expected_at_least,
-        compaction_group_id
-    ))
-}
-
-async fn compactor_worker_count(session: &mut Session) -> Result<usize> {
-    Ok(session
-        .run("SELECT COUNT(*) FROM rw_catalog.rw_worker_nodes WHERE \"type\" = 'Compactor';")
-        .await?
-        .parse::<usize>()?)
-}
-
 fn init_logger() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -237,7 +166,7 @@ async fn create_mv(session: &mut Session) -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_snapshot_backfill_cancel_database_recovery_manual_compaction_attempt() {
+async fn test_snapshot_backfill_failed_foreground_ddl_unregisters_table_ids() {
     init_logger();
     let mut config = Configuration::for_auto_parallelism(MAX_HEARTBEAT_INTERVAL_SEC, true);
     config.compute_nodes = 3;
@@ -293,7 +222,7 @@ async fn test_snapshot_backfill_cancel_database_recovery_manual_compaction_attem
     let baseline_member_tables = member_table_ids(&mut session).await.unwrap();
 
     let mut create_session = cluster.start_session();
-    tokio::spawn(async move {
+    let create_handle = tokio::spawn(async move {
         create_session.run("use group1;").await.unwrap();
         create_session
             .run("set background_ddl = false;")
@@ -307,43 +236,17 @@ async fn test_snapshot_backfill_cancel_database_recovery_manual_compaction_attem
             .run("set backfill_rate_limit = 1;")
             .await
             .unwrap();
-        let _ = create_session
+        create_session
             .run("create materialized view mv1 as select * from t;")
-            .await;
+            .await
     });
 
     let created_member_tables =
         wait_for_stream_job_and_member_tables(&mut session, &baseline_member_tables)
             .await
             .unwrap();
-    let candidate_table_id = *created_member_tables.iter().min().unwrap();
-    let candidate_sstable_ids = wait_for_sstable_ids_by_table_id(&mut session, candidate_table_id)
-        .await
-        .unwrap();
-    let original_compaction_group_id =
-        compaction_group_id_by_table_id(&mut session, candidate_table_id)
-            .await
-            .unwrap();
-    cluster
-        .split_compaction_group(
-            original_compaction_group_id,
-            TableId::new(candidate_table_id),
-        )
-        .await
-        .unwrap();
-    let candidate_compaction_group_id =
-        compaction_group_id_by_table_id(&mut session, candidate_table_id)
-            .await
-            .unwrap();
-    wait_for_compaction_group_sstable_count(&mut session, candidate_compaction_group_id, 1)
-        .await
-        .unwrap();
     tracing::info!(
         ?created_member_tables,
-        candidate_table_id,
-        ?candidate_sstable_ids,
-        ?original_compaction_group_id,
-        ?candidate_compaction_group_id,
         "observed creating snapshot-backfill state tables"
     );
 
@@ -363,18 +266,15 @@ async fn test_snapshot_backfill_cancel_database_recovery_manual_compaction_attem
         .await
         .unwrap();
 
-    let mut cancel_session = cluster.start_session();
-    let cancel_handle = tokio::spawn(async move { cancel_stream_jobs(&mut cancel_session).await });
-
     sleep(Duration::from_millis(100)).await;
     cluster.simple_restart_nodes(["compute-1"]).await;
     wait_all_database_recovered(&mut cluster).await;
     sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC)).await;
 
-    let cancel_result = cancel_handle.await.unwrap();
-    tracing::info!(
-        ?cancel_result,
-        "cancel result after concurrent database recovery"
+    let create_result = create_handle.await.unwrap();
+    assert!(
+        create_result.is_err(),
+        "foreground DDL should fail when database recovery interrupts it, got {create_result:?}"
     );
 
     let database_recovery_events = database_recovery_events(&mut monitor_session)
@@ -394,89 +294,28 @@ async fn test_snapshot_backfill_cancel_database_recovery_manual_compaction_attem
 
     session.run("use group1;").await.unwrap();
     wait_for_jobs_cleared(&mut session).await.unwrap();
+    wait_member_table_ids(&mut session, &baseline_member_tables)
+        .await
+        .unwrap();
     let member_tables_after_recovery = member_table_ids(&mut session).await.unwrap();
-    let dangling_member_tables = created_member_tables
+    let remaining_created_member_tables = created_member_tables
         .intersection(&member_tables_after_recovery)
         .copied()
         .collect::<HashSet<_>>();
     tracing::info!(
         ?created_member_tables,
         ?member_tables_after_recovery,
-        ?dangling_member_tables,
-        "member tables after concurrent cancel and database recovery"
-    );
-    assert!(
-        !dangling_member_tables.is_empty(),
-        "failed to keep created state tables in hummock member tables after recovery"
-    );
-    assert!(
-        dangling_member_tables.contains(&candidate_table_id),
-        "failed to keep candidate table {} in hummock member tables after recovery; dangling tables: {:?}",
-        candidate_table_id,
-        dangling_member_tables
-    );
-
-    let compactor_count_before = compactor_worker_count(&mut session).await.unwrap();
-    let sstable_count_before =
-        wait_for_compaction_group_sstable_count(&mut session, candidate_compaction_group_id, 1)
-            .await
-            .unwrap();
-    cluster
-        .simple_kill_nodes(["compactor-1", "compactor-2"])
-        .await;
-    wait_until(
-        &mut session,
-        "SELECT COUNT(*) FROM rw_catalog.rw_worker_nodes WHERE \"type\" = 'Compactor';",
-        "0",
-    )
-    .await
-    .unwrap();
-    cluster
-        .simple_restart_nodes(["compactor-1", "compactor-2"])
-        .await;
-    wait_until(
-        &mut session,
-        "SELECT COUNT(*) FROM rw_catalog.rw_worker_nodes WHERE \"type\" = 'Compactor';",
-        &compactor_count_before.to_string(),
-    )
-    .await
-    .unwrap();
-    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC)).await;
-    tracing::info!(
-        candidate_table_id,
-        ?candidate_compaction_group_id,
-        compactor_count_before,
-        sstable_count_before,
-        "triggering manual compaction on stale table compaction group after compactor restart"
-    );
-
-    cluster
-        .trigger_manual_compaction(candidate_compaction_group_id, 0)
-        .await
-        .unwrap();
-    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC)).await;
-
-    let compactor_count_after = compactor_worker_count(&mut session).await.unwrap();
-    let sstable_count_after =
-        wait_for_compaction_group_sstable_count(&mut session, candidate_compaction_group_id, 1)
-            .await
-            .unwrap();
-    let candidate_sstable_ids_after = sstable_ids_by_table_id(&mut session, candidate_table_id)
-        .await
-        .unwrap();
-    tracing::info!(
-        candidate_table_id,
-        ?candidate_compaction_group_id,
-        compactor_count_before,
-        compactor_count_after,
-        sstable_count_before,
-        sstable_count_after,
-        ?candidate_sstable_ids_after,
-        "manual compaction result for stale table compaction group"
+        ?remaining_created_member_tables,
+        "member tables after failed foreground DDL and database recovery"
     );
     assert_eq!(
-        compactor_count_after, compactor_count_before,
-        "manual compaction crashed a compactor worker"
+        member_tables_after_recovery, baseline_member_tables,
+        "failed foreground DDL should clean Hummock member tables back to the baseline"
+    );
+    assert!(
+        remaining_created_member_tables.is_empty(),
+        "failed foreground DDL left created state tables in Hummock member tables: {:?}",
+        remaining_created_member_tables
     );
 }
 

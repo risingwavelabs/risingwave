@@ -99,6 +99,28 @@ use crate::model::{
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
+/// Why a creating streaming job is being aborted.
+///
+/// This reason controls whether a live background creating job may be left for recovery and what
+/// error is reported to create waiters. Once the job is decided to be aborted, catalog and Hummock
+/// cleanup are the same for both reasons.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AbortCreatingStreamingJobReason {
+    Cancelled,
+    CreateFailed,
+}
+
+/// Result of trying to abort a creating streaming job.
+///
+/// A background creating job can be left for recovery instead of being aborted.
+pub(crate) enum AbortCreatingStreamingJobResult {
+    Aborted {
+        database_id: Option<DatabaseId>,
+        state_table_ids: Vec<TableId>,
+    },
+    LeftForRecovery,
+}
+
 /// A planned fragment update for dependent sources when a connection's properties change.
 ///
 /// We keep it as a named struct (instead of a tuple) for readability and to avoid clippy
@@ -748,15 +770,18 @@ impl CatalogController {
         })
     }
 
-    /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
-    /// It returns (true, _) if the job is not found or aborted.
-    /// It returns (_, Some(`database_id`)) is the `database_id` of the `job_id` exists
+    /// `try_abort_creating_streaming_job` is used to abort a streaming job that is under
+    /// initial status or in `FOREGROUND` mode.
+    ///
+    /// It returns `LeftForRecovery` only when a background creating job should be left for
+    /// recovery. Otherwise, `Aborted` carries the table ids that must be unregistered after the
+    /// catalog abort.
     #[await_tree::instrument]
-    pub async fn try_abort_creating_streaming_job(
+    pub(crate) async fn try_abort_creating_streaming_job(
         &self,
         mut job_id: JobId,
-        is_cancelled: bool,
-    ) -> MetaResult<(bool, Option<DatabaseId>)> {
+        reason: AbortCreatingStreamingJobReason,
+    ) -> MetaResult<AbortCreatingStreamingJobResult> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -766,14 +791,19 @@ impl CatalogController {
                 id = %job_id,
                 "streaming job not found when aborting creating, might be cancelled already or cleaned by recovery"
             );
-            return Ok((true, None));
+            return Ok(AbortCreatingStreamingJobResult::Aborted {
+                database_id: None,
+                state_table_ids: vec![],
+            });
         };
         let database_id = obj
             .database_id
             .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
         let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
 
-        if !is_cancelled && let Some(streaming_job) = &streaming_job {
+        if reason == AbortCreatingStreamingJobReason::CreateFailed
+            && let Some(streaming_job) = &streaming_job
+        {
             assert_ne!(streaming_job.job_status, JobStatus::Created);
             if streaming_job.create_type == CreateType::Background
                 && streaming_job.job_status == JobStatus::Creating
@@ -788,7 +818,7 @@ impl CatalogController {
                         id = %job_id,
                         "streaming job is created in background and still in creating status"
                     );
-                    return Ok((false, Some(database_id)));
+                    return Ok(AbortCreatingStreamingJobResult::LeftForRecovery);
                 }
             }
         }
@@ -830,25 +860,24 @@ impl CatalogController {
             }
         }
 
-        if is_cancelled {
-            let dropped_tables = Table::find()
-                .find_also_related(Object)
-                .filter(
-                    table::Column::TableId.is_in(
-                        internal_table_ids
-                            .iter()
-                            .cloned()
-                            .chain(table_obj.iter().map(|t| t.table_id as _)),
-                    ),
-                )
-                .all(&txn)
-                .await?
-                .into_iter()
-                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
-            inner
-                .dropped_tables
-                .extend(dropped_tables.map(|t| (t.id, t)));
-        }
+        let state_table_ids = internal_table_ids
+            .iter()
+            .copied()
+            .chain(table_obj.iter().map(|t| t.table_id as _))
+            .unique()
+            .collect_vec();
+        // Keep table catalogs so the caller can notify Hummock and compactor after unregistering
+        // the aborted job table ids.
+        let dropped_tables = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::TableId.is_in(state_table_ids.clone()))
+            .all(&txn)
+            .await?
+            .into_iter()
+            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
+        inner
+            .dropped_tables
+            .extend(dropped_tables.map(|t| (t.id, t)));
 
         if need_notify {
             // Special handling for iceberg sinks: the `job_id` may have been rewritten to the table id.
@@ -922,10 +951,14 @@ impl CatalogController {
             Object::delete_by_id(source_id).exec(&txn).await?;
         }
 
-        let err = if is_cancelled {
-            MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
-        } else {
-            MetaError::catalog_id_not_found("stream job", format!("streaming job {job_id} failed"))
+        let err = match reason {
+            AbortCreatingStreamingJobReason::Cancelled => {
+                MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
+            }
+            AbortCreatingStreamingJobReason::CreateFailed => MetaError::catalog_id_not_found(
+                "stream job",
+                format!("streaming job {job_id} failed"),
+            ),
         };
         let abort_reason = format!("streaming job aborted {}", err.as_report());
         for tx in inner
@@ -953,7 +986,10 @@ impl CatalogController {
             self.notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
                 .await;
         }
-        Ok((true, Some(database_id)))
+        Ok(AbortCreatingStreamingJobResult::Aborted {
+            database_id: Some(database_id),
+            state_table_ids,
+        })
     }
 
     #[await_tree::instrument]

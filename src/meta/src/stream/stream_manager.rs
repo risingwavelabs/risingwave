@@ -43,6 +43,9 @@ use crate::barrier::{
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::streaming_job::{
+    AbortCreatingStreamingJobReason, AbortCreatingStreamingJobResult,
+};
 use crate::error::bail_invalid_parameter;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
@@ -434,7 +437,10 @@ impl GlobalStreamManager {
                                 let cleanup_state_table_ids =
                                     job_fragments.all_table_ids().collect_vec();
                                 self.metadata_manager.catalog_controller
-                                    .try_abort_creating_streaming_job(job_id, true)
+                                    .try_abort_creating_streaming_job(
+                                        job_id,
+                                        AbortCreatingStreamingJobReason::Cancelled,
+                                    )
                                     .await?;
 
                                 self.barrier_scheduler
@@ -759,13 +765,17 @@ impl GlobalStreamManager {
                 .await?;
             let cleanup_state_table_ids = fragment.all_table_ids().collect_vec();
 
-            let (_, database_id) = self
+            let abort_result = self
                 .metadata_manager
                 .catalog_controller
-                .try_abort_creating_streaming_job(id, true)
+                .try_abort_creating_streaming_job(id, AbortCreatingStreamingJobReason::Cancelled)
                 .await?;
 
-            if let Some(database_id) = database_id {
+            if let AbortCreatingStreamingJobResult::Aborted {
+                database_id: Some(database_id),
+                ..
+            } = abort_result
+            {
                 self.barrier_scheduler
                     .run_command(database_id, cancel_command)
                     .await?;
