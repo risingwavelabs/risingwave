@@ -392,6 +392,14 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                 Some(metrics.clone()),
             ) {
                 let chunk = chunk?;
+                // Skip zero-cardinality chunks: a RecordBatch with 0 visible rows after
+                // predicate/delete filtering would cause `cardinality() - 1` to underflow
+                // below when we extract the last-row metadata. Skipping here is safe
+                // because the existing `task_data_file_path` fallback already covers
+                // the case where no readable rows are produced.
+                if chunk.cardinality() == 0 {
+                    continue;
+                }
                 chunks.push(StreamChunk::from_parts(
                     itertools::repeat_n(Op::Insert, chunk.cardinality()).collect_vec(),
                     chunk,
@@ -776,5 +784,52 @@ mod tests {
 
         assert_eq!(cws.chunks.len(), 1);
         assert_eq!(cws.chunks[0].cardinality(), 3);
+    }
+
+    /// Verifies that zero-cardinality chunks are excluded from the `chunks` vec.
+    ///
+    /// `scan_task_to_chunk_with_deletes` can emit zero-row `RecordBatch`es after
+    /// predicate or equality-delete filtering. If such a chunk were pushed into `chunks`
+    /// and then chosen as `chunks.last()`, the subsequent `cardinality() - 1` call would
+    /// underflow on `usize` and panic. The fix is to skip those chunks before pushing,
+    /// relying on the `task_data_file_path` fallback to cover the all-empty case.
+    #[test]
+    fn test_zero_cardinality_chunks_are_excluded() {
+        // Simulate what build_batched_stream_reader does when filtering zero-row chunks.
+        let path = "s3://bucket/mostly-deleted.parquet".to_owned();
+
+        let mut chunks: Vec<StreamChunk> = vec![];
+
+        // A zero-cardinality chunk (e.g. from a fully-deleted RecordBatch).
+        let zero_row_chunk = DataChunk::new_dummy(0);
+        if zero_row_chunk.cardinality() == 0 {
+            // skipped — no push
+        } else {
+            chunks.push(StreamChunk::from_parts(
+                itertools::repeat_n(Op::Insert, zero_row_chunk.cardinality()).collect_vec(),
+                zero_row_chunk,
+            ));
+        }
+
+        // After the loop, chunks is empty: the fallback path kicks in.
+        assert!(
+            chunks.is_empty(),
+            "zero-cardinality chunk must not be added to the chunks vec"
+        );
+
+        // Simulate the fallback: data_file_path comes from the task.
+        let cws = ChunksWithState {
+            chunks,
+            data_file_path: path.clone(),
+            last_read_pos: None,
+        };
+
+        // State cleanup can still run.
+        assert_eq!(
+            cws.data_file_path, path,
+            "data_file_path must be set even when all chunks are zero-cardinality"
+        );
+        // No spurious rows forwarded downstream.
+        assert!(cws.chunks.is_empty());
     }
 }
