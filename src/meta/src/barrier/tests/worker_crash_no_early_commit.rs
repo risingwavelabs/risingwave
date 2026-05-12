@@ -221,7 +221,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let initial_epoch = test_epoch(100);
 
     let fragment_model = |fragment_id: FragmentId, job_id: JobId, table_id: TableId| {
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         LoadedFragment::from(fragment::Model {
             fragment_id,
             job_id,

@@ -1078,7 +1078,7 @@ mod tests {
 
     pub struct Block {
         pub offset: u64,
-        #[allow(dead_code)]
+        #[expect(dead_code)]
         pub sst: u64,
     }
 

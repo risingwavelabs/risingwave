@@ -1017,7 +1017,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    #[allow(clippy::unnecessary_wraps)]
+    #[expect(clippy::unnecessary_wraps)]
     fn consume_and_return(&mut self, t: Token) -> Result<Option<Token>, TokenizerError> {
         self.next();
         Ok(Some(t))

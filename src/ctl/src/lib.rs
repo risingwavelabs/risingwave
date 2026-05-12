@@ -89,7 +89,7 @@ enum ComputeCommands {
     ShowConfig { host: String },
 }
 
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum HummockCommands {
     /// list latest Hummock version on meta node
@@ -340,7 +340,7 @@ enum TableCommands {
 }
 
 #[derive(Subcommand)]
-#[allow(clippy::large_enum_variant)]
+#[expect(clippy::large_enum_variant)]
 enum MetaCommands {
     /// pause the stream graph
     Pause,

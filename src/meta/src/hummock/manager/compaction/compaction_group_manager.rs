@@ -622,7 +622,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::EnableOptimizeL0IntervalSelection(c) => {
                 target.enable_optimize_l0_interval_selection = Some(*c);
             }
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             MutableConfig::VnodeAlignedLevelSizeThreshold(_) => {
                 // Deprecated. Keep accepting the field for old clients but do not apply it.
             }
