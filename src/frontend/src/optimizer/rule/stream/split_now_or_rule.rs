@@ -21,7 +21,7 @@ use crate::optimizer::rule::prelude::{PlanRef, *};
 /// Convert `LogicalFilter` with now or others predicates to a `UNION ALL`
 ///
 /// Before:
-/// ```text
+/// ```
 /// `LogicalFilter`
 ///  now() or others
 ///        |
@@ -33,7 +33,8 @@ use crate::optimizer::rule::prelude::{PlanRef, *};
 ///         `LogicalUnionAll`
 ///         /              \
 /// `LogicalFilter`     `LogicalFilter`
-/// now() & !others        others
+/// now() & others IS      others
+///        NOT TRUE
 ///         |               |
 ///         \              /
 ///         `LogicalShare`
@@ -64,15 +65,23 @@ impl Rule<Logical> for SplitNowOrRule {
             return None;
         }
 
-        // A or B or C ... or Z
+        // A or B or C ... or Z, where A is the now() arm.
         // =>
-        // + A & !B & !C ... &!Z
+        // + A & (B | C ... | Z) IS NOT TRUE
         // + B | C ... | Z
+        //
+        // Do not use `NOT (B | C ... | Z)` here: in SQL three-valued logic,
+        // `NOT NULL` is still `NULL`, while this branch must keep rows where
+        // the non-now arms are not true and the now() arm is true.
 
-        let arm1 = ExprImpl::and(now.into_iter().chain(others.iter().map(|pred| {
-            FunctionCall::new_unchecked(ExprType::Not, vec![pred.clone()], DataType::Boolean).into()
-        })));
         let arm2 = ExprImpl::or(others);
+        let arm1 = ExprImpl::and([
+            now.into_iter()
+                .next()
+                .expect("there should be exactly one now() arm"),
+            FunctionCall::new_unchecked(ExprType::IsNotTrue, vec![arm2.clone()], DataType::Boolean)
+                .into(),
+        ]);
 
         let share = LogicalShare::create(input);
         let filter1 = LogicalFilter::create_with_expr(share.clone(), arm1);
