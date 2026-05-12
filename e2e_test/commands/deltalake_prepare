@@ -30,12 +30,16 @@ if [[ "${RISEDEV_DELTALAKE_LOCATION}" != s3a://*/* ]]; then
 fi
 deltalake_path="${RISEDEV_DELTALAKE_LOCATION#s3a://}"
 deltalake_bucket="${deltalake_path%%/*}"
+exactly_once_location="s3a://${deltalake_bucket}/deltalake-test-exactly-once"
+exactly_once_path="${exactly_once_location#s3a://}"
 
 echo "--- creating minio bucket"
 (cd "${repo_root}" && ./risedev mc mb --ignore-existing "hummock-minio/${deltalake_bucket}")
 
 echo "--- cleaning existing deltalake table at ${RISEDEV_DELTALAKE_LOCATION}"
 (cd "${repo_root}" && ./risedev mc rm --recursive --force "hummock-minio/${deltalake_path}") || true
+echo "--- cleaning existing deltalake table at ${exactly_once_location}"
+(cd "${repo_root}" && ./risedev mc rm --recursive --force "hummock-minio/${exactly_once_path}") || true
 
 spark_tgz="spark-3.3.1-bin-hadoop3.tgz"
 spark_dir="${work_dir}/spark-3.3.1-bin-hadoop3"
@@ -56,10 +60,14 @@ echo "--- creating deltalake table at ${RISEDEV_DELTALAKE_LOCATION}"
 "${spark_sql}" --packages "${DEPENDENCIES}" \
   --conf 'spark.sql.extensions=io.delta.sql.DeltaSparkSessionExtension' \
   --conf 'spark.sql.catalog.spark_catalog=org.apache.spark.sql.delta.catalog.DeltaCatalog' \
+  --conf 'spark.sql.session.timeZone=UTC' \
   --conf "spark.hadoop.fs.s3a.access.key=${RISEDEV_DELTALAKE_S3_ACCESS_KEY}" \
   --conf "spark.hadoop.fs.s3a.secret.key=${RISEDEV_DELTALAKE_S3_SECRET_KEY}" \
   --conf "spark.hadoop.fs.s3a.endpoint=${RISEDEV_DELTALAKE_S3_ENDPOINT}" \
   --conf 'spark.hadoop.fs.s3a.path.style.access=true' \
-  --S --e "create table delta.\`${RISEDEV_DELTALAKE_LOCATION}\`(v1 int, v2 short, v3 long, v4 float, v5 double, v6 string, v7 date, v8 Timestamp, v9 boolean, v10 decimal, v11 ARRAY<decimal>) using delta;"
+  --S --e "
+    create table delta.\`${RISEDEV_DELTALAKE_LOCATION}\`(v1 int, v2 short, v3 long, v4 float, v5 double, v6 string, v7 date, v8 Timestamp, v9 boolean, v10 decimal, v11 ARRAY<decimal>) using delta;
+    create table delta.\`${exactly_once_location}\`(v1 int, v2 short, v3 long, v4 float, v5 double, v6 string, v7 date, v8 Timestamp, v9 boolean, v10 decimal, v11 ARRAY<decimal>) using delta;
+  "
 
 echo "--- done"
