@@ -33,6 +33,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::{ConnectionId, JobId, SourceId, SubscriptionId, ViewId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
@@ -723,7 +724,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _job_id: JobId,
         _parallelism: PbTableParallelism,
-        _adaptive_parallelism_strategy: Option<String>,
+        _adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
@@ -733,7 +734,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         _job_id: JobId,
         _parallelism: Option<PbTableParallelism>,
-        _adaptive_parallelism_strategy: Option<String>,
+        _adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()

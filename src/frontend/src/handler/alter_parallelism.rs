@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::meta::table_parallelism::{
     AdaptiveParallelism, FixedParallelism, PbParallelism,
 };
@@ -131,13 +132,16 @@ pub async fn handle_alter_fragment_parallelism(
 
 fn extract_table_parallelism(
     parallelism: SetVariableValue,
-) -> Result<(TableParallelism, Option<String>)> {
+) -> Result<(TableParallelism, Option<AdaptiveParallelismStrategy>)> {
     extract_job_parallelism(parallelism)
 }
 
 fn extract_backfill_parallelism(
     parallelism: SetVariableValue,
-) -> Result<(Option<TableParallelism>, Option<String>)> {
+) -> Result<(
+    Option<TableParallelism>,
+    Option<AdaptiveParallelismStrategy>,
+)> {
     match parallelism {
         SetVariableValue::Default => Ok((None, None)),
         other => {
@@ -149,7 +153,7 @@ fn extract_backfill_parallelism(
 
 fn extract_job_parallelism(
     parallelism: SetVariableValue,
-) -> Result<(TableParallelism, Option<String>)> {
+) -> Result<(TableParallelism, Option<AdaptiveParallelismStrategy>)> {
     let adaptive_parallelism = PbTableParallelism {
         parallelism: Some(PbParallelism::Adaptive(AdaptiveParallelism {})),
     };
@@ -163,9 +167,10 @@ fn extract_job_parallelism(
     })?;
 
     let result = match config_parallelism {
-        ConfigParallelism::Default | ConfigParallelism::Adaptive => {
-            (adaptive_parallelism, Some("AUTO".to_owned()))
-        }
+        ConfigParallelism::Default | ConfigParallelism::Adaptive => (
+            adaptive_parallelism,
+            Some(AdaptiveParallelismStrategy::Auto),
+        ),
         ConfigParallelism::Fixed(fixed_parallelism) => (
             PbTableParallelism {
                 parallelism: Some(PbParallelism::Fixed(FixedParallelism {
@@ -174,12 +179,9 @@ fn extract_job_parallelism(
             },
             None,
         ),
-        ConfigParallelism::Bounded(_) | ConfigParallelism::Ratio(_) => (
-            adaptive_parallelism,
-            config_parallelism
-                .adaptive_strategy()
-                .map(|strategy| strategy.to_string()),
-        ),
+        ConfigParallelism::Bounded(_) | ConfigParallelism::Ratio(_) => {
+            (adaptive_parallelism, config_parallelism.adaptive_strategy())
+        }
     };
 
     Ok(result)
@@ -286,14 +288,14 @@ mod tests {
     fn test_extract_table_parallelism_adaptive_variants() {
         let (parallelism, strategy) = extract_table_parallelism(SetVariableValue::Default).unwrap();
         assert_eq!(parallelism, adaptive_parallelism());
-        assert_eq!(strategy.as_deref(), Some("AUTO"));
+        assert_eq!(strategy, Some(AdaptiveParallelismStrategy::Auto));
 
         let (parallelism, strategy) = extract_table_parallelism(SetVariableValue::Single(
             SetVariableValueSingle::Ident(Ident::new_unchecked("adaptive")),
         ))
         .unwrap();
         assert_eq!(parallelism, adaptive_parallelism());
-        assert_eq!(strategy.as_deref(), Some("AUTO"));
+        assert_eq!(strategy, Some(AdaptiveParallelismStrategy::Auto));
 
         let (parallelism, strategy) = extract_table_parallelism(SetVariableValue::Single(
             SetVariableValueSingle::Raw("bounded(4)".to_owned()),
@@ -301,9 +303,7 @@ mod tests {
         .unwrap();
         assert_eq!(parallelism, adaptive_parallelism());
         assert_eq!(
-            strategy
-                .as_deref()
-                .and_then(|s| s.parse::<AdaptiveParallelismStrategy>().ok()),
+            strategy,
             Some(AdaptiveParallelismStrategy::Bounded(4.try_into().unwrap()))
         );
 
@@ -312,12 +312,7 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(parallelism, adaptive_parallelism());
-        assert_eq!(
-            strategy
-                .as_deref()
-                .and_then(|s| s.parse::<AdaptiveParallelismStrategy>().ok()),
-            Some(AdaptiveParallelismStrategy::Ratio(0.5))
-        );
+        assert_eq!(strategy, Some(AdaptiveParallelismStrategy::Ratio(0.5)));
     }
 
     #[test]
@@ -355,9 +350,7 @@ mod tests {
         .unwrap();
         assert_eq!(parallelism, Some(adaptive_parallelism()));
         assert_eq!(
-            strategy
-                .as_deref()
-                .and_then(|s| s.parse::<AdaptiveParallelismStrategy>().ok()),
+            strategy,
             Some(AdaptiveParallelismStrategy::Bounded(4.try_into().unwrap()))
         );
 

@@ -29,6 +29,7 @@ use risingwave_common::catalog::{
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, TableId};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, bail_not_implemented};
@@ -73,7 +74,7 @@ use crate::barrier::{BarrierManagerRef, Command};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
-use crate::error::MetaErrorInner;
+use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -350,6 +351,32 @@ impl CreatingStreamingJobPermit {
 }
 
 impl DdlController {
+    fn validate_specified_parallelism(
+        specified_parallelism: Option<NonZeroUsize>,
+        specified_backfill_parallelism: Option<NonZeroUsize>,
+        max_parallelism: NonZeroUsize,
+    ) -> MetaResult<()> {
+        if let Some(parallelism) = specified_parallelism
+            && parallelism > max_parallelism
+        {
+            bail_invalid_parameter!(
+                "specified parallelism {} should not exceed max parallelism {}",
+                parallelism,
+                max_parallelism,
+            );
+        }
+        if let Some(backfill_parallelism) = specified_backfill_parallelism
+            && backfill_parallelism > max_parallelism
+        {
+            bail_invalid_parameter!(
+                "specified backfill parallelism {} should not exceed max parallelism {}",
+                backfill_parallelism,
+                max_parallelism,
+            );
+        }
+        Ok(())
+    }
+
     pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
@@ -1028,6 +1055,18 @@ impl DdlController {
             self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+        let adaptive_parallelism_strategy =
+            (!fragment_graph.adaptive_parallelism_strategy.is_empty()).then(|| {
+                parse_strategy(&fragment_graph.adaptive_parallelism_strategy)
+                    .expect("adaptive parallelism strategy should be validated in frontend")
+            });
+        let backfill_adaptive_parallelism_strategy = (!fragment_graph
+            .backfill_adaptive_parallelism_strategy
+            .is_empty())
+        .then(|| {
+            parse_strategy(&fragment_graph.backfill_adaptive_parallelism_strategy)
+                .expect("backfill adaptive parallelism strategy should be validated in frontend")
+        });
         let streaming_job_model = match self
             .metadata_manager
             .catalog_controller
@@ -1039,6 +1078,8 @@ impl DdlController {
                 dependencies,
                 resource_type.clone(),
                 &fragment_graph.backfill_parallelism,
+                adaptive_parallelism_strategy,
+                backfill_adaptive_parallelism_strategy,
             )
             .await
         {
@@ -1736,6 +1777,11 @@ impl DdlController {
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
+        Self::validate_specified_parallelism(
+            fragment_graph.specified_parallelism(),
+            fragment_graph.specified_backfill_parallelism(),
+            max_parallelism,
+        )?;
 
         // 1. Fragment Level ordering graph
         let fragment_backfill_ordering = fragment_graph.create_fragment_backfill_ordering();
@@ -2390,4 +2436,47 @@ pub fn refill_upstream_sink_union_in_table(
             true
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+
+    use super::*;
+
+    #[test]
+    fn test_validate_specified_parallelism_accepts_within_max() {
+        DdlController::validate_specified_parallelism(
+            Some(NonZeroUsize::new(4).unwrap()),
+            Some(NonZeroUsize::new(8).unwrap()),
+            NonZeroUsize::new(8).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_validate_specified_parallelism_rejects_parallelism_over_max() {
+        let result = DdlController::validate_specified_parallelism(
+            Some(NonZeroUsize::new(9).unwrap()),
+            None,
+            NonZeroUsize::new(8).unwrap(),
+        );
+        assert!(matches!(
+            result,
+            Err(ref e) if matches!(e.inner(), MetaErrorInner::InvalidParameter(_))
+        ));
+    }
+
+    #[test]
+    fn test_validate_specified_parallelism_rejects_backfill_parallelism_over_max() {
+        let result = DdlController::validate_specified_parallelism(
+            None,
+            Some(NonZeroUsize::new(9).unwrap()),
+            NonZeroUsize::new(8).unwrap(),
+        );
+        assert!(matches!(
+            result,
+            Err(ref e) if matches!(e.inner(), MetaErrorInner::InvalidParameter(_))
+        ));
+    }
 }

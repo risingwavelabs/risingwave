@@ -24,6 +24,7 @@ use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_meta_model::fragment::DistributionType;
@@ -47,7 +48,7 @@ use crate::MetaResult;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::resolve_no_shuffle_actor_mapping;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActor, StreamingJobModelContextExt};
+use crate::model::{ActorId, StreamActor};
 use crate::stream::{AssignerBuilder, SplitDiffOptions};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
@@ -1101,9 +1102,14 @@ impl EnsembleActorTemplate {
         vnode_count: usize,
     ) -> MetaResult<Self> {
         let job_id = job.job_id;
-        let stream_context = job.stream_context();
-        let job_strategy = stream_context.adaptive_parallelism_strategy;
-        let backfill_job_strategy = stream_context.backfill_adaptive_parallelism_strategy;
+        let job_strategy = job
+            .adaptive_parallelism_strategy
+            .as_deref()
+            .map(|s| parse_strategy(s).expect("strategy should be validated before persisting"));
+        let backfill_job_strategy = job
+            .backfill_adaptive_parallelism_strategy
+            .as_deref()
+            .map(|s| parse_strategy(s).expect("strategy should be validated before persisting"));
 
         let resource_group = match &job.specific_resource_group {
             None => database_resource_group,
@@ -1148,7 +1154,7 @@ impl EnsembleActorTemplate {
             job_strategy
         };
 
-        let actual_parallelism = match entry_fragment_parallelism
+        let target_parallelism = match entry_fragment_parallelism
             .as_ref()
             .unwrap_or(effective_job_parallelism)
         {
@@ -1164,9 +1170,22 @@ impl EnsembleActorTemplate {
                 effective_job_strategy.compute_target_parallelism(total_parallelism)
             }
             StreamingParallelism::Fixed(n) => *n,
+        };
+        let actual_parallelism = target_parallelism
+            .min(vnode_count)
+            .min(job.max_parallelism as usize);
+        if actual_parallelism != target_parallelism {
+            tracing::warn!(
+                job_id = %job_id,
+                target_parallelism,
+                actual_parallelism,
+                vnode_count,
+                job_max_parallelism = job.max_parallelism,
+                ?effective_job_parallelism,
+                ?entry_fragment_parallelism,
+                "streaming job parallelism was capped by vnode count or max parallelism"
+            );
         }
-        .min(vnode_count)
-        .min(job.max_parallelism as usize);
 
         tracing::debug!(
             "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {} fragment_override {:?}",

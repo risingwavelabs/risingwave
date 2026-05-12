@@ -21,8 +21,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::{IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
-use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId, fragment};
 use risingwave_pb::catalog::Table;
@@ -292,12 +290,6 @@ pub struct StreamContext {
 
     /// The partial config of this job to override the global config.
     pub config_override: Arc<str>,
-
-    /// The adaptive parallelism strategy for this job if it overrides the system default.
-    pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
-
-    /// The adaptive parallelism strategy for this job's temporary backfill override.
-    pub backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
 }
 
 impl StreamContext {
@@ -305,16 +297,6 @@ impl StreamContext {
         PbStreamContext {
             timezone: self.timezone.clone().unwrap_or("".into()),
             config_override: self.config_override.to_string(),
-            adaptive_parallelism_strategy: self
-                .adaptive_parallelism_strategy
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default(),
-            backfill_adaptive_parallelism_strategy: self
-                .backfill_adaptive_parallelism_strategy
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default(),
         }
     }
 
@@ -334,26 +316,6 @@ impl StreamContext {
                 Some(prost.get_timezone().clone())
             },
             config_override: prost.get_config_override().as_str().into(),
-            adaptive_parallelism_strategy: if prost.get_adaptive_parallelism_strategy().is_empty() {
-                None
-            } else {
-                Some(
-                    parse_strategy(prost.get_adaptive_parallelism_strategy())
-                        .expect("adaptive parallelism strategy should be validated in frontend"),
-                )
-            },
-            backfill_adaptive_parallelism_strategy: if prost
-                .get_backfill_adaptive_parallelism_strategy()
-                .is_empty()
-            {
-                None
-            } else {
-                Some(
-                    parse_strategy(prost.get_backfill_adaptive_parallelism_strategy()).expect(
-                        "backfill adaptive parallelism strategy should be validated in frontend",
-                    ),
-                )
-            },
         }
     }
 }
@@ -364,15 +326,6 @@ impl risingwave_meta_model::streaming_job::Model {
         StreamContext {
             timezone: self.timezone.clone(),
             config_override: self.config_override.clone().unwrap_or_default().into(),
-            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
-                parse_strategy(s).expect("strategy should be validated before persisting")
-            }),
-            backfill_adaptive_parallelism_strategy: self
-                .backfill_adaptive_parallelism_strategy
-                .as_deref()
-                .map(|s| {
-                    parse_strategy(s).expect("strategy should be validated before persisting")
-                }),
         }
     }
 }
@@ -417,38 +370,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_stream_context_protobuf_round_trip_with_backfill_strategy() {
+    fn test_stream_context_protobuf_round_trip() {
         let context = StreamContext {
             timezone: Some("UTC".to_owned()),
             config_override: "{\"a\":1}".into(),
-            adaptive_parallelism_strategy: Some(AdaptiveParallelismStrategy::Ratio(0.5)),
-            backfill_adaptive_parallelism_strategy: Some(AdaptiveParallelismStrategy::Bounded(
-                4.try_into().unwrap(),
-            )),
         };
 
         let prost = context.to_protobuf();
-        assert_eq!(prost.get_adaptive_parallelism_strategy(), "RATIO(0.5)");
-        assert_eq!(
-            prost.get_backfill_adaptive_parallelism_strategy(),
-            "BOUNDED(4)"
-        );
 
         let round_trip = StreamContext::from_protobuf(&prost);
         assert_eq!(round_trip.timezone, Some("UTC".to_owned()));
         assert_eq!(&*round_trip.config_override, "{\"a\":1}");
-        assert_eq!(
-            round_trip.adaptive_parallelism_strategy,
-            Some(AdaptiveParallelismStrategy::Ratio(0.5))
-        );
-        assert_eq!(
-            round_trip.backfill_adaptive_parallelism_strategy,
-            Some(AdaptiveParallelismStrategy::Bounded(4.try_into().unwrap()))
-        );
     }
 
     #[test]
-    fn test_stream_context_from_model_parses_backfill_strategy() {
+    fn test_stream_context_from_model() {
         let model = risingwave_meta_model::streaming_job::Model {
             job_id: 1.into(),
             job_status: risingwave_meta_model::JobStatus::Created,
@@ -468,14 +404,6 @@ mod tests {
         let context = model.stream_context();
         assert_eq!(context.timezone, Some("Asia/Shanghai".to_owned()));
         assert_eq!(&*context.config_override, "{\"parallelism\":2}");
-        assert_eq!(
-            context.adaptive_parallelism_strategy,
-            Some(AdaptiveParallelismStrategy::Auto)
-        );
-        assert_eq!(
-            context.backfill_adaptive_parallelism_strategy,
-            Some(AdaptiveParallelismStrategy::Ratio(0.25))
-        );
     }
 }
 

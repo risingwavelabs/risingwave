@@ -1481,7 +1481,7 @@ impl CatalogController {
         if let Some(parallelism) = fragment_parallelism {
             return format!(
                 "override({})",
-                Self::format_streaming_parallelism(parallelism, None)
+                Self::format_streaming_parallelism(parallelism, job_adaptive_parallelism_strategy)
             );
         }
 
