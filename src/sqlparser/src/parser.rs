@@ -4255,6 +4255,7 @@ impl Parser<'_> {
         let token = self.next_token();
         match token.token {
             Token::SingleQuotedString(s) => Ok(s),
+            Token::DollarQuotedString(s) => Ok(s.value),
             _ => self.expected_at(checkpoint, "literal string"),
         }
     }

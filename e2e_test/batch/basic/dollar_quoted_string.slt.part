@@ -17,3 +17,20 @@ query T
 select $$hel$$lo$$;
 ----
 hel
+
+statement ok
+drop table if exists t;
+
+statement ok
+create table t(v int);
+
+statement ok
+COMMENT ON TABLE t IS $$hello$$;
+
+query T
+SELECT DATE $$1999-01-01$$;
+----
+1999-01-01
+
+statement ok
+drop table t;

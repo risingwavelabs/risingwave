@@ -745,6 +745,19 @@ fn parse_comments() {
         _ => unreachable!(),
     }
 
+    match one_statement_parses_to("COMMENT ON TABLE t IS $$hello$$", "") {
+        Statement::Comment {
+            object_type,
+            object_name,
+            comment: Some(comment),
+        } => {
+            assert_eq!("hello", comment);
+            assert_eq!("t", object_name.to_string());
+            assert_eq!(CommentObject::Table, object_type);
+        }
+        _ => unreachable!(),
+    }
+
     match verified_stmt("COMMENT ON TABLE public.tab IS NULL") {
         Statement::Comment {
             object_type,
