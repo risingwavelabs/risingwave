@@ -6,17 +6,10 @@ name: Build & push fork docker image
 # replacement for upstream's Buildkite-backed `Build Docker Image` workflow,
 # which requires secrets we don't have.
 #
-# Trigger surface (temporarily reduced — see below):
+# Trigger surface:
+#   * push to `main`            -> publishes `:main`, `:main-<sha>`, `:latest`
+#   * push to `claude/**`       -> publishes `:<branch-slug>`, `:<branch-slug>-<sha>`
 #   * manual `workflow_dispatch` -> publishes `:<branch-slug>` (and `:<custom-tag>` if provided)
-#
-# The push triggers (`main`, `claude/**`) are commented out because the
-# default `GITHUB_TOKEN` issued for non-default-branch pushes can't do
-# multipart uploads to GHCR — Docker's `docker/build-push-action` fails
-# with `error writing layer blob: Could not authorize multipart upload`.
-# To re-enable automatic builds we need a PAT with `write:packages` (see
-# how `live-ingestion`'s workflows use `secrets.PAT`) wired in as a
-# secret, then swap the `docker/login-action` `password` to use it and
-# uncomment the `push:` block below.
 #
 # Tag slug rules: branch names have `/` -> `-` to satisfy the OCI tag grammar.
 #
@@ -25,6 +18,18 @@ name: Build & push fork docker image
 # workflow_dispatch input; expect ~2x runtime.
 
 on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'src/**'
+      - 'proto/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain'
+      - 'docker/Dockerfile'
+      - '.github/workflows/build-and-push-fork-image.yml'
   workflow_dispatch:
     inputs:
       cargo_profile:
@@ -40,18 +45,6 @@ on:
         description: 'Optional extra tag to publish (e.g. v0.0.1)'
         required: false
         type: string
-  # push:
-  #   branches:
-  #     - main
-  #     - 'claude/**'
-  #   paths:
-  #     - 'src/**'
-  #     - 'proto/**'
-  #     - 'Cargo.toml'
-  #     - 'Cargo.lock'
-  #     - 'rust-toolchain'
-  #     - 'docker/Dockerfile'
-  #     - '.github/workflows/build-and-push-fork-image.yml'
 
 permissions:
   contents: read
