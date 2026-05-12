@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::id::TableId;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration, Session};
 
 fn cluster_config(interval_sec: usize) -> Configuration {
