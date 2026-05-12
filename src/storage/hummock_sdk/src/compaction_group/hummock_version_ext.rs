@@ -255,7 +255,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         new_sst_start_id: HummockSstableId,
     ) {
         let mut new_sst_id = new_sst_start_id;
-        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
+        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup {
             if new_sst_start_id != 0 {
                 if cfg!(debug_assertions) {
                     panic!(
@@ -521,7 +521,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                             self.init_with_parent_group_v2(
                                 parent_group_id,
                                 *compaction_group_id,
-                                group_construct.get_new_sst_start_id().into(),
+                                group_construct.new_sst_start_id,
                                 split_key.clone(),
                             );
                         } else {
@@ -530,7 +530,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                                 parent_group_id,
                                 *compaction_group_id,
                                 member_table_ids,
-                                group_construct.get_new_sst_start_id().into(),
+                                group_construct.new_sst_start_id,
                             );
                         }
                     }
@@ -770,7 +770,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             levels.extend(group.levels.iter());
             for level in levels {
                 for table_info in &level.table_infos {
-                    if table_info.sst_id.inner() == table_info.object_id.inner() {
+                    if table_info.sst_id.as_raw_id() == table_info.object_id.as_raw_id() {
                         continue;
                     }
                     let object_id = table_info.object_id;
@@ -832,7 +832,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         split_key: Option<Bytes>,
     ) {
         let mut new_sst_id = new_sst_start_id;
-        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
+        if parent_group_id == StaticCompactionGroupId::NewCompactionGroup {
             if new_sst_start_id != 0 {
                 if cfg!(debug_assertions) {
                     panic!(
@@ -1127,7 +1127,7 @@ impl<T, L> HummockVersionCommon<T, L> {
 }
 
 pub fn build_initial_compaction_group_levels(
-    group_id: CompactionGroupId,
+    group_id: impl Into<CompactionGroupId>,
     compaction_config: &CompactionConfig,
 ) -> Levels {
     let mut levels = vec![];
@@ -1150,8 +1150,8 @@ pub fn build_initial_compaction_group_levels(
             total_file_size: 0,
             uncompressed_file_size: 0,
         },
-        group_id,
-        parent_group_id: StaticCompactionGroupId::NewCompactionGroup as _,
+        group_id: group_id.into(),
+        parent_group_id: 0.into(),
         member_table_ids: vec![],
         compaction_group_version_id: 0,
     }
@@ -1169,7 +1169,7 @@ fn split_sst_info_for_level(
         let removed_table_ids = sst_info
             .table_ids
             .iter()
-            .filter(|table_id| member_table_ids.contains(table_id))
+            .filter(|table_id| member_table_ids.contains(*table_id))
             .cloned()
             .collect_vec();
         let sst_size = sst_info.sst_size;
@@ -1660,7 +1660,7 @@ mod tests {
         let mut version = HummockVersion {
             id: HummockVersionId::new(0),
             levels: HashMap::from_iter([(
-                0,
+                0.into(),
                 Levels {
                     levels: vec![],
                     l0: OverlappingLevel {
@@ -1716,7 +1716,7 @@ mod tests {
             id: HummockVersionId::new(0),
             levels: HashMap::from_iter([
                 (
-                    0,
+                    0.into(),
                     build_initial_compaction_group_levels(
                         0,
                         &CompactionConfig {
@@ -1726,7 +1726,7 @@ mod tests {
                     ),
                 ),
                 (
-                    1,
+                    1.into(),
                     build_initial_compaction_group_levels(
                         1,
                         &CompactionConfig {
@@ -1742,7 +1742,7 @@ mod tests {
             id: HummockVersionId::new(1),
             group_deltas: HashMap::from_iter([
                 (
-                    2,
+                    2.into(),
                     GroupDeltas {
                         group_deltas: vec![GroupDelta::GroupConstruct(Box::new(GroupConstruct {
                             group_config: Some(CompactionConfig {
@@ -1754,13 +1754,13 @@ mod tests {
                     },
                 ),
                 (
-                    0,
+                    0.into(),
                     GroupDeltas {
                         group_deltas: vec![GroupDelta::GroupDestroy(GroupDestroy {})],
                     },
                 ),
                 (
-                    1,
+                    1.into(),
                     GroupDeltas {
                         group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
                             1,
@@ -1816,7 +1816,7 @@ mod tests {
                 id: HummockVersionId::new(1),
                 levels: HashMap::from_iter([
                     (
-                        2,
+                        2.into(),
                         build_initial_compaction_group_levels(
                             2,
                             &CompactionConfig {
@@ -1825,7 +1825,7 @@ mod tests {
                             },
                         ),
                     ),
-                    (1, cg1),
+                    (1.into(), cg1),
                 ]),
                 ..Default::default()
             }
@@ -2374,9 +2374,9 @@ mod tests {
     #[test]
     fn test_split_sst_info_for_level() {
         let mut version = HummockVersion {
-            id: HummockVersionId(0),
+            id: HummockVersionId::new(0),
             levels: HashMap::from_iter([(
-                1,
+                1.into(),
                 build_initial_compaction_group_levels(
                     1,
                     &CompactionConfig {
@@ -2915,8 +2915,8 @@ mod tests {
                 uncompressed_file_size: 1800,
                 ..Default::default()
             }],
-            group_id: 1,
-            parent_group_id: 0,
+            group_id: 1.into(),
+            parent_group_id: 0.into(),
             member_table_ids: vec![],
             compaction_group_version_id: 0,
         };
@@ -2950,7 +2950,7 @@ mod tests {
     fn test_apply_version_delta_truncate_tables() {
         let mut version = HummockVersion {
             id: HummockVersionId::new(0),
-            levels: HashMap::from_iter([(1, {
+            levels: HashMap::from_iter([(1.into(), {
                 #[expect(deprecated)]
                 let levels = Levels {
                     l0: OverlappingLevel {
@@ -2993,8 +2993,8 @@ mod tests {
                         uncompressed_file_size: 340,
                         ..Default::default()
                     }],
-                    group_id: 1,
-                    parent_group_id: 0,
+                    group_id: 1.into(),
+                    parent_group_id: 0.into(),
                     member_table_ids: vec![],
                     compaction_group_version_id: 0,
                 };
@@ -3006,7 +3006,7 @@ mod tests {
         let version_delta = HummockVersionDelta {
             id: HummockVersionId::new(1),
             group_deltas: HashMap::from_iter([(
-                1,
+                1.into(),
                 GroupDeltas {
                     group_deltas: vec![GroupDelta::TruncateTables(HashSet::from([TableId::new(
                         100,
@@ -3018,7 +3018,7 @@ mod tests {
 
         version.apply_version_delta(&version_delta);
 
-        let cg = version.get_compaction_group_levels(1);
+        let cg = version.get_compaction_group_levels(1.into());
 
         assert_eq!(
             cg.l0.sub_levels.len(),
@@ -3057,7 +3057,7 @@ mod tests {
     fn test_apply_version_delta_compact_l0() {
         let mut version = HummockVersion {
             id: HummockVersionId::new(0),
-            levels: HashMap::from_iter([(1, {
+            levels: HashMap::from_iter([(1.into(), {
                 #[expect(deprecated)]
                 let levels = Levels {
                     l0: OverlappingLevel {
@@ -3095,8 +3095,8 @@ mod tests {
                         uncompressed_file_size: 0,
                         ..Default::default()
                     }],
-                    group_id: 1,
-                    parent_group_id: 0,
+                    group_id: 1.into(),
+                    parent_group_id: 0.into(),
                     member_table_ids: vec![],
                     compaction_group_version_id: 0,
                 };
@@ -3108,7 +3108,7 @@ mod tests {
         let version_delta = HummockVersionDelta {
             id: HummockVersionId::new(1),
             group_deltas: HashMap::from_iter([(
-                1,
+                1.into(),
                 GroupDeltas {
                     group_deltas: vec![
                         GroupDelta::IntraLevel(IntraLevelDelta::new(
@@ -3135,7 +3135,7 @@ mod tests {
 
         version.apply_version_delta(&version_delta);
 
-        let cg = version.get_compaction_group_levels(1);
+        let cg = version.get_compaction_group_levels(1.into());
 
         assert!(cg.l0.sub_levels.is_empty());
         assert_eq!(cg.l0.total_file_size, 0);

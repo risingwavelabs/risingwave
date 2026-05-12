@@ -17,6 +17,7 @@ use core::ops::Bound::Unbounded;
 use risingwave_common::catalog::TableOption;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::id::TableId;
 use risingwave_storage::StateStore;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{
@@ -29,7 +30,7 @@ use crate::common::HummockServiceOpts;
 pub async fn list_kv(
     context: &CtlContext,
     epoch: u64,
-    table_id: u32,
+    table_id: TableId,
     data_dir: Option<String>,
     use_new_object_prefix_strategy: bool,
 ) -> anyhow::Result<()> {
@@ -47,7 +48,7 @@ pub async fn list_kv(
         .new_read_snapshot(
             HummockReadEpoch::Committed(epoch),
             NewReadSnapshotOptions {
-                table_id: table_id.into(),
+                table_id,
                 table_option: TableOption::default(),
             },
         )
