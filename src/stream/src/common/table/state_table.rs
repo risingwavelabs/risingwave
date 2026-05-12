@@ -40,7 +40,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{
@@ -942,26 +942,26 @@ where
         });
 
         // Restore persisted table watermark.
-        let max_watermark_of_vnodes = distribution
-            .vnodes()
-            .iter_vnodes()
-            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
-            .max();
-        let committed_watermark = if let Some((deser, _)) = watermark_serde.as_ref()
-            && let Some(max_watermark) = max_watermark_of_vnodes
-        {
-            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
-                assert!(row.len() == 1);
-                row[0].clone()
-            });
-            if deserialized.is_none() {
-                tracing::error!(
-                    vnodes = ?distribution.vnodes(),
-                    watermark = ?max_watermark,
-                    "Failed to deserialize persisted watermark from state store.",
-                );
-            }
-            deserialized
+        let committed_watermark = if let Some((deser, _)) = watermark_serde.as_ref() {
+            distribution
+                .vnodes()
+                .iter_vnodes()
+                .filter_map(|vnode| {
+                    let bytes = local_state_store.get_table_watermark(vnode)?;
+                    let datum = deser.deserialize(&bytes).ok().and_then(|row| {
+                        assert!(row.len() == 1);
+                        row[0].clone()
+                    });
+                    if datum.is_none() {
+                        tracing::error!(
+                            ?vnode,
+                            watermark = ?bytes,
+                            "Failed to deserialize persisted watermark from state store.",
+                        );
+                    }
+                    datum
+                })
+                .max_by(|a, b| cmp_datum(Some(a), Some(b), OrderType::ascending()))
         } else {
             None
         };
