@@ -21,7 +21,7 @@ use crate::optimizer::rule::prelude::{PlanRef, *};
 /// Convert `LogicalFilter` with now or others predicates to a `UNION ALL`
 ///
 /// Before:
-/// ```
+/// ```text
 /// `LogicalFilter`
 ///  now() or others
 ///        |
