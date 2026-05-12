@@ -195,7 +195,6 @@ mod tests {
     async fn fd_derivation_expand() {
         // input: [v1, v2, v3]
         // FD: v1 --> { v2, v3 }
-<<<<<<< HEAD
         // output: [v1_expanded, v2_expanded, v3_expanded, v1, v2, v3, flag].
         // Input FDs only hold on the preserved original columns. They do not hold on expanded
         // columns, because each expand lane can set columns outside its subset to NULL.
