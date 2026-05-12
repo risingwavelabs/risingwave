@@ -259,6 +259,12 @@ impl DatabaseCheckpointControl {
                     );
                 }
             }
+            Some(Command::Throttle { config, .. }) => {
+                for (fragment_id, throttle_config) in config {
+                    self.database_info
+                        .pre_apply_throttle(*fragment_id, throttle_config);
+                }
+            }
             _ => {}
         };
 
