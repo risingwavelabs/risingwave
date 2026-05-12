@@ -617,20 +617,6 @@ impl_object_id_conversion!(
     ConnectionId,
     SecretId
 );
-macro_rules! declare_relation {
-    ($($id_name:ident),+) => {
-        $(
-            impl $id_name {
-                pub fn as_relation_id(self) -> RelationId {
-                    RelationId::new(self.0)
-                }
-            }
-        )+
-    };
-}
-
-declare_relation!(TableId, SourceId, SinkId, IndexId, ViewId, SubscriptionId);
-
 macro_rules! impl_hummock_object_id {
     ($type_name:ty) => {
         impl $type_name {

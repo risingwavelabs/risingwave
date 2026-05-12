@@ -2291,7 +2291,7 @@ impl DdlController {
                 let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
                 return Ok(WaitVersion {
                     catalog_version,
-                    hummock_version_id: hummock_version_id.to_u64(),
+                    hummock_version_id,
                 });
             }
 

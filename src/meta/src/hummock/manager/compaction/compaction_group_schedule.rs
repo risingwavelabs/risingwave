@@ -1004,7 +1004,7 @@ impl HummockManager {
             let split_sst_count = new_version_delta
                 .latest_version()
                 .count_new_ssts_in_group_split(plan.parent_group_id, split_key.clone());
-            let new_sst_start_id = next_sstable_object_id(&self.env, split_sst_count).await?;
+            let new_sst_start_id = next_sstable_id(&self.env, split_sst_count).await?;
             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
 
             #[expect(deprecated)]
@@ -1015,7 +1015,7 @@ impl HummockManager {
                         group_config: Some(config.clone()),
                         group_id: new_compaction_group_id,
                         parent_group_id: plan.parent_group_id,
-                        new_sst_start_id: new_sst_start_id.inner(),
+                        new_sst_start_id,
                         table_ids: vec![],
                         version: CompatibilityVersion::LATEST as _,
                         split_key: Some(split_key.into()),

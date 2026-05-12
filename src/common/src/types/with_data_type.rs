@@ -19,8 +19,9 @@ use bytes::Bytes;
 
 use super::{
     DataType, Date, Decimal, F32, F64, Fields, Int256, Interval, JsonbRef, JsonbVal, Serial,
-    StructType, Time, Timestamp, Timestamptz, TypedId,
+    StructType, Time, Timestamp, Timestamptz,
 };
+use crate::id::TypedId;
 
 /// A trait for all physical types that can be associated with a [`DataType`].
 ///

@@ -45,6 +45,7 @@ pub use crate::array::{
 use crate::cast::{str_to_bool, str_to_bytea};
 use crate::catalog::ColumnId;
 use crate::error::BoxedError;
+use crate::id::TypedId;
 use crate::{
     dispatch_data_types, dispatch_scalar_ref_variants, dispatch_scalar_variants, for_all_variants,
 };
