@@ -1,4 +1,4 @@
--- Test for issue #20187: count(distinct _row_id) causing other count(distinct ...) producing wrong result
+# Test for issue #20187: count(distinct _row_id) causing other count(distinct ...) producing wrong result
 
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
@@ -9,25 +9,25 @@ create table t (foo int, bar int);
 statement ok
 insert into t values (1, 1), (2, 2), (1, 1);
 
--- This should work correctly
+# This should work correctly
 query II
 select count(foo), count(distinct foo) from t;
 ----
 3 2
 
--- This triggers the bug: count(distinct foo) returns 1 instead of 2
+# This triggers the bug: count(distinct foo) returns 1 instead of 2
 query III
 select count(foo), count(distinct foo), count(distinct _row_id) from t;
 ----
 3 2 3
 
--- This should also work correctly
+# This should also work correctly
 query III
 select count(foo), count(distinct foo), count(distinct bar) from t;
 ----
 3 2 2
 
--- Test with GROUP BY to exercise group_keys in the deduplication logic
+# Test with GROUP BY to exercise group_keys in the deduplication logic
 query IIII rowsort
 select bar, count(foo), count(distinct foo), count(distinct _row_id) from t group by bar;
 ----
