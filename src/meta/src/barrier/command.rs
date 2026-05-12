@@ -450,7 +450,6 @@ pub enum Command {
         streaming_job_ids: HashSet<JobId>,
         /// Used by recovery quick path when draining buffered drop/cancel commands.
         unregistered_state_table_ids: HashSet<TableId>,
-        unregistered_fragment_ids: HashSet<FragmentId>,
         // target_fragment -> [sink_fragments]
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     },
