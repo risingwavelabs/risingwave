@@ -23,17 +23,21 @@ use risingwave_pb::hummock::{
     LevelType, PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats,
     PbValidationTask,
 };
+use risingwave_pb::id::WorkerId;
 
-use crate::HummockSstableObjectId;
 use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::{TableWatermarks, WatermarkSerdeType};
+use crate::{CompactionGroupId, HummockSstableObjectId};
 
 #[derive(Clone, PartialEq, Default, Debug)]
 pub struct CompactTask {
-    /// SSTs to be compacted, which will be removed from LSM after compaction
+    /// SSTs selected by meta, which will be removed from LSM after compaction succeeds.
+    ///
+    /// Each SST's `table_ids` comes from version metadata, where truncate/drop table deltas prune
+    /// table ids before later compaction tasks are picked.
     pub input_ssts: Vec<InputLevel>,
     /// In ideal case, the compaction will generate `splits.len()` tables which have key range
     /// corresponding to that in `splits`, respectively
@@ -49,10 +53,13 @@ pub struct CompactTask {
     pub base_level: u32,
     pub task_status: PbTaskStatus,
     /// compaction group the task belongs to.
-    pub compaction_group_id: u64,
+    pub compaction_group_id: CompactionGroupId,
     /// compaction group id when the compaction task is created
     pub compaction_group_version_id: u64,
-    /// `existing_table_ids` for compaction drop key
+    /// Table ids that still exist in the version when the compaction task is picked.
+    ///
+    /// This may be broader than the table ids touched by this task's input SSTs. Task-local table
+    /// ids should be read from `input_ssts[*].table_ids`.
     pub existing_table_ids: Vec<TableId>,
     pub compression_algorithm: u32,
     pub target_file_size: u64,
@@ -80,6 +87,8 @@ pub struct CompactTask {
     pub max_sub_compaction: u32,
 
     pub max_kv_count_for_xor16: Option<u64>,
+
+    pub max_vnode_key_range_bytes: Option<u64>,
 }
 
 impl CompactTask {
@@ -127,6 +136,10 @@ impl CompactTask {
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
             + self
+                .max_vnode_key_range_bytes
+                .map(|_| size_of::<u32>())
+                .unwrap_or_default()
+            + self
                 .value_table_watermarks
                 .values()
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
@@ -159,20 +172,27 @@ impl CompactTask {
         false
     }
 
+    pub fn task_label(&self) -> &'static str {
+        if self.is_trivial_reclaim() {
+            return "trivial-space-reclaim";
+        }
+
+        if self.is_trivial_move_task() {
+            return "trivial-move";
+        }
+
+        "normal"
+    }
+
     pub fn is_trivial_reclaim(&self) -> bool {
         // Currently all VnodeWatermark tasks are trivial reclaim.
         if self.task_type == TaskType::VnodeWatermark {
             return true;
         }
-        let exist_table_ids =
-            HashSet::<TableId>::from_iter(self.existing_table_ids.iter().copied());
-        self.input_ssts.iter().all(|level| {
-            level.table_infos.iter().all(|sst| {
-                sst.table_ids
-                    .iter()
-                    .all(|table_id| !exist_table_ids.contains(table_id))
-            })
-        })
+        self.input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .all(|sst| sst.table_ids.is_empty())
     }
 }
 
@@ -186,25 +206,22 @@ impl CompactTask {
 
     // The compact task may need to reclaim key with range tombstone
     pub fn contains_range_tombstone(&self) -> bool {
-        self.input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
+        self.read_input_ssts()
             .any(|sst| sst.range_tombstone_count > 0)
     }
 
     // The compact task may need to reclaim key with split sst
     pub fn contains_split_sst(&self) -> bool {
-        self.input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
+        self.read_input_ssts()
             .any(|sst| sst.sst_id.inner() != sst.object_id.inner())
     }
 
+    /// Returns sorted and deduplicated table ids from this task's normalized input SST metadata.
     pub fn get_table_ids_from_input_ssts(&self) -> impl Iterator<Item = StateTableId> + use<> {
         self.input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
-            .flat_map(|sst| sst.table_ids.clone())
+            .flat_map(|sst| sst.table_ids.iter().copied())
             .sorted()
             .dedup()
     }
@@ -212,7 +229,7 @@ impl CompactTask {
     // filter the table-id that in existing_table_ids with the table-id in compact-task
     pub fn build_compact_table_ids(&self) -> Vec<StateTableId> {
         let existing_table_ids: HashSet<TableId> =
-            HashSet::from_iter(self.existing_table_ids.clone());
+            HashSet::from_iter(self.existing_table_ids.iter().copied());
         self.get_table_ids_from_input_ssts()
             .filter(|table_id| existing_table_ids.contains(table_id))
             .collect()
@@ -229,13 +246,29 @@ impl CompactTask {
     /// Returns true if the total key count exceeds the configured threshold.
     pub fn should_use_block_based_filter(&self) -> bool {
         let kv_count = self
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
+            .read_input_ssts()
             .map(|sst| sst.total_key_count)
             .sum::<u64>();
 
         crate::filter_utils::is_kv_count_too_large_for_xor16(kv_count, self.max_kv_count_for_xor16)
+    }
+
+    /// Returns the effective vnode key-range hint limit (in bytes) for this compaction task.
+    ///
+    /// The hint is only meaningful when all input SSTs belong to a single table.
+    pub fn effective_max_vnode_key_range_bytes(&self) -> Option<usize> {
+        let limit = self.max_vnode_key_range_bytes.filter(|&v| v > 0)? as usize;
+        (self.get_table_ids_from_input_ssts().count() == 1).then_some(limit)
+    }
+
+    /// Returns input SSTs that should be read by the compactor.
+    ///
+    /// SST entries with empty `table_ids` are ignored defensively and should not be read by the
+    /// compactor.
+    pub fn read_input_ssts(&self) -> impl Iterator<Item = &SstableInfo> {
+        self.input_ssts
+            .iter()
+            .flat_map(|level| level.read_sstable_infos())
     }
 }
 
@@ -338,6 +371,7 @@ impl From<PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: None,
         }
     }
 }
@@ -403,6 +437,7 @@ impl From<&PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: None,
         }
     }
 }
@@ -520,7 +555,7 @@ impl From<&CompactTask> for PbCompactTask {
 #[derive(Clone, PartialEq, Default)]
 pub struct ValidationTask {
     pub sst_infos: Vec<SstableInfo>,
-    pub sst_id_to_worker_id: HashMap<HummockSstableObjectId, u32>,
+    pub sst_id_to_worker_id: HashMap<HummockSstableObjectId, WorkerId>,
 }
 
 impl From<PbValidationTask> for ValidationTask {
@@ -534,7 +569,7 @@ impl From<PbValidationTask> for ValidationTask {
             sst_id_to_worker_id: pb_validation_task
                 .sst_id_to_worker_id
                 .into_iter()
-                .map(|(object_id, worker_id)| (object_id.into(), worker_id))
+                .map(|(object_id, worker_id)| (object_id.into(), worker_id.into()))
                 .collect(),
         }
     }
@@ -551,7 +586,7 @@ impl From<ValidationTask> for PbValidationTask {
             sst_id_to_worker_id: validation_task
                 .sst_id_to_worker_id
                 .into_iter()
-                .map(|(object_id, worker_id)| (object_id.inner(), worker_id))
+                .map(|(object_id, worker_id)| (object_id.inner(), worker_id.as_raw_id()))
                 .collect(),
         }
     }
@@ -614,5 +649,138 @@ impl From<ReportTask> for PbReportTask {
                 .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_pb::hummock::PbLevelType;
+    use risingwave_pb::hummock::compact_task::TaskType;
+
+    use super::CompactTask;
+    use crate::level::InputLevel;
+    use crate::sstable_info::{SstableInfo, SstableInfoInner};
+
+    fn test_sstable(sst_id: u64, table_ids: Vec<TableId>) -> SstableInfo {
+        SstableInfo::from(SstableInfoInner {
+            object_id: sst_id.into(),
+            sst_id: sst_id.into(),
+            table_ids,
+            ..Default::default()
+        })
+    }
+
+    fn test_read_property_sstable(table_ids: Vec<TableId>) -> SstableInfo {
+        SstableInfo::from(SstableInfoInner {
+            object_id: 1.into(),
+            sst_id: 2.into(),
+            table_ids,
+            range_tombstone_count: 1,
+            total_key_count: 100,
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn test_empty_table_ids_are_reclaim_and_have_no_input_table_ids() {
+        let task = CompactTask {
+            input_ssts: vec![InputLevel {
+                table_infos: vec![test_sstable(1, vec![])],
+                ..Default::default()
+            }],
+            existing_table_ids: vec![TableId::new(1)],
+            ..Default::default()
+        };
+
+        assert!(task.get_table_ids_from_input_ssts().next().is_none());
+        assert!(task.is_trivial_reclaim());
+    }
+
+    #[test]
+    fn test_read_properties_ignore_empty_table_ids() {
+        let task = CompactTask {
+            input_ssts: vec![InputLevel {
+                table_infos: vec![
+                    test_read_property_sstable(vec![]),
+                    SstableInfo::from(SstableInfoInner {
+                        object_id: 3.into(),
+                        sst_id: 3.into(),
+                        table_ids: vec![TableId::new(1)],
+                        total_key_count: 1,
+                        ..Default::default()
+                    }),
+                ],
+                ..Default::default()
+            }],
+            max_kv_count_for_xor16: Some(10),
+            ..Default::default()
+        };
+
+        assert!(!task.contains_range_tombstone());
+        assert!(!task.contains_split_sst());
+        assert!(!task.should_use_block_based_filter());
+
+        let task = CompactTask {
+            input_ssts: vec![InputLevel {
+                table_infos: vec![test_read_property_sstable(vec![TableId::new(1)])],
+                ..Default::default()
+            }],
+            max_kv_count_for_xor16: Some(10),
+            ..Default::default()
+        };
+
+        assert!(task.contains_range_tombstone());
+        assert!(task.contains_split_sst());
+        assert!(task.should_use_block_based_filter());
+    }
+
+    #[test]
+    fn test_task_label_for_trivial_move_and_reclaim() {
+        let trivial_move_task = CompactTask {
+            input_ssts: vec![
+                InputLevel {
+                    level_idx: 1,
+                    level_type: PbLevelType::Nonoverlapping,
+                    table_infos: vec![
+                        test_sstable(10, vec![TableId::new(1)]),
+                        test_sstable(11, vec![]),
+                    ],
+                },
+                InputLevel {
+                    level_idx: 2,
+                    level_type: PbLevelType::Nonoverlapping,
+                    table_infos: vec![],
+                },
+            ],
+            target_level: 2,
+            task_type: TaskType::Dynamic,
+            ..Default::default()
+        };
+
+        assert!(!trivial_move_task.is_trivial_reclaim());
+        assert_eq!(trivial_move_task.task_label(), "trivial-move");
+
+        let trivial_reclaim_task = CompactTask {
+            input_ssts: vec![
+                InputLevel {
+                    level_idx: 1,
+                    level_type: PbLevelType::Nonoverlapping,
+                    table_infos: vec![test_sstable(10, vec![])],
+                },
+                InputLevel {
+                    level_idx: 2,
+                    level_type: PbLevelType::Nonoverlapping,
+                    table_infos: vec![],
+                },
+            ],
+            target_level: 2,
+            task_type: TaskType::Dynamic,
+            ..Default::default()
+        };
+
+        assert!(trivial_reclaim_task.is_trivial_reclaim());
+        assert!(trivial_reclaim_task.is_trivial_move_task());
+        assert_eq!(trivial_reclaim_task.task_label(), "trivial-space-reclaim");
     }
 }
