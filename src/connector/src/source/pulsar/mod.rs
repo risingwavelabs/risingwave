@@ -128,13 +128,17 @@ where
     }
 }
 
-#[doc(hidden)]
-pub fn make_retryable_pulsar_connector_error(message: impl Into<String>) -> ConnectorError {
-    pulsar::Error::Connection(pulsar::error::ConnectionError::Io(std::io::Error::new(
-        std::io::ErrorKind::ConnectionReset,
-        message.into(),
-    )))
-    .into()
+#[cfg(any(test, feature = "test"))]
+pub mod test_utils {
+    use crate::error::ConnectorError;
+
+    pub fn make_retryable_pulsar_connector_error(message: impl Into<String>) -> ConnectorError {
+        pulsar::Error::Connection(pulsar::error::ConnectionError::Io(std::io::Error::new(
+            std::io::ErrorKind::ConnectionReset,
+            message.into(),
+        )))
+        .into()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]

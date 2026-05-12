@@ -77,6 +77,7 @@ url = "2"
 workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
+risingwave_connector = { workspace = true, features = ["test"] }
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 expect-test = "1"

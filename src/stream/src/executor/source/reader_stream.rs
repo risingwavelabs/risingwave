@@ -375,7 +375,7 @@ mod tests {
     use risingwave_common::id::SourceId;
     use risingwave_common::types::DataType;
     use risingwave_connector::source::datagen::DatagenSplit;
-    use risingwave_connector::source::pulsar::make_retryable_pulsar_connector_error;
+    use risingwave_connector::source::pulsar::test_utils::make_retryable_pulsar_connector_error;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_connector::source::{ConnectorState, SplitImpl};
     use risingwave_pb::catalog::StreamSourceInfo;

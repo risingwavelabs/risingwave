@@ -12,6 +12,7 @@ ignored = []
 
 [features]
 default = []
+test = []
 all-sinks = [
     "sink-bigquery",
     "sink-deltalake",
