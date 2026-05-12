@@ -639,7 +639,11 @@ impl OpenDalSinkWriter {
         // rows are irrelevant to an append-only sink and must not trip the assert.
         // Mirrors upstream's per-row iteration in `chunk.rows()`.
         for (op, _row) in chunk.rows() {
-            assert_eq!(op, Op::Insert, "expect all visible `op(s)` to be `Op::Insert`");
+            assert_eq!(
+                op,
+                Op::Insert,
+                "expect all visible `op(s)` to be `Op::Insert`"
+            );
         }
 
         // Fast path: no per-row partitioning. Applies only when neither column
