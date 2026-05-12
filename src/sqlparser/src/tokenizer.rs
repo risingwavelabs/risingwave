@@ -686,6 +686,10 @@ impl<'a> Tokenizer<'a> {
             value.push_str(&self.peeking_take_while(|ch| ch.is_alphanumeric() || ch == '_'));
 
             if let Some('$') = self.peek() {
+                if !is_valid_dollar_quote_tag(&value) {
+                    return self.error(format!("Invalid dollar-quoted string tag \"{}\"", value));
+                }
+
                 self.next();
 
                 let delimiter = format!("${}$", value);
@@ -1028,6 +1032,12 @@ fn is_identifier_part(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '$' || ch == '_'
 }
 
+fn is_valid_dollar_quote_tag(tag: &str) -> bool {
+    let mut chars = tag.chars();
+    matches!(chars.next(), Some(ch) if ch.is_ascii_alphabetic() || ch == '_')
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1152,6 +1162,37 @@ mod tests {
         ];
 
         compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_tagged_dollar_quoted_string_with_identifier_tag() {
+        let sql = String::from("SELECT $_tag_1$hello$_tag_1$");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let tokens = tokenizer.tokenize_with_whitespace().unwrap();
+
+        let expected = vec![
+            Token::make_keyword("SELECT"),
+            Token::Whitespace(Whitespace::Space),
+            Token::DollarQuotedString(DollarQuotedString {
+                tag: Some("_tag_1".into()),
+                value: "hello".into(),
+            }),
+        ];
+
+        compare(expected, tokens);
+    }
+
+    #[test]
+    fn tokenize_dollar_quoted_string_with_invalid_tag() {
+        let sql = String::from("SELECT $1tag$hello$1tag$");
+        let mut tokenizer = Tokenizer::new(&sql);
+        let error = tokenizer.tokenize_with_whitespace().unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("Invalid dollar-quoted string tag \"1tag\"")
+        );
     }
 
     #[test]
