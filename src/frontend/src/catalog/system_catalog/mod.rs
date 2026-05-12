@@ -218,6 +218,8 @@ pub fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
     )
 }
 
+// Shared by `rw_streaming_jobs` and `rw_table_fragments` so both catalogs present the same
+// user-visible parallelism format.
 fn extract_parallelism_from_table_state(state: &StreamingJobState) -> String {
     match state
         .parallelism

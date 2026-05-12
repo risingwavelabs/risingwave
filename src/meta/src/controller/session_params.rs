@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -50,17 +49,11 @@ impl SessionParamsController {
     ) -> MetaResult<Self> {
         let db = sql_meta_store.conn;
         let params = SessionParameter::find().all(&db).await?;
-
-        let effective_params = params
-            .iter()
-            .map(|param| (param.name.clone(), param.value.clone()))
-            .collect::<HashMap<_, _>>();
-
-        for (name, value) in effective_params {
-            if let Err(e) = init_params.set(&name, value, &mut ()) {
+        for param in params {
+            if let Err(e) = init_params.set(&param.name, param.value, &mut ()) {
                 match e {
                     SessionConfigError::InvalidValue { .. } => {
-                        tracing::error!(error = %e.as_report(), "failed to set parameter from meta database, using default value {}", init_params.get(&name)?)
+                        tracing::error!(error = %e.as_report(), "failed to set parameter from meta database, using default value {}", init_params.get(&param.name)?)
                     }
                     SessionConfigError::UnrecognizedEntry(_) => {
                         tracing::error!(error = %e.as_report(), "failed to set parameter from meta database")
@@ -149,6 +142,7 @@ impl SessionParamsController {
         );
     }
 }
+
 #[cfg(test)]
 mod tests {
     use sea_orm::ColumnTrait;

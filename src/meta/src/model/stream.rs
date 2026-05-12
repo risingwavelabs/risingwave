@@ -272,9 +272,6 @@ pub struct StreamJobFragments {
     /// The streaming context associated with this stream plan and its fragments
     pub ctx: StreamContext,
 
-    /// The parallelism assigned to this table fragments
-    pub assigned_parallelism: TableParallelism,
-
     /// The max parallelism specified when the streaming job was created, i.e., expected vnode count.
     ///
     /// The reason for persisting this value is mainly to check if a parallelism change (via `ALTER
@@ -408,7 +405,6 @@ impl StreamJobFragments {
                 .collect(),
             actor_status,
             ctx: Some(self.ctx.to_protobuf()),
-            parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(self.max_parallelism as _),
@@ -502,7 +498,6 @@ impl StreamJobFragments {
             job_id,
             fragments,
             StreamContext::default(),
-            TableParallelism::Adaptive,
             VirtualNode::COUNT_FOR_TEST,
         )
     }
@@ -512,7 +507,6 @@ impl StreamJobFragments {
         stream_job_id: JobId,
         fragments: BTreeMap<FragmentId, Fragment>,
         ctx: StreamContext,
-        table_parallelism: TableParallelism,
         max_parallelism: usize,
     ) -> Self {
         Self {
@@ -520,7 +514,6 @@ impl StreamJobFragments {
             state: State::Initial,
             fragments,
             ctx,
-            assigned_parallelism: table_parallelism,
             max_parallelism,
         }
     }

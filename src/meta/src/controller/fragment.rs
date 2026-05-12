@@ -83,7 +83,6 @@ use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, Notification
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, StreamingJobModelContextExt as _,
-    TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
 use crate::stream::UpstreamSinkInfo;
@@ -303,7 +302,6 @@ impl CatalogController {
         state: PbState,
         ctx: StreamContext,
         fragments: Vec<(fragment::Model, Vec<ActorInfo>)>,
-        parallelism: StreamingParallelism,
         max_parallelism: usize,
         job_definition: Option<String>,
     ) -> MetaResult<(
@@ -330,11 +328,6 @@ impl CatalogController {
             state: state as _,
             fragments: pb_fragments,
             ctx,
-            assigned_parallelism: match parallelism {
-                StreamingParallelism::Custom => TableParallelism::Custom,
-                StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
-            },
             max_parallelism,
         };
 
@@ -643,7 +636,6 @@ impl CatalogController {
             job_info.job_status.into(),
             job_info.stream_context(),
             fragment_actors,
-            job_info.parallelism,
             job_info.max_parallelism as _,
             job_definition,
         )
@@ -1077,7 +1069,6 @@ impl CatalogController {
                     job.job_status.into(),
                     job.stream_context(),
                     fragment_actors,
-                    job.parallelism,
                     job.max_parallelism as _,
                     job_definition.remove(&job.job_id),
                 )?,

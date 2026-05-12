@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::num::NonZeroUsize;
 use std::vec;
 
 use itertools::Itertools;
@@ -421,18 +420,14 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 #[tokio::test]
 async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
-    let parallel_degree = 4;
     let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
     let graph = make_stream_graph();
     let fragment_graph = StreamFragmentGraph::new(&env, graph, &job)?;
     let internal_tables = fragment_graph.incomplete_internal_tables();
 
-    let actor_graph_builder = ActorGraphBuilder::new(
-        job.id(),
-        CompleteStreamFragmentGraph::for_test(fragment_graph),
-        NonZeroUsize::new(parallel_degree).unwrap(),
-    )?;
+    let actor_graph_builder =
+        ActorGraphBuilder::new(CompleteStreamFragmentGraph::for_test(fragment_graph))?;
     let ActorGraphBuildResult {
         graph,
         upstream_fragment_downstreams,

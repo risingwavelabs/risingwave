@@ -3,6 +3,18 @@ use std::collections::HashMap;
 use sea_orm::{ConnectionTrait, FromQueryResult, Statement};
 use sea_orm_migration::prelude::*;
 
+// This migration removes the old split representation of streaming parallelism:
+// 1. `system_parameter.adaptive_parallelism_strategy` held the cluster-wide adaptive fallback.
+// 2. `session_parameter.streaming_parallelism*` held fixed/default/adaptive values.
+// 3. `session_parameter.streaming_parallelism_strategy*` held per-scope adaptive strategies.
+// 4. Existing `streaming_job.adaptive_parallelism_strategy` rows could be NULL and implicitly
+//    inherit from the system parameter.
+//
+// After this migration, the effective policy is materialized directly in:
+// 1. `session_parameter.streaming_parallelism*` using the unified syntax
+//    (`default`, `N`, `adaptive`, `bounded(N)`, `ratio(R)`).
+// 2. `streaming_job.adaptive_parallelism_strategy`, which is backfilled for legacy NULL rows so
+//    dropping the old system parameter does not change existing jobs' behavior.
 const STREAMING_PARALLELISM: &str = "streaming_parallelism";
 const STREAMING_PARALLELISM_FOR_TABLE: &str = "streaming_parallelism_for_table";
 const STREAMING_PARALLELISM_FOR_SOURCE: &str = "streaming_parallelism_for_source";
@@ -208,7 +220,8 @@ async fn load_legacy_system_strategy(
 }
 
 fn default_legacy_system_strategy() -> AdaptiveParallelismStrategy {
-    AdaptiveParallelismStrategy::Auto
+    // Match the removed `system_parameter.adaptive_parallelism_strategy` default on `main`.
+    AdaptiveParallelismStrategy::Bounded(64)
 }
 
 fn is_legacy_streaming_parallelism_strategy_param(name: &str) -> bool {
@@ -602,7 +615,7 @@ mod tests {
                 LEGACY_STREAMING_PARALLELISM_STRATEGY_FOR_SINK,
                 "bounded(8)",
             )],
-            AdaptiveParallelismStrategy::Auto,
+            AdaptiveParallelismStrategy::Bounded(64),
         );
 
         assert_eq!(derived.get(STREAMING_PARALLELISM), None);

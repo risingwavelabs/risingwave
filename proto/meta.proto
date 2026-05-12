@@ -106,7 +106,8 @@ message TableFragments {
 
   stream_plan.StreamContext ctx = 6;
 
-  TableParallelism parallelism = 7;
+  reserved 7;
+  reserved "parallelism";
   // The max parallelism specified when the streaming job was created, i.e., expected vnode count.
   //
   // The reason for persisting this value is mainly to check if a parallelism change (via `ALTER
