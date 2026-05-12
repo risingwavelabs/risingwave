@@ -2509,8 +2509,6 @@ impl CatalogController {
             .ok_or_else(|| SinkError::Config(anyhow!("connector not specified when alter sink")))?
             .to_lowercase();
 
-        validate_connector_type(&connector_type, &alter_props)?;
-
         let prop_keys = build_altered_field_names(&alter_props, &alter_secret_refs);
 
         check_sink_allow_alter_on_fly_fields(&connector_type, &prop_keys)
@@ -2638,8 +2636,6 @@ impl CatalogController {
             .get(CONNECTOR_TYPE_KEY)
             .ok_or_else(|| SinkError::Config(anyhow!("connector not specified when alter sink")))?
             .to_lowercase();
-
-        validate_connector_type(&connector_type, &alter_props)?;
 
         let prop_keys = build_altered_field_names(&alter_props, &alter_secret_refs);
 
@@ -2959,27 +2955,14 @@ impl CatalogController {
                     .optional_associated_table_id
                     .map(|table_id| table_id.as_object_id())
                     .unwrap_or_else(|| source_id.as_object_id());
-                if !source_to_add_secret_dep.is_empty() {
-                    ObjectDependency::insert_many(source_to_add_secret_dep.into_iter().map(
-                        |secret_id| object_dependency::ActiveModel {
-                            oid: Set(secret_id.into()),
-                            used_by: Set(source_used_by_id),
-                            ..Default::default()
-                        },
-                    ))
-                    .exec(&txn)
-                    .await?;
-                }
-                if !source_to_remove_secret_dep.is_empty() {
-                    let _ = ObjectDependency::delete_many()
-                        .filter(
-                            object_dependency::Column::Oid
-                                .is_in(source_to_remove_secret_dep)
-                                .and(object_dependency::Column::UsedBy.eq(source_used_by_id)),
-                        )
-                        .exec(&txn)
-                        .await?;
-                }
+
+                update_secret_dependencies(
+                    &txn,
+                    source_to_add_secret_dep,
+                    source_to_remove_secret_dep,
+                    source_used_by_id,
+                )
+                .await?;
 
                 // Prepare source update
                 let active_source = source::ActiveModel {
@@ -3413,22 +3396,6 @@ fn build_altered_field_names(
         .collect()
 }
 
-fn validate_connector_type(
-    connector: &str,
-    alter_props: &BTreeMap<String, String>,
-) -> MetaResult<()> {
-    if let Some(new_connector) = alter_props.get(CONNECTOR_TYPE_KEY)
-        && new_connector != connector
-    {
-        return Err(MetaError::invalid_parameter(format!(
-            "Cannot change connector type from '{}' to '{}'. Drop and recreate the sink instead.",
-            connector, new_connector
-        )));
-    }
-
-    Ok(())
-}
-
 async fn update_sink_fragment_props(
     txn: &DatabaseTransaction,
     sink_id: SinkId,
@@ -3574,7 +3541,7 @@ async fn update_secret_dependencies(
         .await?;
     }
     // Remove dependencies for secrets that are no longer referenced.
-    // This allows the secrets to be deleted after this source no longer uses them.
+    // This allows the secrets to be deleted after this source/sink no longer uses them.
     if !to_remove_secrets.is_empty() {
         let _ = ObjectDependency::delete_many()
             .filter(
