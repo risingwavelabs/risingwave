@@ -120,9 +120,14 @@ ALTER SINK s_sink_secret_direct CONNECTOR WITH (
     properties.sasl.password = secret sink_password_2
 );
 
-statement ok retry 5 backoff 3s
+statement error
 ALTER SINK s_sink_secret_direct CONNECTOR WITH (
     commit_checkpoint_interval = '2'
+);
+
+statement ok retry 5 backoff 3s
+ALTER SINK s_sink_secret_direct CONNECTOR WITH (
+    properties.message.timeout.ms = '3000'
 );
 
 query I
@@ -131,6 +136,14 @@ from rw_sinks
 where name = 's_sink_secret_direct'
   and connector_props -> 'properties.sasl.password' ->> 'type' = 'secret'
   and connector_props -> 'properties.sasl.password' -> 'value' ->> 'value' = 'sink_password_2';
+----
+1
+
+query I
+select count(*)
+from rw_sinks
+where name = 's_sink_secret_direct'
+  and connector_props -> 'properties.message.timeout.ms' ->> 'value' = '3000';
 ----
 1
 
