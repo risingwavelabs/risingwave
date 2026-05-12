@@ -633,9 +633,13 @@ impl OpenDalSinkWriter {
             .single()
             .expect("Failed to convert timestamp to DateTime<Utc>");
 
-        // Validate ops once; the rest of the writer assumes append-only chunks.
-        for &op in chunk.ops() {
-            assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
+        // Validate that all *visible* rows are `Op::Insert`. The raw `chunk.ops()`
+        // array can include ops for rows that have been masked off via the
+        // visibility bitmap (e.g. after upstream filters or update-deletes); those
+        // rows are irrelevant to an append-only sink and must not trip the assert.
+        // Mirrors upstream's per-row iteration in `chunk.rows()`.
+        for (op, _row) in chunk.rows() {
+            assert_eq!(op, Op::Insert, "expect all visible `op(s)` to be `Op::Insert`");
         }
 
         // Fast path: no per-row partitioning. Applies only when neither column
