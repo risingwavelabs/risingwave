@@ -13599,7 +13599,7 @@ dependencies = [
  "rustls 0.23.35",
  "rustls-native-certs 0.8.1",
  "rustls-platform-verifier-android",
- "rustls-webpki 0.103.8",
+ "rustls-webpki 0.103.10",
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
