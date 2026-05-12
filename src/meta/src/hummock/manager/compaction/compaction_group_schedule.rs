@@ -507,10 +507,11 @@ mod tests {
     use crate::hummock::model::CompactionGroup;
 
     fn group(
-        group_id: CompactionGroupId,
+        group_id: impl Into<CompactionGroupId>,
         table_ids: &[u32],
         disable_auto_group_scheduling: bool,
     ) -> CompactionGroupStatistic {
+        let group_id = group_id.into();
         let config = CompactionConfig {
             disable_auto_group_scheduling: Some(disable_auto_group_scheduling),
             ..Default::default()
@@ -558,7 +559,7 @@ mod tests {
 
         assert_eq!(
             Some(NormalizePlan {
-                parent_group_id: 1,
+                parent_group_id: 1.into(),
                 parent_table_ids: vec![1.into(), 4.into(), 7.into()],
                 boundary_table_id: 4.into(),
             }),
@@ -577,7 +578,7 @@ mod tests {
 
         assert_eq!(
             Some(NormalizePlan {
-                parent_group_id: 3,
+                parent_group_id: 3.into(),
                 parent_table_ids: vec![10.into(), 13.into(), 16.into()],
                 boundary_table_id: 13.into(),
             }),
