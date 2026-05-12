@@ -1,0 +1,155 @@
+statement ok
+set sink_decouple = false;
+
+# ---- Validation: multiple columns should be rejected ----
+# force_append_only bypasses the planner-level retract-stream check so our
+# connector validate() is actually reached.
+statement ok
+CREATE TABLE t_multi_col (a varchar, b varchar);
+
+statement error HTTP sink requires exactly 1 column
+CREATE SINK s_multi_col FROM t_multi_col WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+DROP TABLE t_multi_col;
+
+# ---- Validation: wrong column type should be rejected ----
+statement ok
+CREATE TABLE t_int_col (payload int);
+
+statement error HTTP sink column must be varchar or jsonb
+CREATE SINK s_int_col FROM t_int_col WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+DROP TABLE t_int_col;
+
+# ---- Validation: invalid URL should be rejected ----
+statement ok
+CREATE TABLE t_url (payload varchar);
+
+statement error invalid URL
+CREATE SINK s_bad_url FROM t_url WITH (
+    connector = 'http',
+    url = 'not a valid url !!',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+DROP TABLE t_url;
+
+# ---- Validation: auto schema change should be rejected ----
+statement ok
+CREATE TABLE t_auto_schema_change (payload varchar primary key);
+
+statement error http sink does not support schema change
+CREATE SINK s_auto_schema_change FROM t_auto_schema_change WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    ignore_delete = 'true',
+    primary_key = 'payload',
+    auto.schema.change = 'true'
+);
+
+statement ok
+DROP TABLE t_auto_schema_change;
+
+# ---- Success: ignore_delete allows non-append-only input ----
+statement ok
+CREATE TABLE t_ignore_delete_src (payload varchar);
+
+statement ok
+CREATE SINK s_ignore_delete FROM t_ignore_delete_src WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    ignore_delete = 'true'
+);
+
+statement ok
+INSERT INTO t_ignore_delete_src VALUES ('before update');
+
+statement ok
+UPDATE t_ignore_delete_src SET payload = 'after update' WHERE payload = 'before update';
+
+statement ok
+DELETE FROM t_ignore_delete_src WHERE payload = 'after update';
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_ignore_delete;
+
+statement ok
+DROP TABLE t_ignore_delete_src;
+
+# ---- Success: varchar payload ----
+statement ok
+CREATE TABLE t_varchar (payload varchar);
+
+statement ok
+CREATE SINK s_varchar FROM t_varchar WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    force_append_only = 'true',
+    header.x_test = 'rw-http-sink'
+);
+
+statement ok
+INSERT INTO t_varchar VALUES ('hello world');
+
+statement ok
+INSERT INTO t_varchar VALUES ('{"key":"value"}');
+
+statement ok
+FLUSH;
+
+# NULL values should be silently skipped (no POST sent)
+statement ok
+INSERT INTO t_varchar VALUES (NULL);
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_varchar;
+
+statement ok
+DROP TABLE t_varchar;
+
+# ---- Success: jsonb payload ----
+statement ok
+CREATE TABLE t_jsonb (payload jsonb);
+
+statement ok
+CREATE SINK s_jsonb FROM t_jsonb WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+INSERT INTO t_jsonb VALUES ('{"event":"test","v":42}'::jsonb);
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_jsonb;
+
+statement ok
+DROP TABLE t_jsonb;

@@ -174,6 +174,7 @@ pub fn handle_bind(
                 param_types,
                 dependent_relations,
                 dependent_udfs,
+                dependent_secrets,
                 ..
             } = bound_result;
 
@@ -185,6 +186,7 @@ pub fn handle_bind(
                 parsed_params: Some(parsed_params),
                 dependent_relations,
                 dependent_udfs,
+                dependent_secrets,
                 bound: new_bound,
             };
             Ok(Portal::Portal(PortalResult {

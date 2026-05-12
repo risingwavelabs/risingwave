@@ -21,7 +21,7 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sink_test_env_setup "$profile" true
+sink_test_env_setup "$profile" --need-connector
 
 echo "--- create SQL Server table"
 curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -

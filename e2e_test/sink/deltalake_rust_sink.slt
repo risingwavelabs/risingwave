@@ -25,13 +25,29 @@ with (
 );
 
 statement ok
-INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01+00:00' , false, 1, array[1]::decimal[]);
+create sink s7 as select * from mv6
+with (
+    connector = 'deltalake',
+    is_exactly_once = 'true',
+    type = 'append-only',
+    force_append_only = 'true',
+    location = 's3a://deltalake/deltalake-test-exactly-once',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = secret deltalake_s3_secret_key,
+    s3.endpoint = 'http://127.0.0.1:9301'
+);
+
+statement ok
+INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:01:01+00:00', false, 1, array[1]::decimal[]);
 
 statement ok
 FLUSH;
 
 statement ok
 DROP SINK s6;
+
+statement ok
+DROP SINK s7;
 
 statement ok
 DROP SECRET deltalake_s3_secret_key;

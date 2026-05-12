@@ -286,6 +286,10 @@ pub mod default {
             1000
         }
 
+        pub fn hummock_time_travel_delta_fetch_batch_size() -> usize {
+            100
+        }
+
         pub fn hummock_gc_history_insert_batch_size() -> usize {
             1000
         }
@@ -445,6 +449,10 @@ pub mod default {
         }
 
         pub fn enable_state_table_vnode_stats_pruning() -> bool {
+            false
+        }
+
+        pub fn enable_vnode_key_stats_for_materialize() -> bool {
             false
         }
 
@@ -802,6 +810,26 @@ pub mod tests {
             3 |             max_prefetch_block_number = 0
               |                                         ^
             storage.max_prefetch_block_number must be greater than 0
+        "#]]
+        .assert_eq(&config.to_string());
+    }
+
+    #[test]
+    fn test_storage_iceberg_compaction_pull_interval_ms_must_be_positive() {
+        let config = toml::from_str::<RwConfig>(
+            r#"
+            [storage]
+            iceberg_compaction_pull_interval_ms = 0
+            "#,
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 3, column 51
+              |
+            3 |             iceberg_compaction_pull_interval_ms = 0
+              |                                                   ^
+            storage.iceberg_compaction_pull_interval_ms must be greater than 0
         "#]]
         .assert_eq(&config.to_string());
     }

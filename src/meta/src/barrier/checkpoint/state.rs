@@ -793,15 +793,19 @@ impl DatabaseCheckpointControl {
 
             Some(Command::Throttle { jobs, config }) => {
                 let mutation = Some(Command::throttle_to_mutation(&config));
+                for (fragment_id, throttle_config) in &config {
+                    self.database_info
+                        .pre_apply_throttle(*fragment_id, throttle_config);
+                }
                 throttle_for_creating_jobs = Some((jobs, config));
                 self.apply_simple_command(mutation, "Throttle")
             }
 
             Some(Command::DropStreamingJobs {
                 streaming_job_ids,
-                unregistered_state_table_ids,
                 unregistered_fragment_ids,
                 dropped_sink_fragment_by_targets,
+                ..
             }) => {
                 let actors = self
                     .database_info
@@ -835,10 +839,7 @@ impl DatabaseCheckpointControl {
                     table_ids,
                     None,
                     node_actors,
-                    PostCollectCommand::DropStreamingJobs {
-                        streaming_job_ids,
-                        unregistered_state_table_ids,
-                    },
+                    PostCollectCommand::DropStreamingJobs,
                 )
             }
 

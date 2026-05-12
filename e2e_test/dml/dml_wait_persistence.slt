@@ -1,0 +1,19 @@
+statement ok
+set implicit_flush = false;
+
+statement ok
+set dml_wait_persistence = true;
+
+statement ok
+create table t(v1 int);
+
+statement ok
+insert into t values (1);
+
+query I retry 10 backoff 1s
+select v1 from t;
+----
+1
+
+statement ok
+drop table t;

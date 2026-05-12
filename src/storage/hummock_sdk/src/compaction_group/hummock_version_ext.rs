@@ -91,6 +91,49 @@ impl<L> HummockVersionCommon<SstableInfo, L> {
             .map(|s| s.sst_id)
     }
 
+    /// Prune stale table ids that no longer exist in `state_table_info` from SST metadata.
+    ///
+    /// This is used to normalize recovered versions from old clusters where dropped table ids
+    /// may still exist in persisted SST metadata.
+    pub fn prune_stale_table_ids_from_ssts(&mut self) -> usize {
+        let live_table_ids: HashSet<_> = self.state_table_info.info().keys().copied().collect();
+        // Older checkpoints may rely on deprecated `member_table_ids` before `state_table_info`
+        // is backfilled.
+        if live_table_ids.is_empty()
+            && self.levels.values().any(|levels| {
+                #[expect(deprecated)]
+                {
+                    !levels.member_table_ids.is_empty()
+                }
+            })
+        {
+            return 0;
+        }
+
+        let mut pruned_table_ids = HashSet::new();
+
+        for levels in self.levels.values_mut() {
+            let stale_table_ids = levels
+                .l0
+                .sub_levels
+                .iter()
+                .chain(levels.levels.iter())
+                .flat_map(|level| level.table_infos.iter())
+                .flat_map(|sst| sst.table_ids.iter().copied())
+                .filter(|table_id| !live_table_ids.contains(table_id))
+                .collect::<HashSet<_>>();
+
+            if stale_table_ids.is_empty() {
+                continue;
+            }
+
+            pruned_table_ids.extend(stale_table_ids.iter().copied());
+            levels.prune_table_ids_from_ssts(&stale_table_ids);
+        }
+
+        pruned_table_ids.len()
+    }
+
     pub fn level_iter<F: FnMut(&Level) -> bool>(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -412,7 +455,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                     GroupDeltaCommon::GroupConstruct(_)
                     | GroupDeltaCommon::GroupDestroy(_)
                     | GroupDeltaCommon::GroupMerge(_)
-                    | GroupDeltaCommon::TruncateTables(_) => {}
+                    | GroupDeltaCommon::PruneTableIdsFromSsts(_) => {}
                 }
             }
 
@@ -617,13 +660,13 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                         self.levels.remove(compaction_group_id);
                     }
 
-                    GroupDeltaCommon::TruncateTables(table_ids) => {
+                    GroupDeltaCommon::PruneTableIdsFromSsts(table_ids) => {
                         self.levels
                             .get_mut(compaction_group_id)
                             .unwrap_or_else(|| {
                                 panic!("compaction group {} does not exist", compaction_group_id)
                             })
-                            .truncate_tables(table_ids);
+                            .prune_table_ids_from_ssts(table_ids);
                     }
                 }
             }
@@ -1079,11 +1122,11 @@ impl Levels {
         }
     }
 
-    /// Truncate specified table ids from all levels, remove emptied SSTs and sub-levels,
+    /// Prune specified table ids from all SST metadata, remove emptied SSTs and sub-levels,
     /// then bump `compaction_group_version_id`.
-    pub(crate) fn truncate_tables(&mut self, table_ids: &HashSet<TableId>) {
+    pub(crate) fn prune_table_ids_from_ssts(&mut self, table_ids: &HashSet<TableId>) {
         for level in self.l0.sub_levels.iter_mut().chain(self.levels.iter_mut()) {
-            level.truncate_tables(table_ids);
+            level.prune_table_ids_from_ssts(table_ids);
         }
         self.l0.normalize();
         self.compaction_group_version_id += 1;
@@ -1339,10 +1382,18 @@ impl Level {
         original_len != self.table_infos.len()
     }
 
-    /// Truncate specified `table_ids` from each SST's metadata,
+    /// Prune specified `table_ids` from each SST's metadata,
     /// remove SSTs that become empty, then recompute sizes.
-    fn truncate_tables(&mut self, table_ids: &HashSet<TableId>) {
+    fn prune_table_ids_from_ssts(&mut self, table_ids: &HashSet<TableId>) {
         for sstable_info in &mut self.table_infos {
+            if !sstable_info
+                .table_ids
+                .iter()
+                .any(|table_id| table_ids.contains(table_id))
+            {
+                continue;
+            }
+
             let mut inner = sstable_info.get_inner();
             inner.table_ids.retain(|id| !table_ids.contains(id));
             sstable_info.set_inner(inner);
@@ -1571,7 +1622,9 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_pb::hummock::{CompactionConfig, GroupConstruct, GroupDestroy, LevelType};
+    use risingwave_pb::hummock::{
+        CompactionConfig, GroupConstruct, GroupDestroy, LevelType, StateTableInfo,
+    };
 
     use super::group_split;
     use crate::HummockVersionId;
@@ -1582,7 +1635,8 @@ mod tests {
     use crate::level::{Level, Levels, OverlappingLevel};
     use crate::sstable_info::{SstableInfo, SstableInfoInner};
     use crate::version::{
-        GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, IntraLevelDelta,
+        GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
+        IntraLevelDelta,
     };
 
     fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
@@ -2752,7 +2806,7 @@ mod tests {
     }
 
     #[test]
-    fn test_level_truncate_tables() {
+    fn test_level_prune_table_ids_from_ssts() {
         let mut level = Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping,
@@ -2766,8 +2820,8 @@ mod tests {
             ..Default::default()
         };
 
-        let truncate_ids = HashSet::from([TableId::new(2)]);
-        level.truncate_tables(&truncate_ids);
+        let pruned_table_ids = HashSet::from([TableId::new(2)]);
+        level.prune_table_ids_from_ssts(&pruned_table_ids);
 
         // SST 3 should be removed (was only table_id=2)
         assert_eq!(level.table_infos.len(), 2);
@@ -2776,9 +2830,9 @@ mod tests {
         assert_eq!(level.total_file_size, 100 + 200);
         assert_eq!(level.uncompressed_file_size, 200 + 400);
 
-        // Truncate remaining tables → all SSTs removed.
-        let truncate_ids = HashSet::from([TableId::new(1), TableId::new(3)]);
-        level.truncate_tables(&truncate_ids);
+        // Prune remaining tables, so all SSTs are removed.
+        let pruned_table_ids = HashSet::from([TableId::new(1), TableId::new(3)]);
+        level.prune_table_ids_from_ssts(&pruned_table_ids);
         assert!(level.table_infos.is_empty());
         assert_eq!(level.total_file_size, 0);
         assert_eq!(level.uncompressed_file_size, 0);
@@ -2838,7 +2892,7 @@ mod tests {
     }
 
     #[test]
-    fn test_levels_truncate_tables() {
+    fn test_levels_prune_table_ids_from_ssts() {
         #[expect(deprecated)]
         let mut levels = Levels {
             l0: OverlappingLevel {
@@ -2885,8 +2939,8 @@ mod tests {
             compaction_group_version_id: 0,
         };
 
-        // Truncate table 10
-        levels.truncate_tables(&HashSet::from([TableId::new(10)]));
+        // Prune table 10 from SST metadata.
+        levels.prune_table_ids_from_ssts(&HashSet::from([TableId::new(10)]));
 
         assert_eq!(levels.l0.sub_levels.len(), 1);
         assert_eq!(levels.l0.sub_levels[0].sub_level_id, 1);
@@ -2911,7 +2965,7 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_version_delta_truncate_tables() {
+    fn test_apply_version_delta_prune_table_ids_from_ssts() {
         let mut version = HummockVersion {
             id: HummockVersionId::new(0),
             levels: HashMap::from_iter([(1.into(), {
@@ -2972,9 +3026,9 @@ mod tests {
             group_deltas: HashMap::from_iter([(
                 1.into(),
                 GroupDeltas {
-                    group_deltas: vec![GroupDelta::TruncateTables(HashSet::from([TableId::new(
-                        100,
-                    )]))],
+                    group_deltas: vec![GroupDelta::PruneTableIdsFromSsts(HashSet::from([
+                        TableId::new(100),
+                    ]))],
                 },
             )]),
             ..Default::default()
@@ -2992,15 +3046,10 @@ mod tests {
         assert_eq!(cg.l0.sub_levels[0].sub_level_id, 1);
         assert_eq!(cg.l0.sub_levels[0].table_infos.len(), 1);
         assert_eq!(2, cg.l0.sub_levels[0].table_infos[0].sst_id);
-        for sub_level in &cg.l0.sub_levels {
-            for sst in &sub_level.table_infos {
-                assert!(
-                    !sst.table_ids.is_empty(),
-                    "SST {} should not have empty table_ids",
-                    sst.sst_id
-                );
-            }
-        }
+        assert_eq!(
+            cg.l0.sub_levels[0].table_infos[0].table_ids,
+            vec![TableId::new(200)]
+        );
 
         assert_eq!(cg.l0.total_file_size, 60);
         assert_eq!(cg.l0.uncompressed_file_size, 120);
@@ -3015,6 +3064,114 @@ mod tests {
         assert_eq!(cg.levels[0].uncompressed_file_size, 160);
 
         assert_eq!(cg.compaction_group_version_id, 1);
+    }
+
+    #[test]
+    fn test_prune_stale_table_ids_from_ssts() {
+        let live_table_id = TableId::new(100);
+        let stale_table_id = TableId::new(200);
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([(1.into(), {
+                #[expect(deprecated)]
+                let levels = Levels {
+                    l0: OverlappingLevel {
+                        sub_levels: vec![Level {
+                            level_idx: 0,
+                            level_type: LevelType::Overlapping,
+                            table_infos: vec![make_sst(
+                                1,
+                                vec![live_table_id.as_raw_id(), stale_table_id.as_raw_id()],
+                                50,
+                            )],
+                            total_file_size: 50,
+                            uncompressed_file_size: 100,
+                            sub_level_id: 1,
+                            ..Default::default()
+                        }],
+                        total_file_size: 50,
+                        uncompressed_file_size: 100,
+                    },
+                    levels: vec![Level {
+                        level_idx: 1,
+                        level_type: LevelType::Nonoverlapping,
+                        table_infos: vec![make_sst(2, vec![stale_table_id.as_raw_id()], 60)],
+                        total_file_size: 60,
+                        uncompressed_file_size: 120,
+                        ..Default::default()
+                    }],
+                    group_id: 1.into(),
+                    parent_group_id: 0.into(),
+                    member_table_ids: vec![],
+                    compaction_group_version_id: 0,
+                };
+                levels
+            })]),
+            state_table_info: HummockVersionStateTableInfo::from_protobuf_owned(
+                HashMap::from_iter([(
+                    live_table_id,
+                    StateTableInfo {
+                        committed_epoch: 1,
+                        compaction_group_id: 1.into(),
+                    },
+                )]),
+            ),
+            ..Default::default()
+        };
+
+        assert_eq!(version.prune_stale_table_ids_from_ssts(), 1);
+
+        let cg = version.get_compaction_group_levels(1.into());
+        assert_eq!(cg.l0.sub_levels.len(), 1);
+        assert_eq!(cg.l0.sub_levels[0].table_infos.len(), 1);
+        assert_eq!(cg.l0.sub_levels[0].table_infos[0].sst_id, 1);
+        assert_eq!(
+            cg.l0.sub_levels[0].table_infos[0].table_ids,
+            vec![live_table_id]
+        );
+        assert!(cg.levels[0].table_infos.is_empty());
+        assert_eq!(cg.compaction_group_version_id, 1);
+    }
+
+    #[test]
+    fn test_prune_stale_table_ids_from_ssts_skips_legacy_member_table_ids() {
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from_iter([(1.into(), {
+                #[expect(deprecated)]
+                let levels = Levels {
+                    l0: OverlappingLevel {
+                        sub_levels: vec![Level {
+                            level_idx: 0,
+                            level_type: LevelType::Overlapping,
+                            table_infos: vec![make_sst(1, vec![100, 200], 50)],
+                            total_file_size: 50,
+                            uncompressed_file_size: 100,
+                            sub_level_id: 1,
+                            ..Default::default()
+                        }],
+                        total_file_size: 50,
+                        uncompressed_file_size: 100,
+                    },
+                    group_id: 1.into(),
+                    parent_group_id: 0.into(),
+                    member_table_ids: vec![100, 200],
+                    compaction_group_version_id: 0,
+                    ..Default::default()
+                };
+                levels
+            })]),
+            ..Default::default()
+        };
+
+        assert_eq!(version.prune_stale_table_ids_from_ssts(), 0);
+
+        let cg = version.get_compaction_group_levels(1.into());
+        assert_eq!(
+            cg.l0.sub_levels[0].table_infos[0].table_ids,
+            vec![TableId::new(100), TableId::new(200)]
+        );
+        assert_eq!(cg.compaction_group_version_id, 0);
     }
 
     #[test]

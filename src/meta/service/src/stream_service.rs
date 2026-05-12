@@ -128,7 +128,6 @@ impl StreamManagerService for StreamServiceImpl {
         let statuses = self
             .iceberg_compaction_manager
             .list_compaction_statuses()
-            .await
             .into_iter()
             .map(
                 |status| list_iceberg_compaction_status_response::IcebergCompactionStatus {

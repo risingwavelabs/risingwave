@@ -47,7 +47,9 @@ use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentDownstreamRelation, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::reload_cdc_table_snapshot_splits;
-use crate::stream::{SourceChange, StreamFragmentGraph, UpstreamSinkInfo};
+use crate::stream::{
+    SourceChange, StreamFragmentGraph, UpstreamSinkInfo, cleanup_dropped_streaming_jobs,
+};
 
 #[derive(Debug)]
 pub(crate) struct UpstreamSinkRecoveryInfo {
@@ -214,17 +216,49 @@ fn build_stream_actors(
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    async fn apply_pre_applied_drop_cancel(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<bool> {
+        let drop_cancel = self.scheduled_barriers.pre_apply_drop_cancel(database_id);
+        let has_drop_streaming_jobs = !drop_cancel.streaming_job_ids.is_empty();
+        cleanup_dropped_streaming_jobs(
+            &self.refresh_manager,
+            &self.hummock_manager,
+            &self.metadata_manager,
+            drop_cancel.streaming_job_ids,
+            drop_cancel.dropped_state_table_ids,
+            "drop_streaming_jobs",
+        )
+        .await?;
+        Ok(has_drop_streaming_jobs)
+    }
+
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
     async fn clean_dirty_streaming_jobs(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
         self.metadata_manager
             .catalog_controller
             .clean_dirty_subscription(database_id)
             .await?;
-        let dirty_associated_source_ids = self
+
+        let cleaned_dirty_jobs = self
             .metadata_manager
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
+        if database_id.is_some() {
+            // Per-database recovery does not run the global Hummock purge below. Unregister the
+            // dirty jobs cleaned in this database through the normal dropped-table cleanup path.
+            cleanup_dropped_streaming_jobs(
+                &self.refresh_manager,
+                &self.hummock_manager,
+                &self.metadata_manager,
+                cleaned_dirty_jobs.streaming_job_ids,
+                cleaned_dirty_jobs.dropped_table_ids,
+                "clean_dirty_creating_jobs",
+            )
+            .await?;
+        }
         self.metadata_manager
             .reset_all_refresh_jobs_to_idle()
             .await?;
@@ -232,7 +266,7 @@ impl GlobalBarrierWorkerContextImpl {
         // unregister cleaned sources.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
-                dropped_source_ids: dirty_associated_source_ids,
+                dropped_source_ids: cleaned_dirty_jobs.source_ids,
             })
             .await;
 
@@ -595,7 +629,7 @@ impl GlobalBarrierWorkerContextImpl {
                     tracing::info!("recovered background job progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-                    let _ = self.scheduled_barriers.pre_apply_drop_cancel(None);
+                    let _ = self.apply_pre_applied_drop_cancel(None).await?;
                     self.metadata_manager
                         .catalog_controller
                         .cleanup_dropped_tables()
@@ -653,12 +687,7 @@ impl GlobalBarrierWorkerContextImpl {
                     }
 
                     let mut recovery_context = self.load_recovery_context(None).await?;
-                    let dropped_table_ids = self.scheduled_barriers.pre_apply_drop_cancel(None);
-                    if !dropped_table_ids.is_empty() {
-                        self.metadata_manager
-                            .catalog_controller
-                            .complete_dropped_tables(dropped_table_ids)
-                            .await;
+                    if self.apply_pre_applied_drop_cancel(None).await? {
                         recovery_context = self.load_recovery_context(None).await?;
                     }
 
@@ -768,13 +797,9 @@ impl GlobalBarrierWorkerContextImpl {
         tracing::info!(?database_id, "recovered background job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
-        let dropped_table_ids = self
-            .scheduled_barriers
-            .pre_apply_drop_cancel(Some(database_id));
-        self.metadata_manager
-            .catalog_controller
-            .complete_dropped_tables(dropped_table_ids)
-            .await;
+        let _ = self
+            .apply_pre_applied_drop_cancel(Some(database_id))
+            .await?;
 
         let recovery_context = self.load_recovery_context(Some(database_id)).await?;
 

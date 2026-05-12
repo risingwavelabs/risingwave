@@ -69,7 +69,7 @@ use crate::handler::create_mv::parse_column_names;
 use crate::handler::util::{
     LongRunningNotificationAction, check_connector_match_connection_type,
     ensure_connection_type_allowed, execute_with_long_running_notification,
-    get_table_catalog_by_table_name,
+    get_table_catalog_by_table_name, reject_internal_table_dependencies,
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
@@ -275,7 +275,13 @@ pub async fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
 
-    let (dependent_relations, dependent_udfs, bound, auto_refresh_schema_from_table) = {
+    let (
+        dependent_relations,
+        dependent_udfs,
+        dependent_secrets,
+        bound,
+        auto_refresh_schema_from_table,
+    ) = {
         let mut binder = Binder::new_for_stream(session);
         let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
         {
@@ -315,10 +321,13 @@ pub async fn gen_sink_plan(
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
+            binder.included_secrets().clone(),
             bound,
             auto_refresh_schema_from_table,
         )
     };
+
+    reject_internal_table_dependencies(session, &dependent_relations, "CREATE SINK")?;
 
     let col_names = if sink_into_table_name.is_some() {
         parse_column_names(&stmt.columns)
@@ -434,7 +443,7 @@ pub async fn gen_sink_plan(
 
     let sink_desc = sink_plan.sink_desc().clone();
 
-    let mut sink_plan: PlanRef = sink_plan.into();
+    let mut sink_plan: PlanRef = sink_plan.into_stream_plan()?;
 
     let ctx = sink_plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -450,6 +459,12 @@ pub async fn gen_sink_plan(
         RelationCollectorVisitor::collect_with(dependent_relations, sink_plan.clone())
             .into_iter()
             .chain(dependent_udfs.iter().copied().map_into())
+            .chain(
+                dependent_secrets
+                    .iter()
+                    .copied()
+                    .map(|id| id.as_object_id()),
+            )
             .collect();
 
     let sink_catalog = sink_desc.into_catalog(
@@ -520,7 +535,6 @@ pub async fn get_partition_compute_info(
     }
 }
 
-#[allow(clippy::unused_async)]
 async fn get_partition_compute_info_for_iceberg(
     _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
@@ -751,7 +765,7 @@ pub(crate) fn derive_default_column_project_for_sink(
         // If users specified the columns to be inserted e.g. `CREATE SINK s INTO t(a, b)`, the expressions of `Project` will be generated accordingly.
         // The missing columns will be filled with default value (`null` if not explicitly defined).
         // Otherwise, e.g. `CREATE SINK s INTO t`, the columns will be matched by their order in `select` query and the target table.
-        #[allow(clippy::collapsible_else_if)]
+        #[expect(clippy::collapsible_else_if)]
         if user_specified_columns {
             if let Some(idx) = sink_visible_col_idxes_by_name.get(column.name()) {
                 exprs.push(sink_col_expr(*idx)?);

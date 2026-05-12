@@ -20,37 +20,35 @@ use either::Either;
 use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::ArrayRef;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
-use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::cdc::split::{
     extract_postgres_lsn_from_offset_str, extract_sql_server_commit_lsn_from_offset_str,
 };
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::reader::reader::SourceReader;
 use risingwave_connector::source::{
-    ConnectorState, SourceContext, SourceCtrlOpts, SplitId, SplitImpl, SplitMetaData,
-    StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
+    ConnectorState, SplitId, SplitImpl, SplitMetaData, WaitCheckpointTask,
+    build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::SourceId;
 use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
 use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
-use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
-use crate::executor::source::reader_stream::StreamReaderBuilder;
+use crate::executor::source::reader_stream::{SourceReaderEventWithState, StreamReaderBuilder};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
 
@@ -146,72 +144,6 @@ impl<S: StateStore> SourceExecutor<S> {
         }))
     }
 
-    /// build the source column ids and the source context which will be used to build the source stream
-    pub fn prepare_source_stream_build(
-        &self,
-        source_desc: &SourceDesc,
-    ) -> (Vec<ColumnId>, SourceContext) {
-        let column_ids = source_desc
-            .columns
-            .iter()
-            .map(|column_desc| column_desc.column_id)
-            .collect_vec();
-
-        let (schema_change_tx, mut schema_change_rx) =
-            mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
-        let schema_change_tx = if self.is_auto_schema_change_enable() {
-            let meta_client = self.actor_ctx.meta_client.clone();
-            // spawn a task to handle schema change event from source parser
-            let _join_handle = tokio::task::spawn(async move {
-                while let Some((schema_change, finish_tx)) = schema_change_rx.recv().await {
-                    let table_ids = schema_change.table_ids();
-                    tracing::info!(
-                        target: "auto_schema_change",
-                        "recv a schema change event for tables: {:?}", table_ids);
-                    // TODO: retry on rpc error
-                    if let Some(ref meta_client) = meta_client {
-                        match meta_client
-                            .auto_schema_change(schema_change.to_protobuf())
-                            .await
-                        {
-                            Ok(_) => {
-                                tracing::info!(
-                                    target: "auto_schema_change",
-                                    "schema change success for tables: {:?}", table_ids);
-                                finish_tx.send(()).unwrap();
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    target: "auto_schema_change",
-                                    error = ?e.as_report(), "schema change error");
-                                finish_tx.send(()).unwrap();
-                            }
-                        }
-                    }
-                }
-            });
-            Some(schema_change_tx)
-        } else {
-            info!("auto schema change is disabled in config");
-            None
-        };
-        let source_ctx = SourceContext::new(
-            self.actor_ctx.id,
-            self.stream_source_core.source_id,
-            self.actor_ctx.fragment_id,
-            self.stream_source_core.source_name.clone(),
-            source_desc.metrics.clone(),
-            SourceCtrlOpts {
-                chunk_size: limited_chunk_size(self.rate_limit_rps),
-                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
-            },
-            source_desc.source.config.clone(),
-            schema_change_tx,
-        );
-
-        (column_ids, source_ctx)
-    }
-
     fn is_auto_schema_change_enable(&self) -> bool {
         self.actor_ctx.config.developer.enable_auto_schema_change
     }
@@ -239,7 +171,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         barrier_epoch: EpochPair,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, SourceReaderEventWithState>,
         apply_mutation: ApplyMutationAfterBarrier<'_>,
     ) -> StreamExecutorResult<()> {
         {
@@ -361,7 +293,7 @@ impl<S: StateStore> SourceExecutor<S> {
     fn rebuild_stream_reader_from_error<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, SourceReaderEventWithState>,
         e: StreamExecutorError,
     ) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
@@ -384,7 +316,7 @@ impl<S: StateStore> SourceExecutor<S> {
     fn rebuild_stream_reader<const BIASED: bool>(
         &mut self,
         source_desc: &SourceDesc,
-        stream: &mut StreamReaderWithPause<BIASED, StreamChunkWithState>,
+        stream: &mut StreamReaderWithPause<BIASED, SourceReaderEventWithState>,
     ) -> StreamExecutorResult<()> {
         let core = &mut self.stream_source_core;
         let target_state: Vec<SplitImpl> = core.latest_split_info.values().cloned().collect();
@@ -585,6 +517,17 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
+    fn apply_latest_split_state(&mut self, latest_state: HashMap<SplitId, SplitImpl>) {
+        for (split_id, new_split_impl) in &latest_state {
+            if let Some(split_impl) = self.stream_source_core.latest_split_info.get_mut(split_id) {
+                *split_impl = new_split_impl.clone();
+            }
+        }
+        self.stream_source_core
+            .updated_splits_in_epoch
+            .extend(latest_state);
+    }
+
     /// Report CDC source offset updated only the first time.
     fn maybe_report_cdc_source_offset(
         &self,
@@ -736,7 +679,7 @@ impl<S: StateStore> SourceExecutor<S> {
         }
         // Merge the chunks from source and the barriers into a single stream. We prioritize
         // barriers over source data chunks here.
-        let mut stream = StreamReaderWithPause::<true, StreamChunkWithState>::new(
+        let mut stream = StreamReaderWithPause::<true, SourceReaderEventWithState>::new(
             barrier_stream,
             reader_stream_builder
                 .into_retry_stream(recover_state, is_uninitialized && self.is_shared_non_cdc),
@@ -1062,7 +1005,17 @@ impl<S: StateStore> SourceExecutor<S> {
                     unreachable!();
                 }
 
-                Either::Right((chunk, latest_state)) => {
+                Either::Right(event) => {
+                    let (chunk, latest_state) = match event {
+                        SourceReaderEventWithState::Progress(latest_state) => {
+                            self.apply_latest_split_state(latest_state);
+                            continue;
+                        }
+                        SourceReaderEventWithState::Data((chunk, latest_state)) => {
+                            (chunk, latest_state)
+                        }
+                    };
+
                     if let Some(task_builder) = &mut wait_checkpoint_task_builder {
                         if let Some(pulsar_message_id_idx) = pulsar_message_id_idx {
                             let pulsar_message_id_col = chunk.column_at(pulsar_message_id_idx);
@@ -1101,17 +1054,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             * WAIT_BARRIER_MULTIPLE_TIMES;
                     }
 
-                    latest_state.iter().for_each(|(split_id, new_split_impl)| {
-                        if let Some(split_impl) =
-                            self.stream_source_core.latest_split_info.get_mut(split_id)
-                        {
-                            *split_impl = new_split_impl.clone();
-                        }
-                    });
-
-                    self.stream_source_core
-                        .updated_splits_in_epoch
-                        .extend(latest_state);
+                    self.apply_latest_split_state(latest_state);
 
                     let card = chunk.cardinality();
                     if card == 0 {

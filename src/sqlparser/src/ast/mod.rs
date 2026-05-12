@@ -1256,7 +1256,7 @@ pub enum WaitTarget {
 }
 
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
-#[allow(clippy::large_enum_variant)]
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Statement {
     /// Analyze (Hive)
@@ -1773,7 +1773,7 @@ impl Statement {
     //
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
-    #[allow(clippy::cognitive_complexity)]
+    #[expect(clippy::cognitive_complexity)]
     fn fmt_unchecked(&self, mut f: impl std::fmt::Write) -> fmt::Result {
         match self {
             Statement::Explain {
@@ -2990,6 +2990,8 @@ pub enum FunctionArgExpr {
     QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
     /// An unqualified `*` or `* except (columns)`
     Wildcard(Option<Vec<Expr>>),
+    /// A secret reference, e.g. `SECRET my_secret` or `SECRET my_secret AS FILE`
+    SecretRef(SecretRefValue),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -3021,6 +3023,7 @@ impl fmt::Display for FunctionArgExpr {
                 None => write!(f, "{}.*", prefix),
             },
 
+            FunctionArgExpr::SecretRef(secret_ref) => write!(f, "SECRET {}", secret_ref),
             FunctionArgExpr::Wildcard(except) => match except {
                 Some(exprs) => write!(
                     f,

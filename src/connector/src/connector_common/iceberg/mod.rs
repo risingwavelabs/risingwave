@@ -223,7 +223,8 @@ impl EnforceSecret for IcebergCommon {
 pub struct IcebergTableIdentifier {
     #[serde(rename = "database.name")]
     pub database_name: Option<String>,
-    /// Full name of table, must include schema name when database is provided.
+    /// Table name or namespace-qualified table name. Dots are treated as
+    /// Iceberg namespace separators.
     #[serde(rename = "table.name")]
     pub table_name: String,
 }
@@ -237,26 +238,38 @@ impl IcebergTableIdentifier {
         &self.table_name
     }
 
+    fn identifier_parts(&self) -> ConnectorResult<Vec<&str>> {
+        let mut parts = Vec::new();
+        if let Some(database_name) = &self.database_name {
+            parts.extend(database_name.split('.'));
+        }
+        parts.extend(self.table_name.split('.'));
+
+        if parts.iter().any(|part| part.is_empty()) {
+            bail!(
+                "Invalid iceberg table identifier '{}': identifier parts must not be empty",
+                self.full_identifier()
+            );
+        }
+
+        Ok(parts)
+    }
+
+    fn full_identifier(&self) -> String {
+        match &self.database_name {
+            Some(database_name) => format!("{}.{}", database_name, self.table_name),
+            None => self.table_name.clone(),
+        }
+    }
+
     pub fn to_table_ident(&self) -> ConnectorResult<TableIdent> {
-        let ret = if let Some(database_name) = &self.database_name {
-            TableIdent::from_strs(vec![database_name, &self.table_name])
-        } else {
-            TableIdent::from_strs(vec![&self.table_name])
-        };
+        let ret = TableIdent::from_strs(self.identifier_parts()?);
 
         Ok(ret.context("Failed to create table identifier")?)
     }
 
     pub fn validate(&self) -> ConnectorResult<()> {
-        if let Some(database_name) = &self.database_name
-            && database_name.contains('.')
-        {
-            bail!(
-                "Invalid database.name '{}': dots are not allowed in database names",
-                database_name
-            );
-        }
-        Ok(())
+        self.identifier_parts().map(|_| ())
     }
 }
 
@@ -937,7 +950,6 @@ mod tests {
 
     #[test]
     fn test_iceberg_table_identifier_validation() {
-        // Test valid database names
         let valid_identifier = IcebergTableIdentifier {
             database_name: Some("valid_db".to_owned()),
             table_name: "test_table".to_owned(),
@@ -956,31 +968,78 @@ mod tests {
         };
         assert!(no_database.validate().is_ok());
 
-        // Test invalid database names with dots
-        let single_dot = IcebergTableIdentifier {
-            database_name: Some("a.b".to_owned()),
+        let empty_part = IcebergTableIdentifier {
+            database_name: Some("a..b".to_owned()),
             table_name: "test_table".to_owned(),
         };
-        let result = single_dot.validate();
+        let result = empty_part.validate();
         assert!(result.is_err());
         assert!(
             result
                 .unwrap_err()
                 .to_string()
-                .contains("dots are not allowed")
+                .contains("identifier parts must not be empty")
         );
 
-        let multiple_dots = IcebergTableIdentifier {
-            database_name: Some("a.b.c".to_owned()),
-            table_name: "test_table".to_owned(),
+        let leading_dot = IcebergTableIdentifier {
+            database_name: None,
+            table_name: ".test_table".to_owned(),
         };
-        let result = multiple_dots.validate();
+        let result = leading_dot.validate();
         assert!(result.is_err());
         assert!(
             result
                 .unwrap_err()
                 .to_string()
-                .contains("dots are not allowed")
+                .contains("identifier parts must not be empty")
         );
+    }
+
+    #[test]
+    fn test_iceberg_table_identifier_dots_as_namespace_separators() {
+        let table_ident = IcebergTableIdentifier {
+            database_name: Some("general.zia.stats".to_owned()),
+            table_name: "tagged_security_transactions".to_owned(),
+        }
+        .to_table_ident()
+        .unwrap();
+        let namespace: Vec<_> = table_ident
+            .namespace()
+            .as_ref()
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(namespace, vec!["general", "zia", "stats"]);
+        assert_eq!(table_ident.name(), "tagged_security_transactions");
+
+        let table_ident = IcebergTableIdentifier {
+            database_name: Some("general".to_owned()),
+            table_name: "zia.stats.tagged_security_transactions".to_owned(),
+        }
+        .to_table_ident()
+        .unwrap();
+        let namespace: Vec<_> = table_ident
+            .namespace()
+            .as_ref()
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(namespace, vec!["general", "zia", "stats"]);
+        assert_eq!(table_ident.name(), "tagged_security_transactions");
+
+        let table_ident = IcebergTableIdentifier {
+            database_name: None,
+            table_name: "general.zia.stats.tagged_security_transactions".to_owned(),
+        }
+        .to_table_ident()
+        .unwrap();
+        let namespace: Vec<_> = table_ident
+            .namespace()
+            .as_ref()
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(namespace, vec!["general", "zia", "stats"]);
+        assert_eq!(table_ident.name(), "tagged_security_transactions");
     }
 }

@@ -169,7 +169,7 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
 }
 
 impl CatalogController {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
@@ -1822,11 +1822,12 @@ impl CatalogController {
                         ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job.clone()).into(),
                     )),
                 });
-                if let Some((log_store_table_id, new_log_store_table_columns)) =
-                    finish_sink_context.new_log_store_table
-                {
+                if let Some(new_log_store_table) = finish_sink_context.new_log_store_table {
+                    let log_store_table_id = new_log_store_table.id;
                     let new_log_store_table_columns: ColumnCatalogArray =
-                        new_log_store_table_columns.into();
+                        new_log_store_table.columns.clone().into();
+                    let new_log_store_table_value_indices =
+                        new_log_store_table.value_indices.clone();
                     let (mut table, table_obj) = Table::find_by_id(log_store_table_id)
                         .find_also_related(Object)
                         .one(txn)
@@ -1835,11 +1836,13 @@ impl CatalogController {
                     Table::update(table::ActiveModel {
                         table_id: Set(log_store_table_id),
                         columns: Set(new_log_store_table_columns.clone()),
+                        value_indices: Set(new_log_store_table_value_indices.clone().into()),
                         ..Default::default()
                     })
                     .exec(txn)
                     .await?;
                     table.columns = new_log_store_table_columns;
+                    table.value_indices = new_log_store_table_value_indices.into();
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
                             ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
@@ -2897,12 +2900,40 @@ impl CatalogController {
                         .map(|secret_ref| secret_ref.to_protobuf())
                         .unwrap_or_default(),
                 );
-                let (_source_to_add_secret_dep, _source_to_remove_secret_dep) =
+                let (source_to_add_secret_dep, source_to_remove_secret_dep) =
                     source_options_with_secret
                         .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
 
                 // Validate the updated source properties
                 let _ = ConnectorProperties::extract(source_options_with_secret.clone(), true)?;
+
+                // Keep source-level secret dependencies in sync with the source properties that
+                // are rewritten from the altered connection.
+                let source_used_by_id = source
+                    .optional_associated_table_id
+                    .map(|table_id| table_id.as_object_id())
+                    .unwrap_or_else(|| source_id.as_object_id());
+                if !source_to_add_secret_dep.is_empty() {
+                    ObjectDependency::insert_many(source_to_add_secret_dep.into_iter().map(
+                        |secret_id| object_dependency::ActiveModel {
+                            oid: Set(secret_id.into()),
+                            used_by: Set(source_used_by_id),
+                            ..Default::default()
+                        },
+                    ))
+                    .exec(&txn)
+                    .await?;
+                }
+                if !source_to_remove_secret_dep.is_empty() {
+                    let _ = ObjectDependency::delete_many()
+                        .filter(
+                            object_dependency::Column::Oid
+                                .is_in(source_to_remove_secret_dep)
+                                .and(object_dependency::Column::UsedBy.eq(source_used_by_id)),
+                        )
+                        .exec(&txn)
+                        .await?;
+                }
 
                 // Prepare source update
                 let active_source = source::ActiveModel {
@@ -3399,7 +3430,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
     pub tmp_sink_id: SinkId,
     pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
-    pub new_log_store_table: Option<(TableId, Vec<PbColumnCatalog>)>,
+    pub new_log_store_table: Option<Box<PbTable>>,
 }
 
 async fn update_connector_props_fragments<F>(

@@ -40,15 +40,7 @@ serde_json = "1"
 serde_yaml = "0.9.25"
 size = "0.5"
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-    "fs",
-] }
+tokio = { workspace = true, features = ["fs"] }
 tonic = { workspace = true }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }

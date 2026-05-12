@@ -1,0 +1,24 @@
+control substitution on
+
+statement ok
+create table internal_subscription_t (v1 int);
+
+statement ok
+create materialized view internal_subscription_mv as select * from internal_subscription_t;
+
+let internal_streamscan_table
+SELECT name
+FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'internal_subscription_mv'
+  AND name LIKE '%streamscan%'
+ORDER BY id
+LIMIT 1
+
+statement error CREATE SUBSCRIPTION does not support internal table
+create subscription internal_subscription_sub from ${internal_streamscan_table} with(retention = '1D');
+
+statement ok
+drop materialized view internal_subscription_mv;
+
+statement ok
+drop table internal_subscription_t;
