@@ -1067,7 +1067,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     assert!(
         hummock_manager
             .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
+                StaticCompactionGroupId::StateDefault,
                 &mut default_compaction_selector(),
             )
             .await
@@ -1085,7 +1085,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     register_table_ids_to_compaction_group(
         &hummock_manager,
         &[1],
-        StaticCompactionGroupId::StateDefault.into(),
+        StaticCompactionGroupId::StateDefault,
     )
     .await;
     hummock_meta_client
@@ -1102,7 +1102,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
-            StaticCompactionGroupId::StateDefault.into(),
+            StaticCompactionGroupId::StateDefault,
             &mut default_compaction_selector(),
         )
         .await
@@ -1140,7 +1140,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
-            StaticCompactionGroupId::StateDefault.into(),
+            StaticCompactionGroupId::StateDefault,
             &mut default_compaction_selector(),
         )
         .await
@@ -1202,7 +1202,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     assert!(
         hummock_manager
             .get_compact_task(
-                StaticCompactionGroupId::StateDefault.into(),
+                StaticCompactionGroupId::StateDefault,
                 &mut default_compaction_selector(),
             )
             .await
@@ -1220,7 +1220,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     register_table_ids_to_compaction_group(
         &hummock_manager,
         &[1],
-        StaticCompactionGroupId::StateDefault.into(),
+        StaticCompactionGroupId::StateDefault,
     )
     .await;
     hummock_meta_client
@@ -1237,7 +1237,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     // Get a compaction task.
     let compact_task = hummock_manager
         .get_compact_task(
-            StaticCompactionGroupId::StateDefault.into(),
+            StaticCompactionGroupId::StateDefault,
             &mut default_compaction_selector(),
         )
         .await
@@ -2757,15 +2757,15 @@ async fn test_try_merge_compaction_group_error_propagation() {
     // StateDefault(2): [100, 102], MaterializedView(3): [101, 200]
     hummock_manager
         .register_table_ids_for_test(&[
-            (100, StaticCompactionGroupId::StateDefault.into()),
-            (102, StaticCompactionGroupId::StateDefault.into()),
+            (100, StaticCompactionGroupId::StateDefault),
+            (102, StaticCompactionGroupId::StateDefault),
         ])
         .await
         .unwrap();
     hummock_manager
         .register_table_ids_for_test(&[
-            (101, StaticCompactionGroupId::MaterializedView.into()),
-            (200, StaticCompactionGroupId::MaterializedView.into()),
+            (101, StaticCompactionGroupId::MaterializedView),
+            (200, StaticCompactionGroupId::MaterializedView),
         ])
         .await
         .unwrap();
@@ -2788,14 +2788,14 @@ async fn test_try_merge_compaction_group_error_propagation() {
     // Now StateDefault(2)=[100,102] and Group_X=[101] have overlapping table ID ranges.
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(
-            StaticCompactionGroupId::MaterializedView.into(),
+            StaticCompactionGroupId::MaterializedView,
             &[101.into()],
             None,
         )
         .await
         .unwrap();
 
-    let state_default_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
+    let state_default_id: CompactionGroupId = StaticCompactionGroupId::StateDefault;
     let group_x_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 101).await;
     assert_ne!(state_default_id, group_x_id);
 
@@ -2999,7 +2999,7 @@ async fn test_normalize_overlapping_compaction_groups_skips_disabled_boundary_bu
 
     hummock_manager
         .move_state_tables_to_dedicated_compaction_group(
-            StaticCompactionGroupId::StateDefault.into(),
+            StaticCompactionGroupId::StateDefault,
             &[35.into()],
             None,
         )
