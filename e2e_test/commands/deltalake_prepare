@@ -41,9 +41,27 @@ echo "--- cleaning existing deltalake table at ${RISEDEV_DELTALAKE_LOCATION}"
 echo "--- cleaning existing deltalake table at ${exactly_once_location}"
 (cd "${repo_root}" && ./risedev mc rm --recursive --force "hummock-minio/${exactly_once_path}") || true
 
-spark_tgz="spark-3.3.1-bin-hadoop3.tgz"
-spark_dir="${work_dir}/spark-3.3.1-bin-hadoop3"
+spark_version="4.0.2"
+spark_tgz="spark-${spark_version}-bin-hadoop3.tgz"
+spark_dir="${work_dir}/spark-${spark_version}-bin-hadoop3"
 spark_sql="${spark_dir}/bin/spark-sql"
+
+if [[ -n "${JAVA_HOME:-}" ]]; then
+  java_bin="${JAVA_HOME}/bin/java"
+else
+  java_bin="$(type -p java || true)"
+fi
+
+if [[ -x "${java_bin}" ]]; then
+  java_ver=$("${java_bin}" -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d'.' -f1)
+  if [[ "${java_ver}" != "17" && "${java_ver}" != "21" ]]; then
+    echo "Only Java 17/21 are supported for Spark ${spark_version}. Current version: ${java_ver}" >&2
+    exit 1
+  fi
+else
+  echo "Java not found. Please install Java 17 or 21." >&2
+  exit 1
+fi
 
 if [ ! -x "${spark_sql}" ]; then
   echo "--- downloading spark (once)"
@@ -54,7 +72,8 @@ if [ ! -x "${spark_sql}" ]; then
   tar -xf "${spark_tgz}" --no-same-owner
 fi
 
-DEPENDENCIES="io.delta:delta-core_2.12:2.2.0,org.apache.hadoop:hadoop-aws:3.3.2"
+DEPENDENCIES="io.delta:delta-spark_2.13:4.0.1,org.apache.hadoop:hadoop-aws:3.4.1"
+unset SPARK_HOME
 
 echo "--- creating deltalake table at ${RISEDEV_DELTALAKE_LOCATION}"
 "${spark_sql}" --packages "${DEPENDENCIES}" \
