@@ -357,9 +357,9 @@
       │ └─StreamProject { exprs: [t1.ts, t1._row_id, 0:Int32] }
       │   └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [[$expr1]], output: [t1.ts, $expr1, t1._row_id], cleaned_by_watermark: true }
       │     ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
-      │     │ └─StreamFilter { predicate: Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) }
+      │     │ └─StreamFilter { predicate: IsNotTrue((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) }
       │     │   └─StreamShare { id: 2 }
-      │     │     └─StreamFilter { predicate: IsNotNull(t1.ts) }
+      │     │     └─StreamFilter { predicate: (IsNotTrue((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) }
       │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamNow { output: [now] }
@@ -367,8 +367,31 @@
         └─StreamProject { exprs: [t1.ts, t1._row_id, 1:Int32] }
           └─StreamFilter { predicate: (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) }
             └─StreamShare { id: 2 }
-              └─StreamFilter { predicate: IsNotNull(t1.ts) }
+              └─StreamFilter { predicate: (IsNotTrue((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) }
                 └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+- name: Temporal filter with nullable or predicate
+  sql: |
+    create table t1 (ts timestamp with time zone, a int);
+    select * from t1 where ts + interval '1 hour' > now() or a > 0;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, a, t1._row_id(hidden), $src(hidden)], stream_key: [t1._row_id, $src], pk_columns: [t1._row_id, $src], pk_conflict: NoCheck }
+    └─StreamUnion { all: true }
+      ├─StreamExchange { dist: HashShard(t1._row_id, 0:Int32) }
+      │ └─StreamProject { exprs: [t1.ts, t1.a, t1._row_id, 0:Int32] }
+      │   └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [[$expr1]], output: [t1.ts, t1.a, $expr1, t1._row_id], cleaned_by_watermark: true }
+      │     ├─StreamProject { exprs: [t1.ts, t1.a, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
+      │     │ └─StreamFilter { predicate: IsNotTrue((t1.a > 0:Int32)) }
+      │     │   └─StreamShare { id: 2 }
+      │     │     └─StreamFilter { predicate: (IsNotTrue((t1.a > 0:Int32)) OR (t1.a > 0:Int32)) }
+      │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1.a, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     └─StreamExchange { dist: Broadcast }
+      │       └─StreamNow { output: [now] }
+      └─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t1.ts, t1.a, t1._row_id, 1:Int32] }
+          └─StreamFilter { predicate: (t1.a > 0:Int32) }
+            └─StreamShare { id: 2 }
+              └─StreamFilter { predicate: (IsNotTrue((t1.a > 0:Int32)) OR (t1.a > 0:Int32)) }
+                └─StreamTableScan { table: t1, columns: [t1.ts, t1.a, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - name: Temporal filter with or is null
   sql: |
     create table t1 (ts timestamp with time zone);
@@ -380,16 +403,18 @@
       │ └─StreamProject { exprs: [t1.ts, t1._row_id, 0:Int32] }
       │   └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [[$expr1]], output: [t1.ts, $expr1, t1._row_id], cleaned_by_watermark: true }
       │     ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
-      │     │ └─StreamFilter { predicate: Not(IsNull(t1.ts)) }
-      │     │   └─StreamShare { id: 1 }
-      │     │     └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     │ └─StreamFilter { predicate: IsNotTrue(IsNull(t1.ts)) }
+      │     │   └─StreamShare { id: 2 }
+      │     │     └─StreamFilter { predicate: (IsNotTrue(IsNull(t1.ts)) OR IsNull(t1.ts)) }
+      │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t1._row_id, 1:Int32) }
         └─StreamProject { exprs: [t1.ts, t1._row_id, 1:Int32] }
           └─StreamFilter { predicate: IsNull(t1.ts) }
-            └─StreamShare { id: 1 }
-              └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+            └─StreamShare { id: 2 }
+              └─StreamFilter { predicate: (IsNotTrue(IsNull(t1.ts)) OR IsNull(t1.ts)) }
+                └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - name: Temporal filter with or predicate
   sql: |
     create table t1 (ts timestamp with time zone);
@@ -401,9 +426,9 @@
       │ └─StreamProject { exprs: [t1.ts, t1._row_id, 0:Int32] }
       │   └─StreamDynamicFilter { predicate: ($expr1 > now), output_watermarks: [[$expr1]], output: [t1.ts, $expr1, t1._row_id], cleaned_by_watermark: true }
       │     ├─StreamProject { exprs: [t1.ts, AddWithTimeZone(t1.ts, '01:00:00':Interval, 'UTC':Varchar) as $expr1, t1._row_id] }
-      │     │ └─StreamFilter { predicate: Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts)) }
+      │     │ └─StreamFilter { predicate: IsNotTrue(((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) OR IsNull(t1.ts))) }
       │     │   └─StreamShare { id: 2 }
-      │     │     └─StreamFilter { predicate: (((Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
+      │     │     └─StreamFilter { predicate: ((IsNotTrue(((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) OR IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
       │     │       └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamNow { output: [now] }
@@ -411,7 +436,7 @@
         └─StreamProject { exprs: [t1.ts, t1._row_id, 1:Int32] }
           └─StreamFilter { predicate: ((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) OR IsNull(t1.ts)) }
             └─StreamShare { id: 2 }
-              └─StreamFilter { predicate: (((Not((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) AND Not(IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
+              └─StreamFilter { predicate: ((IsNotTrue(((t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz) OR IsNull(t1.ts))) OR (t1.ts > '2023-12-18 00:00:00+00:00':Timestamptz)) OR IsNull(t1.ts)) }
                 └─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - name: Many Temporal filter with or predicate
   sql: |
@@ -423,24 +448,24 @@
       ├─StreamExchange { dist: HashShard(t._row_id, $src, 0:Int32) }
       │ └─StreamProject { exprs: [t.t, t.a, t._row_id, $src, 0:Int32] }
       │   └─StreamDynamicFilter { predicate: (t.t < $expr2), output: [t.t, t.a, t._row_id, $src], cleaned_by_watermark: true }
-      │     ├─StreamFilter { predicate: Not((t.a > 1:Int32)) }
+      │     ├─StreamFilter { predicate: IsNotTrue((t.a > 1:Int32)) }
       │     │ └─StreamShare { id: 13 }
       │     │   └─StreamUnion { all: true }
       │     │     ├─StreamExchange { dist: HashShard(t._row_id, 0:Int32) }
       │     │     │ └─StreamProject { exprs: [t.t, t.a, t._row_id, 0:Int32], output_watermarks: [[t.t]] }
       │     │     │   └─StreamDynamicFilter { predicate: (t.t > $expr1), output_watermarks: [[t.t]], output: [t.t, t.a, t._row_id], cleaned_by_watermark: true }
-      │     │     │     ├─StreamFilter { predicate: IsNotNull(t.a) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
+      │     │     │     ├─StreamFilter { predicate: (IsNotTrue((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND IsNotTrue((IsNull(t.t) OR (t.a < 1:Int32))) }
       │     │     │     │ └─StreamShare { id: 2 }
-      │     │     │     │   └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
+      │     │     │     │   └─StreamFilter { predicate: (IsNotTrue((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND ((IsNotTrue((IsNull(t.t) OR (t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
       │     │     │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │     │     │     └─StreamExchange { dist: Broadcast }
       │     │     │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
       │     │     │         └─StreamNow { output: [now] }
       │     │     └─StreamExchange { dist: HashShard(t._row_id, 1:Int32) }
       │     │       └─StreamProject { exprs: [t.t, t.a, t._row_id, 1:Int32] }
-      │     │         └─StreamFilter { predicate: IsNotNull(t.a) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
+      │     │         └─StreamFilter { predicate: (IsNotTrue((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
       │     │           └─StreamShare { id: 2 }
-      │     │             └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
+      │     │             └─StreamFilter { predicate: (IsNotTrue((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND ((IsNotTrue((IsNull(t.t) OR (t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
       │     │               └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
@@ -453,18 +478,18 @@
                 ├─StreamExchange { dist: HashShard(t._row_id, 0:Int32) }
                 │ └─StreamProject { exprs: [t.t, t.a, t._row_id, 0:Int32], output_watermarks: [[t.t]] }
                 │   └─StreamDynamicFilter { predicate: (t.t > $expr1), output_watermarks: [[t.t]], output: [t.t, t.a, t._row_id], cleaned_by_watermark: true }
-                │     ├─StreamFilter { predicate: IsNotNull(t.a) AND Not(IsNull(t.t)) AND Not((t.a < 1:Int32)) }
+                │     ├─StreamFilter { predicate: (IsNotTrue((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND IsNotTrue((IsNull(t.t) OR (t.a < 1:Int32))) }
                 │     │ └─StreamShare { id: 2 }
-                │     │   └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
+                │     │   └─StreamFilter { predicate: (IsNotTrue((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND ((IsNotTrue((IsNull(t.t) OR (t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
                 │     │     └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
                 │     └─StreamExchange { dist: Broadcast }
                 │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '01:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
                 │         └─StreamNow { output: [now] }
                 └─StreamExchange { dist: HashShard(t._row_id, 1:Int32) }
                   └─StreamProject { exprs: [t.t, t.a, t._row_id, 1:Int32] }
-                    └─StreamFilter { predicate: IsNotNull(t.a) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
+                    └─StreamFilter { predicate: (IsNotTrue((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND (IsNull(t.t) OR (t.a < 1:Int32)) }
                       └─StreamShare { id: 2 }
-                        └─StreamFilter { predicate: IsNotNull(t.a) AND (((Not(IsNull(t.t)) AND Not((t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
+                        └─StreamFilter { predicate: (IsNotTrue((t.a > 1:Int32)) OR (t.a > 1:Int32)) AND ((IsNotTrue((IsNull(t.t) OR (t.a < 1:Int32))) OR IsNull(t.t)) OR (t.a < 1:Int32)) }
                           └─StreamTableScan { table: t, columns: [t.t, t.a, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Non-trivial now expression
   sql: |
@@ -578,27 +603,29 @@
       │ └─StreamProject { exprs: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id, t1.ta, t2.tb, 0:Int32], output_watermarks: [[t1.ta, t1.ta]] }
       │   └─StreamDynamicFilter { predicate: (t1.ta >= $expr1), output_watermarks: [[t1.ta]], output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id], cleaned_by_watermark: true }
       │     ├─StreamExchange { dist: HashShard(t1.ta, t2.tb, t1._row_id, t2._row_id) }
-      │     │ └─StreamFilter { predicate: Not(IsNull(t1.ta)) }
-      │     │   └─StreamShare { id: 5 }
-      │     │     └─StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
-      │     │       └─StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
-      │     │         ├─StreamExchange { dist: HashShard(t1.ta) }
-      │     │         │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-      │     │         └─StreamExchange { dist: HashShard(t2.tb) }
-      │     │           └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+      │     │ └─StreamFilter { predicate: IsNotTrue(IsNull(t1.ta)) }
+      │     │   └─StreamShare { id: 6 }
+      │     │     └─StreamFilter { predicate: (IsNotTrue(IsNull(t1.ta)) OR IsNull(t1.ta)) }
+      │     │       └─StreamFilter { predicate: ((IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) OR (IsNotNull(t1.ta) OR IsNotNull(t2.tb))) }
+      │     │         └─StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
+      │     │           ├─StreamExchange { dist: HashShard(t1.ta) }
+      │     │           │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+      │     │           └─StreamExchange { dist: HashShard(t2.tb) }
+      │     │             └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
       │     └─StreamExchange { dist: Broadcast }
       │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '02:00:00':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
       │         └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t1._row_id, t2._row_id, t1.ta, t2.tb, 1:Int32) }
         └─StreamProject { exprs: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id, t1.ta, t2.tb, 1:Int32] }
           └─StreamFilter { predicate: IsNull(t1.ta) }
-            └─StreamShare { id: 5 }
-              └─StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
-                └─StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
-                  ├─StreamExchange { dist: HashShard(t1.ta) }
-                  │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-                  └─StreamExchange { dist: HashShard(t2.tb) }
-                    └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+            └─StreamShare { id: 6 }
+              └─StreamFilter { predicate: (IsNotTrue(IsNull(t1.ta)) OR IsNull(t1.ta)) }
+                └─StreamFilter { predicate: ((IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) OR (IsNotNull(t1.ta) OR IsNotNull(t2.tb))) }
+                  └─StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] }
+                    ├─StreamExchange { dist: HashShard(t1.ta) }
+                    │ └─StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+                    └─StreamExchange { dist: HashShard(t2.tb) }
+                      └─StreamTableScan { table: t2, columns: [t2.b, t2.tb, t2._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, ta, b, tb, t1._row_id(hidden), t2._row_id(hidden), t1.ta(hidden), t2.tb(hidden), $src(hidden)], stream_key: [t1._row_id, t2._row_id, t1.ta, t2.tb, $src], pk_columns: [t1._row_id, t2._row_id, t1.ta, t2.tb, $src], pk_conflict: NoCheck }
@@ -613,14 +640,15 @@
         └── StreamExchange Broadcast from 6
 
     Fragment 2
-    StreamFilter { predicate: Not(IsNull(t1.ta)) }
+    StreamFilter { predicate: IsNotTrue(IsNull(t1.ta)) }
     └── StreamExchange NoShuffle from 3
 
     Fragment 3
-    StreamFilter { predicate: (IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) }
-    └── StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] } { tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ] }
-        ├── StreamExchange Hash([1]) from 4
-        └── StreamExchange Hash([1]) from 5
+    StreamFilter { predicate: (IsNotTrue(IsNull(t1.ta)) OR IsNull(t1.ta)) }
+    └── StreamFilter { predicate: ((IsNotNull(t1._row_id) OR IsNotNull(t2._row_id)) OR (IsNotNull(t1.ta) OR IsNotNull(t2.tb))) }
+        └── StreamHashJoin { type: FullOuter, predicate: t1.ta = t2.tb, output: [t1.a, t1.ta, t2.b, t2.tb, t1._row_id, t2._row_id] } { tables: [ HashJoinLeft: 2, HashJoinDegreeLeft: 3, HashJoinRight: 4, HashJoinDegreeRight: 5 ] }
+            ├── StreamExchange Hash([1]) from 4
+            └── StreamExchange Hash([1]) from 5
 
     Fragment 4
     StreamTableScan { table: t1, columns: [t1.a, t1.ta, t1._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) } { tables: [ StreamScan: 6 ] }
