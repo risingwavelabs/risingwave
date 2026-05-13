@@ -238,6 +238,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<String>,
         deferred: bool,
     ) -> Result<()>;
 
@@ -245,6 +246,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<String>,
         deferred: bool,
     ) -> Result<()>;
 
@@ -648,10 +650,11 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_parallelism(job_id, parallelism, deferred)
+            .alter_parallelism(job_id, parallelism, adaptive_parallelism_strategy, deferred)
             .await?;
         Ok(())
     }
@@ -660,10 +663,16 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_backfill_parallelism(job_id, parallelism, deferred)
+            .alter_backfill_parallelism(
+                job_id,
+                parallelism,
+                adaptive_parallelism_strategy,
+                deferred,
+            )
             .await?;
         Ok(())
     }

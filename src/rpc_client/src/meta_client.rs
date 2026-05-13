@@ -657,13 +657,14 @@ impl MetaClient {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterParallelismRequest {
             table_id: job_id,
             parallelism: Some(parallelism),
             deferred,
-            adaptive_parallelism_strategy: None,
+            adaptive_parallelism_strategy,
         };
 
         self.inner.alter_parallelism(request).await?;
@@ -674,13 +675,14 @@ impl MetaClient {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterBackfillParallelismRequest {
             table_id: job_id,
             parallelism,
             deferred,
-            adaptive_parallelism_strategy: None,
+            adaptive_parallelism_strategy,
         };
 
         self.inner.alter_backfill_parallelism(request).await?;
