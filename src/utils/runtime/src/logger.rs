@@ -38,6 +38,51 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::{EnvFilter, filter, reload};
 
+/// A [`FormatEvent`] wrapper that prepends `trace_id=<16-hex> ` to each log
+/// line when the event occurs inside a span that carries `OpenTelemetry`
+/// context. Only the top 8 bytes of the 16-byte `trace_id` are rendered to
+/// keep log lines short; the full id is still what the `OTel` exporter sends.
+///
+/// No-op when tracing is disabled or no `OTel` context is attached — nothing is
+/// written and the inner formatter output is unchanged.
+#[cfg(not(madsim))]
+struct WithTraceId<E> {
+    inner: E,
+}
+
+#[cfg(not(madsim))]
+impl<S, N, E> tracing_subscriber::fmt::FormatEvent<S, N> for WithTraceId<E>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+    E: tracing_subscriber::fmt::FormatEvent<S, N>,
+{
+    fn format_event(
+        &self,
+        ctx: &tracing_subscriber::fmt::FmtContext<'_, S, N>,
+        mut writer: tracing_subscriber::fmt::format::Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> std::fmt::Result {
+        use opentelemetry::TraceId;
+        use tracing_opentelemetry::OtelData;
+
+        if let Some(scope) = ctx.event_scope() {
+            let trace_id = scope.from_root().find_map(|span| {
+                span.extensions()
+                    .get::<OtelData>()
+                    .and_then(OtelData::trace_id)
+                    .filter(|id| *id != TraceId::INVALID)
+            });
+            if let Some(trace_id) = trace_id {
+                let bytes = trace_id.to_bytes();
+                let short = u64::from_be_bytes(bytes[..8].try_into().unwrap());
+                write!(writer, "trace_id={short:016x} ")?;
+            }
+        }
+        self.inner.format_event(ctx, writer, event)
+    }
+}
+
 /// Parse a comma-separated list of `key=value` pairs into `OpenTelemetry` `KeyValue` attributes.
 ///
 /// - Splits by comma to get pairs.
@@ -335,17 +380,30 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 }
             });
 
+        // Non-JSON formatters: prepend `trace_id=<hex>` via [`WithTraceId`] when an OTel
+        // context is present. JSON path keeps its native formatting (trace_id is already
+        // carried via spans in the JSON output and breaking the JSON structure with a
+        // prefix would be worse than missing the field).
+        #[cfg(not(madsim))]
+        fn wrap_trace_id<E>(e: E) -> WithTraceId<E> {
+            WithTraceId { inner: e }
+        }
+        #[cfg(madsim)]
+        fn wrap_trace_id<E>(e: E) -> E {
+            e
+        }
+
         let fmt_layer = match deployment {
-            Deployment::Ci => fmt_layer.compact().boxed(),
+            Deployment::Ci => fmt_layer.compact().map_event_format(wrap_trace_id).boxed(),
             Deployment::Cloud => fmt_layer
                 .json()
                 .map_event_format(|e| e.with_current_span(false)) // avoid duplication as there's a span list field
                 .boxed(),
             Deployment::Other => {
                 if env_var_is_true("ENABLE_PRETTY_LOG") {
-                    fmt_layer.pretty().boxed()
+                    fmt_layer.pretty().map_event_format(wrap_trace_id).boxed()
                 } else {
-                    fmt_layer.boxed()
+                    fmt_layer.map_event_format(wrap_trace_id).boxed()
                 }
             }
         };
