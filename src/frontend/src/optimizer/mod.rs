@@ -322,7 +322,7 @@ impl LogicalPlanRoot {
 
 impl BatchOptimizedLogicalPlanRoot {
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
-    pub fn gen_batch_plan(self) -> Result<BatchPlanRoot> {
+    pub fn gen_batch_plan(mut self) -> Result<BatchPlanRoot> {
         if TemporalJoinValidator::exist_dangling_temporal_scan(self.plan.clone()) {
             return Err(ErrorCode::NotSupported(
                 "do not support temporal join for batch queries".to_owned(),
@@ -341,6 +341,11 @@ impl BatchOptimizedLogicalPlanRoot {
         if ctx.is_explain_trace() {
             ctx.trace("Const eval exprs:");
             ctx.trace(plan.explain_to_string());
+        }
+
+        // A singleton result does not need a physical order guarantee.
+        if CardinalityVisitor.visit(plan.clone()).is_at_most(1) {
+            self.required_order = Order::any();
         }
 
         // Convert to physical plan node

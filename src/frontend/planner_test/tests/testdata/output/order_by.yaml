@@ -281,12 +281,11 @@
         t_0.v1 asc;
   batch_plan: |-
     BatchProject { exprs: [1:Int32] }
-    └─BatchExchange { order: [t1.v1 ASC], dist: Single }
+    └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [1:Int32, t1.v1] }
-        └─BatchSort { order: [t1.v1 ASC] }
-          └─BatchHashAgg { group_key: [t1.v1], aggs: [] }
-            └─BatchExchange { order: [], dist: HashShard(t1.v1) }
-              └─BatchValues { rows: [] }
+        └─BatchHashAgg { group_key: [t1.v1], aggs: [] }
+          └─BatchExchange { order: [], dist: HashShard(t1.v1) }
+            └─BatchValues { rows: [] }
 - name: distinct on order by
   sql: |
     create table t (x int, y int);
