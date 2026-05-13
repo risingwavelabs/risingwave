@@ -1,16 +1,8 @@
 name: PR Title Checker
 
-# Disabled on the dream-faster/risingwave fork: the regex (see
-# .github/pr-title-checker-config.json) enforces upstream's
-# conventional-commits style, and the failure message points at upstream's
-# CONTRIBUTING.md. We don't want either on the fork.
-#
-# Re-enable by restoring the `pull_request` trigger below.
-
 on:
-  workflow_dispatch:
-  # pull_request:
-  #   types: [opened, edited, labeled]
+  pull_request:
+    types: [opened, edited, labeled]
 
 jobs:
   check:

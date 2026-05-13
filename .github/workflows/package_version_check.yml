@@ -1,19 +1,9 @@
 name: Package Version Checker
 
-# Disabled on the dream-faster/risingwave fork: this check enforces that
-# `main`'s Cargo.toml is bumped to the next minor whenever a `release-X.Y`
-# branch exists on the remote. Useful upstream where releases are cut from
-# this repo; pure noise on a fork that tracks upstream and applies local
-# patches, since bumping the version would create rebase conflicts every
-# time we pull in upstream commits.
-#
-# Re-enable by restoring the `pull_request` trigger below.
-
 on:
-  workflow_dispatch:
-  # pull_request:
-  #   branches:
-  #     - 'main'
+  pull_request:
+    branches:
+      - 'main'
 
 jobs:
   compare-package-version-with-latest-release-version:
