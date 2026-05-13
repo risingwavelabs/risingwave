@@ -60,6 +60,10 @@ pub struct MonitoredStorageMetrics {
     // [table_id, top_n, ef_search]
     pub vector_nearest_duration: LabelGuardedHistogramVec,
 
+    /// Prometheus label dimensions `table_id` and `op_type` (`insert`, `delete`, `seal_epoch`, `vector_insert`).
+    /// Counts **attempted** wrapper calls (incremented before delegating to inner), not guaranteed successes.
+    pub local_write_counts: LabelGuardedIntCounterVec,
+
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
 }
@@ -270,6 +274,14 @@ impl MonitoredStorageMetrics {
         )
         .unwrap();
 
+        let local_write_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_local_write_counts",
+            "Attempted write calls through MonitoredTableStateStore (insert/delete/seal_epoch/vector_insert); incremented before inner runs, not success-only.",
+            &["table_id", "op_type"],
+            registry
+        )
+        .unwrap();
+
         Self {
             get_duration,
             get_key_size,
@@ -282,6 +294,7 @@ impl MonitoredStorageMetrics {
             iter_in_progress_counts,
             iter_log_op_type_counts,
             vector_nearest_duration,
+            local_write_counts,
             sync_duration,
             sync_size,
         }
