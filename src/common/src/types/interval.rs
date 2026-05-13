@@ -23,6 +23,7 @@ use std::sync::LazyLock;
 use anyhow::Context;
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
+use musli_zerocopy::ZeroCopy;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::to_sql_checked;
 use regex::Regex;
@@ -40,7 +41,8 @@ use super::*;
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
 /// <https://www.postgresql.org/docs/9.1/datatype-datetime.html#:~:text=field%20is%20negative.-,Internally,-interval%20values%20are>
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, ZeroCopy)]
+#[repr(C)]
 pub struct Interval {
     months: i32,
     days: i32,
