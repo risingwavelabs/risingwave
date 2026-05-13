@@ -14,13 +14,13 @@
 
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::mem::ManuallyDrop;
 use std::slice;
 use std::sync::LazyLock;
 
 use bytes::{Buf, BufMut};
 use itertools::{Itertools, repeat_n};
 use memcomparable::Error;
-use risingwave_common::types::F32;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::common::PbBuffer;
 use risingwave_pb::common::buffer::PbCompressionType;
@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{Array, ArrayBuilder};
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, ListType, Scalar, ScalarRef, ToText};
+use crate::types::{DataType, F32, ListType, Scalar, ScalarRef, ToText};
 use crate::vector::{VectorInner, decode_vector_payload, encode_vector_payload};
 
 pub type VectorItemType = F32;
@@ -148,6 +148,12 @@ impl ArrayBuilder for VectorArrayBuilder {
             inner: self.inner,
             elem_size: self.elem_size,
         }
+    }
+}
+
+impl VectorArrayBuilder {
+    pub fn writer(&mut self) -> VectorWriter<'_> {
+        VectorWriter::new(self)
     }
 }
 
@@ -365,6 +371,12 @@ impl FromIterator<Finite32> for VectorVal {
     }
 }
 
+impl From<Finite32> for VectorItemType {
+    fn from(v: Finite32) -> VectorItemType {
+        VectorItemType::from(v.0)
+    }
+}
+
 pub type VectorRef<'a> = VectorInner<&'a [VectorItemType]>;
 
 impl Debug for VectorRef<'_> {
@@ -439,5 +451,67 @@ impl VectorVal {
             value.push(Finite32::try_from(f32::deserialize(&mut *de)?).map_err(Error::Message)?)
         }
         Ok(VectorVal::from(value))
+    }
+}
+
+pub struct VectorWriter<'a> {
+    builder: &'a mut VectorArrayBuilder,
+    /// The `inner` length at the point this writer was created.
+    start: usize,
+}
+
+impl<'a> VectorWriter<'a> {
+    pub fn new(builder: &'a mut VectorArrayBuilder) -> Self {
+        let start = builder.inner.len();
+        Self { builder, start }
+    }
+
+    /// `finish` will be called when the entire record is successfully written.
+    /// The partial data is committed and the builder can no longer be used.
+    pub fn finish(self) {
+        let last = self
+            .builder
+            .offsets
+            .last()
+            .cloned()
+            .expect("non-empty with an initial 0");
+        let written: u32 = (self.builder.inner.len() - self.start)
+            .try_into()
+            .expect("offset overflow");
+        self.builder
+            .offsets
+            .push(last.checked_add(written).expect("offset overflow"));
+        self.builder.bitmap.append(true);
+        let _ = ManuallyDrop::new(self); // prevent Drop from rolling back
+    }
+
+    /// `rollback` will be called when the entire record is abandoned.
+    /// The partial data is cleaned and the builder can be safely used.
+    pub fn rollback(self) {
+        // just drop self — Drop impl calls truncate(self.start)
+    }
+}
+
+impl Drop for VectorWriter<'_> {
+    /// If the writer is dropped without calling `finish` or `rollback`,
+    /// we rollback the partial data by default.
+    fn drop(&mut self) {
+        self.builder.inner.truncate(self.start);
+    }
+}
+
+pub trait VectorWrite {
+    fn write(&mut self, value: VectorItemType);
+
+    fn write_iter(&mut self, values: impl IntoIterator<Item = VectorItemType>) {
+        for v in values {
+            self.write(v);
+        }
+    }
+}
+
+impl<'a> VectorWrite for VectorWriter<'a> {
+    fn write(&mut self, value: VectorItemType) {
+        self.builder.inner.push(value);
     }
 }
