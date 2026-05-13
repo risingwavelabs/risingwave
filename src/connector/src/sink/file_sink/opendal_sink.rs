@@ -1398,4 +1398,242 @@ mod tests {
             );
         }
     }
+
+    /// Regression test for the fix in commit 3d95755
+    /// (`fix(sink): iterate visible rows in append_only validation, not raw ops`).
+    /// Construct a chunk whose `ops` array carries non-`Insert` entries —
+    /// but those entries are masked off by the visibility bitmap. The
+    /// previous implementation iterated `chunk.ops()` directly and would
+    /// panic on the `UpdateDelete` ops even though they were not visible;
+    /// the fix iterates `chunk.rows()` which honours the bitmap.
+    #[tokio::test]
+    async fn append_only_skips_invisible_non_insert_ops() {
+        use opendal::services::Fs;
+        use risingwave_common::bitmap::BitmapBuilder;
+
+        use crate::sink::SinkFormatDesc;
+        use crate::sink::catalog::{SinkEncode, SinkFormat};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().to_str().unwrap();
+        let operator = Operator::new(Fs::default().root(root))
+            .expect("build opendal Fs builder")
+            .finish();
+
+        // Four rows; ops [Insert, UpdateDelete, Insert, UpdateDelete];
+        // visibility [true, false, true, false]. Only rows 0 and 2 should
+        // be processed.
+        let owned: Vec<OwnedRow> = [
+            ("binance-futures", "BTC-USDT", 1i64),
+            ("binance-futures", "ETH-USDT", 2),
+            ("okx-perps", "BTC-USDT", 3),
+            ("okx-perps", "ETH-USDT", 4),
+        ]
+        .iter()
+        .map(|(exch, sym, amt)| {
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Utf8((*exch).into())),
+                Some(ScalarImpl::Utf8((*sym).into())),
+                Some(ScalarImpl::Int64(*amt)),
+            ])
+        })
+        .collect();
+        let ops: Vec<Op> = vec![Op::Insert, Op::UpdateDelete, Op::Insert, Op::UpdateDelete];
+        let ref_rows: Vec<(Op, &OwnedRow)> = owned
+            .iter()
+            .zip(ops.iter())
+            .map(|(r, op)| (*op, r))
+            .collect();
+        let data_types = [DataType::Varchar, DataType::Varchar, DataType::Int64];
+        let base = StreamChunk::from_rows(&ref_rows, &data_types);
+        let columns: Vec<_> = base.columns().to_vec();
+        let mut visibility = BitmapBuilder::zeroed(owned.len());
+        visibility.set(0, true);
+        visibility.set(2, true);
+        let chunk = StreamChunk::with_visibility(
+            ops.into_boxed_slice(),
+            columns,
+            visibility.finish(),
+        );
+
+        let format_desc = SinkFormatDesc {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Json,
+            options: BTreeMap::new(),
+            secret_refs: BTreeMap::new(),
+            key_encode: None,
+            connection_id: None,
+        };
+        let strategy = BatchingStrategy {
+            max_row_count: 1024,
+            rollover_seconds: 60,
+            path_partition_format: Some(
+                "exchange={exchange}/symbol={symbol}/".to_owned(),
+            ),
+            ..default_strategy()
+        };
+        let mut writer = OpenDalSinkWriter::new(
+            operator,
+            "raw",
+            schema(),
+            ExecutorId::new(1),
+            &format_desc,
+            EngineType::Fs,
+            strategy,
+        )
+        .expect("construct OpenDalSinkWriter");
+
+        writer
+            .write_batch(chunk)
+            .await
+            .expect("write_batch must not panic on masked-off non-Insert ops");
+        assert!(writer.commit().await.expect("commit"));
+
+        let mut paths: Vec<String> = walkdir::WalkDir::new(tmp.path())
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .map(|e| {
+                e.path()
+                    .strip_prefix(tmp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        paths.sort();
+        assert_eq!(
+            paths.len(),
+            2,
+            "expected one file per visible row's partition; got {paths:?}"
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.starts_with("exchange=binance-futures/symbol=BTC-USDT/")),
+            "missing partition for visible row 0; got {paths:?}"
+        );
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.starts_with("exchange=okx-perps/symbol=BTC-USDT/")),
+            "missing partition for visible row 2; got {paths:?}"
+        );
+    }
+
+    /// Verifies the documented `event_time_field` NULL semantics: when a
+    /// row's event-time column is NULL, the writer falls back to its flush
+    /// clock for that row. Rows with a concrete event time still land in
+    /// their historical partition.
+    #[tokio::test]
+    async fn event_time_null_value_falls_back_to_flush_clock() {
+        use opendal::services::Fs;
+        use risingwave_common::types::Timestamptz;
+
+        use crate::sink::SinkFormatDesc;
+        use crate::sink::catalog::{SinkEncode, SinkFormat};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().to_str().unwrap();
+        let operator = Operator::new(Fs::default().root(root))
+            .expect("build opendal Fs builder")
+            .finish();
+
+        let schema = Schema {
+            fields: vec![
+                Field::with_name(DataType::Varchar, "symbol"),
+                Field::with_name(DataType::Timestamptz, "event_time"),
+                Field::with_name(DataType::Int64, "amount"),
+            ],
+        };
+
+        let format_desc = SinkFormatDesc {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Json,
+            options: BTreeMap::new(),
+            secret_refs: BTreeMap::new(),
+            key_encode: None,
+            connection_id: None,
+        };
+        let strategy = BatchingStrategy {
+            max_row_count: 1024,
+            rollover_seconds: 60,
+            path_partition_format: Some(
+                "symbol={symbol}/year=%Y/month=%m/day=%d/hour=%H/".to_owned(),
+            ),
+            event_time_field: Some("event_time".to_owned()),
+            ..default_strategy()
+        };
+        let mut writer = OpenDalSinkWriter::new(
+            operator,
+            "events",
+            schema.clone(),
+            ExecutorId::new(1),
+            &format_desc,
+            EngineType::Fs,
+            strategy,
+        )
+        .expect("construct OpenDalSinkWriter");
+
+        // One row with an explicit, far-in-the-past event_time; one row with
+        // a NULL event_time. The NULL row must fall back to the writer's
+        // flush clock, which is "now" — guaranteed not to be in 2021.
+        let dt_2021 = Utc.with_ymd_and_hms(2021, 6, 25, 13, 0, 0).unwrap();
+        let owned: Vec<(Op, OwnedRow)> = vec![
+            (
+                Op::Insert,
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Utf8("BTC-USDT".into())),
+                    Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(
+                        dt_2021.timestamp_micros(),
+                    ))),
+                    Some(ScalarImpl::Int64(1)),
+                ]),
+            ),
+            (
+                Op::Insert,
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Utf8("BTC-USDT".into())),
+                    None,
+                    Some(ScalarImpl::Int64(2)),
+                ]),
+            ),
+        ];
+        let ref_rows: Vec<(Op, &OwnedRow)> = owned.iter().map(|(op, r)| (*op, r)).collect();
+        let data_types = [DataType::Varchar, DataType::Timestamptz, DataType::Int64];
+        let chunk = StreamChunk::from_rows(&ref_rows, &data_types);
+
+        writer.write_batch(chunk).await.expect("write_batch");
+        assert!(writer.commit().await.expect("commit"));
+
+        let mut paths: Vec<String> = walkdir::WalkDir::new(tmp.path())
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .map(|e| {
+                e.path()
+                    .strip_prefix(tmp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        paths.sort();
+
+        // Two distinct partitions: the historical hour for the non-NULL
+        // row, plus a "today" hour for the NULL fallback row.
+        assert_eq!(paths.len(), 2, "got files: {paths:?}");
+        assert!(
+            paths.iter().any(|p| p
+                .starts_with("symbol=BTC-USDT/year=2021/month=06/day=25/hour=13/")),
+            "expected the explicit-event-time partition; got files: {paths:?}"
+        );
+        // The NULL fallback row must not have landed in the 2021 directory;
+        // it should sit under some other (current-day) hour partition.
+        assert!(
+            paths.iter().any(|p| p.starts_with("symbol=BTC-USDT/")
+                && !p.contains("year=2021/")),
+            "NULL event_time row did not fall back to the flush clock; got files: {paths:?}"
+        );
+    }
 }
