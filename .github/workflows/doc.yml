@@ -15,7 +15,7 @@ jobs:
   build:
     runs-on: risingwave-large # this runner comes with more disk space, necessary for workflows that build RW
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup Rust toolchain
         run: rustup show
       - name: Install dependencies for compiling RisingWave
