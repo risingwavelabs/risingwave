@@ -508,20 +508,22 @@ impl OpenDalSinkWriter {
             match writer {
                 FileWriterEnum::ParquetFileWriter(w) => {
                     let bytes_written = w.bytes_written();
-                    if bytes_written > 0 {
-                        w.close().await?;
-                        tracing::debug!(
-                            "writer {} (executor_id: {}, created_time: {}) finish write file at partition `{}`, bytes_written: {}",
-                            self.unique_writer_id,
-                            self.executor_id,
-                            self.created_time
-                                .duration_since(UNIX_EPOCH)
-                                .expect("Time went backwards")
-                                .as_secs(),
-                            path,
-                            bytes_written
-                        );
-                    }
+                    // A parquet writer can hold a small row group entirely in
+                    // memory until close writes the footer and finalizes the
+                    // object, so active writers must be closed even when no
+                    // bytes have reached the underlying OpenDAL writer yet.
+                    w.close().await?;
+                    tracing::debug!(
+                        "writer {} (executor_id: {}, created_time: {}) finish write file at partition `{}`, bytes_written_before_close: {}",
+                        self.unique_writer_id,
+                        self.executor_id,
+                        self.created_time
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Time went backwards")
+                            .as_secs(),
+                        path,
+                        bytes_written
+                    );
                 }
                 FileWriterEnum::FileWriter(mut w) => {
                     w.close().await?;
@@ -1396,6 +1398,129 @@ mod tests {
                 dirs.iter().any(|p| p.starts_with(expected)),
                 "no file under `{expected}` was written. got files: {dirs:?}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn parquet_writer_finalizes_single_row_event_time_partitions() {
+        use std::fs::File;
+
+        use opendal::services::Fs;
+        use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+        use risingwave_common::types::Timestamptz;
+
+        use crate::sink::SinkFormatDesc;
+        use crate::sink::catalog::{SinkEncode, SinkFormat};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().to_str().unwrap();
+        let operator = Operator::new(Fs::default().root(root))
+            .expect("build opendal Fs builder")
+            .finish();
+
+        let schema = Schema {
+            fields: vec![
+                Field::with_name(DataType::Varchar, "symbol"),
+                Field::with_name(DataType::Timestamptz, "event_time"),
+                Field::with_name(DataType::Int64, "amount"),
+            ],
+        };
+
+        let format_desc = SinkFormatDesc {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Parquet,
+            options: BTreeMap::new(),
+            secret_refs: BTreeMap::new(),
+            key_encode: None,
+            connection_id: None,
+        };
+        let strategy = BatchingStrategy {
+            max_row_count: 1024,
+            rollover_seconds: 60,
+            path_partition_format: Some(
+                "symbol={symbol}/year=%Y/month=%m/day=%d/hour=%H/".to_owned(),
+            ),
+            event_time_field: Some("event_time".to_owned()),
+            ..default_strategy()
+        };
+        let mut writer = OpenDalSinkWriter::new(
+            operator,
+            "events",
+            schema.clone(),
+            ExecutorId::new(1),
+            &format_desc,
+            EngineType::Fs,
+            strategy,
+        )
+        .expect("construct OpenDalSinkWriter");
+
+        let make_row = |sym: &str, year: i32, month: u32, day: u32, hour: u32, amount: i64| {
+            let dt = Utc.with_ymd_and_hms(year, month, day, hour, 0, 0).unwrap();
+            (
+                Op::Insert,
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Utf8(sym.into())),
+                    Some(ScalarImpl::Timestamptz(Timestamptz::from_micros(
+                        dt.timestamp_micros(),
+                    ))),
+                    Some(ScalarImpl::Int64(amount)),
+                ]),
+            )
+        };
+        let owned = vec![
+            make_row("BTC-USDT", 2021, 6, 25, 13, 1),
+            make_row("BTC-USDT", 2021, 6, 25, 14, 2),
+            make_row("ETH-USDT", 2021, 6, 25, 13, 3),
+            make_row("ETH-USDT", 2024, 1, 1, 9, 4),
+        ];
+        let ref_rows: Vec<(Op, &OwnedRow)> = owned.iter().map(|(op, r)| (*op, r)).collect();
+        let data_types = [DataType::Varchar, DataType::Timestamptz, DataType::Int64];
+        let chunk = StreamChunk::from_rows(&ref_rows, &data_types);
+
+        writer.write_batch(chunk).await.expect("write_batch");
+        assert!(writer.commit().await.expect("commit"));
+
+        let mut files: Vec<_> = walkdir::WalkDir::new(tmp.path())
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .map(|e| e.into_path())
+            .collect();
+        files.sort();
+
+        let rel_paths: Vec<String> = files
+            .iter()
+            .map(|path| {
+                path.strip_prefix(tmp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+
+        assert_eq!(rel_paths.len(), 4, "got files: {rel_paths:?}");
+        for expected in [
+            "symbol=BTC-USDT/year=2021/month=06/day=25/hour=13/",
+            "symbol=BTC-USDT/year=2021/month=06/day=25/hour=14/",
+            "symbol=ETH-USDT/year=2021/month=06/day=25/hour=13/",
+            "symbol=ETH-USDT/year=2024/month=01/day=01/hour=09/",
+        ] {
+            assert!(
+                rel_paths.iter().any(|p| p.starts_with(expected)),
+                "no parquet file under `{expected}` was written. got files: {rel_paths:?}"
+            );
+        }
+
+        for path in files {
+            let file = File::open(&path).expect("open parquet file");
+            let reader = ParquetRecordBatchReaderBuilder::try_new(file)
+                .expect("read parquet metadata")
+                .build()
+                .expect("build parquet reader");
+            let rows: usize = reader
+                .map(|batch| batch.expect("read parquet batch").num_rows())
+                .sum();
+            assert_eq!(rows, 1, "expected one row in {}", path.display());
         }
     }
 
