@@ -1,12 +1,24 @@
 name: Connector Node Integration Tests
 
+# Disabled on the dream-faster/risingwave fork: this job is pinned to the
+# upstream self-hosted runner label `risingwave-large` which is not
+# registered on the fork, so every PR sits in `queued` indefinitely and
+# blocks the mergeable_state from going `clean`. The job's only real work
+# is gated on `java/**` or `proto/**` paths anyway — the fork's connector
+# patches touch neither — so leaving the workflow idle costs nothing.
+#
+# Re-enable by restoring the `push` / `pull_request` / `merge_group`
+# triggers below if/when the fork registers a `risingwave-large` runner
+# (or the `runs-on` line is switched to `ubuntu-latest`).
+
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  merge_group:
-    types: [ checks_requested ]
+  workflow_dispatch:
+  # push:
+  #   branches: [ main ]
+  # pull_request:
+  #   branches: [ main ]
+  # merge_group:
+  #   types: [ checks_requested ]
 
 jobs:
   build:
