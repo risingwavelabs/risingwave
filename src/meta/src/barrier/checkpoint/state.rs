@@ -803,21 +803,9 @@ impl DatabaseCheckpointControl {
 
             Some(Command::DropStreamingJobs {
                 streaming_job_ids,
-                unregistered_fragment_ids,
+                unregistered_state_table_ids: _,
                 dropped_sink_fragment_by_targets,
-                ..
             }) => {
-                let actors = self
-                    .database_info
-                    .fragment_infos()
-                    .filter(|fragment| {
-                        self.database_info
-                            .job_id_by_fragment(fragment.fragment_id)
-                            .is_some_and(|job_id| streaming_job_ids.contains(&job_id))
-                    })
-                    .flat_map(|fragment| fragment.actors.keys().copied())
-                    .collect::<Vec<_>>();
-
                 // pre_apply: drop node upstream for sink targets
                 for (target_fragment, sink_fragments) in &dropped_sink_fragment_by_targets {
                     self.database_info
@@ -826,9 +814,20 @@ impl DatabaseCheckpointControl {
 
                 let (table_ids, node_actors) = self.collect_base_info();
 
-                // post_apply: remove fragments
-                self.database_info
-                    .post_apply_remove_fragments(unregistered_fragment_ids.iter().cloned());
+                let mut actors = Vec::new();
+                for job_id in streaming_job_ids {
+                    let Some(job) = self.database_info.post_apply_remove_job(job_id) else {
+                        warn!(
+                            %job_id,
+                            "skip drop payload for streaming job that has already been removed from barrier worker"
+                        );
+                        continue;
+                    };
+
+                    for fragment in job.fragment_infos.values() {
+                        actors.extend(fragment.actors.keys().copied());
+                    }
+                }
 
                 let mutation = Some(Command::drop_streaming_jobs_to_mutation(
                     &actors,
