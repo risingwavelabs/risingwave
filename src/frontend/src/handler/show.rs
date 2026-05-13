@@ -91,10 +91,7 @@ pub fn get_columns_from_view(
     view_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
     let mut binder = Binder::new_for_batch(session);
-    let relation = binder.bind_relation_by_name(&view_name, None, None, false)?;
-    if !matches!(relation, Relation::Share(_)) {
-        return Err(CatalogError::not_found("view", view_name.to_string()).into());
-    }
+    let _ = binder.bind_relation_by_name(&view_name, None, None, false)?;
     let binder = Binder::new_for_system(session);
     let view = binder.bind_view_by_name(view_name)?;
 
