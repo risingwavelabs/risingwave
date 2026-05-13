@@ -298,6 +298,9 @@ pub struct StreamContext {
 
     /// The adaptive parallelism strategy for this job if it overrides the system default.
     pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+
+    /// The adaptive parallelism strategy for this job's temporary backfill override.
+    pub backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
 }
 
 impl StreamContext {
@@ -310,7 +313,11 @@ impl StreamContext {
                 .as_ref()
                 .map(ToString::to_string)
                 .unwrap_or_default(),
-            backfill_adaptive_parallelism_strategy: String::new(),
+            backfill_adaptive_parallelism_strategy: self
+                .backfill_adaptive_parallelism_strategy
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
         }
     }
 
@@ -338,6 +345,18 @@ impl StreamContext {
                         .expect("adaptive parallelism strategy should be validated in frontend"),
                 )
             },
+            backfill_adaptive_parallelism_strategy: if prost
+                .get_backfill_adaptive_parallelism_strategy()
+                .is_empty()
+            {
+                None
+            } else {
+                Some(
+                    parse_strategy(prost.get_backfill_adaptive_parallelism_strategy()).expect(
+                        "backfill adaptive parallelism strategy should be validated in frontend",
+                    ),
+                )
+            },
         }
     }
 }
@@ -351,6 +370,12 @@ impl risingwave_meta_model::streaming_job::Model {
             adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
                 parse_strategy(s).expect("strategy should be validated before persisting")
             }),
+            backfill_adaptive_parallelism_strategy: self
+                .backfill_adaptive_parallelism_strategy
+                .as_deref()
+                .map(|s| {
+                    parse_strategy(s).expect("strategy should be validated before persisting")
+                }),
         }
     }
 }
@@ -388,6 +413,73 @@ impl StreamJobFragments {
             backfill_done: true,
             max_parallelism: Some(self.max_parallelism as _),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stream_context_protobuf_round_trip_with_backfill_strategy() {
+        let context = StreamContext {
+            timezone: Some("UTC".to_owned()),
+            config_override: "{\"a\":1}".into(),
+            adaptive_parallelism_strategy: Some(AdaptiveParallelismStrategy::Ratio(0.5)),
+            backfill_adaptive_parallelism_strategy: Some(AdaptiveParallelismStrategy::Bounded(
+                4.try_into().unwrap(),
+            )),
+        };
+
+        let prost = context.to_protobuf();
+        assert_eq!(prost.get_adaptive_parallelism_strategy(), "RATIO(0.5)");
+        assert_eq!(
+            prost.get_backfill_adaptive_parallelism_strategy(),
+            "BOUNDED(4)"
+        );
+
+        let round_trip = StreamContext::from_protobuf(&prost);
+        assert_eq!(round_trip.timezone, Some("UTC".to_owned()));
+        assert_eq!(&*round_trip.config_override, "{\"a\":1}");
+        assert_eq!(
+            round_trip.adaptive_parallelism_strategy,
+            Some(AdaptiveParallelismStrategy::Ratio(0.5))
+        );
+        assert_eq!(
+            round_trip.backfill_adaptive_parallelism_strategy,
+            Some(AdaptiveParallelismStrategy::Bounded(4.try_into().unwrap()))
+        );
+    }
+
+    #[test]
+    fn test_stream_context_from_model_parses_backfill_strategy() {
+        let model = risingwave_meta_model::streaming_job::Model {
+            job_id: 1.into(),
+            job_status: risingwave_meta_model::JobStatus::Created,
+            create_type: risingwave_meta_model::CreateType::Foreground,
+            timezone: Some("Asia/Shanghai".to_owned()),
+            config_override: Some("{\"parallelism\":2}".to_owned()),
+            adaptive_parallelism_strategy: Some("AUTO".to_owned()),
+            parallelism: StreamingParallelism::Adaptive,
+            backfill_parallelism: Some(StreamingParallelism::Adaptive),
+            backfill_adaptive_parallelism_strategy: Some("RATIO(0.25)".to_owned()),
+            backfill_orders: None,
+            max_parallelism: 32,
+            specific_resource_group: None,
+            is_serverless_backfill: false,
+        };
+
+        let context = model.stream_context();
+        assert_eq!(context.timezone, Some("Asia/Shanghai".to_owned()));
+        assert_eq!(&*context.config_override, "{\"parallelism\":2}");
+        assert_eq!(
+            context.adaptive_parallelism_strategy,
+            Some(AdaptiveParallelismStrategy::Auto)
+        );
+        assert_eq!(
+            context.backfill_adaptive_parallelism_strategy,
+            Some(AdaptiveParallelismStrategy::Ratio(0.25))
+        );
     }
 }
 

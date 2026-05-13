@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
@@ -85,7 +84,6 @@ pub struct RenderedDatabaseRuntimeInfo {
 pub fn render_runtime_info(
     actor_id_generator: &AtomicU32,
     worker_nodes: &ActiveStreamingWorkerNodes,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     recovery_context: &LoadedRecoveryContext,
     database_id: DatabaseId,
 ) -> MetaResult<Option<RenderedDatabaseRuntimeInfo>> {
@@ -99,7 +97,6 @@ pub fn render_runtime_info(
     let RenderedGraph { mut fragments, .. } = render_actor_assignments(
         actor_id_generator,
         worker_nodes.current(),
-        adaptive_parallelism_strategy,
         &per_database_context,
     )?;
 
@@ -993,6 +990,7 @@ mod tests {
                 timezone: Some("UTC".to_owned()),
                 config_override: "cfg".into(),
                 adaptive_parallelism_strategy: None,
+                backfill_adaptive_parallelism_strategy: None,
                 job_definition: "definition".to_owned(),
                 backfill_orders: None,
             },

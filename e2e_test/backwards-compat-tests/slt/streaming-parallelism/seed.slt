@@ -1,0 +1,464 @@
+# Seed 64 tables covering the 2x2x4x4 matrix of legacy streaming parallelism parameters.
+#
+# Naming convention: t_{parallelism}{parallelism_for_table}{strategy}{strategy_for_table}
+#   parallelism (streaming_parallelism):                          d=default,      f=fixed(8)
+#   parallelism_for_table (streaming_parallelism_for_table):      d=default,      f=fixed(6)
+#   strategy (streaming_parallelism_strategy):                    d=default,      b=bounded(32),  r=ratio(0.5),  a=auto
+#   strategy_for_table (streaming_parallelism_strategy_for_table): d=default,     b=bounded(16),  r=ratio(0.5),  a=auto
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Fix the legacy system strategy to a single value so migration can materialize it deterministically.
+statement ok
+ALTER SYSTEM SET adaptive_parallelism_strategy TO 'BOUNDED(64)';
+
+statement ok
+SET streaming_parallelism TO default;
+
+statement ok
+SET streaming_parallelism_for_table TO default;
+
+statement ok
+SET streaming_parallelism_strategy TO default;
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_dddd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_dddb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_dddr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_ddda (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO 'bounded(32)';
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_ddbd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_ddbb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_ddbr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_ddba (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO 'ratio(0.5)';
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_ddrd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_ddrb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_ddrr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_ddra (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO AUTO;
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_ddad (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_ddab (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_ddar (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_ddaa (v int);
+
+statement ok
+SET streaming_parallelism_for_table TO 6;
+
+statement ok
+SET streaming_parallelism_strategy TO default;
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_dfdd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_dfdb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_dfdr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_dfda (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO 'bounded(32)';
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_dfbd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_dfbb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_dfbr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_dfba (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO 'ratio(0.5)';
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_dfrd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_dfrb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_dfrr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_dfra (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO AUTO;
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_dfad (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_dfab (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_dfar (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_dfaa (v int);
+
+statement ok
+SET streaming_parallelism TO 8;
+
+statement ok
+SET streaming_parallelism_for_table TO default;
+
+statement ok
+SET streaming_parallelism_strategy TO default;
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_fddd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_fddb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_fddr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_fdda (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO 'bounded(32)';
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_fdbd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_fdbb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_fdbr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_fdba (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO 'ratio(0.5)';
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_fdrd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_fdrb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_fdrr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_fdra (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO AUTO;
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_fdad (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_fdab (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_fdar (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_fdaa (v int);
+
+statement ok
+SET streaming_parallelism_for_table TO 6;
+
+statement ok
+SET streaming_parallelism_strategy TO default;
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_ffdd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_ffdb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_ffdr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_ffda (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO 'bounded(32)';
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_ffbd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_ffbb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_ffbr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_ffba (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO 'ratio(0.5)';
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_ffrd (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_ffrb (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_ffrr (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_ffra (v int);
+
+statement ok
+SET streaming_parallelism_strategy TO AUTO;
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO default;
+
+statement ok
+CREATE TABLE t_ffad (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'bounded(16)';
+
+statement ok
+CREATE TABLE t_ffab (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO 'ratio(0.5)';
+
+statement ok
+CREATE TABLE t_ffar (v int);
+
+statement ok
+SET streaming_parallelism_strategy_for_table TO AUTO;
+
+statement ok
+CREATE TABLE t_ffaa (v int);

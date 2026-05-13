@@ -375,6 +375,7 @@ mod tests {
             adaptive_parallelism_strategy: Set(None),
             parallelism: Set(StreamingParallelism::Adaptive),
             backfill_parallelism: Set(None),
+            backfill_adaptive_parallelism_strategy: Set(None),
             backfill_orders: Set(None),
             max_parallelism: Set(1),
             specific_resource_group: Set(None),

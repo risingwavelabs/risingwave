@@ -32,6 +32,8 @@ use risingwave_common::error::BoxedError;
 use risingwave_common::id::ObjectId;
 use risingwave_common::metrics_reader::MetricsReader;
 use risingwave_common::session_config::SessionConfig;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::types::DataType;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
@@ -222,13 +224,31 @@ fn extract_parallelism_from_table_state(state: &StreamingJobState) -> String {
         .as_ref()
         .and_then(|parallelism| parallelism.parallelism.as_ref())
     {
-        Some(PbParallelism::Auto(_)) | Some(PbParallelism::Adaptive(_)) => "adaptive".to_owned(),
-        Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => {
-            format!("fixed({parallelism})")
-        }
-        Some(PbParallelism::Custom(_)) => "custom".to_owned(),
+        Some(PbParallelism::Fixed(PbFixedParallelism { parallelism })) => parallelism.to_string(),
+        Some(PbParallelism::Auto(_)) | Some(PbParallelism::Adaptive(_)) => state
+            .adaptive_parallelism_strategy
+            .as_deref()
+            .and_then(format_adaptive_parallelism_strategy)
+            .unwrap_or_else(|| "adaptive".to_owned()),
+        Some(PbParallelism::Custom(_)) => state
+            .adaptive_parallelism_strategy
+            .as_deref()
+            .and_then(format_adaptive_parallelism_strategy)
+            .unwrap_or_else(|| "custom".to_owned()),
         None => "unknown".to_owned(),
     }
+}
+
+fn format_adaptive_parallelism_strategy(strategy: &str) -> Option<String> {
+    parse_strategy(strategy)
+        .ok()
+        .map(|strategy| match strategy {
+            AdaptiveParallelismStrategy::Auto | AdaptiveParallelismStrategy::Full => {
+                "adaptive".to_owned()
+            }
+            AdaptiveParallelismStrategy::Bounded(n) => format!("bounded({n})"),
+            AdaptiveParallelismStrategy::Ratio(r) => format!("ratio({r})"),
+        })
 }
 
 /// get acl items of `object` in string, ignore public.
@@ -349,6 +369,13 @@ impl SysCatalogReader for SysCatalogReaderImpl {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::meta::TableParallelism;
+    use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
+    use risingwave_pb::meta::table_parallelism::{
+        PbAdaptiveParallelism, PbFixedParallelism, PbParallelism,
+    };
+
+    use super::extract_parallelism_from_table_state;
     use crate::catalog::system_catalog::SYS_CATALOGS;
     use crate::test_utils::LocalFrontend;
 
@@ -362,5 +389,39 @@ mod tests {
         for sql in sqls {
             frontend.query_formatted_result(sql).await;
         }
+    }
+
+    #[test]
+    fn test_extract_parallelism_from_table_state_uses_unified_display() {
+        let fixed_state = StreamingJobState {
+            parallelism: Some(TableParallelism {
+                parallelism: Some(PbParallelism::Fixed(PbFixedParallelism { parallelism: 4 })),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(extract_parallelism_from_table_state(&fixed_state), "4");
+
+        let adaptive_state = StreamingJobState {
+            parallelism: Some(TableParallelism {
+                parallelism: Some(PbParallelism::Adaptive(PbAdaptiveParallelism {})),
+            }),
+            adaptive_parallelism_strategy: Some("RATIO(0.5)".to_owned()),
+            ..Default::default()
+        };
+        assert_eq!(
+            extract_parallelism_from_table_state(&adaptive_state),
+            "ratio(0.5)"
+        );
+
+        let fallback_state = StreamingJobState {
+            parallelism: Some(TableParallelism {
+                parallelism: Some(PbParallelism::Adaptive(PbAdaptiveParallelism {})),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            extract_parallelism_from_table_state(&fallback_state),
+            "adaptive"
+        );
     }
 }
