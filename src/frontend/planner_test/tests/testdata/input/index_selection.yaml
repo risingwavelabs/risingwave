@@ -517,6 +517,20 @@
     select * from t1 where a = 1 order by b desc limit 10
   expected_outputs:
     - batch_plan
+- name: topn index selection + limit pushdown with point get + offset
+  sql: |
+    create table t1 (a int, b int);
+    create index idx1 on t1(a, b desc);
+    select * from t1 where a = 1 order by b desc limit 10 offset 5
+  expected_outputs:
+    - batch_plan
+- name: topn index selection + limit pushdown with point get + with ties
+  sql: |
+    create table t1 (a int, b int);
+    create index idx1 on t1(a, b desc);
+    select * from t1 where a = 1 order by b desc fetch next 10 rows with ties
+  expected_outputs:
+    - batch_plan
 - name: topn index selection + limit pushdown with multi point get
   sql: |
     create table t1 (a int, b int, c int);
@@ -598,6 +612,13 @@
     create table t (c int, b int, a int);
     create index idx on t(a, b desc, c desc);
     select b from t where a = 1 order by b desc, c desc limit 1;
+  expected_outputs:
+    - batch_plan
+- name: topn index selection for scan with output column idx + offset
+  sql: |
+    create table t (c int, b int, a int);
+    create index idx on t(a, b desc, c desc);
+    select b from t where a = 1 order by b desc, c desc limit 2 offset 1;
   expected_outputs:
     - batch_plan
 - name: topn index selection for scan with output column idx

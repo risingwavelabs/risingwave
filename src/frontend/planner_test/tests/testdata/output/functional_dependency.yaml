@@ -8,8 +8,8 @@
     └─LogicalProject { exprs: [t1.id, t1.i] }
       └─LogicalScan { table: t1, columns: [t1.id, t1.i, t1._rw_timestamp] }
   batch_plan: |-
-    BatchTopN { order: [t1.id ASC], limit: 2, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 2, offset: 0 }
+    └─BatchExchange { order: [t1.id ASC], dist: Single }
       └─BatchLimit { limit: 2, offset: 0 }
         └─BatchScan { table: t1, columns: [t1.id, t1.i], limit: 2, distribution: UpstreamHashShard(t1.id) }
   stream_plan: |-
@@ -29,8 +29,8 @@
     └─LogicalProject { exprs: [t1.id, t1.i] }
       └─LogicalScan { table: t1, columns: [t1.id, t1.i, t1._rw_timestamp] }
   batch_plan: |-
-    BatchTopN { order: [t1.i ASC, t1.id ASC], limit: 2, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 2, offset: 0 }
+    └─BatchExchange { order: [t1.i ASC, t1.id ASC], dist: Single }
       └─BatchTopN { order: [t1.i ASC, t1.id ASC], limit: 2, offset: 0 }
         └─BatchScan { table: t1, columns: [t1.id, t1.i], distribution: UpstreamHashShard(t1.id) }
   stream_plan: |-

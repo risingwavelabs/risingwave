@@ -2219,8 +2219,8 @@
     ORDER BY bid_count DESC
     LIMIT 1000;
   batch_plan: |-
-    BatchTopN { order: [count(auction) DESC], limit: 1000, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 1000, offset: 0 }
+    └─BatchExchange { order: [count(auction) DESC], dist: Single }
       └─BatchTopN { order: [count(auction) DESC], limit: 1000, offset: 0 }
         └─BatchHashAgg { group_key: [id, item_name], aggs: [count(auction)] }
           └─BatchHashJoin { type: Inner, predicate: id = auction, output: [id, item_name, auction] }

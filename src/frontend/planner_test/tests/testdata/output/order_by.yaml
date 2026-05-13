@@ -90,8 +90,8 @@
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc limit 5;
   batch_plan: |-
-    BatchTopN { order: [t.v1 DESC], limit: 5, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 5, offset: 0 }
+    └─BatchExchange { order: [t.v1 DESC], dist: Single }
       └─BatchTopN { order: [t.v1 DESC], limit: 5, offset: 0 }
         └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-
@@ -122,8 +122,8 @@
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc limit 5 offset 7;
   batch_plan: |-
-    BatchTopN { order: [t.v1 DESC], limit: 5, offset: 7 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 5, offset: 7 }
+    └─BatchExchange { order: [t.v1 DESC], dist: Single }
       └─BatchTopN { order: [t.v1 DESC], limit: 12, offset: 0 }
         └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |-

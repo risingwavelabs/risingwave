@@ -2338,8 +2338,8 @@
     ORDER BY bid_count DESC
     LIMIT 1000;
   batch_plan: |-
-    BatchTopN { order: [count($expr5) DESC], limit: 1000, offset: 0 }
-    └─BatchExchange { order: [], dist: Single }
+    BatchLimit { limit: 1000, offset: 0 }
+    └─BatchExchange { order: [count($expr5) DESC], dist: Single }
       └─BatchTopN { order: [count($expr5) DESC], limit: 1000, offset: 0 }
         └─BatchHashAgg { group_key: [$expr2, $expr3], aggs: [count($expr5)] }
           └─BatchHashJoin { type: Inner, predicate: $expr2 = $expr5, output: all }

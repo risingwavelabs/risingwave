@@ -63,7 +63,6 @@ impl TopNOnIndexRule {
                     selected_index = Some(Self::finish_top_n(
                         logical_top_n,
                         index_scan.into(),
-                        prefix,
                         output_len,
                         scan_output_len,
                     ));
@@ -98,21 +97,9 @@ impl TopNOnIndexRule {
                 .collect::<Vec<_>>(),
         };
         let mut pk_orders_iter = primary_key_order.column_orders.iter().cloned().peekable();
-        let fixed_prefix = {
-            let mut fixed_prefix = vec![];
-            loop {
-                match pk_orders_iter.peek() {
-                    Some(order) if prefix.contains(order) => {
-                        let order = pk_orders_iter.next().unwrap();
-                        fixed_prefix.push(order);
-                    }
-                    _ => break,
-                }
-            }
-            Order {
-                column_orders: fixed_prefix,
-            }
-        };
+        while matches!(pk_orders_iter.peek(), Some(order) if prefix.contains(order)) {
+            pk_orders_iter.next();
+        }
         let remaining_orders = Order {
             column_orders: pk_orders_iter.collect(),
         };
@@ -122,7 +109,6 @@ impl TopNOnIndexRule {
         Some(Self::finish_top_n(
             logical_top_n,
             scan_for_pk.into(),
-            fixed_prefix,
             output_len,
             scan_output_len,
         ))
@@ -184,11 +170,14 @@ impl TopNOnIndexRule {
     fn finish_top_n(
         logical_top_n: &LogicalTopN,
         input: PlanRef,
-        prefix: Order,
         output_len: usize,
         scan_output_len: usize,
     ) -> PlanRef {
-        let top_n = logical_top_n.clone_with_input_and_prefix(input, prefix);
+        // Keep the original TopN order instead of prepending the equality-constrained prefix.
+        // BatchScan already exposes trimmed provided orders for equality prefixes, so adding the
+        // fixed prefix here only makes later order matching less precise and introduces a
+        // redundant BatchSort above the BatchTopN.
+        let top_n = logical_top_n.clone_with_input(input);
         if scan_output_len == output_len {
             top_n.into()
         } else {
