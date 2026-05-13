@@ -140,7 +140,8 @@ impl MaterializedInputState {
                 | PbAggKind::PercentileDisc
                 | PbAggKind::Mode,
             )
-            | AggType::WrapScalar(_) => Box::new(GenericAggStateCache::new(
+            | AggType::WrapScalar(_)
+            | AggType::UserDefined(_) => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
                 agg_call.args.arg_types(),
             )),
