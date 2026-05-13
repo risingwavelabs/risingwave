@@ -20,6 +20,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
+use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
@@ -44,9 +45,10 @@ use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogError, IndexCatalog};
-use crate::error::{Result, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::create_connection::print_connection_params_with_secret_visibility;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{SessionImpl, WorkerProcessId};
 use crate::user::user_catalog::UserCatalog;
 use crate::user::{has_access_to_object, has_schema_usage_privilege};
@@ -75,13 +77,12 @@ pub fn get_columns_from_sink(
 ) -> Result<Vec<ColumnCatalog>> {
     let binder = Binder::new_for_system(session);
     let sink = binder.bind_sink_by_name(sink_name)?;
-    let user_reader = session.env().user_info_reader().read_guard();
-    let current_user = user_reader
-        .get_user_by_name(&session.user_name())
-        .expect("user not found");
-    if !has_access_to_object(current_user, sink.sink_catalog.id, sink.sink_catalog.owner) {
-        return Err(CatalogError::not_found("sink", sink.sink_catalog.name.clone()).into());
-    }
+    session.check_privileges(&[ObjectCheckItem::new(
+        sink.sink_catalog.owner,
+        AclMode::Select,
+        sink.sink_catalog.name.clone(),
+        sink.sink_catalog.id,
+    )])?;
     Ok(sink.sink_catalog.full_columns().to_vec())
 }
 
@@ -89,17 +90,13 @@ pub fn get_columns_from_view(
     session: &SessionImpl,
     view_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
+    let mut binder = Binder::new_for_batch(session);
+    let relation = binder.bind_relation_by_name(&view_name, None, None, false)?;
+    if !matches!(relation, Relation::Share(_)) {
+        return Err(CatalogError::not_found("view", view_name.to_string()).into());
+    }
     let binder = Binder::new_for_system(session);
     let view = binder.bind_view_by_name(view_name)?;
-    let user_reader = session.env().user_info_reader().read_guard();
-    let current_user = user_reader
-        .get_user_by_name(&session.user_name())
-        .expect("user not found");
-    if !view.view_catalog.is_system_view()
-        && !has_access_to_object(current_user, view.view_catalog.id, view.view_catalog.owner)
-    {
-        return Err(CatalogError::not_found("view", view.view_catalog.name.clone()).into());
-    }
 
     Ok(view
         .view_catalog
@@ -217,6 +214,10 @@ impl ShowObjectRow {
     fn base_name(&self) -> String {
         self.name.0.base_name()
     }
+}
+
+fn is_permission_denied(err: &RwError) -> bool {
+    matches!(err.inner(), ErrorCode::PermissionDenied(_))
 }
 
 #[derive(Fields)]
@@ -632,15 +633,30 @@ pub async fn handle_show_object(
             })
         }
         ShowObject::Columns { table } => {
-            let Ok(columns) = get_columns_from_table(&session, table.clone())
-                .or(get_columns_from_sink(&session, table.clone()))
-                .or(get_columns_from_view(&session, table.clone()))
-            else {
-                return Err(CatalogError::not_found(
-                    "table, source, sink or view",
-                    table.to_string(),
-                )
-                .into());
+            let columns = match get_columns_from_table(&session, table.clone()) {
+                Ok(columns) => columns,
+                Err(err) if is_permission_denied(&err) => {
+                    return Err(err);
+                }
+                Err(_) => match get_columns_from_sink(&session, table.clone()) {
+                    Ok(columns) => columns,
+                    Err(err) if is_permission_denied(&err) => {
+                        return Err(err);
+                    }
+                    Err(_) => match get_columns_from_view(&session, table.clone()) {
+                        Ok(columns) => columns,
+                        Err(err) if is_permission_denied(&err) => {
+                            return Err(err);
+                        }
+                        Err(_) => {
+                            return Err(CatalogError::not_found(
+                                "table, source, sink or view",
+                                table.to_string(),
+                            )
+                            .into());
+                        }
+                    },
+                },
             };
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
