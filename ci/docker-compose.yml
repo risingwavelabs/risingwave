@@ -526,6 +526,11 @@ services:
       - ELASTIC_PASSWORD=risingwave
     ports:
       - 9200:9200
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail -sS -u elastic:$${ELASTIC_PASSWORD} http://localhost:9200 >/dev/null"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
 
   opensearch:
     image: opensearchproject/opensearch:2.19.1

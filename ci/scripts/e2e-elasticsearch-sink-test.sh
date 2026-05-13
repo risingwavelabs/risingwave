@@ -14,7 +14,18 @@ export RISEDEV_OPENSEARCH_URL="http://opensearch:9200"
 export RISEDEV_OPENSEARCH_WITH_OPTIONS_COMMON="connector='opensearch',url='${RISEDEV_OPENSEARCH_URL}',username='${OPENSEARCH_USER}',password='${OPENSEARCH_PASSWORD}'"
 
 echo "--- check elasticsearch"
-elasticsearch GET /
+for attempt in $(seq 1 60); do
+    if curl --fail -sS -u "${ELASTICSEARCH_USER}:${ELASTICSEARCH_PASSWORD}" "${RISEDEV_ELASTICSEARCH_URL}" >/dev/null; then
+        break
+    fi
+
+    if [[ "$attempt" -eq 60 ]]; then
+        echo "Elasticsearch is not ready after 60 attempts."
+        exit 1
+    fi
+
+    sleep 1
+done
 
 echo "--- testing elasticsearch sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch/elasticsearch_sink.slt'

@@ -452,6 +452,7 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: sink-elasticsearch-test-env
+          wait: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 10
     retry: *auto-retry
