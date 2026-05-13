@@ -434,7 +434,7 @@ impl GlobalStreamManager {
                                 let cleanup_state_table_ids =
                                     job_fragments.all_table_ids().collect_vec();
                                 self.metadata_manager.catalog_controller
-                                    .try_abort_creating_streaming_job(job_id, true)
+                                    .try_abort_creating_streaming_job(job_id)
                                     .await?;
 
                                 self.barrier_scheduler
@@ -760,7 +760,7 @@ impl GlobalStreamManager {
             let (_, database_id) = self
                 .metadata_manager
                 .catalog_controller
-                .try_abort_creating_streaming_job(id, true)
+                .try_abort_creating_streaming_job(id)
                 .await?;
 
             if let Some(database_id) = database_id {

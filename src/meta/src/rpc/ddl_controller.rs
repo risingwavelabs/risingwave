@@ -1084,11 +1084,6 @@ impl DdlController {
 
         let name = streaming_job.name();
         let definition = streaming_job.definition();
-        let source_id = match &streaming_job {
-            StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
-            _ => None,
-        };
-
         // create streaming job.
         match self
             .create_streaming_job_inner(
@@ -1113,22 +1108,6 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let (aborted, _) = self
-                    .metadata_manager
-                    .catalog_controller
-                    .try_abort_creating_streaming_job(job_id, false)
-                    .await?;
-                if aborted {
-                    tracing::warn!(id = %job_id, "aborted streaming job");
-                    // FIXME: might also need other cleanup here
-                    if let Some(source_id) = source_id {
-                        self.source_manager
-                            .apply_source_change(SourceChange::DropSource {
-                                dropped_source_ids: vec![source_id],
-                            })
-                            .await;
-                    }
-                }
                 Err(err)
             }
         }
@@ -1706,7 +1685,7 @@ impl DdlController {
             JobStatus::Initial => {
                 self.metadata_manager
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id.id(), true)
+                    .try_abort_creating_streaming_job(job_id.id())
                     .await?;
                 IGNORED_NOTIFICATION_VERSION
             }

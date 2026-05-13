@@ -388,7 +388,7 @@ mod tests {
         txn.commit().await?;
         drop(inner);
 
-        let (aborted, database_id) = mgr.try_abort_creating_streaming_job(job_id, true).await?;
+        let (aborted, database_id) = mgr.try_abort_creating_streaming_job(job_id).await?;
         assert!(aborted);
         assert_eq!(database_id, Some(TEST_DATABASE_ID));
 
