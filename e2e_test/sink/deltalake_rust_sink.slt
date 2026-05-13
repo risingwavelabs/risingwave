@@ -1,3 +1,5 @@
+control substitution on
+
 statement ok
 set sink_decouple = false;
 
@@ -10,7 +12,7 @@ CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 statement ok
 CREATE SECRET deltalake_s3_secret_key WITH (
   backend = 'meta'
-) as 'hummockadmin';
+) as '${RISEDEV_DELTALAKE_S3_SECRET_KEY}';
 
 statement ok
 create sink s6 as select * from mv6
@@ -18,10 +20,11 @@ with (
     connector = 'deltalake',
     type = 'append-only',
     force_append_only = 'true',
-    location = 's3a://deltalake/deltalake-test',
-    s3.access.key = 'hummockadmin',
+    location = '${RISEDEV_DELTALAKE_LOCATION}',
+    s3.access.key = '${RISEDEV_DELTALAKE_S3_ACCESS_KEY}',
     s3.secret.key = secret deltalake_s3_secret_key,
-    s3.endpoint = 'http://127.0.0.1:9301'
+    s3.endpoint = '${RISEDEV_DELTALAKE_S3_ENDPOINT}',
+    s3.region = 'us-east-1'
 );
 
 statement ok
