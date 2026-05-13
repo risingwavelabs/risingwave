@@ -1083,9 +1083,24 @@
     LogicalAgg { aggs: [count(t.x_expanded) filter((flag = 0:Int64)), sum(t.y_expanded) filter((flag = 1:Int64))] }
     └─LogicalAgg { group_key: [t.x_expanded, t.y_expanded, flag], aggs: [] }
       └─LogicalExpand { column_subsets: [[t.x], [t.y]] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
   with_config_map:
     RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
+- name: split distinct agg with row id prunes hidden columns
+  sql: |
+    create table t(foo int, bar int);
+    explain (verbose) create materialized view mv_distinct_agg_with_row_id as select count(foo) as c1, count(distinct foo) as c2, count(distinct _row_id) as c3 from t;
+  explain_output: |
+    StreamMaterialize { columns: [c1, c2, c3], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [sum0(sum0(count(t.foo_expanded)) filter((flag = 0:Int64))), sum0(count(t.foo_expanded) filter((flag = 0:Int64))), sum0(count(t._row_id_expanded) filter((flag = 1:Int64)))] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(sum0(count(t.foo_expanded)) filter((flag = 0:Int64))), sum0(count(t.foo_expanded) filter((flag = 0:Int64))), sum0(count(t._row_id_expanded) filter((flag = 1:Int64))), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [sum0(count(t.foo_expanded)) filter((flag = 0:Int64)), count(t.foo_expanded) filter((flag = 0:Int64)), count(t._row_id_expanded) filter((flag = 1:Int64))] }
+            └─StreamProject { exprs: [t.foo_expanded, t._row_id_expanded, flag, count(t.foo_expanded)] }
+              └─StreamHashAgg { group_key: [t.foo_expanded, t._row_id_expanded, flag], aggs: [count(t.foo_expanded), count] }
+                └─StreamExchange { dist: HashShard(t.foo_expanded, t._row_id_expanded, flag) }
+                  └─StreamExpand { column_subsets: [[t.foo], [t._row_id]] }
+                    └─StreamTableScan { table: t, columns: [t.foo, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: remove unnecessary distinct for max and min
   sql: |
     create table t(x int, y int);

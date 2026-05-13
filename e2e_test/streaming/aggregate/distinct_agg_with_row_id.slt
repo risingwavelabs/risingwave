@@ -1,4 +1,4 @@
-# Test for issue #20187: count(distinct _row_id) causing other count(distinct ...) producing wrong result
+# Regression coverage for split distinct aggregation when one distinct argument is `_row_id`.
 
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
@@ -9,19 +9,27 @@ create table t (foo int, bar int);
 statement ok
 insert into t values (1, 1), (2, 2), (1, 1);
 
-# This should work correctly
+# Baseline without `_row_id`.
 query II
 select count(foo), count(distinct foo) from t;
 ----
 3 2
 
-# This triggers the bug: count(distinct foo) returns 1 instead of 2
+# `_row_id` must not affect deduplication for the other distinct aggregate.
 query III
 select count(foo), count(distinct foo), count(distinct _row_id) from t;
 ----
 3 2 3
 
-# This should also work correctly
+statement ok
+create materialized view mv_distinct_agg_with_row_id as select count(foo) as c1, count(distinct foo) as c2, count(distinct _row_id) as c3 from t;
+
+query III
+select * from mv_distinct_agg_with_row_id;
+----
+3 2 3
+
+# Another distinct aggregate on a user column should still work correctly.
 query III
 select count(foo), count(distinct foo), count(distinct bar) from t;
 ----
@@ -33,6 +41,9 @@ select bar, count(foo), count(distinct foo), count(distinct _row_id) from t grou
 ----
 1 2 1 2
 2 1 1 1
+
+statement ok
+drop materialized view mv_distinct_agg_with_row_id;
 
 statement ok
 drop table t;
