@@ -26,10 +26,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag,
 };
-use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, TableId};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont_mut;
 use risingwave_common::{bail, bail_not_implemented};
@@ -72,10 +72,9 @@ use tracing::Instrument;
 
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
-use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
-use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
+use crate::error::{MetaErrorInner, bail_invalid_parameter};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
@@ -84,7 +83,7 @@ use crate::manager::{
 };
 use crate::model::{
     DownstreamFragmentRelation, FragmentDownstreamRelation, FragmentId as CatalogFragmentId,
-    StreamContext, StreamJobFragments, StreamJobFragmentsToCreate, TableParallelism,
+    StreamContext, StreamJobFragments, StreamJobFragmentsToCreate,
 };
 use crate::stream::cdc::{
     parallel_cdc_table_backfill_fragment, try_init_parallel_cdc_table_snapshot_splits,
@@ -93,9 +92,9 @@ use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
-    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
-    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
+    StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
+    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -352,6 +351,32 @@ impl CreatingStreamingJobPermit {
 }
 
 impl DdlController {
+    fn validate_specified_parallelism(
+        specified_parallelism: Option<NonZeroUsize>,
+        specified_backfill_parallelism: Option<NonZeroUsize>,
+        max_parallelism: NonZeroUsize,
+    ) -> MetaResult<()> {
+        if let Some(parallelism) = specified_parallelism
+            && parallelism > max_parallelism
+        {
+            bail_invalid_parameter!(
+                "specified parallelism {} should not exceed max parallelism {}",
+                parallelism,
+                max_parallelism,
+            );
+        }
+        if let Some(backfill_parallelism) = specified_backfill_parallelism
+            && backfill_parallelism > max_parallelism
+        {
+            bail_invalid_parameter!(
+                "specified backfill parallelism {} should not exceed max parallelism {}",
+                backfill_parallelism,
+                max_parallelism,
+            );
+        }
+        Ok(())
+    }
+
     pub async fn new(
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
@@ -550,7 +575,7 @@ impl DdlController {
     pub async fn reschedule_streaming_job_backfill_parallelism(
         &self,
         job_id: JobId,
-        parallelism: Option<StreamingParallelism>,
+        parallelism: Option<ParallelismPolicy>,
         mut deferred: bool,
     ) -> MetaResult<()> {
         tracing::info!("altering backfill parallelism for job {}", job_id);
@@ -1030,6 +1055,18 @@ impl DdlController {
             self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+        let adaptive_parallelism_strategy =
+            (!fragment_graph.adaptive_parallelism_strategy.is_empty()).then(|| {
+                parse_strategy(&fragment_graph.adaptive_parallelism_strategy)
+                    .expect("adaptive parallelism strategy should be validated in frontend")
+            });
+        let backfill_adaptive_parallelism_strategy = (!fragment_graph
+            .backfill_adaptive_parallelism_strategy
+            .is_empty())
+        .then(|| {
+            parse_strategy(&fragment_graph.backfill_adaptive_parallelism_strategy)
+                .expect("backfill adaptive parallelism strategy should be validated in frontend")
+        });
         let streaming_job_model = match self
             .metadata_manager
             .catalog_controller
@@ -1041,6 +1078,8 @@ impl DdlController {
                 dependencies,
                 resource_type.clone(),
                 &fragment_graph.backfill_parallelism,
+                adaptive_parallelism_strategy,
+                backfill_adaptive_parallelism_strategy,
             )
             .await
         {
@@ -1722,86 +1761,6 @@ impl DdlController {
         Ok(version)
     }
 
-    /// Resolve the parallelism of the stream job based on the given information.
-    ///
-    /// Returns error if user specifies a parallelism that cannot be satisfied.
-    fn resolve_stream_parallelism(
-        &self,
-        specified: Option<NonZeroUsize>,
-        max: NonZeroUsize,
-        cluster_info: &StreamingClusterInfo,
-        resource_group: String,
-    ) -> MetaResult<NonZeroUsize> {
-        let available = NonZeroUsize::new(cluster_info.parallelism(&resource_group));
-        DdlController::resolve_stream_parallelism_inner(
-            specified,
-            max,
-            available,
-            &self.env.opts.default_parallelism,
-            &resource_group,
-        )
-    }
-
-    fn resolve_stream_parallelism_inner(
-        specified: Option<NonZeroUsize>,
-        max: NonZeroUsize,
-        available: Option<NonZeroUsize>,
-        default_parallelism: &DefaultParallelism,
-        resource_group: &str,
-    ) -> MetaResult<NonZeroUsize> {
-        let Some(available) = available else {
-            bail_unavailable!(
-                "no available slots to schedule in resource group \"{}\", \
-                 have you allocated any compute nodes within this resource group?",
-                resource_group
-            );
-        };
-
-        if let Some(specified) = specified {
-            if specified > max {
-                bail_invalid_parameter!(
-                    "specified parallelism {} should not exceed max parallelism {}",
-                    specified,
-                    max,
-                );
-            }
-            if specified > available {
-                tracing::warn!(
-                    resource_group,
-                    specified_parallelism = specified.get(),
-                    available_parallelism = available.get(),
-                    "specified parallelism exceeds available slots, scheduling with specified value",
-                );
-            }
-            return Ok(specified);
-        }
-
-        // Use default parallelism when no specific parallelism is provided by the user.
-        let default_parallelism = match default_parallelism {
-            DefaultParallelism::Full => available,
-            DefaultParallelism::Default(num) => {
-                if *num > available {
-                    tracing::warn!(
-                        resource_group,
-                        configured_parallelism = num.get(),
-                        available_parallelism = available.get(),
-                        "default parallelism exceeds available slots, scheduling with configured value",
-                    );
-                }
-                *num
-            }
-        };
-
-        if default_parallelism > max {
-            tracing::warn!(
-                max_parallelism = max.get(),
-                resource_group,
-                "default parallelism exceeds max parallelism, capping to max",
-            );
-        }
-        Ok(default_parallelism.min(max))
-    }
-
     /// Builds the actor graph:
     /// - Add the upstream fragments to the fragment graph
     /// - Schedule the fragments based on their distribution
@@ -1817,9 +1776,12 @@ impl DdlController {
         streaming_job_model: streaming_job::Model,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
-        let specified_parallelism = fragment_graph.specified_parallelism();
-        let specified_backfill_parallelism = fragment_graph.specified_backfill_parallelism();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
+        Self::validate_specified_parallelism(
+            fragment_graph.specified_parallelism(),
+            fragment_graph.specified_backfill_parallelism(),
+            max_parallelism,
+        )?;
 
         // 1. Fragment Level ordering graph
         let fragment_backfill_ordering = fragment_graph.create_fragment_backfill_ordering();
@@ -1898,33 +1860,7 @@ impl DdlController {
         );
 
         // 3. Build the actor graph.
-        let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
-
-        let initial_parallelism = specified_backfill_parallelism.or(specified_parallelism);
-        let parallelism = self.resolve_stream_parallelism(
-            initial_parallelism,
-            max_parallelism,
-            &cluster_info,
-            resource_group.clone(),
-        )?;
-
-        let parallelism = if initial_parallelism.is_some() {
-            parallelism.get()
-        } else {
-            // Prefer job-level override for initial scheduling, fallback to system strategy.
-            let adaptive_strategy = match stream_ctx.adaptive_parallelism_strategy {
-                Some(strategy) => strategy,
-                None => self
-                    .env
-                    .system_params_reader()
-                    .await
-                    .adaptive_parallelism_strategy(),
-            };
-            adaptive_strategy.compute_target_parallelism(parallelism.get())
-        };
-
-        let parallelism = NonZeroUsize::new(parallelism).expect("parallelism must be positive");
-        let actor_graph_builder = ActorGraphBuilder::new(id, complete_graph, parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(complete_graph)?;
 
         let ActorGraphBuildResult {
             graph,
@@ -1938,20 +1874,8 @@ impl DdlController {
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
 
-        // If the frontend does not specify the degree of parallelism and the default_parallelism is set to full, then set it to ADAPTIVE.
-        // Otherwise, it defaults to FIXED based on deduction.
-        let table_parallelism = match (specified_parallelism, &self.env.opts.default_parallelism) {
-            (None, DefaultParallelism::Full) => TableParallelism::Adaptive,
-            _ => TableParallelism::Fixed(parallelism.get()),
-        };
-
-        let stream_job_fragments = StreamJobFragments::new(
-            id,
-            graph,
-            stream_ctx.clone(),
-            table_parallelism,
-            max_parallelism.get(),
-        );
+        let stream_job_fragments =
+            StreamJobFragments::new(id, graph, stream_ctx.clone(), max_parallelism.get());
 
         if let Some(mview_fragment) = stream_job_fragments.mview_fragment() {
             stream_job.set_table_vnode_count(mview_fragment.vnode_count());
@@ -2181,15 +2105,7 @@ impl DdlController {
             .get_database_resource_group(stream_job.database_id())
             .await?;
 
-        // XXX: what is this parallelism?
-        // Is it "assigned parallelism"?
-        let parallelism = NonZeroUsize::new(match old_fragments.assigned_parallelism {
-            TableParallelism::Fixed(n) => n,
-            TableParallelism::Adaptive | TableParallelism::Custom => 1,
-        })
-        .expect("The number of actors in the original table fragment should be greater than 0");
-
-        let actor_graph_builder = ActorGraphBuilder::new(id, complete_graph, parallelism)?;
+        let actor_graph_builder = ActorGraphBuilder::new(complete_graph)?;
 
         let ActorGraphBuildResult {
             graph,
@@ -2209,13 +2125,8 @@ impl DdlController {
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
-        let stream_job_fragments = StreamJobFragments::new(
-            tmp_job_id,
-            graph,
-            stream_ctx,
-            old_fragments.assigned_parallelism,
-            old_fragments.max_parallelism,
-        );
+        let stream_job_fragments =
+            StreamJobFragments::new(tmp_job_id, graph, stream_ctx, old_fragments.max_parallelism);
 
         if let Some(sinks) = &auto_refresh_schema_sinks {
             for sink in sinks {
@@ -2534,67 +2445,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_specified_parallelism_exceeds_available() {
-        let result = DdlController::resolve_stream_parallelism_inner(
-            Some(NonZeroUsize::new(100).unwrap()),
-            NonZeroUsize::new(256).unwrap(),
+    fn test_validate_specified_parallelism_accepts_within_max() {
+        DdlController::validate_specified_parallelism(
             Some(NonZeroUsize::new(4).unwrap()),
-            &DefaultParallelism::Full,
-            "default",
+            Some(NonZeroUsize::new(8).unwrap()),
+            NonZeroUsize::new(8).unwrap(),
         )
         .unwrap();
-        assert_eq!(result.get(), 100);
     }
 
     #[test]
-    fn test_allows_default_parallelism_over_available() {
-        let result = DdlController::resolve_stream_parallelism_inner(
+    fn test_validate_specified_parallelism_rejects_parallelism_over_max() {
+        let result = DdlController::validate_specified_parallelism(
+            Some(NonZeroUsize::new(9).unwrap()),
             None,
-            NonZeroUsize::new(256).unwrap(),
-            Some(NonZeroUsize::new(4).unwrap()),
-            &DefaultParallelism::Default(NonZeroUsize::new(50).unwrap()),
-            "default",
-        )
-        .unwrap();
-        assert_eq!(result.get(), 50);
-    }
-
-    #[test]
-    fn test_full_parallelism_capped_by_max() {
-        let result = DdlController::resolve_stream_parallelism_inner(
-            None,
-            NonZeroUsize::new(6).unwrap(),
-            Some(NonZeroUsize::new(10).unwrap()),
-            &DefaultParallelism::Full,
-            "default",
-        )
-        .unwrap();
-        assert_eq!(result.get(), 6);
-    }
-
-    #[test]
-    fn test_no_available_slots_returns_error() {
-        let result = DdlController::resolve_stream_parallelism_inner(
-            None,
-            NonZeroUsize::new(4).unwrap(),
-            None,
-            &DefaultParallelism::Full,
-            "default",
+            NonZeroUsize::new(8).unwrap(),
         );
         assert!(matches!(
             result,
-            Err(ref e) if matches!(e.inner(), MetaErrorInner::Unavailable(_))
+            Err(ref e) if matches!(e.inner(), MetaErrorInner::InvalidParameter(_))
         ));
     }
 
     #[test]
-    fn test_specified_over_max_returns_error() {
-        let result = DdlController::resolve_stream_parallelism_inner(
-            Some(NonZeroUsize::new(8).unwrap()),
-            NonZeroUsize::new(4).unwrap(),
-            Some(NonZeroUsize::new(10).unwrap()),
-            &DefaultParallelism::Full,
-            "default",
+    fn test_validate_specified_parallelism_rejects_backfill_parallelism_over_max() {
+        let result = DdlController::validate_specified_parallelism(
+            None,
+            Some(NonZeroUsize::new(9).unwrap()),
+            NonZeroUsize::new(8).unwrap(),
         );
         assert!(matches!(
             result,
