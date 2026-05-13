@@ -1450,11 +1450,8 @@ mod tests {
         let mut visibility = BitmapBuilder::zeroed(owned.len());
         visibility.set(0, true);
         visibility.set(2, true);
-        let chunk = StreamChunk::with_visibility(
-            ops.into_boxed_slice(),
-            columns,
-            visibility.finish(),
-        );
+        let chunk =
+            StreamChunk::with_visibility(ops.into_boxed_slice(), columns, visibility.finish());
 
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,
@@ -1467,9 +1464,7 @@ mod tests {
         let strategy = BatchingStrategy {
             max_row_count: 1024,
             rollover_seconds: 60,
-            path_partition_format: Some(
-                "exchange={exchange}/symbol={symbol}/".to_owned(),
-            ),
+            path_partition_format: Some("exchange={exchange}/symbol={symbol}/".to_owned()),
             ..default_strategy()
         };
         let mut writer = OpenDalSinkWriter::new(
@@ -1624,15 +1619,17 @@ mod tests {
         // row, plus a "today" hour for the NULL fallback row.
         assert_eq!(paths.len(), 2, "got files: {paths:?}");
         assert!(
-            paths.iter().any(|p| p
-                .starts_with("symbol=BTC-USDT/year=2021/month=06/day=25/hour=13/")),
+            paths
+                .iter()
+                .any(|p| p.starts_with("symbol=BTC-USDT/year=2021/month=06/day=25/hour=13/")),
             "expected the explicit-event-time partition; got files: {paths:?}"
         );
         // The NULL fallback row must not have landed in the 2021 directory;
         // it should sit under some other (current-day) hour partition.
         assert!(
-            paths.iter().any(|p| p.starts_with("symbol=BTC-USDT/")
-                && !p.contains("year=2021/")),
+            paths
+                .iter()
+                .any(|p| p.starts_with("symbol=BTC-USDT/") && !p.contains("year=2021/")),
             "NULL event_time row did not fall back to the flush clock; got files: {paths:?}"
         );
     }
