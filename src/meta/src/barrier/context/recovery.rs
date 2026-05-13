@@ -239,11 +239,25 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_subscription(database_id)
             .await?;
-        let dirty_associated_source_ids = self
+
+        let cleaned_dirty_jobs = self
             .metadata_manager
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
+        if database_id.is_some() {
+            // Per-database recovery does not run the global Hummock purge below. Unregister the
+            // dirty jobs cleaned in this database through the normal dropped-table cleanup path.
+            cleanup_dropped_streaming_jobs(
+                &self.refresh_manager,
+                &self.hummock_manager,
+                &self.metadata_manager,
+                cleaned_dirty_jobs.streaming_job_ids,
+                cleaned_dirty_jobs.dropped_table_ids,
+                "clean_dirty_creating_jobs",
+            )
+            .await?;
+        }
         self.metadata_manager
             .reset_all_refresh_jobs_to_idle()
             .await?;
@@ -251,7 +265,7 @@ impl GlobalBarrierWorkerContextImpl {
         // unregister cleaned sources.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
-                dropped_source_ids: dirty_associated_source_ids,
+                dropped_source_ids: cleaned_dirty_jobs.source_ids,
             })
             .await;
 
