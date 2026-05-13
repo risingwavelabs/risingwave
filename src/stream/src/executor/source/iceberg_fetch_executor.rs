@@ -725,9 +725,10 @@ impl<S: StateStore> Debug for IcebergFetchExecutor<S> {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use risingwave_common::array::{DataChunk, Op, StreamChunk};
 
-    use super::*;
+    use super::ChunksWithState;
 
     /// Verifies the `ChunksWithState` contract for the empty-task case.
     ///
