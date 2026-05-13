@@ -67,6 +67,7 @@ pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 mod alter_utils;
+mod alter_watermark;
 mod backup;
 pub mod cancel_job;
 pub mod close_cursor;
@@ -831,6 +832,20 @@ pub async fn handle(
                     handler_args,
                     name,
                     operation,
+                ))
+                .await
+            }
+            AlterTableOperation::AlterWatermark {
+                column_name,
+                expr,
+                with_ttl,
+            } => {
+                Box::pin(alter_watermark::handle_alter_watermark(
+                    handler_args,
+                    name,
+                    column_name,
+                    expr,
+                    with_ttl,
                 ))
                 .await
             }

@@ -1,0 +1,220 @@
+statement ok
+SET implicit_flush TO true;
+
+statement ok
+SET streaming_parallelism TO 1;
+
+# ----------------------------------------------------------------------
+# Int watermark with TTL: change the interval, verify MV state preservation.
+# ----------------------------------------------------------------------
+
+statement ok
+create table t_int (
+    k int primary key,
+    ts int,
+    v varchar,
+    watermark for ts as ts - 10 with ttl
+);
+
+statement ok
+create materialized view mv_int as select * from t_int;
+
+statement ok
+insert into t_int values (1, 100, 'a'), (2, 200, 'b');
+
+query IIV rowsort
+select * from mv_int;
+----
+1 100 a
+2 200 b
+
+statement ok
+alter table t_int alter watermark for ts as ts - 5 with ttl;
+
+query TT
+show create table t_int;
+----
+public.t_int CREATE TABLE t_int (k INT PRIMARY KEY, ts INT, v CHARACTER VARYING, WATERMARK FOR ts AS ts - 5 WITH TTL)
+
+# Downstream MV state is preserved across the ALTER.
+query IIV rowsort
+select * from mv_int;
+----
+1 100 a
+2 200 b
+
+statement ok
+insert into t_int values (3, 300, 'c');
+
+query IIV rowsort
+select * from mv_int;
+----
+1 100 a
+2 200 b
+3 300 c
+
+statement ok
+alter table t_int alter watermark for ts as ts - 1 with ttl;
+
+query TT
+show create table t_int;
+----
+public.t_int CREATE TABLE t_int (k INT PRIMARY KEY, ts INT, v CHARACTER VARYING, WATERMARK FOR ts AS ts - 1 WITH TTL)
+
+statement ok
+drop materialized view mv_int;
+
+statement ok
+drop table t_int;
+
+# ----------------------------------------------------------------------
+# Timestamp watermark with INTERVAL.
+# ----------------------------------------------------------------------
+
+statement ok
+create table t_ts (
+    k int primary key,
+    ts timestamp,
+    watermark for ts as ts - interval '1' minute with ttl
+);
+
+statement ok
+alter table t_ts alter watermark for ts as ts - interval '10' second with ttl;
+
+query TT
+show create table t_ts;
+----
+public.t_ts CREATE TABLE t_ts (k INT PRIMARY KEY, ts TIMESTAMP, WATERMARK FOR ts AS ts - INTERVAL '10' SECOND WITH TTL)
+
+statement ok
+drop table t_ts;
+
+# ----------------------------------------------------------------------
+# APPEND ONLY table with non-TTL watermark.
+# ----------------------------------------------------------------------
+
+statement ok
+create table t_ao (ts int, v varchar, watermark for ts as ts - 10) append only;
+
+statement ok
+alter table t_ao alter watermark for ts as ts - 5;
+
+query TT
+show create table t_ao;
+----
+public.t_ao CREATE TABLE t_ao (ts INT, v CHARACTER VARYING, WATERMARK FOR ts AS ts - 5) APPEND ONLY
+
+statement ok
+drop table t_ao;
+
+# ----------------------------------------------------------------------
+# Functional check: the new expression is actually applied post-ALTER.
+# ----------------------------------------------------------------------
+
+# A late row that would have been kept under the old expression is dropped
+# by the watermark filter under the new (tighter) one.
+statement ok
+create table t_func (k int primary key, ts int, watermark for ts as ts - 1000 with ttl);
+
+statement ok
+create materialized view mv_func as select * from t_func;
+
+# Old expr: wm advances to 1000 after inserting ts=2000.
+# ts=1500 is above the watermark, kept.
+statement ok
+insert into t_func values (1, 2000);
+
+statement ok
+insert into t_func values (2, 1500);
+
+query II rowsort
+select * from mv_func;
+----
+1 2000
+2 1500
+
+statement ok
+alter table t_func alter watermark for ts as ts - 1 with ttl;
+
+# New expr: wm advances to 2999 after inserting ts=3000.
+# ts=2500 is below the new watermark and is dropped.
+# Under the old expression ts=2500 would have been kept (2500 > 1000).
+statement ok
+insert into t_func values (3, 3000);
+
+statement ok
+insert into t_func values (4, 2500);
+
+query II rowsort
+select * from mv_func;
+----
+1 2000
+2 1500
+3 3000
+
+statement ok
+drop materialized view mv_func;
+
+statement ok
+drop table t_func;
+
+# ----------------------------------------------------------------------
+# Function-wrapped expression.
+# ----------------------------------------------------------------------
+
+# The handler does no AST shape check — any expr the binder accepts is allowed
+# as long as its output type matches the watermark column.
+statement ok
+create table t_fn (k int primary key, ts int, watermark for ts as ts - 10 with ttl);
+
+statement ok
+alter table t_fn alter watermark for ts as coalesce(ts, 0) - 5 with ttl;
+
+query TT
+show create table t_fn;
+----
+public.t_fn CREATE TABLE t_fn (k INT PRIMARY KEY, ts INT, WATERMARK FOR ts AS coalesce(ts, 0) - 5 WITH TTL)
+
+statement ok
+drop table t_fn;
+
+# ----------------------------------------------------------------------
+# No-op ALTER: identical new expression should pass through cleanly.
+# ----------------------------------------------------------------------
+statement ok
+create table t_nop (k int primary key, ts int, watermark for ts as ts - 10 with ttl);
+
+statement ok
+alter table t_nop alter watermark for ts as ts - 10 with ttl;
+
+query TT
+show create table t_nop;
+----
+public.t_nop CREATE TABLE t_nop (k INT PRIMARY KEY, ts INT, WATERMARK FOR ts AS ts - 10 WITH TTL)
+
+statement ok
+drop table t_nop;
+
+# ----------------------------------------------------------------------
+# Rejections.
+# ----------------------------------------------------------------------
+
+statement ok
+create table t_rej (
+    k int primary key,
+    ts int,
+    watermark for ts as ts - 10 with ttl
+);
+
+statement error no watermark defined on column "k"
+alter table t_rej alter watermark for k as k - 1 with ttl;
+
+statement error toggling WITH TTL
+alter table t_rej alter watermark for ts as ts - 5;
+
+# Output type mismatch is caught by the binder, not the post-plan diff.
+statement error return value type of the watermark expression
+alter table t_rej alter watermark for ts as to_timestamp(ts) with ttl;
+
+statement ok
+drop table t_rej;
