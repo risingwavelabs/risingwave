@@ -1,9 +1,9 @@
 # File sink Hive-style partitioning
 
-RisingWave's file sink (S3, GCS, Azure Blob, WebHDFS, local FS) can write
-Parquet/JSON output into Hive-compatible partition directories so downstream
-query engines (Trino, Athena, DuckDB, Spark, Iceberg readers, etc.) can prune
-files at query time without scanning them.
+RisingWave's file sink (S3, GCS, Azure Blob, WebHDFS, local FS, Snowflake) can
+write Parquet/JSON output into Hive-compatible partition directories so
+downstream query engines (Trino, Athena, DuckDB, Spark, Iceberg readers, etc.)
+can prune files at query time without scanning them.
 
 Three sink options control the layout. The newer `path_partition_format`
 supersedes the older `path_partition_prefix` enum and should be preferred for
@@ -15,8 +15,8 @@ chrono tokens from "writer clock" to "per-row event time".
 | Option                 | Type   | Behaviour                                                                                                                                                                                                                                                                                                                                  |
 | ---------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `path_partition_prefix`| enum   | One of `none` (default), `day`, `month`, `hour`. Files are bucketed by the writer's creation time into a single, non-Hive directory like `2025-06-25 13:00/`. Kept for backwards compatibility.                                                                                                                                            |
-| `path_partition_format`| string | Free-form template applied per row to compute the partition directory. Supports chrono `strftime` tokens (e.g. `%Y`, `%m`, `%d`, `%H`) and `{column_name}` placeholders that reference columns of the sink's input schema. When set, this option takes precedence over `path_partition_prefix`. Use `{{` / `}}` to emit literal `{` / `}`. |
-| `event_time_field`     | string | Optional name of a `TIMESTAMP` or `TIMESTAMPTZ` column. When set, chrono tokens in `path_partition_format` are rendered from each row's value instead of the writer's flush clock, so late-arriving rows land in the historical partition where they belong. When unset (default), the writer clock is used.                              |
+| `path_partition_format`| string | Free-form template applied per row to compute the partition directory. Supports chrono `strftime` tokens (e.g. `%Y`, `%m`, `%d`, `%H`) and `{column_name}` placeholders that reference columns of the sink's input schema. When set, this option takes precedence over `path_partition_prefix`. Use `{{` / `}}` to emit literal `{` / `}`, and `%%` to emit a literal `%`. |
+| `event_time_field`     | string | Optional name of a `TIMESTAMP` or `TIMESTAMPTZ` column. When set, chrono tokens in `path_partition_format` are rendered from each row's value instead of the writer's flush clock, so late-arriving rows land in the historical partition where they belong. When unset (default), the writer clock is used. `TIMESTAMP` values are interpreted as UTC. |
 
 The user is responsible for including a trailing `/` if a directory is desired.
 
@@ -84,7 +84,8 @@ s3://metrics-live/ohlcv/period=1d/exchange=binance-futures/symbol=ETH-USDT/year=
   directory.
 - Rendering is done in UTC. By default, chrono tokens use the writer's flush
   clock. Set `event_time_field` to a `TIMESTAMP`/`TIMESTAMPTZ` column to get
-  per-row event-time partitioning (see below).
+  per-row event-time partitioning (see below). Naive `TIMESTAMP` values are
+  interpreted as UTC, not as a session or server-local timezone.
 - With many distinct partition keys, expect many concurrently open object
   writers per flush. Tune `rollover_seconds` and `max_row_count` accordingly
   to keep per-file size and memory bounded.
@@ -119,7 +120,10 @@ A single flush of rows spanning hours 13:00–14:00 will now produce two
 distinct `hour=13/` and `hour=14/` partition directories. NULL event-time
 values fall back to the writer's flush clock so they remain partition-able.
 
-The referenced column must be of type `TIMESTAMP` or `TIMESTAMPTZ`.
+The referenced column must be of type `TIMESTAMP` or `TIMESTAMPTZ`. A
+`TIMESTAMP` value has no timezone attached and is interpreted as UTC for
+partition rendering; use `TIMESTAMPTZ` if the event time should carry an
+explicit timezone.
 Otherwise sink creation fails:
 
 ```text

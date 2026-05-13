@@ -20,7 +20,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
 use bytes::BytesMut;
+use chrono::format::{Item, StrftimeItems};
 use chrono::{DateTime, TimeZone, Utc};
+use futures::future::join_all;
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::basic::Compression;
@@ -28,7 +30,6 @@ use parquet::file::properties::WriterProperties;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::ToText;
@@ -105,7 +106,7 @@ impl PartitionTemplate {
                         continue;
                     }
                     if !buf.is_empty() {
-                        segments.push(PartitionSegment::Literal(std::mem::take(&mut buf)));
+                        push_literal_segment(&mut segments, std::mem::take(&mut buf), fmt)?;
                     }
                     let mut name = String::new();
                     let mut closed = false;
@@ -125,6 +126,13 @@ impl PartitionTemplate {
                     if name.is_empty() {
                         return Err(SinkError::Config(anyhow!(
                             "empty column placeholder in path_partition_format: {fmt}"
+                        )));
+                    }
+                    if !is_valid_placeholder_name(&name) {
+                        return Err(SinkError::Config(anyhow!(
+                            "invalid column placeholder `{name}` in path_partition_format: \
+                             placeholders must use ASCII identifier characters \
+                             (`[A-Za-z_][A-Za-z0-9_]*`)"
                         )));
                     }
                     let index = rw_schema
@@ -151,11 +159,16 @@ impl PartitionTemplate {
                     chars.next();
                     buf.push('}');
                 }
+                '}' => {
+                    return Err(SinkError::Config(anyhow!(
+                        "unescaped `}}` in path_partition_format: {fmt}; use `}}}}` to emit a literal `}}`"
+                    )));
+                }
                 _ => buf.push(c),
             }
         }
         if !buf.is_empty() {
-            segments.push(PartitionSegment::Literal(buf));
+            push_literal_segment(&mut segments, buf, fmt)?;
         }
         Ok(Self {
             segments,
@@ -172,10 +185,8 @@ impl PartitionTemplate {
         for segment in &self.segments {
             match segment {
                 PartitionSegment::Literal(lit) => {
-                    // chrono's `format` accepts arbitrary literals; only `%`-prefixed
-                    // tokens are interpreted, so it is safe to feed both chrono tokens
-                    // and Hive-style fragments through here.
-                    let _ = write!(out, "{}", datetime.format(lit));
+                    write!(out, "{}", datetime.format(lit))
+                        .expect("validated chrono format literal must render");
                 }
                 PartitionSegment::Column { index, .. } => match row.datum_at(*index) {
                     Some(scalar) => sanitize_partition_value(&scalar.to_text(), &mut out),
@@ -219,11 +230,43 @@ impl PartitionTemplate {
         let mut out = String::new();
         for segment in &self.segments {
             if let PartitionSegment::Literal(lit) = segment {
-                let _ = write!(out, "{}", datetime.format(lit));
+                write!(out, "{}", datetime.format(lit))
+                    .expect("validated chrono format literal must render");
             }
         }
         out
     }
+}
+
+fn push_literal_segment(
+    segments: &mut Vec<PartitionSegment>,
+    literal: String,
+    original_format: &str,
+) -> Result<()> {
+    validate_chrono_literal(&literal, original_format)?;
+    segments.push(PartitionSegment::Literal(literal));
+    Ok(())
+}
+
+fn validate_chrono_literal(literal: &str, original_format: &str) -> Result<()> {
+    for item in StrftimeItems::new(literal) {
+        if matches!(item, Item::Error) {
+            return Err(SinkError::Config(anyhow!(
+                "invalid chrono format token in path_partition_format `{original_format}`; \
+                 use `%%` to emit a literal percent sign"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn is_valid_placeholder_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Replace characters that are problematic in object paths (`/` and control bytes)
@@ -286,15 +329,23 @@ fn resolve_event_time_field_index(
 /// Extract a UTC `DateTime` from a row's column value. Used by the partition
 /// renderer when `event_time_field` is set. Naive timestamps (TIMESTAMP) are
 /// interpreted as UTC; TIMESTAMPTZ values are converted directly.
-fn row_event_datetime<R: Row>(row: &R, index: usize) -> Option<DateTime<Utc>> {
-    let scalar = row.datum_at(index)?;
-    match scalar {
+fn row_event_datetime<R: Row>(row: &R, index: usize) -> Result<Option<DateTime<Utc>>> {
+    let Some(scalar) = row.datum_at(index) else {
+        return Ok(None);
+    };
+    let datetime = match scalar {
         risingwave_common::types::ScalarRefImpl::Timestamp(ts) => {
-            Some(DateTime::<Utc>::from_naive_utc_and_offset(ts.0, Utc))
+            DateTime::<Utc>::from_naive_utc_and_offset(ts.0, Utc)
         }
-        risingwave_common::types::ScalarRefImpl::Timestamptz(ts) => Some(ts.to_datetime_utc()),
-        _ => None,
-    }
+        risingwave_common::types::ScalarRefImpl::Timestamptz(ts) => ts.to_datetime_utc(),
+        other => {
+            return Err(SinkError::File(format!(
+                "`event_time_field` resolved to unsupported runtime value {other:?}; \
+                 expected TIMESTAMP or TIMESTAMPTZ"
+            )));
+        }
+    };
+    Ok(Some(datetime))
 }
 
 /// The `FileSink` struct represents a file sink that uses the `OpendalSinkBackend` trait for its backend implementation.
@@ -444,10 +495,6 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
 
 pub struct OpenDalSinkWriter {
     schema: SchemaRef,
-    /// The RisingWave-side schema. Held so future extensions (e.g. column
-    /// projection for Hive partition-column elision) can look up types.
-    #[allow(dead_code)]
-    rw_schema: Schema,
     operator: Operator,
     /// Active writers keyed by their rendered partition path.
     /// Empty when no chunk has been buffered since the last commit.
@@ -504,7 +551,10 @@ impl OpenDalSinkWriter {
             return Ok(false);
         }
         let writers = std::mem::take(&mut self.sink_writers);
-        for (path, writer) in writers {
+        let unique_writer_id = self.unique_writer_id;
+        let executor_id = self.executor_id;
+        let created_time = self.created_time;
+        let close_results = join_all(writers.into_iter().map(|(path, writer)| async move {
             match writer {
                 FileWriterEnum::ParquetFileWriter(w) => {
                     let bytes_written = w.bytes_written();
@@ -515,9 +565,9 @@ impl OpenDalSinkWriter {
                     w.close().await?;
                     tracing::debug!(
                         "writer {} (executor_id: {}, created_time: {}) finish write file at partition `{}`, bytes_written_before_close: {}",
-                        self.unique_writer_id,
-                        self.executor_id,
-                        self.created_time
+                        unique_writer_id,
+                        executor_id,
+                        created_time
                             .duration_since(UNIX_EPOCH)
                             .expect("Time went backwards")
                             .as_secs(),
@@ -529,6 +579,20 @@ impl OpenDalSinkWriter {
                     w.close().await?;
                 }
             };
+            Ok(())
+        }))
+        .await;
+
+        let mut first_error = None;
+        for result in close_results {
+            if let Err(err) = result
+                && first_error.is_none()
+            {
+                first_error = Some(err);
+            }
+        }
+        if let Some(err) = first_error {
+            return Err(err);
         }
         self.current_bached_row_num = 0;
         Ok(true)
@@ -564,13 +628,13 @@ impl OpenDalSinkWriter {
         &self,
         chunk: &StreamChunk,
         fallback_datetime: DateTime<Utc>,
-    ) -> HashMap<String, Vec<usize>> {
+    ) -> Result<HashMap<String, Vec<usize>>> {
         // No event-time column: every row uses the writer's flush clock, so we
         // can defer to the template's own grouping helper.
         if self.event_time_field_index.is_none()
             && let Some(template) = &self.partition_template
         {
-            return template.group_chunk_rows(chunk, fallback_datetime);
+            return Ok(template.group_chunk_rows(chunk, fallback_datetime));
         }
 
         let data_chunk = chunk.data_chunk();
@@ -583,7 +647,7 @@ impl OpenDalSinkWriter {
             }
             let row = data_chunk.row_at_unchecked_vis(idx);
             let datetime = match self.event_time_field_index {
-                Some(col_idx) => row_event_datetime(&row, col_idx).unwrap_or(fallback_datetime),
+                Some(col_idx) => row_event_datetime(&row, col_idx)?.unwrap_or(fallback_datetime),
                 None => fallback_datetime,
             };
             let path = match &self.partition_template {
@@ -593,7 +657,7 @@ impl OpenDalSinkWriter {
             };
             groups.entry(path).or_default().push(idx);
         }
-        groups
+        Ok(groups)
     }
 
     /// Render the partition path purely from the writer's creation time. Used
@@ -612,8 +676,8 @@ impl OpenDalSinkWriter {
         match prefix {
             PathPartitionPrefix::None => String::new(),
             PathPartitionPrefix::Day => datetime.format("%Y-%m-%d/").to_string(),
-            PathPartitionPrefix::Month => datetime.format("/%Y-%m/").to_string(),
-            PathPartitionPrefix::Hour => datetime.format("/%Y-%m-%d %H:00/").to_string(),
+            PathPartitionPrefix::Month => datetime.format("%Y-%m/").to_string(),
+            PathPartitionPrefix::Hour => datetime.format("%Y-%m-%d %H:00/").to_string(),
         }
     }
 
@@ -641,11 +705,11 @@ impl OpenDalSinkWriter {
         // rows are irrelevant to an append-only sink and must not trip the assert.
         // Mirrors upstream's per-row iteration in `chunk.rows()`.
         for (op, _row) in chunk.rows() {
-            assert_eq!(
-                op,
-                Op::Insert,
-                "expect all visible `op(s)` to be `Op::Insert`"
-            );
+            if op != Op::Insert {
+                return Err(SinkError::File(format!(
+                    "file sink expects all visible ops to be `Op::Insert`, got {op:?}"
+                )));
+            }
         }
 
         // Fast path: no per-row partitioning. Applies only when neither column
@@ -665,24 +729,12 @@ impl OpenDalSinkWriter {
 
         // Per-row partitioning: bucket visible rows by their rendered path,
         // then flush each bucket as a sub-chunk so we get one writer per partition.
-        let capacity = chunk.data_chunk().capacity();
-        let groups = self.group_chunk_per_row(&chunk, datetime);
+        let groups = self.group_chunk_per_row(&chunk, datetime)?;
 
         for (path, indices) in groups {
-            let mut bits = BitmapBuilder::zeroed(capacity);
-            for idx in indices {
-                bits.set(idx, true);
-            }
-            let sub = chunk.clone().data_chunk().with_visibility(bits.finish());
-            // `compact_vis` is what `IcebergArrowConvert.to_record_batch` expects
-            // when only some rows are visible. It also keeps the JSON path simple
-            // by collapsing the chunk to its visible rows.
-            let compacted = sub.compact_vis();
-            // Reconstruct a StreamChunk with all-`Insert` ops matching the
-            // compacted cardinality. Ops were already validated as inserts.
-            let nrows = compacted.cardinality();
-            let columns: Vec<_> = compacted.columns().to_vec();
-            let sub_chunk = StreamChunk::new(vec![Op::Insert; nrows].into_boxed_slice(), columns);
+            let nrows = indices.len();
+            let data_chunk = chunk.data_chunk().reorder_rows(&indices);
+            let sub_chunk = StreamChunk::from_parts(vec![Op::Insert; nrows], data_chunk);
             self.write_chunk_to_partition(&path, sub_chunk).await?;
         }
         Ok(())
@@ -711,9 +763,9 @@ impl OpenDalSinkWriter {
             }
             FileWriterEnum::FileWriter(w) => {
                 let mut chunk_buf = BytesMut::new();
-                let batch_row_nums = chunk.data_chunk().capacity();
+                let batch_row_nums = chunk.data_chunk().cardinality();
                 for (op, row) in chunk.rows() {
-                    assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
+                    debug_assert_eq!(op, Op::Insert, "expect all `op(s)` to be `Op::Insert`");
                     writeln!(
                         chunk_buf,
                         "{}",
@@ -759,7 +811,6 @@ impl OpenDalSinkWriter {
             resolve_event_time_field_index(&batching_strategy, &rw_schema)?;
         Ok(Self {
             schema: Arc::new(arrow_schema),
-            rw_schema,
             write_path: write_path.to_owned(),
             operator,
             sink_writers: HashMap::new(),
@@ -998,6 +1049,36 @@ mod tests {
     }
 
     #[test]
+    fn template_rejects_invalid_percent_token() {
+        let err = PartitionTemplate::parse("bucket=100%/symbol={symbol}/", &schema()).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("literal percent"), "{msg}");
+    }
+
+    #[test]
+    fn template_allows_escaped_literal_percent() {
+        let template = PartitionTemplate::parse("bucket=100%%/year=%Y/", &schema()).unwrap();
+        assert_eq!(
+            template.render_time_only(ts(2021, 6, 25, 13)),
+            "bucket=100%/year=2021/"
+        );
+    }
+
+    #[test]
+    fn template_rejects_invalid_placeholder_name() {
+        let err = PartitionTemplate::parse("symbol={symbol/}/", &schema()).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("invalid column placeholder"), "{msg}");
+    }
+
+    #[test]
+    fn template_rejects_unescaped_closing_brace() {
+        let err = PartitionTemplate::parse("symbol={symbol}}/", &schema()).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("unescaped"), "{msg}");
+    }
+
+    #[test]
     fn template_handles_escaped_braces_and_null_column() {
         let template = PartitionTemplate::parse("{{literal}}={symbol}/", &schema()).unwrap();
         let row = OwnedRow::new(vec![
@@ -1114,6 +1195,35 @@ mod tests {
         }
     }
 
+    fn test_writer_for_strategy(strategy: BatchingStrategy) -> OpenDalSinkWriter {
+        use opendal::services::Fs;
+
+        use crate::sink::SinkFormatDesc;
+        use crate::sink::catalog::{SinkEncode, SinkFormat};
+
+        let operator = Operator::new(Fs::default().root("/tmp"))
+            .expect("build opendal Fs builder")
+            .finish();
+        let format_desc = SinkFormatDesc {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Json,
+            options: BTreeMap::new(),
+            secret_refs: BTreeMap::new(),
+            key_encode: None,
+            connection_id: None,
+        };
+        OpenDalSinkWriter::new(
+            operator,
+            "metrics",
+            schema(),
+            ExecutorId::new(1),
+            &format_desc,
+            EngineType::Fs,
+            strategy,
+        )
+        .expect("construct OpenDalSinkWriter")
+    }
+
     #[test]
     fn event_time_field_resolves_to_schema_index() {
         let strategy = BatchingStrategy {
@@ -1178,7 +1288,7 @@ mod tests {
             Some(ScalarImpl::Timestamptz(tz)),
             Some(ScalarImpl::Int64(0)),
         ]);
-        assert_eq!(row_event_datetime(&row, 1), Some(dt));
+        assert_eq!(row_event_datetime(&row, 1).unwrap(), Some(dt));
     }
 
     #[test]
@@ -1188,7 +1298,26 @@ mod tests {
             None,
             Some(ScalarImpl::Int64(0)),
         ]);
-        assert_eq!(row_event_datetime(&row, 1), None);
+        assert_eq!(row_event_datetime(&row, 1).unwrap(), None);
+    }
+
+    #[test]
+    fn legacy_month_and_hour_prefixes_do_not_start_with_slash() {
+        let mut strategy = default_strategy();
+        strategy.path_partition_prefix = Some(PathPartitionPrefix::Month);
+        let month_writer = test_writer_for_strategy(strategy);
+        assert_eq!(
+            month_writer.time_only_partition_path(ts(2021, 6, 25, 13)),
+            "2021-06/"
+        );
+
+        let mut strategy = default_strategy();
+        strategy.path_partition_prefix = Some(PathPartitionPrefix::Hour);
+        let hour_writer = test_writer_for_strategy(strategy);
+        assert_eq!(
+            hour_writer.time_only_partition_path(ts(2021, 6, 25, 13)),
+            "2021-06-25 13:00/"
+        );
     }
 
     /// End-to-end test that wires up the real `OpenDalSinkWriter` with a local
@@ -1524,8 +1653,8 @@ mod tests {
         }
     }
 
-    /// Regression test for the fix in commit 3d95755
-    /// (`fix(sink): iterate visible rows in append_only validation, not raw ops`).
+    /// Regression test for iterating visible rows in append-only validation,
+    /// instead of inspecting raw ops that may be hidden by the visibility bitmap.
     /// Construct a chunk whose `ops` array carries non-`Insert` entries —
     /// but those entries are masked off by the visibility bitmap. The
     /// previous implementation iterated `chunk.ops()` directly and would
