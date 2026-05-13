@@ -15,169 +15,28 @@
 use std::collections::{HashMap, HashSet};
 use std::process::exit;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use inquire::Confirm;
 use itertools::Itertools;
-use regex::Regex;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::{GetClusterInfoResponse, PbWorkerReschedule};
-use serde::{Deserialize, Serialize};
+use risingwave_pb::meta::GetClusterInfoResponse;
 use thiserror_ext::AsReport;
 
 use crate::CtlContext;
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ReschedulePayload {
-    #[serde(rename = "reschedule_revision")]
-    pub reschedule_revision: u64,
+const LEGACY_MANUAL_RESCHEDULE_REMOVED: &str = "legacy manual reschedule has been removed; use ALTER ... SET PARALLELISM / ALTER FRAGMENT ... instead";
 
-    #[serde(rename = "reschedule_plan")]
-    pub worker_reschedule_plan: HashMap<u32, WorkerReschedulePlan>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct WorkerReschedulePlan {
-    #[serde(rename = "actor_count_diff")]
-    pub actor_count_diff: HashMap<WorkerId, i32>,
-}
-
-#[derive(Debug)]
-pub enum RescheduleInput {
-    String(String),
-    FilePath(String),
-}
-
-impl From<WorkerReschedulePlan> for PbWorkerReschedule {
-    fn from(value: WorkerReschedulePlan) -> Self {
-        let WorkerReschedulePlan { actor_count_diff } = value;
-
-        PbWorkerReschedule {
-            worker_actor_diff: actor_count_diff,
-        }
-    }
-}
-
-impl From<PbWorkerReschedule> for WorkerReschedulePlan {
-    fn from(value: PbWorkerReschedule) -> Self {
-        let PbWorkerReschedule {
-            worker_actor_diff: actor_count_diff,
-        } = value;
-
-        WorkerReschedulePlan {
-            actor_count_diff: actor_count_diff
-                .into_iter()
-                .map(|(k, v)| (k, v as _))
-                .collect(),
-        }
-    }
-}
-
+#[allow(clippy::unused_async)]
 pub async fn reschedule(
-    context: &CtlContext,
-    plan: Option<String>,
-    revision: Option<u64>,
-    from: Option<String>,
-    dry_run: bool,
-    resolve_no_shuffle: bool,
+    _context: &CtlContext,
+    _plan: Option<String>,
+    _revision: Option<u64>,
+    _from: Option<String>,
+    _dry_run: bool,
+    _resolve_no_shuffle: bool,
 ) -> Result<()> {
-    let meta_client = context.meta_client().await?;
-
-    let (reschedules, revision) = match (plan, revision, from) {
-        (Some(plan), Some(revision), None) => (parse_plan(plan)?, revision),
-        (None, None, Some(path)) => {
-            let file = std::fs::File::open(path)?;
-            let ReschedulePayload {
-                reschedule_revision,
-                worker_reschedule_plan,
-            } = serde_yaml::from_reader(file)?;
-            (
-                worker_reschedule_plan
-                    .into_iter()
-                    .map(|(fragment_id, worker_reschedule_plan)| {
-                        (fragment_id, worker_reschedule_plan.into())
-                    })
-                    .collect(),
-                reschedule_revision,
-            )
-        }
-        _ => unreachable!(),
-    };
-
-    if reschedules.is_empty() {
-        return Ok(());
-    }
-
-    for (fragment_id, reschedule) in &reschedules {
-        println!("For fragment #{}", fragment_id);
-        if !reschedule.get_worker_actor_diff().is_empty() {
-            println!("\tChange: {:?}", reschedule.get_worker_actor_diff());
-        }
-
-        println!();
-    }
-
-    if !dry_run {
-        println!("---------------------------");
-        let (success, revision) = meta_client
-            .reschedule(reschedules, revision, resolve_no_shuffle)
-            .await?;
-
-        if !success {
-            println!(
-                "Reschedule failed, please check the plan or the revision, current revision is {}",
-                revision
-            );
-
-            return Err(anyhow!("reschedule failed"));
-        }
-
-        println!("Reschedule success, current revision is {}", revision);
-    }
-
-    Ok(())
-}
-
-// It will match formats like `1:[1:+1,2:-1,3:1];2:[1:1,2:1]`, indicating which workers' actors need to change in quantity for each fragment.
-fn parse_plan(mut plan: String) -> Result<HashMap<u32, PbWorkerReschedule>> {
-    let mut reschedules = HashMap::new();
-    let regex = Regex::new(r"^(\d+):\[((?:\d+:[+-]?\d+,?)+)]$")?;
-    plan.retain(|c| !c.is_whitespace());
-
-    for fragment_reschedule_plan in plan.split(';') {
-        if fragment_reschedule_plan.is_empty() {
-            continue;
-        }
-
-        let captures = regex
-            .captures(fragment_reschedule_plan)
-            .ok_or_else(|| anyhow!("plan \"{}\" format illegal", fragment_reschedule_plan))?;
-
-        let fragment_id = captures
-            .get(1)
-            .and_then(|mat| mat.as_str().parse::<u32>().ok())
-            .ok_or_else(|| anyhow!("plan \"{}\" does not have a valid fragment id", plan))?;
-
-        let worker_changes: Vec<&str> = captures[2].split(',').collect();
-
-        let mut worker_actor_diff = HashMap::new();
-        for worker_change in &worker_changes {
-            let (worker_id, count) = worker_change.split(':').collect_tuple::<(_, _)>().unwrap();
-            let worker_id = worker_id.parse().unwrap();
-            let count = count.parse().unwrap();
-
-            if let Some(dup_change) = worker_actor_diff.insert(worker_id, count) {
-                anyhow::bail!(
-                    "duplicate worker id {worker_id} in plan, prev {worker_id} -> {dup_change}",
-                );
-            }
-        }
-
-        if !worker_actor_diff.is_empty() {
-            reschedules.insert(fragment_id, PbWorkerReschedule { worker_actor_diff });
-        }
-    }
-    Ok(reschedules)
+    anyhow::bail!(LEGACY_MANUAL_RESCHEDULE_REMOVED)
 }
 
 pub async fn unregister_workers(
@@ -315,4 +174,26 @@ pub async fn unregister_workers(
     println!("Done");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn reschedule_returns_removed_error_without_meta_access() {
+        let context = CtlContext::default();
+        let err = reschedule(
+            &context,
+            Some("1:[1:+1]".to_owned()),
+            Some(0),
+            None,
+            false,
+            false,
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.to_string(), LEGACY_MANUAL_RESCHEDULE_REMOVED);
+    }
 }

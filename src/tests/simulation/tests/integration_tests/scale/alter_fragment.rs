@@ -16,6 +16,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use madsim::time::sleep;
+use risingwave_pb::meta::TableParallelism;
+use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
@@ -129,6 +131,45 @@ async fn test_alter_fragment() -> Result<()> {
         ))
         .await?
         .assert_result_eq(format!("{new_parallelism}"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_alter_fragment_rejects_mixed_entry_and_non_entry_request() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
+    let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
+    cluster.run("create table t1 (c1 int, c2 int);").await?;
+    let upstream_fragment = cluster
+        .locate_one_fragment([identity_contains("materialize")])
+        .await?;
+
+    let upstream_fragment_id = upstream_fragment.id();
+    cluster
+        .run("create materialized view m as select * from t1;")
+        .await?;
+
+    let downstream_fragment = cluster
+        .locate_one_fragment([identity_contains("StreamTableScan")])
+        .await?;
+    let downstream_fragment_id = downstream_fragment.id();
+
+    let new_parallelism = (default_parallelism + 1) as u32;
+    let err = cluster
+        .alter_fragment_parallelism(
+            vec![upstream_fragment_id, downstream_fragment_id],
+            Some(TableParallelism {
+                parallelism: Some(Parallelism::Fixed(FixedParallelism {
+                    parallelism: new_parallelism,
+                })),
+            }),
+        )
+        .await
+        .unwrap_err();
+    let err = err.to_string();
+    assert!(err.contains("non-entry fragments"));
+    assert!(err.contains(&downstream_fragment_id.to_string()));
+    assert!(err.contains(&upstream_fragment_id.to_string()));
 
     Ok(())
 }

@@ -178,6 +178,18 @@ impl Configuration {
         max_heartbeat_interval_secs: u64,
         enable_auto_parallelism: bool,
     ) -> Self {
+        Self::for_auto_parallelism_with_first_delay(
+            max_heartbeat_interval_secs,
+            enable_auto_parallelism,
+            0,
+        )
+    }
+
+    pub fn for_auto_parallelism_with_first_delay(
+        max_heartbeat_interval_secs: u64,
+        enable_auto_parallelism: bool,
+        first_delay_secs: u64,
+    ) -> Self {
         let disable_automatic_parallelism_control = !enable_auto_parallelism;
 
         let config_path = {
@@ -188,7 +200,7 @@ impl Configuration {
                 r#"[meta]
 max_heartbeat_interval_secs = {max_heartbeat_interval_secs}
 disable_automatic_parallelism_control = {disable_automatic_parallelism_control}
-parallelism_control_trigger_first_delay_sec = 0
+parallelism_control_trigger_first_delay_sec = {first_delay_secs}
 parallelism_control_batch_size = 10
 parallelism_control_trigger_period_sec = 10
 

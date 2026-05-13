@@ -33,6 +33,12 @@ pub struct ScaleServiceImpl {
 }
 
 impl ScaleServiceImpl {
+    fn legacy_manual_reschedule_unavailable() -> Status {
+        Status::unimplemented(
+            "legacy manual reschedule has been removed; use ALTER ... SET PARALLELISM / ALTER FRAGMENT ... instead",
+        )
+    }
+
     pub fn new(
         metadata_manager: MetadataManager,
         stream_manager: GlobalStreamManagerRef,
@@ -53,6 +59,7 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         _: Request<GetClusterInfoRequest>,
     ) -> Result<Response<GetClusterInfoResponse>, Status> {
+        // This endpoint remains for cluster inspection and worker/split introspection only.
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let stream_job_fragments = self
@@ -122,23 +129,20 @@ impl ScaleService for ScaleServiceImpl {
         &self,
         _request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        Ok(Response::new(RescheduleResponse {
-            success: false,
-            revision: 0,
-        }))
+        Err(Self::legacy_manual_reschedule_unavailable())
     }
 
     async fn update_streaming_job_node_labels(
         &self,
         _request: Request<UpdateStreamingJobNodeLabelsRequest>,
     ) -> Result<Response<UpdateStreamingJobNodeLabelsResponse>, Status> {
-        todo!()
+        Err(Self::legacy_manual_reschedule_unavailable())
     }
 
     async fn get_serverless_streaming_jobs_status(
         &self,
         _request: Request<GetServerlessStreamingJobsStatusRequest>,
     ) -> Result<Response<GetServerlessStreamingJobsStatusResponse>, Status> {
-        todo!()
+        Err(Self::legacy_manual_reschedule_unavailable())
     }
 }

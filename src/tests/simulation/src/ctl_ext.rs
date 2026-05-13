@@ -28,8 +28,8 @@ use risingwave_common::id::WorkerId;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::id::{ActorId, FragmentId};
-use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::PbFragment;
+use risingwave_pb::meta::{GetClusterInfoResponse, TableParallelism};
 use risingwave_pb::stream_plan::StreamNode;
 
 use self::predicate::BoxedPredicate;
@@ -253,6 +253,25 @@ impl Cluster {
     pub async fn locate_fragment_by_id(&mut self, id: FragmentId) -> Result<Fragment> {
         self.locate_one_fragment([predicate::id(id.as_raw_id())])
             .await
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn alter_fragment_parallelism(
+        &mut self,
+        fragment_ids: Vec<FragmentId>,
+        parallelism: Option<TableParallelism>,
+    ) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let context = risingwave_ctl::common::CtlContext::default();
+                let meta_client = context.meta_client().await?;
+                meta_client
+                    .alter_fragment_parallelism(fragment_ids, parallelism)
+                    .await?;
+                Ok::<_, anyhow::Error>(())
+            })
+            .await??;
+        Ok(())
     }
 
     #[cfg_or_panic(madsim)]

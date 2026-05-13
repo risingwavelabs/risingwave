@@ -1003,13 +1003,42 @@ fn render_actors_with_allocator(
             .resource_group
             .clone();
 
-        let source_entry_fragment = entry_fragments.iter().find(|f| {
-            let mask = f.fragment_type_mask;
-            if mask.contains(FragmentTypeFlag::Source) {
-                assert!(!mask.contains(FragmentTypeFlag::SourceScan))
-            }
-            mask.contains(FragmentTypeFlag::Source) && !mask.contains(FragmentTypeFlag::Dml)
-        });
+        let source_entry_fragments = entry_fragments
+            .iter()
+            .copied()
+            .filter(|f| {
+                let mask = f.fragment_type_mask;
+                if mask.contains(FragmentTypeFlag::Source) {
+                    assert!(!mask.contains(FragmentTypeFlag::SourceScan))
+                }
+                mask.contains(FragmentTypeFlag::Source) && !mask.contains(FragmentTypeFlag::Dml)
+            })
+            .collect_vec();
+        if source_entry_fragments.len() > 1 {
+            let source_fragment_ids = source_entry_fragments
+                .iter()
+                .map(|fragment| fragment.fragment_id)
+                .collect_vec();
+            let source_ids = source_fragment_ids
+                .iter()
+                .map(|fragment_id| {
+                    fragment_source_ids
+                        .get(fragment_id)
+                        .copied()
+                        .ok_or_else(|| {
+                            anyhow!("missing source id in source fragment {}", fragment_id)
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            return Err(anyhow!(
+                "unsupported no-shuffle ensemble with multiple source roots: entries {:?}, source fragments {:?}, source ids {:?}",
+                entries.iter().copied().collect_vec(),
+                source_fragment_ids,
+                source_ids
+            )
+            .into());
+        }
+        let source_entry_fragment = source_entry_fragments.into_iter().next();
 
         let actor_template = EnsembleActorTemplate::render_new(
             job,
@@ -2275,6 +2304,107 @@ mod tests {
             BTreeSet::from([split_a.id().to_string(), split_b.id().to_string()])
         );
         assert_eq!(actor_id_counter.load(Ordering::Relaxed), 4);
+    }
+
+    #[test]
+    fn render_actors_rejects_multiple_source_entries_in_one_no_shuffle_ensemble() {
+        let actor_id_counter = AtomicU32::new(0);
+        let left_entry_fragment_id: FragmentId = 11.into();
+        let right_entry_fragment_id: FragmentId = 12.into();
+        let job_id: JobId = 30.into();
+        let database_id: DatabaseId = DatabaseId::new(7);
+        let left_source_id: SourceId = 99.into();
+        let right_source_id: SourceId = 100.into();
+
+        let source_mask = FragmentTypeFlag::raw_flag([FragmentTypeFlag::Source]) as i32;
+
+        let left_entry_fragment = build_fragment(
+            left_entry_fragment_id,
+            job_id,
+            source_mask,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+        let right_entry_fragment = build_fragment(
+            right_entry_fragment_id,
+            job_id,
+            source_mask,
+            DistributionType::Hash,
+            4,
+            StreamingParallelism::Fixed(2),
+        );
+
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Background,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: None,
+            parallelism: StreamingParallelism::Fixed(2),
+            backfill_parallelism: None,
+            backfill_orders: None,
+            max_parallelism: 2,
+            specific_resource_group: None,
+            is_serverless_backfill: false,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "split_db".into(),
+            resource_group: "rg-source".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([left_entry_fragment_id, right_entry_fragment_id]),
+            components: HashSet::from([left_entry_fragment_id, right_entry_fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([
+            (left_entry_fragment_id, left_entry_fragment),
+            (right_entry_fragment_id, right_entry_fragment),
+        ]);
+        let job_fragments = HashMap::from([(job_id, fragment_map)]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        let worker_map: HashMap<WorkerId, WorkerNode> = HashMap::from([
+            (1.into(), build_worker_node(1, 1, "rg-source")),
+            (2.into(), build_worker_node(2, 1, "rg-source")),
+        ]);
+
+        let fragment_splits = HashMap::new();
+        let fragment_source_ids = HashMap::from([
+            (left_entry_fragment_id, left_source_id),
+            (right_entry_fragment_id, right_source_id),
+        ]);
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        let err = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &job_fragments,
+            &job_map,
+            &worker_map,
+            AdaptiveParallelismStrategy::Auto,
+            context,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("unsupported no-shuffle ensemble with multiple source roots")
+        );
     }
 
     #[test]
