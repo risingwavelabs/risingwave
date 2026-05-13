@@ -23,7 +23,8 @@ use crate::optimizer::plan_node::utils::{
     Distill, childless_record, infer_synced_kv_log_store_table_catalog_inner,
 };
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamExchange, StreamNode,
+    StreamPlanRef as PlanRef,
 };
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -48,6 +49,19 @@ impl StreamSyncLogStore {
         );
 
         Self { base, input }
+    }
+
+    pub fn new_as_fragment_root(input: PlanRef) -> PlanRef {
+        let log_store: PlanRef = Self::new(input).into();
+        Self::ensure_as_fragment_root(log_store)
+    }
+
+    pub fn ensure_as_fragment_root(plan: PlanRef) -> PlanRef {
+        if plan.as_stream_sync_log_store().is_some() {
+            StreamExchange::new_no_shuffle(plan).into()
+        } else {
+            plan
+        }
     }
 }
 

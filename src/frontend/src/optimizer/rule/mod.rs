@@ -380,6 +380,7 @@ macro_rules! for_all_rules {
             , { IcebergCountStarRule}
             , { IcebergIntermediateScanRule }
             , { AddLogstoreRule }
+            , { EnsureSyncLogStoreRootRule }
             , { EmptyAggRemoveRule }
             , { TopNToVectorSearchRule }
             , { CorrelatedTopNToVectorSearchRule }

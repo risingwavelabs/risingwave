@@ -575,7 +575,7 @@ impl StreamSink {
 
         // sink into table should have logstore for sink_decouple
         let input = if sink_decouple && target_table.is_some() {
-            StreamSyncLogStore::new(input).into()
+            StreamSyncLogStore::new_as_fragment_root(input)
         } else {
             input
         };

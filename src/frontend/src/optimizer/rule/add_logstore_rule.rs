@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::plan_node::{Stream, StreamPlanRef as PlanRef, StreamSyncLogStore};
+use crate::optimizer::plan_node::{
+    Stream, StreamExchange, StreamPlanRef as PlanRef, StreamSyncLogStore,
+};
 use crate::optimizer::rule::{BoxedRule, Rule};
 
 pub struct AddLogstoreRule {}
@@ -26,6 +28,38 @@ impl Rule<Stream> for AddLogstoreRule {
 }
 
 impl AddLogstoreRule {
+    pub fn create() -> BoxedRule<Stream> {
+        Box::new(Self {})
+    }
+}
+
+pub struct EnsureSyncLogStoreRootRule {}
+
+impl Rule<Stream> for EnsureSyncLogStoreRootRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+        if plan.as_stream_exchange().is_some() {
+            return None;
+        }
+
+        let mut changed = false;
+        let inputs: Vec<_> = plan
+            .inputs()
+            .into_iter()
+            .map(|input| {
+                if input.as_stream_sync_log_store().is_some() {
+                    changed = true;
+                    StreamExchange::new_no_shuffle(input).into()
+                } else {
+                    input
+                }
+            })
+            .collect();
+
+        changed.then(|| plan.clone_root_with_inputs(&inputs))
+    }
+}
+
+impl EnsureSyncLogStoreRootRule {
     pub fn create() -> BoxedRule<Stream> {
         Box::new(Self {})
     }
