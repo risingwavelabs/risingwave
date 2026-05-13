@@ -279,6 +279,28 @@ impl DatabaseCheckpointControl {
             self.database_info.post_apply(post_apply_changes);
         }
 
+        if let Some(Command::DropStreamingJobs {
+            streaming_job_ids,
+            actors,
+            ..
+        }) = &mut command
+        {
+            actors.clear();
+            for &job_id in streaming_job_ids.iter() {
+                let Some(job) = self.database_info.post_apply_remove_job(job_id) else {
+                    warn!(
+                        %job_id,
+                        "skip drop payload for streaming job that has already been removed from barrier worker"
+                    );
+                    continue;
+                };
+
+                for fragment in job.fragment_infos.values() {
+                    actors.extend(fragment.actors.keys().copied());
+                }
+            }
+        }
+
         let prev_is_paused = self.state.is_paused();
         let curr_is_paused = match command {
             Some(Command::Pause) => true,

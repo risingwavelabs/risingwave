@@ -1207,13 +1207,14 @@ impl DdlController {
             removed_iceberg_table_sinks,
         } = release_ctx;
 
+        let _ = removed_fragments;
+
         self.stream_manager
             .drop_streaming_jobs(
                 database_id,
                 removed_actors.iter().map(|id| *id as _).collect(),
                 removed_streaming_job_ids,
                 removed_state_table_ids,
-                removed_fragments.iter().map(|id| *id as _).collect(),
                 removed_sink_fragment_by_targets
                     .into_iter()
                     .map(|(target, sinks)| {
