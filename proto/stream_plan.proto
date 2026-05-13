@@ -249,6 +249,14 @@ message StreamMessage {
 message StreamMessageBatch {
   message BarrierBatch {
     repeated Barrier barriers = 1;
+    // Actor IDs whose barriers were coalesced into this batch.
+    // Non-empty only for multiplexed exchanges with barrier coalescing.
+    repeated uint32 coalesced_actor_ids = 2;
+    // Per-actor data message counts for message-counting based synchronization.
+    // Key: upstream actor_id, Value: number of data messages (chunks + watermarks)
+    // sent by that actor in the epoch ending at this barrier.
+    // Non-empty only for multiplexed exchanges with barrier coalescing.
+    map<uint32, uint64> actor_data_counts = 3;
   }
   oneof stream_message_batch {
     data.StreamChunk stream_chunk = 1;

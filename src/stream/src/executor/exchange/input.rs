@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::pin::Pin;
+use std::sync::LazyLock;
 use std::task::{Context, Poll};
 
 use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 
 use super::permit::Receiver;
@@ -364,6 +366,164 @@ pub(crate) async fn new_input(
     };
 
     Ok(input)
+}
+
+/// Create inputs for all upstream actors, with multiplexed barrier coalescing.
+///
+/// Groups remote actors by host address. For groups with multiple actors on the same
+/// remote host, creates a barrier-only gRPC stream and wraps individual data `RemoteInput`s
+/// with [`CountingMergeInput`](super::multiplexed::CountingMergeInput) to inject barriers from the shared barrier stream.
+///
+/// Local actors and single-actor remote groups use the standard [`new_input`] path.
+pub(crate) async fn new_inputs(
+    local_barrier_manager: &LocalBarrierManager,
+    metrics: Arc<StreamingMetrics>,
+    actor_id: ActorId,
+    fragment_id: FragmentId,
+    upstream_actors: &[&ActorInfo],
+    upstream_fragment_id: FragmentId,
+    actor_config: Arc<StreamingConfig>,
+) -> StreamExecutorResult<Vec<BoxedActorInput>> {
+    use std::collections::HashMap;
+
+    use thiserror_ext::AsReport;
+
+    use super::multiplexed::{CountingMergeInput, run_barrier_receiver};
+
+    let server_addr = local_barrier_manager.env.server_address();
+
+    // Group actors by (host_addr, partial_graph_id).
+    // Local actors are handled individually.
+    let mut local_actors: Vec<&ActorInfo> = Vec::new();
+    let mut remote_groups: HashMap<(HostAddr, PartialGraphId), Vec<&ActorInfo>> = HashMap::new();
+
+    for &actor in upstream_actors {
+        let upstream_addr: HostAddr = actor.get_host()?.into();
+        if is_local_address(server_addr, &upstream_addr) {
+            local_actors.push(actor);
+        } else {
+            remote_groups
+                .entry((upstream_addr, actor.partial_graph_id))
+                .or_default()
+                .push(actor);
+        }
+    }
+
+    let mut inputs = Vec::with_capacity(upstream_actors.len());
+
+    // Create local inputs.
+    for actor in &local_actors {
+        let input = LocalInput::new(
+            local_barrier_manager.register_local_upstream_output(
+                actor_id,
+                actor.actor_id,
+                upstream_fragment_id,
+                actor.partial_graph_id,
+                metrics.clone(),
+            ),
+            actor.actor_id,
+        )
+        .boxed_input();
+        inputs.push(input);
+    }
+
+    // Create remote inputs, using multiplexed barrier coalescing for groups of >1 actor.
+    for ((upstream_addr, partial_graph_id), actors) in remote_groups {
+        if actors.len() <= 1 {
+            // Single remote actor: use standard RemoteInput (no coalescing needed).
+            let actor = actors[0];
+            let input = RemoteInput::new(
+                local_barrier_manager,
+                upstream_addr,
+                partial_graph_id,
+                (actor.actor_id, actor_id),
+                (upstream_fragment_id, fragment_id),
+                metrics.clone(),
+                actor_config.clone(),
+            )
+            .await?
+            .boxed_input();
+            inputs.push(input);
+        } else {
+            // Multiple remote actors on the same host: use multiplexed barrier coalescing.
+            //
+            // Step 1: Create barrier-only gRPC stream.
+            //   This triggers CreateBarrierGroup on the upstream side, which:
+            //   - Creates per-actor data channels (stored for later TakeReceiver calls)
+            //   - Creates a coalesced barrier channel
+            //   - Sends CoalescedBarrierRemote output requests to upstream actors
+            let up_actor_ids: Vec<ActorId> = actors.iter().map(|a| a.actor_id).collect();
+            let client = local_barrier_manager
+                .env
+                .client_pool()
+                .get_by_addr(upstream_addr.clone())
+                .await?;
+
+            let (barrier_stream, barrier_permits_tx) = client
+                .get_stream_barrier(
+                    up_actor_ids.clone(),
+                    actor_id,
+                    upstream_fragment_id,
+                    fragment_id,
+                    partial_graph_id,
+                    local_barrier_manager.term_id.clone(),
+                )
+                .await?;
+
+            // Step 2: Create individual data RemoteInputs + CountingMergeInput wrappers.
+            //   Each RemoteInput::new() calls get_stream() which triggers TakeReceiver on
+            //   the upstream side, finding the pre-created data channel receiver.
+            let mut barrier_txs = HashMap::with_capacity(up_actor_ids.len());
+            for actor in &actors {
+                let data_input = RemoteInput::new(
+                    local_barrier_manager,
+                    upstream_addr.clone(),
+                    partial_graph_id,
+                    (actor.actor_id, actor_id),
+                    (upstream_fragment_id, fragment_id),
+                    metrics.clone(),
+                    actor_config.clone(),
+                )
+                .await?;
+
+                // Step 3: Wrap with CountingMergeInput.
+                let (btx, brx) = tokio::sync::mpsc::unbounded_channel();
+                barrier_txs.insert(actor.actor_id, btx);
+                let counting =
+                    CountingMergeInput::new(actor.actor_id, data_input.boxed_input(), brx);
+                inputs.push(counting.boxed_input());
+            }
+
+            // Step 4: Spawn barrier receiver task.
+            let batched_permits_limit = actor_config.developer.exchange_batched_permits;
+            let barrier_metrics = metrics.clone();
+            let up_down_frag = (upstream_fragment_id, fragment_id);
+            tokio::spawn(async move {
+                if let Err(e) = run_barrier_receiver(
+                    barrier_stream,
+                    barrier_permits_tx,
+                    barrier_txs,
+                    up_down_frag,
+                    barrier_metrics,
+                    batched_permits_limit,
+                )
+                .await
+                {
+                    static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                        LazyLock::new(|| LogSuppressor::per_minute(1));
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            suppressed_count,
+                            "barrier receiver task failed"
+                        );
+                    }
+                }
+            });
+        }
+    }
+
+    Ok(inputs)
 }
 
 impl DispatcherMessageBatch {

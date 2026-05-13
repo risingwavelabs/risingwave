@@ -14,24 +14,36 @@
 
 //! Channel implementation for permit-based back-pressure.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_pb::id::ActorId;
 use risingwave_pb::task_service::permits;
 use tokio::sync::{AcquireError, Semaphore, SemaphorePermit, mpsc};
 
 use crate::executor::DispatcherMessageBatch as Message;
 
-/// Message with its required permits.
+/// Message with its required permits and optional multiplexing metadata.
 ///
 /// We store the `permits` in the struct instead of implying it from the `message` so that the
 /// permit number is totally determined by the sender and the downstream only needs to give the
 /// `permits` back verbatim, in case the version of the upstream and the downstream are different.
+///
+/// For coalesced barrier exchanges, `coalesced_actor_ids` lists all actors whose barriers were
+/// merged into a single coalesced barrier, and `actor_data_counts` maps each actor to the number
+/// of data messages it sent in the epoch ending at this barrier.
 pub struct MessageWithPermits {
     pub message: Message,
     pub permits: Option<permits::Value>,
+    /// For coalesced barriers: the set of actor IDs whose barriers were merged.
+    /// Empty for non-barrier messages and non-coalesced exchanges.
+    pub coalesced_actor_ids: Vec<ActorId>,
+    /// Per-actor data message counts for message-counting synchronization.
+    /// Non-empty only for coalesced barrier messages.
+    pub actor_data_counts: HashMap<ActorId, u64>,
 }
 
 pub struct ChannelMetrics {
@@ -45,6 +57,10 @@ impl ChannelMetrics {
             sender_actor_channel_buffered_bytes: LabelGuardedIntGauge::test_int_gauge::<1>(),
             receiver_actor_channel_buffered_bytes: LabelGuardedIntGauge::test_int_gauge::<1>(),
         }
+    }
+
+    pub fn unused() -> Self {
+        Self::for_test()
     }
 }
 
@@ -84,6 +100,20 @@ pub fn channel_with_metrics(
     )
 }
 
+/// Create a channel for the exchange service without fragment metrics.
+pub fn channel(
+    initial_permits: usize,
+    batched_permits: usize,
+    concurrent_barriers: usize,
+) -> (Sender, Receiver) {
+    channel_with_metrics(
+        initial_permits,
+        batched_permits,
+        concurrent_barriers,
+        ChannelMetrics::unused(),
+    )
+}
+
 pub fn channel_from_config_with_metrics(
     config: &StreamingConfig,
     metrics: ChannelMetrics,
@@ -93,6 +123,14 @@ pub fn channel_from_config_with_metrics(
         config.developer.exchange_batched_permits,
         config.developer.exchange_concurrent_barriers,
         metrics,
+    )
+}
+
+pub fn channel_from_config(config: &StreamingConfig) -> (Sender, Receiver) {
+    channel(
+        config.developer.exchange_initial_permits,
+        config.developer.exchange_batched_permits,
+        config.developer.exchange_concurrent_barriers,
     )
 }
 
@@ -194,12 +232,53 @@ impl Sender {
         }
 
         self.tx
-            .send(MessageWithPermits { message, permits })
+            .send(MessageWithPermits {
+                message,
+                permits,
+                coalesced_actor_ids: vec![],
+                actor_data_counts: HashMap::new(),
+            })
             .map_err(|e| mpsc::error::SendError(e.0.message))?;
 
         self.sender_actor_channel_buffered_bytes.add(chunk_size);
 
         Ok(())
+    }
+
+    /// Send a coalesced barrier message with pre-computed metadata.
+    ///
+    /// Used by [`MultiplexedOutputCoordinator`](super::multiplexed::MultiplexedOutputCoordinator)
+    /// to send coalesced barriers with per-actor data message counts.
+    pub async fn send_coalesced(
+        &self,
+        message: Message,
+        coalesced_actor_ids: Vec<ActorId>,
+        actor_data_counts: HashMap<ActorId, u64>,
+    ) -> Result<(), mpsc::error::SendError<Message>> {
+        let permits = match &message {
+            Message::BarrierBatch(_) => Some(permits::Value::Barrier(1)),
+            _ => unreachable!("send_coalesced should only be called with barrier messages"),
+        };
+
+        if let Some(permits) = &permits
+            && self.permits.acquire_permits(permits).await.is_err()
+        {
+            return Err(mpsc::error::SendError(message));
+        }
+
+        self.tx
+            .send(MessageWithPermits {
+                message,
+                permits,
+                coalesced_actor_ids,
+                actor_data_counts,
+            })
+            .map_err(|e| mpsc::error::SendError(e.0.message))
+    }
+
+    /// The maximum permits that a single chunk can acquire.
+    pub fn max_chunk_permits(&self) -> usize {
+        self.max_chunk_permits
     }
 }
 
@@ -216,7 +295,9 @@ impl Receiver {
     ///
     /// Returns `None` if the channel has been closed.
     pub async fn recv(&mut self) -> Option<Message> {
-        let MessageWithPermits { message, permits } = self.recv_raw().await?;
+        let MessageWithPermits {
+            message, permits, ..
+        } = self.recv_raw().await?;
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);
@@ -230,7 +311,9 @@ impl Receiver {
     ///
     /// Returns error if the channel is currently empty.
     pub fn try_recv(&mut self) -> Result<Message, mpsc::error::TryRecvError> {
-        let MessageWithPermits { message, permits } = self.rx.try_recv()?;
+        let MessageWithPermits {
+            message, permits, ..
+        } = self.rx.try_recv()?;
 
         if let Some(permits) = permits {
             self.permits.add_permits(permits);
