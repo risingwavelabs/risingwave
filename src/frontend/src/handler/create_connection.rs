@@ -37,8 +37,8 @@ use crate::error::ErrorCode::ProtocolError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
-use crate::user::has_access_to_object;
 use crate::user::user_catalog::UserCatalog;
+use crate::user::{has_access_to_object, has_schema_usage_privilege};
 use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
@@ -182,20 +182,27 @@ fn print_connection_params_impl(
         };
 
         let secret_id = SecretId::from(secret_ref.secret_id);
-        let (schema_name, secret) = catalog_reader
+        let (schema_name, schema_id, schema_owner, secret) = catalog_reader
             .iter_schemas(db_name)
             .unwrap()
             .find_map(|schema| {
-                schema
-                    .get_secret_by_id(secret_id)
-                    .map(|secret| (schema.name.clone(), secret.clone()))
+                schema.get_secret_by_id(secret_id).map(|secret| {
+                    (
+                        schema.name.clone(),
+                        schema.id(),
+                        schema.owner,
+                        secret.clone(),
+                    )
+                })
             })
             .unwrap();
 
-        if let Some(current_user) = current_user
-            && !has_access_to_object(current_user, secret.id, secret.owner)
-        {
-            return format!("SECRET <redacted>{}", maybe_print_as);
+        if let Some(current_user) = current_user {
+            let can_show_secret_ref = has_access_to_object(current_user, secret.id, secret.owner)
+                && has_schema_usage_privilege(current_user, schema_id, schema_owner);
+            if !can_show_secret_ref {
+                return format!("SECRET <redacted>{}", maybe_print_as);
+            }
         }
 
         let secret_name = secret.name.clone();
