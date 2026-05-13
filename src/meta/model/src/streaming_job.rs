@@ -40,6 +40,7 @@ pub struct Model {
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,
     pub is_serverless_backfill: bool,
+    pub refresh_interval_sec: Option<i64>,
 }
 
 // This data structure contains an adjacency list of backfill nodes.

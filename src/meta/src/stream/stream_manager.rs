@@ -38,8 +38,8 @@ use super::{
     UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
-    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    BarrierScheduler, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo,
+    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -137,6 +137,9 @@ pub struct CreateStreamingJobContext {
 
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
+
+    /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
+    pub refresh_interval_sec: Option<u64>,
 }
 
 struct StreamingJobExecution {
@@ -518,6 +521,7 @@ impl GlobalStreamManager {
             cdc_table_snapshot_splits,
             is_serverless_backfill,
             streaming_job_model,
+            refresh_interval_sec,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -563,9 +567,39 @@ impl GlobalStreamManager {
             locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
             streaming_job_model,
+            refresh_interval_sec,
         };
 
-        let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
+        let job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+            let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "batch refresh materialized view must have snapshot backfill upstream"
+                )
+            })?;
+            // Batch refresh jobs must not contain source or source-backfill nodes,
+            // because we skip split assignment resolution for them.
+            for fragment in info.stream_job_fragments.inner.fragments.values() {
+                let mask = fragment.fragment_type_mask;
+                if mask.contains(FragmentTypeFlag::Source)
+                    || mask.contains(FragmentTypeFlag::SourceScan)
+                {
+                    bail!(
+                        "batch refresh materialized views must not depend on sources directly; \
+                         fragment {} has source/source-backfill nodes",
+                        fragment.fragment_id
+                    );
+                }
+            }
+            tracing::debug!(
+                ?snapshot_backfill_info,
+                refresh_interval_sec,
+                "sending Command::CreateBatchRefreshStreamingJob"
+            );
+            CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+                snapshot_backfill_info,
+                refresh_interval_sec,
+            })
+        } else if let Some(snapshot_backfill_info) = snapshot_backfill_info {
             tracing::debug!(
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"

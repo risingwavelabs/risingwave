@@ -1067,6 +1067,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             job_infos,
                             stream_actors,
                             mut source_splits,
+                            batch_refresh,
                         } = rendered_info;
                         recoverer.inject_database_initial_barrier(
                             database_id,
@@ -1082,6 +1083,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             is_paused,
                             &hummock_version_stats,
                             &mut cdc_table_snapshot_splits,
+                            batch_refresh,
                         )?
                     };
                     let collector = match result {
