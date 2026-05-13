@@ -90,8 +90,8 @@ pub fn get_columns_from_view(
     session: &SessionImpl,
     view_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
-    let mut binder = Binder::new_for_batch(session);
-    let _ = binder.bind_relation_by_name(&view_name, None, None, false)?;
+    let _authorized_relation =
+        Binder::new_for_batch(session).bind_relation_by_name(&view_name, None, None, false)?;
     let binder = Binder::new_for_system(session);
     let view = binder.bind_view_by_name(view_name)?;
 
