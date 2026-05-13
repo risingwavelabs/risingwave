@@ -233,24 +233,29 @@ impl IndexSelectionRule {
         );
         let new_predicate = predicate.rewrite_expr(&mut rewriter);
 
-        let conjunctions = index
-            .primary_table_pk_ref_to_index_table()
-            .iter()
-            .zip_eq_fast(index.primary_table.pk.iter())
-            .map(|(x, y)| {
-                Self::create_null_safe_equal_expr(
-                    x.column_index,
-                    index.index_table.columns[x.column_index]
-                        .data_type()
-                        .clone(),
-                    y.column_index + offset,
-                    index.primary_table.columns[y.column_index]
-                        .data_type()
-                        .clone(),
-                )
-            })
-            .chain(new_predicate)
-            .collect_vec();
+        let conjunctions = match index.primary_table_pk_ref_to_index_table() {
+            Some(pk_ref) => pk_ref
+                .iter()
+                .zip_eq_fast(index.primary_table.pk.iter())
+                .map(|(x, y)| {
+                    Self::create_null_safe_equal_expr(
+                        x.column_index,
+                        index.index_table.columns[x.column_index]
+                            .data_type()
+                            .clone(),
+                        y.column_index + offset,
+                        index.primary_table.columns[y.column_index]
+                            .data_type()
+                            .clone(),
+                    )
+                })
+                .chain(new_predicate)
+                .collect_vec(),
+            None => {
+                // Index doesn't cover all PK columns, can't use for lookup.
+                return (logical_scan.clone().into(), IndexCost::default());
+            }
+        };
         let on = Condition { conjunctions };
         let join: PlanRef = LogicalJoin::new(
             index_scan.into(),
@@ -630,7 +635,7 @@ impl IndexSelectionRule {
         Some(
             generic::TableScan::new(
                 index
-                    .primary_table_pk_ref_to_index_table()
+                    .primary_table_pk_ref_to_index_table()?
                     .iter()
                     .map(|x| x.column_index)
                     .collect_vec(),
