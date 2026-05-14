@@ -91,10 +91,11 @@ use crate::stream::cdc::{
 };
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
-    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
-    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
+    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobError,
+    CreateStreamingJobOption, FragmentGraphDownstreamContext, FragmentGraphUpstreamContext,
+    GlobalStreamManagerRef, ReplaceStreamJobContext, ReschedulePolicy, SourceChange,
+    SourceManagerRef, StreamFragmentGraph, UpstreamSinkInfo,
+    check_sink_fragments_support_refresh_schema, create_source_worker,
     rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
@@ -1084,6 +1085,10 @@ impl DdlController {
 
         let name = streaming_job.name();
         let definition = streaming_job.definition();
+        let source_id = match &streaming_job {
+            StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
+            _ => None,
+        };
         // create streaming job.
         match self
             .create_streaming_job_inner(
@@ -1097,7 +1102,9 @@ impl DdlController {
             .await
         {
             Ok(version) => Ok(version),
-            Err(err) => {
+            Err(create_err) => {
+                let should_abort_catalog = create_err.should_abort_catalog();
+                let err = create_err.into_error();
                 tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: job_id,
@@ -1108,6 +1115,24 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
+                if should_abort_catalog {
+                    let (aborted, _) = self
+                        .metadata_manager
+                        .catalog_controller
+                        .try_abort_creating_streaming_job(job_id, false)
+                        .await?;
+                    if aborted {
+                        tracing::warn!(id = %job_id, "aborted streaming job");
+                        // FIXME: might also need other cleanup here
+                        if let Some(source_id) = source_id {
+                            self.source_manager
+                                .apply_source_change(SourceChange::DropSource {
+                                    dropped_source_ids: vec![source_id],
+                                })
+                                .await;
+                        }
+                    }
+                }
                 Err(err)
             }
         }
@@ -1122,7 +1147,7 @@ impl DdlController {
         resource_type: streaming_job_resource_type::ResourceType,
         permit: OwnedSemaphorePermit,
         streaming_job_model: streaming_job::Model,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> Result<NotificationVersion, CreateStreamingJobError> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_info_from_graph(&fragment_graph);
@@ -1685,7 +1710,7 @@ impl DdlController {
             JobStatus::Initial => {
                 self.metadata_manager
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id.id())
+                    .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
                 IGNORED_NOTIFICATION_VERSION
             }

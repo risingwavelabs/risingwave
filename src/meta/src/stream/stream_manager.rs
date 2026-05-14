@@ -84,6 +84,41 @@ pub(crate) async fn cleanup_dropped_streaming_jobs(
     Ok(())
 }
 
+pub struct CreateStreamingJobError {
+    error: MetaError,
+    should_abort_catalog: bool,
+}
+
+impl CreateStreamingJobError {
+    fn before_command(error: MetaError) -> Self {
+        Self {
+            error,
+            should_abort_catalog: true,
+        }
+    }
+
+    fn after_command(error: MetaError) -> Self {
+        Self {
+            error,
+            should_abort_catalog: false,
+        }
+    }
+
+    pub fn should_abort_catalog(&self) -> bool {
+        self.should_abort_catalog
+    }
+
+    pub fn into_error(self) -> MetaError {
+        self.error
+    }
+}
+
+impl From<MetaError> for CreateStreamingJobError {
+    fn from(error: MetaError) -> Self {
+        Self::before_command(error)
+    }
+}
+
 #[derive(Default)]
 pub struct CreateStreamingJobOption {
     // leave empty as a placeholder for future option if there is any
@@ -346,7 +381,7 @@ impl GlobalStreamManager {
         stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
         permit: OwnedSemaphorePermit,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> Result<NotificationVersion, CreateStreamingJobError> {
         let await_tree_key = format!("Create Streaming Job Worker ({})", ctx.streaming_job.id());
         let await_tree_span = span!(
             "{:?}({})",
@@ -375,12 +410,11 @@ impl GlobalStreamManager {
                         .current_version()
                         .await
                 }
-                CreateType::Foreground => {
-                    stream_manager
-                        .metadata_manager
-                        .wait_streaming_job_finished(database_id, streaming_job.id() as _)
-                        .await?
-                }
+                CreateType::Foreground => stream_manager
+                    .metadata_manager
+                    .wait_streaming_job_finished(database_id, streaming_job.id() as _)
+                    .await
+                    .map_err(CreateStreamingJobError::after_command)?,
                 CreateType::Unspecified => unreachable!(),
             };
 
@@ -434,7 +468,7 @@ impl GlobalStreamManager {
                                 let cleanup_state_table_ids =
                                     job_fragments.all_table_ids().collect_vec();
                                 self.metadata_manager.catalog_controller
-                                    .try_abort_creating_streaming_job(job_id)
+                                    .try_abort_creating_streaming_job(job_id, true)
                                     .await?;
 
                                 self.barrier_scheduler
@@ -477,9 +511,18 @@ impl GlobalStreamManager {
                     };
 
                     let (cancelled, result) = match cancel_res {
-                        CancelResult::Completed(result) => (false, result),
-                        CancelResult::Failed(err) => (false, Err(err)),
-                        CancelResult::Cancelled => (true, Err(MetaError::cancelled("create"))),
+                        CancelResult::Completed(result) => (
+                            false,
+                            result.map_err(CreateStreamingJobError::after_command),
+                        ),
+                        CancelResult::Failed(err) => (
+                            false,
+                            Err(CreateStreamingJobError::before_command(err)),
+                        ),
+                        CancelResult::Cancelled => (
+                            true,
+                            Err(CreateStreamingJobError::before_command(MetaError::cancelled("create"))),
+                        ),
                     };
 
                     let _ = notifier
@@ -520,7 +563,7 @@ impl GlobalStreamManager {
             streaming_job_model,
             ..
         }: CreateStreamingJobContext,
-    ) -> MetaResult<StreamingJob> {
+    ) -> Result<StreamingJob, CreateStreamingJobError> {
         tracing::debug!(
             table_id = %stream_job_fragments.stream_job_id(),
             "built actors finished"
@@ -588,7 +631,8 @@ impl GlobalStreamManager {
 
         self.barrier_scheduler
             .run_command(streaming_job.database_id(), command)
-            .await?;
+            .await
+            .map_err(CreateStreamingJobError::after_command)?;
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
 
@@ -760,7 +804,7 @@ impl GlobalStreamManager {
             let (_, database_id) = self
                 .metadata_manager
                 .catalog_controller
-                .try_abort_creating_streaming_job(id)
+                .try_abort_creating_streaming_job(id, true)
                 .await?;
 
             if let Some(database_id) = database_id {

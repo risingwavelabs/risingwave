@@ -747,13 +747,14 @@ impl CatalogController {
         })
     }
 
-    /// `try_abort_creating_streaming_job` is used to cancel a job that is under initial status or in `FOREGROUND` mode.
+    /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
     /// It returns (true, _) if the job is not found or aborted.
     /// It returns (_, Some(`database_id`)) is the `database_id` of the `job_id` exists
     #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
         &self,
         mut job_id: JobId,
+        is_cancelled: bool,
     ) -> MetaResult<(bool, Option<DatabaseId>)> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -770,6 +771,26 @@ impl CatalogController {
             .database_id
             .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
         let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
+
+        if !is_cancelled && let Some(streaming_job) = &streaming_job {
+            assert_ne!(streaming_job.job_status, JobStatus::Created);
+            if streaming_job.create_type == CreateType::Background
+                && streaming_job.job_status == JobStatus::Creating
+            {
+                if (obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
+                    && check_if_belongs_to_iceberg_table(&txn, job_id).await?
+                {
+                    // If the job belongs to an iceberg table, we still need to clean it.
+                } else {
+                    // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
+                    tracing::warn!(
+                        id = %job_id,
+                        "streaming job is created in background and still in creating status"
+                    );
+                    return Ok((false, Some(database_id)));
+                }
+            }
+        }
 
         // Record original job info before any potential job id rewrite (e.g. iceberg sink).
         let original_job_id = job_id;
@@ -808,23 +829,25 @@ impl CatalogController {
             }
         }
 
-        let dropped_tables = Table::find()
-            .find_also_related(Object)
-            .filter(
-                table::Column::TableId.is_in(
-                    internal_table_ids
-                        .iter()
-                        .cloned()
-                        .chain(table_obj.iter().map(|t| t.table_id as _)),
-                ),
-            )
-            .all(&txn)
-            .await?
-            .into_iter()
-            .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
-        inner
-            .dropped_tables
-            .extend(dropped_tables.map(|t| (t.id, t)));
+        if is_cancelled {
+            let dropped_tables = Table::find()
+                .find_also_related(Object)
+                .filter(
+                    table::Column::TableId.is_in(
+                        internal_table_ids
+                            .iter()
+                            .cloned()
+                            .chain(table_obj.iter().map(|t| t.table_id as _)),
+                    ),
+                )
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
+            inner
+                .dropped_tables
+                .extend(dropped_tables.map(|t| (t.id, t)));
+        }
 
         if need_notify {
             // Special handling for iceberg sinks: the `job_id` may have been rewritten to the table id.
@@ -898,7 +921,11 @@ impl CatalogController {
             Object::delete_by_id(source_id).exec(&txn).await?;
         }
 
-        let err = MetaError::cancelled(format!("streaming job {job_id} is cancelled"));
+        let err = if is_cancelled {
+            MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
+        } else {
+            MetaError::catalog_id_not_found("stream job", format!("streaming job {job_id} failed"))
+        };
         let abort_reason = format!("streaming job aborted {}", err.as_report());
         for tx in inner
             .creating_table_finish_notifier
