@@ -1791,7 +1791,7 @@ async fn test_merge_compaction_group_removes_split_group_metrics() {
     // task picking records compact task metrics for the split group.
     hummock_manager.create_version_checkpoint(0).await.unwrap();
     let compact_task = hummock_manager
-        .get_compact_task(right_group_id, &mut *default_compaction_selector())
+        .get_compact_task(right_group_id, &mut default_compaction_selector())
         .await
         .unwrap();
     assert!(compact_task.is_some());
