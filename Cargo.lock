@@ -12564,6 +12564,7 @@ dependencies = [
  "risingwave_meta_node",
  "risingwave_object_store",
  "risingwave_pb",
+ "risingwave_rpc_client",
  "risingwave_sqlparser",
  "risingwave_sqlsmith",
  "sea-orm",
