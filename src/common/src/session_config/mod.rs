@@ -456,6 +456,13 @@ pub struct SessionConfig {
     #[parameter(default = None)]
     streaming_sync_log_store_buffer_size: OptionConfig<usize>,
 
+    /// Disable the optimized dispatcher path for sync log store.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None)]
+    streaming_disable_sync_log_store_dispatcher: OptionConfig<bool>,
+
     /// Whether to disable purifying the definition of the table or source upon retrieval.
     /// Only set this if encountering issues with functionalities like `SHOW` or `ALTER TABLE/SOURCE`.
     /// This config may be removed in the future.
@@ -646,6 +653,11 @@ impl SessionConfig {
                 .upsert("streaming.developer.sync_log_store_buffer_size", v)
                 .unwrap();
         }
+        if let Some(v) = self.streaming_disable_sync_log_store_dispatcher.as_ref() {
+            table
+                .upsert("streaming.developer.disable_sync_log_store_dispatcher", v)
+                .unwrap();
+        }
         if let Some(v) = self.streaming_over_window_cache_policy.as_ref() {
             table
                 .upsert("streaming.developer.over_window_cache_policy", v)
@@ -705,11 +717,15 @@ mod test {
                 &mut (),
             )
             .unwrap();
+        config
+            .set_streaming_disable_sync_log_store_dispatcher(Some(true).into(), &mut ())
+            .unwrap();
 
         // Check the converted config override string.
         let override_str = config.to_initial_streaming_config_override().unwrap();
         expect![[r#"
             [streaming.developer]
+            disable_sync_log_store_dispatcher = true
             join_encoding_type = "cpu_optimized"
             over_window_cache_policy = "recent_first_n"
         "#]]
@@ -724,6 +740,7 @@ mod test {
             merged.developer.over_window_cache_policy,
             OverWindowCachePolicy::RecentFirstN
         );
+        assert!(merged.developer.disable_sync_log_store_dispatcher);
     }
 
     #[test]
