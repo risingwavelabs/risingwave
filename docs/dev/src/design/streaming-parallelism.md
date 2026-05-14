@@ -76,17 +76,42 @@ SET streaming_parallelism_for_materialized_view = DEFAULT;
 
 ## Migration
 
-Older releases exposed these deprecated parameters:
+The deprecated parameters fall into two groups:
 
-- `streaming_parallelism_strategy`
-- `streaming_parallelism_strategy_for_<type>`
-- `adaptive_parallelism_strategy`
+1. `adaptive_parallelism_strategy`
+
+   This parameter existed in official releases and was the old cluster-wide knob for adaptive
+   scheduling. Users could previously set it through `ALTER SYSTEM` or config files to choose how
+   `adaptive` should expand by default, for example `AUTO`, `BOUNDED(n)`, or `RATIO(r)`.
+
+   This is no longer supported as a separate user-facing setting. After the migration, users must
+   express the final policy directly with `streaming_parallelism` and
+   `streaming_parallelism_for_<type>`, such as `adaptive`, `bounded(64)`, or `ratio(0.5)`. There
+   is no longer a separate "adaptive strategy default" to configure.
+
+2. `streaming_parallelism_strategy` and `streaming_parallelism_strategy_for_<type>`
+
+   These parameters only existed in Nightly builds between v2.8.0 and v3.0.0, so this part of the migration is
+   not a breaking change for official releases. It still matters for Nightly users because their
+   stored values are migrated to the unified parameters.
+
+   These parameters were also separate strategy-only knobs: users could combine
+   `streaming_parallelism = adaptive` with a matching `streaming_parallelism_strategy = ...`, or do
+   the same per job type. This split representation is no longer supported. After the migration,
+   users set only the unified `streaming_parallelism*` parameters, and each value already carries
+   its own strategy.
+
 
 On startup, meta derives the final `streaming_parallelism` and
 `streaming_parallelism_for_<type>` values once from the legacy parameters, persists the new values,
-and drops the deprecated entries. If the legacy system parameter
-`adaptive_parallelism_strategy` is missing, the migration interprets it using the released legacy
-default `AUTO`. Existing jobs without a stored job-level strategy are materialized as `AUTO` to
-preserve their released behavior, while untouched sessions on the new runtime still resolve the
-unified defaults (`streaming_parallelism = default` to `bounded(64)`, table/source `default` to
-`bounded(4)`). New clusters only expose the unified parameters.
+and drops the deprecated entries. For `adaptive_parallelism_strategy`, if the legacy system
+parameter is missing, the migration interprets it using the released legacy default `AUTO`.
+Existing jobs without a stored job-level strategy are materialized as `AUTO` to preserve their
+released behavior, while untouched sessions on the new runtime still resolve the unified defaults
+(`streaming_parallelism = default` to `bounded(64)`, table/source `default` to `bounded(4)`). New
+clusters only expose the unified parameters.
+
+In other words, an upgraded user may still observe the same effective parallelism for existing jobs
+or migrated session defaults, but they can no longer keep adjusting that behavior through the old
+`*_strategy` parameters. Any further changes must use the unified `streaming_parallelism*`
+parameters.
