@@ -197,6 +197,21 @@ struct HummockEventHandlerMetrics {
     event_handler_on_spiller: Histogram,
 }
 
+fn table_cache_refill_policies_to_map(
+    policies: TableCacheRefillPolicies,
+) -> HashMap<TableId, Option<CacheRefillPolicy>> {
+    policies
+        .policies
+        .into_iter()
+        .map(|policy| {
+            (
+                TableId::from(policy.table_id),
+                CacheRefillPolicy::from_protobuf(policy.get_policy().unwrap()),
+            )
+        })
+        .collect()
+}
+
 pub(crate) struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
@@ -238,6 +253,7 @@ impl HummockEventHandler {
     pub fn new(
         role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
+        initial_cache_refill_policies: TableCacheRefillPolicies,
         cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
         serving_table_vnode_mapping_rx: UnboundedReceiver<(Operation, HashMap<TableId, Bitmap>)>,
         pinned_version: PinnedVersion,
@@ -261,6 +277,7 @@ impl HummockEventHandler {
         Self::new_inner(
             role,
             version_update_rx,
+            initial_cache_refill_policies,
             cache_refill_policy_rx,
             serving_table_vnode_mapping_rx,
             compactor_context.sstable_store.clone(),
@@ -320,6 +337,7 @@ impl HummockEventHandler {
     fn new_inner(
         role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
+        initial_cache_refill_policies: TableCacheRefillPolicies,
         cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
         serving_table_vnode_mapping_rx: UnboundedReceiver<(Operation, HashMap<TableId, Bitmap>)>,
         sstable_store: SstableStoreRef,
@@ -358,13 +376,16 @@ impl HummockEventHandler {
             spawn_upload_task,
             buffer_tracker,
         );
-        let refiller = CacheRefiller::new(
+        let mut refiller = CacheRefiller::new(
             role,
             refill_config,
             sstable_store,
             spawn_refill_task,
             read_version_mapping.clone(),
         );
+        refiller.update_table_cache_refill_policies(table_cache_refill_policies_to_map(
+            initial_cache_refill_policies,
+        ));
 
         Self {
             hummock_event_tx,
@@ -747,8 +768,9 @@ impl HummockEventHandler {
                         warn!("cache refill policy stream ends. event handle shutdown");
                         return;
                     };
-                    let policies = policies.policies.into_iter().map(|policy| (TableId::from(policy.table_id), CacheRefillPolicy::from_protobuf(policy.get_policy().unwrap()))).collect::<HashMap<_, _>>();
-                    self.refiller.update_table_cache_refill_policies(policies);
+                    self.refiller.update_table_cache_refill_policies(
+                        table_cache_refill_policies_to_map(policies),
+                    );
                 }
                 serving_table_vnode_mapping = pin!(self.serving_table_vnode_mapping_rx.recv()) => {
                     let Some((op, mapping)) = serving_table_vnode_mapping else {
@@ -893,9 +915,9 @@ impl HummockEventHandler {
                     .get(&instance_id)
                     .unwrap_or_else(|| panic!("query inexist instance instance_id {instance_id}"))
                     .0;
-                self.refiller.update_table_cache_refill_vnodes(table_id);
                 self.uploader.may_destroy_instance(instance_id);
                 self.destroy_read_version(instance_id);
+                self.refiller.update_table_cache_refill_vnodes(table_id);
             }
             HummockEvent::GetMinUncommittedObjectId { result_tx } => {
                 let _ = result_tx
@@ -1018,6 +1040,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
+    use risingwave_pb::meta::TableCacheRefillPolicies;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::oneshot;
@@ -1075,6 +1098,7 @@ mod tests {
         let event_handler = HummockEventHandler::new_inner(
             Role::None,
             version_update_rx,
+            TableCacheRefillPolicies::default(),
             cache_refill_policy_rx,
             serving_table_vnode_mapping_rx,
             mock_sstable_store().await,
@@ -1257,6 +1281,7 @@ mod tests {
         let event_handler = HummockEventHandler::new_inner(
             Role::None,
             version_update_rx,
+            TableCacheRefillPolicies::default(),
             cache_refill_policy_rx,
             serving_table_vnode_mapping_rx,
             mock_sstable_store().await,

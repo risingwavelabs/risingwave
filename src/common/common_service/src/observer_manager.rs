@@ -134,7 +134,6 @@ where
                         .streaming_worker_slot_mapping_version
             }
             Info::ServingWorkerSlotMappings(_) => true,
-            Info::TableCacheRefillPolicies(_) => true,
             Info::ServingTableVnodeMappings(_) => {
                 notification.version
                     > info
@@ -143,6 +142,7 @@ where
                         .unwrap()
                         .streaming_worker_slot_mapping_version
             }
+            Info::TableCacheRefillPolicies(_) => true,
         });
 
         self.observer_states

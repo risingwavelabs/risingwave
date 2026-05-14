@@ -634,6 +634,8 @@ message MetaSnapshot {
   repeated FragmentWorkerSlotMapping streaming_worker_slot_mappings = 21;
   repeated FragmentWorkerSlotMapping serving_worker_slot_mappings = 22;
   repeated ObjectDependency object_dependencies = 26;
+  TableCacheRefillPolicies table_cache_refill_policies = 27;
+  ServingTableVnodeMappings serving_table_vnode_mappings = 28;
 
   SnapshotVersion version = 13;
 }

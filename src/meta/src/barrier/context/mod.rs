@@ -23,6 +23,7 @@ use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::JobId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::meta::PbTableCacheRefillPolicies;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
@@ -76,6 +77,10 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         recovery_reason: RecoveryReason,
     );
     fn mark_ready(&self, options: MarkReadyOptions);
+
+    async fn table_cache_refill_policies_snapshot(&self) -> MetaResult<PbTableCacheRefillPolicies> {
+        Ok(PbTableCacheRefillPolicies::default())
+    }
 
     fn post_collect_command(
         &self,

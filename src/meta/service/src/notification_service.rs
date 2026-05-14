@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{HashMap, HashSet};
+
 use anyhow::{Context, anyhow};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_meta::MetaResult;
 use risingwave_meta::controller::catalog::Catalog;
 use risingwave_meta::manager::MetadataManager;
+use risingwave_meta_model::{TableId, WorkerId};
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
 use risingwave_pb::common::worker_node::State::Running;
@@ -25,9 +29,10 @@ use risingwave_pb::common::{ClusterResource, WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
+use risingwave_pb::meta::serving_table_vnode_mappings::PbServingTableVnodeMapping;
 use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
-    SubscribeType,
+    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, PbServingTableVnodeMappings,
+    SubscribeRequest, SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -38,6 +43,25 @@ use crate::backup_restore::BackupManagerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{MetaSrvEnv, Notification, NotificationVersion, WorkerKey};
 use crate::serving::ServingVnodeMappingRef;
+
+fn append_worker_table_vnode_mapping(
+    table_vnode_mapping: &mut HashMap<TableId, Bitmap>,
+    worker_id: WorkerId,
+    state_table_ids: &HashSet<TableId>,
+    worker_vnode_mapping: &HashMap<risingwave_common::hash::WorkerSlotId, Bitmap>,
+) {
+    for (worker_slot_id, bitmap) in worker_vnode_mapping {
+        if worker_slot_id.worker_id() != worker_id {
+            continue;
+        }
+        for table_id in state_table_ids {
+            table_vnode_mapping
+                .entry(*table_id)
+                .and_modify(|b| *b |= bitmap.clone())
+                .or_insert_with(|| bitmap.clone());
+        }
+    }
+}
 
 pub struct NotificationServiceImpl {
     env: MetaSrvEnv,
@@ -174,6 +198,51 @@ impl NotificationServiceImpl {
                 mapping: Some(mapping.to_protobuf()),
             })
             .collect()
+    }
+
+    async fn get_hummock_serving_table_vnode_mappings(
+        &self,
+        worker_key: &WorkerKey,
+    ) -> MetaResult<PbServingTableVnodeMappings> {
+        let active_serving_workers = self
+            .metadata_manager
+            .cluster_controller
+            .list_active_serving_workers()
+            .await?;
+        let Some(worker_id) = active_serving_workers
+            .iter()
+            .find(|worker| worker.host.as_ref() == Some(&worker_key.0))
+            .map(|worker| worker.id)
+        else {
+            return Ok(PbServingTableVnodeMappings::default());
+        };
+
+        let streaming_parallelisms = self
+            .metadata_manager
+            .catalog_controller
+            .running_fragment_parallelisms(None)?;
+        let mut table_vnode_mapping: HashMap<TableId, Bitmap> = HashMap::new();
+        for (fragment_id, mapping) in self.serving_vnode_mapping.all() {
+            let Some(parallelism) = streaming_parallelisms.get(&fragment_id) else {
+                continue;
+            };
+            append_worker_table_vnode_mapping(
+                &mut table_vnode_mapping,
+                worker_id,
+                &parallelism.state_table_ids,
+                &mapping.to_bitmaps(),
+            );
+        }
+
+        Ok(PbServingTableVnodeMappings {
+            mappings: table_vnode_mapping
+                .into_iter()
+                .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
+                    table_id: table_id.as_raw_id(),
+                    bitmap: Some(bitmap.to_protobuf()),
+                })
+                .collect(),
+        })
     }
 
     async fn get_worker_node_snapshot(&self) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
@@ -322,7 +391,7 @@ impl NotificationServiceImpl {
         })
     }
 
-    async fn hummock_subscribe(&self) -> MetaResult<MetaSnapshot> {
+    async fn hummock_subscribe(&self, worker_key: &WorkerKey) -> MetaResult<MetaSnapshot> {
         let (tables, catalog_version) = self.get_tables_snapshot().await?;
         let hummock_version = self
             .hummock_manager
@@ -331,6 +400,14 @@ impl NotificationServiceImpl {
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
         let cluster_resource = self.get_cluster_resource().await;
+        let table_cache_refill_policies = self
+            .metadata_manager
+            .catalog_controller
+            .table_cache_refill_policies_snapshot()
+            .await?;
+        let serving_table_vnode_mappings = self
+            .get_hummock_serving_table_vnode_mappings(worker_key)
+            .await?;
 
         Ok(MetaSnapshot {
             tables,
@@ -346,6 +423,8 @@ impl NotificationServiceImpl {
                 write_limits: hummock_write_limits,
             }),
             cluster_resource: Some(cluster_resource),
+            table_cache_refill_policies: Some(table_cache_refill_policies),
+            serving_table_vnode_mappings: Some(serving_table_vnode_mappings),
             ..Default::default()
         })
     }
@@ -392,7 +471,7 @@ impl NotificationService for NotificationServiceImpl {
                 self.hummock_manager
                     .pin_version(req.get_worker_id())
                     .await?;
-                self.hummock_subscribe().await?
+                self.hummock_subscribe(&worker_key).await?
             }
             SubscribeType::Compute => self.compute_subscribe().await?,
             SubscribeType::Unspecified => unreachable!(),

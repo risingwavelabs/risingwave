@@ -177,7 +177,7 @@ impl HummockStorage {
         .map_err(HummockError::read_backup_error)?;
         let write_limiter = Arc::new(WriteLimiter::default());
         let (version_update_tx, mut version_update_rx) = unbounded_channel();
-        let (cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
+        let (cache_refill_policy_tx, mut cache_refill_policy_rx) = unbounded_channel();
         let (serving_table_vnode_mapping_tx, serving_table_vnode_mapping_rx) = unbounded_channel();
 
         let observer_manager = ObserverManager::new(
@@ -200,6 +200,7 @@ impl HummockStorage {
                 "the hummock observer manager is the first one to take the event tx. Should be full hummock version"
             ),
         };
+        let initial_cache_refill_policies = cache_refill_policy_rx.recv().await.unwrap_or_default();
 
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
         let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
@@ -221,6 +222,7 @@ impl HummockStorage {
         let hummock_event_handler = HummockEventHandler::new(
             role,
             version_update_rx,
+            initial_cache_refill_policies,
             cache_refill_policy_rx,
             serving_table_vnode_mapping_rx,
             pinned_version,

@@ -1325,6 +1325,22 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             ),
         )]);
 
+        match self.context.table_cache_refill_policies_snapshot().await {
+            Ok(policies) => self
+                .env
+                .notification_manager()
+                .notify_hummock_without_version(
+                    Operation::Update,
+                    Info::TableCacheRefillPolicies(policies),
+                ),
+            Err(err) => {
+                warn!(
+                    error = %err.as_report(),
+                    "failed to notify table cache refill policies after recovery"
+                );
+            }
+        }
+
         self.env
             .notification_manager()
             .notify_frontend_without_version(Operation::Update, Info::Recovery(Recovery {}));
