@@ -68,6 +68,7 @@ mod tests {
             clean_watermark_indices: Set(None),
             refreshable: Set(false),
             vector_index_info: Set(None),
+            disable_bloom_filter: Set(false),
             cdc_table_type: Set(None),
         }
         .insert(txn)
@@ -361,6 +362,7 @@ mod tests {
             clean_watermark_indices: Set(None),
             refreshable: Set(false),
             vector_index_info: Set(None),
+            disable_bloom_filter: Set(false),
             cdc_table_type: Set(None),
         }
         .insert(&txn)

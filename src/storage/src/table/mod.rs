@@ -36,6 +36,23 @@ pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 }
 
+pub fn should_calculate_prefix_hint(
+    disable_bloom_filter: bool,
+    prefix_hint_len: usize,
+    pk_prefix_len: usize,
+    is_prefix: bool,
+) -> bool {
+    if disable_bloom_filter || prefix_hint_len == 0 {
+        return false;
+    }
+
+    if is_prefix {
+        prefix_hint_len <= pk_prefix_len
+    } else {
+        prefix_hint_len == pk_prefix_len
+    }
+}
+
 pub async fn collect_data_chunk<E, S, R>(
     stream: &mut S,
     schema: &Schema,

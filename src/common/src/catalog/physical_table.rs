@@ -63,6 +63,9 @@ pub struct TableDesc {
     ///
     /// See `version` field in `TableCatalog` for more details.
     pub versioned: bool,
+
+    /// Whether bloom filter is disabled for this table.
+    pub disable_bloom_filter: bool,
 }
 
 impl TableDesc {
@@ -99,6 +102,7 @@ impl TableDesc {
             stream_key: self.stream_key.iter().map(|&x| x as u32).collect(),
             vnode_col_idx_in_pk,
             maybe_vnode_count: VnodeCount::set(self.vnode_count).to_protobuf(),
+            disable_bloom_filter: self.disable_bloom_filter,
         })
     }
 
@@ -123,6 +127,7 @@ impl TableDesc {
             watermark_columns: table.watermark_indices.iter().map(|i| *i as _).collect(),
             versioned: table.version.is_some(),
             vnode_count,
+            disable_bloom_filter: table.disable_bloom_filter,
         }
     }
 }

@@ -491,6 +491,7 @@ impl TableCatalog {
             versioned: self.version.is_some(),
             vnode_col_index: self.vnode_col_index,
             vnode_count: self.vnode_count(),
+            disable_bloom_filter: self.disable_bloom_filter,
         }
     }
 

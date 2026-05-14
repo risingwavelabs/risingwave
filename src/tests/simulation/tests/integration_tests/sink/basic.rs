@@ -157,3 +157,58 @@ async fn test_sink_decouple_blackhole() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_sink_log_store_internal_table_point_get_after_flush() -> Result<()> {
+    let mut cluster = start_sink_test_cluster().await?;
+
+    let source_parallelism = 2;
+    let test_sink = SimulationTestSink::register_new(TestSinkType::RetainLog);
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..64, 1.0, 64);
+
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 2").await?;
+    session.run("set sink_decouple = true").await?;
+    session.run(CREATE_SOURCE).await?;
+    session.run(CREATE_SINK).await?;
+    test_sink.wait_initial_parallelism(2).await?;
+    test_sink
+        .store
+        .wait_for_count(test_source.id_list.len())
+        .await?;
+    session.flush().await?;
+
+    let log_store_table_id = session
+        .run("select internal_table_id from rw_sink_log_store_tables")
+        .await?
+        .trim()
+        .parse::<u32>()?;
+
+    let point_get_key = session
+        .run(format!(
+            "select kv_log_store_epoch, kv_log_store_seq_id, kv_log_store_vnode \
+             from rw_table({log_store_table_id}) \
+             where kv_log_store_seq_id is not null \
+             limit 1"
+        ))
+        .await?;
+    let [epoch, seq_id, vnode] =
+        TryInto::<[&str; 3]>::try_into(point_get_key.split_whitespace().collect_vec()).unwrap();
+
+    let point_get_count = session
+        .run(format!(
+            "select count(*) from rw_table({log_store_table_id}) \
+             where kv_log_store_epoch = {epoch} \
+               and kv_log_store_seq_id = {seq_id} \
+               and kv_log_store_vnode = {vnode}"
+        ))
+        .await?
+        .trim()
+        .parse::<usize>()?;
+    assert_eq!(1, point_get_count);
+
+    session.run(DROP_SINK).await?;
+    session.run(DROP_SOURCE).await?;
+
+    Ok(())
+}

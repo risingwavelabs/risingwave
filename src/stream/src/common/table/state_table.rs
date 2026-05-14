@@ -61,7 +61,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::*;
-use risingwave_storage::table::{KeyedRow, TableDistribution};
+use risingwave_storage::table::{KeyedRow, TableDistribution, should_calculate_prefix_hint};
 use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
@@ -214,6 +214,8 @@ where
     distribution: TableDistribution,
 
     prefix_hint_len: usize,
+
+    disable_bloom_filter: bool,
 
     value_indices: Option<Vec<usize>>,
 
@@ -841,6 +843,7 @@ where
             false => Some(input_value_indices),
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
+        let disable_bloom_filter = table_catalog.disable_bloom_filter;
 
         let row_serde = Arc::new(SD::new(
             Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
@@ -985,6 +988,7 @@ where
             pk_indices,
             distribution,
             prefix_hint_len,
+            disable_bloom_filter,
             value_indices,
             pending_watermark: None,
             committed_watermark,
@@ -1121,11 +1125,16 @@ where
 
     fn serialize_pk_and_get_prefix_hint(&self, pk: &impl Row) -> (TableKey<Bytes>, Option<Bytes>) {
         let serialized_pk = self.serialize_pk(&pk);
-        let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
+        let prefix_hint = if should_calculate_prefix_hint(
+            self.disable_bloom_filter,
+            self.prefix_hint_len,
+            pk.len(),
+            false,
+        ) {
             Some(serialized_pk.slice(VirtualNode::SIZE..))
         } else {
             #[cfg(debug_assertions)]
-            if self.prefix_hint_len != 0 {
+            if !self.disable_bloom_filter && self.prefix_hint_len != 0 {
                 warn!(
                     "prefix_hint_len is not equal to pk.len(), may not be able to utilize bloom filter"
                 );
@@ -2142,13 +2151,16 @@ where
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
-        if self.prefix_hint_len != 0 {
+        if !self.disable_bloom_filter && self.prefix_hint_len != 0 {
             debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
         }
         let prefix_hint = {
-            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
-                None
-            } else {
+            if should_calculate_prefix_hint(
+                self.disable_bloom_filter,
+                self.prefix_hint_len,
+                pk_prefix.len(),
+                true,
+            ) {
                 let encoded_prefix_len = self
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
@@ -2156,6 +2168,8 @@ where
                 Some(Bytes::copy_from_slice(
                     &encoded_prefix[..encoded_prefix_len],
                 ))
+            } else {
+                None
             }
         };
 
