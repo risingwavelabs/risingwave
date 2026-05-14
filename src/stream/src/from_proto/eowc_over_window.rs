@@ -62,7 +62,7 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
         let intermediate_state_table =
             if let Some(table_pb) = node.intermediate_state_table.as_ref() {
                 Some(
-                    StateTableBuilder::new(table_pb, store, vnodes)
+                    StateTableBuilder::new(table_pb, store.clone(), vnodes.clone())
                         // Use ConsistentOldValue because we update existing rows
                         .with_op_consistency_level(StateTableOpConsistencyLevel::ConsistentOldValue)
                         .enable_preload_all_rows_by_config(&params.config)
@@ -72,6 +72,19 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             } else {
                 None
             };
+
+        // Build optional open sessions table for tracking partitions with unclosed sessions
+        let open_sessions_table = if let Some(table_pb) = node.open_sessions_table.as_ref() {
+            Some(
+                StateTableBuilder::new(table_pb, store, vnodes)
+                    .with_op_consistency_level(StateTableOpConsistencyLevel::ConsistentOldValue)
+                    .enable_preload_all_rows_by_config(&params.config)
+                    .build()
+                    .await,
+            )
+        } else {
+            None
+        };
 
         let exec = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
             actor_ctx: params.actor_context,
@@ -85,6 +98,7 @@ impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
             state_table,
             watermark_epoch: params.watermark_epoch,
             intermediate_state_table,
+            open_sessions_table,
         });
         Ok((params.info, exec).into())
     }
