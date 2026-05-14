@@ -72,6 +72,7 @@ user standard_conforming_strings
 user statement_timeout
 user streaming_allow_jsonb_in_stream_key
 user streaming_asof_join_use_cache
+user streaming_disable_sync_log_store_dispatcher
 user streaming_enable_bushy_join
 user streaming_enable_delta_join
 user streaming_enable_unaligned_join
