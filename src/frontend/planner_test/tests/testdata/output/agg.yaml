@@ -1086,6 +1086,20 @@
         └─LogicalScan { table: t, columns: [t.x, t.y] }
   with_config_map:
     RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
+- name: grouping sets can require only expand flag
+  sql: |
+    create table t(a int);
+    select count(*) from t group by grouping sets ((), ());
+  optimized_logical_plan_for_batch: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { group_key: [flag], aggs: [count] }
+      └─LogicalExpand { column_subsets: [[], []] }
+        └─LogicalScan { table: t, columns: [] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [count] }
+    └─LogicalAgg { group_key: [flag], aggs: [count] }
+      └─LogicalExpand { column_subsets: [[], []] }
+        └─LogicalScan { table: t, columns: [] }
 - name: split distinct agg with row id prunes hidden columns
   sql: |
     create table t(foo int, bar int);
