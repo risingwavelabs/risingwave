@@ -84,7 +84,7 @@ create sink s as select t1.v as t1v, t2.v as t2v from t t1, t t2 where t1.v = t2
 query T
 select parallelism from sink_parallelism where name = 's';
 ----
-bounded(64)
+bounded(8)
 
 statement ok
 alter sink s set parallelism = 4;

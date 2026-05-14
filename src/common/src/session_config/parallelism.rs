@@ -38,6 +38,7 @@ const fn bounded_parallelism(parallelism: u64) -> ConfigParallelism {
 
 pub const DEFAULT_GLOBAL_STREAMING_PARALLELISM: ConfigParallelism = bounded_parallelism(64);
 pub const DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM: ConfigParallelism = bounded_parallelism(4);
+pub const DEFAULT_SINK_STREAMING_PARALLELISM: ConfigParallelism = bounded_parallelism(8);
 
 #[derive(Copy, Debug, Clone, PartialEq, Default)]
 pub enum ConfigParallelism {
@@ -357,6 +358,10 @@ mod tests {
         assert_eq!(
             DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM,
             ConfigParallelism::Bounded(NonZeroU64::new(4).unwrap())
+        );
+        assert_eq!(
+            DEFAULT_SINK_STREAMING_PARALLELISM,
+            ConfigParallelism::Bounded(NonZeroU64::new(8).unwrap())
         );
     }
 
