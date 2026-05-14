@@ -439,6 +439,39 @@ pub struct MongoDbConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct NatsConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+    pub monitor_port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct MqttConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub address: String,
+    pub port: u16,
+
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct ElasticSearchConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -533,6 +566,8 @@ pub enum ServiceConfig {
     MongoDb(MongoDbConfig),
     ElasticSearch(ElasticSearchConfig),
     OpenSearch(OpenSearchConfig),
+    Nats(NatsConfig),
+    Mqtt(MqttConfig),
     Lakekeeper(LakekeeperConfig),
     Moat(MoatConfig),
 }
@@ -550,6 +585,8 @@ pub enum TaskGroup {
     MongoDb,
     ElasticSearch,
     OpenSearch,
+    Nats,
+    Mqtt,
     Redis,
     Lakekeeper,
     Moat,
@@ -579,6 +616,8 @@ impl ServiceConfig {
             Self::MongoDb(c) => &c.id,
             Self::ElasticSearch(c) => &c.id,
             Self::OpenSearch(c) => &c.id,
+            Self::Nats(c) => &c.id,
+            Self::Mqtt(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
             Self::Lakekeeper(c) => &c.id,
             Self::Moat(c) => &c.id,
@@ -609,6 +648,8 @@ impl ServiceConfig {
             Self::MongoDb(c) => Some(c.port),
             Self::ElasticSearch(c) => Some(c.port),
             Self::OpenSearch(c) => Some(c.port),
+            Self::Nats(c) => Some(c.port),
+            Self::Mqtt(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
             Self::Lakekeeper(c) => Some(c.port),
             Self::Moat(c) => Some(c.port),
@@ -638,6 +679,8 @@ impl ServiceConfig {
             Self::MongoDb(c) => c.user_managed,
             Self::ElasticSearch(c) => c.user_managed,
             Self::OpenSearch(c) => c.user_managed,
+            Self::Nats(c) => c.user_managed,
+            Self::Mqtt(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
             Self::Lakekeeper(c) => c.user_managed,
             Self::Moat(_c) => false,
@@ -679,6 +722,8 @@ impl ServiceConfig {
             ServiceConfig::MongoDb(_) => MongoDb,
             ServiceConfig::ElasticSearch(_) => ElasticSearch,
             ServiceConfig::OpenSearch(_) => OpenSearch,
+            ServiceConfig::Nats(_) => Nats,
+            ServiceConfig::Mqtt(_) => Mqtt,
             ServiceConfig::Lakekeeper(_) => Lakekeeper,
             ServiceConfig::Moat(_) => Moat,
         }

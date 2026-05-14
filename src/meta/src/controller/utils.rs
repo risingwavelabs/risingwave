@@ -23,8 +23,6 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::id::{JobId, SubscriptionId};
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
-use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
@@ -2510,7 +2508,6 @@ pub fn build_select_node_list(
 pub struct StreamingJobExtraInfo {
     pub timezone: Option<String>,
     pub config_override: Arc<str>,
-    pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
     pub job_definition: String,
     pub backfill_orders: Option<BackfillOrders>,
 }
@@ -2520,15 +2517,13 @@ impl StreamingJobExtraInfo {
         StreamContext {
             timezone: self.timezone.clone(),
             config_override: self.config_override.clone(),
-            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy,
         }
     }
 }
 
-/// Tuple of (`job_id`, `timezone`, `config_override`, `adaptive_parallelism_strategy`, `backfill_orders`)
+/// Tuple of (`job_id`, `timezone`, `config_override`, `backfill_orders`)
 type StreamingJobExtraInfoRow = (
     JobId,
-    Option<String>,
     Option<String>,
     Option<String>,
     Option<BackfillOrders>,
@@ -2547,7 +2542,6 @@ where
             streaming_job::Column::JobId,
             streaming_job::Column::Timezone,
             streaming_job::Column::ConfigOverride,
-            streaming_job::Column::AdaptiveParallelismStrategy,
             streaming_job::Column::BackfillOrders,
         ])
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
@@ -2561,24 +2555,18 @@ where
 
     let result = pairs
         .into_iter()
-        .map(
-            |(job_id, timezone, config_override, strategy, backfill_orders)| {
-                let job_definition = definitions.remove(&job_id).unwrap_or_default();
-                let adaptive_parallelism_strategy = strategy.as_deref().map(|s| {
-                    parse_strategy(s).expect("strategy should be validated before storing")
-                });
-                (
-                    job_id,
-                    StreamingJobExtraInfo {
-                        timezone,
-                        config_override: config_override.unwrap_or_default().into(),
-                        adaptive_parallelism_strategy,
-                        job_definition,
-                        backfill_orders,
-                    },
-                )
-            },
-        )
+        .map(|(job_id, timezone, config_override, backfill_orders)| {
+            let job_definition = definitions.remove(&job_id).unwrap_or_default();
+            (
+                job_id,
+                StreamingJobExtraInfo {
+                    timezone,
+                    config_override: config_override.unwrap_or_default().into(),
+                    job_definition,
+                    backfill_orders,
+                },
+            )
+        })
         .collect();
 
     Ok(result)

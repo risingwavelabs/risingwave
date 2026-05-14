@@ -31,10 +31,10 @@ use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     ElasticSearchService, EnsureStopService, ExecuteContext, FrontendService, GrafanaService,
     KafkaService, LakekeeperService, MetaNodeService, MinioService, MoatService, MongoDbService,
-    MongoDbSetupTask, MySqlService, OpenSearchService, PostgresService, PrometheusService,
-    PubsubService, PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
-    SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env,
-    preflight_check,
+    MongoDbSetupTask, MqttService, MySqlService, NatsService, OpenSearchService, PostgresService,
+    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
+    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
+    TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -372,6 +372,23 @@ fn task_main(
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("opensearch http://{}:{}", c.address, c.port));
+                }
+                ServiceConfig::Nats(c) => {
+                    NatsService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb.set_message(format!(
+                        "nats {}:{}, monitor {}",
+                        c.address, c.port, c.monitor_port
+                    ));
+                }
+                ServiceConfig::Mqtt(c) => {
+                    MqttService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb.set_message(format!("mqtt {}:{}", c.address, c.port));
                 }
                 ServiceConfig::Lakekeeper(c) => {
                     let mut service = LakekeeperService::new(c.clone())?;

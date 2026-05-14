@@ -983,6 +983,36 @@ profile:
         password: post\tgres
         user-managed: true
 
+  ci-source-nats-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: nats
+        address: nats-server
+        port: 4222
+        monitor-port: 8222
+        user-managed: true
+
+  ci-sink-mqtt-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: mqtt
+        address: mqtt-server
+        port: 1883
+        user-managed: true
+
   # Minimal configuration for cron_only source tests (Kafka + direct CDC)
   ci-inline-source-cron-only-test:
     config-path: src/config/ci-recovery.toml
@@ -1234,6 +1264,21 @@ profile:
       - use: compactor
       - use: mongodb
 
+  local-nats-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+        id: minio-local-nats-test
+      - use: sqlite
+        id: sqlite-local-nats-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: nats
+
   local-search-sink-test:
     config-path: src/config/ci.toml
     steps:
@@ -1250,6 +1295,21 @@ profile:
       - use: elasticsearch
       - use: opensearch
 
+  local-mqtt-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-mqtt-test
+      - use: sqlite
+        id: sqlite-local-mqtt-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: mqtt
+
   local-elasticsearch-sink-test:
     config-path: src/config/ci.toml
     steps:
@@ -1264,6 +1324,20 @@ profile:
       - use: frontend
       - use: compactor
       - use: elasticsearch
+
+  deltalake-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-deltalake-sink-test
+      - use: sqlite
+        id: sqlite-deltalake-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
 
   local-opensearch-sink-test:
     config-path: src/config/ci.toml
@@ -1840,6 +1914,25 @@ template:
     password: "Risingwave123!"
     image: "opensearchproject/opensearch:2.19.1"
     persist-data: false
+    user-managed: false
+
+  # NATS service backed by docker.
+  nats:
+    id: nats-${port}
+    address: "127.0.0.1"
+    port: 4222
+    monitor-port: 8222
+    image: "nats:2.11.3"
+    persist-data: true
+    user-managed: false
+
+  # MQTT service backed by docker.
+  mqtt:
+    id: mqtt-${port}
+    address: "127.0.0.1"
+    port: 1883
+    image: "eclipse-mosquitto:2.0.21"
+    persist-data: true
     user-managed: false
 
   # Lakekeeper Apache Iceberg REST Catalog service backed by binary.

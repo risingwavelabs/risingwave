@@ -218,6 +218,8 @@ impl ConfigExpander {
                         ServiceConfig::ElasticSearch(serde_yaml::from_str(&out_str)?)
                     }
                     "opensearch" => ServiceConfig::OpenSearch(serde_yaml::from_str(&out_str)?),
+                    "nats" => ServiceConfig::Nats(serde_yaml::from_str(&out_str)?),
+                    "mqtt" => ServiceConfig::Mqtt(serde_yaml::from_str(&out_str)?),
                     "schema-registry" => {
                         ServiceConfig::SchemaRegistry(serde_yaml::from_str(&out_str)?)
                     }

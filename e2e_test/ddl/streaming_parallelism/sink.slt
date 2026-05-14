@@ -1,0 +1,614 @@
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+set streaming_parallelism to 1;
+
+statement ok
+set streaming_parallelism_for_table to 1;
+
+statement ok
+create table sk_base_t (v int);
+
+# Case: global=default, streaming_parallelism_for_sink=default
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_sink to default;
+
+statement ok
+create sink sk_dd as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_dd';
+----
+bounded(64)
+
+statement ok
+drop sink sk_dd;
+
+# Case: global=default, streaming_parallelism_for_sink=6
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_sink to 6;
+
+statement ok
+create sink sk_df as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_df';
+----
+6
+
+statement ok
+drop sink sk_df;
+
+# Case: global=default, streaming_parallelism_for_sink='ratio(0.5)'
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_sink to 'ratio(0.5)';
+
+statement ok
+create sink sk_dr as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_dr';
+----
+ratio(0.5)
+
+statement ok
+drop sink sk_dr;
+
+# Case: global=default, streaming_parallelism_for_sink='bounded(16)'
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_sink to 'bounded(16)';
+
+statement ok
+create sink sk_db as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_db';
+----
+bounded(16)
+
+statement ok
+drop sink sk_db;
+
+# Case: global=default, streaming_parallelism_for_sink=adaptive
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_sink to adaptive;
+
+statement ok
+create sink sk_da as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_da';
+----
+adaptive
+
+statement ok
+drop sink sk_da;
+
+# Case: global=8, streaming_parallelism_for_sink=default
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_sink to default;
+
+statement ok
+create sink sk_fd as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_fd';
+----
+8
+
+statement ok
+drop sink sk_fd;
+
+# Case: global=8, streaming_parallelism_for_sink=6
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_sink to 6;
+
+statement ok
+create sink sk_ff as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_ff';
+----
+6
+
+statement ok
+drop sink sk_ff;
+
+# Case: global=8, streaming_parallelism_for_sink='ratio(0.5)'
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_sink to 'ratio(0.5)';
+
+statement ok
+create sink sk_fr as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_fr';
+----
+ratio(0.5)
+
+statement ok
+drop sink sk_fr;
+
+# Case: global=8, streaming_parallelism_for_sink='bounded(16)'
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_sink to 'bounded(16)';
+
+statement ok
+create sink sk_fb as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_fb';
+----
+bounded(16)
+
+statement ok
+drop sink sk_fb;
+
+# Case: global=8, streaming_parallelism_for_sink=adaptive
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_sink to adaptive;
+
+statement ok
+create sink sk_fa as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_fa';
+----
+adaptive
+
+statement ok
+drop sink sk_fa;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_sink=default
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_sink to default;
+
+statement ok
+create sink sk_rd as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_rd';
+----
+ratio(0.5)
+
+statement ok
+drop sink sk_rd;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_sink=6
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_sink to 6;
+
+statement ok
+create sink sk_rf as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_rf';
+----
+6
+
+statement ok
+drop sink sk_rf;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_sink='ratio(0.5)'
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_sink to 'ratio(0.5)';
+
+statement ok
+create sink sk_rr as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_rr';
+----
+ratio(0.5)
+
+statement ok
+drop sink sk_rr;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_sink='bounded(16)'
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_sink to 'bounded(16)';
+
+statement ok
+create sink sk_rb as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_rb';
+----
+bounded(16)
+
+statement ok
+drop sink sk_rb;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_sink=adaptive
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_sink to adaptive;
+
+statement ok
+create sink sk_ra as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_ra';
+----
+adaptive
+
+statement ok
+drop sink sk_ra;
+
+# Case: global='bounded(32)', streaming_parallelism_for_sink=default
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_sink to default;
+
+statement ok
+create sink sk_bd as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_bd';
+----
+bounded(32)
+
+statement ok
+drop sink sk_bd;
+
+# Case: global='bounded(32)', streaming_parallelism_for_sink=6
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_sink to 6;
+
+statement ok
+create sink sk_bf as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_bf';
+----
+6
+
+statement ok
+drop sink sk_bf;
+
+# Case: global='bounded(32)', streaming_parallelism_for_sink='ratio(0.5)'
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_sink to 'ratio(0.5)';
+
+statement ok
+create sink sk_br as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_br';
+----
+ratio(0.5)
+
+statement ok
+drop sink sk_br;
+
+# Case: global='bounded(32)', streaming_parallelism_for_sink='bounded(16)'
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_sink to 'bounded(16)';
+
+statement ok
+create sink sk_bb as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_bb';
+----
+bounded(16)
+
+statement ok
+drop sink sk_bb;
+
+# Case: global='bounded(32)', streaming_parallelism_for_sink=adaptive
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_sink to adaptive;
+
+statement ok
+create sink sk_ba as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_ba';
+----
+adaptive
+
+statement ok
+drop sink sk_ba;
+
+# Case: global=adaptive, streaming_parallelism_for_sink=default
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_sink to default;
+
+statement ok
+create sink sk_ad as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_ad';
+----
+adaptive
+
+statement ok
+drop sink sk_ad;
+
+# Case: global=adaptive, streaming_parallelism_for_sink=6
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_sink to 6;
+
+statement ok
+create sink sk_af as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_af';
+----
+6
+
+statement ok
+drop sink sk_af;
+
+# Case: global=adaptive, streaming_parallelism_for_sink='ratio(0.5)'
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_sink to 'ratio(0.5)';
+
+statement ok
+create sink sk_ar as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_ar';
+----
+ratio(0.5)
+
+statement ok
+drop sink sk_ar;
+
+# Case: global=adaptive, streaming_parallelism_for_sink='bounded(16)'
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_sink to 'bounded(16)';
+
+statement ok
+create sink sk_ab as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_ab';
+----
+bounded(16)
+
+statement ok
+drop sink sk_ab;
+
+# Case: global=adaptive, streaming_parallelism_for_sink=adaptive
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_sink to adaptive;
+
+statement ok
+create sink sk_aa as
+select * from sk_base_t
+with (
+    connector = 'blackhole',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'sk_aa';
+----
+adaptive
+
+statement ok
+drop sink sk_aa;
+
+statement ok
+drop table sk_base_t;
