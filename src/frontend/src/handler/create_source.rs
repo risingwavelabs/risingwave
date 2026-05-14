@@ -176,8 +176,47 @@ pub enum CreateSourceType {
     /// e.g., shared Kafka source
     SharedNonCdc,
     NonShared,
-    /// create table with connector
-    Table,
+}
+
+/// Why we are creating a source catalog.
+///
+/// This keeps the standalone `CREATE SOURCE` behavior separate from the
+/// associated source catalog created for `CREATE TABLE ... WITH connector`.
+/// The two paths share most binding code, but differ in DDL policy, hidden
+/// source columns, nested type id handling, watermark checks, and whether the
+/// resulting source has an associated table id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceCatalogPurpose {
+    CreateSource(CreateSourceType),
+    CreateTableWithConnector,
+}
+
+impl SourceCatalogPurpose {
+    fn is_create_source(self) -> bool {
+        matches!(self, SourceCatalogPurpose::CreateSource(_))
+    }
+
+    fn create_source_type(self) -> Option<CreateSourceType> {
+        match self {
+            SourceCatalogPurpose::CreateSource(create_source_type) => Some(create_source_type),
+            SourceCatalogPurpose::CreateTableWithConnector => None,
+        }
+    }
+
+    fn is_shared_non_cdc_source(self) -> bool {
+        matches!(
+            self,
+            SourceCatalogPurpose::CreateSource(CreateSourceType::SharedNonCdc)
+        )
+    }
+
+    fn associated_table_id(self) -> Option<TableId> {
+        if self.is_create_source() {
+            None
+        } else {
+            Some(TableId::placeholder())
+        }
+    }
 }
 
 impl CreateSourceType {
@@ -736,75 +775,118 @@ pub(super) fn check_format_encode(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectorPropsPurpose {
+    CreateSource,
+    CreateTableWithConnector,
+}
+
+impl ConnectorPropsPurpose {
+    fn is_create_source(self) -> bool {
+        matches!(self, ConnectorPropsPurpose::CreateSource)
+    }
+}
+
 pub fn bind_connector_props(
     handler_args: &HandlerArgs,
     format_encode: &FormatEncodeOptions,
-    is_create_source: bool,
+    purpose: ConnectorPropsPurpose,
 ) -> Result<(WithOptions, SourceRefreshMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
+
+    // Keep this order explicit: compatibility validation may normalize connector
+    // options before later checks read/remove/insert individual fields.
     validate_compatibility(format_encode, &mut with_properties)?;
-    let refresh_mode = {
-        let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
-        if is_create_source && refresh_mode.is_some() {
-            return Err(RwError::from(ProtocolError(
-                "`refresh_mode` only supported for CREATE TABLE".to_owned(),
-            )));
-        }
 
-        refresh_mode.unwrap_or(SourceRefreshMode {
-            refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
-        })
-    };
-
+    let refresh_mode = resolve_refresh_mode_for_connector_props(&mut with_properties, purpose)?;
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
 
-    if !is_create_source && with_properties.is_shareable_only_cdc_connector() {
+    reject_unsupported_table_connector(&with_properties, purpose)?;
+    if purpose.is_create_source() && create_cdc_source_job {
+        apply_shared_cdc_source_job_defaults(&mut with_properties, handler_args)?;
+    }
+    ensure_mysql_cdc_server_id(&mut with_properties);
+
+    Ok((with_properties, refresh_mode))
+}
+
+fn resolve_refresh_mode_for_connector_props(
+    with_properties: &mut WithOptions,
+    purpose: ConnectorPropsPurpose,
+) -> Result<SourceRefreshMode> {
+    // Resolve and remove `refresh_mode` before connector-purpose defaults are
+    // injected, so only the original user option controls the DDL policy.
+    let refresh_mode = resolve_source_refresh_mode_in_with_option(with_properties)?;
+    if purpose.is_create_source() && refresh_mode.is_some() {
+        return Err(RwError::from(ProtocolError(
+            "`refresh_mode` only supported for CREATE TABLE".to_owned(),
+        )));
+    }
+
+    Ok(refresh_mode.unwrap_or(SourceRefreshMode {
+        refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+    }))
+}
+
+fn reject_unsupported_table_connector(
+    with_properties: &WithOptions,
+    purpose: ConnectorPropsPurpose,
+) -> Result<()> {
+    if !purpose.is_create_source() && with_properties.is_shareable_only_cdc_connector() {
         return Err(RwError::from(ProtocolError(format!(
             "connector {} does not support `CREATE TABLE`, please use `CREATE SOURCE` instead",
             with_properties.get_connector().unwrap(),
         ))));
     }
-    if is_create_source && create_cdc_source_job {
-        if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)
-            && value.parse::<bool>().map_err(|_| {
-                ErrorCode::InvalidInputSyntax(format!(
-                    "invalid value of '{}' option",
-                    AUTO_SCHEMA_CHANGE_KEY
-                ))
-            })?
-        {
-            Feature::CdcAutoSchemaChange.check_available()?;
-        }
+    Ok(())
+}
 
-        // set connector to backfill mode
-        with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
-        // enable cdc sharing mode, which will capture all tables in the given `database.name`
-        with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
-        // enable transactional cdc
-        if with_properties.enable_transaction_metadata() {
-            with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
-        }
-        // Only set CDC_WAIT_FOR_STREAMING_START_TIMEOUT if not already specified by user.
-        if !with_properties.contains_key(CDC_WAIT_FOR_STREAMING_START_TIMEOUT) {
-            with_properties.insert(
-                CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
-                handler_args
-                    .session
-                    .config()
-                    .cdc_source_wait_streaming_start_timeout()
-                    .to_string(),
-            );
-        }
+fn apply_shared_cdc_source_job_defaults(
+    with_properties: &mut WithOptions,
+    handler_args: &HandlerArgs,
+) -> Result<()> {
+    if let Some(value) = with_properties.get(AUTO_SCHEMA_CHANGE_KEY)
+        && value.parse::<bool>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "invalid value of '{}' option",
+                AUTO_SCHEMA_CHANGE_KEY
+            ))
+        })?
+    {
+        Feature::CdcAutoSchemaChange.check_available()?;
     }
+
+    // Set connector to backfill mode.
+    with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
+    // Enable cdc sharing mode, which will capture all tables in the given `database.name`.
+    with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
+    // Enable transactional cdc.
+    if with_properties.enable_transaction_metadata() {
+        with_properties.insert(CDC_TRANSACTIONAL_KEY.into(), "true".into());
+    }
+    // Only set CDC_WAIT_FOR_STREAMING_START_TIMEOUT if not already specified by user.
+    if !with_properties.contains_key(CDC_WAIT_FOR_STREAMING_START_TIMEOUT) {
+        with_properties.insert(
+            CDC_WAIT_FOR_STREAMING_START_TIMEOUT.into(),
+            handler_args
+                .session
+                .config()
+                .cdc_source_wait_streaming_start_timeout()
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn ensure_mysql_cdc_server_id(with_properties: &mut WithOptions) {
     if with_properties.is_mysql_cdc_connector() {
-        // Generate a random server id for mysql cdc source if needed
-        // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
-        // group (that is, different from any other server id being used by any master or slave)
+        // Generate a random server id for mysql cdc source if needed.
+        // `server.id` (in the range from 1 to 2^32 - 1) must be unique across the whole replication
+        // group (that is, different from any other server id being used by any master or slave).
         with_properties
             .entry("server.id".to_owned())
             .or_insert(rand::rng().random_range(1..u32::MAX).to_string());
     }
-    Ok((with_properties, refresh_mode))
 }
 
 /// When the schema can be inferred from external system (like schema registry),
@@ -847,7 +929,7 @@ pub async fn bind_create_source_or_table_with_connector(
     source_info: StreamSourceInfo,
     include_column_options: IncludeOption,
     col_id_gen: &mut ColumnIdGenerator,
-    create_source_type: CreateSourceType,
+    source_catalog_purpose: SourceCatalogPurpose,
     source_rate_limit: Option<u32>,
     sql_column_strategy: SqlColumnStrategy,
     refresh_mode: SourceRefreshMode,
@@ -858,7 +940,7 @@ pub async fn bind_create_source_or_table_with_connector(
     let (database_id, schema_id) =
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
-    let is_create_source = create_source_type != CreateSourceType::Table;
+    let is_create_source = source_catalog_purpose.is_create_source();
 
     if is_create_source {
         // reject refreshable batch source
@@ -962,7 +1044,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
 
         // For shared sources, we will include partition and offset cols in the SourceExecutor's *output*, to be used by the SourceBackfillExecutor.
         // For shared CDC source, the schema is different. See ColumnCatalog::debezium_cdc_source_cols(), CDC_BACKFILL_TABLE_ADDITIONAL_COLUMNS
-        if create_source_type == CreateSourceType::SharedNonCdc {
+        if source_catalog_purpose.is_shared_non_cdc_source() {
             let (columns_exist, additional_columns) = source_add_partition_offset_cols(
                 &columns,
                 &with_properties.get_connector().unwrap(),
@@ -1081,11 +1163,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
 
     let definition = handler_args.normalized_sql.clone();
 
-    let associated_table_id = if is_create_source {
-        None
-    } else {
-        Some(TableId::placeholder())
-    };
+    let associated_table_id = source_catalog_purpose.associated_table_id();
     let source = SourceCatalog {
         id: SourceId::placeholder(),
         name: source_name,
@@ -1146,15 +1224,18 @@ pub async fn handle_create_source(
     }
 
     let format_encode = stmt.format_encode.into_v2_with_warning();
-    let (with_properties, refresh_mode) =
-        bind_connector_props(&handler_args, &format_encode, true)?;
+    let (with_properties, refresh_mode) = bind_connector_props(
+        &handler_args,
+        &format_encode,
+        ConnectorPropsPurpose::CreateSource,
+    )?;
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         &session,
         &format_encode,
         Either::Left(&with_properties),
-        create_source_type,
+        SourceCatalogPurpose::CreateSource(create_source_type),
     )
     .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();
@@ -1182,7 +1263,7 @@ pub async fn handle_create_source(
         source_info,
         stmt.include_column_options,
         &mut col_id_gen,
-        create_source_type,
+        SourceCatalogPurpose::CreateSource(create_source_type),
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
         refresh_mode,

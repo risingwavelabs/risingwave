@@ -73,15 +73,18 @@ pub async fn bind_columns_from_source(
     session: &SessionImpl,
     format_encode: &FormatEncodeOptions,
     with_properties: Either<&WithOptions, &WithOptionsSecResolved>,
-    create_source_type: CreateSourceType,
+    source_catalog_purpose: SourceCatalogPurpose,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
+    let create_source_type = source_catalog_purpose.create_source_type();
     let (columns_from_resolve_source, mut source_info) =
-        if create_source_type == CreateSourceType::SharedCdc {
+        if create_source_type == Some(CreateSourceType::SharedCdc) {
             bind_columns_from_source_for_cdc(session, format_encode)?
         } else {
             bind_columns_from_source_for_non_cdc(session, format_encode, with_properties).await?
         };
-    if create_source_type.is_shared() {
+    if let Some(create_source_type) = create_source_type
+        && create_source_type.is_shared()
+    {
         // Note: this field should be called is_shared. Check field doc for more details.
         source_info.cdc_source_job = true;
         source_info.is_distributed = create_source_type == CreateSourceType::SharedNonCdc;

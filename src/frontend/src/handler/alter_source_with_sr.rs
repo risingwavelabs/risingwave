@@ -35,7 +35,9 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_source::{CreateSourceType, bind_columns_from_source};
+use crate::handler::create_source::{
+    CreateSourceType, SourceCatalogPurpose, bind_columns_from_source,
+};
 use crate::session::SessionImpl;
 use crate::utils::resolve_secret_ref_in_with_options;
 use crate::{Binder, WithOptions};
@@ -166,7 +168,7 @@ pub async fn refresh_sr_and_get_columns_diff(
         session,
         format_encode,
         Either::Right(&with_properties),
-        CreateSourceType::for_replace(original_source),
+        SourceCatalogPurpose::CreateSource(CreateSourceType::for_replace(original_source)),
     )
     .await?
     else {

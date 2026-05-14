@@ -65,7 +65,10 @@ use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
-use super::create_source::{CreateSourceType, SqlColumnStrategy, bind_columns_from_source};
+use super::create_source::{
+    ConnectorPropsPurpose, CreateSourceType, SourceCatalogPurpose, SqlColumnStrategy,
+    bind_columns_from_source,
+};
 use crate::binder::{Clause, SecureCompareContext, WEBHOOK_PAYLOAD_FIELD_NAME, bind_data_type};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -487,8 +490,11 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let session = &handler_args.session;
-    let (with_properties, refresh_mode) =
-        bind_connector_props(&handler_args, &format_encode, false)?;
+    let (with_properties, refresh_mode) = bind_connector_props(
+        &handler_args,
+        &format_encode,
+        ConnectorPropsPurpose::CreateTableWithConnector,
+    )?;
     if with_properties.is_shareable_cdc_connector() {
         generated_columns_check_for_cdc_table(&column_defs)?;
         not_null_check_for_cdc_table(&wildcard_idx, &column_defs)?;
@@ -511,7 +517,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         session,
         &format_encode,
         Either::Left(&with_properties),
-        CreateSourceType::Table,
+        SourceCatalogPurpose::CreateTableWithConnector,
     )
     .await?;
 
@@ -530,7 +536,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         source_info,
         include_column_options,
         &mut col_id_gen,
-        CreateSourceType::Table,
+        SourceCatalogPurpose::CreateTableWithConnector,
         rate_limit,
         sql_column_strategy,
         refresh_mode,
@@ -2342,8 +2348,11 @@ pub async fn create_iceberg_engine_table(
 
     let overwrite_options = OverwriteOptions::new(&mut source_handler_args);
     let format_encode = create_source_stmt.format_encode.into_v2_with_warning();
-    let (with_properties, refresh_mode) =
-        bind_connector_props(&source_handler_args, &format_encode, true)?;
+    let (with_properties, refresh_mode) = bind_connector_props(
+        &source_handler_args,
+        &format_encode,
+        ConnectorPropsPurpose::CreateSource,
+    )?;
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
     // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
@@ -2362,7 +2371,7 @@ pub async fn create_iceberg_engine_table(
         &session,
         &format_encode,
         Either::Left(&with_properties),
-        create_source_type,
+        SourceCatalogPurpose::CreateSource(create_source_type),
     )
     .await?;
     let mut col_id_gen = ColumnIdGenerator::new_initial();
@@ -2380,7 +2389,7 @@ pub async fn create_iceberg_engine_table(
         source_info,
         create_source_stmt.include_column_options,
         &mut col_id_gen,
-        create_source_type,
+        SourceCatalogPurpose::CreateSource(create_source_type),
         overwrite_options.source_rate_limit,
         SqlColumnStrategy::FollowChecked,
         refresh_mode,
