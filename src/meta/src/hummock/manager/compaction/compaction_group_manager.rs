@@ -40,7 +40,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{HummockManager, commit_multi_var};
-use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
+use crate::hummock::metrics_utils::remove_compaction_group_metrics;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_group_id;
 use crate::manager::MetaSrvEnv;
@@ -340,7 +340,7 @@ impl HummockManager {
                     .or_default()
                     .group_deltas
                     .push(GroupDelta::GroupDestroy(PbGroupDestroy {}));
-                remove_compaction_group_in_sst_stat(&self.metrics, group_id, max_level);
+                remove_compaction_group_metrics(&self.metrics, group_id, max_level);
                 // clean up compaction schedule state for the removed group
                 self.compaction_state.remove_compaction_group(group_id);
             } else {
