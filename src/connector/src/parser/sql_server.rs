@@ -97,7 +97,10 @@ pub fn convert_money_i64_to_type(value: i64, data_type: &DataType) -> ScalarImpl
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use risingwave_common::types::F32;
+    use tiberius::FromSql;
 
     use super::*;
 
@@ -124,6 +127,15 @@ mod tests {
     fn test_non_upcast_keeps_original() {
         let v = coerce_scalar_to_target_type(ScalarImpl::Int32(7), &DataType::Int32);
         assert_eq!(v, ScalarImpl::Int32(7));
+    }
+
+    #[test]
+    fn test_nvarchar_ntext_payload_with_replacement_char_is_preserved() {
+        // SQL Server nvarchar/ntext payloads can contain ill-formed UTF-16 from upstream tools.
+        // Tiberius decodes such payloads with U+FFFD replacement chars; ensure RW preserves them.
+        let value = tiberius::ColumnData::String(Some(Cow::Borrowed("a\u{FFFD}b")));
+        let scalar = ScalarImplTiberiusWrapper::from_sql(&value).unwrap().unwrap().0;
+        assert_eq!(scalar, ScalarImpl::Utf8("a\u{FFFD}b".into()));
     }
 }
 macro_rules! impl_tiberius_wrapper {
