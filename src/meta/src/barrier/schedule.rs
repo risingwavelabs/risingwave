@@ -49,11 +49,6 @@ pub(super) struct NewBarrier {
     pub checkpoint: bool,
 }
 
-pub enum CommandIssueError {
-    BeforeIssue(MetaError),
-    AfterIssue(MetaError),
-}
-
 /// A queue for scheduling barriers.
 ///
 /// We manually implement one here instead of using channels since we may need to update the front
@@ -306,52 +301,6 @@ impl BarrierScheduler {
         let ret = self.run_multiple_commands(database_id, vec![command]).await;
         tracing::trace!("run_command finished");
         ret
-    }
-
-    /// Run a command and preserve whether the error happened before or after the command was issued.
-    pub async fn run_command_with_issue_status(
-        &self,
-        database_id: DatabaseId,
-        command: Command,
-    ) -> Result<(), CommandIssueError> {
-        tracing::trace!("run_command_with_issue_status: {:?}", command);
-        let (started_tx, started_rx) = oneshot::channel();
-        let (collect_tx, collect_rx) = oneshot::channel();
-
-        self.push(
-            database_id,
-            vec![(
-                command,
-                Notifier {
-                    started: Some(started_tx),
-                    collected: Some(collect_tx),
-                },
-            )],
-        )
-        .map_err(CommandIssueError::BeforeIssue)?;
-
-        tracing::trace!("waiting for injected_rx");
-        let started_result = started_rx
-            .instrument_await("wait_injected")
-            .await
-            .ok()
-            .context("failed to inject barrier")
-            .map_err(MetaError::from)
-            .map_err(CommandIssueError::BeforeIssue)?;
-        started_result.map_err(CommandIssueError::BeforeIssue)?;
-
-        tracing::trace!("waiting for collect_rx");
-        let collect_result = collect_rx
-            .instrument_await("wait_collected")
-            .await
-            .ok()
-            .context("failed to collect barrier")
-            .map_err(MetaError::from)
-            .map_err(CommandIssueError::AfterIssue)?;
-        collect_result.map_err(CommandIssueError::AfterIssue)?;
-
-        tracing::trace!("run_command_with_issue_status finished");
-        Ok(())
     }
 
     /// Schedule a command without waiting for it to be executed.

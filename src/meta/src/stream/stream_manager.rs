@@ -38,8 +38,8 @@ use super::{
     UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
-    BarrierScheduler, Command, CommandIssueError, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -82,35 +82,6 @@ pub(crate) async fn cleanup_dropped_streaming_jobs(
         .complete_dropped_tables(state_table_ids)
         .await;
     Ok(())
-}
-
-pub struct CreateStreamingJobError {
-    error: MetaError,
-    should_abort_catalog: bool,
-}
-
-impl CreateStreamingJobError {
-    pub fn before_command(error: MetaError) -> Self {
-        Self {
-            error,
-            should_abort_catalog: true,
-        }
-    }
-
-    pub fn after_command(error: MetaError) -> Self {
-        Self {
-            error,
-            should_abort_catalog: false,
-        }
-    }
-
-    pub fn should_abort_catalog(&self) -> bool {
-        self.should_abort_catalog
-    }
-
-    pub fn into_error(self) -> MetaError {
-        self.error
-    }
 }
 
 #[derive(Default)]
@@ -375,7 +346,7 @@ impl GlobalStreamManager {
         stream_job_fragments: StreamJobFragmentsToCreate,
         ctx: CreateStreamingJobContext,
         permit: OwnedSemaphorePermit,
-    ) -> Result<NotificationVersion, CreateStreamingJobError> {
+    ) -> MetaResult<NotificationVersion> {
         let await_tree_key = format!("Create Streaming Job Worker ({})", ctx.streaming_job.id());
         let await_tree_span = span!(
             "{:?}({})",
@@ -404,11 +375,12 @@ impl GlobalStreamManager {
                         .current_version()
                         .await
                 }
-                CreateType::Foreground => stream_manager
-                    .metadata_manager
-                    .wait_streaming_job_finished(database_id, streaming_job.id() as _)
-                    .await
-                    .map_err(CreateStreamingJobError::after_command)?,
+                CreateType::Foreground => {
+                    stream_manager
+                        .metadata_manager
+                        .wait_streaming_job_finished(database_id, streaming_job.id() as _)
+                        .await?
+                }
                 CreateType::Unspecified => unreachable!(),
             };
 
@@ -505,18 +477,9 @@ impl GlobalStreamManager {
                     };
 
                     let (cancelled, result) = match cancel_res {
-                        CancelResult::Completed(result) => (
-                            false,
-                            result.map_err(CreateStreamingJobError::after_command),
-                        ),
-                        CancelResult::Failed(err) => (
-                            false,
-                            Err(CreateStreamingJobError::before_command(err)),
-                        ),
-                        CancelResult::Cancelled => (
-                            true,
-                            Err(CreateStreamingJobError::before_command(MetaError::cancelled("create"))),
-                        ),
+                        CancelResult::Completed(result) => (false, result),
+                        CancelResult::Failed(err) => (false, Err(err)),
+                        CancelResult::Cancelled => (true, Err(MetaError::cancelled("create"))),
                     };
 
                     let _ = notifier
@@ -557,7 +520,7 @@ impl GlobalStreamManager {
             streaming_job_model,
             ..
         }: CreateStreamingJobContext,
-    ) -> Result<StreamingJob, CreateStreamingJobError> {
+    ) -> MetaResult<StreamingJob> {
         tracing::debug!(
             table_id = %stream_job_fragments.stream_job_id(),
             "built actors finished"
@@ -570,8 +533,7 @@ impl GlobalStreamManager {
         let init_split_assignment = self
             .source_manager
             .discover_splits(&stream_job_fragments)
-            .await
-            .map_err(CreateStreamingJobError::before_command)?;
+            .await?;
 
         let fragment_backfill_ordering =
             StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
@@ -625,12 +587,8 @@ impl GlobalStreamManager {
         };
 
         self.barrier_scheduler
-            .run_command_with_issue_status(streaming_job.database_id(), command)
-            .await
-            .map_err(|err| match err {
-                CommandIssueError::BeforeIssue(err) => CreateStreamingJobError::before_command(err),
-                CommandIssueError::AfterIssue(err) => CreateStreamingJobError::after_command(err),
-            })?;
+            .run_command(streaming_job.database_id(), command)
+            .await?;
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
 

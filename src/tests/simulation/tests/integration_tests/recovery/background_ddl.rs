@@ -18,12 +18,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use risingwave_common::catalog::TableId;
 use risingwave_common::config::RwConfig;
 use risingwave_common::error::AsReport;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
-use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
@@ -48,8 +46,6 @@ const RESET_RATE_LIMIT: &str = "SET BACKFILL_RATE_LIMIT=DEFAULT;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 const DROP_MV1: &str = "DROP MATERIALIZED VIEW mv1;";
 const WAIT: &str = "WAIT;";
-const DATABASE_RECOVERY_START: &str = "DATABASE_RECOVERY_START";
-const DATABASE_RECOVERY_SUCCESS: &str = "DATABASE_RECOVERY_SUCCESS";
 const MAX_HEARTBEAT_INTERVAL_SEC: u64 = 10;
 
 async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
@@ -82,31 +78,6 @@ async fn database_id_mapping(session: &mut Session) -> Result<HashMap<String, u3
             (name.to_owned(), u32::from_str(id.trim()).unwrap())
         })
         .collect())
-}
-
-async fn database_recovery_events(session: &mut Session) -> Result<HashMap<u32, Vec<String>>> {
-    let rows = session
-        .run(
-            "select event_type,
-       case event_type
-           when 'DATABASE_RECOVERY_START' then info -> 'recovery' -> 'databaseStart' ->> 'databaseId'
-           when 'DATABASE_RECOVERY_SUCCESS' then info -> 'recovery' -> 'databaseSuccess' ->> 'databaseId'
-           when 'DATABASE_RECOVERY_FAILURE' then info -> 'recovery' -> 'databaseFailure' ->> 'databaseId'
-           end as database_id
-from rw_catalog.rw_event_logs
-where event_type like '%DATABASE_RECOVERY%'
-order by timestamp;",
-        )
-        .await?;
-    let mut result = HashMap::new();
-    for line in rows.lines().filter(|line| !line.trim().is_empty()) {
-        let (event_type, id) = line.rsplit_once(' ').unwrap();
-        result
-            .entry(u32::from_str(id.trim())?)
-            .or_insert_with(Vec::new)
-            .push(event_type.to_owned());
-    }
-    Ok(result)
 }
 
 async fn wait_until(session: &mut Session, sql: &str, target: &str) -> Result<()> {
@@ -161,18 +132,6 @@ async fn wait_for_stream_job_and_member_tables(
     ))
 }
 
-async fn compaction_group_id_by_table_id(
-    session: &mut Session,
-    table_id: u32,
-) -> Result<CompactionGroupId> {
-    Ok(session
-        .run(format!(
-            "SELECT id FROM rw_hummock_compaction_group_configs WHERE member_tables @> '[{table_id}]'::jsonb;"
-        ))
-        .await?
-        .parse::<CompactionGroupId>()?)
-}
-
 async fn sstable_ids_by_table_id(session: &mut Session, table_id: u32) -> Result<Vec<u64>> {
     let rows = session
         .run(format!(
@@ -197,37 +156,6 @@ async fn wait_for_sstable_ids_by_table_id(
         sleep(Duration::from_secs(1)).await;
     }
     Err(anyhow!("failed to observe sstables for table {}", table_id))
-}
-
-async fn wait_for_compaction_group_sstable_count(
-    session: &mut Session,
-    compaction_group_id: CompactionGroupId,
-    expected_at_least: usize,
-) -> Result<usize> {
-    for _ in 0..60 {
-        let count = session
-            .run(format!(
-                "SELECT COUNT(*) FROM rw_hummock_sstables WHERE compaction_group_id = {compaction_group_id};"
-            ))
-            .await?
-            .parse::<usize>()?;
-        if count >= expected_at_least {
-            return Ok(count);
-        }
-        sleep(Duration::from_secs(1)).await;
-    }
-    Err(anyhow!(
-        "failed to observe at least {} sstables in compaction group {}",
-        expected_at_least,
-        compaction_group_id
-    ))
-}
-
-async fn compactor_worker_count(session: &mut Session) -> Result<usize> {
-    Ok(session
-        .run("SELECT COUNT(*) FROM rw_catalog.rw_worker_nodes WHERE \"type\" = 'Compactor';")
-        .await?
-        .parse::<usize>()?)
 }
 
 async fn assert_hummock_state_tables_can_be_fetched_from_catalog(cluster: &Cluster) {
@@ -413,258 +341,10 @@ async fn test_foreground_snapshot_backfill_recovery_keeps_hummock_table_catalog_
         ?create_result,
         "foreground ddl result after database recovery"
     );
-    assert!(
-        create_result.is_err(),
-        "foreground ddl unexpectedly succeeded after database recovery"
-    );
 
     assert_hummock_state_tables_can_be_fetched_from_catalog(&cluster).await;
     cluster.simple_restart_nodes(["compute-1"]).await;
     wait_all_database_recovered(&mut cluster).await;
-}
-
-#[tokio::test]
-async fn test_snapshot_backfill_cancel_database_recovery_manual_compaction_attempt() {
-    init_logger();
-    let mut config = Configuration::for_auto_parallelism(MAX_HEARTBEAT_INTERVAL_SEC, true);
-    config.compute_nodes = 3;
-    config.compute_node_cores = 2;
-    config.compactor_nodes = 2;
-    config.compute_resource_groups = HashMap::from([
-        (1, "group1".to_owned()),
-        (2, "group2".to_owned()),
-        (3, "group3".to_owned()),
-    ]);
-    let mut cluster = Cluster::start(config).await.unwrap();
-    let mut session = cluster.start_session();
-
-    session
-        .run("create database group1 with resource_group='group1'")
-        .await
-        .unwrap();
-    session
-        .run("create database group2 with resource_group='group2'")
-        .await
-        .unwrap();
-    session.run("set rw_implicit_flush = true;").await.unwrap();
-
-    let database_id_mapping = database_id_mapping(&mut session).await.unwrap();
-    let group1_database_id = database_id_mapping["group1"];
-
-    session.run("use group1;").await.unwrap();
-    session.run("set background_ddl = false;").await.unwrap();
-    session
-        .run("set streaming_use_snapshot_backfill = true;")
-        .await
-        .unwrap();
-    session.run("set backfill_rate_limit = 1;").await.unwrap();
-    session
-        .run("create table t (k int primary key, v int);")
-        .await
-        .unwrap();
-    session
-        .run("insert into t select i, i from generate_series(1, 10000) as i;")
-        .await
-        .unwrap();
-    session.run("flush;").await.unwrap();
-    session
-        .run("create table recovery_probe (v int);")
-        .await
-        .unwrap();
-    session
-        .run("insert into recovery_probe select * from generate_series(1, 10);")
-        .await
-        .unwrap();
-    session.run("flush;").await.unwrap();
-
-    let baseline_member_tables = member_table_ids(&mut session).await.unwrap();
-
-    let mut create_session = cluster.start_session();
-    tokio::spawn(async move {
-        create_session.run("use group1;").await.unwrap();
-        create_session
-            .run("set background_ddl = false;")
-            .await
-            .unwrap();
-        create_session
-            .run("set streaming_use_snapshot_backfill = true;")
-            .await
-            .unwrap();
-        create_session
-            .run("set backfill_rate_limit = 1;")
-            .await
-            .unwrap();
-        let _ = create_session
-            .run("create materialized view mv1 as select * from t;")
-            .await;
-    });
-
-    let created_member_tables =
-        wait_for_stream_job_and_member_tables(&mut session, &baseline_member_tables)
-            .await
-            .unwrap();
-    let candidate_table_id = *created_member_tables.iter().min().unwrap();
-    let candidate_sstable_ids = wait_for_sstable_ids_by_table_id(&mut session, candidate_table_id)
-        .await
-        .unwrap();
-    let original_compaction_group_id =
-        compaction_group_id_by_table_id(&mut session, candidate_table_id)
-            .await
-            .unwrap();
-    cluster
-        .split_compaction_group(
-            original_compaction_group_id,
-            TableId::new(candidate_table_id),
-        )
-        .await
-        .unwrap();
-    let candidate_compaction_group_id =
-        compaction_group_id_by_table_id(&mut session, candidate_table_id)
-            .await
-            .unwrap();
-    wait_for_compaction_group_sstable_count(&mut session, candidate_compaction_group_id, 1)
-        .await
-        .unwrap();
-    tracing::info!(
-        ?created_member_tables,
-        candidate_table_id,
-        ?candidate_sstable_ids,
-        ?original_compaction_group_id,
-        ?candidate_compaction_group_id,
-        "observed creating snapshot-backfill state tables"
-    );
-
-    let mut monitor_session = cluster.start_session();
-    monitor_session.run("use group2;").await.unwrap();
-
-    cluster.simple_kill_nodes(["compute-1"]).await;
-    wait_until(
-        &mut monitor_session,
-        "select count(*) from rw_catalog.rw_worker_nodes where host = '192.168.3.1';",
-        "0",
-    )
-    .await
-    .unwrap();
-
-    wait_for_database_recovery_state(&mut monitor_session, group1_database_id, "RECOVERING")
-        .await
-        .unwrap();
-
-    let mut cancel_session = cluster.start_session();
-    let cancel_handle = tokio::spawn(async move { cancel_stream_jobs(&mut cancel_session).await });
-
-    sleep(Duration::from_millis(100)).await;
-    cluster.simple_restart_nodes(["compute-1"]).await;
-    wait_all_database_recovered(&mut cluster).await;
-    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC)).await;
-
-    let cancel_result = cancel_handle.await.unwrap();
-    tracing::info!(
-        ?cancel_result,
-        "cancel result after concurrent database recovery"
-    );
-
-    let database_recovery_events = database_recovery_events(&mut monitor_session)
-        .await
-        .unwrap();
-    let group1_events = database_recovery_events
-        .get(&group1_database_id)
-        .cloned()
-        .unwrap_or_default();
-    assert!(
-        group1_events.ends_with(&[
-            DATABASE_RECOVERY_START.to_owned(),
-            DATABASE_RECOVERY_SUCCESS.to_owned(),
-        ]),
-        "failed to observe database recovery for group1, got events: {group1_events:?}"
-    );
-
-    session.run("use group1;").await.unwrap();
-    wait_for_jobs_cleared(&mut session).await.unwrap();
-    let member_tables_after_recovery = member_table_ids(&mut session).await.unwrap();
-    let dangling_member_tables = created_member_tables
-        .intersection(&member_tables_after_recovery)
-        .copied()
-        .collect::<HashSet<_>>();
-    tracing::info!(
-        ?created_member_tables,
-        ?member_tables_after_recovery,
-        ?dangling_member_tables,
-        "member tables after concurrent cancel and database recovery"
-    );
-    assert!(
-        !dangling_member_tables.is_empty(),
-        "failed to keep created state tables in hummock member tables after recovery"
-    );
-    assert!(
-        dangling_member_tables.contains(&candidate_table_id),
-        "failed to keep candidate table {} in hummock member tables after recovery; dangling tables: {:?}",
-        candidate_table_id,
-        dangling_member_tables
-    );
-
-    let compactor_count_before = compactor_worker_count(&mut session).await.unwrap();
-    let sstable_count_before =
-        wait_for_compaction_group_sstable_count(&mut session, candidate_compaction_group_id, 1)
-            .await
-            .unwrap();
-    cluster
-        .simple_kill_nodes(["compactor-1", "compactor-2"])
-        .await;
-    wait_until(
-        &mut session,
-        "SELECT COUNT(*) FROM rw_catalog.rw_worker_nodes WHERE \"type\" = 'Compactor';",
-        "0",
-    )
-    .await
-    .unwrap();
-    cluster
-        .simple_restart_nodes(["compactor-1", "compactor-2"])
-        .await;
-    wait_until(
-        &mut session,
-        "SELECT COUNT(*) FROM rw_catalog.rw_worker_nodes WHERE \"type\" = 'Compactor';",
-        &compactor_count_before.to_string(),
-    )
-    .await
-    .unwrap();
-    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC)).await;
-    tracing::info!(
-        candidate_table_id,
-        ?candidate_compaction_group_id,
-        compactor_count_before,
-        sstable_count_before,
-        "triggering manual compaction on stale table compaction group after compactor restart"
-    );
-
-    cluster
-        .trigger_manual_compaction(candidate_compaction_group_id, 0)
-        .await
-        .unwrap();
-    sleep(Duration::from_secs(MAX_HEARTBEAT_INTERVAL_SEC)).await;
-
-    let compactor_count_after = compactor_worker_count(&mut session).await.unwrap();
-    let sstable_count_after =
-        wait_for_compaction_group_sstable_count(&mut session, candidate_compaction_group_id, 1)
-            .await
-            .unwrap();
-    let candidate_sstable_ids_after = sstable_ids_by_table_id(&mut session, candidate_table_id)
-        .await
-        .unwrap();
-    tracing::info!(
-        candidate_table_id,
-        ?candidate_compaction_group_id,
-        compactor_count_before,
-        compactor_count_after,
-        sstable_count_before,
-        sstable_count_after,
-        ?candidate_sstable_ids_after,
-        "manual compaction result for stale table compaction group"
-    );
-    assert_eq!(
-        compactor_count_after, compactor_count_before,
-        "manual compaction crashed a compactor worker"
-    );
 }
 
 #[tokio::test]

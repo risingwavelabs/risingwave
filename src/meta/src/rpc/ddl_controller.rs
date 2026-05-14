@@ -66,7 +66,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -91,11 +91,10 @@ use crate::stream::cdc::{
 };
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
-    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobError,
-    CreateStreamingJobOption, FragmentGraphDownstreamContext, FragmentGraphUpstreamContext,
-    GlobalStreamManagerRef, ReplaceStreamJobContext, ReschedulePolicy, SourceChange,
-    SourceManagerRef, StreamFragmentGraph, UpstreamSinkInfo,
-    check_sink_fragments_support_refresh_schema, create_source_worker,
+    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
+    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
+    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
+    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
     rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
@@ -1089,22 +1088,29 @@ impl DdlController {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
         };
-        // create streaming job.
-        match self
-            .create_streaming_job_inner(
+        // Generate streaming job metadata and issue the create command in two steps, so that the
+        // error phase is classified at the barrier command boundary.
+        let create_result = match self
+            .generate_streaming_job(
                 ctx,
                 streaming_job,
                 fragment_graph,
                 resource_type,
-                permit,
                 streaming_job_model,
             )
             .await
         {
+            Ok((stream_job_fragments, ctx)) => self
+                .stream_manager
+                .create_streaming_job(stream_job_fragments, ctx, permit)
+                .await
+                .map_err(|err| (err, true)),
+            Err(err) => Err((err, false)),
+        };
+
+        match create_result {
             Ok(version) => Ok(version),
-            Err(create_err) => {
-                let should_abort_catalog = create_err.should_abort_catalog();
-                let err = create_err.into_error();
+            Err((err, is_cancelled)) => {
                 tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: job_id,
@@ -1115,22 +1121,20 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                if should_abort_catalog {
-                    let (aborted, _) = self
-                        .metadata_manager
-                        .catalog_controller
-                        .try_abort_creating_streaming_job(job_id, false)
-                        .await?;
-                    if aborted {
-                        tracing::warn!(id = %job_id, "aborted streaming job");
-                        // FIXME: might also need other cleanup here
-                        if let Some(source_id) = source_id {
-                            self.source_manager
-                                .apply_source_change(SourceChange::DropSource {
-                                    dropped_source_ids: vec![source_id],
-                                })
-                                .await;
-                        }
+                let (aborted, _) = self
+                    .metadata_manager
+                    .catalog_controller
+                    .try_abort_creating_streaming_job(job_id, is_cancelled)
+                    .await?;
+                if aborted {
+                    tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
+                    // FIXME: might also need other cleanup here
+                    if let Some(source_id) = source_id {
+                        self.source_manager
+                            .apply_source_change(SourceChange::DropSource {
+                                dropped_source_ids: vec![source_id],
+                            })
+                            .await;
                     }
                 }
                 Err(err)
@@ -1139,18 +1143,16 @@ impl DdlController {
     }
 
     #[await_tree::instrument(boxed)]
-    async fn create_streaming_job_inner(
+    async fn generate_streaming_job(
         &self,
         ctx: StreamContext,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
-        permit: OwnedSemaphorePermit,
         streaming_job_model: streaming_job::Model,
-    ) -> Result<NotificationVersion, CreateStreamingJobError> {
+    ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
-            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)
-                .map_err(CreateStreamingJobError::before_command)?;
+            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_info_from_graph(&fragment_graph);
 
         // create internal table catalogs and refill table id.
@@ -1162,8 +1164,7 @@ impl DdlController {
             .metadata_manager
             .catalog_controller
             .create_internal_table_catalog(&streaming_job, incomplete_internal_tables)
-            .await
-            .map_err(CreateStreamingJobError::before_command)?;
+            .await?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
         // create fragment and actor catalogs.
@@ -1176,23 +1177,18 @@ impl DdlController {
                 resource_type,
                 streaming_job_model,
             )
-            .await
-            .map_err(CreateStreamingJobError::before_command)?;
+            .await?;
 
         let streaming_job = &ctx.streaming_job;
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
                 self.validate_cdc_table(table, &stream_job_fragments)
-                    .await
-                    .map_err(CreateStreamingJobError::before_command)?;
+                    .await?;
             }
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.
-                self.source_manager
-                    .register_source(source)
-                    .await
-                    .map_err(CreateStreamingJobError::before_command)?;
+                self.source_manager.register_source(source).await?;
                 let connector_name = source
                     .get_with_properties()
                     .get(UPSTREAM_SOURCE_KEY)
@@ -1213,13 +1209,10 @@ impl DdlController {
             }
             StreamingJob::Sink(sink) => {
                 if sink.auto_refresh_schema_from_table.is_some() {
-                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)
-                        .map_err(CreateStreamingJobError::before_command)?
+                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?;
                 }
                 // Validate the sink on the connector node.
-                validate_sink(sink)
-                    .await
-                    .map_err(CreateStreamingJobError::before_command)?;
+                validate_sink(sink).await?;
                 let connector_name = sink.get_properties().get(UPSTREAM_SOURCE_KEY).cloned();
                 let attr = sink.format_desc.as_ref().map(|sink_info| {
                     jsonbb::json!({
@@ -1237,10 +1230,7 @@ impl DdlController {
             }
             StreamingJob::Source(source) => {
                 // Register the source on the connector node.
-                self.source_manager
-                    .register_source(source)
-                    .await
-                    .map_err(CreateStreamingJobError::before_command)?;
+                self.source_manager.register_source(source).await?;
                 let connector_name = source
                     .get_with_properties()
                     .get(UPSTREAM_SOURCE_KEY)
@@ -1271,16 +1261,9 @@ impl DdlController {
                 false,
                 Some(backfill_orders),
             )
-            .await
-            .map_err(CreateStreamingJobError::before_command)?;
-
-        // create streaming jobs.
-        let version = self
-            .stream_manager
-            .create_streaming_job(stream_job_fragments, ctx, permit)
             .await?;
 
-        Ok(version)
+        Ok((stream_job_fragments, ctx))
     }
 
     /// `target_replace_info`: when dropping a sink into table, we need to replace the table.
