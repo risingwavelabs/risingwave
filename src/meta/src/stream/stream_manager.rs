@@ -38,8 +38,8 @@ use super::{
     UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
-    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    BarrierScheduler, Command, CommandIssueError, CreateStreamingJobCommandInfo,
+    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -90,14 +90,14 @@ pub struct CreateStreamingJobError {
 }
 
 impl CreateStreamingJobError {
-    fn before_command(error: MetaError) -> Self {
+    pub fn before_command(error: MetaError) -> Self {
         Self {
             error,
             should_abort_catalog: true,
         }
     }
 
-    fn after_command(error: MetaError) -> Self {
+    pub fn after_command(error: MetaError) -> Self {
         Self {
             error,
             should_abort_catalog: false,
@@ -110,12 +110,6 @@ impl CreateStreamingJobError {
 
     pub fn into_error(self) -> MetaError {
         self.error
-    }
-}
-
-impl From<MetaError> for CreateStreamingJobError {
-    fn from(error: MetaError) -> Self {
-        Self::before_command(error)
     }
 }
 
@@ -576,7 +570,8 @@ impl GlobalStreamManager {
         let init_split_assignment = self
             .source_manager
             .discover_splits(&stream_job_fragments)
-            .await?;
+            .await
+            .map_err(CreateStreamingJobError::before_command)?;
 
         let fragment_backfill_ordering =
             StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
@@ -630,9 +625,12 @@ impl GlobalStreamManager {
         };
 
         self.barrier_scheduler
-            .run_command(streaming_job.database_id(), command)
+            .run_command_with_issue_status(streaming_job.database_id(), command)
             .await
-            .map_err(CreateStreamingJobError::after_command)?;
+            .map_err(|err| match err {
+                CommandIssueError::BeforeIssue(err) => CreateStreamingJobError::before_command(err),
+                CommandIssueError::AfterIssue(err) => CreateStreamingJobError::after_command(err),
+            })?;
 
         tracing::debug!(?streaming_job, "first barrier collected for stream job");
 

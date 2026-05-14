@@ -58,7 +58,7 @@ pub use self::command::{
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
-pub use self::schedule::BarrierScheduler;
+pub use self::schedule::{BarrierScheduler, CommandIssueError};
 pub use self::trace::TracedEpoch;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::context::recovery::LoadedRecoveryContext;

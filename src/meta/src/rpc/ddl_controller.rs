@@ -1149,7 +1149,8 @@ impl DdlController {
         streaming_job_model: streaming_job::Model,
     ) -> Result<NotificationVersion, CreateStreamingJobError> {
         let mut fragment_graph =
-            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
+            StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)
+                .map_err(CreateStreamingJobError::before_command)?;
         streaming_job.set_info_from_graph(&fragment_graph);
 
         // create internal table catalogs and refill table id.
@@ -1161,7 +1162,8 @@ impl DdlController {
             .metadata_manager
             .catalog_controller
             .create_internal_table_catalog(&streaming_job, incomplete_internal_tables)
-            .await?;
+            .await
+            .map_err(CreateStreamingJobError::before_command)?;
         fragment_graph.refill_internal_table_ids(table_id_map);
 
         // create fragment and actor catalogs.
@@ -1174,18 +1176,23 @@ impl DdlController {
                 resource_type,
                 streaming_job_model,
             )
-            .await?;
+            .await
+            .map_err(CreateStreamingJobError::before_command)?;
 
         let streaming_job = &ctx.streaming_job;
 
         match streaming_job {
             StreamingJob::Table(None, table, TableJobType::SharedCdcSource) => {
                 self.validate_cdc_table(table, &stream_job_fragments)
-                    .await?;
+                    .await
+                    .map_err(CreateStreamingJobError::before_command)?;
             }
             StreamingJob::Table(Some(source), ..) => {
                 // Register the source on the connector node.
-                self.source_manager.register_source(source).await?;
+                self.source_manager
+                    .register_source(source)
+                    .await
+                    .map_err(CreateStreamingJobError::before_command)?;
                 let connector_name = source
                     .get_with_properties()
                     .get(UPSTREAM_SOURCE_KEY)
@@ -1206,10 +1213,13 @@ impl DdlController {
             }
             StreamingJob::Sink(sink) => {
                 if sink.auto_refresh_schema_from_table.is_some() {
-                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?
+                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)
+                        .map_err(CreateStreamingJobError::before_command)?
                 }
                 // Validate the sink on the connector node.
-                validate_sink(sink).await?;
+                validate_sink(sink)
+                    .await
+                    .map_err(CreateStreamingJobError::before_command)?;
                 let connector_name = sink.get_properties().get(UPSTREAM_SOURCE_KEY).cloned();
                 let attr = sink.format_desc.as_ref().map(|sink_info| {
                     jsonbb::json!({
@@ -1227,7 +1237,10 @@ impl DdlController {
             }
             StreamingJob::Source(source) => {
                 // Register the source on the connector node.
-                self.source_manager.register_source(source).await?;
+                self.source_manager
+                    .register_source(source)
+                    .await
+                    .map_err(CreateStreamingJobError::before_command)?;
                 let connector_name = source
                     .get_with_properties()
                     .get(UPSTREAM_SOURCE_KEY)
@@ -1258,7 +1271,8 @@ impl DdlController {
                 false,
                 Some(backfill_orders),
             )
-            .await?;
+            .await
+            .map_err(CreateStreamingJobError::before_command)?;
 
         // create streaming jobs.
         let version = self
