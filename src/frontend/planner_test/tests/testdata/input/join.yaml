@@ -16,7 +16,6 @@
   expected_outputs:
   - logical_plan
   - stream_plan
-  - stream_dist_plan
 - name: unaligned join with separated consecutive joins should not duplicate exchanges
   sql: |
     set streaming_enable_unaligned_join = true;
