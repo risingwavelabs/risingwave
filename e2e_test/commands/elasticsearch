@@ -8,7 +8,7 @@ shift $(( $# >= 2 ? 2 : $# ))
 
 data_args=()
 case "${method}" in
-  GET|HEAD|get|head)
+  GET|HEAD|DELETE|get|head|delete)
     ;;
   *)
     if [ -p /dev/stdin ]; then
