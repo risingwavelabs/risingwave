@@ -40,7 +40,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{HummockManager, commit_multi_var};
-use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
+use crate::hummock::metrics_utils::remove_compaction_group_metrics;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::table_write_throughput_statistic::{
     TableWriteThroughputStatistic, TableWriteThroughputStatisticManager,
@@ -423,7 +423,7 @@ impl HummockManager {
                     .levels
                     .len();
 
-                remove_compaction_group_in_sst_stat(
+                remove_compaction_group_metrics(
                     &self.metrics,
                     right_group_id,
                     right_group_max_level,
