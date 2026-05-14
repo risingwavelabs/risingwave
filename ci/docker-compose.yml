@@ -354,6 +354,13 @@ services:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
       - elasticsearch
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  sink-opensearch-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
       - opensearch
     volumes:
       - ..:/risingwave

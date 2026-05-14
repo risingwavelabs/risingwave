@@ -30,7 +30,9 @@ download_and_prepare_rw "$profile" source
 echo "--- starting risingwave cluster"
 cargo make ci-start ci-sink-test
 sleep 1
-export MONGODB_CONTAINER="$(docker ps --filter label=com.docker.compose.service=mongodb --format '{{.Names}}' | head -n 1)"
+if command -v docker >/dev/null 2>&1; then
+    export MONGODB_CONTAINER="$(docker ps --filter label=com.docker.compose.service=mongodb --format '{{.Names}}' | head -n 1)"
+fi
 
 # install the mongo shell
 wget --no-verbose http://archive.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_amd64.deb
