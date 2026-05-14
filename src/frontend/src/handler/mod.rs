@@ -1722,6 +1722,13 @@ fn check_ban_alter_table_operation_for_iceberg_engine_table(
                 table_name
             );
         }
+        AlterTableOperation::AlterWatermark { .. } => {
+            bail!(
+                "ALTER TABLE ALTER WATERMARK is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
         _ => {}
     }
     Ok(())
