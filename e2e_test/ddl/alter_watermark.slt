@@ -159,6 +159,69 @@ statement ok
 drop table t_func;
 
 # ----------------------------------------------------------------------
+# Loosening the watermark expression must not roll the watermark back.
+# ----------------------------------------------------------------------
+
+statement ok
+create table t_loose (k int primary key, ts int, watermark for ts as ts - 1 with ttl);
+
+statement ok
+create materialized view mv_loose as select * from t_loose;
+
+statement ok
+insert into t_loose values (1, 1000);
+
+# Below the watermark (999), filtered.
+statement ok
+insert into t_loose values (2, 500);
+
+query II rowsort
+select * from mv_loose;
+----
+1 1000
+
+statement ok
+alter table t_loose alter watermark for ts as ts - 10000 with ttl;
+
+# Drive the new expr: ts=2000 -> eval=-8000. A buggy actor that drops
+# the max() guard would replace wm with -8000 here.
+statement ok
+insert into t_loose values (3, 2000);
+
+# Probe: ts=998 must still be filtered. If wm had rolled back to -8000,
+# 998 would pass.
+statement ok
+insert into t_loose values (4, 998);
+
+query II rowsort
+select * from mv_loose;
+----
+1 1000
+3 2000
+
+# ts=11000 -> eval=1000 > 999, watermark advances to 1000.
+statement ok
+insert into t_loose values (5, 11000);
+
+# Probe: ts=999 was admissible at wm=999 and is filtered at wm=1000;
+# its absence pins wm >= 1000, proving the advance.
+statement ok
+insert into t_loose values (6, 999);
+
+query II rowsort
+select * from mv_loose;
+----
+1 1000
+3 2000
+5 11000
+
+statement ok
+drop materialized view mv_loose;
+
+statement ok
+drop table t_loose;
+
+# ----------------------------------------------------------------------
 # Function-wrapped expression.
 # ----------------------------------------------------------------------
 
