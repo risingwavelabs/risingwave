@@ -14,7 +14,7 @@
 
 use risingwave_common::session_config::parallelism::{
     ConfigBackfillParallelism, ConfigParallelism, DEFAULT_GLOBAL_STREAMING_PARALLELISM,
-    DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM,
+    DEFAULT_SINK_STREAMING_PARALLELISM, DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM,
 };
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
@@ -47,7 +47,11 @@ fn resolve_default_parallelism(
             ConfigParallelism::Default => DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM,
             other => resolve_global_parallelism(other),
         },
-        Some(GraphJobType::MaterializedView | GraphJobType::Sink | GraphJobType::Index) | None => {
+        Some(GraphJobType::Sink) => match global_streaming_parallelism {
+            ConfigParallelism::Default => DEFAULT_SINK_STREAMING_PARALLELISM,
+            other => resolve_global_parallelism(other),
+        },
+        Some(GraphJobType::MaterializedView | GraphJobType::Index) | None => {
             resolve_global_parallelism(global_streaming_parallelism)
         }
     }
@@ -304,6 +308,32 @@ mod tests {
             Some(AdaptiveParallelismStrategy::Bounded(
                 NonZeroUsize::new(5).unwrap()
             ))
+        );
+    }
+
+    #[test]
+    fn test_sink_default_uses_legacy_bound_only_with_default_global() {
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Sink),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Default
+            )
+            .adaptive_strategy,
+            DEFAULT_SINK_STREAMING_PARALLELISM.adaptive_strategy()
+        );
+    }
+
+    #[test]
+    fn test_sink_default_follows_explicit_global_strategy() {
+        assert_eq!(
+            derive_parallelism(
+                Some(GraphJobType::Sink),
+                Some(ConfigParallelism::Default),
+                ConfigParallelism::Ratio(0.5)
+            )
+            .adaptive_strategy,
+            Some(AdaptiveParallelismStrategy::Ratio(0.5))
         );
     }
 
