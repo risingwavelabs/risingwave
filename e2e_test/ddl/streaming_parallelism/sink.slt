@@ -29,7 +29,7 @@ with (
 query T
 select parallelism from rw_streaming_parallelism where name = 'sk_dd';
 ----
-bounded(64)
+bounded(8)
 
 statement ok
 drop sink sk_dd;
