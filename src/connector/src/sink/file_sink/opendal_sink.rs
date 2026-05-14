@@ -22,7 +22,7 @@ use anyhow::anyhow;
 use bytes::BytesMut;
 use chrono::format::{Item, StrftimeItems};
 use chrono::{DateTime, TimeZone, Utc};
-use futures::future::join_all;
+use futures::stream::{self, StreamExt};
 use opendal::{FuturesAsyncWriter, Operator, Writer as OpendalWriter};
 use parquet::arrow::AsyncArrowWriter;
 use parquet::basic::Compression;
@@ -55,6 +55,7 @@ use crate::with_options::WithOptions;
 
 pub const DEFAULT_ROLLOVER_SECONDS: usize = 10;
 pub const DEFAULT_MAX_ROW_COUNR: usize = 10240;
+const MAX_CONCURRENT_PARTITION_CLOSES: usize = 16;
 
 pub fn default_rollover_seconds() -> usize {
     DEFAULT_ROLLOVER_SECONDS
@@ -131,8 +132,7 @@ impl PartitionTemplate {
                     if !is_valid_placeholder_name(&name) {
                         return Err(SinkError::Config(anyhow!(
                             "invalid column placeholder `{name}` in path_partition_format: \
-                             placeholders must use ASCII identifier characters \
-                             (`[A-Za-z_][A-Za-z0-9_]*`)"
+                             placeholders must not contain braces"
                         )));
                     }
                     let index = rw_schema
@@ -261,12 +261,7 @@ fn validate_chrono_literal(literal: &str, original_format: &str) -> Result<()> {
 }
 
 fn is_valid_placeholder_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    (first.is_ascii_alphabetic() || first == '_')
-        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !name.is_empty() && !name.chars().any(|c| matches!(c, '{' | '}'))
 }
 
 /// Replace characters that are problematic in object paths (`/` and control bytes)
@@ -275,6 +270,7 @@ fn is_valid_placeholder_name(name: &str) -> bool {
 fn sanitize_partition_value(value: &str, out: &mut String) {
     for ch in value.chars() {
         match ch {
+            '%' => out.push_str("%25"),
             '/' => out.push_str("%2F"),
             '\\' => out.push_str("%5C"),
             '\0' => out.push_str("%00"),
@@ -554,34 +550,37 @@ impl OpenDalSinkWriter {
         let unique_writer_id = self.unique_writer_id;
         let executor_id = self.executor_id;
         let created_time = self.created_time;
-        let close_results = join_all(writers.into_iter().map(|(path, writer)| async move {
-            match writer {
-                FileWriterEnum::ParquetFileWriter(w) => {
-                    let bytes_written = w.bytes_written();
-                    // A parquet writer can hold a small row group entirely in
-                    // memory until close writes the footer and finalizes the
-                    // object, so active writers must be closed even when no
-                    // bytes have reached the underlying OpenDAL writer yet.
-                    w.close().await?;
-                    tracing::debug!(
-                        "writer {} (executor_id: {}, created_time: {}) finish write file at partition `{}`, bytes_written_before_close: {}",
-                        unique_writer_id,
-                        executor_id,
-                        created_time
-                            .duration_since(UNIX_EPOCH)
-                            .expect("Time went backwards")
-                            .as_secs(),
-                        path,
-                        bytes_written
-                    );
-                }
-                FileWriterEnum::FileWriter(mut w) => {
-                    w.close().await?;
-                }
-            };
-            Ok(())
-        }))
-        .await;
+        let close_results: Vec<Result<()>> = stream::iter(writers)
+            .map(|(path, writer)| async move {
+                match writer {
+                    FileWriterEnum::ParquetFileWriter(w) => {
+                        let bytes_written = w.bytes_written();
+                        // A parquet writer can hold a small row group entirely in
+                        // memory until close writes the footer and finalizes the
+                        // object, so active writers must be closed even when no
+                        // bytes have reached the underlying OpenDAL writer yet.
+                        w.close().await?;
+                        tracing::debug!(
+                            "writer {} (executor_id: {}, created_time: {}) finish write file at partition `{}`, bytes_written_before_close: {}",
+                            unique_writer_id,
+                            executor_id,
+                            created_time
+                                .duration_since(UNIX_EPOCH)
+                                .expect("Time went backwards")
+                                .as_secs(),
+                            path,
+                            bytes_written
+                        );
+                    }
+                    FileWriterEnum::FileWriter(mut w) => {
+                        w.close().await?;
+                    }
+                };
+                Ok(())
+            })
+            .buffer_unordered(MAX_CONCURRENT_PARTITION_CLOSES)
+            .collect()
+            .await;
 
         let mut first_error = None;
         for result in close_results {
@@ -851,11 +850,7 @@ impl OpenDalSinkWriter {
         // If the engine type is `Fs`, the base path is empty so the host filesystem
         // handles the path. For the Snowflake Sink the `write_path` may be empty.
         let object_name = {
-            let base_path = match self.engine_type {
-                EngineType::Fs => String::new(),
-                EngineType::Snowflake if self.write_path.is_empty() => String::new(),
-                _ => format!("{}/", self.write_path),
-            };
+            let base_path = self.base_object_path();
             let current_file_seq = self.file_seq;
             self.file_seq = self.file_seq.checked_add(1).expect("file seq overflow");
 
@@ -892,6 +887,18 @@ impl OpenDalSinkWriter {
             _ => FileWriterEnum::FileWriter(object_writer),
         };
         Ok(writer)
+    }
+
+    fn base_object_path(&self) -> String {
+        if matches!(self.engine_type, EngineType::Fs) {
+            return String::new();
+        }
+        let trimmed = self.write_path.trim_end_matches('/');
+        if trimmed.is_empty() {
+            String::new()
+        } else {
+            format!("{trimmed}/")
+        }
     }
 }
 
@@ -1066,9 +1073,29 @@ mod tests {
 
     #[test]
     fn template_rejects_invalid_placeholder_name() {
-        let err = PartitionTemplate::parse("symbol={symbol/}/", &schema()).unwrap_err();
+        let err = PartitionTemplate::parse("symbol={sym{bol}/", &schema()).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("invalid column placeholder"), "{msg}");
+    }
+
+    #[test]
+    fn template_accepts_quoted_identifier_style_column_names() {
+        let schema = Schema {
+            fields: vec![
+                Field::with_name(DataType::Varchar, "price-usd"),
+                Field::with_name(DataType::Varchar, "symbol名"),
+            ],
+        };
+        let template =
+            PartitionTemplate::parse("price={price-usd}/symbol={symbol名}/", &schema).unwrap();
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Utf8("100".into())),
+            Some(ScalarImpl::Utf8("BTC-USDT".into())),
+        ]);
+        assert_eq!(
+            template.render_with_row(ts(2021, 6, 25, 13), &row),
+            "price=100/symbol=BTC-USDT/"
+        );
     }
 
     #[test]
@@ -1104,6 +1131,29 @@ mod tests {
         assert_eq!(
             template.render_with_row(ts(2021, 6, 25, 13), &row),
             "symbol=a%2Fb/"
+        );
+    }
+
+    #[test]
+    fn template_sanitizes_percent_to_avoid_path_collisions() {
+        let template = PartitionTemplate::parse("symbol={symbol}/", &schema()).unwrap();
+        let escaped_slash = OwnedRow::new(vec![
+            Some(ScalarImpl::Utf8("ex".into())),
+            Some(ScalarImpl::Utf8("a/b".into())),
+            Some(ScalarImpl::Int64(0)),
+        ]);
+        let literal_percent = OwnedRow::new(vec![
+            Some(ScalarImpl::Utf8("ex".into())),
+            Some(ScalarImpl::Utf8("a%2Fb".into())),
+            Some(ScalarImpl::Int64(0)),
+        ]);
+        assert_eq!(
+            template.render_with_row(ts(2021, 6, 25, 13), &escaped_slash),
+            "symbol=a%2Fb/"
+        );
+        assert_eq!(
+            template.render_with_row(ts(2021, 6, 25, 13), &literal_percent),
+            "symbol=a%252Fb/"
         );
     }
 
@@ -1318,6 +1368,21 @@ mod tests {
             hour_writer.time_only_partition_path(ts(2021, 6, 25, 13)),
             "2021-06-25 13:00/"
         );
+    }
+
+    #[test]
+    fn non_fs_base_path_normalizes_trailing_slashes() {
+        let mut writer = test_writer_for_strategy(default_strategy());
+        writer.engine_type = EngineType::S3;
+
+        writer.write_path = "events/".to_owned();
+        assert_eq!(writer.base_object_path(), "events/");
+
+        writer.write_path = "events//".to_owned();
+        assert_eq!(writer.base_object_path(), "events/");
+
+        writer.write_path = String::new();
+        assert_eq!(writer.base_object_path(), "");
     }
 
     /// End-to-end test that wires up the real `OpenDalSinkWriter` with a local
