@@ -51,13 +51,11 @@ pub enum FilterKeyExtractorImpl {
 
 impl FilterKeyExtractorImpl {
     pub fn from_table(table_catalog: &Table) -> Self {
-        if table_catalog.disable_bloom_filter {
-            return FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor);
-        }
-
         let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
 
-        if read_prefix_len == 0 || read_prefix_len > table_catalog.get_pk().len() {
+        if read_prefix_len == 0 {
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)
+        } else if read_prefix_len > table_catalog.get_pk().len() {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)
@@ -849,14 +847,13 @@ mod tests {
             refreshable: false,
             vector_index_info: None,
             cdc_table_type: None,
-            disable_bloom_filter: false,
         }
     }
 
     #[test]
-    fn test_disable_bloom_filter_uses_dummy_extractor() {
+    fn test_zero_read_prefix_len_uses_dummy_extractor() {
         let mut prost_table = build_table_with_prefix_column_num(1);
-        prost_table.disable_bloom_filter = true;
+        prost_table.read_prefix_len_hint = 0;
 
         let extractor = FilterKeyExtractorImpl::from_table(&prost_table);
         let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];

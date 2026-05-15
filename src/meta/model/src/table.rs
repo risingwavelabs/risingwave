@@ -219,7 +219,6 @@ pub struct Model {
     pub refreshable: bool,
     pub vector_index_info: Option<VectorIndexInfo>,
     pub cdc_table_type: Option<CdcTableType>,
-    pub disable_bloom_filter: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -396,7 +395,6 @@ impl From<PbTable> for ActiveModel {
                     _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
             })),
-            disable_bloom_filter: Set(pb_table.disable_bloom_filter),
         }
     }
 }

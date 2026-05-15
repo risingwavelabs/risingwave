@@ -197,7 +197,6 @@ impl StreamVectorIndexWrite {
             refreshable: false,
             vector_index_info: Some(vector_index_info),
             cdc_table_type: None,
-            disable_bloom_filter: false,
         })
     }
 

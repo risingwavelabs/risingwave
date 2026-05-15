@@ -215,8 +215,6 @@ where
 
     prefix_hint_len: usize,
 
-    disable_bloom_filter: bool,
-
     value_indices: Option<Vec<usize>>,
 
     /// The index of the watermark column used for state cleaning in all columns.
@@ -843,7 +841,6 @@ where
             false => Some(input_value_indices),
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
-        let disable_bloom_filter = table_catalog.disable_bloom_filter;
 
         let row_serde = Arc::new(SD::new(
             Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
@@ -988,7 +985,6 @@ where
             pk_indices,
             distribution,
             prefix_hint_len,
-            disable_bloom_filter,
             value_indices,
             pending_watermark: None,
             committed_watermark,
@@ -1125,16 +1121,11 @@ where
 
     fn serialize_pk_and_get_prefix_hint(&self, pk: &impl Row) -> (TableKey<Bytes>, Option<Bytes>) {
         let serialized_pk = self.serialize_pk(&pk);
-        let prefix_hint = if should_calculate_prefix_hint(
-            self.disable_bloom_filter,
-            self.prefix_hint_len,
-            pk.len(),
-            false,
-        ) {
+        let prefix_hint = if should_calculate_prefix_hint(self.prefix_hint_len, pk.len(), false) {
             Some(serialized_pk.slice(VirtualNode::SIZE..))
         } else {
             #[cfg(debug_assertions)]
-            if !self.disable_bloom_filter && self.prefix_hint_len != 0 {
+            if self.prefix_hint_len != 0 {
                 warn!(
                     "prefix_hint_len is not equal to pk.len(), may not be able to utilize bloom filter"
                 );
@@ -2151,16 +2142,11 @@ where
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
-        if !self.disable_bloom_filter && self.prefix_hint_len != 0 {
+        if self.prefix_hint_len != 0 {
             debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
         }
         let prefix_hint = {
-            if should_calculate_prefix_hint(
-                self.disable_bloom_filter,
-                self.prefix_hint_len,
-                pk_prefix.len(),
-                true,
-            ) {
+            if should_calculate_prefix_hint(self.prefix_hint_len, pk_prefix.len(), true) {
                 let encoded_prefix_len = self
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;

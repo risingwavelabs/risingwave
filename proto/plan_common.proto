@@ -103,9 +103,6 @@ message StorageTableDesc {
   // supported, in which case a default value of 256 (or 1 for singleton) should be used.
   // Use `VnodeCountCompat::vnode_count` to access it.
   optional uint32 maybe_vnode_count = 12;
-
-  // Whether bloom filter is disabled for this table.
-  bool disable_bloom_filter = 13;
 }
 
 message VectorIndexReaderDesc {

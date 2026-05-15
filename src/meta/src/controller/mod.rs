@@ -303,7 +303,6 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .0
                 .cdc_table_type
                 .map(|cdc_type| PbCdcTableType::from(cdc_type) as i32),
-            disable_bloom_filter: value.0.disable_bloom_filter,
         }
     }
 }

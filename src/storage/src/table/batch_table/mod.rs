@@ -111,8 +111,6 @@ pub struct BatchTableInner<S: StateStore, SD: ValueRowSerde> {
     table_option: TableOption,
 
     read_prefix_len_hint: usize,
-
-    disable_bloom_filter: bool,
 }
 
 /// `BatchTable` will use [`EitherSerde`] as default so that we can support both versioned and
@@ -171,7 +169,6 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
         let versioned = table_desc.versioned;
-        let disable_bloom_filter = table_desc.disable_bloom_filter;
         let distribution = TableDistribution::new_from_storage_table_desc(vnodes, table_desc);
 
         Self::new_inner(
@@ -186,7 +183,6 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
             value_indices,
             prefix_hint_len,
             versioned,
-            disable_bloom_filter,
         )
     }
 
@@ -210,7 +206,6 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
             Default::default(),
             value_indices,
             0,
-            false,
             false,
         )
     }
@@ -248,7 +243,6 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
         value_indices: Vec<usize>,
         read_prefix_len_hint: usize,
         versioned: bool,
-        disable_bloom_filter: bool,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
@@ -333,7 +327,6 @@ impl<S: StateStore> BatchTableInner<S, EitherSerde> {
             distribution,
             table_option,
             read_prefix_len_hint,
-            disable_bloom_filter,
         }
     }
 }
@@ -396,16 +389,12 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         );
         assert!(pk.len() <= self.pk_indices.len());
 
-        let prefix_hint = if should_calculate_prefix_hint(
-            self.disable_bloom_filter,
-            self.read_prefix_len_hint,
-            pk.len(),
-            false,
-        ) {
-            Some(serialized_pk.slice(VirtualNode::SIZE..))
-        } else {
-            None
-        };
+        let prefix_hint =
+            if should_calculate_prefix_hint(self.read_prefix_len_hint, pk.len(), false) {
+                Some(serialized_pk.slice(VirtualNode::SIZE..))
+            } else {
+                None
+            };
 
         let read_options = ReadOptions {
             prefix_hint,
@@ -805,7 +794,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             .collect_vec();
 
         let prefix_hint = if should_calculate_prefix_hint(
-            self.disable_bloom_filter,
             self.read_prefix_len_hint,
             pk_prefix.len(),
             true,
