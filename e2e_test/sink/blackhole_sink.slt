@@ -69,6 +69,12 @@ system ok
 bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_sink_user -d "$SLT_DB" -Atc "SHOW SINKS FROM show_acl_sink;"); grep -q "hidden_sink" <<<"$out"'
 
 statement ok
+REVOKE USAGE ON SCHEMA show_acl_sink FROM show_acl_sink_user;
+
+system ok
+bash -c 'set -euo pipefail; out=$(PGPASSWORD=password psql -h "$SLT_HOST" -p "$SLT_PORT" -U show_acl_sink_user -d "$SLT_DB" -Atc "SHOW COLUMNS FROM show_acl_sink.hidden_sink;" 2>&1 || true); grep -q "permission denied for schema" <<<"$out"; ! grep -q "v1.*integer" <<<"$out"'
+
+statement ok
 DROP SINK show_acl_sink.hidden_sink;
 
 statement ok

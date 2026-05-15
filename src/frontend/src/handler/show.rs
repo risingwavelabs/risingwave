@@ -77,12 +77,20 @@ pub fn get_columns_from_sink(
 ) -> Result<Vec<ColumnCatalog>> {
     let binder = Binder::new_for_system(session);
     let sink = binder.bind_sink_by_name(sink_name)?;
-    session.check_privileges(&[ObjectCheckItem::new(
-        sink.sink_catalog.owner,
-        AclMode::Select,
-        sink.sink_catalog.name.clone(),
-        sink.sink_catalog.id,
-    )])?;
+
+    let catalog_reader = session.env().catalog_reader().read_guard();
+    let schema = catalog_reader
+        .get_schema_by_id(sink.sink_catalog.database_id, sink.sink_catalog.schema_id)?;
+    session.check_privileges(&[
+        ObjectCheckItem::new(schema.owner, AclMode::Usage, schema.name(), schema.id()),
+        ObjectCheckItem::new(
+            sink.sink_catalog.owner,
+            AclMode::Select,
+            sink.sink_catalog.name.clone(),
+            sink.sink_catalog.id,
+        ),
+    ])?;
+
     Ok(sink.sink_catalog.full_columns().to_vec())
 }
 
