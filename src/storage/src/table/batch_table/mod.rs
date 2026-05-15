@@ -77,6 +77,16 @@ pub struct PkScanRange {
 }
 
 impl PkScanRange {
+    fn pk_type_at(pk_types: &[DataType], index: usize) -> StorageResult<&DataType> {
+        pk_types.get(index).ok_or_else(|| {
+            StorageError::from(memcomparable::Error::Message(format!(
+                "invalid scan range: primary key index {} exceeds primary key length {}",
+                index,
+                pk_types.len()
+            )))
+        })
+    }
+
     /// Decode a scan range from the protobuf representation and the primary-key column types.
     pub fn new(scan_range: PbScanRange, pk_types: Vec<DataType>) -> StorageResult<Self> {
         let mut index = 0;
@@ -84,10 +94,10 @@ impl PkScanRange {
             scan_range
                 .eq_conds
                 .iter()
-                .map(|v| {
-                    let ty = pk_types.get(index).unwrap();
+                .map(|v| -> StorageResult<_> {
+                    let ty = Self::pk_type_at(&pk_types, index)?;
                     index += 1;
-                    deserialize_datum(v.as_slice(), ty)
+                    Ok(deserialize_datum(v.as_slice(), ty)?)
                 })
                 .try_collect()?,
         );
@@ -104,10 +114,10 @@ impl PkScanRange {
                     bound
                         .value
                         .iter()
-                        .map(|v| {
-                            let ty = pk_types.get(index).unwrap();
+                        .map(|v| -> StorageResult<_> {
+                            let ty = Self::pk_type_at(&pk_types, index)?;
                             index += 1;
-                            deserialize_datum(v.as_slice(), ty)
+                            Ok(deserialize_datum(v.as_slice(), ty)?)
                         })
                         .try_collect()?,
                 );
@@ -177,14 +187,16 @@ impl PkScanRange {
     pub fn convert_to_range_bounds<S: StateStore, SD: ValueRowSerde>(
         self,
         table: &BatchTableInner<S, SD>,
-    ) -> impl RangeBounds<OwnedRow> {
+    ) -> PkRangeBounds {
         let PkScanRange {
             pk_prefix,
             range_bounds,
         } = self;
 
         // The len of a valid pk_prefix should be less than or equal pk's num.
-        let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
+        let Some(order_type) = table.pk_serializer().get_order_types().get(pk_prefix.len()) else {
+            return range_bounds;
+        };
         let (start_bound, end_bound) = if order_type.is_ascending() {
             (range_bounds.0, range_bounds.1)
         } else {
@@ -219,6 +231,29 @@ impl PkScanRange {
             order_type.nulls_are_last(),
         );
         (start_bound, end_bound)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pk_scan_range_rejects_out_of_bounds_pk_index() {
+        let scan_range = PbScanRange {
+            eq_conds: vec![vec![]],
+            ..Default::default()
+        };
+        assert!(PkScanRange::new(scan_range, vec![]).is_err());
+
+        let scan_range = PbScanRange {
+            lower_bound: Some(scan_range::Bound {
+                value: vec![vec![]],
+                inclusive: false,
+            }),
+            ..Default::default()
+        };
+        assert!(PkScanRange::new(scan_range, vec![]).is_err());
     }
 }
 
@@ -1135,43 +1170,19 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             "rebuild_interval should be positive"
         );
 
-        // For DESC PK columns, the planner's lower/upper bounds are in logical (ascending)
-        // order, but storage key ordering is reversed. Swap bounds so that the serialized
-        // start_key < end_key in storage key space, matching what batch's
-        // `convert_to_range_bounds` does.
-        //
-        // If the equality prefix already covers the full PK, there is no "next column" whose
-        // order type can be consulted. In that case, keep the bounds as-is and let
-        // `serialize_pk_bound` interpret them against the full prefix directly.
-        let next_col_idx = pk_prefix.len();
-        let (logical_start, logical_end) =
-            if let Some(order_type) = self.pk_serializer.get_order_types().get(next_col_idx) {
-                if order_type.is_ascending() {
-                    (&range_bounds.0, &range_bounds.1)
-                } else {
-                    (&range_bounds.1, &range_bounds.0)
-                }
-            } else {
-                (&range_bounds.0, &range_bounds.1)
-            };
-
-        let range_start = match logical_start {
-            Included(row) => Included(row),
-            Excluded(row) => Excluded(row),
-            Unbounded => Unbounded,
-        };
-        let range_end = match logical_end {
-            Included(row) => Included(row),
-            Excluded(row) => Excluded(row),
-            Unbounded => Unbounded,
-        };
+        let normalized_range_bounds = PkScanRange {
+            pk_prefix: pk_prefix.clone(),
+            range_bounds: range_bounds.clone(),
+        }
+        .convert_to_range_bounds(self);
 
         let start_key = if let Some(start_pk) = start_pk {
             self.start_bound_from_pk(Some(start_pk))
         } else {
-            self.serialize_pk_bound(pk_prefix, range_start, true)
+            self.serialize_pk_bound(pk_prefix, normalized_range_bounds.start_bound(), true)
         };
-        let end_key = self.serialize_pk_bound(pk_prefix, range_end, false);
+        let end_key =
+            self.serialize_pk_bound(pk_prefix, normalized_range_bounds.end_bound(), false);
 
         let prefix_hint =
             if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint <= pk_prefix.len() {

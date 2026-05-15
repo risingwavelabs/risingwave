@@ -646,6 +646,7 @@ impl ToStream for LogicalScan {
                         ctx.backfill_type().to_stream_scan_type(),
                         Some(scan_ranges.into_iter().next().unwrap()),
                     );
+                    LogicalFilter::check_stream_predicate(&predicate)?;
 
                     let mut plan: crate::optimizer::plan_node::StreamPlanRef =
                         StreamFilter::new(generic::Filter::new(predicate, scan.into())).into();

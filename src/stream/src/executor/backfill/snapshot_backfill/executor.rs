@@ -16,7 +16,6 @@ use std::cmp::min;
 use std::collections::VecDeque;
 use std::future::{Future, pending, ready};
 use std::mem::take;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -942,11 +941,7 @@ async fn make_snapshot_stream(
     chunk_size: usize,
     snapshot_rebuild_interval: Duration,
     pk_scan_range: &PkScanRange,
-) -> StreamExecutorResult<
-    VnodeStream<Pin<Box<dyn Stream<Item = StreamExecutorResult<ChangeLogRow>> + Send>>>,
-> {
-    type BoxedChangeLogRowStream =
-        Pin<Box<dyn Stream<Item = StreamExecutorResult<ChangeLogRow>> + Send>>;
+) -> StreamExecutorResult<VnodeStream<impl super::vnode_stream::ChangeLogRowStream>> {
     let data_types = upstream_table.schema().data_types();
     let vnode_streams = try_join_all(backfill_state.latest_progress().filter_map(
         move |(vnode, progress)| {
@@ -963,25 +958,20 @@ async fn make_snapshot_stream(
                 }) => None,
             };
             start_pk.map(|(start_pk, row_count)| {
-                async move {
-                    let stream: BoxedChangeLogRowStream = Box::pin(
-                        upstream_table
-                            .batch_iter_vnode_with_pk_range(
-                                HummockReadEpoch::Committed(snapshot_epoch),
-                                start_pk,
-                                &pk_scan_range.pk_prefix,
-                                &pk_scan_range.range_bounds,
-                                vnode,
-                                PrefetchOptions::prefetch_for_large_range_scan(),
-                                snapshot_rebuild_interval,
-                            )
-                            .await?
-                            .map_ok(ChangeLogRow::Insert)
-                            .map_err(Into::into),
-                    );
-                    Ok::<_, StreamExecutorError>((vnode, stream, row_count))
-                }
-                .boxed()
+                upstream_table
+                    .batch_iter_vnode_with_pk_range(
+                        HummockReadEpoch::Committed(snapshot_epoch),
+                        start_pk,
+                        &pk_scan_range.pk_prefix,
+                        &pk_scan_range.range_bounds,
+                        vnode,
+                        PrefetchOptions::prefetch_for_large_range_scan(),
+                        snapshot_rebuild_interval,
+                    )
+                    .map_ok(move |stream| {
+                        let stream = stream.map_ok(ChangeLogRow::Insert).map_err(Into::into);
+                        (vnode, stream, row_count)
+                    })
             })
         },
     ))

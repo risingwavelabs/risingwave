@@ -138,6 +138,12 @@
     select * from t where a = 1 and b > 5;
   expected_outputs:
     - stream_plan
+- name: snapshot backfill scan range rejects invalid now predicate
+  sql: |
+    create table t(a int, ts timestamp with time zone, primary key(a));
+    select * from t where a = 1 and (ts >= now() or ts <= now());
+  expected_outputs:
+    - stream_error
 - name: |
     Test backfill order, auto, stream share cycle.
     For auto derived backfill order with cycle, it should not return any order plan, and return a NOTICE

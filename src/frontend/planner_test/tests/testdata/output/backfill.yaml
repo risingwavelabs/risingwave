@@ -270,6 +270,11 @@
     StreamMaterialize { columns: [a, b, c], stream_key: [a, b], pk_columns: [a, b], pk_conflict: NoCheck }
     └─StreamFilter { predicate: (t.a = 1:Int32) AND (t.b > 5:Int32) }
       └─StreamTableScan { table: t, columns: [t.a, t.b, t.c], pk_scan_range: a = Some(Int32(1)) AND b > Some(Int32(5)), stream_scan_type: SnapshotBackfill, stream_key: [t.a, t.b], pk: [a, b], dist: UpstreamHashShard(t.a, t.b) }
+- name: snapshot backfill scan range rejects invalid now predicate
+  sql: |
+    create table t(a int, ts timestamp with time zone, primary key(a));
+    select * from t where a = 1 and (ts >= now() or ts <= now());
+  stream_error: Conditions containing now must be in the form of `input_expr cmp now_expr` or `now_expr cmp input_expr`, where `input_expr` references a column and contains no `now()`, and `now_expr` is a non-decreasing expression contains `now()`.
 - name: |
     Test backfill order, auto, stream share cycle.
     For auto derived backfill order with cycle, it should not return any order plan, and return a NOTICE
