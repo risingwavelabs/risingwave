@@ -1,0 +1,20 @@
+- sql: |
+    create table hasura_t (id int primary key, v int);
+    select pg_catalog.pg_relation_is_updatable('hasura_t'::regclass, true);
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create table hasura_t (id int primary key, v int);
+    create view hasura_v as select * from hasura_t;
+    select ((pg_catalog.pg_relation_is_updatable('hasura_v'::regclass, true) & 4) = 4) as is_updatable,
+           ((pg_catalog.pg_relation_is_updatable('hasura_v'::regclass, true) & 8) = 8) as is_insertable,
+           ((pg_catalog.pg_relation_is_updatable('hasura_v'::regclass, true) & 16) = 16) as is_deletable;
+  expected_outputs:
+  - batch_plan
+- sql: |
+    create source hasura_s (id int)
+    with (connector = 'kafka', topic = 'hasura', properties.bootstrap.server = 'localhost:9092', scan.startup.mode = 'earliest')
+    format plain encode json;
+    select pg_catalog.pg_relation_is_updatable('hasura_s'::regclass, true);
+  expected_outputs:
+  - batch_plan

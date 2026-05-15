@@ -398,6 +398,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::RwClusterId
             | Type::RwFragmentVnodes
             | Type::RwActorVnodes
+            | Type::PgRelationIsUpdatable
             | Type::PgTableIsVisible
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
