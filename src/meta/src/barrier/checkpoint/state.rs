@@ -23,7 +23,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{DispatcherType, WorkerId, streaming_job};
@@ -268,7 +267,6 @@ fn render_actors(
     streaming_job_model: &streaming_job::Model,
     actor_id_counter: &AtomicU32,
     worker_map: &HashMap<WorkerId, WorkerNode>,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     ensembles: &[NoShuffleEnsemble],
     database_resource_group: &str,
 ) -> MetaResult<RenderResult> {
@@ -330,7 +328,6 @@ fn render_actors(
             EnsembleActorTemplate::render_new(
                 streaming_job_model,
                 worker_map,
-                adaptive_parallelism_strategy,
                 None,
                 database_resource_group.to_owned(),
                 distribution_type,
@@ -413,7 +410,6 @@ impl DatabaseCheckpointControl {
         barrier_info: BarrierInfo,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
-        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<ApplyCommandInfo> {
         debug_assert!(
@@ -512,7 +508,6 @@ impl DatabaseCheckpointControl {
                         .env
                         .actor_id_generator(),
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     &ensembles,
                     &info.database_resource_group,
                 )?;
@@ -645,7 +640,6 @@ impl DatabaseCheckpointControl {
                         .env
                         .actor_id_generator(),
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     &ensembles,
                     &info.database_resource_group,
                 )?;
@@ -793,27 +787,19 @@ impl DatabaseCheckpointControl {
 
             Some(Command::Throttle { jobs, config }) => {
                 let mutation = Some(Command::throttle_to_mutation(&config));
+                for (fragment_id, throttle_config) in &config {
+                    self.database_info
+                        .pre_apply_throttle(*fragment_id, throttle_config);
+                }
                 throttle_for_creating_jobs = Some((jobs, config));
                 self.apply_simple_command(mutation, "Throttle")
             }
 
             Some(Command::DropStreamingJobs {
                 streaming_job_ids,
-                unregistered_fragment_ids,
+                unregistered_state_table_ids: _,
                 dropped_sink_fragment_by_targets,
-                ..
             }) => {
-                let actors = self
-                    .database_info
-                    .fragment_infos()
-                    .filter(|fragment| {
-                        self.database_info
-                            .job_id_by_fragment(fragment.fragment_id)
-                            .is_some_and(|job_id| streaming_job_ids.contains(&job_id))
-                    })
-                    .flat_map(|fragment| fragment.actors.keys().copied())
-                    .collect::<Vec<_>>();
-
                 // pre_apply: drop node upstream for sink targets
                 for (target_fragment, sink_fragments) in &dropped_sink_fragment_by_targets {
                     self.database_info
@@ -822,9 +808,20 @@ impl DatabaseCheckpointControl {
 
                 let (table_ids, node_actors) = self.collect_base_info();
 
-                // post_apply: remove fragments
-                self.database_info
-                    .post_apply_remove_fragments(unregistered_fragment_ids.iter().cloned());
+                let mut actors = Vec::new();
+                for job_id in streaming_job_ids {
+                    let Some(job) = self.database_info.post_apply_remove_job(job_id) else {
+                        warn!(
+                            %job_id,
+                            "skip drop payload for streaming job that has already been removed from barrier worker"
+                        );
+                        continue;
+                    };
+
+                    for fragment in job.fragment_infos.values() {
+                        actors.extend(fragment.actors.keys().copied());
+                    }
+                }
 
                 let mutation = Some(Command::drop_streaming_jobs_to_mutation(
                     &actors,
@@ -947,7 +944,6 @@ impl DatabaseCheckpointControl {
                         .env
                         .actor_id_generator(),
                     worker_nodes,
-                    adaptive_parallelism_strategy,
                     &ensembles,
                     &plan.database_resource_group,
                 )?;

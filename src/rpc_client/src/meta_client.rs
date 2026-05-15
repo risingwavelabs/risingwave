@@ -38,6 +38,7 @@ use risingwave_common::id::{
     ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, UserId, ViewId, WorkerId,
 };
 use risingwave_common::monitor::EndpointExt;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -657,13 +658,15 @@ impl MetaClient {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterParallelismRequest {
             table_id: job_id,
             parallelism: Some(parallelism),
             deferred,
-            adaptive_parallelism_strategy: None,
+            adaptive_parallelism_strategy: adaptive_parallelism_strategy
+                .map(|strategy| strategy.to_string()),
         };
 
         self.inner.alter_parallelism(request).await?;
@@ -674,13 +677,15 @@ impl MetaClient {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterBackfillParallelismRequest {
             table_id: job_id,
             parallelism,
             deferred,
-            adaptive_parallelism_strategy: None,
+            adaptive_parallelism_strategy: adaptive_parallelism_strategy
+                .map(|strategy| strategy.to_string()),
         };
 
         self.inner.alter_backfill_parallelism(request).await?;

@@ -95,7 +95,7 @@ impl<S> BackfillExecutor<S>
 where
     S: StateStore,
 {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         upstream_table: BatchTable<S>,
         upstream: Executor,

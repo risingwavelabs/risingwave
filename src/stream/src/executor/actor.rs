@@ -106,7 +106,6 @@ impl ActorContext {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn create(
         stream_actor: &BuildActorInfo,
         fragment_id: FragmentId,

@@ -82,7 +82,7 @@ impl EnforceSecret for ClickHouseCommon {
     };
 }
 
-#[allow(clippy::enum_variant_names)]
+
 #[derive(Debug)]
 enum ClickHouseEngine {
     MergeTree,

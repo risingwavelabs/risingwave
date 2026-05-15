@@ -1,0 +1,464 @@
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+set streaming_parallelism to 1;
+
+statement ok
+set streaming_parallelism_for_table to 1;
+
+statement ok
+create table mv_base_t (v int);
+
+# Case: global=default, streaming_parallelism_for_materialized_view=default
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_materialized_view to default;
+
+statement ok
+create materialized view mv_dd as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_dd';
+----
+bounded(64)
+
+statement ok
+drop materialized view mv_dd;
+
+# Case: global=default, streaming_parallelism_for_materialized_view=6
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_materialized_view to 6;
+
+statement ok
+create materialized view mv_df as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_df';
+----
+6
+
+statement ok
+drop materialized view mv_df;
+
+# Case: global=default, streaming_parallelism_for_materialized_view='ratio(0.5)'
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'ratio(0.5)';
+
+statement ok
+create materialized view mv_dr as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_dr';
+----
+ratio(0.5)
+
+statement ok
+drop materialized view mv_dr;
+
+# Case: global=default, streaming_parallelism_for_materialized_view='bounded(16)'
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'bounded(16)';
+
+statement ok
+create materialized view mv_db as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_db';
+----
+bounded(16)
+
+statement ok
+drop materialized view mv_db;
+
+# Case: global=default, streaming_parallelism_for_materialized_view=adaptive
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_materialized_view to adaptive;
+
+statement ok
+create materialized view mv_da as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_da';
+----
+adaptive
+
+statement ok
+drop materialized view mv_da;
+
+# Case: global=8, streaming_parallelism_for_materialized_view=default
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_materialized_view to default;
+
+statement ok
+create materialized view mv_fd as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_fd';
+----
+8
+
+statement ok
+drop materialized view mv_fd;
+
+# Case: global=8, streaming_parallelism_for_materialized_view=6
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_materialized_view to 6;
+
+statement ok
+create materialized view mv_ff as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_ff';
+----
+6
+
+statement ok
+drop materialized view mv_ff;
+
+# Case: global=8, streaming_parallelism_for_materialized_view='ratio(0.5)'
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'ratio(0.5)';
+
+statement ok
+create materialized view mv_fr as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_fr';
+----
+ratio(0.5)
+
+statement ok
+drop materialized view mv_fr;
+
+# Case: global=8, streaming_parallelism_for_materialized_view='bounded(16)'
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'bounded(16)';
+
+statement ok
+create materialized view mv_fb as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_fb';
+----
+bounded(16)
+
+statement ok
+drop materialized view mv_fb;
+
+# Case: global=8, streaming_parallelism_for_materialized_view=adaptive
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_materialized_view to adaptive;
+
+statement ok
+create materialized view mv_fa as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_fa';
+----
+adaptive
+
+statement ok
+drop materialized view mv_fa;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_materialized_view=default
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to default;
+
+statement ok
+create materialized view mv_rd as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_rd';
+----
+ratio(0.5)
+
+statement ok
+drop materialized view mv_rd;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_materialized_view=6
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to 6;
+
+statement ok
+create materialized view mv_rf as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_rf';
+----
+6
+
+statement ok
+drop materialized view mv_rf;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_materialized_view='ratio(0.5)'
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'ratio(0.5)';
+
+statement ok
+create materialized view mv_rr as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_rr';
+----
+ratio(0.5)
+
+statement ok
+drop materialized view mv_rr;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_materialized_view='bounded(16)'
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'bounded(16)';
+
+statement ok
+create materialized view mv_rb as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_rb';
+----
+bounded(16)
+
+statement ok
+drop materialized view mv_rb;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_materialized_view=adaptive
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to adaptive;
+
+statement ok
+create materialized view mv_ra as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_ra';
+----
+adaptive
+
+statement ok
+drop materialized view mv_ra;
+
+# Case: global='bounded(32)', streaming_parallelism_for_materialized_view=default
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to default;
+
+statement ok
+create materialized view mv_bd as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_bd';
+----
+bounded(32)
+
+statement ok
+drop materialized view mv_bd;
+
+# Case: global='bounded(32)', streaming_parallelism_for_materialized_view=6
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to 6;
+
+statement ok
+create materialized view mv_bf as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_bf';
+----
+6
+
+statement ok
+drop materialized view mv_bf;
+
+# Case: global='bounded(32)', streaming_parallelism_for_materialized_view='ratio(0.5)'
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'ratio(0.5)';
+
+statement ok
+create materialized view mv_br as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_br';
+----
+ratio(0.5)
+
+statement ok
+drop materialized view mv_br;
+
+# Case: global='bounded(32)', streaming_parallelism_for_materialized_view='bounded(16)'
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'bounded(16)';
+
+statement ok
+create materialized view mv_bb as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_bb';
+----
+bounded(16)
+
+statement ok
+drop materialized view mv_bb;
+
+# Case: global='bounded(32)', streaming_parallelism_for_materialized_view=adaptive
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_materialized_view to adaptive;
+
+statement ok
+create materialized view mv_ba as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_ba';
+----
+adaptive
+
+statement ok
+drop materialized view mv_ba;
+
+# Case: global=adaptive, streaming_parallelism_for_materialized_view=default
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_materialized_view to default;
+
+statement ok
+create materialized view mv_ad as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_ad';
+----
+adaptive
+
+statement ok
+drop materialized view mv_ad;
+
+# Case: global=adaptive, streaming_parallelism_for_materialized_view=6
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_materialized_view to 6;
+
+statement ok
+create materialized view mv_af as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_af';
+----
+6
+
+statement ok
+drop materialized view mv_af;
+
+# Case: global=adaptive, streaming_parallelism_for_materialized_view='ratio(0.5)'
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'ratio(0.5)';
+
+statement ok
+create materialized view mv_ar as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_ar';
+----
+ratio(0.5)
+
+statement ok
+drop materialized view mv_ar;
+
+# Case: global=adaptive, streaming_parallelism_for_materialized_view='bounded(16)'
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_materialized_view to 'bounded(16)';
+
+statement ok
+create materialized view mv_ab as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_ab';
+----
+bounded(16)
+
+statement ok
+drop materialized view mv_ab;
+
+# Case: global=adaptive, streaming_parallelism_for_materialized_view=adaptive
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_materialized_view to adaptive;
+
+statement ok
+create materialized view mv_aa as select * from mv_base_t;
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'mv_aa';
+----
+adaptive
+
+statement ok
+drop materialized view mv_aa;
+
+statement ok
+drop table mv_base_t;

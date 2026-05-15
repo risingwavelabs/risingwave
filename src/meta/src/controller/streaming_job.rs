@@ -26,6 +26,7 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
@@ -139,9 +140,6 @@ impl ReplaceOriginalJobInfo {
             // We don't expect replacing a job with a different config override.
             // Thus always use the original config override.
             config_override: self.config_override.clone().unwrap_or_default().into(),
-            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
-                parse_strategy(s).expect("strategy should be validated before persisting")
-            }),
         }
     }
 
@@ -169,7 +167,7 @@ impl From<streaming_job::Model> for ReplaceOriginalJobInfo {
 }
 
 impl CatalogController {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
@@ -178,10 +176,12 @@ impl CatalogController {
         schema_id: Option<SchemaId>,
         create_type: PbCreateType,
         ctx: StreamContext,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: Option<StreamingParallelism>,
+        backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
     ) -> MetaResult<streaming_job::Model> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
@@ -196,12 +196,14 @@ impl CatalogController {
             create_type: create_type.into(),
             timezone: ctx.timezone,
             config_override: Some(ctx.config_override.to_string()),
-            adaptive_parallelism_strategy: ctx
-                .adaptive_parallelism_strategy
+            adaptive_parallelism_strategy: adaptive_parallelism_strategy
                 .as_ref()
                 .map(ToString::to_string),
             parallelism: streaming_parallelism,
             backfill_parallelism,
+            backfill_adaptive_parallelism_strategy: backfill_adaptive_parallelism_strategy
+                .as_ref()
+                .map(ToString::to_string),
             backfill_orders: None,
             max_parallelism: max_parallelism as _,
             specific_resource_group,
@@ -228,6 +230,8 @@ impl CatalogController {
         mut dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: &Option<Parallelism>,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+        backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
     ) -> MetaResult<streaming_job::Model> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -240,7 +244,12 @@ impl CatalogController {
         };
         let backfill_parallelism = backfill_parallelism
             .as_ref()
-            .map(|p| StreamingParallelism::Fixed(p.parallelism as _));
+            .map(|p| StreamingParallelism::Fixed(p.parallelism as _))
+            .or_else(|| {
+                backfill_adaptive_parallelism_strategy
+                    .as_ref()
+                    .map(|_| StreamingParallelism::Adaptive)
+            });
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
@@ -295,10 +304,12 @@ impl CatalogController {
                     Some(table.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
                 )
                 .await?;
                 table.id = streaming_job_model.job_id.as_mv_table_id();
@@ -326,10 +337,12 @@ impl CatalogController {
                     Some(sink.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
                 )
                 .await?;
                 sink.id = streaming_job_model.job_id.as_sink_id();
@@ -346,10 +359,12 @@ impl CatalogController {
                     Some(table.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
                 )
                 .await?;
                 let job_id = streaming_job_model.job_id;
@@ -408,10 +423,12 @@ impl CatalogController {
                     Some(index.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -443,10 +460,12 @@ impl CatalogController {
                     Some(src.schema_id),
                     create_type,
                     ctx.clone(),
+                    adaptive_parallelism_strategy,
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
                     backfill_parallelism.clone(),
+                    backfill_adaptive_parallelism_strategy,
                 )
                 .await?;
                 src.id = streaming_job_model.job_id.as_shared_source_id();
@@ -740,7 +759,6 @@ impl CatalogController {
         Ok(Command::DropStreamingJobs {
             streaming_job_ids: HashSet::from_iter([table_fragments.stream_job_id()]),
             unregistered_state_table_ids: table_fragments.all_table_ids().collect(),
-            unregistered_fragment_ids: table_fragments.fragment_ids().collect(),
             dropped_sink_fragment_by_targets: dropped_sink_fragment_with_target
                 .into_iter()
                 .map(|(sink, target)| (target as _, vec![sink as _]))
@@ -1058,6 +1076,10 @@ impl CatalogController {
 
         let parallelism = original_job.resolved_parallelism(specified_parallelism);
         let ctx = original_job.stream_context(ctx);
+        let adaptive_parallelism_strategy = original_job
+            .adaptive_parallelism_strategy
+            .as_deref()
+            .map(|s| parse_strategy(s).expect("strategy should be validated before persisting"));
         let resource_type = original_job.resource_type();
 
         // 4. create streaming object for new replace table.
@@ -1069,12 +1091,14 @@ impl CatalogController {
             Some(streaming_job.schema_id() as _),
             streaming_job.create_type(),
             ctx,
+            adaptive_parallelism_strategy,
             parallelism,
             original_job.max_parallelism as _,
             resource_type,
             // `backfill_parallelism` is intentionally NOT inherited from the original job.
             // Replace has no "backfill finish -> restore parallelism" phase, so inheriting it
             // would render actors at the backfill parallelism and never recover to steady-state.
+            None,
             None,
         )
         .await?;

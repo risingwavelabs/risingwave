@@ -33,7 +33,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::SINGLETON_VNODE;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
-use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indices};
+use crate::common::table::test_utils::{
+    gen_pbtable, gen_pbtable_with_dist_key, gen_pbtable_with_value_indices,
+};
 
 #[tokio::test]
 async fn test_state_table_update_insert() {
@@ -1826,6 +1828,77 @@ async fn test_non_pk_prefix_watermark_read() {
             .unwrap();
         assert_eq!(r3, item_3);
     }
+}
+
+#[tokio::test]
+async fn test_committed_watermark_descending_direction() {
+    const TEST_TABLE_ID: TableId = TableId::new(233);
+    let mut table = gen_pbtable_with_dist_key(
+        TEST_TABLE_ID,
+        vec![
+            ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        ],
+        vec![OrderType::descending()],
+        vec![0],
+        1,
+        vec![0],
+    );
+    table.watermark_indices = vec![0];
+    table.clean_watermark_indices = vec![0];
+
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table(table.clone()).await;
+
+    let vnode_count = VirtualNode::COUNT_FOR_TEST;
+    let half = vnode_count / 2;
+    let bitmap_of = |range: std::ops::Range<usize>| {
+        let mut b = BitmapBuilder::zeroed(vnode_count);
+        range.for_each(|i| b.set(i, true));
+        Arc::new(b.finish())
+    };
+
+    let mut state_table_low = StateTable::from_table_catalog_inconsistent_op(
+        &table,
+        test_env.storage.clone(),
+        Some(bitmap_of(0..half)),
+    )
+    .await;
+    let mut state_table_high = StateTable::from_table_catalog_inconsistent_op(
+        &table,
+        test_env.storage.clone(),
+        Some(bitmap_of(half..vnode_count)),
+    )
+    .await;
+
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table_low.init_epoch(epoch).await.unwrap();
+    state_table_high.init_epoch(epoch).await.unwrap();
+
+    state_table_low.update_watermark(ScalarImpl::Int32(100));
+    state_table_high.update_watermark(ScalarImpl::Int32(200));
+
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table_low.commit_for_test(epoch).await.unwrap();
+    state_table_high.commit_for_test(epoch).await.unwrap();
+    test_env.commit_epoch(epoch.prev).await;
+
+    let state_table = StateTable::from_table_catalog_inconsistent_op(
+        &table,
+        test_env.storage.clone(),
+        Some(bitmap_of(0..vnode_count)),
+    )
+    .await;
+    assert_eq!(
+        state_table.get_committed_watermark(),
+        Some(&ScalarImpl::Int32(200)),
+    );
 }
 
 #[tokio::test]

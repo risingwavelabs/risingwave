@@ -53,7 +53,6 @@ use crate::vector::{MeasureDistanceBuilder, NearestBuilder};
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
 
-#[allow(clippy::type_complexity)]
 pub trait RangeKv: Clone + Send + Sync + 'static {
     fn range(
         &self,
@@ -434,7 +433,6 @@ mod batched_iter {
     }
 
     impl<R: RangeKv> Iter<R> {
-        #[allow(clippy::type_complexity)]
         pub fn next(&mut self) -> StorageResult<Option<(BytesFullKey, Option<Bytes>)>> {
             match self.current.next() {
                 Some((key, value)) => Ok(Some((key, value))),
@@ -471,7 +469,7 @@ mod batched_iter {
             let num_to_bytes = |k: i32| Bytes::from(format!("{:06}", k).as_bytes().to_vec());
             let num_to_full_key =
                 |k: i32| FullKey::new(TableId::default(), TableKey(num_to_bytes(k)), 0);
-            #[allow(clippy::mutable_key_type)]
+
             map.ingest_batch(key_range.clone().map(|k| {
                 let key = num_to_full_key(k);
                 let b = key.user_key.table_key.0.clone();

@@ -20,9 +20,7 @@ use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
-use risingwave_pb::stream_plan::{
-    DispatchStrategy, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
-};
+use risingwave_pb::stream_plan::{DispatchStrategy, StreamNode};
 use thiserror_ext::AsReport;
 
 pub type LocalFragmentId = FragmentId;
@@ -79,33 +77,14 @@ impl StreamFragment {
 #[derive(Default)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
-    fragments: HashMap<LocalFragmentId, Rc<StreamFragment>>,
+    pub(in crate::stream_fragmenter) fragments: HashMap<LocalFragmentId, Rc<StreamFragment>>,
 
     /// stores edges between fragments: (upstream, downstream) => edge.
-    edges: HashMap<(LocalFragmentId, LocalFragmentId), StreamFragmentEdgeProto>,
+    pub(in crate::stream_fragmenter) edges:
+        HashMap<(LocalFragmentId, LocalFragmentId), StreamFragmentEdgeProto>,
 }
 
 impl StreamFragmentGraph {
-    pub fn to_protobuf(&self) -> StreamFragmentGraphProto {
-        StreamFragmentGraphProto {
-            fragments: self
-                .fragments
-                .iter()
-                .map(|(k, v)| (*k, v.to_protobuf()))
-                .collect(),
-            edges: self.edges.values().cloned().collect(),
-
-            // Following fields will be filled later in `build_graph` based on session context.
-            ctx: None,
-            dependent_table_ids: vec![],
-            table_ids_cnt: 0,
-            parallelism: None,
-            max_parallelism: 0,
-            backfill_parallelism: None,
-            backfill_order: Default::default(),
-        }
-    }
-
     /// Adds a fragment to the graph.
     pub fn add_fragment(&mut self, stream_fragment: Rc<StreamFragment>) {
         let id = stream_fragment.fragment_id;
