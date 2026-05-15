@@ -133,7 +133,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 
         // Previously, the `join_encoding_type` is persisted in the plan node.
         // Now it's always `Unspecified` and we should refer to the job's config override.
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         let join_encoding_type = node
             .get_join_encoding_type()
             .map_or(params.config.developer.join_encoding_type, Into::into);

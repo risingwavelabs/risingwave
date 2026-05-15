@@ -584,7 +584,7 @@ mod tests {
         compress_payload, decode_checkpoint_data, read_bytes_in_chunks, xxhash64_checksum,
     };
 
-    #[allow(deprecated)]
+    #[expect(deprecated)]
     fn make_version(id: u64) -> PbHummockVersion {
         PbHummockVersion {
             id: id.into(),

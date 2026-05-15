@@ -191,14 +191,14 @@ mod tests {
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalExpand, LogicalValues};
 
-    // TODO(Wenzhuo): change this test according to expand's new definition.
     #[tokio::test]
     async fn fd_derivation_expand() {
         // input: [v1, v2, v3]
         // FD: v1 --> { v2, v3 }
-        // output: [v1, v2, v3, flag],
-        // FD: { v1, flag } --> { v2, v3 }
-        let ctx = OptimizerContext::mock().await;
+        // output: [v1_expanded, v2_expanded, v3_expanded, v1, v2, v3, flag].
+        // Input FDs only hold on the preserved original columns. They do not hold on expanded
+        // columns, because each expand lane can set columns outside its subset to NULL.
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),
@@ -214,7 +214,7 @@ mod tests {
         let expand = LogicalExpand::create(values.into(), column_subsets);
         let fd = expand.functional_dependency().as_dependencies();
         assert_eq!(fd.len(), 1);
-        assert_eq!(fd[0].from().ones().collect_vec(), &[0, 6]);
-        assert_eq!(fd[0].to().ones().collect_vec(), &[1, 2]);
+        assert_eq!(fd[0].from().ones().collect_vec(), &[3]);
+        assert_eq!(fd[0].to().ones().collect_vec(), &[4, 5]);
     }
 }

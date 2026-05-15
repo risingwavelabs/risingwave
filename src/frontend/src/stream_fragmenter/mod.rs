@@ -198,14 +198,13 @@ pub fn build_graph_with_strategy(
         )));
     }
 
-    let mut fragment_graph = state.fragment_graph.to_protobuf();
-
-    // Set table ids.
-    fragment_graph.dependent_table_ids = state.dependent_table_ids.into_iter().collect();
-    fragment_graph.table_ids_cnt = state.next_table_id;
-
-    // Set parallelism and vnode count.
-    let parallelism_strategy = {
+    let (
+        normal_parallelism,
+        backfill_parallelism,
+        adaptive_parallelism_strategy,
+        backfill_adaptive_parallelism_strategy,
+        max_parallelism,
+    ) = {
         let config = ctx.session_ctx().config();
         let streaming_parallelism = config.streaming_parallelism();
         let job_parallelism = job_type.map(|t| t.to_parallelism(config.deref()));
@@ -219,41 +218,52 @@ pub fn build_graph_with_strategy(
                 adaptive_strategy: None,
             }
         };
-        fragment_graph.parallelism = normal_parallelism.parallelism;
-        fragment_graph.backfill_parallelism = backfill_parallelism.parallelism;
-        fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
         (
-            normal_parallelism.adaptive_strategy,
-            backfill_parallelism.adaptive_strategy,
+            normal_parallelism.parallelism,
+            backfill_parallelism.parallelism,
+            normal_parallelism
+                .adaptive_strategy
+                .as_ref()
+                .map(AdaptiveParallelismStrategy::to_string)
+                .unwrap_or_default(),
+            backfill_parallelism
+                .adaptive_strategy
+                .as_ref()
+                .map(AdaptiveParallelismStrategy::to_string)
+                .unwrap_or_default(),
+            config.streaming_max_parallelism() as _,
         )
     };
 
-    // Set context for this streaming job.
     let config_override = ctx
         .session_ctx()
         .config()
         .to_initial_streaming_config_override()
         .context("invalid initial streaming config override")?;
-    let adaptive_parallelism_strategy = parallelism_strategy
-        .0
-        .as_ref()
-        .map(AdaptiveParallelismStrategy::to_string)
-        .unwrap_or_default();
-    let backfill_adaptive_parallelism_strategy = parallelism_strategy
-        .1
-        .as_ref()
-        .map(AdaptiveParallelismStrategy::to_string)
-        .unwrap_or_default();
-    fragment_graph.ctx = Some(StreamContext {
-        timezone: ctx.get_session_timezone(),
-        config_override,
+    let fragments = state
+        .fragment_graph
+        .fragments
+        .into_iter()
+        .map(|(k, v)| (k, v.to_protobuf()))
+        .collect();
+    let edges = state.fragment_graph.edges.into_values().collect();
+
+    Ok(StreamFragmentGraphProto {
+        fragments,
+        edges,
+        dependent_table_ids: state.dependent_table_ids.into_iter().collect(),
+        table_ids_cnt: state.next_table_id,
+        ctx: Some(StreamContext {
+            timezone: ctx.get_session_timezone(),
+            config_override,
+        }),
+        parallelism: normal_parallelism,
+        backfill_parallelism,
         adaptive_parallelism_strategy,
         backfill_adaptive_parallelism_strategy,
-    });
-
-    fragment_graph.backfill_order = backfill_order;
-
-    Ok(fragment_graph)
+        max_parallelism,
+        backfill_order,
+    })
 }
 
 #[cfg(any())]

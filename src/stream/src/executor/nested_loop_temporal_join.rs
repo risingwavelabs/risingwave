@@ -38,7 +38,7 @@ use crate::executor::{ActorContextRef, Executor};
 
 pub struct NestedLoopTemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     info: ExecutorInfo,
     left: Executor,
     right: Executor,
@@ -47,7 +47,7 @@ pub struct NestedLoopTemporalJoinExecutor<S: StateStore, const T: JoinTypePrimit
     output_indices: Vec<usize>,
     chunk_size: usize,
     // TODO: update metrics
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     metrics: Arc<StreamingMetrics>,
 }
 
@@ -58,7 +58,7 @@ struct TemporalSide<S: StateStore> {
 impl<S: StateStore> TemporalSide<S> {}
 
 #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-#[allow(clippy::too_many_arguments)]
+
 async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
     chunk_size: usize,
     right_size: usize,

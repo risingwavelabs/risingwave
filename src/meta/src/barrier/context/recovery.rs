@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::change_log::TableChangeLogs;
@@ -85,7 +84,6 @@ pub struct RenderedDatabaseRuntimeInfo {
 pub fn render_runtime_info(
     actor_id_generator: &AtomicU32,
     worker_nodes: &ActiveStreamingWorkerNodes,
-    adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     recovery_context: &LoadedRecoveryContext,
     database_id: DatabaseId,
 ) -> MetaResult<Option<RenderedDatabaseRuntimeInfo>> {
@@ -99,7 +97,6 @@ pub fn render_runtime_info(
     let RenderedGraph { mut fragments, .. } = render_actor_assignments(
         actor_id_generator,
         worker_nodes.current(),
-        adaptive_parallelism_strategy,
         &per_database_context,
     )?;
 
@@ -240,11 +237,25 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_subscription(database_id)
             .await?;
-        let dirty_associated_source_ids = self
+
+        let cleaned_dirty_jobs = self
             .metadata_manager
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
+        if database_id.is_some() {
+            // Per-database recovery does not run the global Hummock purge below. Unregister the
+            // dirty jobs cleaned in this database through the normal dropped-table cleanup path.
+            cleanup_dropped_streaming_jobs(
+                &self.refresh_manager,
+                &self.hummock_manager,
+                &self.metadata_manager,
+                cleaned_dirty_jobs.streaming_job_ids,
+                cleaned_dirty_jobs.dropped_table_ids,
+                "clean_dirty_creating_jobs",
+            )
+            .await?;
+        }
         self.metadata_manager
             .reset_all_refresh_jobs_to_idle()
             .await?;
@@ -252,7 +263,7 @@ impl GlobalBarrierWorkerContextImpl {
         // unregister cleaned sources.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
-                dropped_source_ids: dirty_associated_source_ids,
+                dropped_source_ids: cleaned_dirty_jobs.source_ids,
             })
             .await;
 
@@ -978,7 +989,6 @@ mod tests {
             StreamingJobExtraInfo {
                 timezone: Some("UTC".to_owned()),
                 config_override: "cfg".into(),
-                adaptive_parallelism_strategy: None,
                 job_definition: "definition".to_owned(),
                 backfill_orders: None,
             },

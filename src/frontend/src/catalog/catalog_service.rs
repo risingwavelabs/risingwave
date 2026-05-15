@@ -22,6 +22,7 @@ use risingwave_common::catalog::{
     AlterDatabaseParam, CatalogVersion, FunctionId, IndexId, ObjectId,
 };
 use risingwave_common::id::{ConnectionId, JobId, SchemaId, SourceId, ViewId};
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
@@ -238,6 +239,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()>;
 
@@ -245,6 +247,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()>;
 
@@ -648,10 +651,11 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_parallelism(job_id, parallelism, deferred)
+            .alter_parallelism(job_id, parallelism, adaptive_parallelism_strategy, deferred)
             .await?;
         Ok(())
     }
@@ -660,10 +664,16 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         self.meta_client
-            .alter_backfill_parallelism(job_id, parallelism, deferred)
+            .alter_backfill_parallelism(
+                job_id,
+                parallelism,
+                adaptive_parallelism_strategy,
+                deferred,
+            )
             .await?;
         Ok(())
     }
