@@ -249,6 +249,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         adaptive_parallelism_strategy: None,
         parallelism: StreamingParallelism::Fixed(1),
         backfill_parallelism: None,
+        backfill_adaptive_parallelism_strategy: None,
         backfill_orders: None,
         max_parallelism: 1,
         specific_resource_group: Some(resource_group.to_owned()),
@@ -286,7 +287,6 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 StreamingJobExtraInfo {
                     timezone: None,
                     config_override: Arc::<str>::from(""),
-                    adaptive_parallelism_strategy: None,
                     job_definition: "".to_owned(),
                     backfill_orders: None,
                 },
@@ -296,7 +296,6 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 StreamingJobExtraInfo {
                     timezone: None,
                     config_override: Arc::<str>::from(""),
-                    adaptive_parallelism_strategy: None,
                     job_definition: "".to_owned(),
                     backfill_orders: None,
                 },

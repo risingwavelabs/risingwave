@@ -24,7 +24,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::WorkerId;
@@ -240,7 +239,6 @@ impl CheckpointControl {
         &mut self,
         new_barrier: NewBarrier,
         partial_graph_manager: &mut PartialGraphManager,
-        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let NewBarrier {
@@ -368,7 +366,6 @@ impl CheckpointControl {
                 span,
                 partial_graph_manager,
                 &self.hummock_version_stats,
-                adaptive_parallelism_strategy,
                 worker_nodes,
             )
         } else {
@@ -396,7 +393,6 @@ impl CheckpointControl {
                 span,
                 partial_graph_manager,
                 &self.hummock_version_stats,
-                adaptive_parallelism_strategy,
                 worker_nodes,
             )
         }
@@ -1088,7 +1084,6 @@ impl DatabaseCheckpointControl {
         span: tracing::Span,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
-        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let curr_epoch = self.state.in_flight_prev_epoch().next();
@@ -1242,7 +1237,6 @@ impl DatabaseCheckpointControl {
             barrier_info,
             partial_graph_manager,
             hummock_version_stats,
-            adaptive_parallelism_strategy,
             worker_nodes,
         ) {
             Ok(info) => {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use await_tree::span;
@@ -34,8 +34,8 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
 use tracing::Instrument;
 
 use super::{
-    GlobalRefreshManagerRef, ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph,
-    UserDefinedFragmentBackfillOrder,
+    GlobalRefreshManagerRef, ParallelismPolicy, ReschedulePolicy, ScaleControllerRef,
+    StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
     BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -666,7 +666,6 @@ impl GlobalStreamManager {
         database_id: DatabaseId,
         streaming_job_ids: Vec<JobId>,
         state_table_ids: Vec<TableId>,
-        fragment_ids: HashSet<FragmentId>,
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     ) {
         if !streaming_job_ids.is_empty() || !state_table_ids.is_empty() {
@@ -679,7 +678,6 @@ impl GlobalStreamManager {
                     Command::DropStreamingJobs {
                         streaming_job_ids: streaming_job_ids.into_iter().collect(),
                         unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
-                        unregistered_fragment_ids: fragment_ids,
                         dropped_sink_fragment_by_targets,
                     },
                 )
@@ -840,7 +838,7 @@ impl GlobalStreamManager {
     pub(crate) async fn reschedule_streaming_job_backfill_parallelism(
         &self,
         job_id: JobId,
-        parallelism: Option<StreamingParallelism>,
+        parallelism: Option<ParallelismPolicy>,
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;

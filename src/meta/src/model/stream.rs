@@ -21,8 +21,6 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::{IsSingleton, VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::AdaptiveParallelismStrategy;
-use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::stream_graph_visitor::{self, visit_stream_node_body};
 use risingwave_meta_model::{DispatcherType, SourceId, StreamingParallelism, WorkerId, fragment};
 use risingwave_pb::catalog::Table;
@@ -272,9 +270,6 @@ pub struct StreamJobFragments {
     /// The streaming context associated with this stream plan and its fragments
     pub ctx: StreamContext,
 
-    /// The parallelism assigned to this table fragments
-    pub assigned_parallelism: TableParallelism,
-
     /// The max parallelism specified when the streaming job was created, i.e., expected vnode count.
     ///
     /// The reason for persisting this value is mainly to check if a parallelism change (via `ALTER
@@ -295,9 +290,6 @@ pub struct StreamContext {
 
     /// The partial config of this job to override the global config.
     pub config_override: Arc<str>,
-
-    /// The adaptive parallelism strategy for this job if it overrides the system default.
-    pub adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
 }
 
 impl StreamContext {
@@ -305,12 +297,6 @@ impl StreamContext {
         PbStreamContext {
             timezone: self.timezone.clone().unwrap_or("".into()),
             config_override: self.config_override.to_string(),
-            adaptive_parallelism_strategy: self
-                .adaptive_parallelism_strategy
-                .as_ref()
-                .map(ToString::to_string)
-                .unwrap_or_default(),
-            backfill_adaptive_parallelism_strategy: String::new(),
         }
     }
 
@@ -330,14 +316,6 @@ impl StreamContext {
                 Some(prost.get_timezone().clone())
             },
             config_override: prost.get_config_override().as_str().into(),
-            adaptive_parallelism_strategy: if prost.get_adaptive_parallelism_strategy().is_empty() {
-                None
-            } else {
-                Some(
-                    parse_strategy(prost.get_adaptive_parallelism_strategy())
-                        .expect("adaptive parallelism strategy should be validated in frontend"),
-                )
-            },
         }
     }
 }
@@ -348,9 +326,6 @@ impl risingwave_meta_model::streaming_job::Model {
         StreamContext {
             timezone: self.timezone.clone(),
             config_override: self.config_override.clone().unwrap_or_default().into(),
-            adaptive_parallelism_strategy: self.adaptive_parallelism_strategy.as_deref().map(|s| {
-                parse_strategy(s).expect("strategy should be validated before persisting")
-            }),
         }
     }
 }
@@ -383,11 +358,52 @@ impl StreamJobFragments {
                 .collect(),
             actor_status,
             ctx: Some(self.ctx.to_protobuf()),
-            parallelism: Some(self.assigned_parallelism.into()),
             node_label: "".to_owned(),
             backfill_done: true,
             max_parallelism: Some(self.max_parallelism as _),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stream_context_protobuf_round_trip() {
+        let context = StreamContext {
+            timezone: Some("UTC".to_owned()),
+            config_override: "{\"a\":1}".into(),
+        };
+
+        let prost = context.to_protobuf();
+
+        let round_trip = StreamContext::from_protobuf(&prost);
+        assert_eq!(round_trip.timezone, Some("UTC".to_owned()));
+        assert_eq!(&*round_trip.config_override, "{\"a\":1}");
+    }
+
+    #[test]
+    fn test_stream_context_from_model() {
+        let model = risingwave_meta_model::streaming_job::Model {
+            job_id: 1.into(),
+            job_status: risingwave_meta_model::JobStatus::Created,
+            create_type: risingwave_meta_model::CreateType::Foreground,
+            timezone: Some("Asia/Shanghai".to_owned()),
+            config_override: Some("{\"parallelism\":2}".to_owned()),
+            adaptive_parallelism_strategy: Some("AUTO".to_owned()),
+            parallelism: StreamingParallelism::Adaptive,
+            backfill_parallelism: Some(StreamingParallelism::Adaptive),
+            backfill_adaptive_parallelism_strategy: Some("RATIO(0.25)".to_owned()),
+            backfill_orders: None,
+            max_parallelism: 32,
+            specific_resource_group: None,
+            is_serverless_backfill: false,
+        };
+
+        let context = model.stream_context();
+        assert_eq!(context.timezone, Some("Asia/Shanghai".to_owned()));
+        assert_eq!(&*context.config_override, "{\"parallelism\":2}");
     }
 }
 
@@ -410,7 +426,6 @@ impl StreamJobFragments {
             job_id,
             fragments,
             StreamContext::default(),
-            TableParallelism::Adaptive,
             VirtualNode::COUNT_FOR_TEST,
         )
     }
@@ -420,7 +435,6 @@ impl StreamJobFragments {
         stream_job_id: JobId,
         fragments: BTreeMap<FragmentId, Fragment>,
         ctx: StreamContext,
-        table_parallelism: TableParallelism,
         max_parallelism: usize,
     ) -> Self {
         Self {
@@ -428,7 +442,6 @@ impl StreamJobFragments {
             state: State::Initial,
             fragments,
             ctx,
-            assigned_parallelism: table_parallelism,
             max_parallelism,
         }
     }
