@@ -193,3 +193,71 @@
     - logical_plan
     - stream_plan
     - eowc_stream_error
+
+# PARTITION BY Tests
+- name: partition by single column
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - stream_dist_plan
+
+- name: partition by duplicate columns
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id, device_id));
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+
+- name: partition by multiple columns
+  sql: |
+    CREATE TABLE t (region VARCHAR, device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(region, device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, INTERPOLATE(val), PARTITION_BY(region, device_id));
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - stream_dist_plan
+
+- name: partition by with mixed strategies
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, temp DOUBLE, status VARCHAR, PRIMARY KEY(device_id, ts));
+    SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, INTERPOLATE(temp), KEEPNULL(status), PARTITION_BY(device_id));
+  expected_outputs:
+    - stream_plan
+
+- name: partition by in materialized view
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, PRIMARY KEY(device_id, ts));
+    CREATE MATERIALIZED VIEW mv AS SELECT * FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+  expected_outputs:
+    - stream_plan
+    - stream_dist_plan
+
+- name: partition by in materialized view without input pk
+  sql: |
+    CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
+    CREATE MATERIALIZED VIEW mv AS
+    SELECT id, ts, v
+    FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+  expected_outputs:
+    - stream_plan
+
+- name: partition by aggregate in materialized view
+  sql: |
+    CREATE TABLE t (id INT, ts TIMESTAMP, v INT);
+    CREATE MATERIALIZED VIEW cnt AS
+    SELECT count(*)
+    FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(v), PARTITION_BY(id));
+  expected_outputs:
+    - stream_plan
+
+- name: partition by with projection
+  sql: |
+    CREATE TABLE t (device_id INT, ts TIMESTAMP, val DOUBLE, extra INT, PRIMARY KEY(device_id, ts));
+    SELECT device_id, ts, val FROM GAP_FILL(t, ts, INTERVAL '1' MINUTE, LOCF(val), PARTITION_BY(device_id));
+  expected_outputs:
+    - logical_plan
+    - stream_plan

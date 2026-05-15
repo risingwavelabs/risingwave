@@ -84,6 +84,12 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
                 .build()
                 .await;
 
+        let partition_by_indices: Vec<usize> = node
+            .get_partition_by_indices()
+            .iter()
+            .map(|&x| x as usize)
+            .collect();
+
         let exec = EowcGapFillExecutor::new(EowcGapFillExecutorArgs {
             actor_ctx: params.actor_context,
             input,
@@ -94,6 +100,7 @@ impl ExecutorBuilder for EowcGapFillExecutorBuilder {
             time_column_index,
             fill_columns: fill_columns_with_strategies,
             gap_interval,
+            partition_by_indices,
         });
 
         Ok((params.info, exec).into())
