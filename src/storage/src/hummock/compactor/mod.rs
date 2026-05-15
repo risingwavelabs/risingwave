@@ -1385,6 +1385,10 @@ fn cancel_iceberg_task(
     task_queue: &mut IcebergTaskQueue,
     shutdown_map: &Arc<Mutex<HashMap<TaskKey, Sender<()>>>>,
 ) {
+    // Meta assigns one task id to an Iceberg compact task, but the compactor
+    // splits it into multiple plan runners tracked by `(task_id, plan_index)`.
+    // A cancel event only carries `task_id`, so it must cancel all waiting and
+    // running plan runners that belong to that task.
     let cancelled_waiting = task_queue.cancel_waiting_task(task_id);
 
     let cancelled_running = {
