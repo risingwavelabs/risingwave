@@ -3324,6 +3324,22 @@ impl Parser<'_> {
                 cascade,
             }
         } else if self.parse_keyword(Keyword::ALTER) {
+            // `WATERMARK` is non-reserved; require `FOR` so `ALTER <col>` on a
+            // column named `watermark` still falls through to ALTER COLUMN.
+            if self.parse_keywords(&[Keyword::WATERMARK, Keyword::FOR]) {
+                let column_name = self.parse_identifier_non_reserved()?;
+                self.expect_keyword(Keyword::AS)?;
+                let expr = self.parse_expr()?;
+                let with_ttl = self.parse_keywords(&[Keyword::WITH, Keyword::TTL]);
+                return Ok(Statement::AlterTable {
+                    name: table_name,
+                    operation: AlterTableOperation::AlterWatermark {
+                        column_name,
+                        expr,
+                        with_ttl,
+                    },
+                });
+            }
             let _ = self.parse_keyword(Keyword::COLUMN);
             let column_name = self.parse_identifier_non_reserved()?;
 

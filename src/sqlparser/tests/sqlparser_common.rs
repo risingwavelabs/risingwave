@@ -1685,6 +1685,57 @@ fn parse_alter_table_drop_column() {
 }
 
 #[test]
+fn parse_alter_table_alter_watermark() {
+    match verified_stmt("ALTER TABLE tab ALTER WATERMARK FOR ts AS ts - INTERVAL '1' MINUTE") {
+        Statement::AlterTable {
+            name,
+            operation:
+                AlterTableOperation::AlterWatermark {
+                    column_name,
+                    expr: _,
+                    with_ttl,
+                },
+        } => {
+            assert_eq!("tab", name.to_string());
+            assert_eq!("ts", column_name.to_string());
+            assert!(!with_ttl);
+        }
+        _ => unreachable!(),
+    }
+
+    match verified_stmt("ALTER TABLE tab ALTER WATERMARK FOR ts AS ts - 10 WITH TTL") {
+        Statement::AlterTable {
+            operation:
+                AlterTableOperation::AlterWatermark {
+                    column_name,
+                    with_ttl,
+                    ..
+                },
+            ..
+        } => {
+            assert_eq!("ts", column_name.to_string());
+            assert!(with_ttl);
+        }
+        _ => unreachable!(),
+    }
+
+    // `WATERMARK` is non-reserved; the new branch must not steal `ALTER <col>`
+    // when `<col>` happens to be named `watermark` (only commit on `WATERMARK FOR`).
+    match one_statement_parses_to(
+        "ALTER TABLE tab ALTER watermark TYPE BIGINT",
+        "ALTER TABLE tab ALTER COLUMN watermark SET DATA TYPE BIGINT",
+    ) {
+        Statement::AlterTable {
+            operation: AlterTableOperation::AlterColumn { column_name, .. },
+            ..
+        } => {
+            assert_eq!("watermark", column_name.to_string());
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn parse_alter_table_alter_column() {
     let alter_stmt = "ALTER TABLE tab";
     match verified_stmt(&format!(
