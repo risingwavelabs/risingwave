@@ -123,6 +123,9 @@ impl ObserverState for FrontendObserverNode {
             Info::TableCacheRefillPolicies(_) => {
                 panic!("frontend node should not receive TableCacheRefillPolicies");
             }
+            Info::TableRefillRuntimeConfig(_) => {
+                panic!("frontend node should not receive TableRefillRuntimeConfig");
+            }
         }
     }
 
@@ -158,8 +161,7 @@ impl ObserverState for FrontendObserverNode {
             secrets,
             cluster_resource,
             object_dependencies,
-            table_cache_refill_policies: _,
-            serving_table_vnode_mappings: _,
+            table_refill_runtime_config: _,
         } = snapshot;
 
         for db in databases {

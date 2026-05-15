@@ -634,10 +634,11 @@ message MetaSnapshot {
   repeated FragmentWorkerSlotMapping streaming_worker_slot_mappings = 21;
   repeated FragmentWorkerSlotMapping serving_worker_slot_mappings = 22;
   repeated ObjectDependency object_dependencies = 26;
-  TableCacheRefillPolicies table_cache_refill_policies = 27;
-  ServingTableVnodeMappings serving_table_vnode_mappings = 28;
+  TableRefillRuntimeConfig table_refill_runtime_config = 27;
 
   SnapshotVersion version = 13;
+  reserved 28;
+  reserved "serving_table_vnode_mappings";
 }
 
 message Object {
@@ -699,6 +700,7 @@ message SubscribeResponse {
     common.ClusterResource cluster_resource = 31;
     TableCacheRefillPolicies table_cache_refill_policies = 32;
     ServingTableVnodeMappings serving_table_vnode_mappings = 33;
+    TableRefillRuntimeConfig table_refill_runtime_config = 34;
   }
   reserved 12;
   reserved "parallel_unit_mapping";
@@ -706,6 +708,12 @@ message SubscribeResponse {
   reserved "serving_parallel_unit_mappings";
   reserved 30;
   reserved "compute_node_total_cpu_count";
+}
+
+message TableRefillRuntimeConfig {
+  TableCacheRefillPolicies table_cache_refill_policies = 1;
+  ServingTableVnodeMappings serving_table_vnode_mappings = 2;
+  uint64 version = 3;
 }
 
 message ServingTableVnodeMappings {

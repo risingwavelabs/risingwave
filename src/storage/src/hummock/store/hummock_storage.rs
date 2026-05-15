@@ -178,8 +178,7 @@ impl HummockStorage {
         .map_err(HummockError::read_backup_error)?;
         let write_limiter = Arc::new(WriteLimiter::default());
         let (version_update_tx, mut version_update_rx) = unbounded_channel();
-        let (cache_refill_policy_tx, mut cache_refill_policy_rx) = unbounded_channel();
-        let (serving_table_vnode_mapping_tx, mut serving_table_vnode_mapping_rx) =
+        let (table_refill_runtime_config_tx, mut table_refill_runtime_config_rx) =
             unbounded_channel();
 
         let observer_manager = ObserverManager::new(
@@ -188,8 +187,7 @@ impl HummockStorage {
                 compaction_catalog_manager_ref.clone(),
                 backup_reader.clone(),
                 version_update_tx.clone(),
-                cache_refill_policy_tx,
-                serving_table_vnode_mapping_tx,
+                table_refill_runtime_config_tx,
                 write_limiter.clone(),
             ),
         )
@@ -202,8 +200,7 @@ impl HummockStorage {
                 "the hummock observer manager is the first one to take the event tx. Should be full hummock version"
             ),
         };
-        let initial_cache_refill_policies = cache_refill_policy_rx.recv().await.unwrap_or_default();
-        let initial_serving_table_vnode_mapping = serving_table_vnode_mapping_rx
+        let initial_table_refill_runtime_config = table_refill_runtime_config_rx
             .recv()
             .await
             .unwrap_or((Operation::Snapshot, Default::default()));
@@ -228,10 +225,8 @@ impl HummockStorage {
         let hummock_event_handler = HummockEventHandler::new(
             role,
             version_update_rx,
-            initial_cache_refill_policies,
-            initial_serving_table_vnode_mapping,
-            cache_refill_policy_rx,
-            serving_table_vnode_mapping_rx,
+            initial_table_refill_runtime_config,
+            table_refill_runtime_config_rx,
             pinned_version,
             compactor_context.clone(),
             compaction_catalog_manager_ref.clone(),

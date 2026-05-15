@@ -134,8 +134,15 @@ where
                         .streaming_worker_slot_mapping_version
             }
             Info::ServingWorkerSlotMappings(_) => true,
-            Info::ServingTableVnodeMappings(_) => true,
-            Info::TableCacheRefillPolicies(_) => true,
+            Info::ServingTableVnodeMappings(_) | Info::TableCacheRefillPolicies(_) => false,
+            Info::TableRefillRuntimeConfig(_) => {
+                notification.version
+                    > info
+                        .table_refill_runtime_config
+                        .as_ref()
+                        .map(|config| config.version)
+                        .unwrap_or_default()
+            }
         });
 
         self.observer_states
@@ -261,7 +268,7 @@ mod tests {
     use risingwave_pb::meta::subscribe_response::Info;
     use risingwave_pb::meta::{
         MetaSnapshot, ServingTableVnodeMappings, SubscribeResponse, SubscribeType,
-        TableCacheRefillPolicies,
+        TableCacheRefillPolicies, TableRefillRuntimeConfig,
     };
 
     use super::*;
@@ -308,11 +315,8 @@ mod tests {
 
         fn handle_notification(&mut self, resp: SubscribeResponse) {
             match resp.info.unwrap() {
-                Info::ServingTableVnodeMappings(_) => {
-                    self.notifications.push("serving_table_vnode_mappings")
-                }
-                Info::TableCacheRefillPolicies(_) => {
-                    self.notifications.push("table_cache_refill_policies")
+                Info::TableRefillRuntimeConfig(_) => {
+                    self.notifications.push("table_refill_runtime_config")
                 }
                 Info::Database(_) => self.notifications.push("database"),
                 info => panic!("unexpected notification: {info:?}"),
@@ -325,15 +329,16 @@ mod tests {
         }
     }
 
-    fn notification(info: Info) -> SubscribeResponse {
+    fn notification(version: u64, info: Info) -> SubscribeResponse {
         SubscribeResponse {
             info: Some(info),
+            version,
             ..Default::default()
         }
     }
 
     #[tokio::test]
-    async fn test_preserve_unversioned_hummock_notifications_before_snapshot() {
+    async fn test_filter_stale_table_refill_runtime_config_before_snapshot() {
         let snapshot = SubscribeResponse {
             info: Some(Info::Snapshot(MetaSnapshot {
                 version: Some(SnapshotVersion {
@@ -341,19 +346,39 @@ mod tests {
                     worker_node_version: 1,
                     streaming_worker_slot_mapping_version: 1,
                 }),
+                table_refill_runtime_config: Some(TableRefillRuntimeConfig {
+                    version: 10,
+                    ..Default::default()
+                }),
                 ..Default::default()
             })),
             ..Default::default()
         };
         let rx = TestChannel {
             messages: VecDeque::from([
-                notification(Info::ServingTableVnodeMappings(
-                    ServingTableVnodeMappings::default(),
-                )),
-                notification(Info::TableCacheRefillPolicies(
-                    TableCacheRefillPolicies::default(),
-                )),
-                notification(Info::Database(Default::default())),
+                notification(
+                    9,
+                    Info::TableRefillRuntimeConfig(TableRefillRuntimeConfig {
+                        version: 9,
+                        ..Default::default()
+                    }),
+                ),
+                notification(
+                    11,
+                    Info::TableRefillRuntimeConfig(TableRefillRuntimeConfig {
+                        version: 11,
+                        ..Default::default()
+                    }),
+                ),
+                notification(1, Info::Database(Default::default())),
+                notification(
+                    0,
+                    Info::TableCacheRefillPolicies(TableCacheRefillPolicies::default()),
+                ),
+                notification(
+                    0,
+                    Info::ServingTableVnodeMappings(ServingTableVnodeMappings::default()),
+                ),
                 snapshot,
             ]),
         };
@@ -368,10 +393,7 @@ mod tests {
         assert!(observer_manager.observer_states.initialized);
         assert_eq!(
             observer_manager.observer_states.notifications,
-            vec![
-                "serving_table_vnode_mappings",
-                "table_cache_refill_policies"
-            ]
+            vec!["table_refill_runtime_config"]
         );
     }
 }

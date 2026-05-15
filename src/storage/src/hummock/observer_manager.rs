@@ -12,19 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::license::LicenseManager;
 use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::id::TableId;
 use risingwave_pb::meta::object::PbObjectInfo;
-use risingwave_pb::meta::serving_table_vnode_mappings::PbServingTableVnodeMapping;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{SubscribeResponse, TableCacheRefillPolicies};
+use risingwave_pb::meta::{PbTableRefillRuntimeConfig, SubscribeResponse};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
@@ -37,8 +32,7 @@ pub struct HummockObserverNode {
     backup_reader: BackupReaderRef,
     write_limiter: WriteLimiterRef,
     version_update_sender: UnboundedSender<HummockVersionUpdate>,
-    cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
-    serving_table_vnode_mapping_sender: UnboundedSender<(Operation, HashMap<TableId, Bitmap>)>,
+    table_refill_runtime_config_sender: UnboundedSender<(Operation, PbTableRefillRuntimeConfig)>,
     version: u64,
 }
 
@@ -101,10 +95,25 @@ impl ObserverState for HummockObserverNode {
                 LicenseManager::get().update_cluster_resource(resource);
             }
             Info::ServingTableVnodeMappings(mappings) => {
-                self.handle_serving_table_vnode_mappings(resp.operation(), mappings.mappings);
+                self.handle_table_refill_runtime_config(
+                    resp.operation(),
+                    PbTableRefillRuntimeConfig {
+                        serving_table_vnode_mappings: Some(mappings),
+                        ..Default::default()
+                    },
+                );
             }
             Info::TableCacheRefillPolicies(policies) => {
-                self.handle_table_cache_refill_policies(policies);
+                self.handle_table_refill_runtime_config(
+                    resp.operation(),
+                    PbTableRefillRuntimeConfig {
+                        table_cache_refill_policies: Some(policies),
+                        ..Default::default()
+                    },
+                );
+            }
+            Info::TableRefillRuntimeConfig(config) => {
+                self.handle_table_refill_runtime_config(resp.operation(), config);
             }
             info => {
                 panic!("invalid notification info: {info}");
@@ -149,16 +158,9 @@ impl ObserverState for HummockObserverNode {
         self.version = snapshot_version.catalog_version;
         LicenseManager::get().update_cluster_resource(snapshot.cluster_resource.unwrap());
 
-        self.handle_table_cache_refill_policies(
-            snapshot.table_cache_refill_policies.unwrap_or_default(),
-        );
-
-        self.handle_serving_table_vnode_mappings(
+        self.handle_table_refill_runtime_config(
             Operation::Snapshot,
-            snapshot
-                .serving_table_vnode_mappings
-                .unwrap_or_default()
-                .mappings,
+            snapshot.table_refill_runtime_config.unwrap_or_default(),
         );
     }
 }
@@ -168,16 +170,17 @@ impl HummockObserverNode {
         compaction_catalog_manager: CompactionCatalogManagerRef,
         backup_reader: BackupReaderRef,
         version_update_sender: UnboundedSender<HummockVersionUpdate>,
-        cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
-        serving_table_vnode_mapping_sender: UnboundedSender<(Operation, HashMap<TableId, Bitmap>)>,
+        table_refill_runtime_config_sender: UnboundedSender<(
+            Operation,
+            PbTableRefillRuntimeConfig,
+        )>,
         write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {
             compaction_catalog_manager,
             backup_reader,
             version_update_sender,
-            cache_refill_policy_sender,
-            serving_table_vnode_mapping_sender,
+            table_refill_runtime_config_sender,
             version: 0,
             write_limiter,
         }
@@ -188,53 +191,25 @@ impl HummockObserverNode {
             .sync(tables.into_iter().map(|t| (t.id, t)).collect());
     }
 
-    fn handle_serving_table_vnode_mappings(
+    fn handle_table_refill_runtime_config(
         &self,
-        op: Operation,
-        mappings: Vec<PbServingTableVnodeMapping>,
+        operation: Operation,
+        config: PbTableRefillRuntimeConfig,
     ) {
-        let mappings = mappings
-            .into_iter()
-            .map(|mapping| {
-                (
-                    TableId::from(mapping.table_id),
-                    Bitmap::from(
-                        mapping
-                            .bitmap
-                            .expect("serving table vnode bitmap must exist"),
-                    ),
-                )
-            })
-            .collect();
-
         tracing::debug!(
-            ?op,
-            ?mappings,
-            "receive serving table vnode mappings updates"
+            ?operation,
+            ?config,
+            "receive table refill runtime config updates"
         );
 
         let _ = self
-            .serving_table_vnode_mapping_sender
-            .send((op, mappings))
+            .table_refill_runtime_config_sender
+            .send((operation, config))
             .inspect_err(|e| {
                 tracing::error!(
-                    op = ?e.0.0,
-                    mappings = ?e.0.1,
-                    "unable to send serving table vnode mappings"
-                );
-            });
-    }
-
-    fn handle_table_cache_refill_policies(&self, policies: TableCacheRefillPolicies) {
-        tracing::debug!(?policies, "receive table cache refill policy updates");
-
-        let _ = self
-            .cache_refill_policy_sender
-            .send(policies)
-            .inspect_err(|e| {
-                tracing::error!(
-                    policies = ?e.0,
-                    "unable to send table cache refill policies"
+                    operation = ?e.0.0,
+                    config = ?e.0.1,
+                    "unable to send table refill runtime config"
                 );
             });
     }
@@ -267,7 +242,9 @@ mod tests {
     use risingwave_pb::meta::subscribe_response::{Info, Operation};
     use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
     use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
-    use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, TableCacheRefillPolicies};
+    use risingwave_pb::meta::{
+        MetaSnapshot, PbTableRefillRuntimeConfig, SubscribeResponse, TableCacheRefillPolicies,
+    };
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::HummockObserverNode;
@@ -288,11 +265,14 @@ mod tests {
                     write_limits: HashMap::new(),
                 }),
                 cluster_resource: Some(Default::default()),
-                table_cache_refill_policies: Some(TableCacheRefillPolicies {
-                    policies: vec![PbTableCacheRefillPolicy {
-                        table_id,
-                        policy: PbCacheRefillPolicy::Serving as i32,
-                    }],
+                table_refill_runtime_config: Some(PbTableRefillRuntimeConfig {
+                    table_cache_refill_policies: Some(TableCacheRefillPolicies {
+                        policies: vec![PbTableCacheRefillPolicy {
+                            table_id,
+                            policy: PbCacheRefillPolicy::Serving as i32,
+                        }],
+                    }),
+                    ..Default::default()
                 }),
                 ..Default::default()
             })),
@@ -303,36 +283,32 @@ mod tests {
     #[tokio::test]
     async fn test_resubscribe_snapshot_refreshes_table_cache_refill_policies() {
         let (version_update_tx, mut version_update_rx) = unbounded_channel();
-        let (cache_refill_policy_tx, mut cache_refill_policy_rx) = unbounded_channel();
-        let (serving_table_vnode_mapping_tx, mut serving_table_vnode_mapping_rx) =
+        let (table_refill_runtime_config_tx, mut table_refill_runtime_config_rx) =
             unbounded_channel();
         let mut observer = HummockObserverNode::new(
             Arc::new(CompactionCatalogManager::default()),
             BackupReader::unused().await,
             version_update_tx,
-            cache_refill_policy_tx,
-            serving_table_vnode_mapping_tx,
+            table_refill_runtime_config_tx,
             WriteLimiter::unused(),
         );
 
         observer.handle_initialization_notification(policy_snapshot(1, 233));
+        let (operation, config) = table_refill_runtime_config_rx.recv().await.unwrap();
+        assert_eq!(operation, Operation::Snapshot);
         assert_eq!(
-            cache_refill_policy_rx.recv().await.unwrap().policies[0].table_id,
+            config.table_cache_refill_policies.unwrap().policies[0].table_id,
             233
         );
-        let (op, mappings) = serving_table_vnode_mapping_rx.recv().await.unwrap();
-        assert_eq!(op, Operation::Snapshot);
-        assert!(mappings.is_empty());
         version_update_rx.recv().await.unwrap();
 
         observer.handle_initialization_notification(policy_snapshot(2, 234));
+        let (operation, config) = table_refill_runtime_config_rx.recv().await.unwrap();
+        assert_eq!(operation, Operation::Snapshot);
         assert_eq!(
-            cache_refill_policy_rx.recv().await.unwrap().policies[0].table_id,
+            config.table_cache_refill_policies.unwrap().policies[0].table_id,
             234
         );
-        let (op, mappings) = serving_table_vnode_mapping_rx.recv().await.unwrap();
-        assert_eq!(op, Operation::Snapshot);
-        assert!(mappings.is_empty());
         version_update_rx.recv().await.unwrap();
     }
 }

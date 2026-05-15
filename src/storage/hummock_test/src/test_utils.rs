@@ -65,7 +65,7 @@ pub async fn prepare_first_valid_version(
     UnboundedReceiver<HummockVersionUpdate>,
 ) {
     let (version_update_tx, mut version_update_rx) = unbounded_channel();
-    let (serving_table_vnode_mapping_tx, _serving_table_vnode_mapping_rx) = unbounded_channel();
+    let (table_refill_runtime_config_tx, _table_refill_runtime_config_rx) = unbounded_channel();
 
     let notification_client = get_notification_client_for_test(
         env,
@@ -76,15 +76,13 @@ pub async fn prepare_first_valid_version(
     .await;
     let backup_manager = BackupReader::unused().await;
     let write_limiter = WriteLimiter::unused();
-    let (cache_refill_policy_tx, _cache_refill_policy_rx) = unbounded_channel();
     let observer_manager = ObserverManager::new(
         notification_client,
         HummockObserverNode::new(
             Arc::new(CompactionCatalogManager::default()),
             backup_manager,
             version_update_tx.clone(),
-            cache_refill_policy_tx,
-            serving_table_vnode_mapping_tx,
+            table_refill_runtime_config_tx,
             write_limiter,
         ),
     )

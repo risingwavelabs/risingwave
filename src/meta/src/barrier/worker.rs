@@ -28,8 +28,8 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::{AdaptiveParallelismStrategy, PAUSE_ON_NEXT_BOOTSTRAP_KEY};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::Recovery;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::{PbTableRefillRuntimeConfig, Recovery};
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -977,10 +977,17 @@ use crate::barrier::partial_graph::{
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     async fn notify_table_cache_refill_policies_after_recovery(context: Arc<C>, env: MetaSrvEnv) {
         match context.table_cache_refill_policies_snapshot().await {
-            Ok(policies) => env.notification_manager().notify_hummock_without_version(
-                Operation::Update,
-                Info::TableCacheRefillPolicies(policies),
-            ),
+            Ok(policies) => {
+                env.notification_manager()
+                    .notify_hummock(
+                        Operation::Update,
+                        Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                            table_cache_refill_policies: Some(policies),
+                            ..Default::default()
+                        }),
+                    )
+                    .await;
+            }
             Err(err) => {
                 warn!(
                     error = %err.as_report(),

@@ -26,6 +26,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, FragmentWorkerSlotMappings, PbServingTableVnodeMappings,
+    PbTableRefillRuntimeConfig,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -411,16 +412,21 @@ async fn notify_hummock_serving_table_vnode_mapping(
 
     for worker in active_serving_workers {
         if let Some(table_vnode_mapping) = worker_table_vnode_mapping.get(&worker.id) {
-            notification_manager.notify_hummock_with_worker_key_without_version(
-                Some(WorkerKey(PbHostAddress {
-                    host: worker.host.as_ref().unwrap().host.clone(),
-                    port: worker.host.as_ref().unwrap().port,
-                })),
-                operation,
-                Info::ServingTableVnodeMappings(to_pb_serving_table_vnode_mappings(
-                    table_vnode_mapping,
-                )),
-            );
+            notification_manager
+                .notify_hummock_with_worker_key(
+                    Some(WorkerKey(PbHostAddress {
+                        host: worker.host.as_ref().unwrap().host.clone(),
+                        port: worker.host.as_ref().unwrap().port,
+                    })),
+                    operation,
+                    Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                        serving_table_vnode_mappings: Some(to_pb_serving_table_vnode_mappings(
+                            table_vnode_mapping,
+                        )),
+                        ..Default::default()
+                    }),
+                )
+                .await;
         }
     }
 }
@@ -455,16 +461,21 @@ async fn notify_hummock_delete_serving_table_vnode_mapping(
 
     for worker in active_serving_workers {
         if let Some(table_vnode_mapping) = worker_table_vnode_mapping.get(&worker.id) {
-            notification_manager.notify_hummock_with_worker_key_without_version(
-                Some(WorkerKey(PbHostAddress {
-                    host: worker.host.as_ref().unwrap().host.clone(),
-                    port: worker.host.as_ref().unwrap().port,
-                })),
-                operation,
-                Info::ServingTableVnodeMappings(to_pb_serving_table_vnode_mappings(
-                    table_vnode_mapping,
-                )),
-            );
+            notification_manager
+                .notify_hummock_with_worker_key(
+                    Some(WorkerKey(PbHostAddress {
+                        host: worker.host.as_ref().unwrap().host.clone(),
+                        port: worker.host.as_ref().unwrap().port,
+                    })),
+                    operation,
+                    Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                        serving_table_vnode_mappings: Some(to_pb_serving_table_vnode_mappings(
+                            table_vnode_mapping,
+                        )),
+                        ..Default::default()
+                    }),
+                )
+                .await;
         }
     }
 }

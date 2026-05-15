@@ -27,7 +27,7 @@ use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, PbServingTableVnodeMappings,
-    SubscribeRequest, SubscribeType,
+    PbTableRefillRuntimeConfig, SubscribeRequest, SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -214,6 +214,27 @@ impl NotificationServiceImpl {
         Ok(mappings)
     }
 
+    async fn get_hummock_table_refill_runtime_config(
+        &self,
+        worker_key: &WorkerKey,
+    ) -> MetaResult<PbTableRefillRuntimeConfig> {
+        let version = self.env.notification_manager().current_version().await;
+        let table_cache_refill_policies = self
+            .metadata_manager
+            .catalog_controller
+            .table_cache_refill_policies_snapshot()
+            .await?;
+        let serving_table_vnode_mappings = self
+            .get_hummock_serving_table_vnode_mappings(worker_key)
+            .await?;
+
+        Ok(PbTableRefillRuntimeConfig {
+            table_cache_refill_policies: Some(table_cache_refill_policies),
+            serving_table_vnode_mappings: Some(serving_table_vnode_mappings),
+            version,
+        })
+    }
+
     async fn get_worker_node_snapshot(&self) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
         let cluster_guard = self
             .metadata_manager
@@ -369,13 +390,8 @@ impl NotificationServiceImpl {
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
         let cluster_resource = self.get_cluster_resource().await;
-        let table_cache_refill_policies = self
-            .metadata_manager
-            .catalog_controller
-            .table_cache_refill_policies_snapshot()
-            .await?;
-        let serving_table_vnode_mappings = self
-            .get_hummock_serving_table_vnode_mappings(worker_key)
+        let table_refill_runtime_config = self
+            .get_hummock_table_refill_runtime_config(worker_key)
             .await?;
 
         Ok(MetaSnapshot {
@@ -392,8 +408,7 @@ impl NotificationServiceImpl {
                 write_limits: hummock_write_limits,
             }),
             cluster_resource: Some(cluster_resource),
-            table_cache_refill_policies: Some(table_cache_refill_policies),
-            serving_table_vnode_mappings: Some(serving_table_vnode_mappings),
+            table_refill_runtime_config: Some(table_refill_runtime_config),
             ..Default::default()
         })
     }
