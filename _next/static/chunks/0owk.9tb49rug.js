@@ -1,0 +1,19 @@
+__turbopack_load_page_chunks__("/fragment_graph", [
+  "static/chunks/07c1_gg4t..ls.js",
+  "static/chunks/06.9zof_zjjvh.js",
+  "static/chunks/17tng~sm9vi91.js",
+  "static/chunks/0e9sg5b__.sy9.js",
+  "static/chunks/0am6gii-qx27q.js",
+  "static/chunks/05h0s5tn1m6~z.js",
+  "static/chunks/0u4rgtdrllqbo.js",
+  "static/chunks/0szh3xfkks~8y.js",
+  "static/chunks/0n6kjig934i_j.js",
+  "static/chunks/09sm5r_nmqwug.js",
+  "static/chunks/0xjhj219qds.z.js",
+  "static/chunks/0x2gaxso9rf_4.js",
+  "static/chunks/0~f95ser_w3w7.js",
+  "static/chunks/0upy6kw9sp016.js",
+  "static/chunks/0m803bcy80.o5.js",
+  "static/chunks/0ylx6-8cmgm~h.js",
+  "static/chunks/turbopack-0vaayexz5-p.i.js"
+])
