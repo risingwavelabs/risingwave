@@ -410,7 +410,7 @@ impl CacheRefiller {
 
     pub(crate) fn update_table_cache_refill_policies(
         &mut self,
-        policies: HashMap<TableId, Option<CacheRefillPolicy>>,
+        policies: HashMap<TableId, CacheRefillPolicy>,
     ) {
         let mut table_cache_refill_context = self.table_cache_refill_context.write();
         let table_ids = table_cache_refill_context
@@ -419,12 +419,7 @@ impl CacheRefiller {
             .chain(policies.keys())
             .copied()
             .collect_vec();
-        table_cache_refill_context.policies.clear();
-        for (table_id, policy) in policies {
-            if let Some(policy) = policy {
-                table_cache_refill_context.policies.insert(table_id, policy);
-            }
-        }
+        table_cache_refill_context.policies = policies;
         for table_id in table_ids {
             self.update_table_cache_refill_vnodes_inner(&mut table_cache_refill_context, table_id);
         }
@@ -438,13 +433,20 @@ impl CacheRefiller {
         let mut table_cache_refill_context = self.table_cache_refill_context.write();
         match op {
             Operation::Snapshot => {
+                let mut table_ids = table_cache_refill_context
+                    .serving_table_vnode_mapping
+                    .read()
+                    .keys()
+                    .chain(mapping.keys())
+                    .copied()
+                    .collect::<HashSet<_>>();
                 *table_cache_refill_context
                     .serving_table_vnode_mapping
-                    .write() = mapping.clone();
-                for table_id in mapping.keys() {
+                    .write() = mapping;
+                for table_id in table_ids.drain() {
                     self.update_table_cache_refill_vnodes_inner(
                         &mut table_cache_refill_context,
-                        *table_id,
+                        table_id,
                     );
                 }
             }
@@ -1065,7 +1067,7 @@ mod tests {
 
         refiller.update_table_cache_refill_policies(HashMap::from([(
             table_id,
-            Some(CacheRefillPolicy::Serving),
+            CacheRefillPolicy::Serving,
         )]));
         assert!(
             refiller
@@ -1083,6 +1085,55 @@ mod tests {
         let context = refiller.table_cache_refill_context().read();
         assert!(context.streaming.is_empty());
         assert_eq!(context.serving.get(&table_id), Some(&serving_vnodes));
+    }
+
+    #[tokio::test]
+    async fn test_serving_snapshot_replaces_existing_vnodes() {
+        let table_id = TableId::from(233);
+        let removed_table_id = TableId::from(234);
+        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let read_version_mapping = Arc::new(RwLock::new(HashMap::new()));
+        let mut refiller = CacheRefiller::new(
+            Role::Serving,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            mock_sstable_store().await,
+            CacheRefiller::default_spawn_refill_task(),
+            read_version_mapping,
+        );
+
+        refiller.update_table_cache_refill_policies(HashMap::from([
+            (table_id, CacheRefillPolicy::Serving),
+            (removed_table_id, CacheRefillPolicy::Serving),
+        ]));
+        refiller.update_serving_table_vnode_mapping(
+            Operation::Snapshot,
+            HashMap::from([
+                (table_id, serving_vnodes.clone()),
+                (removed_table_id, serving_vnodes.clone()),
+            ]),
+        );
+        assert!(
+            refiller
+                .table_cache_refill_context()
+                .read()
+                .serving
+                .contains_key(&removed_table_id)
+        );
+
+        refiller.update_serving_table_vnode_mapping(
+            Operation::Snapshot,
+            HashMap::from([(table_id, serving_vnodes.clone())]),
+        );
+
+        let context = refiller.table_cache_refill_context().read();
+        assert_eq!(context.serving.get(&table_id), Some(&serving_vnodes));
+        assert!(!context.serving.contains_key(&removed_table_id));
+        assert!(
+            !context
+                .serving_table_vnode_mapping
+                .read()
+                .contains_key(&removed_table_id)
+        );
     }
 
     #[tokio::test]
@@ -1104,7 +1155,7 @@ mod tests {
         );
         refiller.update_table_cache_refill_policies(HashMap::from([(
             table_id,
-            Some(CacheRefillPolicy::Serving),
+            CacheRefillPolicy::Serving,
         )]));
         assert!(
             refiller

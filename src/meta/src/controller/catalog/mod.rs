@@ -152,25 +152,22 @@ impl CatalogController {
     pub async fn table_cache_refill_policies_snapshot(
         &self,
     ) -> MetaResult<PbTableCacheRefillPolicies> {
-        fn has_explicit_cache_refill_policy(config_override: &str) -> MetaResult<bool> {
+        fn explicit_cache_refill_policy(
+            config_override: &str,
+        ) -> MetaResult<Option<CacheRefillPolicy>> {
             if config_override.trim().is_empty() {
-                return Ok(false);
+                return Ok(None);
             }
 
             let table: toml::Table =
                 toml::from_str(config_override).context("invalid streaming job config override")?;
-            Ok(table
+            let has_explicit_policy = table
                 .get("streaming")
                 .and_then(toml::Value::as_table)
                 .and_then(|table| table.get("developer"))
                 .and_then(toml::Value::as_table)
-                .is_some_and(|table| table.contains_key("cache_refill_policy")))
-        }
-
-        fn explicit_cache_refill_policy(
-            config_override: &str,
-        ) -> MetaResult<Option<CacheRefillPolicy>> {
-            if !has_explicit_cache_refill_policy(config_override)? {
+                .is_some_and(|table| table.contains_key("cache_refill_policy"));
+            if !has_explicit_policy {
                 return Ok(None);
             }
 

@@ -34,6 +34,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarksIndex;
 use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
 use risingwave_hummock_sdk::{HummockRawObjectId, HummockReadEpoch, SyncResult};
+use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
@@ -178,7 +179,8 @@ impl HummockStorage {
         let write_limiter = Arc::new(WriteLimiter::default());
         let (version_update_tx, mut version_update_rx) = unbounded_channel();
         let (cache_refill_policy_tx, mut cache_refill_policy_rx) = unbounded_channel();
-        let (serving_table_vnode_mapping_tx, serving_table_vnode_mapping_rx) = unbounded_channel();
+        let (serving_table_vnode_mapping_tx, mut serving_table_vnode_mapping_rx) =
+            unbounded_channel();
 
         let observer_manager = ObserverManager::new(
             notification_client,
@@ -201,6 +203,10 @@ impl HummockStorage {
             ),
         };
         let initial_cache_refill_policies = cache_refill_policy_rx.recv().await.unwrap_or_default();
+        let initial_serving_table_vnode_mapping = serving_table_vnode_mapping_rx
+            .recv()
+            .await
+            .unwrap_or((Operation::Snapshot, Default::default()));
 
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
         let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
@@ -223,6 +229,7 @@ impl HummockStorage {
             role,
             version_update_rx,
             initial_cache_refill_policies,
+            initial_serving_table_vnode_mapping,
             cache_refill_policy_rx,
             serving_table_vnode_mapping_rx,
             pinned_version,

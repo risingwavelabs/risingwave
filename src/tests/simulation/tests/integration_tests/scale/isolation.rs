@@ -16,13 +16,19 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result, anyhow};
 use itertools::Itertools;
+use risingwave_pb::common::WorkerType;
+use risingwave_pb::monitor_service::GetTableCacheRefillStatsRequest;
+use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
+use serde_json::Value;
 use tokio::time::sleep;
+use tonic::transport::Endpoint;
 
 const DATABASE_RECOVERY_START: &str = "DATABASE_RECOVERY_START";
 const DATABASE_RECOVERY_SUCCESS: &str = "DATABASE_RECOVERY_SUCCESS";
+const COMPUTE_2_HOST: &str = "192.168.3.2";
 
 async fn assert_no_expected_global_recovery(session: &mut Session) -> Result<()> {
     let global_recovery_events = global_recovery_events(session).await?;
@@ -90,6 +96,70 @@ async fn test_isolation_simple_two_databases() -> Result<()> {
         ])
     );
 
+    assert_no_expected_global_recovery(&mut session).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_table_cache_refill_policy_after_database_recovery() -> Result<()> {
+    let (cluster, mut session) = prepare_refill_policy_db_recovery_env().await?;
+
+    let database_mapping = database_id_mapping(&mut session).await?;
+    let group1_database_id = database_mapping["group1"];
+    let group2_database_id = database_mapping["group2"];
+
+    session.run("use group1").await?;
+    session.run("create table t1(v1 int, v2 int);").await?;
+    session.run("create table t2(v1 int, v3 int);").await?;
+    session
+        .run("create table t3(v1 int primary key, v2 int, v3 int);")
+        .await?;
+    session
+        .run("create sink s3 into t3 as select t1.v1, t1.v2, t2.v3 from t1 join t2 on t1.v1 = t2.v1;")
+        .await?;
+    session
+        .run("alter sink s3 set config(streaming.developer.cache_refill_policy = 'both');")
+        .await?;
+
+    let internal_table_ids = internal_table_ids_for_job(&mut session, "s3").await?;
+    assert!(
+        !internal_table_ids.is_empty(),
+        "sink should have internal state tables"
+    );
+
+    wait_refill_policy_on_compute(&cluster, COMPUTE_2_HOST, &internal_table_ids, None).await?;
+
+    session
+        .run("insert into t2 select * from generate_series(1, 10);")
+        .await?;
+
+    cluster.simple_kill_nodes(["compute-1"]).await;
+    wait_until(
+        &mut session,
+        "select count(*) from rw_catalog.rw_worker_nodes where host = '192.168.3.1';",
+        "0",
+    )
+    .await?;
+
+    wait_until_run_ok(
+        &mut session,
+        "insert into t1 select generate_series, generate_series from generate_series(1, 10);",
+    )
+    .await?;
+
+    wait_refill_policy_on_compute(&cluster, COMPUTE_2_HOST, &internal_table_ids, Some("both"))
+        .await?;
+
+    let mut database_recovery_events = database_recovery_events(&mut session).await?;
+    assert!(!database_recovery_events.contains_key(&group2_database_id));
+    assert_eq!(
+        database_recovery_events.remove(&group1_database_id),
+        Some(vec![
+            DATABASE_RECOVERY_START.to_owned(),
+            DATABASE_RECOVERY_SUCCESS.to_owned()
+        ])
+    );
     assert_no_expected_global_recovery(&mut session).await?;
 
     Ok(())
@@ -367,6 +437,114 @@ async fn wait_until(session: &mut Session, sql: &str, target: &str) -> Result<()
     Ok(())
 }
 
+async fn wait_until_run_ok(session: &mut Session, sql: &str) -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(100), async {
+        loop {
+            if session.run(sql).await.is_ok() {
+                return;
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+    })
+    .await?;
+
+    Ok(())
+}
+
+async fn internal_table_ids_for_job(session: &mut Session, job_name: &str) -> Result<Vec<u32>> {
+    let table_ids = session
+        .run(format!(
+            "select id from rw_catalog.rw_internal_table_info \
+             where job_id = (select id from rw_catalog.rw_sinks where name = '{job_name}') \
+             order by id;"
+        ))
+        .await?;
+
+    table_ids
+        .lines()
+        .map(|line| {
+            line.trim()
+                .parse::<u32>()
+                .with_context(|| format!("failed to parse internal table id from {line:?}"))
+        })
+        .collect()
+}
+
+async fn table_cache_refill_policies_on_compute(
+    cluster: &Cluster,
+    worker_host: &str,
+) -> Result<serde_json::Map<String, Value>> {
+    let worker_nodes = cluster.get_cluster_info().await?.worker_nodes;
+    let worker = worker_nodes
+        .into_iter()
+        .find(|worker| {
+            worker.r#type() == WorkerType::ComputeNode
+                && worker
+                    .host
+                    .as_ref()
+                    .is_some_and(|host| host.host == worker_host)
+        })
+        .context("target compute node is missing")?;
+    let host = worker.host.context("compute node host is missing")?;
+    let endpoint = format!("http://{}:{}", host.host, host.port);
+
+    cluster
+        .run_on_client(async move {
+            let channel = Endpoint::from_shared(endpoint)?.connect().await?;
+            let mut client = MonitorServiceClient::new(channel);
+            let response = client
+                .get_table_cache_refill_stats(GetTableCacheRefillStatsRequest {})
+                .await?
+                .into_inner();
+            let stats: Value = serde_json::from_str(&response.stats)
+                .context("failed to parse table cache refill stats")?;
+
+            stats
+                .get("policies")
+                .and_then(Value::as_object)
+                .cloned()
+                .context("table cache refill stats missing policies")
+        })
+        .await
+}
+
+fn refill_policy_matches(
+    policies: &serde_json::Map<String, Value>,
+    table_ids: &[u32],
+    expected_policy: Option<&str>,
+) -> bool {
+    table_ids.iter().all(|table_id| {
+        let actual_policy = policies.get(&table_id.to_string()).and_then(Value::as_str);
+        actual_policy == expected_policy
+    })
+}
+
+async fn wait_refill_policy_on_compute(
+    cluster: &Cluster,
+    worker_host: &str,
+    table_ids: &[u32],
+    expected_policy: Option<&str>,
+) -> Result<()> {
+    tokio::time::timeout(Duration::from_secs(100), async {
+        loop {
+            let policies = table_cache_refill_policies_on_compute(cluster, worker_host).await?;
+            if refill_policy_matches(&policies, table_ids, expected_policy) {
+                return Ok(());
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow!(
+            "timed out waiting for table cache refill policy {:?} on {} for {:?}",
+            expected_policy,
+            worker_host,
+            table_ids
+        )
+    })?
+}
+
 async fn prepare_isolation_env() -> Result<(Cluster, Session)> {
     let mut config = Configuration::for_auto_parallelism(MAX_HEARTBEAT_INTERVAL_SEC, true);
 
@@ -391,6 +569,31 @@ async fn prepare_isolation_env() -> Result<(Cluster, Session)> {
         .run("create database group3 with resource_group='group3'")
         .await?;
 
+    session.run("set rw_implicit_flush = true;").await?;
+
+    Ok((cluster, session))
+}
+
+async fn prepare_refill_policy_db_recovery_env() -> Result<(Cluster, Session)> {
+    let mut config = Configuration::for_auto_parallelism(MAX_HEARTBEAT_INTERVAL_SEC, true);
+
+    config.compute_nodes = 3;
+    config.compute_node_cores = 2;
+    config.compute_resource_groups = HashMap::from([
+        (1, "group1".to_owned()),
+        (2, "group1".to_owned()),
+        (3, "group2".to_owned()),
+    ]);
+
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session
+        .run("create database group1 with resource_group='group1'")
+        .await?;
+    session
+        .run("create database group2 with resource_group='group2'")
+        .await?;
     session.run("set rw_implicit_flush = true;").await?;
 
     Ok((cluster, session))

@@ -153,9 +153,13 @@ impl ObserverState for HummockObserverNode {
             snapshot.table_cache_refill_policies.unwrap_or_default(),
         );
 
-        if let Some(mappings) = snapshot.serving_table_vnode_mappings {
-            self.handle_serving_table_vnode_mappings(Operation::Snapshot, mappings.mappings);
-        }
+        self.handle_serving_table_vnode_mappings(
+            Operation::Snapshot,
+            snapshot
+                .serving_table_vnode_mappings
+                .unwrap_or_default()
+                .mappings,
+        );
     }
 }
 
@@ -197,7 +201,7 @@ impl HummockObserverNode {
                     Bitmap::from(
                         mapping
                             .bitmap
-                            .expect("serving table vnode bitmap cannot inexists"),
+                            .expect("serving table vnode bitmap must exist"),
                     ),
                 )
             })
@@ -260,7 +264,7 @@ mod tests {
     use risingwave_pb::backup_service::MetaBackupManifestId;
     use risingwave_pb::hummock::{PbHummockVersion, WriteLimits};
     use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
-    use risingwave_pb::meta::subscribe_response::Info;
+    use risingwave_pb::meta::subscribe_response::{Info, Operation};
     use risingwave_pb::meta::table_cache_refill_policies::PbTableCacheRefillPolicy;
     use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
     use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, TableCacheRefillPolicies};
@@ -300,7 +304,8 @@ mod tests {
     async fn test_resubscribe_snapshot_refreshes_table_cache_refill_policies() {
         let (version_update_tx, mut version_update_rx) = unbounded_channel();
         let (cache_refill_policy_tx, mut cache_refill_policy_rx) = unbounded_channel();
-        let (serving_table_vnode_mapping_tx, _serving_table_vnode_mapping_rx) = unbounded_channel();
+        let (serving_table_vnode_mapping_tx, mut serving_table_vnode_mapping_rx) =
+            unbounded_channel();
         let mut observer = HummockObserverNode::new(
             Arc::new(CompactionCatalogManager::default()),
             BackupReader::unused().await,
@@ -315,6 +320,9 @@ mod tests {
             cache_refill_policy_rx.recv().await.unwrap().policies[0].table_id,
             233
         );
+        let (op, mappings) = serving_table_vnode_mapping_rx.recv().await.unwrap();
+        assert_eq!(op, Operation::Snapshot);
+        assert!(mappings.is_empty());
         version_update_rx.recv().await.unwrap();
 
         observer.handle_initialization_notification(policy_snapshot(2, 234));
@@ -322,6 +330,9 @@ mod tests {
             cache_refill_policy_rx.recv().await.unwrap().policies[0].table_id,
             234
         );
+        let (op, mappings) = serving_table_vnode_mapping_rx.recv().await.unwrap();
+        assert_eq!(op, Operation::Snapshot);
+        assert!(mappings.is_empty());
         version_update_rx.recv().await.unwrap();
     }
 }

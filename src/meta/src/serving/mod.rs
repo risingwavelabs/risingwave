@@ -364,16 +364,31 @@ pub fn build_worker_table_vnode_mapping(
 ) -> HashMap<WorkerId, HashMap<TableId, Bitmap>> {
     let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(active_serving_workers);
     for (fragment_id, mapping) in fragment_worker_slot_mappings {
-        let Some(parallelism) = streaming_parallelisms.get(fragment_id) else {
-            continue;
-        };
+        let state_table_ids = &streaming_parallelisms
+            .get(fragment_id)
+            .expect("streaming parallelism must exist")
+            .state_table_ids;
         append_worker_table_vnode_mapping(
             &mut worker_table_vnode_mapping,
-            &parallelism.state_table_ids,
+            state_table_ids,
             mapping,
         );
     }
     worker_table_vnode_mapping
+}
+
+pub fn to_pb_serving_table_vnode_mappings(
+    table_vnode_mapping: &HashMap<TableId, Bitmap>,
+) -> PbServingTableVnodeMappings {
+    PbServingTableVnodeMappings {
+        mappings: table_vnode_mapping
+            .iter()
+            .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
+                table_id: table_id.as_raw_id(),
+                bitmap: Some(bitmap.to_protobuf()),
+            })
+            .collect(),
+    }
 }
 
 async fn notify_hummock_serving_table_vnode_mapping(
@@ -388,12 +403,6 @@ async fn notify_hummock_serving_table_vnode_mapping(
         .list_active_serving_workers()
         .await
         .expect("fail to list serving compute nodes");
-    for fragment_id in fragment_worker_slot_mappings.keys() {
-        assert!(
-            streaming_parallelisms.contains_key(fragment_id),
-            "streaming parallelism must exist"
-        );
-    }
     let worker_table_vnode_mapping = build_worker_table_vnode_mapping(
         &active_serving_workers,
         fragment_worker_slot_mappings,
@@ -408,15 +417,9 @@ async fn notify_hummock_serving_table_vnode_mapping(
                     port: worker.host.as_ref().unwrap().port,
                 })),
                 operation,
-                Info::ServingTableVnodeMappings(PbServingTableVnodeMappings {
-                    mappings: table_vnode_mapping
-                        .iter()
-                        .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
-                            table_id: table_id.as_raw_id(),
-                            bitmap: Some(bitmap.to_protobuf()),
-                        })
-                        .collect(),
-                }),
+                Info::ServingTableVnodeMappings(to_pb_serving_table_vnode_mappings(
+                    table_vnode_mapping,
+                )),
             );
         }
     }
@@ -458,15 +461,9 @@ async fn notify_hummock_delete_serving_table_vnode_mapping(
                     port: worker.host.as_ref().unwrap().port,
                 })),
                 operation,
-                Info::ServingTableVnodeMappings(PbServingTableVnodeMappings {
-                    mappings: table_vnode_mapping
-                        .iter()
-                        .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
-                            table_id: table_id.as_raw_id(),
-                            bitmap: Some(bitmap.to_protobuf()),
-                        })
-                        .collect(),
-                }),
+                Info::ServingTableVnodeMappings(to_pb_serving_table_vnode_mappings(
+                    table_vnode_mapping,
+                )),
             );
         }
     }

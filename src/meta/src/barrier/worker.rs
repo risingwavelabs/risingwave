@@ -613,6 +613,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         // mark ready to unblock subsequent request
                                         self.context.mark_ready(MarkReadyOptions::Database(database_id));
                                         entering_initializing.remove();
+                                        Self::notify_table_cache_refill_policies_after_recovery(
+                                            self.context.clone(),
+                                            self.env.clone(),
+                                        ).await;
                                     }
                                     Err(e) => {
                                         entering_initializing.fail_reload_runtime_info(e);
@@ -622,6 +626,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
                                 entering_running.enter();
+                                Self::notify_table_cache_refill_policies_after_recovery(
+                                    self.context.clone(),
+                                    self.env.clone(),
+                                ).await;
                             }
                         }
                     };
@@ -967,6 +975,21 @@ use crate::barrier::partial_graph::{
 };
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
+    async fn notify_table_cache_refill_policies_after_recovery(context: Arc<C>, env: MetaSrvEnv) {
+        match context.table_cache_refill_policies_snapshot().await {
+            Ok(policies) => env.notification_manager().notify_hummock_without_version(
+                Operation::Update,
+                Info::TableCacheRefillPolicies(policies),
+            ),
+            Err(err) => {
+                warn!(
+                    error = %err.as_report(),
+                    "failed to notify table cache refill policies after recovery"
+                );
+            }
+        }
+    }
+
     /// Recovery the whole cluster from the latest epoch.
     ///
     /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
@@ -1325,21 +1348,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             ),
         )]);
 
-        match self.context.table_cache_refill_policies_snapshot().await {
-            Ok(policies) => self
-                .env
-                .notification_manager()
-                .notify_hummock_without_version(
-                    Operation::Update,
-                    Info::TableCacheRefillPolicies(policies),
-                ),
-            Err(err) => {
-                warn!(
-                    error = %err.as_report(),
-                    "failed to notify table cache refill policies after recovery"
-                );
-            }
-        }
+        Self::notify_table_cache_refill_policies_after_recovery(
+            self.context.clone(),
+            self.env.clone(),
+        )
+        .await;
 
         self.env
             .notification_manager()

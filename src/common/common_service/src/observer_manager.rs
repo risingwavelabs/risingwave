@@ -134,14 +134,7 @@ where
                         .streaming_worker_slot_mapping_version
             }
             Info::ServingWorkerSlotMappings(_) => true,
-            Info::ServingTableVnodeMappings(_) => {
-                notification.version
-                    > info
-                        .version
-                        .as_ref()
-                        .unwrap()
-                        .streaming_worker_slot_mapping_version
-            }
+            Info::ServingTableVnodeMappings(_) => true,
             Info::TableCacheRefillPolicies(_) => true,
         });
 
@@ -257,5 +250,128 @@ impl NotificationClient for RpcNotificationClient {
             .subscribe(subscribe_type)
             .await
             .map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
+    use risingwave_pb::meta::subscribe_response::Info;
+    use risingwave_pb::meta::{
+        MetaSnapshot, ServingTableVnodeMappings, SubscribeResponse, SubscribeType,
+        TableCacheRefillPolicies,
+    };
+
+    use super::*;
+
+    struct TestChannel {
+        messages: VecDeque<SubscribeResponse>,
+    }
+
+    #[async_trait::async_trait]
+    impl Channel for TestChannel {
+        type Item = SubscribeResponse;
+
+        async fn message(&mut self) -> std::result::Result<Option<Self::Item>, Status> {
+            Ok(self.messages.pop_front())
+        }
+    }
+
+    struct TestClient;
+
+    #[async_trait::async_trait]
+    impl NotificationClient for TestClient {
+        type Channel = TestChannel;
+
+        async fn subscribe(
+            &self,
+            _subscribe_type: SubscribeType,
+        ) -> Result<Self::Channel, ObserverError> {
+            Ok(TestChannel {
+                messages: VecDeque::new(),
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct TestObserverState {
+        initialized: bool,
+        notifications: Vec<&'static str>,
+    }
+
+    impl ObserverState for TestObserverState {
+        fn subscribe_type() -> SubscribeType {
+            SubscribeType::Hummock
+        }
+
+        fn handle_notification(&mut self, resp: SubscribeResponse) {
+            match resp.info.unwrap() {
+                Info::ServingTableVnodeMappings(_) => {
+                    self.notifications.push("serving_table_vnode_mappings")
+                }
+                Info::TableCacheRefillPolicies(_) => {
+                    self.notifications.push("table_cache_refill_policies")
+                }
+                Info::Database(_) => self.notifications.push("database"),
+                info => panic!("unexpected notification: {info:?}"),
+            }
+        }
+
+        fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+            assert!(matches!(resp.info, Some(Info::Snapshot(_))));
+            self.initialized = true;
+        }
+    }
+
+    fn notification(info: Info) -> SubscribeResponse {
+        SubscribeResponse {
+            info: Some(info),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_preserve_unversioned_hummock_notifications_before_snapshot() {
+        let snapshot = SubscribeResponse {
+            info: Some(Info::Snapshot(MetaSnapshot {
+                version: Some(SnapshotVersion {
+                    catalog_version: 1,
+                    worker_node_version: 1,
+                    streaming_worker_slot_mapping_version: 1,
+                }),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        let rx = TestChannel {
+            messages: VecDeque::from([
+                notification(Info::ServingTableVnodeMappings(
+                    ServingTableVnodeMappings::default(),
+                )),
+                notification(Info::TableCacheRefillPolicies(
+                    TableCacheRefillPolicies::default(),
+                )),
+                notification(Info::Database(Default::default())),
+                snapshot,
+            ]),
+        };
+        let mut observer_manager = ObserverManager {
+            rx,
+            client: TestClient,
+            observer_states: TestObserverState::default(),
+        };
+
+        observer_manager.wait_init_notification().await.unwrap();
+
+        assert!(observer_manager.observer_states.initialized);
+        assert_eq!(
+            observer_manager.observer_states.notifications,
+            vec![
+                "serving_table_vnode_mappings",
+                "table_cache_refill_policies"
+            ]
+        );
     }
 }

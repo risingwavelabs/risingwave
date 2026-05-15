@@ -25,7 +25,6 @@ use risingwave_pb::common::{ClusterResource, WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
-use risingwave_pb::meta::serving_table_vnode_mappings::PbServingTableVnodeMapping;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, PbServingTableVnodeMappings,
     SubscribeRequest, SubscribeType,
@@ -38,7 +37,9 @@ use tonic::{Request, Response, Status};
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{MetaSrvEnv, Notification, NotificationVersion, WorkerKey};
-use crate::serving::{ServingVnodeMappingRef, build_worker_table_vnode_mapping};
+use crate::serving::{
+    ServingVnodeMappingRef, build_worker_table_vnode_mapping, to_pb_serving_table_vnode_mappings,
+};
 
 pub struct NotificationServiceImpl {
     env: MetaSrvEnv,
@@ -207,18 +208,10 @@ impl NotificationServiceImpl {
 
         let mappings = worker_table_vnode_mapping
             .get(&worker_id)
-            .map(|table_vnode_mapping| {
-                table_vnode_mapping
-                    .iter()
-                    .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
-                        table_id: table_id.as_raw_id(),
-                        bitmap: Some(bitmap.to_protobuf()),
-                    })
-                    .collect()
-            })
+            .map(to_pb_serving_table_vnode_mappings)
             .unwrap_or_default();
 
-        Ok(PbServingTableVnodeMappings { mappings })
+        Ok(mappings)
     }
 
     async fn get_worker_node_snapshot(&self) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
