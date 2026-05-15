@@ -12,6 +12,7 @@ ignored = ["adbc_core"]
 
 [features]
 default = []
+test = []
 all-sinks = [
     "sink-bigquery",
     "sink-deltalake",

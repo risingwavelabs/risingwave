@@ -164,6 +164,14 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "properties.enable.auto.commit".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // PulsarProperties
+    map.try_insert(
+        std::any::type_name::<PulsarProperties>().to_owned(),
+        [
+            "pulsar.operation.retry.max.retries".to_owned(),
+            "pulsar.operation.retry.delay".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     map
 });
 
