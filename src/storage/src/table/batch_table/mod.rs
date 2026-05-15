@@ -58,7 +58,9 @@ use crate::store::{
     StateStoreGet, StateStoreIter, StateStoreIterExt, StateStoreRead, TryWaitEpochOptions,
 };
 use crate::table::merge_sort::NodePeek;
-use crate::table::{ChangeLogRow, KeyedRow, TableDistribution, TableIter};
+use crate::table::{
+    ChangeLogRow, KeyedRow, TableDistribution, TableIter, should_calculate_prefix_hint,
+};
 
 /// [`BatchTableInner`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
@@ -387,12 +389,12 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         );
         assert!(pk.len() <= self.pk_indices.len());
 
-        let prefix_hint = if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint == pk.len()
-        {
-            Some(serialized_pk.slice(VirtualNode::SIZE..))
-        } else {
-            None
-        };
+        let prefix_hint =
+            if should_calculate_prefix_hint(self.read_prefix_len_hint, pk.len(), false) {
+                Some(serialized_pk.slice(VirtualNode::SIZE..))
+            } else {
+                None
+            };
 
         let read_options = ReadOptions {
             prefix_hint,
@@ -791,9 +793,11 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
 
-        let prefix_hint = if self.read_prefix_len_hint != 0
-            && self.read_prefix_len_hint <= pk_prefix.len()
-        {
+        let prefix_hint = if should_calculate_prefix_hint(
+            self.read_prefix_len_hint,
+            pk_prefix.len(),
+            true,
+        ) {
             let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
                 start_key
             } else {

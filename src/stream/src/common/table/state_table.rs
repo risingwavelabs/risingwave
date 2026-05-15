@@ -61,7 +61,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::*;
-use risingwave_storage::table::{KeyedRow, TableDistribution};
+use risingwave_storage::table::{KeyedRow, TableDistribution, should_calculate_prefix_hint};
 use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
@@ -1121,7 +1121,7 @@ where
 
     fn serialize_pk_and_get_prefix_hint(&self, pk: &impl Row) -> (TableKey<Bytes>, Option<Bytes>) {
         let serialized_pk = self.serialize_pk(&pk);
-        let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
+        let prefix_hint = if should_calculate_prefix_hint(self.prefix_hint_len, pk.len(), false) {
             Some(serialized_pk.slice(VirtualNode::SIZE..))
         } else {
             #[cfg(debug_assertions)]
@@ -2146,9 +2146,7 @@ where
             debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
         }
         let prefix_hint = {
-            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
-                None
-            } else {
+            if should_calculate_prefix_hint(self.prefix_hint_len, pk_prefix.len(), true) {
                 let encoded_prefix_len = self
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
@@ -2156,6 +2154,8 @@ where
                 Some(Bytes::copy_from_slice(
                     &encoded_prefix[..encoded_prefix_len],
                 ))
+            } else {
+                None
             }
         };
 
