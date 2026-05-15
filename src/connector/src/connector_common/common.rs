@@ -28,7 +28,7 @@ use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use phf::{Set, phf_set};
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
-use pulsar::{Authentication, Pulsar, TokioExecutor};
+use pulsar::{Authentication, OperationRetryOptions, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::bail;
 use rustls_pki_types::pem::PemObject;
@@ -559,6 +559,7 @@ impl PulsarCommon {
         &self,
         oauth: &Option<PulsarOauthCommon>,
         aws_auth_props: &AwsAuthProps,
+        operation_retry_options: Option<OperationRetryOptions>,
     ) -> ConnectorResult<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
         let mut _temp_file = None; // Keep temp file alive
@@ -583,6 +584,15 @@ impl PulsarCommon {
                 name: "token".to_owned(),
                 data: Vec::from(auth_token.as_str()),
             });
+        }
+
+        if let Some(operation_retry_options) = operation_retry_options {
+            tracing::info!(
+                max_retries = ?operation_retry_options.max_retries,
+                retry_delay_ms = operation_retry_options.retry_delay.as_millis(),
+                "applying Pulsar source operation retry override"
+            );
+            pulsar_builder = pulsar_builder.with_operation_retry_options(operation_retry_options);
         }
 
         let res = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
