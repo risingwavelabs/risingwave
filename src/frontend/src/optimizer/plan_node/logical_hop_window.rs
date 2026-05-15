@@ -97,7 +97,7 @@ impl LogicalHopWindow {
     ) -> PlanRef {
         let input = LogicalFilter::create_with_expr(
             input,
-            FunctionCall::new(ExprType::IsNotNull, vec![time_col.clone().into()])
+            FunctionCall::new(ExprType::IsNotNull, vec![time_col.clone()])
                 .unwrap()
                 .into(),
         );
