@@ -357,6 +357,25 @@ fn append_worker_table_vnode_mapping(
     }
 }
 
+pub fn build_worker_table_vnode_mapping(
+    active_serving_workers: &[PbWorkerNode],
+    fragment_worker_slot_mappings: &HashMap<FragmentId, WorkerSlotMapping>,
+    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
+) -> HashMap<WorkerId, HashMap<TableId, Bitmap>> {
+    let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(active_serving_workers);
+    for (fragment_id, mapping) in fragment_worker_slot_mappings {
+        let Some(parallelism) = streaming_parallelisms.get(fragment_id) else {
+            continue;
+        };
+        append_worker_table_vnode_mapping(
+            &mut worker_table_vnode_mapping,
+            &parallelism.state_table_ids,
+            mapping,
+        );
+    }
+    worker_table_vnode_mapping
+}
+
 async fn notify_hummock_serving_table_vnode_mapping(
     operation: Operation,
     metadata_manager: &MetadataManager,
@@ -369,18 +388,17 @@ async fn notify_hummock_serving_table_vnode_mapping(
         .list_active_serving_workers()
         .await
         .expect("fail to list serving compute nodes");
-    let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(&active_serving_workers);
-    for (fragment_id, mapping) in fragment_worker_slot_mappings {
-        let state_table_ids = &streaming_parallelisms
-            .get(fragment_id)
-            .expect("streaming parallelism must exist")
-            .state_table_ids;
-        append_worker_table_vnode_mapping(
-            &mut worker_table_vnode_mapping,
-            state_table_ids,
-            mapping,
+    for fragment_id in fragment_worker_slot_mappings.keys() {
+        assert!(
+            streaming_parallelisms.contains_key(fragment_id),
+            "streaming parallelism must exist"
         );
     }
+    let worker_table_vnode_mapping = build_worker_table_vnode_mapping(
+        &active_serving_workers,
+        fragment_worker_slot_mappings,
+        streaming_parallelisms,
+    );
 
     for worker in active_serving_workers {
         if let Some(table_vnode_mapping) = worker_table_vnode_mapping.get(&worker.id) {

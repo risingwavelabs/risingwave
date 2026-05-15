@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-
 use anyhow::{Context, anyhow};
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
 use risingwave_meta::MetaResult;
 use risingwave_meta::controller::catalog::Catalog;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model::{TableId, WorkerId};
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
 use risingwave_pb::common::worker_node::State::Running;
@@ -42,26 +38,7 @@ use tonic::{Request, Response, Status};
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{MetaSrvEnv, Notification, NotificationVersion, WorkerKey};
-use crate::serving::ServingVnodeMappingRef;
-
-fn append_worker_table_vnode_mapping(
-    table_vnode_mapping: &mut HashMap<TableId, Bitmap>,
-    worker_id: WorkerId,
-    state_table_ids: &HashSet<TableId>,
-    worker_vnode_mapping: &HashMap<risingwave_common::hash::WorkerSlotId, Bitmap>,
-) {
-    for (worker_slot_id, bitmap) in worker_vnode_mapping {
-        if worker_slot_id.worker_id() != worker_id {
-            continue;
-        }
-        for table_id in state_table_ids {
-            table_vnode_mapping
-                .entry(*table_id)
-                .and_modify(|b| *b |= bitmap.clone())
-                .or_insert_with(|| bitmap.clone());
-        }
-    }
-}
+use crate::serving::{ServingVnodeMappingRef, build_worker_table_vnode_mapping};
 
 pub struct NotificationServiceImpl {
     env: MetaSrvEnv,
@@ -221,28 +198,27 @@ impl NotificationServiceImpl {
             .metadata_manager
             .catalog_controller
             .running_fragment_parallelisms(None)?;
-        let mut table_vnode_mapping: HashMap<TableId, Bitmap> = HashMap::new();
-        for (fragment_id, mapping) in self.serving_vnode_mapping.all() {
-            let Some(parallelism) = streaming_parallelisms.get(&fragment_id) else {
-                continue;
-            };
-            append_worker_table_vnode_mapping(
-                &mut table_vnode_mapping,
-                worker_id,
-                &parallelism.state_table_ids,
-                &mapping.to_bitmaps(),
-            );
-        }
+        let serving_vnode_mappings = self.serving_vnode_mapping.all();
+        let worker_table_vnode_mapping = build_worker_table_vnode_mapping(
+            &active_serving_workers,
+            &serving_vnode_mappings,
+            &streaming_parallelisms,
+        );
 
-        Ok(PbServingTableVnodeMappings {
-            mappings: table_vnode_mapping
-                .into_iter()
-                .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
-                    table_id: table_id.as_raw_id(),
-                    bitmap: Some(bitmap.to_protobuf()),
-                })
-                .collect(),
-        })
+        let mappings = worker_table_vnode_mapping
+            .get(&worker_id)
+            .map(|table_vnode_mapping| {
+                table_vnode_mapping
+                    .iter()
+                    .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
+                        table_id: table_id.as_raw_id(),
+                        bitmap: Some(bitmap.to_protobuf()),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(PbServingTableVnodeMappings { mappings })
     }
 
     async fn get_worker_node_snapshot(&self) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
