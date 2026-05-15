@@ -514,7 +514,7 @@ source: {:?}",
     fn plan_tumble_window(
         &mut self,
         input: Relation,
-        time_col: InputRef,
+        time_col: ExprImpl,
         args: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
         let mut args = args.into_iter();
@@ -528,7 +528,7 @@ source: {:?}",
                 }
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
-                    vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone()],
+                    vec![time_col.clone(), window_size.clone()],
                 )?
                 .into();
                 // TODO: `window_end` may be optimized to avoid double calculation of
@@ -554,11 +554,7 @@ source: {:?}",
                 }
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
-                    vec![
-                        ExprImpl::InputRef(Box::new(time_col)),
-                        window_size.clone(),
-                        window_offset,
-                    ],
+                    vec![time_col.clone(), window_size.clone(), window_offset],
                 )?
                 .into();
                 // TODO: `window_end` may be optimized to avoid double calculation of
@@ -580,7 +576,7 @@ source: {:?}",
     fn plan_hop_window(
         &mut self,
         input: Relation,
-        time_col: InputRef,
+        time_col: ExprImpl,
         args: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
         let input = self.plan_relation(input)?;

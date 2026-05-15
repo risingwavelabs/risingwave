@@ -24,7 +24,7 @@ use risingwave_expr::ExprError;
 use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
 use crate::error::Result;
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
+use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprType, FunctionCall, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanNodeMetadata;
 use crate::optimizer::property::{FunctionalDependencySet, Order};
@@ -34,7 +34,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HopWindow<PlanRef> {
     pub input: PlanRef,
-    pub time_col: InputRef,
+    pub time_col: ExprImpl,
     pub window_slide: Interval,
     pub window_size: Interval,
     pub window_offset: Interval,
@@ -50,7 +50,7 @@ pub struct HopWindow<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
     fn schema(&self) -> Schema {
-        let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
+        let output_type = DataType::window_of(&self.time_col.return_type()).unwrap();
         let mut original_schema = self.input.schema().clone();
         original_schema.fields.reserve_exact(2);
         let window_start = Field::with_name(output_type.clone(), "window_start");
@@ -145,7 +145,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
             .try_map(self.internal_window_end_col_idx())
     }
 
-    pub fn into_parts(self) -> (PlanRef, InputRef, Interval, Interval, Interval, Vec<usize>) {
+    pub fn into_parts(self) -> (PlanRef, ExprImpl, Interval, Interval, Interval, Vec<usize>) {
         (
             self.input,
             self.time_col,
@@ -231,10 +231,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
 
         let time_col_shifted = FunctionCall::new(
             ExprType::Subtract,
-            vec![
-                ExprImpl::InputRef(Box::new(time_col.clone())),
-                window_size_sub_slide,
-            ],
+            vec![time_col.clone(), window_size_sub_slide],
         )?
         .into();
 
@@ -297,11 +294,11 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
 
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         let mut out = Vec::with_capacity(5);
-        let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
+        let output_type = DataType::window_of(&self.time_col.return_type()).unwrap();
         out.push((
             "time_col",
-            Pretty::display(&InputRefDisplay {
-                input_ref: &self.time_col,
+            Pretty::debug(&ExprDisplay {
+                expr: &self.time_col,
                 input_schema: self.input.schema(),
             }),
         ));

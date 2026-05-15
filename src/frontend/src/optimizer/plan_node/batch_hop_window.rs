@@ -112,8 +112,14 @@ impl ToDistributedBatch for BatchHopWindow {
 
 impl ToBatchPb for BatchHopWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
+        let time_col = self
+            .core
+            .time_col
+            .as_input_ref()
+            .expect("time_col must be an InputRef when converting HopWindow to batch plan")
+            .index();
         NodeBody::HopWindow(HopWindowNode {
-            time_col: self.core.time_col.index() as _,
+            time_col: time_col as _,
             window_slide: Some(self.core.window_slide.into()),
             window_size: Some(self.core.window_size.into()),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
