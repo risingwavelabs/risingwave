@@ -561,6 +561,88 @@
       └─StreamGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.y] }
         └─StreamExchange { dist: HashShard(t.y) }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: TopN by row_number with arithmetic rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where rank - 1 = 0;
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y] }
+      └─StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: TopN by row_number with mirrored arithmetic rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 0 = rank - 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y] }
+      └─StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: TopN by row_number with mirrored arithmetic rank inequality
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 0 < rank - 1 AND rank <= 3;
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
+    └─StreamGroupTopN { order: [t.x ASC], limit: 2, offset: 1, group_key: [t.y] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: TopN by row_number with mirrored arithmetic rank upper bound
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 3 >= rank + 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
+    └─StreamGroupTopN { order: [t.x ASC], limit: 2, offset: 0, group_key: [t.y] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: TopN by row_number with mirrored commuted addition rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 2 = 1 + rank;
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y] }
+      └─StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: TopN by row_number with nested arithmetic rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where (rank - 1) - 1 = 0;
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y] }
+      └─StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 1, group_key: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: TopN by row_number with mirrored nested arithmetic rank predicate
+  sql: |
+    create table t(x int, y int);
+    select x, y from
+      (select *, row_number() over(PARTITION BY y ORDER BY x) rank from t)
+    where 0 = (rank - 1) - 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y] }
+      └─StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 1, group_key: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: TopN by rank without rank output
   sql: |
     create table t(x int, y int);
