@@ -26,6 +26,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, FragmentWorkerSlotMappings, PbServingTableVnodeMappings,
+    PbTableRefillRuntimeConfig,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -357,6 +358,40 @@ fn append_worker_table_vnode_mapping(
     }
 }
 
+pub fn build_worker_table_vnode_mapping(
+    active_serving_workers: &[PbWorkerNode],
+    fragment_worker_slot_mappings: &HashMap<FragmentId, WorkerSlotMapping>,
+    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
+) -> HashMap<WorkerId, HashMap<TableId, Bitmap>> {
+    let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(active_serving_workers);
+    for (fragment_id, mapping) in fragment_worker_slot_mappings {
+        let state_table_ids = &streaming_parallelisms
+            .get(fragment_id)
+            .expect("streaming parallelism must exist")
+            .state_table_ids;
+        append_worker_table_vnode_mapping(
+            &mut worker_table_vnode_mapping,
+            state_table_ids,
+            mapping,
+        );
+    }
+    worker_table_vnode_mapping
+}
+
+pub fn to_pb_serving_table_vnode_mappings(
+    table_vnode_mapping: &HashMap<TableId, Bitmap>,
+) -> PbServingTableVnodeMappings {
+    PbServingTableVnodeMappings {
+        mappings: table_vnode_mapping
+            .iter()
+            .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
+                table_id: table_id.as_raw_id(),
+                bitmap: Some(bitmap.to_protobuf()),
+            })
+            .collect(),
+    }
+}
+
 async fn notify_hummock_serving_table_vnode_mapping(
     operation: Operation,
     metadata_manager: &MetadataManager,
@@ -369,37 +404,29 @@ async fn notify_hummock_serving_table_vnode_mapping(
         .list_active_serving_workers()
         .await
         .expect("fail to list serving compute nodes");
-    let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(&active_serving_workers);
-    for (fragment_id, mapping) in fragment_worker_slot_mappings {
-        let state_table_ids = &streaming_parallelisms
-            .get(fragment_id)
-            .expect("streaming parallelism must exist")
-            .state_table_ids;
-        append_worker_table_vnode_mapping(
-            &mut worker_table_vnode_mapping,
-            state_table_ids,
-            mapping,
-        );
-    }
+    let worker_table_vnode_mapping = build_worker_table_vnode_mapping(
+        &active_serving_workers,
+        fragment_worker_slot_mappings,
+        streaming_parallelisms,
+    );
 
     for worker in active_serving_workers {
         if let Some(table_vnode_mapping) = worker_table_vnode_mapping.get(&worker.id) {
-            notification_manager.notify_hummock_with_worker_key_without_version(
-                Some(WorkerKey(PbHostAddress {
-                    host: worker.host.as_ref().unwrap().host.clone(),
-                    port: worker.host.as_ref().unwrap().port,
-                })),
-                operation,
-                Info::ServingTableVnodeMappings(PbServingTableVnodeMappings {
-                    mappings: table_vnode_mapping
-                        .iter()
-                        .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
-                            table_id: table_id.as_raw_id(),
-                            bitmap: Some(bitmap.to_protobuf()),
-                        })
-                        .collect(),
-                }),
-            );
+            notification_manager
+                .notify_hummock_with_worker_key(
+                    Some(WorkerKey(PbHostAddress {
+                        host: worker.host.as_ref().unwrap().host.clone(),
+                        port: worker.host.as_ref().unwrap().port,
+                    })),
+                    operation,
+                    Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                        serving_table_vnode_mappings: Some(to_pb_serving_table_vnode_mappings(
+                            table_vnode_mapping,
+                        )),
+                        ..Default::default()
+                    }),
+                )
+                .await;
         }
     }
 }
@@ -434,22 +461,21 @@ async fn notify_hummock_delete_serving_table_vnode_mapping(
 
     for worker in active_serving_workers {
         if let Some(table_vnode_mapping) = worker_table_vnode_mapping.get(&worker.id) {
-            notification_manager.notify_hummock_with_worker_key_without_version(
-                Some(WorkerKey(PbHostAddress {
-                    host: worker.host.as_ref().unwrap().host.clone(),
-                    port: worker.host.as_ref().unwrap().port,
-                })),
-                operation,
-                Info::ServingTableVnodeMappings(PbServingTableVnodeMappings {
-                    mappings: table_vnode_mapping
-                        .iter()
-                        .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
-                            table_id: table_id.as_raw_id(),
-                            bitmap: Some(bitmap.to_protobuf()),
-                        })
-                        .collect(),
-                }),
-            );
+            notification_manager
+                .notify_hummock_with_worker_key(
+                    Some(WorkerKey(PbHostAddress {
+                        host: worker.host.as_ref().unwrap().host.clone(),
+                        port: worker.host.as_ref().unwrap().port,
+                    })),
+                    operation,
+                    Info::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                        serving_table_vnode_mappings: Some(to_pb_serving_table_vnode_mappings(
+                            table_vnode_mapping,
+                        )),
+                        ..Default::default()
+                    }),
+                )
+                .await;
         }
     }
 }

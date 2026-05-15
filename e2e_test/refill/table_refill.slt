@@ -24,6 +24,9 @@ select name, key, value from rw_streaming_job_config;
 ----
 s3  streaming.developer.cache_refill_policy "both"
 
+statement ok
+recover;
+
 skipif parallel
 system ok
 psql_refill_validate.py --job-name s3 --job-type sink --mode streaming --expect-policy both

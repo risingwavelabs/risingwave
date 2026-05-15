@@ -23,6 +23,7 @@ use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SourceId;
+use risingwave_pb::meta::PbTableCacheRefillPolicies;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
@@ -77,6 +78,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
+    }
+
+    async fn table_cache_refill_policies_snapshot(&self) -> MetaResult<PbTableCacheRefillPolicies> {
+        self.metadata_manager
+            .catalog_controller
+            .table_cache_refill_policies_snapshot()
+            .await
     }
 
     #[await_tree::instrument("post_collect_command({command})")]
