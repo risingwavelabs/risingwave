@@ -13,14 +13,12 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::num::NonZeroUsize;
 
 use anyhow::Context;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::hash::{ActorAlignmentId, VnodeCountCompat};
-use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_connector::source::cdc::{CDC_BACKFILL_MAX_PARALLELISM, CdcScanOptions};
 use risingwave_meta_model::WorkerId;
@@ -154,24 +152,8 @@ pub(super) struct Scheduler {
 }
 
 impl Scheduler {
-    /// Create a new [`Scheduler`] with the given workers and the default parallelism.
-    ///
-    /// Each hash-distributed fragment will be scheduled to at most `default_parallelism` parallel
-    /// units, in a round-robin fashion on all compute nodes. If the `default_parallelism` is
-    /// `None`, all workers will be used.
-    ///
-    /// For different streaming jobs, we even out possible scheduling skew by using the streaming job id as the salt for the scheduling algorithm.
-    pub fn new(
-        streaming_job_id: JobId,
-        default_parallelism: NonZeroUsize,
-        expected_vnode_count: usize,
-    ) -> MetaResult<Self> {
-        let parallelism = default_parallelism.get();
-        assert!(
-            parallelism <= expected_vnode_count,
-            "parallelism should be limited by vnode count in previous steps for job {streaming_job_id}"
-        );
-
+    /// Create a new [`Scheduler`] with the expected vnode count of the streaming job.
+    pub fn new(expected_vnode_count: usize) -> MetaResult<Self> {
         Ok(Self {
             default_vnode_count: expected_vnode_count,
         })

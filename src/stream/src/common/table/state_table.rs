@@ -40,7 +40,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{
@@ -61,7 +61,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::*;
-use risingwave_storage::table::{KeyedRow, TableDistribution};
+use risingwave_storage::table::{KeyedRow, TableDistribution, should_calculate_prefix_hint};
 use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
@@ -942,26 +942,26 @@ where
         });
 
         // Restore persisted table watermark.
-        let max_watermark_of_vnodes = distribution
-            .vnodes()
-            .iter_vnodes()
-            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
-            .max();
-        let committed_watermark = if let Some((deser, _)) = watermark_serde.as_ref()
-            && let Some(max_watermark) = max_watermark_of_vnodes
-        {
-            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
-                assert!(row.len() == 1);
-                row[0].clone()
-            });
-            if deserialized.is_none() {
-                tracing::error!(
-                    vnodes = ?distribution.vnodes(),
-                    watermark = ?max_watermark,
-                    "Failed to deserialize persisted watermark from state store.",
-                );
-            }
-            deserialized
+        let committed_watermark = if let Some((deser, _)) = watermark_serde.as_ref() {
+            distribution
+                .vnodes()
+                .iter_vnodes()
+                .filter_map(|vnode| {
+                    let bytes = local_state_store.get_table_watermark(vnode)?;
+                    let datum = deser.deserialize(&bytes).ok().and_then(|row| {
+                        assert!(row.len() == 1);
+                        row[0].clone()
+                    });
+                    if datum.is_none() {
+                        tracing::error!(
+                            ?vnode,
+                            watermark = ?bytes,
+                            "Failed to deserialize persisted watermark from state store.",
+                        );
+                    }
+                    datum
+                })
+                .max_by(|a, b| cmp_datum(Some(a), Some(b), OrderType::ascending()))
         } else {
             None
         };
@@ -1121,7 +1121,7 @@ where
 
     fn serialize_pk_and_get_prefix_hint(&self, pk: &impl Row) -> (TableKey<Bytes>, Option<Bytes>) {
         let serialized_pk = self.serialize_pk(&pk);
-        let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
+        let prefix_hint = if should_calculate_prefix_hint(self.prefix_hint_len, pk.len(), false) {
             Some(serialized_pk.slice(VirtualNode::SIZE..))
         } else {
             #[cfg(debug_assertions)]
@@ -2146,9 +2146,7 @@ where
             debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
         }
         let prefix_hint = {
-            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
-                None
-            } else {
+            if should_calculate_prefix_hint(self.prefix_hint_len, pk_prefix.len(), true) {
                 let encoded_prefix_len = self
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
@@ -2156,6 +2154,8 @@ where
                 Some(Bytes::copy_from_slice(
                     &encoded_prefix[..encoded_prefix_len],
                 ))
+            } else {
+                None
             }
         };
 

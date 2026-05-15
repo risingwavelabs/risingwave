@@ -575,6 +575,19 @@
   - optimized_logical_plan_for_stream
   with_config_map:
     RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
+- name: grouping sets can require only expand flag
+  sql: |
+    create table t(a int);
+    select count(*) from t group by grouping sets ((), ());
+  expected_outputs:
+  - optimized_logical_plan_for_batch
+  - optimized_logical_plan_for_stream
+- name: split distinct agg with row id prunes hidden columns
+  sql: |
+    create table t(foo int, bar int);
+    explain (verbose) create materialized view mv_distinct_agg_with_row_id as select count(foo) as c1, count(distinct foo) as c2, count(distinct _row_id) as c3 from t;
+  expected_outputs:
+  - explain_output
 - name: remove unnecessary distinct for max and min
   sql: |
     create table t(x int, y int);

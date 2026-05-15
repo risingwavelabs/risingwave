@@ -38,6 +38,7 @@ risedev slt './e2e_test/source_inline/connection/*.slt'
 risedev slt './e2e_test/source_inline/vault/vault_secret_source.slt'
 risedev slt './e2e_test/source_inline/kafka/**/*.slt' --skip 'cron_only' -j8
 risedev slt './e2e_test/source_inline/kafka/**/*.slt.serial' --skip 'cron_only'
+risedev slt './e2e_test/ddl/streaming_parallelism/source.slt' --label 'streaming_parallelism_source_kafka'
 
 if [ "$profile" == "ci-release" ]; then
     echo "--- Run release mode only tests"
