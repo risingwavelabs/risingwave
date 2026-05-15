@@ -72,7 +72,7 @@ pretty_assertions = "1"
 prometheus = { version = "0.14", features = ["process"] }
 prometheus-http-query = "0.8.3"
 prost = { workspace = true }
-quick-xml = { version = "0.39", features = ["serialize"] }
+quick-xml = { version = "0.40", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
