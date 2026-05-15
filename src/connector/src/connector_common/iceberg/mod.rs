@@ -158,16 +158,20 @@ pub struct IcebergCommon {
     )]
     pub hosted_catalog: Option<bool>,
 
-    /// The http header to be used in the catalog requests.
+    /// The HTTP header to be used in catalog requests.
     /// Example:
     /// `catalog.header = "key1=value1;key2=value2;key3=value3"`
-    /// explain the format of the header:
+    /// For Google Cloud Lakehouse Iceberg REST catalogs, set
+    /// `catalog.header = "x-goog-user-project=PROJECT_ID"` to specify the billing project.
+    /// Explain the format of the header:
     /// - Each header is a key-value pair, separated by an '='.
     /// - Multiple headers can be specified, separated by a ';'.
     #[serde(rename = "catalog.header")]
     pub catalog_header: Option<String>,
 
-    /// Enable vended credentials for iceberg REST catalog.
+    /// Enable vended credentials for Iceberg REST catalog.
+    /// For Google Cloud Lakehouse Iceberg REST catalogs, this sends
+    /// `X-Iceberg-Access-Delegation: vended-credentials`.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub vended_credentials: Option<bool>,
 
@@ -191,6 +195,8 @@ pub struct IcebergCommon {
     /// - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
     /// - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
     /// - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
+    /// Google Cloud Lakehouse Iceberg REST catalogs with credential vending require
+    /// `org.apache.iceberg.gcp.gcs.GCSFileIO`.
     #[serde(rename = "catalog.io_impl")]
     pub catalog_io_impl: Option<String>,
 }
@@ -420,7 +426,7 @@ impl IcebergCommon {
                 Some(warehouse_path) => {
                     let (bucket, _) = {
                         let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
-                        // BigLake catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables
+                        // Lakehouse Iceberg REST catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables.
                         let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
                         let url = Url::parse(warehouse_path);
                         if (url.is_err() || is_s3_tables || is_bq_catalog_federation)
@@ -429,7 +435,7 @@ impl IcebergCommon {
                             // If the warehouse path is not a valid URL, it could be:
                             // - A warehouse name in REST catalog
                             // - An S3 Tables path (arn:aws:s3tables:...)
-                            // - A BigLake path (bq://projects/...) for Google Cloud BigQuery integration
+                            // - A Lakehouse path (bq://projects/...) for Google Cloud BigQuery integration
                             // We allow these to pass through for REST catalogs.
                             (None, None)
                         } else {
