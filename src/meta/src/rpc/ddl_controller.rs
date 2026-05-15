@@ -1007,12 +1007,7 @@ impl DdlController {
         // Generate streaming job metadata and issue the create command in two steps, so that the
         // error phase is classified at the barrier command boundary.
         let create_result = match self
-            .generate_streaming_job(
-                ctx,
-                streaming_job,
-                fragment_graph,
-                resource_type,
-            )
+            .generate_streaming_job(ctx, streaming_job, fragment_graph, resource_type)
             .await
         {
             Ok((stream_job_fragments, ctx)) => self
