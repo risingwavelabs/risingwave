@@ -200,7 +200,43 @@ impl CdcSplitTrait for PostgresCdcSplit {
     }
 
     fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        self.inner.snapshot_done = self.extract_snapshot_flag(last_seen_offset.as_str())?;
+        let new_snapshot_done = self.extract_snapshot_flag(last_seen_offset.as_str())?;
+
+        // Monotonicity guard for streaming-phase LSN.
+        //
+        // Debezium's task-level auto-restart (BaseSourceTask) reloads
+        // effectiveOffset from ConfigurableOffsetBackingStore, which lags
+        // dbz's in-memory position by one barrier + async commit cycle.
+        // After a broken pipe, dbz re-emits older WAL events whose LSNs
+        // are smaller than the freshest entry we already persisted.
+        // Without this guard those stale LSNs would overwrite the split
+        // state, the store would then be pushed backwards via the next
+        // barrier, and a subsequent restart would load the stale value
+        // -- by which time PG's slot.restart_lsn has typically advanced
+        // past it, causing a fatal validateLogPosition failure
+        // ("change stream ... no longer available").
+        //
+        // Snapshot-phase offsets carry no comparable LSN, so they always
+        // pass through. Heartbeat / non-LSN-bearing offsets also pass
+        // through (extract returns None).
+        if self.inner.snapshot_done
+            && new_snapshot_done
+            && let Some(new_lsn) = extract_postgres_lsn_from_offset_str(&last_seen_offset)
+            && let Some(old_lsn) = self.pg_lsn()
+            && new_lsn < old_lsn
+        {
+            tracing::warn!(
+                split_id = self.inner.split_id,
+                old_lsn,
+                new_lsn,
+                delta_bytes = old_lsn - new_lsn,
+                "Rejecting backward Postgres CDC offset update; \
+                 keeping current LSN to prevent state-table regression."
+            );
+            return Ok(());
+        }
+
+        self.inner.snapshot_done = new_snapshot_done;
         self.inner.start_offset = Some(last_seen_offset);
         Ok(())
     }
@@ -512,6 +548,64 @@ mod tests {
         let parsed = parse_sql_server_lsn_str(lsn).unwrap();
         let expected = ((0x00000027_u128) << 48) | ((0x00000ac0_u128) << 16) | (0x0002_u128);
         assert_eq!(parsed, expected);
+    }
+
+    fn pg_streaming_offset_json(lsn: u64) -> String {
+        format!(
+            r#"{{
+                "sourcePartition": {{"server": "RW_CDC_1001"}},
+                "sourceOffset": {{
+                    "last_snapshot_record": false,
+                    "lsn": {lsn},
+                    "txId": 12345,
+                    "ts_usec": 1700000000000000
+                }},
+                "isHeartbeat": false
+            }}"#
+        )
+    }
+
+    #[test]
+    fn test_postgres_offset_monotonic_guard_rejects_backward_lsn() {
+        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
+        // Mark snapshot as done so we enter the streaming-phase guard.
+        split.inner.snapshot_done = true;
+
+        // Push a backward LSN -- must be rejected, current offset kept.
+        split
+            .update_offset(pg_streaming_offset_json(150))
+            .expect("update_offset must not error on rejection");
+        assert_eq!(split.pg_lsn(), Some(200));
+    }
+
+    #[test]
+    fn test_postgres_offset_monotonic_guard_allows_forward_lsn() {
+        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
+        split.inner.snapshot_done = true;
+
+        split.update_offset(pg_streaming_offset_json(250)).unwrap();
+        assert_eq!(split.pg_lsn(), Some(250));
+    }
+
+    #[test]
+    fn test_postgres_offset_monotonic_guard_allows_equal_lsn() {
+        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
+        split.inner.snapshot_done = true;
+
+        // Equal is allowed (no regression).
+        split.update_offset(pg_streaming_offset_json(200)).unwrap();
+        assert_eq!(split.pg_lsn(), Some(200));
+    }
+
+    #[test]
+    fn test_postgres_offset_snapshot_phase_bypasses_guard() {
+        let mut split = PostgresCdcSplit::new(1, Some(pg_streaming_offset_json(200)), None);
+        // snapshot_done stays false -- still in snapshot phase.
+        assert!(!split.inner.snapshot_done);
+
+        // Even with a smaller LSN, snapshot-phase offsets pass through.
+        split.update_offset(pg_streaming_offset_json(150)).unwrap();
+        assert_eq!(split.pg_lsn(), Some(150));
     }
 
     #[test]
