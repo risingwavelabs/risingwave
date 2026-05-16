@@ -12,16 +12,68 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::anyhow;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportTask as IcebergReportTask;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_task::Status as IcebergReportTaskStatus;
+use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
 use super::*;
 use crate::hummock::sequence::next_compaction_task_id;
+
+struct ManualCompactionCancelGuard {
+    compactor: Arc<crate::hummock::IcebergCompactor>,
+    sink_id: SinkId,
+    task_id: u64,
+    armed: bool,
+}
+
+impl ManualCompactionCancelGuard {
+    fn new(
+        compactor: Arc<crate::hummock::IcebergCompactor>,
+        sink_id: SinkId,
+        task_id: u64,
+    ) -> Self {
+        Self {
+            compactor,
+            sink_id,
+            task_id,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ManualCompactionCancelGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+
+        tracing::info!(
+            sink_id = %self.sink_id,
+            task_id = self.task_id,
+            "Cancelling manual iceberg compaction task",
+        );
+
+        if let Err(e) = self.compactor.cancel_task(self.task_id) {
+            tracing::warn!(
+                error = %e.as_report(),
+                sink_id = %self.sink_id,
+                task_id = self.task_id,
+                "Failed to cancel manual iceberg compaction task",
+            );
+        }
+    }
+}
 
 impl IcebergCompactionManager {
     fn register_manual_task_waiter(
@@ -103,13 +155,17 @@ impl IcebergCompactionManager {
             return Err(error);
         }
 
+        // If the caller cancels the SQL command or this method exits before a
+        // completion report arrives, notify the compactor to stop the task.
+        let mut cancel_guard = ManualCompactionCancelGuard::new(compactor, sink_id, task_id);
+
         tracing::info!(
             "Manual compaction triggered for sink {} with task ID {}, waiting for completion...",
             sink_id,
             task_id
         );
 
-        self.wait_for_compaction_completion(&sink_id, task_id, waiter)
+        self.wait_for_compaction_completion(&sink_id, task_id, waiter, &mut cancel_guard)
             .await?;
 
         Ok(task_id)
@@ -120,12 +176,16 @@ impl IcebergCompactionManager {
         sink_id: &SinkId,
         task_id: u64,
         waiter: oneshot::Receiver<MetaResult<()>>,
+        cancel_guard: &mut ManualCompactionCancelGuard,
     ) -> MetaResult<()> {
         let _cleanup_guard =
             scopeguard::guard(task_id, |task_id| self.clear_manual_task_waiter(task_id));
 
         match tokio::time::timeout(self.report_timeout(), waiter).await {
-            Ok(Ok(result)) => result,
+            Ok(Ok(result)) => {
+                cancel_guard.disarm();
+                result
+            }
             Ok(Err(_)) => Err(anyhow!(
                 "Manual iceberg compaction waiter dropped unexpectedly for sink {} (task_id={})",
                 sink_id,
