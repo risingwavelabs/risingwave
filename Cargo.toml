@@ -187,10 +187,10 @@ mysql_async = { version = "0.36", features = [
 ] }
 opendal = "0.55"
 openssl = "0.10.79"
-opentelemetry = "0.31"
-opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
-opentelemetry-semantic-conventions = "0.31"
-opentelemetry_sdk = { version = "0.31", default-features = false, features = ["trace"] }
+opentelemetry = "0.32"
+opentelemetry-otlp = { version = "0.32", features = ["grpc-tonic"] }
+opentelemetry-semantic-conventions = "0.32"
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace"] }
 otlp-embedded = "0.0.2"
 parking_lot = { version = "0.12", features = [
     "arc_lock",
