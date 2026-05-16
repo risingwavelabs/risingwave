@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -107,32 +106,14 @@ struct EnsureSyncLogStoreFragmentRootRewriter;
 
 impl PlanRewriter<Stream> for EnsureSyncLogStoreFragmentRootRewriter {
     fn rewrite_with_inputs(&mut self, plan: &PlanRef, mut inputs: Vec<PlanRef>) -> PlanRef {
-        let old_inputs = plan.inputs();
-        let mut changed = old_inputs.len() != inputs.len()
-            || old_inputs
-                .iter()
-                .zip_eq_fast(inputs.iter())
-                .any(|(old, new)| old != new);
-
-        if plan.as_stream_exchange().is_some() {
-            return if changed {
-                plan.clone_root_with_inputs(&inputs)
-            } else {
-                plan.clone()
-            };
-        }
-
-        for input in &mut inputs {
-            if input.as_stream_sync_log_store().is_some() {
-                *input = StreamExchange::new_no_shuffle(input.clone()).into();
-                changed = true;
+        if plan.as_stream_exchange().is_none() {
+            for input in &mut inputs {
+                if input.as_stream_sync_log_store().is_some() {
+                    *input = StreamExchange::new_no_shuffle(input.clone()).into();
+                }
             }
         }
 
-        if changed {
-            plan.clone_root_with_inputs(&inputs)
-        } else {
-            plan.clone()
-        }
+        plan.clone_root_with_inputs(&inputs)
     }
 }
