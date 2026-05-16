@@ -443,6 +443,7 @@ fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
         Encode::Parquet => EncodeType::Parquet,
         Encode::None => EncodeType::None,
         Encode::Text => EncodeType::Text,
+        Encode::Xml => EncodeType::Xml,
     }
 }
 
