@@ -34,8 +34,7 @@ use super::derive::derive_columns;
 use super::stream::prelude::*;
 use super::utils::{Distill, TableCatalogBuilder, childless_record};
 use super::{
-    ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, StreamSyncLogStore,
-    reorganize_elements_id,
+    ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, reorganize_elements_id,
 };
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::{DatabaseId, SchemaId};
@@ -296,8 +295,7 @@ impl StreamMaterialize {
             },
         };
 
-        let input = required_dist.streaming_enforce_if_not_satisfies(input)?;
-        Ok(StreamSyncLogStore::ensure_as_fragment_root(input))
+        required_dist.streaming_enforce_if_not_satisfies(input)
     }
 
     /// Derive the table catalog with the given arguments.

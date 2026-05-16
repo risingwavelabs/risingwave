@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::SyncLogStoreNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -26,6 +27,7 @@ use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamExchange, StreamNode,
     StreamPlanRef as PlanRef,
 };
+use crate::optimizer::plan_rewriter::PlanRewriter;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -49,19 +51,6 @@ impl StreamSyncLogStore {
         );
 
         Self { base, input }
-    }
-
-    pub fn new_as_fragment_root(input: PlanRef) -> PlanRef {
-        let log_store: PlanRef = Self::new(input).into();
-        Self::ensure_as_fragment_root(log_store)
-    }
-
-    pub fn ensure_as_fragment_root(plan: PlanRef) -> PlanRef {
-        if plan.as_stream_sync_log_store().is_some() {
-            StreamExchange::new_no_shuffle(plan).into()
-        } else {
-            plan
-        }
     }
 }
 
@@ -106,3 +95,44 @@ impl StreamNode for StreamSyncLogStore {
 impl ExprRewritable<Stream> for StreamSyncLogStore {}
 
 impl ExprVisitable for StreamSyncLogStore {}
+
+/// Run after the final stream job root is created, so physical explain and graph building see the
+/// same sync log store fragment boundary.
+pub(crate) fn ensure_sync_log_store_fragment_root(plan: PlanRef) -> PlanRef {
+    plan.rewrite_with(&mut EnsureSyncLogStoreFragmentRootRewriter)
+}
+
+/// Insert no-shuffle exchanges above sync log stores that are not already separated by an exchange.
+struct EnsureSyncLogStoreFragmentRootRewriter;
+
+impl PlanRewriter<Stream> for EnsureSyncLogStoreFragmentRootRewriter {
+    fn rewrite_with_inputs(&mut self, plan: &PlanRef, mut inputs: Vec<PlanRef>) -> PlanRef {
+        let old_inputs = plan.inputs();
+        let mut changed = old_inputs.len() != inputs.len()
+            || old_inputs
+                .iter()
+                .zip_eq_fast(inputs.iter())
+                .any(|(old, new)| old != new);
+
+        if plan.as_stream_exchange().is_some() {
+            return if changed {
+                plan.clone_root_with_inputs(&inputs)
+            } else {
+                plan.clone()
+            };
+        }
+
+        for input in &mut inputs {
+            if input.as_stream_sync_log_store().is_some() {
+                *input = StreamExchange::new_no_shuffle(input.clone()).into();
+                changed = true;
+            }
+        }
+
+        if changed {
+            plan.clone_root_with_inputs(&inputs)
+        } else {
+            plan.clone()
+        }
+    }
+}

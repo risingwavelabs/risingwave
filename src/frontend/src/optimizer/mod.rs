@@ -592,14 +592,6 @@ impl LogicalPlanRoot {
                 ApplyOrder::BottomUp,
             ))?;
         }
-
-        if ctx.session_ctx().config().streaming_enable_unaligned_join() {
-            plan = plan.optimize_by_rules(&OptimizationStage::new(
-                "Ensure SyncLogStore is fragment root",
-                vec![EnsureSyncLogStoreRootRule::create()],
-                ApplyOrder::BottomUp,
-            ))?;
-        }
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 

@@ -534,3 +534,46 @@
         7 -> 8 [ label = "" ]
         7 -> 9 [ label = "" ]
     }
+- name: test dot output format (distsql, unaligned join)
+  sql: |
+    set streaming_enable_unaligned_join = true;
+    create table t1(v1 int primary key);
+    create table t2(v2 int primary key);
+    explain (distsql, format dot) create materialized view m1 as select * from t1 join t2 on t1.v1 = t2.v2;
+  explain_output: |
+    digraph {
+        0 [ label = "Fragment 0\l" ]
+        1 [ label = "StreamMaterialize { columns: [v1, v2], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }" ]
+        2 [ label = "StreamExchange NoShuffle from 1" ]
+        3 [ label = "Fragment 1\l" ]
+        4 [ label = "StreamSyncLogStore\ltables: [\"StreamSyncLogStore: 0\"]\l" ]
+        5 [ label = "StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2 }\ltables: [\"HashJoinLeft: 1\",\"HashJoinDegreeLeft: 2\",\"HashJoinRight: 3\",\"HashJoinDegreeRight: 4\"]\l" ]
+        6 [ label = "StreamExchange Hash([0]) from 2" ]
+        7 [ label = "StreamExchange Hash([0]) from 3" ]
+        8 [ label = "Fragment 2\l" ]
+        9 [ label = "StreamTableScan { table: t1, columns: [v1] }\ltables: [\"StreamScan: 5\"]\l" ]
+        10 [ label = "Upstream" ]
+        11 [ label = "BatchPlanNode" ]
+        12 [ label = "Fragment 3\l" ]
+        13 [ label = "StreamTableScan { table: t2, columns: [v2] }\ltables: [\"StreamScan: 6\"]\l" ]
+        14 [ label = "Table 0\lcolumns: [\"kv_log_store_epoch\",\"kv_log_store_seq_id\",\"kv_log_store_vnode\",\"kv_log_store_row_op\",\"t1_v1\",\"t2_v2\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\",\"$1 ASC\",\"$2 ASC\"]\lvalue indices: [\"0\",\"1\",\"2\",\"3\",\"4\",\"5\"]\ldistribution key: [\"4\"]\lread pk prefix len hint: \"3\"\lvnode column idx: \"2\"\l" ]
+        15 [ label = "Table 1\lcolumns: [\"t1_v1\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"0\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\l" ]
+        16 [ label = "Table 2\lcolumns: [\"t1_v1\",\"_degree\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"1\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\l" ]
+        17 [ label = "Table 3\lcolumns: [\"t2_v2\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"0\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\l" ]
+        18 [ label = "Table 4\lcolumns: [\"t2_v2\",\"_degree\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"1\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\l" ]
+        19 [ label = "Table 5\lcolumns: [\"vnode\",\"epoch\",\"row_count\",\"is_epoch_finished\",\"v1\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"1\",\"2\",\"3\",\"4\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\lvnode column idx: \"0\"\l" ]
+        20 [ label = "Table 6\lcolumns: [\"vnode\",\"epoch\",\"row_count\",\"is_epoch_finished\",\"v2\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"1\",\"2\",\"3\",\"4\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\lvnode column idx: \"0\"\l" ]
+        21 [ label = "Table 4294967294\lcolumns: [\"v1\",\"v2\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"0\",\"1\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\l" ]
+        0 -> 1 [ label = "" ]
+        1 -> 2 [ label = "" ]
+        3 -> 4 [ label = "" ]
+        4 -> 5 [ label = "" ]
+        5 -> 6 [ label = "" ]
+        5 -> 7 [ label = "" ]
+        8 -> 9 [ label = "" ]
+        9 -> 10 [ label = "" ]
+        9 -> 11 [ label = "" ]
+        12 -> 13 [ label = "" ]
+        13 -> 10 [ label = "" ]
+        13 -> 11 [ label = "" ]
+    }
