@@ -80,6 +80,21 @@ INSERT INTO sqlserver_all_data_types VALUES (2, 'True', 255, -32768, -2147483648
 
 INSERT INTO sqlserver_all_data_types VALUES (3, 'True', 127, 32767, 2147483647, 9223372036854775807, -10.0, 9999.999999, 10000.0, 'zzzz', 'zzzz', N'🌹👍', N'🌹👍', 0xffffffff, 0xffffffff, '6F9619FF-8B86-D011-B42D-00C04FC964FF', '2999-12-31', '23:59:59.999', '2099-12-31 23:59:59.999', '2999-12-31 23:59:59.999', '<Name>Jane Doe</Name>', 100.0)
 
+-- Insert ill-formed UTF-16 into `nvarchar`/`ntext` to ensure upstream decoding does not error.
+-- SQL Server allows storing surrogate code units; Rust clients should replace them with U+FFFD.
+CREATE TABLE test_invalid_utf16 (
+  id INT PRIMARY KEY,
+  c_nvarchar nvarchar(10),
+  c_ntext ntext
+);
+
+EXEC sys.sp_cdc_enable_table
+  @source_schema = 'dbo',
+  @source_name = 'test_invalid_utf16',
+  @role_name = NULL;
+
+INSERT INTO test_invalid_utf16 VALUES (1, NCHAR(0xD800) + N'A', NCHAR(0xD800) + N'B');
+
 -- Table without enabling CDC
 CREATE TABLE orders_without_cdc (
   order_id INT PRIMARY KEY,
