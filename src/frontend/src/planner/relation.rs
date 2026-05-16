@@ -514,7 +514,7 @@ source: {:?}",
     fn plan_tumble_window(
         &mut self,
         input: Relation,
-        time_col: InputRef,
+        time_col: ExprImpl,
         args: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
         let mut args = args.into_iter();
@@ -526,11 +526,9 @@ source: {:?}",
                 for (idx, col_dt) in col_data_types.iter().enumerate() {
                     exprs.push(InputRef::new(idx, col_dt.clone()).into());
                 }
-                let window_start: ExprImpl = FunctionCall::new(
-                    ExprType::TumbleStart,
-                    vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone()],
-                )?
-                .into();
+                let window_start: ExprImpl =
+                    FunctionCall::new(ExprType::TumbleStart, vec![time_col, window_size.clone()])?
+                        .into();
                 // TODO: `window_end` may be optimized to avoid double calculation of
                 // `tumble_start`, or we can depends on common expression
                 // optimization.
@@ -554,11 +552,7 @@ source: {:?}",
                 }
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
-                    vec![
-                        ExprImpl::InputRef(Box::new(time_col)),
-                        window_size.clone(),
-                        window_offset,
-                    ],
+                    vec![time_col, window_size.clone(), window_offset],
                 )?
                 .into();
                 // TODO: `window_end` may be optimized to avoid double calculation of
@@ -580,10 +574,36 @@ source: {:?}",
     fn plan_hop_window(
         &mut self,
         input: Relation,
-        time_col: InputRef,
+        time_col: ExprImpl,
         args: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
         let input = self.plan_relation(input)?;
+        let input_len = input.schema().len();
+        let (input, time_col, output_indices) = match time_col {
+            ExprImpl::InputRef(_) => (input, time_col, None),
+            expr => {
+                let time_col_type = expr.return_type();
+                let mut exprs = input
+                    .schema()
+                    .fields()
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, field)| InputRef::new(idx, field.data_type()).into())
+                    .collect_vec();
+                exprs.push(expr);
+
+                let time_col_idx = input_len;
+                let input = LogicalProject::create(input, exprs);
+                let output_indices = (0..input_len)
+                    .chain([input_len + 1, input_len + 2])
+                    .collect_vec();
+                (
+                    input,
+                    InputRef::new(time_col_idx, time_col_type).into(),
+                    Some(output_indices),
+                )
+            }
+        };
         let mut args = args.into_iter();
         let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) =
             args.next_tuple()
@@ -619,13 +639,17 @@ source: {:?}",
             return Err(ErrorCode::BindError(format!("Invalid arguments for HOP window function: window_size {} cannot be divided by window_slide {}",window_size, window_slide)).into());
         }
 
-        Ok(LogicalHopWindow::create(
-            input,
-            time_col,
-            window_slide,
-            window_size,
-            window_offset,
-        ))
+        let hop_window =
+            LogicalHopWindow::create(input, time_col, window_slide, window_size, window_offset);
+        if let Some(output_indices) = output_indices {
+            Ok(hop_window
+                .as_logical_hop_window()
+                .unwrap()
+                .clone_with_output_indices(output_indices)
+                .into())
+        } else {
+            Ok(hop_window)
+        }
     }
 
     fn plan_iceberg_intermediate_scan(

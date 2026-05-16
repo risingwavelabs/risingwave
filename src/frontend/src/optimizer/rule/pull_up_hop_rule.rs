@@ -16,6 +16,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::JoinType;
 
 use super::prelude::{PlanRef, *};
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalHopWindow, LogicalJoin};
 use crate::utils::IndexRewriter;
 
@@ -184,8 +185,11 @@ impl Rule<Logical> for PullUpHopRule {
             output_index
         };
         let new_left_len = new_left.schema().len();
+        let new_right_len = new_right.schema().len();
         let new_cond = on.rewrite_expr(&mut IndexRewriter::new(old_i2new_i));
         let new_join = LogicalJoin::new(new_left, new_right, join_type, new_cond);
+        let mut right_time_col_shift =
+            ColIndexMapping::with_shift_offset(new_right_len, new_left_len as isize);
 
         let new_hop = if pull_up_left && pull_up_right {
             let left_hop = LogicalHopWindow::create(
@@ -197,9 +201,7 @@ impl Rule<Logical> for PullUpHopRule {
             );
             LogicalHopWindow::create(
                 left_hop,
-                right_time_col
-                    .unwrap()
-                    .clone_with_offset(new_left_len as isize),
+                right_time_col_shift.rewrite_expr(right_time_col.unwrap()),
                 right_window_slide.unwrap(),
                 right_window_size.unwrap(),
                 right_window_offset.unwrap(),
@@ -215,9 +217,7 @@ impl Rule<Logical> for PullUpHopRule {
         } else {
             LogicalHopWindow::create(
                 new_join.into(),
-                right_time_col
-                    .unwrap()
-                    .clone_with_offset(new_left_len as isize),
+                right_time_col_shift.rewrite_expr(right_time_col.unwrap()),
                 right_window_slide.unwrap(),
                 right_window_size.unwrap(),
                 right_window_offset.unwrap(),

@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::JoinType;
 
 use super::prelude::{PlanRef, *};
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalHopWindow};
 use crate::utils::Condition;
 
@@ -56,6 +58,8 @@ impl Rule<Logical> for ApplyHopWindowTransposeRule {
             hop_window.clone().into_parts();
 
         let apply_left_len = left.schema().len() as isize;
+        let mut time_col_mapping =
+            ColIndexMapping::with_shift_offset(hop_window_input.schema().len(), apply_left_len);
 
         if max_one_row {
             return None;
@@ -73,7 +77,7 @@ impl Rule<Logical> for ApplyHopWindowTransposeRule {
 
         let new_hop_window = LogicalHopWindow::create(
             new_apply,
-            time_col.clone_with_offset(apply_left_len),
+            time_col_mapping.rewrite_expr(time_col),
             window_slide,
             window_size,
             window_offset,
