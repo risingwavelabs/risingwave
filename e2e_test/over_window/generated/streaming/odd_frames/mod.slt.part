@@ -3,7 +3,7 @@
 # Test weird window frames.
 
 statement ok
-create table t (a int, b int, c int);
+create table t (a int, b int, c decimal);
 
 statement ok
 create materialized view v as
@@ -11,7 +11,9 @@ select
     count(*) over (partition by 1::int order by b rows between 1 preceding and 10 preceding) as c1,
     count(*) over (partition by 1::int order by b rows between 10 following and 1 following) as c2,
     count(*) over (partition by 1::int order by b range between 2 preceding and 10 preceding) as c3,
-    count(*) over (partition by 1::int order by b range between 10 following and 2 following) as c4
+    count(*) over (partition by 1::int order by b range between 10 following and 2 following) as c4,
+    avg(c) over (partition by 1::int order by b rows between 1 preceding and 10 preceding) as a1,
+    avg(c) over (partition by 1::int order by b rows between 10 following and 1 following) as a2
 from t;
 
 statement ok
@@ -21,12 +23,12 @@ insert into t values
    ,(1, 4, 9)
 ;
 
-query IIII
+query IIIIRR
 select * from v;
 ----
-0 0 0 0
-0 0 0 0
-0 0 0 0
+0 0 0 0 NULL NULL
+0 0 0 0 NULL NULL
+0 0 0 0 NULL NULL
 
 statement ok
 drop materialized view v;
