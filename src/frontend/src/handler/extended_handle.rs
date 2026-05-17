@@ -159,6 +159,7 @@ pub fn handle_bind(
     params: Vec<Option<Bytes>>,
     param_formats: Vec<Format>,
     result_formats: Vec<Format>,
+    session_timezone: String,
 ) -> Result<Portal> {
     match prepare_statement {
         PrepareStatement::Empty => Ok(Portal::Empty),
@@ -178,7 +179,7 @@ pub fn handle_bind(
                 ..
             } = bound_result;
 
-            let (new_bound, parsed_params) = bound.bind_parameter(params, param_formats)?;
+            let (new_bound, parsed_params) = bound.bind_parameter(params, param_formats, session_timezone)?;
             let new_bound_result = BoundResult {
                 stmt_type,
                 must_dist,
