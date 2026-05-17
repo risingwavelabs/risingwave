@@ -489,3 +489,51 @@ pub enum SourceWorkerCommand {
     /// Update the properties of the source worker.
     UpdateProps(ConnectorProperties),
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use risingwave_connector::source::nats::split::{NatsOffset, NatsSplit};
+    use risingwave_connector::source::{SplitId, SplitImpl};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_nats_discovered_splits_stay_fixed_when_adaptive_disabled() {
+        let split_id: SplitId = "0".into();
+        let mut discovered = BTreeMap::new();
+        discovered.insert(
+            split_id.clone(),
+            SplitImpl::Nats(NatsSplit::new(
+                "quotes.test".to_owned(),
+                split_id,
+                NatsOffset::None,
+            )),
+        );
+
+        let splits = Arc::new(Mutex::new(SharedSplitMap {
+            splits: Some(discovered),
+        }));
+        let (command_tx, _command_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let handle = ConnectorSourceWorkerHandle {
+            handle: tokio::spawn(async {}),
+            command_tx,
+            splits,
+            enable_drop_split: true,
+            enable_adaptive_splits: false,
+        };
+
+        let discovered = handle.discovered_splits(1.into()).await.unwrap().unwrap();
+        match discovered {
+            DiscoveredSplits::Fixed(splits) => {
+                assert_eq!(splits.len(), 1);
+                assert!(matches!(splits.get("0"), Some(SplitImpl::Nats(_))));
+            }
+            DiscoveredSplits::Adaptive(_) => {
+                panic!("NATS splits must remain fixed when adaptive mode is disabled");
+            }
+        }
+    }
+}

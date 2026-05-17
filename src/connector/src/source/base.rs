@@ -708,10 +708,7 @@ impl ConnectorProperties {
 
     /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.
     pub fn enable_adaptive_splits(&self) -> bool {
-        matches!(
-            self,
-            ConnectorProperties::Nats(_) | ConnectorProperties::GooglePubsub(_)
-        )
+        matches!(self, ConnectorProperties::GooglePubsub(_))
     }
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
@@ -1072,6 +1069,24 @@ mod tests {
         } else {
             panic!("extract kafka config failed");
         }
+    }
+
+    #[test]
+    fn test_nats_connector_does_not_enable_adaptive_splits() {
+        let props = convert_args!(btreemap!(
+            "connector" => "nats",
+            "server_url" => "nats://localhost:4222",
+            "subject" => "quotes.test",
+            "stream" => "quotes-test",
+            "consumer.durable_name" => "quotes-test-durable",
+            "connect_mode" => "plain",
+        ));
+
+        let props =
+            ConnectorProperties::extract(WithOptionsSecResolved::without_secrets(props), true)
+                .unwrap();
+
+        assert!(!props.enable_adaptive_splits());
     }
 
     #[test]

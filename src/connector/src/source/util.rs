@@ -18,32 +18,12 @@ use std::sync::Arc;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::SplitImpl;
 use crate::source::google_pubsub::PubsubSplit;
-use crate::source::nats::split::NatsSplit;
 
 pub fn fill_adaptive_split(
     split_template: &SplitImpl,
     actor_count: usize,
 ) -> ConnectorResult<BTreeMap<Arc<str>, SplitImpl>> {
     match split_template {
-        SplitImpl::Nats(split) => {
-            let mut new_splits = BTreeMap::new();
-            for idx in 0..actor_count {
-                let split_id: Arc<str> = idx.to_string().into();
-                new_splits.insert(
-                    split_id.clone(),
-                    SplitImpl::Nats(NatsSplit::new(
-                        split.subject.clone(),
-                        split_id,
-                        split.start_sequence.clone(),
-                    )),
-                );
-            }
-            tracing::debug!(
-                "Filled adaptive splits for Nats source, {} splits in total",
-                new_splits.len()
-            );
-            Ok(new_splits)
-        }
         SplitImpl::GooglePubsub(split) => {
             let mut new_splits = BTreeMap::new();
             for idx in 0..actor_count {
@@ -75,7 +55,7 @@ pub fn fill_adaptive_split(
 mod tests {
     use super::*;
     use crate::source::SplitMetaData;
-    use crate::source::nats::split::NatsOffset;
+    use crate::source::nats::split::{NatsOffset, NatsSplit};
 
     #[test]
     fn test_fill_adaptive_split_pubsub() {
@@ -118,19 +98,15 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_adaptive_split_nats() {
+    fn test_fill_adaptive_split_nats_unsupported() {
         let template = SplitImpl::Nats(NatsSplit::new(
             "test-subject".to_owned(),
             "0".into(),
             NatsOffset::None,
         ));
 
-        let splits = fill_adaptive_split(&template, 4).unwrap();
-        assert_eq!(splits.len(), 4);
-
-        for idx in 0..4 {
-            assert!(splits.contains_key(idx.to_string().as_str()));
-        }
+        let result = fill_adaptive_split(&template, 4);
+        assert!(result.is_err());
     }
 
     #[test]
