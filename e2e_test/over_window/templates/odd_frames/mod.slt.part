@@ -22,7 +22,7 @@ insert into t values
 ;
 
 query IIIIRR
-select * from v;
+select * from v order by a2 nulls last;
 ----
 0 0 0 0 NULL 3
 0 0 0 0 NULL 9
