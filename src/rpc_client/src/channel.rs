@@ -14,6 +14,7 @@
 
 use std::task::{Context, Poll};
 
+use fastrace::future::FutureExt as _;
 use futures::Future;
 use http::HeaderValue;
 use risingwave_common::util::tracing::TracingContext;
@@ -54,10 +55,12 @@ impl Service<http::Request<Body>> for WrappedChannel {
         async move {
             let path = req.uri().path().to_owned();
 
+            let fastrace_span = fastrace::Span::enter_with_local_parent("grpc_client")
+                .with_property(|| ("uri", path.clone()));
             let headers = TracingContext::from_current_span().to_http_headers();
             req.headers_mut().extend(headers);
 
-            let mut response = inner.call(req).await;
+            let mut response = inner.call(req).in_span(fastrace_span).await;
 
             if let Ok(response) = &mut response
                 && let Ok(path) = HeaderValue::from_str(&path)

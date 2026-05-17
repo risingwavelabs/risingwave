@@ -29,6 +29,8 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 mod logger;
 pub use logger::*;
 mod deadlock;
+#[cfg(not(madsim))]
+mod toggleable_reporter;
 pub use deadlock::*;
 mod panic_hook;
 pub use panic_hook::*;

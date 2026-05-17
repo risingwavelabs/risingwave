@@ -12,6 +12,7 @@ anyhow = "1"
 async-trait = "0.1"
 easy-ext = "1"
 either = "1.15.0"
+fastrace = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "1"
 lru = { workspace = true }

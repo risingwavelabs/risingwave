@@ -148,6 +148,7 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
 deltalake = { version = "0.32.0", features = ["s3", "gcs"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
+fastrace = { version = "0.7", features = ["enable"] }
 foyer = { version = "0.21.2", features = ["serde", "tracing"] }
 futures-async-stream = "0.2.13"
 governor = { version = "0.10", default-features = false, features = ["std"] }
@@ -304,7 +305,6 @@ tokio-util = "0.7"
 toml = "1.0"
 tonic = { package = "madsim-tonic", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646", features = ["zstd"] }
 tonic-build = { package = "madsim-tonic-build", git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
-tracing-opentelemetry = "=0.32.0"
 
 [workspace.lints.rust]
 # `forbid` will also prevent the misuse of `#[allow(unused)]`

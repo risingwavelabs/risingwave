@@ -17,6 +17,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use anyhow::Context;
+use fastrace::future::FutureExt as _;
 use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
@@ -440,12 +441,19 @@ impl BatchTaskExecution {
                     stage_id = task_id.stage_id,
                     query_id = task_id.query_id,
                 ));
+                let fastrace_span = tracing_context
+                    .root_span("batch_execute")
+                    .with_property(|| ("task_id", task_id.task_id.to_string()))
+                    .with_property(|| ("stage_id", task_id.stage_id.to_string()))
+                    .with_property(|| ("query_id", task_id.query_id.clone()));
 
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
                 expr_context_scope(
                     expr_context,
-                    t_1.run(exec, sender, state_tx_1.as_mut()).instrument(span),
+                    t_1.run(exec, sender, state_tx_1.as_mut())
+                        .instrument(span)
+                        .in_span(fastrace_span),
                 )
                 .await;
             };

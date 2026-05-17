@@ -28,6 +28,7 @@ educe = "0.6"
 either = "1"
 enum-as-inner = "0.7"
 fail = "0.5"
+fastrace = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"

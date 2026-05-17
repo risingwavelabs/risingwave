@@ -29,7 +29,6 @@ thiserror-ext = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { workspace = true, features = ["fs"] }
 tracing = "0.1"
-tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { version = "0.3", features = [
     "fmt",
     "parking_lot",
@@ -40,7 +39,7 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 
 [target.'cfg(not(madsim))'.dependencies]
-fastrace = "0.7"
+fastrace = { workspace = true }
 fastrace-opentelemetry = "0.16.0"
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
