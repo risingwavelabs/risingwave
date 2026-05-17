@@ -1541,6 +1541,18 @@ mod tests {
             interval,
             Interval::from_month(14) + Interval::from_days(3) + Interval::from_minutes(5)
         );
+
+        // Sign separated from its number by whitespace, as accepted by
+        // PostgreSQL: `1 month - 1 day` == `1 month + (-1) day`. See #22018.
+        let interval = "1 month - 1 day".parse::<Interval>().unwrap();
+        assert_eq!(interval, Interval::from_month(1) + Interval::from_days(-1));
+
+        let interval = "1 month + 1 day".parse::<Interval>().unwrap();
+        assert_eq!(interval, Interval::from_month(1) + Interval::from_days(1));
+
+        // No whitespace between the sign and the digit should still work.
+        let interval = "1 month -1 day".parse::<Interval>().unwrap();
+        assert_eq!(interval, Interval::from_month(1) + Interval::from_days(-1));
     }
 
     #[test]
