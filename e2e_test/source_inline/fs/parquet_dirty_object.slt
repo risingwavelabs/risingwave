@@ -1,0 +1,22 @@
+system ok
+bash -c 'set -euo pipefail; rm -rf /tmp/rw_parquet_dirty_object; mkdir -p /tmp/rw_parquet_dirty_object; printf "%s" "UEFSMRUAFRQVGCwVAhUAFQYVBgAACiQCAAAAAgEBAAAAFQAVFBUYLBUCFQAVBhUGAAAKJAIAAAACAQoAAAAVABUUFRgsFQIVABUGFQYAAAokAgAAAAIBAgAAABUAFRQVGCwVAhUAFQYVBgAACiQCAAAAAgEUAAAAFQIZPDUAGA1kdWNrZGJfc2NoZW1hFQQAFQIlAhgCdjElIgAVAiUCGAJ2MiUiABYEGSwZLCYAHBUCGRUAGRgCdjEVAhYCFjYWOiYIPBgEAQAAABgEAQAAABYAKAQBAAAAGAQBAAAAAAAAJgAcFQIZFQAZGAJ2MhUCFgIWNhY6JkI8GAQKAAAAGAQKAAAAFgAoBAoAAAAYBAoAAAAAAAAWgIgCFgImCAAZLCYAHBUCGRUAGRgCdjEVAhYCFjYWOiZ8PBgEAgAAABgEAgAAABYAKAQCAAAAGAQCAAAAAAAAJgAcFQIZFQAZGAJ2MhUCFgIWNhY6JrYBPBgEFAAAABgEFAAAABYAKAQUAAAAGAQUAAAAAAAAFoCIAhYCJnwAKAZEdWNrREIAJgEAAFBBUjE=" | base64 -d > /tmp/rw_parquet_dirty_object/10_good.parquet; printf "not a parquet file\n" > /tmp/rw_parquet_dirty_object/bad_14.bin'
+
+statement ok
+CREATE TABLE parquet_dirty_object (
+    v1 int,
+    v2 int
+) WITH (
+    connector = 'posix_fs',
+    posix_fs.root = '/tmp/rw_parquet_dirty_object'
+) FORMAT PLAIN ENCODE PARQUET;
+
+query II retry 20 backoff 1s
+SELECT count(*), sum(v2) FROM parquet_dirty_object;
+----
+2 30
+
+statement ok
+DROP TABLE parquet_dirty_object;
+
+system ok
+rm -rf /tmp/rw_parquet_dirty_object
