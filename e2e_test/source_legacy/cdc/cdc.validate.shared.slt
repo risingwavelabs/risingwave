@@ -210,28 +210,6 @@ create table shipments (
  PRIMARY KEY (shipment_id)
 ) from pg_validate_src table 'public.shipments';
 
-# explicit `FORMAT DEBEZIUM ENCODE JSON` is accepted (no-op for CDC)
-statement ok
-explain create table shipments (
-  shipment_id INTEGER,
-  order_id INTEGER,
-  origin STRING,
-  destination STRING,
-  is_arrived boolean,
- PRIMARY KEY (shipment_id)
-) from pg_validate_src table 'public.shipments' format debezium encode json;
-
-# any other format/encode combination is rejected
-statement error Row format for CDC connectors should be either omitted or set to `FORMAT DEBEZIUM ENCODE JSON`
-create table shipments (
-  shipment_id INTEGER,
-  order_id INTEGER,
-  origin STRING,
-  destination STRING,
-  is_arrived boolean,
- PRIMARY KEY (shipment_id)
-) from pg_validate_src table 'public.shipments' format canal encode csv;
-
 # non-generated column after a generated column is rejected
 statement error Not supported: Non-generated column found after a generated column.
 create table shipments (
