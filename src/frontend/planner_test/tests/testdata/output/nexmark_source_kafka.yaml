@@ -2010,7 +2010,7 @@
     StreamNoOp
     └── StreamExchange NoShuffle from 3
 
-    Table 0 { columns: [ id, item_name, count(auction), _rw_timestamp ], primary key: [ $2 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ id, item_name, count(auction), _rw_timestamp ], primary key: [ $2 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 

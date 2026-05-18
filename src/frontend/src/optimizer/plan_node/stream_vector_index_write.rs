@@ -150,7 +150,9 @@ impl StreamVectorIndexWrite {
         let (table_pk, stream_key) = derive_pk(input, user_distributed_by, user_order_by, &columns);
         // assert: `stream_key` is a subset of `table_pk`
 
-        let read_prefix_len_hint = table_pk.len();
+        // Vector index writes go through vector writer APIs instead of StateTable
+        // get/prefix-iter reads, so prefix bloom filters are not consumed.
+        let read_prefix_len_hint = 0;
         // We don't need to fill in table id for table in frontend. The id will be generated on
         // meta catalog service.
         Ok(TableCatalog {
