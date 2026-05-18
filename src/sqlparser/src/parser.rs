@@ -317,6 +317,7 @@ impl Parser<'_> {
                 Keyword::ALTER => Ok(self.parse_alter()?),
                 Keyword::COPY => Ok(self.parse_copy()?),
                 Keyword::SET => Ok(self.parse_set()?),
+                Keyword::RESET => Ok(self.parse_reset()?),
                 Keyword::SHOW => {
                     if self.parse_keyword(Keyword::CREATE) {
                         Ok(self.parse_show_create()?)
@@ -1990,6 +1991,8 @@ impl Parser<'_> {
             self.parse_create_database()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_create_user()
+        } else if self.parse_keyword(Keyword::ROLE) {
+            self.parse_create_role()
         } else if self.parse_keyword(Keyword::SECRET) {
             self.parse_create_secret()
         } else {
@@ -2395,6 +2398,10 @@ impl Parser<'_> {
     //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL | OAUTH
     fn parse_create_user(&mut self) -> ModalResult<Statement> {
         Ok(Statement::CreateUser(CreateUserStatement::parse_to(self)?))
+    }
+
+    fn parse_create_role(&mut self) -> ModalResult<Statement> {
+        Ok(Statement::CreateRole(CreateUserStatement::parse_to(self)?))
     }
 
     fn parse_create_secret(&mut self) -> ModalResult<Statement> {
@@ -3145,6 +3152,8 @@ impl Parser<'_> {
             self.parse_alter_connection()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
+        } else if self.parse_keyword(Keyword::ROLE) {
+            self.parse_alter_role()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
         } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
@@ -3215,6 +3224,10 @@ impl Parser<'_> {
 
     pub fn parse_alter_user(&mut self) -> ModalResult<Statement> {
         Ok(Statement::AlterUser(AlterUserStatement::parse_to(self)?))
+    }
+
+    pub fn parse_alter_role(&mut self) -> ModalResult<Statement> {
+        Ok(Statement::AlterRole(AlterUserStatement::parse_to(self)?))
     }
 
     pub fn parse_alter_table(&mut self) -> ModalResult<Statement> {
@@ -5017,7 +5030,23 @@ impl Parser<'_> {
 
     pub fn parse_set(&mut self) -> ModalResult<Statement> {
         let modifier = self.parse_one_of_keywords(&[Keyword::SESSION, Keyword::LOCAL]);
-        if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
+        if self.parse_keyword(Keyword::ROLE) {
+            let context_modifier = match modifier {
+                Some(Keyword::SESSION) => Some(RoleContextModifier::Session),
+                Some(Keyword::LOCAL) => Some(RoleContextModifier::Local),
+                _ => None,
+            };
+            let role_name = if self.parse_keyword(Keyword::NONE) {
+                SetRoleSpec::None
+            } else {
+                SetRoleSpec::Name(self.parse_identifier()?)
+            };
+
+            Ok(Statement::SetRole {
+                context_modifier,
+                role_name,
+            })
+        } else if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
             let value = alt((
                 Keyword::DEFAULT.value(SetTimeZoneValue::Default),
                 Keyword::LOCAL.value(SetTimeZoneValue::Local),
@@ -5080,6 +5109,14 @@ impl Parser<'_> {
                 variable: config_param.param,
                 value: config_param.value,
             })
+        }
+    }
+
+    pub fn parse_reset(&mut self) -> ModalResult<Statement> {
+        if self.parse_keyword(Keyword::ROLE) {
+            Ok(Statement::ResetRole)
+        } else {
+            self.expected("ROLE after RESET")
         }
     }
 
@@ -5570,6 +5607,28 @@ impl Parser<'_> {
 
     /// Parse a GRANT statement.
     pub fn parse_grant(&mut self) -> ModalResult<Statement> {
+        if !self.grant_revoke_looks_like_object_privilege(Keyword::TO) {
+            let roles = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_keyword(Keyword::TO)?;
+            let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
+            let role_options = if self.parse_keyword(Keyword::WITH) {
+                self.parse_comma_separated(Parser::parse_role_option_spec)?
+            } else {
+                vec![]
+            };
+            let granted_by = if self.parse_keywords(&[Keyword::GRANTED, Keyword::BY]) {
+                Some(self.parse_identifier()?)
+            } else {
+                None
+            };
+            return Ok(Statement::GrantRole {
+                roles,
+                grantees,
+                role_options,
+                granted_by,
+            });
+        }
+
         let (privileges, objects) = self.parse_grant_revoke_privileges_objects()?;
 
         self.expect_keyword(Keyword::TO)?;
@@ -5578,9 +5637,11 @@ impl Parser<'_> {
         let with_grant_option =
             self.parse_keywords(&[Keyword::WITH, Keyword::GRANT, Keyword::OPTION]);
 
-        let granted_by = self
-            .parse_keywords(&[Keyword::GRANTED, Keyword::BY])
-            .then(|| self.parse_identifier().unwrap());
+        let granted_by = if self.parse_keywords(&[Keyword::GRANTED, Keyword::BY]) {
+            Some(self.parse_identifier()?)
+        } else {
+            None
+        };
 
         Ok(Statement::Grant {
             privileges,
@@ -5589,6 +5650,30 @@ impl Parser<'_> {
             with_grant_option,
             granted_by,
         })
+    }
+
+    fn grant_revoke_looks_like_object_privilege(&self, role_separator: Keyword) -> bool {
+        let mut paren_depth = 0usize;
+        let mut index = 0usize;
+
+        loop {
+            match self.peek_nth_token(index).token {
+                Token::EOF | Token::SemiColon => return false,
+                Token::LParen => paren_depth += 1,
+                Token::RParen => paren_depth = paren_depth.saturating_sub(1),
+                Token::Word(word) if paren_depth == 0 => {
+                    if word.keyword == Keyword::ON {
+                        return true;
+                    }
+                    if word.keyword == role_separator {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+
+            index += 1;
+        }
     }
 
     fn parse_privileges(&mut self) -> ModalResult<Privileges> {
@@ -5783,14 +5868,54 @@ impl Parser<'_> {
     pub fn parse_revoke(&mut self) -> ModalResult<Statement> {
         let revoke_grant_option =
             self.parse_keywords(&[Keyword::GRANT, Keyword::OPTION, Keyword::FOR]);
+        let revoke_role_option = if !revoke_grant_option {
+            self.parse_role_option_for_clause()?
+        } else {
+            None
+        };
+
+        let starts_with_privilege = self.grant_revoke_looks_like_object_privilege(Keyword::FROM);
+        if revoke_grant_option && !starts_with_privilege {
+            parser_err!(
+                "GRANT OPTION FOR is not valid for role membership revokes; use ADMIN OPTION FOR"
+            );
+        }
+
+        if revoke_role_option.is_some() || !starts_with_privilege {
+            let roles = self.parse_comma_separated(Parser::parse_identifier)?;
+            self.expect_keyword(Keyword::FROM)?;
+            let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
+            let granted_by = if self.parse_keywords(&[Keyword::GRANTED, Keyword::BY]) {
+                Some(self.parse_identifier()?)
+            } else {
+                None
+            };
+
+            let cascade = self.parse_keyword(Keyword::CASCADE);
+            let restrict = self.parse_keyword(Keyword::RESTRICT);
+            if cascade && restrict {
+                parser_err!("Cannot specify both CASCADE and RESTRICT in REVOKE");
+            }
+
+            return Ok(Statement::RevokeRole {
+                roles,
+                grantees,
+                revoke_role_option,
+                granted_by,
+                cascade,
+            });
+        }
+
         let (privileges, objects) = self.parse_grant_revoke_privileges_objects()?;
 
         self.expect_keyword(Keyword::FROM)?;
         let grantees = self.parse_comma_separated(Parser::parse_identifier)?;
 
-        let granted_by = self
-            .parse_keywords(&[Keyword::GRANTED, Keyword::BY])
-            .then(|| self.parse_identifier().unwrap());
+        let granted_by = if self.parse_keywords(&[Keyword::GRANTED, Keyword::BY]) {
+            Some(self.parse_identifier()?)
+        } else {
+            None
+        };
 
         let cascade = self.parse_keyword(Keyword::CASCADE);
         let restrict = self.parse_keyword(Keyword::RESTRICT);
@@ -5806,6 +5931,45 @@ impl Parser<'_> {
             revoke_grant_option,
             cascade,
         })
+    }
+
+    fn parse_role_option_for_clause(&mut self) -> ModalResult<Option<RoleOptionKind>> {
+        let kind = match &self.peek_token().token {
+            Token::Word(word) => match word.value.to_ascii_lowercase().as_str() {
+                "admin" => Some(RoleOptionKind::Admin),
+                "inherit" => Some(RoleOptionKind::Inherit),
+                "set" => Some(RoleOptionKind::Set),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(kind) = kind else {
+            return Ok(None);
+        };
+        if !self.peek_nth_any_of_keywords(1, &[Keyword::OPTION]) {
+            return Ok(None);
+        }
+        self.next_token();
+        self.expect_keyword(Keyword::OPTION)?;
+        self.expect_keyword(Keyword::FOR)?;
+        Ok(Some(kind))
+    }
+
+    fn parse_role_option_spec(&mut self) -> ModalResult<RoleOptionSpec> {
+        let option = self.parse_identifier()?;
+        let kind = match option.real_value().as_str() {
+            "admin" => RoleOptionKind::Admin,
+            "inherit" => RoleOptionKind::Inherit,
+            "set" => RoleOptionKind::Set,
+            _ => parser_err!("expected ADMIN, INHERIT or SET, found {}", option),
+        };
+        let value = if matches!(kind, RoleOptionKind::Admin) && self.parse_keyword(Keyword::OPTION)
+        {
+            true
+        } else {
+            self.parse_boolean()?
+        };
+        Ok(RoleOptionSpec { kind, value })
     }
 
     fn parse_privilege_object_types(&mut self) -> ModalResult<PrivilegeObjectType> {

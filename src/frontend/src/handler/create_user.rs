@@ -110,6 +110,15 @@ pub async fn handle_create_user(
                 UserOption::NoLogin => user_info.can_login = false,
                 UserOption::Admin => user_info.is_admin = true,
                 UserOption::NoAdmin => user_info.is_admin = false,
+                UserOption::CreateRole
+                | UserOption::NoCreateRole
+                | UserOption::Inherit
+                | UserOption::NoInherit => {
+                    return Err(ErrorCode::InvalidParameterValue(
+                        "role options are not supported yet".to_owned(),
+                    )
+                    .into());
+                }
                 UserOption::EncryptedPassword(password) => {
                     if !password.0.is_empty() {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);
@@ -233,6 +242,23 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn test_create_user_rejects_role_options() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        for (idx, option) in ["CREATEROLE", "NOCREATEROLE", "INHERIT", "NOINHERIT"]
+            .into_iter()
+            .enumerate()
+        {
+            let err = frontend
+                .run_sql(&format!("CREATE USER role_option_user_{idx} WITH {option}"))
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("role options are not supported yet"), "{err}");
+        }
     }
 
     #[tokio::test]

@@ -119,6 +119,15 @@ fn alter_prost_user_info(
                 user_info.is_admin = false;
                 update_fields.insert(UpdateField::Admin);
             }
+            UserOption::CreateRole
+            | UserOption::NoCreateRole
+            | UserOption::Inherit
+            | UserOption::NoInherit => {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "role options are not supported yet".to_owned(),
+                )
+                .into());
+            }
             UserOption::EncryptedPassword(p) => {
                 if !p.0.is_empty() {
                     user_info.auth_info = encrypted_password(&user_info.name, &p.0);
@@ -297,6 +306,24 @@ mod tests {
                 metadata: HashMap::new(),
             })
         );
+    }
+
+    #[tokio::test]
+    async fn test_alter_user_rejects_role_options() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("CREATE USER role_option_user")
+            .await
+            .unwrap();
+
+        for option in ["CREATEROLE", "NOCREATEROLE", "INHERIT", "NOINHERIT"] {
+            let err = frontend
+                .run_sql(&format!("ALTER USER role_option_user WITH {option}"))
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("role options are not supported yet"), "{err}");
+        }
     }
 
     #[tokio::test]
