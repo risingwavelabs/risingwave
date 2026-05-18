@@ -253,11 +253,11 @@ statement ok
 CREATE TABLE t_dynamic_url_as_select_src (body varchar, target_url varchar);
 
 statement ok
-CREATE SINK s_dynamic_url_as_select WITH (
+CREATE SINK s_dynamic_url_as_select AS SELECT body AS payload, target_url AS url FROM t_dynamic_url_as_select_src WITH (
     connector = 'http',
     type = 'append-only',
     force_append_only = 'true'
-) AS SELECT body AS payload, target_url AS url FROM t_dynamic_url_as_select_src;
+);
 
 statement ok
 INSERT INTO t_dynamic_url_as_select_src VALUES ('dynamic url as select payload', 'http://localhost:18081');
