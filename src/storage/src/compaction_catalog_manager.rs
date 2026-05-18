@@ -503,6 +503,27 @@ impl CompactionCatalogAgent {
         self.filter_key_extractor_manager.extract(user_key)
     }
 
+    /// Returns true when this compaction task only contains one table and the table never emits
+    /// filter keys.
+    pub fn is_single_table_no_filter(&self) -> bool {
+        let mut table_ids = self.table_ids();
+        let Some(table_id) = table_ids.next() else {
+            return false;
+        };
+        if table_ids.next().is_some() {
+            return false;
+        }
+
+        match &self.filter_key_extractor_manager {
+            FilterKeyExtractorImpl::Dummy(_) => true,
+            FilterKeyExtractorImpl::Multi(filter) => filter
+                .id_to_filter_key_extractor
+                .get(&table_id)
+                .is_some_and(|extractor| matches!(extractor, FilterKeyExtractorImpl::Dummy(_))),
+            _ => false,
+        }
+    }
+
     pub fn vnode_count(&self, table_id: StateTableId) -> usize {
         *self.table_id_to_vnode.get(&table_id).unwrap_or_else(|| {
             panic!(

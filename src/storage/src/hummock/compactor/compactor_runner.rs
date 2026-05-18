@@ -341,7 +341,8 @@ pub async fn compact_with_agent(
 
     let multi_filter = build_multi_compaction_filter(&compact_task);
     let mut task_status = TaskStatus::Success;
-    let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
+    let optimize_by_copy_block =
+        optimize_by_copy_block(&compact_task, &context, &compaction_catalog_agent_ref);
 
     if let Err(e) =
         generate_splits_for_task(&mut compact_task, &context, optimize_by_copy_block).await
