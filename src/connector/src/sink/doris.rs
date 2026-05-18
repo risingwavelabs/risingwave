@@ -88,7 +88,7 @@ pub struct DorisConfig {
 
     pub r#type: String, // accept "append-only" or "upsert"
 
-    /// The timeout in milliseconds for stream load http request, defaults to 10 seconds.
+    /// The timeout in milliseconds for stream load http request, defaults to 30 seconds.
     #[serde(
         rename = "doris.stream_load.http.timeout.ms",
         default = "default_stream_load_http_timeout_ms"
@@ -191,7 +191,8 @@ impl DorisSink {
         rw_data_type: &DataType,
         doris_data_type: String,
     ) -> Result<bool> {
-        let is_variant = doris_data_type.to_ascii_uppercase().contains("VARIANT");
+        let doris_data_type = doris_data_type.to_ascii_uppercase();
+        let is_variant = doris_data_type.contains("VARIANT");
         match rw_data_type {
             risingwave_common::types::DataType::Boolean => Ok(doris_data_type.contains("BOOLEAN")),
             risingwave_common::types::DataType::Int16 => Ok(doris_data_type.contains("SMALLINT")),
@@ -204,8 +205,8 @@ impl DorisSink {
             risingwave_common::types::DataType::Varchar => {
                 Ok(
                     doris_data_type.contains("STRING")
-                        | doris_data_type.contains("VARCHAR")
-                        | is_variant,
+                        || doris_data_type.contains("VARCHAR")
+                        || is_variant,
                 )
             }
             risingwave_common::types::DataType::Time => {
