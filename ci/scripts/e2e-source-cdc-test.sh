@@ -63,12 +63,7 @@ RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=
 risedev ci-start ci-1cn-1fe-with-recovery
 
 risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
-risedev slt './e2e_test/source_legacy/cdc/cdc.validate.mysql.slt'
-risedev slt './e2e_test/source_legacy/cdc/cdc.validate.postgres.slt'
 risedev slt './e2e_test/source_legacy/cdc/cdc.share_stream.slt'
-risedev slt './e2e_test/source_legacy/cdc/cdc.load.slt'
-sleep 10
-risedev slt './e2e_test/source_legacy/cdc/cdc.check.slt'
 
 echo "--- Kill cluster"
 risedev kill

@@ -192,15 +192,7 @@ create table test (
     v32 timestamp,
     v33 bytea
 )
-with (
- connector = 'mysql-cdc',
- hostname = '$MYSQL_HOST',
- port = '$MYSQL_TCP_PORT',
- username = '$RISEDEV_MYSQL_USER',
- password = '$MYSQL_PWD',
- database.name = 'tvf',
- table.name = 'test',
-);
+from mysql_cdc_source table 'tvf.test';
 
 
 query I retry 6 backoff 1s
