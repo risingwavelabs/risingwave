@@ -12688,6 +12688,7 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "thiserror-ext",
  "uuid",
 ]
 

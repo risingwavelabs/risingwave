@@ -2,10 +2,12 @@ use std::collections::BTreeSet;
 
 use prost::Message;
 use risingwave_pb::catalog::Table as PbTable;
+use risingwave_pb::id::{FragmentId, TableId};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{SinkLogStoreType, StreamNode};
 use sea_orm::{FromQueryResult, Statement};
 use sea_orm_migration::prelude::*;
+use thiserror_ext::AsReport;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -33,8 +35,10 @@ impl MigrationTrait for Migration {
 
         for row in fragments {
             let fragment = FragmentEntity::from_query_result(&row, "")?;
-            let mut stream_node = StreamNode::decode(fragment.stream_node.as_slice())
-                .map_err(|err| DbErr::Custom(format!("failed to decode stream node: {err}")))?;
+            let mut stream_node =
+                StreamNode::decode(fragment.stream_node.as_slice()).map_err(|err| {
+                    DbErr::Custom(format!("failed to decode stream node: {}", err.as_report()))
+                })?;
 
             if disable_unused_read_prefix_hints(&mut stream_node, &mut table_ids) {
                 manager
@@ -75,7 +79,7 @@ impl MigrationTrait for Migration {
 
 fn disable_unused_read_prefix_hints(
     stream_node: &mut StreamNode,
-    table_ids: &mut BTreeSet<i32>,
+    table_ids: &mut BTreeSet<TableId>,
 ) -> bool {
     let mut changed = false;
 
@@ -105,12 +109,12 @@ fn disable_unused_read_prefix_hints(
     changed
 }
 
-fn disable_table_hint(table: Option<&mut PbTable>, table_ids: &mut BTreeSet<i32>) -> bool {
+fn disable_table_hint(table: Option<&mut PbTable>, table_ids: &mut BTreeSet<TableId>) -> bool {
     let Some(table) = table else {
         return false;
     };
 
-    table_ids.insert(table.id.as_raw_id() as i32);
+    table_ids.insert(table.id);
     if table.read_prefix_len_hint == 0 {
         return false;
     }
@@ -122,7 +126,7 @@ fn disable_table_hint(table: Option<&mut PbTable>, table_ids: &mut BTreeSet<i32>
 #[derive(Debug, FromQueryResult)]
 #[sea_orm(entity = "Fragment")]
 struct FragmentEntity {
-    fragment_id: i32,
+    fragment_id: FragmentId,
     stream_node: Vec<u8>,
 }
 
@@ -142,7 +146,6 @@ enum Table {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::id::TableId;
     use risingwave_pb::stream_plan::{
         DynamicFilterNode, MaterializeNode, SinkNode, SyncLogStoreNode, VectorIndexWriteNode,
     };
@@ -212,7 +215,16 @@ mod tests {
             &mut stream_node,
             &mut table_ids
         ));
-        assert_eq!(table_ids, BTreeSet::from([1, 3, 5, 7, 8]));
+        assert_eq!(
+            table_ids,
+            BTreeSet::from([
+                TableId::new(1),
+                TableId::new(3),
+                TableId::new(5),
+                TableId::new(7),
+                TableId::new(8),
+            ])
+        );
 
         let Some(NodeBody::DynamicFilter(dynamic_filter)) = &stream_node.node_body else {
             unreachable!()
@@ -278,6 +290,6 @@ mod tests {
             &mut stream_node,
             &mut table_ids
         ));
-        assert_eq!(table_ids, BTreeSet::from([42]));
+        assert_eq!(table_ids, BTreeSet::from([TableId::new(42)]));
     }
 }
