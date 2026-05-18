@@ -63,6 +63,7 @@ RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=
 risedev ci-start ci-1cn-1fe-with-recovery
 
 risedev slt './e2e_test/source_legacy/cdc_inline/**/*.slt'
+risedev slt './e2e_test/source_legacy/cdc/cdc.validate.shared.slt'
 risedev slt './e2e_test/source_legacy/cdc/cdc.share_stream.slt'
 
 echo "--- Kill cluster"
