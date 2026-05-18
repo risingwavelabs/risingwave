@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::iter::once;
 use std::ops::Bound;
@@ -21,10 +22,11 @@ use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::{EpochPair, MAX_EPOCH, MAX_SPILL_TIMES};
 use risingwave_hummock_sdk::key::{
-    FullKey, TableKey, TableKeyRange, UserKey, is_empty_key_range, vnode_range,
+    FullKey, TableKey, TableKeyRange, UserKey, is_empty_key_range, prefixed_range_with_vnode,
+    vnode_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
@@ -34,6 +36,7 @@ use super::version::VersionUpdate;
 use crate::error::StorageResult;
 use crate::hummock::event_handler::hummock_event_handler::HummockEventSender;
 use crate::hummock::event_handler::{HummockEvent, HummockReadVersionRef, LocalInstanceGuard};
+use crate::hummock::iterator::change_log::BaseChangeLogIterator;
 use crate::hummock::iterator::{
     Backward, BackwardUserIterator, ConcatIteratorInner, Forward, HummockIteratorUnion,
     IteratorFactory, MergeIterator, UserIterator,
@@ -44,10 +47,12 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferBatchOldValues, SharedBufferItem,
     SharedBufferValue,
 };
-use crate::hummock::store::version::{HummockVersionReader, read_filter_for_version};
+use crate::hummock::store::version::{
+    HummockVersionReader, StagingSstableInfo, read_filter_for_version,
+};
 use crate::hummock::utils::{
-    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, sanity_check_enabled,
-    wait_for_epoch,
+    do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check, filter_single_sst,
+    sanity_check_enabled, wait_for_epoch,
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{
@@ -424,6 +429,150 @@ impl LocalStateStore for LocalHummockStorage {
 
     async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
         self.update_vnode_bitmap_impl(vnodes).await
+    }
+}
+
+impl LocalHummockStorage {
+    async fn iter_uncommitted_log_with_key_range(
+        &self,
+        current_epoch: HummockEpoch,
+        imms: &[SharedBufferBatch],
+        staging_ssts: &[Arc<StagingSstableInfo>],
+        key_range: TableKeyRange,
+    ) -> StorageResult<SingleLocalHummockStorageChangeLogIterator> {
+        let read_options = Arc::new(SstableIteratorReadOptions {
+            cache_policy: Default::default(),
+            must_iterated_end_user_key: None,
+            max_preload_retry_times: 0,
+            prefetch_for_large_query: false,
+        });
+        let mut local_stat = StoreLocalStatistic::default();
+
+        let new_value_sst_iters = self
+            .hummock_version_reader
+            .open_sstable_iters(
+                staging_ssts
+                    .iter()
+                    .flat_map(|staging_sst| staging_sst.sstable_infos().iter())
+                    .map(|sstable| &sstable.sst_info)
+                    .filter(|sst| filter_single_sst(sst, self.table_id, &key_range)),
+                read_options.clone(),
+                &mut local_stat,
+            )
+            .await?;
+        let old_value_sst_iters = self
+            .hummock_version_reader
+            .open_sstable_iters(
+                staging_ssts
+                    .iter()
+                    .flat_map(|staging_sst| staging_sst.old_value_sstable_infos().iter())
+                    .map(|sstable| &sstable.sst_info)
+                    .filter(|sst| filter_single_sst(sst, self.table_id, &key_range)),
+                read_options,
+                &mut local_stat,
+            )
+            .await?;
+
+        let new_value_iter = MergeIterator::new(
+            imms.iter()
+                .cloned()
+                .map(SharedBufferBatch::into_forward_iter)
+                .map(HummockIteratorUnion::First)
+                .chain(
+                    new_value_sst_iters
+                        .into_iter()
+                        .map(HummockIteratorUnion::Second),
+                ),
+        );
+        let old_value_iter = MergeIterator::new(
+            imms.iter()
+                .cloned()
+                .map(|imm| {
+                    assert!(
+                        imm.has_old_value(),
+                        "local changelog iteration requires old values in imm for table {} epoch {}",
+                        self.table_id,
+                        current_epoch
+                    );
+                    imm.into_old_value_iter()
+                })
+                .map(HummockIteratorUnion::First)
+                .chain(old_value_sst_iters.into_iter().map(HummockIteratorUnion::Second)),
+        );
+
+        BaseChangeLogIterator::new(
+            (current_epoch, current_epoch),
+            key_range,
+            new_value_iter,
+            old_value_iter,
+            self.table_id,
+            IterLocalMetricsGuard::new(
+                self.hummock_version_reader.stats().clone(),
+                self.table_id,
+                local_stat,
+            ),
+        )
+        .await
+        .map_err(Into::into)
+    }
+}
+
+impl LocalStateStoreReadLog for LocalHummockStorage {
+    type ChangeLogIter = LocalHummockStorageChangeLogIterator;
+
+    async fn iter_uncommitted_log(&self) -> StorageResult<Self::ChangeLogIter> {
+        assert!(
+            !self.mem_table.is_dirty(),
+            "iter_uncommitted_log requires all writes to be flushed before reading the local changelog"
+        );
+
+        let current_epoch = self.epoch();
+        let (imms, staging_ssts, vnodes) = {
+            let read_version = self.read_version.read();
+            (
+                read_version
+                    .staging()
+                    .pending_imms
+                    .iter()
+                    .map(|(imm, _)| imm)
+                    .chain(read_version.staging().uploading_imms.iter())
+                    .filter(|imm| {
+                        imm.min_epoch() <= current_epoch && current_epoch <= imm.max_epoch()
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                read_version
+                    .staging()
+                    .ssts_for_epoch(current_epoch)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                read_version.vnodes(),
+            )
+        };
+
+        debug_assert!(
+            imms.iter().all(SharedBufferBatch::has_old_value),
+            "local changelog iteration expects imm old values to be preserved"
+        );
+
+        let mut vnode_iters = VecDeque::new();
+        for vnode in vnodes.iter_vnodes() {
+            let key_range = prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                vnode,
+            );
+            vnode_iters.push_back(
+                self.iter_uncommitted_log_with_key_range(
+                    current_epoch,
+                    &imms,
+                    &staging_ssts,
+                    key_range,
+                )
+                .await?,
+            );
+        }
+
+        Ok(LocalHummockStorageChangeLogIterator::new(vnode_iters))
     }
 }
 
@@ -804,6 +953,53 @@ impl LocalHummockStorage {
 pub type StagingDataIterator = MergeIterator<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
+pub type LocalHummockStorageNewValueChangeLogIterator = MergeIterator<
+    HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
+>;
+pub type LocalHummockStorageOldValueChangeLogIterator = MergeIterator<
+    HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward, false>, SstableIterator>,
+>;
+pub type SingleLocalHummockStorageChangeLogIterator = BaseChangeLogIterator<
+    LocalHummockStorageNewValueChangeLogIterator,
+    LocalHummockStorageOldValueChangeLogIterator,
+>;
+pub struct LocalHummockStorageChangeLogIterator {
+    vnode_iters: VecDeque<SingleLocalHummockStorageChangeLogIterator>,
+    current_item: Option<StateStoreReadLogItem>,
+}
+
+impl LocalHummockStorageChangeLogIterator {
+    fn new(vnode_iters: VecDeque<SingleLocalHummockStorageChangeLogIterator>) -> Self {
+        Self {
+            vnode_iters,
+            current_item: None,
+        }
+    }
+}
+
+impl StateStoreIter<StateStoreReadLogItem> for LocalHummockStorageChangeLogIterator {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreReadLogItemRef<'_>>> {
+        loop {
+            let Some(iter) = self.vnode_iters.front_mut() else {
+                self.current_item = None;
+                return Ok(None);
+            };
+
+            if let Some((key, value)) = iter.try_next().await? {
+                let value = value.try_map(|value| Ok(Bytes::copy_from_slice(value)))?;
+                self.current_item = Some((key.copy_into(), value));
+                let (key, value) = self
+                    .current_item
+                    .as_ref()
+                    .expect("current changelog item has just been set");
+                return Ok(Some((key.to_ref(), value.to_ref())));
+            }
+
+            self.vnode_iters.pop_front();
+        }
+    }
+}
+
 pub type StagingDataRevIterator = MergeIterator<
     HummockIteratorUnion<Backward, SharedBufferBatchIterator<Backward>, BackwardSstableIterator>,
 >;
