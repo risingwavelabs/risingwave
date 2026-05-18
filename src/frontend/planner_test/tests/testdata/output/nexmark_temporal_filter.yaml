@@ -97,7 +97,7 @@
     ├── primary key: [ $4 ASC, $5 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 5 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 1 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -142,7 +142,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
-    Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -285,7 +285,7 @@
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 9 { columns: [ $expr6, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -414,7 +414,7 @@
     ├── primary key: [ $4 ASC, $5 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 5 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 6 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -555,7 +555,7 @@
 
     Table 6 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 0 }
 
     Table 8 { columns: [ $expr6, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -671,7 +671,7 @@
     ├── primary key: [ $4 ASC, $5 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 5 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 5 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -910,7 +910,7 @@
 
     Table 5 { columns: [ partition_id, offset_info, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-    Table 6 { columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 6 { columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 0 }
 
     Table 7 { columns: [ $expr11, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1018,7 +1018,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
-    Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1077,7 +1077,7 @@
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
-    Table 1 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 0 }
 
     Table 2 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1134,7 +1134,7 @@
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 
-    Table 1 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 0 }
 
     Table 2 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1194,7 +1194,7 @@
 
     Table 1 { columns: [ $expr3, $expr4, $expr5, $expr6, $expr7, $expr8, $expr9, $expr1, _row_id, _rw_timestamp ], primary key: [ $0 ASC, $2 DESC, $8 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 0 }
 
     Table 3 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1281,7 +1281,7 @@
 
     Table 3 { columns: [ $expr9, _row_id, _degree, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 0 }
 
     Table 5 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1340,7 +1340,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
-    Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1388,7 +1388,7 @@
     StreamProject { exprs: [SubtractWithTimeZone(now, '00:05:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
     └── StreamNow { output: [now] } { tables: [ Now: 3 ] }
 
-    Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ event_type, person, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 5 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr2, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1502,7 +1502,7 @@
 
     Table 6 { columns: [ $expr5, max($expr6), count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 7 { columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 1 }
+    Table 7 { columns: [ event_type, auction, bid, $expr1, _row_id, _rw_timestamp ], primary key: [ $3 ASC, $4 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4 ], read pk prefix len hint: 0 }
 
     Table 8 { columns: [ $expr4, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1641,7 +1641,7 @@
     ├── primary key: [ $2 ASC, $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 1 { columns: [ $expr6, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1667,7 +1667,7 @@
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 9 { columns: [ $expr4, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1794,7 +1794,7 @@
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 7 { columns: [ $expr4, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -1917,7 +1917,7 @@
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 7 { columns: [ $expr4, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -2049,7 +2049,7 @@
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 9 { columns: [ $expr4, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -2241,7 +2241,7 @@
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 4 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 12 { columns: [ $expr5, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 

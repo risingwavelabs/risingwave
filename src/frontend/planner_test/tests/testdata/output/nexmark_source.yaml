@@ -1979,7 +1979,7 @@
     ├── primary key: [ $2 ASC, $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    └── read pk prefix len hint: 0
 
     Table 1 { columns: [ $expr1, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
