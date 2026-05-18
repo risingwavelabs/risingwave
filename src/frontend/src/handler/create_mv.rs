@@ -38,7 +38,9 @@ use crate::handler::util::{
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
+use crate::optimizer::plan_node::{
+    Explain, StreamPlanRef as PlanRef, ensure_sync_log_store_fragment_root,
+};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -146,7 +148,7 @@ pub fn gen_create_mv_plan_bound(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
 
-    let plan: PlanRef = materialize.into();
+    let plan: PlanRef = ensure_sync_log_store_fragment_root(materialize.into());
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();

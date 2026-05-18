@@ -74,7 +74,7 @@ use crate::handler::util::{
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
     IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamPlanRef as PlanRef,
-    StreamProject, generic,
+    StreamProject, ensure_sync_log_store_fragment_root, generic,
 };
 use crate::optimizer::{OptimizerContext, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -444,6 +444,7 @@ pub async fn gen_sink_plan(
     let sink_desc = sink_plan.sink_desc().clone();
 
     let mut sink_plan: PlanRef = sink_plan.into_stream_plan()?;
+    sink_plan = ensure_sync_log_store_fragment_root(sink_plan);
 
     let ctx = sink_plan.ctx();
     let explain_trace = ctx.is_explain_trace();

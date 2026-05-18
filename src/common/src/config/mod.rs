@@ -440,6 +440,10 @@ pub mod default {
             2048
         }
 
+        pub fn disable_sync_log_store_dispatcher() -> bool {
+            false
+        }
+
         pub fn table_change_log_insert_batch_size() -> u64 {
             1000
         }
