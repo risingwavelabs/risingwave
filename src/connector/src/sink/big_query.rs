@@ -367,73 +367,26 @@ impl BigQuerySink {
     }
 
     fn normalize_bigquery_data_type(data_type: &str) -> String {
-        fn is_ident_char(byte: u8) -> bool {
-            byte.is_ascii_alphanumeric() || byte == b'_'
-        }
-
-        fn starts_with_keyword(data_type: &str, index: usize, keyword: &str) -> bool {
-            if index > 0 && is_ident_char(data_type.as_bytes()[index - 1]) {
-                return false;
-            }
-            let Some(candidate) = data_type.get(index..index + keyword.len()) else {
-                return false;
-            };
-            if !candidate.eq_ignore_ascii_case(keyword) {
-                return false;
+        fn remove_type_parameters(mut data_type: String, type_name: &str) -> String {
+            let pattern = format!("{type_name}(");
+            while let Some(type_start) = data_type.find(&pattern) {
+                let params_start = type_start + type_name.len();
+                let Some(params_end) = data_type[params_start..].find(')') else {
+                    break;
+                };
+                data_type.replace_range(params_start..=params_start + params_end, "");
             }
             data_type
-                .as_bytes()
-                .get(index + keyword.len())
-                .is_none_or(|byte| !is_ident_char(*byte))
         }
 
-        fn skip_parameter_list(data_type: &str, index: usize) -> Option<usize> {
-            let bytes = data_type.as_bytes();
-            let mut i = index;
-            while bytes.get(i).is_some_and(|byte| byte.is_ascii_whitespace()) {
-                i += 1;
-            }
-            if bytes.get(i) != Some(&b'(') {
-                return None;
-            }
-            i += 1;
-            let mut depth = 1;
-            while let Some(byte) = bytes.get(i) {
-                match byte {
-                    b'(' => depth += 1,
-                    b')' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            return Some(i + 1);
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-            None
+        let mut data_type = data_type.to_ascii_uppercase();
+        for type_name in ["BIGNUMERIC", "BIGDECIMAL", "NUMERIC", "DECIMAL"] {
+            data_type = remove_type_parameters(data_type, type_name);
         }
-
-        const DECIMAL_TYPE_NAMES: [&str; 4] = ["BIGNUMERIC", "BIGDECIMAL", "NUMERIC", "DECIMAL"];
-
-        let mut normalized = String::with_capacity(data_type.len());
-        let mut i = 0;
-        while i < data_type.len() {
-            if let Some(keyword) = DECIMAL_TYPE_NAMES
-                .iter()
-                .find(|keyword| starts_with_keyword(data_type, i, keyword))
-            {
-                normalized.push_str("NUMERIC");
-                let keyword_end = i + keyword.len();
-                i = skip_parameter_list(data_type, keyword_end).unwrap_or(keyword_end);
-                continue;
-            }
-
-            let ch = data_type[i..].chars().next().expect("valid char boundary");
-            normalized.extend(ch.to_uppercase());
-            i += ch.len_utf8();
-        }
-        normalized
+        data_type
+            .replace("BIGNUMERIC", "NUMERIC")
+            .replace("BIGDECIMAL", "NUMERIC")
+            .replace("DECIMAL", "NUMERIC")
     }
 
     fn get_string_and_check_support_from_datatype(rw_data_type: &DataType) -> Result<String> {
