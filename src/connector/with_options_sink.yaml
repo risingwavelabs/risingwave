@@ -683,7 +683,7 @@ IcebergConfig:
     field_type: bool
     comments: Whether to enable iceberg expired snapshots.
     required: false
-    default: 'true'
+    default: Default::default
     allow_alter_on_fly: true
   - name: write_mode
     field_type: IcebergWriteMode
@@ -701,13 +701,13 @@ IcebergConfig:
       The maximum age (in milliseconds) for snapshots before they expire
       For example, if set to 3600000, snapshots older than 1 hour will be expired
     required: false
-    default: Some (DEFAULT_SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
+    default: Default::default
     allow_alter_on_fly: true
   - name: snapshot_expiration_retain_last
     field_type: i32
     comments: The number of snapshots to retain
     required: false
-    default: Some (DEFAULT_SNAPSHOT_EXPIRATION_RETAIN_LAST)
+    default: Default::default
     allow_alter_on_fly: true
   - name: snapshot_expiration_clear_expired_files
     field_type: bool
