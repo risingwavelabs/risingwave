@@ -84,6 +84,7 @@ use crate::handler::util::{
 use crate::optimizer::plan_node::generic::{SourceNodeKind, build_cdc_scan_options_with_options};
 use crate::optimizer::plan_node::{
     LogicalCdcScan, LogicalPlanRef, LogicalSource, StreamPlanRef as PlanRef,
+    ensure_sync_log_store_fragment_root,
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
@@ -820,7 +821,10 @@ fn gen_table_plan_inner(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
 
-    Ok((materialize.into(), table))
+    Ok((
+        ensure_sync_log_store_fragment_root(materialize.into()),
+        table,
+    ))
 }
 
 /// Generate stream plan for cdc table based on shared source.
@@ -967,7 +971,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
     table.cdc_table_type = Some(cdc_table_type);
-    Ok((materialize.into(), table))
+    Ok((
+        ensure_sync_log_store_fragment_root(materialize.into()),
+        table,
+    ))
 }
 
 /// Derive connector properties and normalize `external_table_name` for CDC tables.

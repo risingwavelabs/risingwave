@@ -553,9 +553,15 @@ impl StreamActorManager {
             let trace_span = format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
             let barrier_manager = local_barrier_manager;
             let node_body = node.get_node_body().unwrap().clone();
+            let use_sync_log_store_dispatcher =
+                !actor_config.developer.disable_sync_log_store_dispatcher;
             // wrap the future of `create_actor` with `boxed` to avoid stack overflow
             let actor = match node_body {
-                NodeBody::SyncLogStore(sync) => {
+                NodeBody::SyncLogStore(sync) if use_sync_log_store_dispatcher => {
+                    tracing::info!(
+                        "SyncLogStoreDispatchExecutor is created for fragment {}",
+                        fragment_id
+                    );
                     dispatch_state_store!(self.env.state_store(), store, {
                         self
                         .clone()
