@@ -83,6 +83,12 @@ pub enum AlterTableOperation {
         column_name: Ident,
         op: AlterColumnOperation,
     },
+    /// `ALTER WATERMARK FOR <column> AS <expr> [WITH TTL]`
+    AlterWatermark {
+        column_name: Ident,
+        expr: Expr,
+        with_ttl: bool,
+    },
     /// `OWNER TO <owner_name>`
     ChangeOwner {
         new_owner_name: Ident,
@@ -388,6 +394,17 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::AlterColumn { column_name, op } => {
                 write!(f, "ALTER COLUMN {} {}", column_name, op)
+            }
+            AlterTableOperation::AlterWatermark {
+                column_name,
+                expr,
+                with_ttl,
+            } => {
+                write!(f, "ALTER WATERMARK FOR {} AS {}", column_name, expr)?;
+                if *with_ttl {
+                    write!(f, " WITH TTL")?;
+                }
+                Ok(())
             }
             AlterTableOperation::DropConstraint { name } => write!(f, "DROP CONSTRAINT {}", name),
             AlterTableOperation::DropColumn {
