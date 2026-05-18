@@ -1,0 +1,35 @@
+name: auto update branch with rebase
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types:
+      - labeled
+      - unlabeled
+      - synchronize
+      - opened
+      - edited
+      - ready_for_review
+      - reopened
+      - unlocked
+      - auto_merge_enabled
+
+jobs:
+  autoupdate:
+    runs-on: ubuntu-latest
+    steps:
+      - id: autoupdate
+        name: autoupdate
+        uses: pascalgn/automerge-action@v0.16.4
+        env:
+          # https://github.com/pascalgn/automerge-action#limitations
+          GITHUB_TOKEN: "${{ secrets.RISINGWAVE_CI_GITHUB_TOKEN }}"
+          MERGE_LABELS: "non-existent-label"
+          UPDATE_LABELS: "autoupdate_rebase,!autoupdate_merge"
+          UPDATE_METHOD: "rebase"
+        # https://github.com/pascalgn/automerge-action/issues/191
+        continue-on-error: true
