@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 winnow = "1.0.1"
+winnow-rule = { git = "https://github.com/TennyZhuang/winnow-rule.git", rev = "13814e8" }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

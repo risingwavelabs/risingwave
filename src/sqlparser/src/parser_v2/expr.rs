@@ -12,6 +12,7 @@
 use winnow::combinator::{alt, cut_err, opt, preceded, repeat, seq, trace};
 use winnow::error::ContextError;
 use winnow::{ModalParser, ModalResult, Parser};
+use winnow_rule::rule;
 
 use super::{ParserExt, TokenStream, data_type, token};
 use crate::ast::Expr;
@@ -77,13 +78,11 @@ pub fn expr_cast<S>(input: &mut S) -> ModalResult<Expr>
 where
     S: TokenStream,
 {
-    let parse = cut_err(seq! {Expr::Cast {
-        _: Token::LParen,
-        expr: expr_parse.map(Box::new),
-        _: Keyword::AS,
-        data_type: data_type,
-        _: Token::RParen,
-    }});
+    let parse = rule!(^(#Token::LParen ~ #expr_parse ~ #Keyword::AS ~ #data_type ~ #Token::RParen))
+        .map(|(_, expr, _, data_type, _)| Expr::Cast {
+            expr: Box::new(expr),
+            data_type,
+        });
 
     trace("expr_cast", parse).parse_next(input)
 }
