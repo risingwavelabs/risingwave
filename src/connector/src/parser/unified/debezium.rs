@@ -149,6 +149,7 @@ pub struct DebeziumChangeEvent<A> {
     value_accessor: Option<A>,
     key_accessor: Option<A>,
     is_mongodb: bool,
+    cached_op: Option<ChangeEventOperation>,
 }
 
 const BEFORE: &str = "before";
@@ -525,6 +526,7 @@ where
             value_accessor,
             key_accessor,
             is_mongodb: false,
+            cached_op: None,
         }
     }
 
@@ -534,7 +536,12 @@ where
             value_accessor,
             key_accessor,
             is_mongodb: true,
+            cached_op: None,
         }
+    }
+
+    pub fn cache_op(&mut self, op: ChangeEventOperation) {
+        self.cached_op = Some(op);
     }
 
     /// Returns the transaction metadata if exists.
@@ -635,6 +642,10 @@ where
     }
 
     fn op(&self) -> Result<ChangeEventOperation, AccessError> {
+        if let Some(op) = self.cached_op {
+            return Ok(op);
+        }
+
         if let Some(accessor) = &self.value_accessor {
             if let Some(ScalarRefImpl::Utf8(op)) =
                 accessor.access(&[OP], &DataType::Varchar)?.to_datum_ref()

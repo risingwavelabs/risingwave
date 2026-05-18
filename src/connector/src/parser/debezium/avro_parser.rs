@@ -37,6 +37,7 @@ use crate::schema::schema_registry::{
 pub struct DebeziumAvroAccessBuilder {
     reader_schema: ResolvedAvroSchema,
     schema_resolver: Arc<ConfluentSchemaCache>,
+    parse_options: AvroParseOptions,
     value: Option<Value>,
 }
 
@@ -55,7 +56,7 @@ impl AccessBuilder for DebeziumAvroAccessBuilder {
         )?);
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
-            AvroParseOptions::create(&self.reader_schema.original_schema),
+            &self.parse_options,
         )))
     }
 }
@@ -70,13 +71,16 @@ impl DebeziumAvroAccessBuilder {
             outer_schema,
             schema_resolver,
         } = config;
+        let chosen_schema = match encoding_type {
+            EncodingType::Key => key_schema,
+            EncodingType::Value => outer_schema,
+        };
+        let parse_options = AvroParseOptions::create_from_arc(chosen_schema.clone());
 
         Ok(Self {
-            reader_schema: ResolvedAvroSchema::create(match encoding_type {
-                EncodingType::Key => key_schema,
-                EncodingType::Value => outer_schema,
-            })?,
+            reader_schema: ResolvedAvroSchema::create(chosen_schema)?,
             schema_resolver,
+            parse_options,
             value: None,
         })
     }

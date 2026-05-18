@@ -99,7 +99,7 @@ fn check(
                 let avro_data =
                     from_avro_datum(&resolved_schema.original_schema, &mut data.as_slice(), None)
                         .expect("failed to parse Avro data");
-                let access = AvroAccess::new(&avro_data, parser);
+                let access = AvroAccess::new(&avro_data, &parser);
 
                 let mut row = vec![];
                 for col in &rw_schema {

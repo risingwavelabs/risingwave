@@ -14,6 +14,8 @@
 
 mod schema;
 
+use std::sync::Arc;
+
 use apache_avro::Schema;
 use apache_avro::schema::{DecimalSchema, NamesRef, UnionSchema};
 use apache_avro::types::{Value, ValueKind};
@@ -31,43 +33,59 @@ use super::utils::scaled_bigint_to_rust_decimal;
 use super::{Access, AccessError, AccessResult, bail_uncategorized, uncategorized};
 use crate::decoder::avro::schema::avro_schema_to_struct_field_name;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// Options for parsing an `AvroValue` into Datum, with a root avro schema.
-pub struct AvroParseOptions<'a> {
+pub struct AvroParseOptions {
     /// The avro schema at root level
-    root_schema: &'a Schema,
+    root_schema: Arc<Schema>,
     /// The immutable "global" context during recursive parsing
-    inner: AvroParseOptionsInner<'a>,
+    inner: AvroParseOptionsInner,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 /// Options for parsing an `AvroValue` into Datum, with names resolved from root schema.
-struct AvroParseOptionsInner<'a> {
+struct AvroParseOptionsInner {
     /// Mapping from type names to actual schema
-    refs: NamesRef<'a>,
+    refs: std::collections::HashMap<apache_avro::schema::Name, Schema>,
     /// Strict Mode
     /// If strict mode is disabled, an int64 can be parsed from an `AvroInt` (int32) value.
     relax_numeric: bool,
 }
 
-impl<'a> AvroParseOptions<'a> {
-    pub fn create(root_schema: &'a Schema) -> Self {
-        let resolved = apache_avro::schema::ResolvedSchema::try_from(root_schema)
+impl AvroParseOptions {
+    pub fn create(root_schema: &Schema) -> Self {
+        Self::create_from_arc(Arc::new(root_schema.clone()))
+    }
+
+    pub fn create_from_arc(root_schema: Arc<Schema>) -> Self {
+        let root_schema_ref = root_schema.clone();
+        let resolved = apache_avro::schema::ResolvedSchema::try_from(root_schema_ref.as_ref())
             .expect("avro schema is self contained");
         Self {
             root_schema,
             inner: AvroParseOptionsInner {
-                refs: resolved.get_names().clone(),
+                refs: clone_names_ref(resolved.get_names()),
                 relax_numeric: true,
             },
         }
     }
 }
 
-impl<'a> AvroParseOptionsInner<'a> {
-    fn lookup_ref(&self, schema: &'a Schema) -> &'a Schema {
+fn clone_names_ref(
+    refs: &NamesRef<'_>,
+) -> std::collections::HashMap<apache_avro::schema::Name, Schema> {
+    refs.iter()
+        .map(|(name, schema)| (name.clone(), (*schema).clone()))
+        .collect()
+}
+
+impl AvroParseOptionsInner {
+    fn lookup_ref<'a>(&'a self, schema: &'a Schema) -> &'a Schema {
         match schema {
-            Schema::Ref { name } => self.refs[name],
+            Schema::Ref { name } => self
+                .refs
+                .get(name)
+                .expect("avro ref must exist in resolved schema"),
             _ => schema,
         }
     }
@@ -87,13 +105,10 @@ impl<'a> AvroParseOptionsInner<'a> {
     ///   the `DataType` will be inferred.
     fn convert_to_datum<'b>(
         &self,
-        unresolved_schema: &'a Schema,
+        unresolved_schema: &Schema,
         value: &'b Value,
         type_expected: &DataType,
-    ) -> AccessResult<DatumCow<'b>>
-    where
-        'b: 'a,
-    {
+    ) -> AccessResult<DatumCow<'b>> {
         let create_error = || AccessError::TypeError {
             expected: format!("{:?}", type_expected),
             got: format!("{:?}", value),
@@ -342,11 +357,11 @@ impl<'a> AvroParseOptionsInner<'a> {
 
 pub struct AvroAccess<'a> {
     value: &'a Value,
-    options: AvroParseOptions<'a>,
+    options: &'a AvroParseOptions,
 }
 
 impl<'a> AvroAccess<'a> {
-    pub fn new(root_value: &'a Value, options: AvroParseOptions<'a>) -> Self {
+    pub fn new(root_value: &'a Value, options: &'a AvroParseOptions) -> Self {
         Self {
             value: root_value,
             options,
@@ -357,7 +372,7 @@ impl<'a> AvroAccess<'a> {
 impl Access for AvroAccess<'_> {
     fn access<'a>(&'a self, path: &[&str], type_expected: &DataType) -> AccessResult<DatumCow<'a>> {
         let mut value = self.value;
-        let mut unresolved_schema = self.options.root_schema;
+        let mut unresolved_schema = self.options.root_schema.as_ref();
 
         debug_assert!(
             path.len() == 1

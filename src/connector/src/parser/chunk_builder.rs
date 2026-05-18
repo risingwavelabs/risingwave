@@ -494,6 +494,21 @@ impl SourceStreamChunkRowWriter<'_> {
         self.do_action::<InsertAction>(|desc| f(desc).map(Into::into))
     }
 
+    /// Write an `Insert` record using trusted parser outputs.
+    ///
+    /// This skips the defensive datum-vs-column-type check and should only be used when
+    /// the caller already guarantees that the produced datum shape matches the target column type.
+    #[inline(always)]
+    pub fn do_insert_trusted<'a, D>(
+        &mut self,
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<D>,
+    ) -> AccessResult<()>
+    where
+        D: Into<DatumCow<'a>>,
+    {
+        self.do_action::<TrustedInsertAction>(|desc| f(desc).map(Into::into))
+    }
+
     /// Write a `Delete` record to the [`StreamChunk`], with the given fallible closure that
     /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
@@ -603,6 +618,34 @@ impl RowWriterAction for DeleteAction {
     #[inline(always)]
     fn type_check(desc: &SourceColumnDesc, output: &DatumCow<'_>) -> AccessResult<()> {
         check_datum_type(desc, output.to_datum_ref())
+    }
+
+    #[inline(always)]
+    fn apply(builder: &mut ArrayBuilderImpl, output: DatumCow<'_>) {
+        builder.append(output)
+    }
+
+    #[inline(always)]
+    fn rollback(builder: &mut ArrayBuilderImpl) {
+        builder.pop().unwrap()
+    }
+}
+
+struct TrustedInsertAction;
+
+impl RowWriterAction for TrustedInsertAction {
+    type Output<'a> = DatumCow<'a>;
+
+    const RECORD_TYPE: RecordType = RecordType::Insert;
+
+    #[inline(always)]
+    fn output_for<'a>(datum: impl Into<DatumCow<'a>>) -> Self::Output<'a> {
+        datum.into()
+    }
+
+    #[inline(always)]
+    fn type_check(_desc: &SourceColumnDesc, _output: &DatumCow<'_>) -> AccessResult<()> {
+        Ok(())
     }
 
     #[inline(always)]

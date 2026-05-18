@@ -58,10 +58,15 @@ fn check(
 
     let mut data_str = vec![];
     let messages_as_jsonb = HashSet::from(["google.protobuf.Any".to_owned()]);
+    let fields_by_name = pb_schema
+        .fields()
+        .map(|field| (field.name().to_owned(), field))
+        .collect::<HashMap<_, _>>();
     for data in pb_data {
         let access = ProtobufAccess::new(
             DynamicMessage::decode(pb_schema.clone(), *data).unwrap(),
             &messages_as_jsonb,
+            &fields_by_name,
         );
         let mut row = vec![];
         for col in &rw_schema {
