@@ -100,6 +100,26 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::RabbitMq(c) => {
+                let host = &c.address;
+                let amqp_port = c.port;
+                let user = &c.user;
+                let password = &c.password;
+                writeln!(env, r#"RISEDEV_RABBITMQ_HOST="{host}""#).unwrap();
+                writeln!(env, r#"RISEDEV_RABBITMQ_AMQP_PORT="{amqp_port}""#).unwrap();
+                writeln!(env, r#"RISEDEV_RABBITMQ_USER="{user}""#).unwrap();
+                writeln!(env, r#"RISEDEV_RABBITMQ_PASSWORD="{password}""#).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_RABBITMQ_AMQP_URL="amqp://{user}:{password}@{host}:{amqp_port}/%2f""#
+                )
+                .unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_RABBITMQ_WITH_OPTIONS_COMMON="connector='rabbitmq',url='amqp://{host}:{amqp_port}',username='{user}',password='{password}'""#
+                )
+                .unwrap();
+            }
             ServiceConfig::MySql(c) if c.application != Application::Metastore => {
                 let host = &c.address;
                 let port = &c.port;

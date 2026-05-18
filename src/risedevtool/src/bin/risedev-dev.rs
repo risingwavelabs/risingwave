@@ -32,8 +32,8 @@ use risedev::{
     EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
     LakekeeperService, MetaNodeService, MinioService, MoatService, MqttService, MySqlService,
     NatsService, PostgresService, PrometheusService, PubsubService, PulsarService, RISEDEV_NAME,
-    RedisService, SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task,
-    TaskGroup, TempoService, generate_risedev_env, preflight_check,
+    RabbitMqService, RedisService, SchemaRegistryService, ServiceConfig, SqlServerService,
+    SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -300,6 +300,16 @@ fn task_main(
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("redis {}:{}", c.address, c.port));
+                }
+                ServiceConfig::RabbitMq(c) => {
+                    RabbitMqService::new(c.clone()).execute(&mut ctx)?;
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb.set_message(format!(
+                        "rabbitmq amqp://{}:{} (mgmt http://{}:{})",
+                        c.address, c.port, c.address, c.management_port
+                    ));
                 }
                 ServiceConfig::MySql(c) => {
                     MySqlService::new(c.clone()).execute(&mut ctx)?;
