@@ -1,13 +1,13 @@
 statement ok
 set sink_decouple = false;
 
-# ---- Validation: multiple columns should be rejected ----
+# ---- Validation: multiple columns must use payload/url shape ----
 # force_append_only bypasses the planner-level retract-stream check so our
 # connector validate() is actually reached.
 statement ok
 CREATE TABLE t_multi_col (a varchar, b varchar);
 
-statement error HTTP sink requires exactly 1 column
+statement error HTTP sink with multiple columns only supports payload and url columns, got a
 CREATE SINK s_multi_col FROM t_multi_col WITH (
     connector = 'http',
     url = 'http://localhost:18081',
@@ -18,11 +18,82 @@ CREATE SINK s_multi_col FROM t_multi_col WITH (
 statement ok
 DROP TABLE t_multi_col;
 
+# ---- Validation: single payload column still requires url option ----
+statement ok
+CREATE TABLE t_static_url_missing_option (payload varchar);
+
+statement error HTTP sink requires url option when schema has exactly 1 column
+CREATE SINK s_static_url_missing_option FROM t_static_url_missing_option WITH (
+    connector = 'http',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+DROP TABLE t_static_url_missing_option;
+
+# ---- Validation: dynamic url column cannot coexist with url option ----
+statement ok
+CREATE TABLE t_dynamic_url_with_static_option (payload varchar, url varchar);
+
+statement error HTTP sink url option cannot coexist with url column
+CREATE SINK s_dynamic_url_with_static_option FROM t_dynamic_url_with_static_option WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+DROP TABLE t_dynamic_url_with_static_option;
+
+# ---- Validation: unsupported metadata columns are rejected ----
+statement ok
+CREATE TABLE t_dynamic_url_missing_url (payload varchar, extra varchar);
+
+statement error HTTP sink with multiple columns only supports payload and url columns, got extra
+CREATE SINK s_dynamic_url_missing_url FROM t_dynamic_url_missing_url WITH (
+    connector = 'http',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+DROP TABLE t_dynamic_url_missing_url;
+
+# ---- Validation: dynamic url column must be varchar ----
+statement ok
+CREATE TABLE t_dynamic_url_bad_type (payload varchar, url int);
+
+statement error HTTP sink url column must be varchar
+CREATE SINK s_dynamic_url_bad_type FROM t_dynamic_url_bad_type WITH (
+    connector = 'http',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+DROP TABLE t_dynamic_url_bad_type;
+
+# ---- Validation: extra columns are rejected ----
+statement ok
+CREATE TABLE t_dynamic_url_extra_column (payload varchar, url varchar, extra varchar);
+
+statement error HTTP sink with multiple columns only supports payload and url columns, got extra
+CREATE SINK s_dynamic_url_extra_column FROM t_dynamic_url_extra_column WITH (
+    connector = 'http',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+DROP TABLE t_dynamic_url_extra_column;
+
 # ---- Validation: wrong column type should be rejected ----
 statement ok
 CREATE TABLE t_int_col (payload int);
 
-statement error HTTP sink column must be varchar or jsonb
+statement error HTTP sink payload column must be varchar or jsonb
 CREATE SINK s_int_col FROM t_int_col WITH (
     connector = 'http',
     url = 'http://localhost:18081',
@@ -153,3 +224,49 @@ DROP SINK s_jsonb;
 
 statement ok
 DROP TABLE t_jsonb;
+
+# ---- Success: dynamic url column ----
+statement ok
+CREATE TABLE t_dynamic_url (payload varchar, url varchar);
+
+statement ok
+CREATE SINK s_dynamic_url FROM t_dynamic_url WITH (
+    connector = 'http',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+INSERT INTO t_dynamic_url VALUES ('dynamic url payload', 'http://localhost:18081');
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_dynamic_url;
+
+statement ok
+DROP TABLE t_dynamic_url;
+
+# ---- Success: dynamic url column with CREATE SINK AS SELECT ----
+statement ok
+CREATE TABLE t_dynamic_url_as_select_src (body varchar, target_url varchar);
+
+statement ok
+CREATE SINK s_dynamic_url_as_select WITH (
+    connector = 'http',
+    type = 'append-only',
+    force_append_only = 'true'
+) AS SELECT body AS payload, target_url AS url FROM t_dynamic_url_as_select_src;
+
+statement ok
+INSERT INTO t_dynamic_url_as_select_src VALUES ('dynamic url as select payload', 'http://localhost:18081');
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_dynamic_url_as_select;
+
+statement ok
+DROP TABLE t_dynamic_url_as_select_src;
