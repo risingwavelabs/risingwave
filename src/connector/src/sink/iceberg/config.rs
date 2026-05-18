@@ -126,6 +126,7 @@ pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
     "compaction.write_parquet_max_row_group_bytes";
 pub const ORDER_KEY: &str = "order_key";
+pub const DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM: usize = 1000;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
@@ -150,6 +151,10 @@ fn default_true() -> bool {
 
 fn default_some_true() -> Option<bool> {
     Some(true)
+}
+
+fn default_compaction_max_snapshots_num() -> Option<usize> {
+    Some(DEFAULT_COMPACTION_MAX_SNAPSHOTS_NUM)
 }
 
 fn parse_format_version_str(value: &str) -> std::result::Result<FormatVersion, String> {
@@ -398,7 +403,10 @@ pub struct IcebergConfig {
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
-    #[serde(rename = "compaction.max_snapshots_num", default)]
+    #[serde(
+        rename = "compaction.max_snapshots_num",
+        default = "default_compaction_max_snapshots_num"
+    )]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub max_snapshots_num_before_compaction: Option<usize>,
