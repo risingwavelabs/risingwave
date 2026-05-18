@@ -21,6 +21,7 @@ on:
 jobs:
   autoupdate:
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - id: autoupdate
         name: autoupdate
@@ -33,3 +34,12 @@ jobs:
           UPDATE_METHOD: "rebase"
         # https://github.com/pascalgn/automerge-action/issues/191
         continue-on-error: true
+      - name: Report autoupdate failure
+        if: steps.autoupdate.outcome == 'failure'
+        run: |
+          echo "::warning::autoupdate failed. Check the autoupdate step logs for details."
+          {
+            echo "### Autoupdate failed"
+            echo
+            echo "The autoupdate action failed. Check the autoupdate step logs for details."
+          } >> "$GITHUB_STEP_SUMMARY"
