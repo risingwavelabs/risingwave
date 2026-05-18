@@ -364,18 +364,16 @@ impl BigQuerySink {
     }
 
     fn bigquery_data_type_compatible(rw_data_type: &str, bigquery_data_type: &str) -> bool {
-        Self::normalize_bigquery_data_type(rw_data_type)
-            == Self::normalize_bigquery_data_type(bigquery_data_type)
+        rw_data_type == Self::normalize_bigquery_data_type(bigquery_data_type)
     }
 
     fn normalize_bigquery_data_type(data_type: &str) -> String {
         static PARAMETERIZED_NUMERIC_TYPE: LazyLock<Regex> = LazyLock::new(|| {
-            Regex::new(r"\b(?:BIG)?(?:NUMERIC|DECIMAL)\s*\([^)]*\)").unwrap()
+            Regex::new(r"(?i)\b(?:BIG)?(?:NUMERIC|DECIMAL)\s*\([^)]*\)").unwrap()
         });
         static NUMERIC_ALIAS: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r"\b(?:BIGNUMERIC|BIGDECIMAL|DECIMAL)\b").unwrap());
+            LazyLock::new(|| Regex::new(r"(?i)\b(?:BIG)?(?:NUMERIC|DECIMAL)\b").unwrap());
 
-        let data_type = data_type.to_ascii_uppercase();
         let data_type = PARAMETERIZED_NUMERIC_TYPE.replace_all(&data_type, "NUMERIC");
         NUMERIC_ALIAS.replace_all(&data_type, "NUMERIC").into_owned()
     }
