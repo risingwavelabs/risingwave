@@ -1290,9 +1290,14 @@ fn convert_digit(c: &mut String, t: &mut Vec<TimeStrToken>) -> ParseResult<()> {
             Ok(num) => {
                 t.push(TimeStrToken::Num(num));
             }
-            Err(_) => {
-                return Err(IntervalParseError::invalid(c.clone()));
-            }
+            Err(_) => match c.parse::<f64>() {
+                Ok(f) => {
+                    t.push(TimeStrToken::Second(F64::from(f)));
+                }
+                Err(_) => {
+                    return Err(IntervalParseError::invalid(c.clone()));
+                }
+            },
         }
         c.clear();
     }
@@ -1784,5 +1789,30 @@ mod tests {
         let rhs = Interval::from_iso_8601(iso_8601_str).unwrap();
         assert_eq!(rhs.as_iso_8601().as_str(), iso_8601_str);
         assert_eq!(lhs, rhs);
+    }
+
+    #[test]
+    fn test_fractional_seconds_parsing() {
+        // Issue #21796: '6.12345678 secs'::interval should parse correctly
+        let interval = Interval::from_str("6.12345678 secs").unwrap();
+        // 6.12345678 seconds = 6_123_457 microseconds (rounded)
+        assert_eq!(interval, Interval::from_month_day_usec(0, 0, 6_123_457));
+
+        let interval = Interval::from_str("1.5 secs").unwrap();
+        assert_eq!(interval, Interval::from_month_day_usec(0, 0, 1_500_000));
+
+        let interval = Interval::from_str("0.000001 secs").unwrap();
+        assert_eq!(interval, Interval::from_month_day_usec(0, 0, 1));
+
+        // Negative fractional seconds
+        let interval = Interval::from_str("-3.5 secs").unwrap();
+        assert_eq!(interval, Interval::from_month_day_usec(0, 0, -3_500_000));
+
+        // Mixed: integer unit + fractional seconds
+        let interval = Interval::from_str("1 min 2.5 secs").unwrap();
+        assert_eq!(
+            interval,
+            Interval::from_month_day_usec(0, 0, 60_000_000 + 2_500_000)
+        );
     }
 }
