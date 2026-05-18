@@ -15,6 +15,7 @@
 use core::pin::Pin;
 use core::time::Duration;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::sync::LazyLock;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
@@ -48,6 +49,7 @@ use prost_types::{
     DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
     field_descriptor_proto,
 };
+use regex::Regex;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -367,26 +369,15 @@ impl BigQuerySink {
     }
 
     fn normalize_bigquery_data_type(data_type: &str) -> String {
-        fn remove_type_parameters(mut data_type: String, type_name: &str) -> String {
-            let pattern = format!("{type_name}(");
-            while let Some(type_start) = data_type.find(&pattern) {
-                let params_start = type_start + type_name.len();
-                let Some(params_end) = data_type[params_start..].find(')') else {
-                    break;
-                };
-                data_type.replace_range(params_start..=params_start + params_end, "");
-            }
-            data_type
-        }
+        static PARAMETERIZED_NUMERIC_TYPE: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"\b(?:BIG)?(?:NUMERIC|DECIMAL)\s*\([^)]*\)").unwrap()
+        });
+        static NUMERIC_ALIAS: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"\b(?:BIGNUMERIC|BIGDECIMAL|DECIMAL)\b").unwrap());
 
-        let mut data_type = data_type.to_ascii_uppercase();
-        for type_name in ["BIGNUMERIC", "BIGDECIMAL", "NUMERIC", "DECIMAL"] {
-            data_type = remove_type_parameters(data_type, type_name);
-        }
-        data_type
-            .replace("BIGNUMERIC", "NUMERIC")
-            .replace("BIGDECIMAL", "NUMERIC")
-            .replace("DECIMAL", "NUMERIC")
+        let data_type = data_type.to_ascii_uppercase();
+        let data_type = PARAMETERIZED_NUMERIC_TYPE.replace_all(&data_type, "NUMERIC");
+        NUMERIC_ALIAS.replace_all(&data_type, "NUMERIC").into_owned()
     }
 
     fn get_string_and_check_support_from_datatype(rw_data_type: &DataType) -> Result<String> {
@@ -1051,6 +1042,10 @@ mod test {
             "ARRAY<STRUCT<v1 NUMERIC, v2 ARRAY<NUMERIC>>>",
             "ARRAY<STRUCT<v1 NUMERIC(31, 2), v2 ARRAY<BIGNUMERIC(76, 38)>>>"
         ));
+        assert_eq!(
+            BigQuerySink::normalize_bigquery_data_type("FOO_NUMERIC(31, 2)"),
+            "FOO_NUMERIC(31, 2)"
+        );
         assert!(!BigQuerySink::bigquery_data_type_compatible(
             "NUMERIC", "STRING"
         ));
