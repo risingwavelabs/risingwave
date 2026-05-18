@@ -504,7 +504,12 @@ enum CoordinatorWorkerState {
 
 pub struct CoordinatorWorker {
     handle_manager: CoordinationHandleManager,
-    prev_committed_epoch: Option<u64>,
+    /// Last epoch whose commit has been acknowledged to sink writers.
+    ///
+    /// On recovery, pending sink states are treated as already acknowledged to writers, so this is
+    /// initialized to the latest pending epoch if any. Otherwise, it starts from the latest
+    /// committed epoch persisted in `pending_sink_state`.
+    last_writer_acked_epoch: Option<u64>,
     curr_state: CoordinatorWorkerState,
 }
 
@@ -566,7 +571,7 @@ impl CoordinatorWorker {
                 next_handle_id: 0,
                 request_rx,
             },
-            prev_committed_epoch: None,
+            last_writer_acked_epoch: None,
             curr_state: CoordinatorWorkerState::Running,
         };
 
@@ -600,7 +605,7 @@ impl CoordinatorWorker {
         &mut self,
         pending_handle_ids: impl IntoIterator<Item = HandleId>,
     ) -> anyhow::Result<()> {
-        let log_store_rewind_start_epoch = self.prev_committed_epoch;
+        let log_store_rewind_start_epoch = self.last_writer_acked_epoch;
         self.handle_manager
             .start(log_store_rewind_start_epoch, pending_handle_ids)?;
         if log_store_rewind_start_epoch.is_none() {
@@ -770,7 +775,6 @@ impl CoordinatorWorker {
                     match commit_res {
                         Ok(_) => {
                             two_phase_handler.ack_committed(epoch).await?;
-                            self.prev_committed_epoch = Some(epoch);
                         }
                         Err(e) => {
                             two_phase_handler.failed_committed(epoch, e);
@@ -844,8 +848,6 @@ impl CoordinatorWorker {
                             )
                             .await?;
                             two_phase_handler.push_new_item(epoch, None, first_schema_change);
-                        } else {
-                            self.prev_committed_epoch = Some(epoch);
                         }
                     }
                     SinkCommitCoordinator::TwoPhase(coordinator) => {
@@ -871,15 +873,13 @@ impl CoordinatorWorker {
                                 commit_metadata,
                                 first_schema_change,
                             );
-                        } else {
-                            // No data to commit and no schema change.
-                            self.prev_committed_epoch = Some(epoch);
                         }
                     }
                 }
 
                 self.handle_manager
                     .ack_commit(epoch, commit_requests.handle_ids)?;
+                self.last_writer_acked_epoch = Some(epoch);
             }
         }
     }
@@ -898,12 +898,15 @@ impl CoordinatorWorker {
         let last_committed_epoch = metadata_iter
             .next_if(|(_, state, _, _)| matches!(state, SinkState::Committed))
             .map(|(epoch, _, _, _)| epoch);
-        self.prev_committed_epoch = last_committed_epoch;
 
         let pending_items = metadata_iter
             .peeking_take_while(|(_, state, _, _)| matches!(state, SinkState::Pending))
             .map(|(epoch, _, metadata, schema_change)| (epoch, metadata, schema_change))
             .collect_vec();
+        self.last_writer_acked_epoch = pending_items
+            .last()
+            .map(|(epoch, _, _)| *epoch)
+            .or(last_committed_epoch);
 
         let mut aborted_epochs = vec![];
 
