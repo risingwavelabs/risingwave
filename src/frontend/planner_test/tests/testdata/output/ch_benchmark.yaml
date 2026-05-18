@@ -1250,7 +1250,7 @@
               │     │         │ └─StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all }
               │     │         │   ├─StreamExchange { dist: HashShard(item.i_id) }
               │     │         │   │ └─StreamFilter { predicate: (item.i_id < 1000:Int32) }
-              │     │         │   │   └─StreamTableScan { table: item, columns: [item.i_id], stream_scan_type: SnapshotBackfill, stream_key: [item.i_id], pk: [i_id], dist: UpstreamHashShard(item.i_id) }
+              │     │         │   │   └─StreamTableScan { table: item, columns: [item.i_id], pk_scan_range: i_id < Some(Int32(1000)), stream_scan_type: SnapshotBackfill, stream_key: [item.i_id], pk: [i_id], dist: UpstreamHashShard(item.i_id) }
               │     │         │   └─StreamExchange { dist: HashShard(stock.s_i_id) }
               │     │         │     └─StreamFilter { predicate: (stock.s_i_id < 1000:Int32) }
               │     │         │       └─StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], stream_scan_type: SnapshotBackfill, stream_key: [stock.s_w_id, stock.s_i_id], pk: [s_w_id, s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
@@ -1328,7 +1328,7 @@
 
     Fragment 9
     StreamFilter { predicate: (item.i_id < 1000:Int32) }
-    └── StreamTableScan { table: item, columns: [item.i_id], stream_scan_type: SnapshotBackfill, stream_key: [item.i_id], pk: [i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 27 ] }
+    └── StreamTableScan { table: item, columns: [item.i_id], pk_scan_range: i_id < Some(Int32(1000)), stream_scan_type: SnapshotBackfill, stream_key: [item.i_id], pk: [i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 27 ] }
         ├── Upstream
         └── BatchPlanNode
 
