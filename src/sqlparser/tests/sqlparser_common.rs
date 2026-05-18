@@ -2297,6 +2297,32 @@ fn parse_literal_date() {
 }
 
 #[test]
+fn parse_escaped_double_quote_in_delimited_identifier() {
+    {
+        let select = verified_only_select(r#"SELECT 'STRI"NG' AS "'STRI""NG""#);
+
+        match only(&select.projection) {
+            SelectItem::ExprWithAlias { expr, alias } => {
+                assert_eq!(
+                    &Expr::Value(Value::SingleQuotedString("STRI\"NG".to_owned())),
+                    expr
+                );
+                assert_eq!(&Ident::with_quote_unchecked('"', "'STRI\"NG"), alias);
+            }
+            _ => panic!("expected ExprWithAlias"),
+        }
+    }
+
+    {
+        let select = verified_only_select(r#"SELECT "'STRI""NG""#);
+        assert_eq!(
+            &Expr::Identifier(Ident::with_quote_unchecked('"', "'STRI\"NG")),
+            expr_from_projection(only(&select.projection)),
+        );
+    }
+}
+
+#[test]
 fn parse_literal_time() {
     let sql = "SELECT TIME '01:23:34'";
     let select = verified_only_select(sql);
