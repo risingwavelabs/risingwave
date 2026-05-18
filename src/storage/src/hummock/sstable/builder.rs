@@ -116,6 +116,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     block_builder: BlockBuilder,
 
     compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    is_single_table_no_filter: bool,
     /// Block metadata vec.
     block_metas: Vec<BlockMeta>,
 
@@ -188,6 +189,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         memory_limiter: Option<Arc<MemoryLimiter>>,
     ) -> Self {
         let sst_object_id = sst_object_id.into();
+        let is_single_table_no_filter = compaction_catalog_agent_ref.is_single_table_no_filter();
         Self {
             vnode_range_collector: VnodeUserKeyRangeCollector::with_limit(
                 options.max_vnode_key_range_bytes,
@@ -208,6 +210,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             last_full_key: vec![],
             sst_object_id,
             compaction_catalog_agent_ref,
+            is_single_table_no_filter,
             table_stats: Default::default(),
             last_table_stats: Default::default(),
             epoch_set: BTreeSet::default(),
@@ -284,7 +287,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         );
         meta.offset = self.writer.data_len() as u32;
         self.block_metas.push(meta);
-        self.filter_builder.add_raw_data(filter_data);
+        if self.is_single_table_no_filter {
+            assert!(
+                filter_data.is_empty(),
+                "single-table no-filter compaction should not copy raw filter data"
+            );
+        } else {
+            self.filter_builder.add_raw_data(filter_data);
+        }
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer.write_block_bytes(buf, block_meta).await?;
 
@@ -469,12 +479,23 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
-        let bloom_filter_kind = if self.filter_builder.support_blocked_raw_data() {
+        let should_skip_filter = self.is_single_table_no_filter;
+        assert!(
+            !should_skip_filter || self.table_ids.len() <= 1,
+            "single-table no-filter compaction should not output multiple tables"
+        );
+        assert!(
+            !should_skip_filter || self.filter_builder.approximate_len() == 0,
+            "single-table no-filter compaction should not build filter data"
+        );
+        let bloom_filter_kind = if should_skip_filter {
+            BloomFilterType::Sstable
+        } else if self.filter_builder.support_blocked_raw_data() {
             BloomFilterType::Blocked
         } else {
             BloomFilterType::Sstable
         };
-        let bloom_filter = if self.options.bloom_false_positive > 0.0 {
+        let bloom_filter = if self.options.bloom_false_positive > 0.0 && !should_skip_filter {
             self.filter_builder.finish(self.memory_limiter.clone())
         } else {
             vec![]
@@ -687,8 +708,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let block = self.block_builder.build();
         self.writer.write_block(block, block_meta).await?;
         self.block_size_vec.push(block.len());
-        self.filter_builder
-            .switch_block(self.memory_limiter.clone());
+        if !self.is_single_table_no_filter {
+            self.filter_builder
+                .switch_block(self.memory_limiter.clone());
+        }
         let data_len = utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
             panic!(
                 "WARN overflow can't convert writer_data_len {} into u32 table {:?}",
@@ -1364,5 +1387,63 @@ pub(super) mod tests {
                 table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_single_table_without_filter_key_writes_no_xor_filter() {
+        let opts = SstableBuilderOptions::default();
+        let sstable_store = mock_sstable_store().await;
+        let object_id = 1;
+        let writer = sstable_store
+            .clone()
+            .create_sst_writer(object_id, SstableWriterOptions::default());
+
+        let mut filter = MultiFilterKeyExtractor::default();
+        filter.register(
+            1.into(),
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor),
+        );
+        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
+            FilterKeyExtractorImpl::Multi(filter),
+            HashMap::from_iter([(1.into(), VirtualNode::COUNT_FOR_TEST)]),
+            HashMap::from_iter([(1.into(), None)]),
+            HashMap::default(),
+        ));
+
+        let mut builder = SstableBuilder::new(
+            object_id,
+            writer,
+            BlockedXor16FilterBuilder::new(1024),
+            opts,
+            compaction_catalog_agent_ref,
+            None,
+        );
+
+        let key_count: usize = 10000;
+        let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+        for idx in 0..key_count {
+            table_key.resize(VirtualNode::SIZE, 0);
+            table_key.extend_from_slice(format!("key_test_{idx:05}").as_bytes());
+            let k = UserKey::for_test(TableId::new(1), table_key.as_ref());
+            builder
+                .add(
+                    FullKey::from_user_key(k, test_epoch(1)),
+                    HummockValue::put(test_value_of(idx).as_ref()),
+                )
+                .await
+                .unwrap();
+        }
+
+        let ret = builder.finish().await.unwrap();
+        let sst_info = ret.sst_info.sst_info.clone();
+        ret.writer_output.await.unwrap().unwrap();
+
+        let table = sstable_store
+            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap();
+        assert_eq!(sst_info.bloom_filter_kind, BloomFilterType::Sstable);
+        assert!(!table.has_bloom_filter());
+        assert!(!table.filter_reader.is_block_based_filter());
     }
 }
