@@ -38,7 +38,7 @@ use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
-    SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+    SCHEMA_NAME_KEY, SchemaTableName, TABLE_NAME_KEY,
 };
 use risingwave_connector::source::cdc::{
     build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
@@ -1193,6 +1193,50 @@ fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(
     }
 }
 
+/// Reject `CREATE TABLE` when a primary-key column is excluded from Debezium change-event
+/// values via `debezium.column.exclude.list`.
+///
+/// Debezium's `column.exclude.list` only filters the change-event **value** payload.
+/// Message keys are always built from the upstream PRIMARY KEY and are not affected.
+/// If a PK column is dropped from the value, RisingWave reads NULL for that PK column
+/// from the payload, causing silent data corruption: UPDATE turns into a fresh INSERT
+/// (PK mismatch with the original row) and DELETE silently no-ops.
+///
+/// Debezium pattern format is `<namespace>.<table>.<column>`, where namespace is
+/// `schema` for Postgres / SQL Server and `database` for MySQL. We strip the current
+/// table's `<namespace>.<table>.` prefix to recover the column name; entries that
+/// target other tables are skipped.
+fn reject_pk_excluded_by_debezium_filter(
+    pk_names: &[String],
+    cdc_with_options: &WithOptionsSecResolved,
+) -> Result<()> {
+    const EXCLUDE_KEY: &str = "debezium.column.exclude.list";
+
+    let Some(exclude_list) = cdc_with_options.get(EXCLUDE_KEY) else {
+        return Ok(());
+    };
+
+    let st = SchemaTableName::from_properties(cdc_with_options.as_plaintext());
+    let prefix = format!("{}.{}.", st.schema_name, st.table_name);
+
+    for entry in exclude_list.split(',') {
+        let Some(col) = entry.trim().strip_prefix(prefix.as_str()) else {
+            continue;
+        };
+        if pk_names.iter().any(|pk| pk == col) {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "primary key column `{col}` is excluded by `{EXCLUDE_KEY}`. \
+                 Excluding a PK column causes silent data corruption: Debezium keeps \
+                 the PK in the message key but drops it from the payload, so RisingWave \
+                 cannot match UPDATE/DELETE events against the original row."
+            ))
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_create_table_plan(
     handler_args: HandlerArgs,
@@ -1346,6 +1390,13 @@ pub(super) async fn handle_create_table_plan(
                     (columns, pk_names)
                 }
             };
+
+            // CDC-table branch only: if `debezium.column.exclude.list` covers a PK
+            // column, Debezium drops it from the change-event value while keeping it
+            // in the message key. RisingWave would read NULL for that PK from the
+            // payload, silently corrupting downstream (UPDATE turns into a fresh
+            // INSERT, DELETE no-ops). Plain (non-CDC) tables don't hit this check.
+            reject_pk_excluded_by_debezium_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, explain_options).into();
@@ -2721,6 +2772,10 @@ pub async fn generate_stream_graph_for_replace_table(
                 )?;
 
             let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
+
+            // CDC-table branch only: see the comment at the symmetric call site in
+            // `handle_create_table_plan`. Plain (non-CDC) tables don't hit this check.
+            reject_pk_excluded_by_debezium_filter(&pk_names, &cdc_with_options)?;
 
             let context: OptimizerContextRef =
                 OptimizerContext::new(handler_args, ExplainOptions::default()).into();
