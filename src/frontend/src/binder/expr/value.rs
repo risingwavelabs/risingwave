@@ -28,6 +28,7 @@ impl Binder {
         match value {
             Value::Number(s) => self.bind_number(s.clone()),
             Value::SingleQuotedString(s) => self.bind_string(s),
+            Value::DollarQuotedString(s) => self.bind_string(&s.value),
             Value::CstyleEscapedString(s) => self.bind_string(&s.value),
             Value::Boolean(b) => self.bind_bool(*b),
             // Both null and string literal will be treated as `unknown` during type inference.

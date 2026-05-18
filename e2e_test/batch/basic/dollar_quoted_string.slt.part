@@ -1,0 +1,36 @@
+query T
+select $$hello$$;
+----
+hello
+
+query T
+select $foo$the content with $bar$nested$bar$ usage$foo$;
+----
+the content with $bar$nested$bar$ usage
+
+query T
+select $fo$o$not nesting just $ sign$fo$o$;
+----
+o$not nesting just $ sign
+
+query T
+select $$hel$$lo$$;
+----
+hel
+
+statement ok
+drop table if exists t;
+
+statement ok
+create table t(v int);
+
+statement ok
+COMMENT ON TABLE t IS $$hello$$;
+
+query T
+SELECT DATE $$1999-01-01$$;
+----
+1999-01-01
+
+statement ok
+drop table t;
