@@ -811,31 +811,44 @@ impl IcebergSinkCommitter {
         Ok(())
     }
 
-    /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
-    /// Returns the number of snapshots since the last rewrite/overwrite
-    fn count_snapshots_since_rewrite(&self) -> usize {
-        let mut snapshots: Vec<_> = self.table.metadata().snapshots().collect();
-        snapshots.sort_by_key(|b| std::cmp::Reverse(b.timestamp_ms()));
-
-        // Iterate through snapshots in reverse order (newest first) to find the last rewrite/overwrite
+    fn count_snapshots_since_rewrite_in_lineage(
+        mut snapshot_id: Option<i64>,
+        mut snapshot_info_by_id: impl FnMut(i64) -> Option<(Operation, Option<i64>)>,
+    ) -> usize {
         let mut count = 0;
-        for snapshot in snapshots {
-            // Check if this snapshot represents a rewrite or overwrite operation
-            let summary = snapshot.summary();
-            match &summary.operation {
-                Operation::Replace => {
-                    // Found a rewrite/overwrite operation, stop counting
-                    break;
-                }
+        while let Some(current_snapshot_id) = snapshot_id {
+            let Some((operation, parent_snapshot_id)) = snapshot_info_by_id(current_snapshot_id)
+            else {
+                break;
+            };
 
-                _ => {
-                    // Increment count for each snapshot that is not a rewrite/overwrite
-                    count += 1;
-                }
+            if operation == Operation::Replace {
+                break;
             }
+
+            count += 1;
+            snapshot_id = parent_snapshot_id;
         }
 
         count
+    }
+
+    /// Returns the number of snapshots in the current commit branch since the last rewrite.
+    fn count_snapshots_since_rewrite(&self) -> usize {
+        let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
+        let metadata = self.table.metadata();
+        let snapshot_id = metadata
+            .snapshot_for_ref(branch.as_str())
+            .map(|snapshot| snapshot.snapshot_id());
+
+        Self::count_snapshots_since_rewrite_in_lineage(snapshot_id, |snapshot_id| {
+            metadata.snapshot_by_id(snapshot_id).map(|snapshot| {
+                (
+                    snapshot.summary().operation.clone(),
+                    snapshot.parent_snapshot_id(),
+                )
+            })
+        })
     }
 
     /// Wait until snapshot count since last rewrite is below the limit
@@ -891,4 +904,30 @@ fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
 
 fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[test]
+    fn test_count_snapshots_since_rewrite_in_lineage_ignores_other_branches() {
+        let snapshots = HashMap::from([
+            (1, (Operation::Append, None)),
+            (2, (Operation::Append, Some(1))),
+            (3, (Operation::Replace, Some(2))),
+            (4, (Operation::Append, Some(3))),
+            // Simulate the COW publish snapshot on main. It should not affect
+            // the ingestion branch backlog count.
+            (5, (Operation::Overwrite, None)),
+        ]);
+
+        let count = IcebergSinkCommitter::count_snapshots_since_rewrite_in_lineage(Some(4), |id| {
+            snapshots.get(&id).cloned()
+        });
+
+        assert_eq!(count, 1);
+    }
 }
