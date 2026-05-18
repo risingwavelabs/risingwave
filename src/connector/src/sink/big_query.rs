@@ -324,6 +324,10 @@ impl BigQuerySink {
 
 impl BigQuerySink {
     fn is_decimal_type_compatible(bigquery_type: &str) -> bool {
+        // BigQuery INFORMATION_SCHEMA reports parameterized decimal columns as
+        // `NUMERIC(p, s)` or `BIGNUMERIC(p, s)`. RisingWave `Decimal` does not
+        // carry typmod, so schema validation accepts the BigQuery decimal type
+        // family instead of requiring exact string equality.
         let normalized = bigquery_type.trim().to_ascii_uppercase();
         matches!(
             normalized.split_once('(').map_or(normalized.as_str(), |(prefix, _)| prefix),
