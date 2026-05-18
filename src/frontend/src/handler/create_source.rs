@@ -758,9 +758,11 @@ pub fn bind_connector_props(
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
 
-    if !is_create_source && with_properties.is_shareable_only_cdc_connector() {
+    if !is_create_source && with_properties.is_shareable_cdc_connector() {
         return Err(RwError::from(ProtocolError(format!(
-            "connector {} does not support `CREATE TABLE`, please use `CREATE SOURCE` instead",
+            "directly creating a CDC table for connector {} is no longer supported; \
+             please `CREATE SOURCE` to create a shared CDC source first, \
+             then `CREATE TABLE ... FROM <source> TABLE '<database>.<table>'`",
             with_properties.get_connector().unwrap(),
         ))));
     }
