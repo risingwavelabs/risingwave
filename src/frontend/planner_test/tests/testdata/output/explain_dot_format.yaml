@@ -556,7 +556,7 @@
         11 [ label = "BatchPlanNode" ]
         12 [ label = "Fragment 3\l" ]
         13 [ label = "StreamTableScan { table: t2, columns: [v2] }\ltables: [\"StreamScan: 6\"]\l" ]
-        14 [ label = "Table 0\lcolumns: [\"kv_log_store_epoch\",\"kv_log_store_seq_id\",\"kv_log_store_vnode\",\"kv_log_store_row_op\",\"t1_v1\",\"t2_v2\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\",\"$1 ASC\",\"$2 ASC\"]\lvalue indices: [\"0\",\"1\",\"2\",\"3\",\"4\",\"5\"]\ldistribution key: [\"4\"]\lread pk prefix len hint: \"3\"\lvnode column idx: \"2\"\l" ]
+        14 [ label = "Table 0\lcolumns: [\"kv_log_store_epoch\",\"kv_log_store_seq_id\",\"kv_log_store_vnode\",\"kv_log_store_row_op\",\"t1_v1\",\"t2_v2\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\",\"$1 ASC\",\"$2 ASC\"]\lvalue indices: [\"0\",\"1\",\"2\",\"3\",\"4\",\"5\"]\ldistribution key: [\"4\"]\lread pk prefix len hint: \"0\"\lvnode column idx: \"2\"\l" ]
         15 [ label = "Table 1\lcolumns: [\"t1_v1\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"0\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\l" ]
         16 [ label = "Table 2\lcolumns: [\"t1_v1\",\"_degree\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"1\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\l" ]
         17 [ label = "Table 3\lcolumns: [\"t2_v2\",\"_rw_timestamp\"]\lprimary key: [\"$0 ASC\"]\lvalue indices: [\"0\"]\ldistribution key: [\"0\"]\lread pk prefix len hint: \"1\"\l" ]
