@@ -31,11 +31,13 @@ use crate::sink::writer::{
 use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, Sink, SinkError, SinkParam, SinkWriterParam};
 
 pub const HTTP_SINK: &str = "http";
+const HTTP_SINK_PAYLOAD_COLUMN: &str = "payload";
+const HTTP_SINK_URL_COLUMN: &str = "url";
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct HttpConfig {
     /// The endpoint URL to POST data to.
-    pub url: String,
+    pub url: Option<String>,
 
     /// Content-Type header value. Defaults to `text/plain` for `varchar` and `application/json`
     /// for `jsonb`.
@@ -75,47 +77,108 @@ impl HttpConfig {
     }
 }
 
-/// Validates the HTTP sink parameters and returns the parsed URL and default headers so callers
-/// can use them directly without re-parsing.
+#[derive(Clone, Debug)]
+enum HttpUrl {
+    Static(reqwest::Url),
+    Dynamic { url_index: usize },
+}
+
+/// Validates the HTTP sink parameters and returns the sink so callers can use it directly without
+/// re-parsing.
 fn validate_http_sink(
     is_append_only: bool,
     ignore_delete: bool,
     schema: &Schema,
-    url: &str,
+    url: Option<&str>,
     content_type: Option<&str>,
     headers: &BTreeMap<String, String>,
-) -> Result<(reqwest::Url, HeaderMap)> {
+) -> Result<HttpSink> {
     if !is_append_only && !ignore_delete {
         return Err(SinkError::Config(anyhow!(
             "HTTP sink only supports append-only mode"
         )));
     }
 
-    if schema.fields().len() != 1 {
+    let fields = schema.fields();
+    let (payload_index, url, payload_type) = if fields.len() == 1 {
+        let Some(url) = url else {
+            return Err(SinkError::Config(anyhow!(
+                "HTTP sink requires url option when schema has exactly 1 column"
+            )));
+        };
+        let url = url
+            .parse()
+            .context("invalid URL")
+            .map_err(SinkError::Config)?;
+        (0, HttpUrl::Static(url), fields[0].data_type.clone())
+    } else {
+        for field in fields {
+            match field.name.as_str() {
+                HTTP_SINK_PAYLOAD_COLUMN | HTTP_SINK_URL_COLUMN => {}
+                _ => {
+                    return Err(SinkError::Config(anyhow!(
+                        "HTTP sink with multiple columns only supports payload and url columns, got {}",
+                        field.name
+                    )));
+                }
+            }
+        }
+
+        let payload_index = fields
+            .iter()
+            .position(|field| field.name == HTTP_SINK_PAYLOAD_COLUMN)
+            .ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "HTTP sink with multiple columns requires a payload column"
+                ))
+            })?;
+        let url_index = fields
+            .iter()
+            .position(|field| field.name == HTTP_SINK_URL_COLUMN);
+        let url = match (url, url_index) {
+            (Some(_), Some(_)) => {
+                return Err(SinkError::Config(anyhow!(
+                    "HTTP sink url option cannot coexist with url column"
+                )));
+            }
+            (Some(url), None) => {
+                let url = url
+                    .parse()
+                    .context("invalid URL")
+                    .map_err(SinkError::Config)?;
+                HttpUrl::Static(url)
+            }
+            (None, Some(url_index)) => {
+                if fields[url_index].data_type != DataType::Varchar {
+                    return Err(SinkError::Config(anyhow!(
+                        "HTTP sink url column must be varchar, got {:?}",
+                        fields[url_index].data_type
+                    )));
+                }
+                HttpUrl::Dynamic { url_index }
+            }
+            (None, None) => {
+                return Err(SinkError::Config(anyhow!(
+                    "HTTP sink requires either url option or url column"
+                )));
+            }
+        };
+
+        (payload_index, url, fields[payload_index].data_type.clone())
+    };
+
+    if payload_type != DataType::Varchar && payload_type != DataType::Jsonb {
         return Err(SinkError::Config(anyhow!(
-            "HTTP sink requires exactly 1 column, got {}",
-            schema.fields().len()
+            "HTTP sink payload column must be varchar or jsonb, got {:?}",
+            payload_type
         )));
     }
-
-    let col_type = schema.fields()[0].data_type.clone();
-    if col_type != DataType::Varchar && col_type != DataType::Jsonb {
-        return Err(SinkError::Config(anyhow!(
-            "HTTP sink column must be varchar or jsonb, got {:?}",
-            col_type
-        )));
-    }
-
-    let parsed_url = url
-        .parse()
-        .context("invalid URL")
-        .map_err(SinkError::Config)?;
 
     let mut header_map = HeaderMap::new();
     header_map.insert(
         CONTENT_TYPE,
         content_type
-            .unwrap_or(match col_type {
+            .unwrap_or(match payload_type {
                 DataType::Varchar => "text/plain",
                 DataType::Jsonb => "application/json",
                 _ => unreachable!("validated HTTP sink column type"),
@@ -136,12 +199,17 @@ fn validate_http_sink(
         header_map.insert(name, value);
     }
 
-    Ok((parsed_url, header_map))
+    Ok(HttpSink {
+        url,
+        payload_index,
+        header_map,
+    })
 }
 
 #[derive(Clone, Debug)]
 pub struct HttpSink {
-    endpoint: String,
+    url: HttpUrl,
+    payload_index: usize,
     header_map: HeaderMap,
 }
 
@@ -162,18 +230,14 @@ impl TryFrom<SinkParam> for HttpSink {
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let (config, headers) = HttpConfig::from_btreemap(param.properties)?;
-        let (_parsed_url, header_map) = validate_http_sink(
+        validate_http_sink(
             param.sink_type.is_append_only(),
             param.ignore_delete,
             &schema,
-            &config.url,
+            config.url.as_deref(),
             config.content_type.as_deref(),
             &headers,
-        )?;
-        Ok(Self {
-            endpoint: config.url,
-            header_map,
-        })
+        )
     }
 }
 
@@ -187,27 +251,52 @@ impl Sink for HttpSink {
     }
 
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        Ok(
-            HttpSinkWriter::new(self.endpoint.clone(), self.header_map.clone())?
-                .into_log_sinker(usize::MAX),
-        )
+        Ok(HttpSinkWriter::new(
+            self.url.clone(),
+            self.payload_index,
+            self.header_map.clone(),
+        )?
+        .into_log_sinker(usize::MAX))
     }
 }
 
 pub struct HttpSinkWriter {
     client: reqwest::Client,
-    endpoint: String,
+    url: HttpUrl,
+    payload_index: usize,
 }
 
 impl HttpSinkWriter {
-    pub fn new(endpoint: String, header_map: HeaderMap) -> Result<Self> {
+    fn new(url: HttpUrl, payload_index: usize, header_map: HeaderMap) -> Result<Self> {
         let client = reqwest::Client::builder()
             .default_headers(header_map)
             .build()
             .context("failed to build HTTP client")
             .map_err(SinkError::Http)?;
 
-        Ok(Self { client, endpoint })
+        Ok(Self {
+            client,
+            url,
+            payload_index,
+        })
+    }
+
+    fn extract_url(&self, row: impl Row) -> Result<reqwest::Url> {
+        match &self.url {
+            HttpUrl::Static(url) => Ok(url.clone()),
+            HttpUrl::Dynamic { url_index } => match row.datum_at(*url_index) {
+                Some(ScalarRefImpl::Utf8(url)) if !url.is_empty() => url
+                    .parse()
+                    .context("invalid URL in HTTP sink url column")
+                    .map_err(SinkError::Http),
+                Some(ScalarRefImpl::Utf8(_)) | None => Err(SinkError::Http(anyhow!(
+                    "HTTP sink url column must not be null or empty"
+                ))),
+                Some(_) => Err(SinkError::Http(anyhow!(
+                    "unexpected url column type, expected varchar"
+                ))),
+            },
+        }
     }
 }
 
@@ -222,12 +311,12 @@ impl AsyncTruncateSinkWriter for HttpSinkWriter {
                 continue;
             }
 
-            let payload = match row.datum_at(0) {
+            let payload = match row.datum_at(self.payload_index) {
                 Some(ScalarRefImpl::Utf8(s)) => s.to_owned(),
                 Some(ScalarRefImpl::Jsonb(j)) => j.to_string(),
                 Some(_) => {
                     return Err(SinkError::Http(anyhow!(
-                        "unexpected column type, expected varchar or jsonb"
+                        "unexpected payload column type, expected varchar or jsonb"
                     )));
                 }
                 None => continue, // skip NULL rows
@@ -235,7 +324,7 @@ impl AsyncTruncateSinkWriter for HttpSinkWriter {
 
             let resp = self
                 .client
-                .post(&self.endpoint)
+                .post(self.extract_url(row)?)
                 .body(payload)
                 .send()
                 .await
