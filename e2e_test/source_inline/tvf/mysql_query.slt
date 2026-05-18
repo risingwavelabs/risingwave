@@ -198,8 +198,8 @@ from mysql_cdc_source table 'tvf.test';
 query I retry 6 backoff 1s
 select * from test order by id;
 ----
-1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 text tinytext mediumtext longtext 2021-01-01 12:34:56 \x01020304
-2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL f 2022 c \x6162636465 text2 tinytext2 mediumtext2 longtext2 2021-01-01 12:34:56 \x05060708
+1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 text tinytext mediumtext longtext 2021-01-01 12:34:56 \x01020304
+2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL f 2022 c \x6162636465 text2 tinytext2 mediumtext2 longtext2 2021-01-01 12:34:56 \x05060708
 
 system ok
 mysql -e "
