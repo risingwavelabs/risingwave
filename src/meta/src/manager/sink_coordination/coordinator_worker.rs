@@ -246,6 +246,14 @@ impl TwoPhaseCommitHandler {
         );
     }
 
+    fn latest_durable_epoch(&self) -> Option<u64> {
+        self.last_committed_epoch
+            .into_iter()
+            .chain(self.pending_epochs.iter().map(|(epoch, _, _)| *epoch))
+            .chain(self.prepared_epochs.iter().map(|(epoch, _, _)| *epoch))
+            .max()
+    }
+
     fn is_empty(&self) -> bool {
         self.pending_epochs.is_empty() && self.prepared_epochs.is_empty()
     }
@@ -589,8 +597,11 @@ impl CoordinatorWorker {
             // Delay handling init requests until all pending epochs are flushed.
             self.curr_state = CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids.clone());
         } else {
-            self.handle_init_requests_impl(pending_handle_ids.clone())
-                .await?;
+            self.handle_init_requests_impl(
+                pending_handle_ids.clone(),
+                two_phase_handler.latest_durable_epoch(),
+            )
+            .await?;
         }
         Ok(())
     }
@@ -598,8 +609,8 @@ impl CoordinatorWorker {
     async fn handle_init_requests_impl(
         &mut self,
         pending_handle_ids: impl IntoIterator<Item = HandleId>,
+        log_store_rewind_start_epoch: Option<u64>,
     ) -> anyhow::Result<()> {
-        let log_store_rewind_start_epoch = self.prev_committed_epoch;
         self.handle_manager
             .start(log_store_rewind_start_epoch, pending_handle_ids)?;
         if log_store_rewind_start_epoch.is_none() {
@@ -638,7 +649,11 @@ impl CoordinatorWorker {
             && two_phase_handler.is_empty()
         {
             let pending_handle_ids = pending_handle_ids.clone();
-            self.handle_init_requests_impl(pending_handle_ids).await?;
+            self.handle_init_requests_impl(
+                pending_handle_ids,
+                two_phase_handler.latest_durable_epoch(),
+            )
+            .await?;
             self.curr_state = CoordinatorWorkerState::Running;
         }
 
