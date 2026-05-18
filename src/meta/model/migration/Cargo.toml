@@ -9,6 +9,8 @@ repository = { workspace = true }
 
 [dependencies]
 easy-ext = "1"
+prost = { workspace = true }
+risingwave_pb = { workspace = true }
 sea-orm = { workspace = true }
 sea-orm-migration = { workspace = true }
 serde = { workspace = true }
