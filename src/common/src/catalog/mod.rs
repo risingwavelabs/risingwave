@@ -337,7 +337,8 @@ macro_rules! for_all_fragment_type_flags {
                 StreamCdcScan,
                 VectorIndexWrite,
                 UpstreamSinkUnion,
-                LocalityProvider
+                LocalityProvider,
+                SourceWaitForBackfill
             },
             {},
             0
@@ -443,6 +444,15 @@ impl FragmentTypeFlag {
         [FragmentTypeFlag::Dml].into_iter()
     }
 }
+
+/// Fragments that perform backfill and report progress via `CreateMviewProgressReporter`.
+/// Note: `Values` reports progress too but has no upstream to backfill, so it's excluded.
+pub const BACKFILL_FRAGMENTS: [FragmentTypeFlag; 4] = [
+    FragmentTypeFlag::StreamScan,
+    FragmentTypeFlag::SourceScan,
+    FragmentTypeFlag::LocalityProvider,
+    FragmentTypeFlag::SourceWaitForBackfill,
+];
 
 #[derive(Clone, Copy, Debug, Hash, PartialOrd, PartialEq, Eq, Default)]
 pub struct FragmentTypeMask(u32);
@@ -596,6 +606,11 @@ mod tests {
                     LocalityProvider,
                     131072,
                     "LOCALITY_PROVIDER",
+                ),
+                (
+                    SourceWaitForBackfill,
+                    262144,
+                    "SOURCE_WAIT_FOR_BACKFILL",
                 ),
             ]
         "#]]

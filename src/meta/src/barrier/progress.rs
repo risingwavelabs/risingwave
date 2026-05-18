@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::mem::take;
 
-use risingwave_common::catalog::{FragmentTypeFlag, TableId};
+use risingwave_common::catalog::{BACKFILL_FRAGMENTS, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -921,13 +921,7 @@ pub(crate) fn collect_done_fragments(
 ) -> Vec<FragmentBackfillProgress> {
     fragment_infos
         .iter()
-        .filter(|(_, fragment)| {
-            fragment.fragment_type_mask.contains_any([
-                FragmentTypeFlag::StreamScan,
-                FragmentTypeFlag::SourceScan,
-                FragmentTypeFlag::LocalityProvider,
-            ])
-        })
+        .filter(|(_, fragment)| fragment.fragment_type_mask.contains_any(BACKFILL_FRAGMENTS))
         .map(|(fragment_id, fragment)| FragmentBackfillProgress {
             job_id,
             fragment_id: *fragment_id,

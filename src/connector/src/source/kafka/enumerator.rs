@@ -34,7 +34,7 @@ use crate::connector_common::read_kafka_log_level;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::SourceEnumeratorContextRef;
 use crate::source::base::SplitEnumerator;
-use crate::source::kafka::split::KafkaSplit;
+use crate::source::kafka::split::{KafkaBackfillWaitState, KafkaSplit};
 use crate::source::kafka::{
     KAFKA_ISOLATION_LEVEL, KafkaConnectionProps, KafkaContextCommon, KafkaProperties,
     RwConsumerContext,
@@ -74,6 +74,8 @@ pub struct KafkaSplitEnumerator {
 
     sync_call_timeout: Duration,
     high_watermark_metrics: HashMap<i32, LabelGuardedIntGauge>,
+
+    wait_for_backfill: bool,
 
     properties: KafkaProperties,
     config: rdkafka::ClientConfig,
@@ -172,6 +174,8 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             })
             .await?;
 
+        let wait_for_backfill = properties.backfill_wait.unwrap_or(false);
+
         Ok(Self {
             context,
             broker_address,
@@ -181,6 +185,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             stop_offset: KafkaEnumeratorOffset::None,
             sync_call_timeout: properties.common.sync_call_timeout,
             high_watermark_metrics: HashMap::new(),
+            wait_for_backfill,
             properties,
             config,
         })
@@ -225,11 +230,27 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 
         let ret: Vec<_> = topic_partitions
             .into_iter()
-            .map(|partition| KafkaSplit {
-                topic: self.topic.clone(),
-                partition,
-                start_offset: start_offsets.remove(&partition).unwrap(),
-                stop_offset: stop_offsets.remove(&partition).unwrap(),
+            .map(|partition| {
+                let backfill_wait_state = if self.wait_for_backfill {
+                    let (low, high) = watermarks.get(&partition).unwrap();
+                    if high > low {
+                        // high_watermark - 1 is the offset of the last available message.
+                        // This matches the "last seen offset" convention used by start_offset.
+                        KafkaBackfillWaitState::Pending { target: *high - 1 }
+                    } else {
+                        // Empty partition: nothing to backfill.
+                        KafkaBackfillWaitState::Finished
+                    }
+                } else {
+                    KafkaBackfillWaitState::Disabled
+                };
+                KafkaSplit {
+                    topic: self.topic.clone(),
+                    partition,
+                    start_offset: start_offsets.remove(&partition).unwrap(),
+                    stop_offset: stop_offsets.remove(&partition).unwrap(),
+                    backfill_wait_state,
+                }
             })
             .collect();
 
@@ -382,6 +403,7 @@ impl KafkaSplitEnumerator {
                     partition: *partition,
                     start_offset: Some(start_offset),
                     stop_offset: Some(stop_offset),
+                    backfill_wait_state: KafkaBackfillWaitState::Disabled,
                 }
             })
             .collect::<Vec<KafkaSplit>>())

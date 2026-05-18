@@ -291,6 +291,15 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     }
                 } else {
                     let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
+                    let backfill_progress = if source.wait_for_backfill {
+                        Some(
+                            params
+                                .local_barrier_manager
+                                .register_create_mview_progress(&params.actor_context),
+                        )
+                    } else {
+                        None
+                    };
                     SourceExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
@@ -300,6 +309,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         source.rate_limit,
                         is_shared && !source.with_properties.is_cdc_connector(),
                         params.local_barrier_manager.clone(),
+                        backfill_progress,
                     )
                     .boxed()
                 }

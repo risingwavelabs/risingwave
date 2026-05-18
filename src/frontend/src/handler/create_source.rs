@@ -743,6 +743,30 @@ pub fn bind_connector_props(
 ) -> Result<(WithOptions, SourceRefreshMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(format_encode, &mut with_properties)?;
+
+    // `backfill.wait` is currently only supported for `CREATE TABLE WITH connector` on kafka.
+    if with_properties
+        .get("backfill.wait")
+        .is_some_and(|v| v.eq_ignore_ascii_case("true"))
+    {
+        if !with_properties.is_kafka_connector() {
+            return Err(ErrorCode::NotSupported(
+                "backfill.wait is not supported for this connector, currently only 'kafka' is supported"
+                    .to_owned(),
+                "Use a kafka connector or remove the backfill.wait option".to_owned(),
+            )
+            .into());
+        }
+        if is_create_source {
+            return Err(ErrorCode::NotSupported(
+                "backfill.wait is not supported for CREATE SOURCE".to_owned(),
+                "Use CREATE TABLE WITH connector instead, or remove the backfill.wait option"
+                    .to_owned(),
+            )
+            .into());
+        }
+    }
+
     let refresh_mode = {
         let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
         if is_create_source && refresh_mode.is_some() {
