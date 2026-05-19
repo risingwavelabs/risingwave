@@ -5,7 +5,7 @@ statement ok
 ALTER COMPACTION GROUP 2 SET max_bytes_for_level_base = 1073741824;
 
 # Verify the config was updated
-query I
+query T
 SELECT (compaction_config::jsonb)->>'maxBytesForLevelBase' FROM rw_hummock_compaction_group_configs WHERE id = 2;
 ----
 1073741824
@@ -46,7 +46,7 @@ statement ok
 ALTER COMPACTION GROUP 2, 3 SET max_bytes_for_level_base = 268435456;
 
 # Verify both groups were updated
-query II
+query IT
 SELECT id, (compaction_config::jsonb)->>'maxBytesForLevelBase' FROM rw_hummock_compaction_group_configs WHERE id IN (2, 3) ORDER BY id;
 ----
 2 268435456
@@ -57,7 +57,7 @@ statement ok
 ALTER COMPACTION GROUP 2 SET target_file_size_base TO 134217728;
 
 # Verify TO syntax updated the config
-query I
+query T
 SELECT (compaction_config::jsonb)->>'targetFileSizeBase' FROM rw_hummock_compaction_group_configs WHERE id = 2;
 ----
 134217728
@@ -108,7 +108,7 @@ ALTER COMPACTION GROUP 2 SET max_bytes_for_level_base = 1,2;
 statement ok
 ALTER COMPACTION GROUP 2 SET max_bytes_for_level_base = DEFAULT;
 
-query I
+query T
 SELECT (compaction_config::jsonb)->>'maxBytesForLevelBase' FROM rw_hummock_compaction_group_configs WHERE id = 2;
 ----
 536870912
@@ -122,14 +122,9 @@ SELECT (compaction_config::jsonb)->'compressionAlgorithm'->>6 FROM rw_hummock_co
 ----
 Zstd
 
-# DEFAULT for optional configs can become NULL
-statement ok
+# Deprecated no-op configs are rejected by SQL instead of reporting success without effect
+statement error deprecated and cannot be altered via SQL
 ALTER COMPACTION GROUP 2 SET vnode_aligned_level_size_threshold = DEFAULT;
-
-query T
-SELECT (compaction_config::jsonb)->>'vnodeAlignedLevelSizeThreshold' FROM rw_hummock_compaction_group_configs WHERE id = 2;
-----
-NULL
 
 statement ok
 ALTER COMPACTION GROUP 2 SET max_vnode_key_range_bytes = 1024;
@@ -147,6 +142,22 @@ SELECT (compaction_config::jsonb)->>'maxVnodeKeyRangeBytes' FROM rw_hummock_comp
 ----
 NULL
 
+statement ok
+ALTER COMPACTION GROUP 2 SET max_kv_count_for_xor16 = 1024;
+
+query T
+SELECT (compaction_config::jsonb)->>'maxKvCountForXor16' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+1024
+
+statement ok
+ALTER COMPACTION GROUP 2 SET max_kv_count_for_xor16 = DEFAULT;
+
+query T
+SELECT (compaction_config::jsonb)->>'maxKvCountForXor16' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+262144
+
 # Optional positive configs reject sentinel values instead of silently treating them as unset
 statement error must be between 1 and 18446744073709551614, or DEFAULT
 ALTER COMPACTION GROUP 2 SET max_kv_count_for_xor16 = 0;
@@ -159,6 +170,9 @@ ALTER COMPACTION GROUP 2 SET max_kv_count_for_xor16 = 18446744073709551615;
 
 statement error must be between 1 and 18446744073709551614, or DEFAULT
 ALTER COMPACTION GROUP 2 SET max_vnode_key_range_bytes = 18446744073709551615;
+
+statement error managed by the system and cannot be altered via SQL
+ALTER COMPACTION GROUP 2 SET split_weight_by_vnode = 1;
 
 # Test invalid config name
 statement error unknown compaction config parameter

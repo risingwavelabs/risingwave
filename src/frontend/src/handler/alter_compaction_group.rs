@@ -254,10 +254,13 @@ fn build_compaction_config_from_params(params: &[ConfigParam]) -> Result<Vec<Mut
                     compaction_config::enable_optimize_l0_interval_selection(),
                 )?)
             }
-            #[expect(deprecated)]
-            "vnode_aligned_level_size_threshold" => MutableConfig::VnodeAlignedLevelSizeThreshold(
-                parse_optional_u64_value(value, &name, None)?,
-            ),
+            "vnode_aligned_level_size_threshold" => {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "vnode_aligned_level_size_threshold is deprecated and cannot be altered via SQL"
+                        .to_owned(),
+                )
+                .into());
+            }
             "max_kv_count_for_xor16" => {
                 MutableConfig::MaxKvCountForXor16(parse_optional_positive_u64_value(
                     value,
