@@ -21,6 +21,7 @@ use super::{
     DataType, Date, Decimal, F32, F64, Fields, Int256, Interval, JsonbRef, JsonbVal, Serial,
     StructType, Time, Timestamp, Timestamptz,
 };
+use crate::id::TypedId;
 
 /// A trait for all physical types that can be associated with a [`DataType`].
 ///
@@ -139,5 +140,16 @@ where
 {
     fn default_data_type() -> DataType {
         DataType::Struct(StructType::new(T::fields()))
+    }
+}
+impl<const N: usize> WithDataType for TypedId<N, u32> {
+    fn default_data_type() -> DataType {
+        DataType::Int32
+    }
+}
+
+impl<const N: usize> WithDataType for TypedId<N, u64> {
+    fn default_data_type() -> DataType {
+        DataType::Int64
     }
 }

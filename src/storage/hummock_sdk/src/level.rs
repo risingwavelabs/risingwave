@@ -19,6 +19,7 @@ use risingwave_pb::hummock::hummock_version::PbLevels;
 use risingwave_pb::hummock::{
     PbInputLevel, PbLevel, PbLevelType, PbOverlappingLevel, PbSstableInfo,
 };
+use risingwave_pb::id::CompactionGroupId;
 
 use crate::sstable_info::SstableInfo;
 
@@ -215,8 +216,8 @@ impl Level {
 pub struct LevelsCommon<T> {
     pub levels: Vec<LevelCommon<T>>,
     pub l0: OverlappingLevelCommon<T>,
-    pub group_id: u64,
-    pub parent_group_id: u64,
+    pub group_id: CompactionGroupId,
+    pub parent_group_id: CompactionGroupId,
 
     #[deprecated]
     pub member_table_ids: Vec<u32>,
@@ -377,6 +378,16 @@ impl InputLevel {
                 .iter()
                 .map(|sst| sst.estimated_encode_len())
                 .sum::<usize>()
+    }
+
+    /// Returns SSTs that should be read by a compact task.
+    ///
+    /// SST entries with empty `table_ids` are ignored defensively and should not be read by the
+    /// compactor.
+    pub fn read_sstable_infos(&self) -> impl Iterator<Item = &SstableInfo> {
+        self.table_infos
+            .iter()
+            .filter(|sst| !sst.table_ids.is_empty())
     }
 }
 

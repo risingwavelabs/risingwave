@@ -1,0 +1,67 @@
+# Regression for the Throttle / inflight-nodes desync fixed alongside this test:
+# ALTER ... rate_limit only updated DB + actor mutation, not `database_info.fragment.nodes`,
+# so a later ALTER PARALLELISM would materialize fresh actors from the stale snapshot and
+# resume backfill at rate_limit = 0. Mirrors the source-side test at
+# `e2e_test/source_inline/kafka/alter/source_rate_limit_inflight_sync.slt.serial`.
+
+# Use ArrangementBackfill so the creating MV is online-reschedulable.
+statement ok
+set streaming_use_snapshot_backfill = false;
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+create table t (v int);
+
+statement ok
+insert into t select * from generate_series(1, 1000);
+
+statement ok
+flush;
+
+statement ok
+set background_ddl = true;
+
+statement ok
+create materialized view mv with (backfill_rate_limit = 0) as select * from t;
+
+# Backfill must really be paused before we exercise the ALTER path.
+sleep 2s
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+1
+
+statement ok
+alter materialized view mv set backfill_rate_limit to 10;
+
+statement ok
+alter materialized view mv set parallelism = 16;
+
+statement ok
+set background_ddl = false;
+
+# Without the fix, fresh actors come up at rate_limit=0 and the count stays at 1 forever.
+query I retry 60 backoff 1s
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+0
+
+query I
+select count(*) from mv;
+----
+1000
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
+
+statement ok
+set streaming_parallelism = default;
+
+statement ok
+set streaming_use_snapshot_backfill = default;

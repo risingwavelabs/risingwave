@@ -1300,7 +1300,7 @@ mod tests {
                 test_table_id,
                 StateTableInfo {
                     committed_epoch: EPOCH1,
-                    compaction_group_id: StaticCompactionGroupId::StateDefault as _,
+                    compaction_group_id: StaticCompactionGroupId::StateDefault,
                 },
             )]),
             ..Default::default()

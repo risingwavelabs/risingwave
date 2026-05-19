@@ -40,6 +40,8 @@ use crate::{
     HummockSstableObjectId, HummockVersionId,
 };
 
+pub const MAX_HUMMOCK_VERSION_ID: HummockVersionId = HummockVersionId::new(i64::MAX as _);
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct HummockVersionStateTableInfo {
     state_table_info: HashMap<TableId, PbStateTableInfo>,
@@ -296,13 +298,11 @@ where
     fn from(pb_version: &PbHummockVersion) -> Self {
         #[expect(deprecated)]
         Self {
-            id: HummockVersionId(pb_version.id),
+            id: pb_version.id,
             levels: pb_version
                 .levels
                 .iter()
-                .map(|(group_id, levels)| {
-                    (*group_id as CompactionGroupId, LevelsCommon::from(levels))
-                })
+                .map(|(group_id, levels)| (*group_id, LevelsCommon::from(levels)))
                 .collect(),
             max_committed_epoch: pb_version.max_committed_epoch,
             table_watermarks: pb_version
@@ -338,11 +338,11 @@ where
     fn from(version: &HummockVersionCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
-            id: version.id.0,
+            id: version.id,
             levels: version
                 .levels
                 .iter()
-                .map(|(group_id, levels)| (*group_id as _, levels.into()))
+                .map(|(group_id, levels)| (*group_id, levels.into()))
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
             table_watermarks: version
@@ -373,11 +373,11 @@ where
     fn from(version: HummockVersionCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
-            id: version.id.0,
+            id: version.id,
             levels: version
                 .levels
                 .into_iter()
-                .map(|(group_id, levels)| (group_id as _, levels.into()))
+                .map(|(group_id, levels)| (group_id, levels.into()))
                 .collect(),
             max_committed_epoch: version.max_committed_epoch,
             table_watermarks: version
@@ -402,7 +402,7 @@ where
 
 impl HummockVersion {
     pub fn next_version_id(&self) -> HummockVersionId {
-        self.id.next()
+        self.id + 1
     }
 
     pub fn need_fill_backward_compatible_state_table_info_delta(&self) -> bool {
@@ -633,7 +633,7 @@ impl<T> HummockVersionDeltaCommon<T> {
                         GroupDeltaCommon::GroupConstruct(_)
                         | GroupDeltaCommon::GroupDestroy(_)
                         | GroupDeltaCommon::GroupMerge(_)
-                        | GroupDeltaCommon::TruncateTables(_) => None,
+                        | GroupDeltaCommon::PruneTableIdsFromSsts(_) => None,
                     };
                     sst_slice.into_iter().flatten()
                 })
@@ -666,17 +666,12 @@ where
     fn from(pb_version_delta: &PbHummockVersionDelta) -> Self {
         #[expect(deprecated)]
         Self {
-            id: HummockVersionId(pb_version_delta.id),
-            prev_id: HummockVersionId(pb_version_delta.prev_id),
+            id: pb_version_delta.id,
+            prev_id: pb_version_delta.prev_id,
             group_deltas: pb_version_delta
                 .group_deltas
                 .iter()
-                .map(|(group_id, deltas)| {
-                    (
-                        *group_id as CompactionGroupId,
-                        GroupDeltasCommon::from(deltas),
-                    )
-                })
+                .map(|(group_id, deltas)| (*group_id, GroupDeltasCommon::from(deltas)))
                 .collect(),
             max_committed_epoch: pb_version_delta.max_committed_epoch,
             trivial_move: pb_version_delta.trivial_move,
@@ -721,12 +716,12 @@ where
     fn from(version_delta: &HummockVersionDeltaCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
-            id: version_delta.id.0,
-            prev_id: version_delta.prev_id.0,
+            id: version_delta.id,
+            prev_id: version_delta.prev_id,
             group_deltas: version_delta
                 .group_deltas
                 .iter()
-                .map(|(group_id, deltas)| (*group_id as _, deltas.into()))
+                .map(|(group_id, deltas)| (*group_id, deltas.into()))
                 .collect(),
             max_committed_epoch: version_delta.max_committed_epoch,
             trivial_move: version_delta.trivial_move,
@@ -758,12 +753,12 @@ where
     fn from(version_delta: HummockVersionDeltaCommon<T>) -> Self {
         #[expect(deprecated)]
         Self {
-            id: version_delta.id.0,
-            prev_id: version_delta.prev_id.0,
+            id: version_delta.id,
+            prev_id: version_delta.prev_id,
             group_deltas: version_delta
                 .group_deltas
                 .into_iter()
-                .map(|(group_id, deltas)| (group_id as _, deltas.into()))
+                .map(|(group_id, deltas)| (group_id, deltas.into()))
                 .collect(),
             max_committed_epoch: version_delta.max_committed_epoch,
             trivial_move: version_delta.trivial_move,
@@ -778,7 +773,7 @@ where
                 .into_iter()
                 .map(|(table_id, log_delta)| (table_id, log_delta.into()))
                 .collect(),
-            state_table_info_delta: version_delta.state_table_info_delta.clone(),
+            state_table_info_delta: version_delta.state_table_info_delta,
             vector_index_delta: version_delta
                 .vector_index_delta
                 .into_iter()
@@ -795,12 +790,12 @@ where
     fn from(pb_version_delta: PbHummockVersionDelta) -> Self {
         #[expect(deprecated)]
         Self {
-            id: HummockVersionId(pb_version_delta.id),
-            prev_id: HummockVersionId(pb_version_delta.prev_id),
+            id: pb_version_delta.id,
+            prev_id: pb_version_delta.prev_id,
             group_deltas: pb_version_delta
                 .group_deltas
                 .into_iter()
-                .map(|(group_id, deltas)| (group_id as CompactionGroupId, deltas.into()))
+                .map(|(group_id, deltas)| (group_id, deltas.into()))
                 .collect(),
             max_committed_epoch: pb_version_delta.max_committed_epoch,
             trivial_move: pb_version_delta.trivial_move,
@@ -872,10 +867,7 @@ where
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
             removed_table_ids: HashSet::from_iter(
-                pb_intra_level_delta
-                    .removed_table_ids
-                    .iter()
-                    .map(|sst_id| (*sst_id).into()),
+                pb_intra_level_delta.removed_table_ids.iter().copied(),
             ),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
@@ -896,11 +888,7 @@ where
         Self {
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
-            removed_table_ids: intra_level_delta
-                .removed_table_ids
-                .into_iter()
-                .map(|sst_id| sst_id.inner())
-                .collect(),
+            removed_table_ids: intra_level_delta.removed_table_ids.into_iter().collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
                 .into_iter()
@@ -923,7 +911,7 @@ where
             removed_table_ids: intra_level_delta
                 .removed_table_ids
                 .iter()
-                .map(|sst_id| sst_id.inner())
+                .copied()
                 .collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
@@ -945,10 +933,7 @@ where
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
             removed_table_ids: HashSet::from_iter(
-                pb_intra_level_delta
-                    .removed_table_ids
-                    .iter()
-                    .map(|sst_id| (*sst_id).into()),
+                pb_intra_level_delta.removed_table_ids.iter().copied(),
             ),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
@@ -988,7 +973,10 @@ pub enum GroupDeltaCommon<T> {
     GroupConstruct(Box<PbGroupConstruct>),
     GroupDestroy(PbGroupDestroy),
     GroupMerge(PbGroupMerge),
-    TruncateTables(HashSet<TableId>),
+    /// Prunes table ids from SST metadata.
+    ///
+    /// Serialized as protobuf `truncate_tables` for compatibility.
+    PruneTableIdsFromSsts(HashSet<TableId>),
 }
 
 pub type GroupDelta = GroupDeltaCommon<SstableInfo>;
@@ -1019,7 +1007,9 @@ where
                     .collect(),
             ),
             Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
-                GroupDeltaCommon::TruncateTables(pb_truncate_tables.table_ids.into_iter().collect())
+                GroupDeltaCommon::PruneTableIdsFromSsts(
+                    pb_truncate_tables.table_ids.into_iter().collect(),
+                )
             }
 
             None => panic!("delta_type is not set"),
@@ -1053,7 +1043,7 @@ where
                         .collect(),
                 })),
             },
-            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+            GroupDeltaCommon::PruneTableIdsFromSsts(table_ids) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
                     table_ids: table_ids.iter().copied().collect(),
                 })),
@@ -1085,7 +1075,7 @@ where
                     inserted_table_infos: new_sub_level.iter().map(PbSstableInfo::from).collect(),
                 })),
             },
-            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+            GroupDeltaCommon::PruneTableIdsFromSsts(table_ids) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
                     table_ids: table_ids.iter().copied().collect(),
                 })),
@@ -1120,7 +1110,7 @@ where
                     .collect(),
             ),
             Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
-                GroupDeltaCommon::TruncateTables(
+                GroupDeltaCommon::PruneTableIdsFromSsts(
                     pb_truncate_tables.table_ids.iter().copied().collect(),
                 )
             }

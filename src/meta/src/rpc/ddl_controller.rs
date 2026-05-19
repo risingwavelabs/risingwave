@@ -66,7 +66,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
 use strum::Display;
 use thiserror_ext::AsReport;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::Semaphore;
 use tokio::time::sleep;
 use tracing::Instrument;
 
@@ -475,7 +475,7 @@ impl DdlController {
         let notification_version = tokio::spawn(fut).await.map_err(|e| anyhow!(e))??;
         Ok(Some(WaitVersion {
             catalog_version: notification_version,
-            hummock_version_id: self.barrier_manager.get_hummock_version_id().await.to_u64(),
+            hummock_version_id: self.barrier_manager.get_hummock_version_id().await,
         }))
     }
 
@@ -1004,14 +1004,23 @@ impl DdlController {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
         };
-
-        // create streaming job.
-        match self
-            .create_streaming_job_inner(ctx, streaming_job, fragment_graph, resource_type, permit)
+        // Generate streaming job metadata and issue the create command in two steps, so that the
+        // error phase is classified at the barrier command boundary.
+        let create_result = match self
+            .generate_streaming_job(ctx, streaming_job, fragment_graph, resource_type)
             .await
         {
+            Ok((stream_job_fragments, ctx)) => self
+                .stream_manager
+                .create_streaming_job(stream_job_fragments, ctx, permit)
+                .await
+                .map_err(|err| (err, true)),
+            Err(err) => Err((err, false)),
+        };
+
+        match create_result {
             Ok(version) => Ok(version),
-            Err(err) => {
+            Err((err, is_cancelled)) => {
                 tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: job_id,
@@ -1025,10 +1034,10 @@ impl DdlController {
                 let (aborted, _) = self
                     .metadata_manager
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id, false)
+                    .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
                 if aborted {
-                    tracing::warn!(id = %job_id, "aborted streaming job");
+                    tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
                         self.source_manager
@@ -1044,14 +1053,13 @@ impl DdlController {
     }
 
     #[await_tree::instrument(boxed)]
-    async fn create_streaming_job_inner(
+    async fn generate_streaming_job(
         &self,
         ctx: StreamContext,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
-        permit: OwnedSemaphorePermit,
-    ) -> MetaResult<NotificationVersion> {
+    ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
             StreamFragmentGraph::new(&self.env, fragment_graph, &streaming_job)?;
         streaming_job.set_info_from_graph(&fragment_graph);
@@ -1104,7 +1112,7 @@ impl DdlController {
             }
             StreamingJob::Sink(sink) => {
                 if sink.auto_refresh_schema_from_table.is_some() {
-                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?
+                    check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?;
                 }
                 // Validate the sink on the connector node.
                 validate_sink(sink).await?;
@@ -1158,13 +1166,7 @@ impl DdlController {
             )
             .await?;
 
-        // create streaming jobs.
-        let version = self
-            .stream_manager
-            .create_streaming_job(stream_job_fragments, ctx, permit)
-            .await?;
-
-        Ok(version)
+        Ok((stream_job_fragments, ctx))
     }
 
     /// `target_replace_info`: when dropping a sink into table, we need to replace the table.
@@ -1420,7 +1422,7 @@ impl DdlController {
                             .map(|col| Field::from(&col.column_desc))
                             .collect(),
                         new_fragment: new_sink_fragment,
-                        new_log_store_table,
+                        new_log_store_table: new_log_store_table.map(Box::new),
                         actor_status,
                     });
                 }
@@ -1473,10 +1475,7 @@ impl DdlController {
                             tmp_sink_id: sink.tmp_sink_id,
                             original_sink_id: sink.original_sink.id,
                             columns: sink.new_schema.clone(),
-                            new_log_store_table: sink
-                                .new_log_store_table
-                                .as_ref()
-                                .map(|table| (table.id, table.columns.clone())),
+                            new_log_store_table: sink.new_log_store_table.clone(),
                         })
                         .collect()
                 });
@@ -1742,7 +1741,7 @@ impl DdlController {
             .filter(|id| {
                 !cross_db_snapshot_backfill_info
                     .upstream_mv_table_id_to_backfill_epoch
-                    .contains_key(id)
+                    .contains_key(*id)
             })
             .cloned()
             .collect();
@@ -2294,7 +2293,7 @@ impl DdlController {
                 let hummock_version_id = self.barrier_manager.get_hummock_version_id().await;
                 return Ok(WaitVersion {
                     catalog_version,
-                    hummock_version_id: hummock_version_id.to_u64(),
+                    hummock_version_id,
                 });
             }
 
