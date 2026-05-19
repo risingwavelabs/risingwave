@@ -21,6 +21,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, JsonbRef, ScalarRefImpl};
 use serde::Deserialize;
+use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
 use crate::enforce_secret::EnforceSecret;
@@ -281,16 +282,16 @@ impl HttpSinkWriter {
         })
     }
 
-    fn extract_url<'a>(&'a self, row: &'a impl Row) -> Result<Option<&'a str>> {
+    fn extract_url(&self, row: &impl Row) -> Result<Option<reqwest::Url>> {
         match &self.url {
-            HttpUrl::Static(url) => Ok(Some(url.as_str())),
+            HttpUrl::Static(url) => Ok(Some(url.clone())),
             HttpUrl::Dynamic { url_index } => match row.datum_at(*url_index) {
                 Some(ScalarRefImpl::Utf8(url)) if !url.is_empty() => {
                     match url.parse::<reqwest::Url>() {
-                        Ok(_) => Ok(Some(url)),
+                        Ok(url) => Ok(Some(url)),
                         Err(err) => {
                             tracing::warn!(
-                                error = %err,
+                                error = %err.as_report(),
                                 payload = %self.strip_payload_for_log(row),
                                 "skip HTTP sink row due to invalid URL in url column"
                             );
