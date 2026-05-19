@@ -73,7 +73,7 @@ mod opaque_type {
 
     #[define_opaque(HummockStorageType)]
     pub fn hummock(state_store: HummockStorage) -> HummockStorageType {
-        may_verify(may_dynamic_dispatch(state_store))
+        may_dynamic_dispatch(may_verify(state_store))
     }
 
     #[define_opaque(SledStateStoreType)]
@@ -142,10 +142,7 @@ pub enum StateStoreImpl {
     SledStateStore(Monitored<SledStateStoreType>),
 }
 
-fn may_dynamic_dispatch<S>(state_store: S) -> impl StateStore + AsHummock
-where
-    S: StateStore + AsHummock,
-{
+fn may_dynamic_dispatch(state_store: impl StateStore + AsHummock) -> impl StateStore + AsHummock {
     #[cfg(not(debug_assertions))]
     {
         state_store
@@ -1036,6 +1033,11 @@ mod dyn_state_store {
         ) -> StorageResult<BoxStateStoreReadChangeLogIter>;
     }
 
+    #[async_trait::async_trait]
+    pub trait DynLocalStateStoreReadLog: StaticSendSync {
+        async fn iter_uncommitted_log(&self) -> StorageResult<BoxLocalStateStoreReadChangeLogIter>;
+    }
+
     pub type StateStoreReadDynRef = StateStorePointer<Arc<dyn DynStateStoreRead>>;
 
     #[async_trait::async_trait]
@@ -1095,11 +1097,6 @@ mod dyn_state_store {
     pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreKeyedRow>;
     pub type BoxLocalStateStoreReadChangeLogIter =
         BoxStateStoreIter<'static, StateStoreReadLogItem>;
-
-    #[async_trait::async_trait]
-    pub trait DynLocalStateStoreReadLog: StaticSendSync {
-        async fn iter_uncommitted_log(&self) -> StorageResult<BoxLocalStateStoreReadChangeLogIter>;
-    }
 
     #[async_trait::async_trait]
     pub trait DynLocalStateStore:
@@ -1402,11 +1399,7 @@ mod dyn_state_store {
     }
 
     #[async_trait::async_trait]
-    impl<S> DynStateStoreExt for S
-    where
-        S: StateStore,
-        S::Local: DynLocalStateStore,
-    {
+    impl<S: StateStore> DynStateStoreExt for S {
         async fn try_wait_epoch(
             &self,
             epoch: HummockReadEpoch,

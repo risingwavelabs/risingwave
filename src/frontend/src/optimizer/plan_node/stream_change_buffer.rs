@@ -86,7 +86,8 @@ impl StreamChangeBuffer {
 impl Distill for StreamChangeBuffer {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = Vec::with_capacity(2);
-        if self.base.ctx().is_explain_verbose() {
+        let verbose = self.base.ctx().is_explain_verbose();
+        if verbose {
             let schema = self.input.schema();
             let pk = IndicesDisplay {
                 indices: self.input.stream_key().unwrap_or_default(),

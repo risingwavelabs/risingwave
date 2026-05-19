@@ -543,7 +543,9 @@ impl LocalStateStoreReadLog for LocalHummockStorage {
                     .collect::<Vec<_>>(),
                 read_version
                     .staging()
-                    .ssts_for_epoch(current_epoch)
+                    .sst
+                    .iter()
+                    .filter(|staging_sst| staging_sst.epochs().contains(&current_epoch))
                     .cloned()
                     .collect::<Vec<_>>(),
                 read_version.vnodes(),

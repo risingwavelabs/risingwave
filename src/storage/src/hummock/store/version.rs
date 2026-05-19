@@ -224,18 +224,6 @@ impl StagingVersion {
     pub fn is_empty(&self) -> bool {
         self.pending_imms.is_empty() && self.uploading_imms.is_empty() && self.sst.is_empty()
     }
-
-    /// Returns the staging SSTs that contain data for the given epoch.
-    ///
-    /// The iterator preserves the internal ordering where newer staging SSTs come first.
-    pub fn ssts_for_epoch(
-        &self,
-        epoch: HummockEpoch,
-    ) -> impl Iterator<Item = &Arc<StagingSstableInfo>> {
-        self.sst
-            .iter()
-            .filter(move |staging_sst| staging_sst.epochs().contains(&epoch))
-    }
 }
 
 /// A container of information required for reading from hummock.

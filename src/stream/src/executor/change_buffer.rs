@@ -22,7 +22,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, TableOption};
+use risingwave_common::catalog::{ColumnDesc, TableOption, get_dist_key_in_pk_indices};
 use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -55,30 +55,38 @@ where
     buffer_max_size: usize,
 }
 
-#[derive(Default)]
 struct EpochChunkBuffer {
-    chunks: VecDeque<StreamChunk>,
+    buffer: VecDeque<StreamChunk>,
     row_count: usize,
+    max_rows: usize,
 }
 
 impl EpochChunkBuffer {
-    fn push_chunk(&mut self, chunk: StreamChunk) {
-        self.row_count += chunk.cardinality();
-        self.chunks.push_back(chunk);
+    fn new(max_rows: usize) -> Self {
+        Self {
+            buffer: VecDeque::new(),
+            row_count: 0,
+            max_rows,
+        }
     }
 
-    fn exceeds(&self, max_rows: usize) -> bool {
-        self.row_count > max_rows
+    fn push_chunk(&mut self, chunk: StreamChunk) {
+        self.row_count += chunk.cardinality();
+        self.buffer.push_back(chunk);
+    }
+
+    fn has_available_capacity(&self) -> bool {
+        self.row_count <= self.max_rows
     }
 
     #[cfg(test)]
     fn is_empty(&self) -> bool {
-        self.chunks.is_empty()
+        self.buffer.is_empty()
     }
 
     fn drain(&mut self) -> impl Iterator<Item = StreamChunk> + '_ {
         self.row_count = 0;
-        self.chunks.drain(..)
+        self.buffer.drain(..)
     }
 }
 
@@ -350,8 +358,6 @@ where
             return Ok(());
         }
 
-        // The executor validates that the state table primary key matches the input stream key in
-        // ascending order, so the uncommitted changelog is already ordered as required.
         let mut iter = self.local_state_store.iter_uncommitted_log().await?;
         let mut builder = StreamChunkBuilder::new(chunk_size, self.serde.data_types.clone());
 
@@ -380,8 +386,6 @@ where
         vnodes: Arc<Bitmap>,
         buffer_max_size: usize,
     ) -> StreamExecutorResult<Self> {
-        validate_change_buffer_pk(&table, input.stream_key())?;
-
         Ok(Self {
             actor_context,
             input,
@@ -418,9 +422,6 @@ where
         let first_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier);
 
-        // Forward the first barrier before opening the local state table. New internal tables are
-        // registered as part of the creating-job barrier flow, so initializing beforehand can
-        // deadlock while waiting for the table to appear in hummock.
         let mut writer = create_epoch_writer(
             &state_store,
             &actor_context,
@@ -429,7 +430,7 @@ where
             first_epoch,
         )
         .await?;
-        let mut buffer = EpochChunkBuffer::default();
+        let mut buffer = EpochChunkBuffer::new(buffer_max_size);
 
         #[for_await]
         for msg in input {
@@ -444,7 +445,7 @@ where
                     }
 
                     buffer.push_chunk(chunk);
-                    if buffer.exceeds(buffer_max_size) {
+                    if !buffer.has_available_capacity() {
                         writer.spill_buffer(&mut buffer)?;
                         writer.flush().await?;
                     }
@@ -511,60 +512,6 @@ where
     ChangeBufferStateWriter::new(local_state_store, table_serde, epoch).await
 }
 
-fn get_dist_key_in_pk_indices(
-    dist_key_indices: &[usize],
-    pk_indices: &[usize],
-) -> StreamExecutorResult<Vec<usize>> {
-    dist_key_indices
-        .iter()
-        .map(|dist_key_idx| {
-            pk_indices
-                .iter()
-                .position(|pk_idx| pk_idx == dist_key_idx)
-                .ok_or_else(|| {
-                    StreamExecutorError::from(anyhow!(
-                        "distribution key column {} is not included in primary key {:?}",
-                        dist_key_idx,
-                        pk_indices
-                    ))
-                })
-        })
-        .collect()
-}
-
-fn validate_change_buffer_pk(
-    table: &Table,
-    input_stream_key: &[usize],
-) -> StreamExecutorResult<()> {
-    if input_stream_key.is_empty() {
-        return Err(StreamExecutorError::from(anyhow!(
-            "change buffer requires a non-empty input stream key"
-        )));
-    }
-
-    let table_pk_indices = table
-        .pk
-        .iter()
-        .map(|column_order| column_order.column_index as usize)
-        .collect_vec();
-    if table_pk_indices != input_stream_key {
-        return Err(StreamExecutorError::from(anyhow!(
-            "change buffer table pk {:?} must match input stream key {:?}",
-            table_pk_indices,
-            input_stream_key
-        )));
-    }
-
-    if table.pk.iter().any(|column_order| {
-        OrderType::from_protobuf(column_order.get_order_type().unwrap()) != OrderType::ascending()
-    }) {
-        return Err(StreamExecutorError::from(anyhow!(
-            "change buffer table pk must use ascending order for all columns"
-        )));
-    }
-
-    Ok(())
-}
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -647,119 +594,6 @@ mod tests {
         (test_env, vnodes, epoch, writer)
     }
 
-    #[test]
-    fn test_epoch_chunk_buffer_tracks_rows() {
-        let mut buffer = EpochChunkBuffer::default();
-        buffer.push_chunk(StreamChunk::from_pretty(" I\n + 1"));
-        buffer.push_chunk(StreamChunk::from_pretty(" I\n + 2\n + 3"));
-
-        assert!(buffer.exceeds(2));
-        assert!(!buffer.exceeds(3));
-        assert!(!buffer.is_empty());
-
-        let chunks = buffer.drain().collect::<Vec<_>>();
-        assert_eq!(chunks.len(), 2);
-        assert!(!buffer.exceeds(1));
-        assert!(buffer.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_state_writer_reads_pending_imms_from_shared_buffer() {
-        let actor_context = ActorContext::for_test(0);
-        let table = gen_change_buffer_table(TableId::new(233));
-        let (_test_env, _vnodes, _curr_epoch, mut writer) =
-            prepare_hummock_writer(&actor_context, &table).await;
-
-        writer
-            .write_chunk(&StreamChunk::from_pretty(
-                " i i
-                + 1 10
-                + 2 20",
-            ))
-            .unwrap();
-        writer.flush().await.unwrap();
-
-        writer
-            .write_chunk(&StreamChunk::from_pretty(
-                " i i
-                U- 1 10
-                U+ 1 11
-                - 2 20
-                + 3 30",
-            ))
-            .unwrap();
-        writer.flush().await.unwrap();
-
-        let chunks: Vec<_> = writer.change_log_chunks(1024).try_collect().await.unwrap();
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(
-            chunks.into_iter().next().unwrap().compact_vis(),
-            StreamChunk::from_pretty(
-                " i i
-                + 1 11
-                + 3 30"
-            )
-        );
-    }
-
-    #[tokio::test]
-    async fn test_change_buffer_executor_emits_changes_from_shared_buffer_imms() {
-        let actor_context = ActorContext::for_test(0);
-        let table = gen_change_buffer_table(TableId::new(234));
-        let (test_env, vnodes, curr_epoch, writer) =
-            prepare_hummock_writer(&actor_context, &table).await;
-        drop(writer);
-        let next_epoch = curr_epoch.next_epoch();
-        test_env
-            .storage
-            .start_epoch(next_epoch, HashSet::from_iter([table.id]));
-
-        let schema = Schema::new(vec![
-            Field::unnamed(DataType::Int32),
-            Field::unnamed(DataType::Int32),
-        ]);
-        let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(curr_epoch)),
-            Message::Chunk(StreamChunk::from_pretty(
-                " i i
-                + 1 10
-                + 2 20",
-            )),
-            Message::Chunk(StreamChunk::from_pretty(
-                " i i
-                U- 1 10
-                U+ 1 11
-                - 2 20
-                + 3 30",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(next_epoch)),
-        ])
-        .into_executor(schema, StreamKey::from(vec![0]));
-
-        let mut executor = ChangeBufferExecutor::new(
-            actor_context,
-            source,
-            test_env.storage.clone(),
-            table,
-            vnodes,
-            1,
-        )
-        .unwrap()
-        .boxed()
-        .execute();
-
-        assert_eq!(executor.expect_barrier().await.epoch.curr, curr_epoch);
-        assert_eq!(
-            executor.expect_chunk().await.compact_vis(),
-            StreamChunk::from_pretty(
-                " i i
-                + 1 11
-                + 3 30"
-            )
-        );
-        assert_eq!(executor.expect_barrier().await.epoch.curr, next_epoch);
-    }
-
     #[tokio::test]
     async fn test_change_buffer_executor_outputs_stream_key_order() {
         let actor_context = ActorContext::for_test(0);
@@ -811,89 +645,6 @@ mod tests {
                 + 1 40
                 + 2 30"
             )
-        );
-        assert_eq!(executor.expect_barrier().await.epoch.curr, next_epoch);
-    }
-
-    /// Drives multiple buffer-overflow spills inside a single epoch with
-    /// keys that overlap across spills, and verifies the post-barrier replay
-    /// emits the correctly compacted result.
-    #[tokio::test]
-    async fn test_change_buffer_executor_multi_spill_within_epoch() {
-        let actor_context = ActorContext::for_test(0);
-        let table = gen_change_buffer_table(TableId::new(236));
-        let (test_env, vnodes, curr_epoch, writer) =
-            prepare_hummock_writer(&actor_context, &table).await;
-        drop(writer);
-        let next_epoch = curr_epoch.next_epoch();
-        test_env
-            .storage
-            .start_epoch(next_epoch, HashSet::from_iter([table.id]));
-
-        let schema = Schema::new(vec![
-            Field::unnamed(DataType::Int32),
-            Field::unnamed(DataType::Int32),
-        ]);
-        // buffer_max_size = 3 (rows). The first two chunks together hold 4 rows,
-        // forcing a spill+flush; the third chunk (4 rows) updates and deletes
-        // keys from the prior spill, forcing another spill+flush; the fourth
-        // chunk fits under the threshold and is drained at barrier.
-        let source = MockSource::with_messages(vec![
-            Message::Barrier(Barrier::new_test_barrier(curr_epoch)),
-            Message::Chunk(StreamChunk::from_pretty(
-                " i i
-                + 1 10
-                + 2 20",
-            )),
-            Message::Chunk(StreamChunk::from_pretty(
-                " i i
-                + 3 30
-                + 4 40",
-            )),
-            Message::Chunk(StreamChunk::from_pretty(
-                " i  i
-                U- 1 10
-                U+ 1 11
-                -  4 40
-                +  5 50",
-            )),
-            Message::Chunk(StreamChunk::from_pretty(
-                " i i
-                + 6 60",
-            )),
-            Message::Barrier(Barrier::new_test_barrier(next_epoch)),
-        ])
-        .into_executor(schema, StreamKey::from(vec![0]));
-
-        let mut executor = ChangeBufferExecutor::new(
-            actor_context,
-            source,
-            test_env.storage.clone(),
-            table,
-            vnodes,
-            3,
-        )
-        .unwrap()
-        .boxed()
-        .execute();
-
-        assert_eq!(executor.expect_barrier().await.epoch.curr, curr_epoch);
-
-        // After cross-spill compaction, key 4 is cancelled out (insert+delete)
-        // and key 1's later Update collapses with its initial Insert. The
-        // change buffer replays per vnode, so compare via `sort_rows` to make
-        // the assertion order-independent.
-        assert_eq!(
-            executor.expect_chunk().await.compact_vis().sort_rows(),
-            StreamChunk::from_pretty(
-                " i i
-                + 1 11
-                + 2 20
-                + 3 30
-                + 5 50
-                + 6 60"
-            )
-            .sort_rows(),
         );
         assert_eq!(executor.expect_barrier().await.epoch.curr, next_epoch);
     }

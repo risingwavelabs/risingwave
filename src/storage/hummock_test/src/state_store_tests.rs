@@ -1565,7 +1565,9 @@ async fn test_iter_uncommitted_log() {
             let staging = read_version.read();
             staging
                 .staging()
-                .ssts_for_epoch(current_epoch)
+                .sst
+                .iter()
+                .filter(|staging_sst| staging_sst.epochs().contains(&current_epoch))
                 .next()
                 .is_some()
         };
