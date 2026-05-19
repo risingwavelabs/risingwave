@@ -168,9 +168,19 @@ impl FromStr for Timestamp {
     type Err = InvalidParamsError;
 
     fn from_str(s: &str) -> Result<Self> {
-        let dt = s
-            .parse::<jiff::civil::DateTime>()
-            .map_err(|_| ErrorKind::ParseTimestamp)?;
+        let dt = match s.parse::<jiff::civil::DateTime>() {
+            Ok(dt) => dt,
+            Err(_) => {
+                // PostgreSQL ignores timezone markers when parsing `timestamp without time zone`.
+                let s_without_z = s
+                    .strip_suffix('Z')
+                    .or_else(|| s.strip_suffix('z'))
+                    .ok_or(ErrorKind::ParseTimestamp)?;
+                s_without_z
+                    .parse::<jiff::civil::DateTime>()
+                    .map_err(|_| ErrorKind::ParseTimestamp)?
+            }
+        };
         Ok(
             Date::from_ymd_uncheck(dt.year() as i32, dt.month() as u32, dt.day() as u32)
                 .and_hms_nano_uncheck(
@@ -856,6 +866,14 @@ mod tests {
         assert_eq!(
             Timestamp::from_str("2022-08-03T10:34:02").unwrap(),
             Timestamp::from_str("2022-08-03 10:34:02").unwrap()
+        );
+        assert_eq!(
+            Timestamp::from_str("2026-05-19T14:45:41.8724744Z").unwrap(),
+            Timestamp::from_str("2026-05-19T14:45:41.8724744").unwrap()
+        );
+        assert_eq!(
+            Timestamp::from_str("2026-05-19T14:45:41.8724744+08:00").unwrap(),
+            Timestamp::from_str("2026-05-19T14:45:41.8724744").unwrap()
         );
         let ts = Timestamp::from_str("0001-11-15 07:35:40.999999").unwrap();
         assert_eq!(ts.0.and_utc().timestamp_micros(), -62108094259000001);
