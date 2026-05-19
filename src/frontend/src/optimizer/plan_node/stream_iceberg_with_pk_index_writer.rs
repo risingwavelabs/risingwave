@@ -59,7 +59,7 @@ impl StreamIcebergWithPkIndexWriter {
         let base = PlanBase::new_stream(
             sink.ctx(),
             output_schema,
-            Some(vec![]),
+            sink.stream_key().map(|v| v.to_vec()),
             fd_set,
             dist,
             StreamKind::AppendOnly,

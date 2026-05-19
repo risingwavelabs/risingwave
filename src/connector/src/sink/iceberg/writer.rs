@@ -297,13 +297,6 @@ impl IcebergSinkWriter {
 }
 
 impl IcebergSinkWriterInner {
-    fn should_commit_on_checkpoint(&self) -> bool {
-        self.commit_checkpoint_size_threshold_bytes
-            .is_some_and(|threshold| {
-                self.uncommitted_write_bytes > 0 && self.uncommitted_write_bytes >= threshold
-            })
-    }
-
     pub fn build_append_only(
         config: &IcebergConfig,
         table: Table,
@@ -697,9 +690,6 @@ impl IcebergSinkWriterInner {
             .instrument_await("iceberg_write")
             .await?;
         self.metrics.write_bytes.inc_by(write_batch_size as _);
-        self.uncommitted_write_bytes = self
-            .uncommitted_write_bytes
-            .saturating_add(write_batch_size as u64);
         Ok(())
     }
 
@@ -723,9 +713,6 @@ impl IcebergSinkWriterInner {
             .instrument_await("iceberg_write")
             .await?;
         self.metrics.write_bytes.inc_by(write_batch_size as _);
-        self.uncommitted_write_bytes = self
-            .uncommitted_write_bytes
-            .saturating_add(write_batch_size as u64);
         Ok(positions)
     }
 

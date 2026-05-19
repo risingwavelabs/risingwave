@@ -87,6 +87,7 @@ where
     /// Buffer for accumulating delete position messages before the next barrier flush.
     delete_position_buffer: Option<DataChunkBuilder>,
     chunk_size: usize,
+    pk_matched: bool,
 }
 
 impl<S, W> WriterExecutor<S, W>
@@ -102,6 +103,7 @@ where
         pk_index_state_table: StateTable<S>,
         writer: W,
         chunk_size: usize,
+        pk_matched: bool,
     ) -> Self {
         Self {
             ctx,
@@ -111,6 +113,7 @@ where
             writer,
             delete_position_buffer: None,
             chunk_size,
+            pk_matched,
         }
     }
 
@@ -179,6 +182,15 @@ where
         for record in chunk.records() {
             match record {
                 Record::Insert { new_row } => {
+                    if !self.pk_matched {
+                        let pk_row = new_row.project(&pk_indices);
+                        if let Some(chunk) = self
+                            .delete_existing_row(pk_row, &mut delete_position_buffer)
+                            .await?
+                        {
+                            yield chunk;
+                        }
+                    }
                     let overflow = insert_chunk.append_one_row(new_row);
                     debug_assert!(overflow.is_none(), "insert chunk exceeds capacity");
                     insert_pks.push(new_row.project(&pk_indices));
@@ -192,9 +204,9 @@ where
                         yield chunk;
                     }
                 }
-                Record::Update { old_row, new_row } => {
+                Record::Update { new_row, .. } => {
                     // The compactor groups by `pk_indices`, so old and new share the same PK.
-                    let pk_row = old_row.project(&pk_indices);
+                    let pk_row = new_row.project(&pk_indices);
                     if let Some(chunk) = self
                         .delete_existing_row(pk_row, &mut delete_position_buffer)
                         .await?
@@ -414,6 +426,7 @@ mod tests {
                 state_table,
                 writer,
                 CHUNK_SIZE,
+                true,
             )
             .boxed()
             .execute();
