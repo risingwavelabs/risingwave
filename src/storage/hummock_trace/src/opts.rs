@@ -202,7 +202,7 @@ impl From<HummockReadEpoch> for TracedHummockReadEpoch {
         match value {
             HummockReadEpoch::Committed(epoch) => Self::Committed(epoch),
             HummockReadEpoch::BatchQueryCommitted(epoch, version_id) => {
-                Self::BatchQueryReadCommitted(epoch, version_id.to_u64())
+                Self::BatchQueryReadCommitted(epoch, version_id.as_raw_id())
             }
             HummockReadEpoch::NoWait(epoch) => Self::NoWait(epoch),
             HummockReadEpoch::Backup(epoch) => Self::Backup(epoch),

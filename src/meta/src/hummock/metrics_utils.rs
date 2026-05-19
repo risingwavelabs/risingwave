@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::{Itertools, enumerate};
 use prometheus::IntGauge;
-use prometheus::core::{AtomicU64, GenericCounter};
+use prometheus::core::{AtomicU64, Collector, GenericCounter, MetricVec, MetricVecBuilder};
 use risingwave_common::id::{JobId, TableId};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
@@ -49,6 +49,7 @@ pub struct LocalTableMetrics {
 
 const MIN_FLUSH_COUNT: usize = 16;
 const MIN_FLUSH_DATA_SIZE: u64 = 128 * 1024 * 1024;
+const COMPACTION_GROUP_LABEL_NAME: &str = "group";
 
 impl LocalTableMetrics {
     pub fn inc_write_throughput(&mut self, val: u64) {
@@ -216,12 +217,10 @@ pub fn trigger_sst_stat(
 
     {
         // sub level stat
-        let overlapping_level_label =
-            build_compact_task_l0_stat_metrics_label(compaction_group_id, true, false);
+        let overlapping_level_label = L0SubLevelMetricKind::Overlapping.label(compaction_group_id);
         let non_overlap_level_label =
-            build_compact_task_l0_stat_metrics_label(compaction_group_id, false, false);
-        let partition_level_label =
-            build_compact_task_l0_stat_metrics_label(compaction_group_id, true, true);
+            L0SubLevelMetricKind::NonOverlapping.label(compaction_group_id);
+        let partition_level_label = L0SubLevelMetricKind::VnodePartition.label(compaction_group_id);
 
         let overlapping_sst_num = current_version
             .levels
@@ -333,11 +332,12 @@ pub fn trigger_epoch_stat(metrics: &MetaMetrics, version: &HummockVersion) {
     );
 }
 
-pub fn remove_compaction_group_in_sst_stat(
+pub fn remove_compaction_group_metrics(
     metrics: &MetaMetrics,
     compaction_group_id: CompactionGroupId,
     max_level: usize,
 ) {
+    let group_label = compaction_group_id.to_string();
     let mut idx = 0;
     loop {
         let level_label = build_level_metrics_label(compaction_group_id, idx);
@@ -345,12 +345,10 @@ pub fn remove_compaction_group_in_sst_stat(
             .level_sst_num
             .remove_label_values(&[&level_label])
             .is_ok();
-
         metrics
             .level_file_size
             .remove_label_values(&[&level_label])
             .ok();
-
         metrics
             .level_compact_cnt
             .remove_label_values(&[&level_label])
@@ -361,21 +359,92 @@ pub fn remove_compaction_group_in_sst_stat(
         idx += 1;
     }
 
-    let overlapping_level_label = build_level_l0_metrics_label(compaction_group_id, true);
-    let non_overlap_level_label = build_level_l0_metrics_label(compaction_group_id, false);
-    metrics
-        .level_sst_num
-        .remove_label_values(&[&overlapping_level_label])
-        .ok();
-    metrics
-        .level_sst_num
-        .remove_label_values(&[&non_overlap_level_label])
-        .ok();
+    for kind in L0SubLevelMetricKind::ALL {
+        let level_label = kind.label(compaction_group_id);
+        metrics
+            .level_sst_num
+            .remove_label_values(&[&level_label])
+            .ok();
+    }
 
     remove_compacting_task_stat(metrics, compaction_group_id, max_level);
+    remove_compact_skip_frequency(metrics, compaction_group_id, max_level);
+    remove_lsm_stat(metrics, &group_label);
     remove_split_stat(metrics, compaction_group_id);
-    remove_compact_task_metrics(metrics, compaction_group_id, max_level);
+    remove_compact_task_metrics(metrics, &group_label);
     remove_compaction_group_stat(metrics, compaction_group_id);
+}
+
+fn remove_metric_series_with_label<T>(
+    metric_vec: &MetricVec<T>,
+    target_label_name: &str,
+    target_label_value: &str,
+) where
+    T: MetricVecBuilder,
+{
+    for metric_family in metric_vec.collect() {
+        for metric in metric_family.get_metric() {
+            let labels = metric.get_label();
+            if labels.iter().any(|label| {
+                label.name() == target_label_name && label.value() == target_label_value
+            }) {
+                let labels: HashMap<_, _> = labels
+                    .iter()
+                    .map(|label| (label.name(), label.value()))
+                    .collect();
+                metric_vec.remove(&labels).ok();
+            }
+        }
+    }
+}
+
+fn remove_lsm_stat(metrics: &MetaMetrics, group_label: &str) {
+    metrics
+        .write_stop_compaction_groups
+        .remove_label_values(&[group_label])
+        .ok();
+    metrics
+        .compact_pending_bytes
+        .remove_label_values(&[group_label])
+        .ok();
+
+    remove_metric_series_with_label(
+        &metrics.compact_frequency,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
+    remove_metric_series_with_label(
+        &metrics.compact_level_compression_ratio,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
+}
+
+fn remove_compact_skip_frequency(
+    metrics: &MetaMetrics,
+    compaction_group_id: CompactionGroupId,
+    max_level: usize,
+) {
+    for start_level in 0..=max_level {
+        for target_level in 0..=max_level {
+            let level_label = format!(
+                "cg{}-{}-to-{}",
+                compaction_group_id, start_level, target_level
+            );
+            for skip_type in [
+                "write-amp",
+                "count",
+                "pending-files",
+                "overlapping",
+                "picker",
+            ] {
+                metrics
+                    .compact_skip_frequency
+                    .remove_label_values(&[level_label.as_str(), skip_type])
+                    .ok();
+            }
+        }
+    }
 }
 
 pub fn remove_compacting_task_stat(
@@ -442,11 +511,9 @@ pub fn trigger_pin_unpin_version_state(
     pinned_versions: &BTreeMap<HummockContextId, HummockPinnedVersion>,
 ) {
     if let Some(m) = pinned_versions.values().map(|v| v.min_pinned_id).min() {
-        metrics.min_pinned_version_id.set(m as i64);
+        metrics.min_pinned_version_id.set(m.as_i64_id());
     } else {
-        metrics
-            .min_pinned_version_id
-            .set(HummockVersionId::MAX.to_u64() as _);
+        metrics.min_pinned_version_id.set(u64::MAX as _);
     }
 }
 
@@ -617,20 +684,12 @@ pub fn trigger_split_stat(metrics: &MetaMetrics, version: &HummockVersion) {
     }
 }
 
-pub fn build_level_metrics_label(compaction_group_id: u64, level_idx: usize) -> String {
+fn build_level_metrics_label(compaction_group_id: CompactionGroupId, level_idx: usize) -> String {
     format!("cg{}_L{}", compaction_group_id, level_idx)
 }
 
-pub fn build_level_l0_metrics_label(compaction_group_id: u64, overlapping: bool) -> String {
-    if overlapping {
-        format!("cg{}_l0_sub_overlapping", compaction_group_id)
-    } else {
-        format!("cg{}_l0_sub_non_overlap", compaction_group_id)
-    }
-}
-
-pub fn build_compact_task_stat_metrics_label(
-    compaction_group_id: u64,
+fn build_compact_task_stat_metrics_label(
+    compaction_group_id: CompactionGroupId,
     select_level: usize,
     target_level: usize,
 ) -> String {
@@ -640,17 +699,27 @@ pub fn build_compact_task_stat_metrics_label(
     )
 }
 
-pub fn build_compact_task_l0_stat_metrics_label(
-    compaction_group_id: u64,
-    overlapping: bool,
-    partition: bool,
-) -> String {
-    if partition {
-        format!("cg{}_l0_sub_partition", compaction_group_id)
-    } else if overlapping {
-        format!("cg{}_l0_sub_overlapping", compaction_group_id)
-    } else {
-        format!("cg{}_l0_sub_non_overlap", compaction_group_id)
+#[derive(Clone, Copy)]
+enum L0SubLevelMetricKind {
+    Overlapping,
+    NonOverlapping,
+    VnodePartition,
+}
+
+impl L0SubLevelMetricKind {
+    const ALL: [Self; 3] = [
+        Self::Overlapping,
+        Self::NonOverlapping,
+        Self::VnodePartition,
+    ];
+
+    fn label(self, compaction_group_id: CompactionGroupId) -> String {
+        let suffix = match self {
+            Self::Overlapping => "l0_sub_overlapping",
+            Self::NonOverlapping => "l0_sub_non_overlap",
+            Self::VnodePartition => "l0_sub_partition",
+        };
+        format!("cg{}_{}", compaction_group_id, suffix)
     }
 }
 
@@ -661,37 +730,27 @@ pub fn build_compact_task_level_type_metrics_label(
     format!("L{}->L{}", select_level, target_level)
 }
 
-pub fn remove_compact_task_metrics(
-    metrics: &MetaMetrics,
-    compaction_group_id: CompactionGroupId,
-    max_level: usize,
-) {
-    for select_level in 0..=max_level {
-        for target_level in 0..=max_level {
-            let level_type_label =
-                build_compact_task_level_type_metrics_label(select_level, target_level);
-            let should_continue = metrics
-                .l0_compact_level_count
-                .remove_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .is_ok();
-
-            metrics
-                .compact_task_size
-                .remove_label_values(&[&compaction_group_id.to_string(), &level_type_label])
-                .ok();
-
-            metrics
-                .compact_task_size
-                .remove_label_values(&[
-                    &compaction_group_id.to_string(),
-                    &format!("{} uncompressed", level_type_label),
-                ])
-                .ok();
-            if !should_continue {
-                break;
-            }
-        }
-    }
+fn remove_compact_task_metrics(metrics: &MetaMetrics, group_label: &str) {
+    remove_metric_series_with_label(
+        &metrics.l0_compact_level_count,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
+    remove_metric_series_with_label(
+        &metrics.compact_task_size,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
+    remove_metric_series_with_label(
+        &metrics.compact_task_file_count,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
+    remove_metric_series_with_label(
+        &metrics.compact_task_trivial_move_sst_count,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
 }
 
 pub fn trigger_compact_tasks_stat(

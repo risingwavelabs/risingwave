@@ -27,6 +27,7 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SubscriberId;
@@ -35,6 +36,7 @@ use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::source::PbCdcTableSnapshotSplits;
 use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
@@ -1162,7 +1164,7 @@ impl InflightDatabaseInfo {
                             !info
                                 .stream_job_fragments
                                 .fragments
-                                .contains_key(fragment_id)
+                                .contains_key(*fragment_id)
                         })
                         .unwrap_or(true)
                     })
@@ -1259,6 +1261,51 @@ impl InflightDatabaseInfo {
             }
         }
         Some(builder.build())
+    }
+
+    /// Sync inflight `nodes.rate_limit` so a later reschedule won't materialize new actors
+    /// from stale data. Mirrors `controller/streaming_job.rs::update_*_rate_limit_by_*`.
+    pub(crate) fn pre_apply_throttle(&mut self, fragment_id: FragmentId, config: &ThrottleConfig) {
+        // Snapshot-backfill creating jobs live outside main inflight; their throttles
+        // flow through `on_new_upstream_barrier`.
+        if !self.fragment_location.contains_key(&fragment_id) {
+            return;
+        }
+        let throttle_type = config.throttle_type();
+        let rate_limit = config.rate_limit;
+        let (info, _) = self.fragment_mut(fragment_id);
+
+        visit_stream_node_mut(&mut info.nodes, |node| match throttle_type {
+            ThrottleType::Source => {
+                if let NodeBody::Source(node) = node
+                    && let Some(node_inner) = &mut node.source_inner
+                {
+                    node_inner.rate_limit = rate_limit;
+                }
+                if let NodeBody::StreamFsFetch(node) = node
+                    && let Some(node_inner) = &mut node.node_inner
+                {
+                    node_inner.rate_limit = rate_limit;
+                }
+            }
+            ThrottleType::Backfill => match node {
+                NodeBody::StreamCdcScan(node) => node.rate_limit = rate_limit,
+                NodeBody::StreamScan(node) => node.rate_limit = rate_limit,
+                NodeBody::SourceBackfill(node) => node.rate_limit = rate_limit,
+                _ => {}
+            },
+            ThrottleType::Sink => {
+                if let NodeBody::Sink(node) = node {
+                    node.rate_limit = rate_limit;
+                }
+            }
+            ThrottleType::Dml => {
+                if let NodeBody::Dml(node) = node {
+                    node.rate_limit = rate_limit;
+                }
+            }
+            ThrottleType::Unspecified => {}
+        });
     }
 
     /// Apply some actor changes after the barrier command is collected, if the command contains any actors that are dropped, we should

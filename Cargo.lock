@@ -12039,7 +12039,6 @@ dependencies = [
  "bytes",
  "hex",
  "itertools 0.14.0",
- "parse-display",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_pb",
@@ -12565,6 +12564,7 @@ dependencies = [
  "risingwave_meta_node",
  "risingwave_object_store",
  "risingwave_pb",
+ "risingwave_rpc_client",
  "risingwave_sqlparser",
  "risingwave_sqlsmith",
  "sea-orm",
@@ -15097,7 +15097,7 @@ dependencies = [
 [[package]]
 name = "tiberius"
 version = "0.12.2"
-source = "git+https://github.com/risingwavelabs/tiberius.git?rev=59350b92775a61611cf1fc3a5d0ff38bf264e6ac#59350b92775a61611cf1fc3a5d0ff38bf264e6ac"
+source = "git+https://github.com/risingwavelabs/tiberius.git?rev=cd69774fb1a4e08c0a3ea3b2041de7cc09662464#cd69774fb1a4e08c0a3ea3b2041de7cc09662464"
 dependencies = [
  "async-trait",
  "asynchronous-codec",

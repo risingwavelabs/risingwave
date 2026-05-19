@@ -14,6 +14,7 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::id::CompactionGroupId;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
@@ -21,7 +22,7 @@ use crate::error::Result;
 #[derive(Fields)]
 struct RwHummockCompactTaskProgress {
     #[primary_key]
-    compaction_group_id: i64,
+    compaction_group_id: CompactionGroupId,
     task_id: i64,
     num_ssts_sealed: i32,
     num_ssts_uploaded: i32,
@@ -37,7 +38,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockCompactTaskP
     let mut rows = vec![];
     for p in compact_task_progress {
         rows.push(RwHummockCompactTaskProgress {
-            compaction_group_id: p.compaction_group_id.unwrap_or_default() as _,
+            compaction_group_id: p.compaction_group_id.unwrap_or_default(),
             task_id: p.task_id as _,
             num_ssts_sealed: p.num_ssts_sealed as _,
             num_ssts_uploaded: p.num_ssts_uploaded as _,
