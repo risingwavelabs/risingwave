@@ -117,8 +117,8 @@ def _(panels: Panels):
                     "Abnormal Block Cache Memory",
                 ),
                 panels.target(
-                    f"{metric('state_store_uploading_memory_usage_ratio')} >= bool 0.7",
-                    "Abnormal Uploading Memory Usage",
+                    f"{metric('state_store_uploading_memory_usage_ratio', filter=compute_component_filter)} >= bool 0.8",
+                    "Abnormal Uploading Memory Usage @ {{%s}}" % (NODE_LABEL),
                 ),
                 panels.target(
                     f"{metric('storage_write_stop_compaction_groups')} > bool 0",
