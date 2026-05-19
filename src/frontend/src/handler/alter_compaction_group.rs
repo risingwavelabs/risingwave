@@ -27,7 +27,7 @@ use crate::error::{ErrorCode, Result};
 /// Wire encoding for clearing optional `u64` compaction configs.
 ///
 /// Note: meta currently treats both `u64::MIN` and `u64::MAX` as "unset" for historical reasons.
-/// We always *send* `u64::MAX` to avoid ambiguity, since `0` can be a valid user value.
+/// SQL `DEFAULT` always sends `u64::MAX` to avoid overloading `0` at the SQL layer.
 const OPTIONAL_U64_UNSET_WIRE: u64 = u64::MAX;
 
 pub async fn handle_alter_compaction_group(
@@ -259,14 +259,14 @@ fn build_compaction_config_from_params(params: &[ConfigParam]) -> Result<Vec<Mut
                 parse_optional_u64_value(value, &name, None)?,
             ),
             "max_kv_count_for_xor16" => {
-                MutableConfig::MaxKvCountForXor16(parse_optional_u64_value(
+                MutableConfig::MaxKvCountForXor16(parse_optional_positive_u64_value(
                     value,
                     &name,
                     compaction_config::max_kv_count_for_xor16(),
                 )?)
             }
             "max_vnode_key_range_bytes" => {
-                MutableConfig::MaxVnodeKeyRangeBytes(parse_optional_u64_value(
+                MutableConfig::MaxVnodeKeyRangeBytes(parse_optional_positive_u64_value(
                     value,
                     &name,
                     compaction_config::max_vnode_key_range_bytes(),
@@ -389,6 +389,20 @@ fn parse_optional_u64_value(
         name,
         default_value.unwrap_or(OPTIONAL_U64_UNSET_WIRE),
     )
+}
+
+fn parse_optional_positive_u64_value(
+    value: &SetVariableValue,
+    name: &str,
+    default_value: Option<u64>,
+) -> Result<u64> {
+    let value = parse_optional_u64_value(value, name, default_value)?;
+    if value == 0 {
+        return Err(
+            ErrorCode::InvalidInputSyntax(format!("{} must be positive or DEFAULT", name)).into(),
+        );
+    }
+    Ok(value)
 }
 
 fn parse_compression_algorithm_with_level(

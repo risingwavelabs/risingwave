@@ -651,7 +651,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                 target.max_kv_count_for_xor16 = optional_u64_config(*c);
             }
             MutableConfig::MaxVnodeKeyRangeBytes(c) => {
-                target.max_vnode_key_range_bytes = optional_u64_config(*c);
+                target.max_vnode_key_range_bytes = optional_positive_u64_config(*c);
             }
         }
     }
@@ -660,7 +660,11 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
 }
 
 fn optional_u64_config(value: u64) -> Option<u64> {
-    (value != u64::MIN && value != u64::MAX && value > 0).then_some(value)
+    (value != u64::MIN && value != u64::MAX).then_some(value)
+}
+
+fn optional_positive_u64_config(value: u64) -> Option<u64> {
+    optional_u64_config(value).filter(|value| *value > 0)
 }
 
 fn try_u32_max_level(max_level: u64) -> Result<u32> {
@@ -885,6 +889,88 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("invalid compression_algorithm level 6")
+        );
+
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxKvCountForXor16(0)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_kv_count_for_xor16,
+            None
+        );
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxKvCountForXor16(1024)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_kv_count_for_xor16,
+            Some(1024)
+        );
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxKvCountForXor16(u64::MAX)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_kv_count_for_xor16,
+            None
+        );
+
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxVnodeKeyRangeBytes(0)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_vnode_key_range_bytes,
+            None
+        );
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxVnodeKeyRangeBytes(1024)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_vnode_key_range_bytes,
+            Some(1024)
         );
     }
 
