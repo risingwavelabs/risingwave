@@ -62,7 +62,9 @@ CREATE SOURCE src_test (v1 int) WITH (
 
 statement error batch refresh materialized views must not depend on sources
 CREATE MATERIALIZED VIEW mv_batch_source_bad WITH (refresh.interval.sec = 5) AS
-SELECT * FROM src_test;
+SELECT v1 FROM src_test
+UNION ALL
+SELECT v1 FROM t_batch;
 
 statement ok
 DROP SOURCE src_test;
