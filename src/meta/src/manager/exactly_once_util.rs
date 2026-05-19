@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,8 @@ use sea_orm::{
 };
 use thiserror_ext::AsReport;
 
-// This file contains methods for accessing system tables in the meta store with two-phase commit sink support.
+// Helpers for accessing the `pending_sink_state` system table used by exactly-once sink coordinators
+// (both the generic sink coordinator and the Iceberg V3 sink coordinator).
 
 pub async fn persist_pre_commit_metadata(
     db: &DatabaseConnection,

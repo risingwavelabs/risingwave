@@ -74,7 +74,6 @@ enum ManagerRequest {
 pub struct SinkCoordinatorManager {
     request_tx: mpsc::Sender<ManagerRequest>,
 }
-
 fn new_committed_epoch_subscriber(
     hummock_manager: HummockManagerRef,
     metadata_manager: MetadataManager,

@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SinkId};
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{
@@ -168,6 +168,19 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         _last_committed_epoch: u64,
     ) -> MetaResult<crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext>
     {
+        unimplemented!()
+    }
+
+    async fn pre_commit_iceberg_v3_sink_metadata(
+        &self,
+        _reports: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata,
+        >,
+    ) -> MetaResult<Vec<SinkId>> {
+        unimplemented!()
+    }
+
+    async fn commit_iceberg_v3_sink_metadata(&self, _sink_ids: Vec<SinkId>) -> MetaResult<()> {
         unimplemented!()
     }
 }
