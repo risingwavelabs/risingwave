@@ -227,9 +227,7 @@ impl NatsPropertiesConsumer {
         if let Some(v) = &self.description {
             c.description = Some(v.clone())
         }
-        if let Some(v) = &self.ack_policy {
-            c.ack_policy = AckPolicyWrapper::parse_str(v).unwrap()
-        }
+        c.ack_policy = self.effective_ack_policy().unwrap();
         if let Some(v) = &self.ack_wait {
             c.ack_wait = Duration::from_secs(*v)
         }
@@ -283,11 +281,15 @@ impl NatsPropertiesConsumer {
         }
     }
 
-    pub fn get_ack_policy(&self) -> ConnectorResult<AckPolicy> {
+    fn effective_ack_policy(&self) -> ConnectorResult<AckPolicy> {
         match &self.ack_policy {
             Some(policy) => Ok(AckPolicyWrapper::parse_str(policy).map_err(ConnectorError::from)?),
-            None => Ok(AckPolicy::None),
+            None => Ok(AckPolicy::Explicit),
         }
+    }
+
+    pub fn get_ack_policy(&self) -> ConnectorResult<AckPolicy> {
+        self.effective_ack_policy()
     }
 }
 
