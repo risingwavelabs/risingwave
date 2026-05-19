@@ -19,7 +19,7 @@ use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::types::{DataType, JsonbRef, ScalarRefImpl};
 use serde::Deserialize;
 use with_options::WithOptions;
 
@@ -266,6 +266,10 @@ pub struct HttpSinkWriter {
     payload_index: usize,
 }
 
+struct HttpPayload {
+    body: String,
+}
+
 impl HttpSinkWriter {
     fn new(url: HttpUrl, payload_index: usize, header_map: HeaderMap) -> Result<Self> {
         let client = reqwest::Client::builder()
@@ -281,23 +285,123 @@ impl HttpSinkWriter {
         })
     }
 
-    fn extract_url(&self, row: impl Row) -> Result<reqwest::Url> {
+    fn extract_url(&self, row: impl Row) -> Result<Option<reqwest::Url>> {
         match &self.url {
-            HttpUrl::Static(url) => Ok(url.clone()),
+            HttpUrl::Static(url) => Ok(Some(url.clone())),
             HttpUrl::Dynamic { url_index } => match row.datum_at(*url_index) {
-                Some(ScalarRefImpl::Utf8(url)) if !url.is_empty() => url
-                    .parse()
-                    .context("invalid URL in HTTP sink url column")
-                    .map_err(SinkError::Http),
-                Some(ScalarRefImpl::Utf8(_)) | None => Err(SinkError::Http(anyhow!(
-                    "HTTP sink url column must not be null or empty"
-                ))),
-                Some(_) => Err(SinkError::Http(anyhow!(
-                    "unexpected url column type, expected varchar"
-                ))),
+                Some(ScalarRefImpl::Utf8(url)) if !url.is_empty() => match url.parse() {
+                    Ok(url) => Ok(Some(url)),
+                    Err(err) => {
+                        tracing::warn!(
+                            error = %err,
+                            payload = %self.strip_payload_for_log(&row),
+                            "skip HTTP sink row due to invalid URL in url column"
+                        );
+                        Ok(None)
+                    }
+                },
+                Some(ScalarRefImpl::Utf8(_)) | None => {
+                    tracing::warn!(
+                        payload = %self.strip_payload_for_log(&row),
+                        "skip HTTP sink row due to null or empty url column"
+                    );
+                    Ok(None)
+                }
+                Some(_) => {
+                    tracing::warn!(
+                        payload = %self.strip_payload_for_log(&row),
+                        "skip HTTP sink row due to unexpected url column type"
+                    );
+                    Ok(None)
+                }
             },
         }
     }
+
+    fn strip_payload_for_log(&self, row: impl Row) -> String {
+        match row.datum_at(self.payload_index) {
+            Some(ScalarRefImpl::Utf8(s)) => strip_text_payload(s),
+            Some(ScalarRefImpl::Jsonb(j)) => strip_jsonb_payload(j),
+            Some(_) => "<unexpected payload type>".to_owned(),
+            None => "NULL".to_owned(),
+        }
+    }
+
+    fn extract_payload(&self, row: impl Row) -> Result<Option<HttpPayload>> {
+        Ok(match row.datum_at(self.payload_index) {
+            Some(ScalarRefImpl::Utf8(s)) => Some(HttpPayload { body: s.to_owned() }),
+            Some(ScalarRefImpl::Jsonb(j)) => Some(HttpPayload {
+                body: j.to_string(),
+            }),
+            Some(_) => {
+                return Err(SinkError::Http(anyhow!(
+                    "unexpected payload column type, expected varchar or jsonb"
+                )));
+            }
+            None => None, // skip NULL rows
+        })
+    }
+}
+
+fn strip_text_payload(payload: &str) -> String {
+    const EDGE_CHAR_COUNT: usize = 100;
+    let char_count = payload.chars().count();
+    if char_count <= EDGE_CHAR_COUNT * 2 {
+        return payload.to_owned();
+    }
+
+    let prefix: String = payload.chars().take(EDGE_CHAR_COUNT).collect();
+    let suffix: String = payload.chars().skip(char_count - EDGE_CHAR_COUNT).collect();
+    format!("{prefix}...{suffix}")
+}
+
+fn strip_jsonb_payload(payload: JsonbRef<'_>) -> String {
+    if payload.is_array() {
+        let len = payload.array_len().expect("checked JSON array type");
+        return match len {
+            0 => "[]".to_owned(),
+            1 => {
+                let first = payload.access_array_element(0).expect("JSON array element");
+                format!("[{}]", strip_jsonb_payload(first))
+            }
+            2 => {
+                let first = payload.access_array_element(0).expect("JSON array element");
+                let second = payload.access_array_element(1).expect("JSON array element");
+                format!(
+                    "[{},{}]",
+                    strip_jsonb_payload(first),
+                    strip_jsonb_payload(second)
+                )
+            }
+            _ => {
+                let first = payload.access_array_element(0).expect("JSON array element");
+                let last = payload
+                    .access_array_element(len - 1)
+                    .expect("JSON array element");
+                format!(
+                    "[{},...,{}]",
+                    strip_jsonb_payload(first),
+                    strip_jsonb_payload(last)
+                )
+            }
+        };
+    }
+
+    if let Ok(fields) = payload.object_key_values() {
+        let fields = fields
+            .map(|(key, value)| {
+                let key = serde_json::to_string(key).expect("serialize JSON object key");
+                format!("{key}:{}", strip_jsonb_payload(value))
+            })
+            .collect::<Vec<_>>();
+        return format!("{{{}}}", fields.join(","));
+    }
+
+    if let Ok(value) = payload.as_str() {
+        return serde_json::to_string(&strip_text_payload(value)).expect("serialize JSON string");
+    }
+
+    payload.to_string()
 }
 
 impl AsyncTruncateSinkWriter for HttpSinkWriter {
@@ -311,21 +415,17 @@ impl AsyncTruncateSinkWriter for HttpSinkWriter {
                 continue;
             }
 
-            let payload = match row.datum_at(self.payload_index) {
-                Some(ScalarRefImpl::Utf8(s)) => s.to_owned(),
-                Some(ScalarRefImpl::Jsonb(j)) => j.to_string(),
-                Some(_) => {
-                    return Err(SinkError::Http(anyhow!(
-                        "unexpected payload column type, expected varchar or jsonb"
-                    )));
-                }
-                None => continue, // skip NULL rows
+            let Some(payload) = self.extract_payload(row)? else {
+                continue;
+            };
+            let Some(url) = self.extract_url(row)? else {
+                continue;
             };
 
             let resp = self
                 .client
-                .post(self.extract_url(row)?)
-                .body(payload)
+                .post(url)
+                .body(payload.body)
                 .send()
                 .await
                 .context("HTTP request failed")
@@ -343,5 +443,51 @@ impl AsyncTruncateSinkWriter for HttpSinkWriter {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::{JsonbVal, Scalar};
+
+    use super::*;
+
+    #[test]
+    fn test_strip_text_payload() {
+        assert_eq!(strip_text_payload("short payload"), "short payload");
+
+        let payload = format!("{}{}", "a".repeat(100), "z".repeat(100));
+        assert_eq!(strip_text_payload(&payload), payload);
+
+        let payload = format!("{}middle{}", "a".repeat(101), "z".repeat(101));
+        assert_eq!(
+            strip_text_payload(&payload),
+            format!("{}...{}", "a".repeat(100), "z".repeat(100))
+        );
+    }
+
+    #[test]
+    fn test_strip_jsonb_payload() {
+        let payload: JsonbVal = r#"{
+            "id": 1,
+            "items": [1, {"nested": ["first", "middle", "last"]}, 3],
+            "message": "short"
+        }"#
+        .parse()
+        .unwrap();
+
+        assert_eq!(
+            strip_jsonb_payload(payload.as_scalar_ref()),
+            r#"{"id":1,"items":[1,...,3],"message":"short"}"#
+        );
+
+        let payload: JsonbVal = r#"["only"]"#.parse().unwrap();
+        assert_eq!(strip_jsonb_payload(payload.as_scalar_ref()), r#"["only"]"#);
+
+        let payload: JsonbVal = r#"["first","last"]"#.parse().unwrap();
+        assert_eq!(
+            strip_jsonb_payload(payload.as_scalar_ref()),
+            r#"["first","last"]"#
+        );
     }
 }
