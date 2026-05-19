@@ -31,16 +31,17 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
-use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, deserialize_datum};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{
     CopyFromSlice, TableKeyRange, end_bound_of_prefix, next_key, prefixed_range_with_vnode,
 };
+use risingwave_pb::batch_plan::{PbScanRange, scan_range};
 use risingwave_pb::plan_common::StorageTableDesc;
 use tracing::trace;
 mod vector_index_reader;
@@ -61,6 +62,202 @@ use crate::table::merge_sort::NodePeek;
 use crate::table::{
     ChangeLogRow, KeyedRow, TableDistribution, TableIter, should_calculate_prefix_hint,
 };
+
+pub type PkRangeBounds = (Bound<OwnedRow>, Bound<OwnedRow>);
+
+/// Primary-key scan range decoded from the batch plan scan-range protobuf.
+///
+/// This is shared by batch row scans and snapshot backfill so the protobuf decoding, full-scan
+/// default, and batch range-bound conversion stay in one place.
+#[derive(Clone, Debug)]
+pub struct PkScanRange {
+    /// Equality prefix of the primary key.
+    pub pk_prefix: OwnedRow,
+
+    /// Logical range bounds of the next primary-key column after `pk_prefix`.
+    pub range_bounds: PkRangeBounds,
+}
+
+impl PkScanRange {
+    fn pk_type_at(pk_types: &[DataType], index: usize) -> StorageResult<&DataType> {
+        pk_types.get(index).ok_or_else(|| {
+            StorageError::from(memcomparable::Error::Message(format!(
+                "invalid scan range: primary key index {} exceeds primary key length {}",
+                index,
+                pk_types.len()
+            )))
+        })
+    }
+
+    /// Decode a scan range from the protobuf representation and the primary-key column types.
+    pub fn new(scan_range: PbScanRange, pk_types: Vec<DataType>) -> StorageResult<Self> {
+        let mut index = 0;
+        let pk_prefix = OwnedRow::new(
+            scan_range
+                .eq_conds
+                .iter()
+                .map(|v| -> StorageResult<_> {
+                    let ty = Self::pk_type_at(&pk_types, index)?;
+                    index += 1;
+                    Ok(deserialize_datum(v.as_slice(), ty)?)
+                })
+                .try_collect()?,
+        );
+        if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
+            return Ok(Self {
+                pk_prefix,
+                ..Self::full()
+            });
+        }
+
+        let build_bound =
+            |bound: &scan_range::Bound, mut index| -> StorageResult<Bound<OwnedRow>> {
+                let range_bound = OwnedRow::new(
+                    bound
+                        .value
+                        .iter()
+                        .map(|v| -> StorageResult<_> {
+                            let ty = Self::pk_type_at(&pk_types, index)?;
+                            index += 1;
+                            Ok(deserialize_datum(v.as_slice(), ty)?)
+                        })
+                        .try_collect()?,
+                );
+                if bound.inclusive {
+                    Ok(Bound::Included(range_bound))
+                } else {
+                    Ok(Bound::Excluded(range_bound))
+                }
+            };
+
+        let range_bounds = match (
+            scan_range.lower_bound.as_ref(),
+            scan_range.upper_bound.as_ref(),
+        ) {
+            (Some(lb), Some(ub)) => (build_bound(lb, index)?, build_bound(ub, index)?),
+            (None, Some(ub)) => (Bound::Unbounded, build_bound(ub, index)?),
+            (Some(lb), None) => (build_bound(lb, index)?, Bound::Unbounded),
+            (None, None) => unreachable!(),
+        };
+        Ok(Self {
+            pk_prefix,
+            range_bounds,
+        })
+    }
+
+    /// Create a scan range for full table scan.
+    pub fn full() -> Self {
+        Self {
+            pk_prefix: OwnedRow::default(),
+            range_bounds: (Bound::Unbounded, Bound::Unbounded),
+        }
+    }
+
+    pub fn build_from_protobuf(
+        scan_ranges: &[PbScanRange],
+        table_desc: &StorageTableDesc,
+    ) -> StorageResult<Vec<Self>> {
+        if scan_ranges.is_empty() {
+            Ok(vec![Self::full()])
+        } else {
+            scan_ranges
+                .iter()
+                .map(|scan_range| Self::from_protobuf(scan_range, table_desc))
+                .try_collect()
+        }
+    }
+
+    pub fn from_protobuf(
+        scan_range: &PbScanRange,
+        table_desc: &StorageTableDesc,
+    ) -> StorageResult<Self> {
+        let pk_types = table_desc
+            .pk
+            .iter()
+            .map(|order| {
+                DataType::from(
+                    table_desc.columns[order.column_index as usize]
+                        .column_type
+                        .as_ref()
+                        .unwrap(),
+                )
+            })
+            .collect_vec();
+        Self::new(scan_range.clone(), pk_types)
+    }
+
+    pub fn convert_to_range_bounds<S: StateStore, SD: ValueRowSerde>(
+        self,
+        table: &BatchTableInner<S, SD>,
+    ) -> PkRangeBounds {
+        let PkScanRange {
+            pk_prefix,
+            range_bounds,
+        } = self;
+
+        // The len of a valid pk_prefix should be less than or equal pk's num.
+        let Some(order_type) = table.pk_serializer().get_order_types().get(pk_prefix.len()) else {
+            return range_bounds;
+        };
+        let (start_bound, end_bound) = if order_type.is_ascending() {
+            (range_bounds.0, range_bounds.1)
+        } else {
+            (range_bounds.1, range_bounds.0)
+        };
+
+        let start_bound_is_bounded = !matches!(start_bound, Bound::Unbounded);
+        let end_bound_is_bounded = !matches!(end_bound, Bound::Unbounded);
+
+        let build_bound = |other_bound_is_bounded: bool, bound, order_type_nulls| match bound {
+            Bound::Unbounded => {
+                if other_bound_is_bounded && order_type_nulls {
+                    // `NULL`s are at the start bound side, we should exclude them to meet SQL
+                    // semantics.
+                    Bound::Excluded(OwnedRow::new(vec![None]))
+                } else {
+                    // Both start and end are unbounded, so we need to select all rows.
+                    Bound::Unbounded
+                }
+            }
+            Bound::Included(x) => Bound::Included(x),
+            Bound::Excluded(x) => Bound::Excluded(x),
+        };
+        let start_bound = build_bound(
+            end_bound_is_bounded,
+            start_bound,
+            order_type.nulls_are_first(),
+        );
+        let end_bound = build_bound(
+            start_bound_is_bounded,
+            end_bound,
+            order_type.nulls_are_last(),
+        );
+        (start_bound, end_bound)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pk_scan_range_rejects_out_of_bounds_pk_index() {
+        let scan_range = PbScanRange {
+            eq_conds: vec![vec![]],
+            ..Default::default()
+        };
+        assert!(PkScanRange::new(scan_range, vec![]).is_err());
+
+        let scan_range = PbScanRange {
+            lower_bound: Some(scan_range::Bound {
+                value: vec![vec![]],
+                inclusive: false,
+            }),
+            ..Default::default()
+        };
+        assert!(PkScanRange::new(scan_range, vec![]).is_err());
+    }
+}
 
 /// [`BatchTableInner`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
@@ -945,11 +1142,64 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
         rebuild_interval: Duration,
     ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static + use<S, SD>>
     {
+        let full_pk_prefix = OwnedRow::default();
+        let full_range = (Bound::Unbounded, Bound::Unbounded);
+        self.batch_iter_vnode_with_pk_range(
+            epoch,
+            start_pk,
+            &full_pk_prefix,
+            &full_range,
+            vnode,
+            prefetch_options,
+            rebuild_interval,
+        )
+        .await
+    }
+
+    /// Iterates data from the given vnode, optionally restricted by a primary-key
+    /// equality prefix and range bounds on the next primary-key column.
+    pub async fn batch_iter_vnode_with_pk_range(
+        &self,
+        epoch: HummockReadEpoch,
+        start_pk: Option<&OwnedRow>,
+        pk_prefix: &OwnedRow,
+        range_bounds: &(Bound<OwnedRow>, Bound<OwnedRow>),
+        vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
+        rebuild_interval: Duration,
+    ) -> StorageResult<impl Stream<Item = StorageResult<OwnedRow>> + Send + 'static + use<S, SD>>
+    {
         assert!(
             !rebuild_interval.is_zero(),
             "rebuild_interval should be positive"
         );
-        let start_bound = self.start_bound_from_pk(start_pk);
+
+        let normalized_range_bounds = PkScanRange {
+            pk_prefix: pk_prefix.clone(),
+            range_bounds: range_bounds.clone(),
+        }
+        .convert_to_range_bounds(self);
+
+        let start_key = if let Some(start_pk) = start_pk {
+            self.start_bound_from_pk(Some(start_pk))
+        } else {
+            self.serialize_pk_bound(pk_prefix, normalized_range_bounds.start_bound(), true)
+        };
+        let end_key =
+            self.serialize_pk_bound(pk_prefix, normalized_range_bounds.end_bound(), false);
+
+        let prefix_hint =
+            if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint <= pk_prefix.len() {
+                let pk_prefix_serializer = self.pk_serializer.prefix(pk_prefix.len());
+                let serialized_pk_prefix = serialize_pk(pk_prefix, &pk_prefix_serializer);
+                let prefix_len = self
+                    .pk_serializer
+                    .deserialize_prefix_len(&serialized_pk_prefix, self.read_prefix_len_hint)?;
+                Some(Bytes::from(serialized_pk_prefix[..prefix_len].to_vec()))
+            } else {
+                None
+            };
+
         let snapshot = Arc::new(
             self.store
                 .new_read_snapshot(
@@ -962,8 +1212,8 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 .await?,
         );
         let (table_key_range, read_options, pk_serializer) = self.vnode_read_context(
-            None,
-            (start_bound.as_ref(), Unbounded),
+            prefix_hint,
+            (start_key.as_ref(), end_key.as_ref()),
             vnode,
             prefetch_options,
         );
