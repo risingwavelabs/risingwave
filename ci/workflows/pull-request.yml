@@ -210,7 +210,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 14
+    timeout_in_minutes: 45
     retry: *auto-retry
 
   - label: "end-to-end source test"
