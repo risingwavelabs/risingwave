@@ -254,18 +254,22 @@ fn build_compaction_config_from_params(params: &[ConfigParam]) -> Result<Vec<Mut
                     compaction_config::enable_optimize_l0_interval_selection(),
                 )?)
             }
-            "vnode_aligned_level_size_threshold" => {
-                MutableConfig::VnodeAlignedLevelSizeThreshold(parse_optional_u64_value(
-                    value,
-                    &name,
-                    compaction_config::vnode_aligned_level_size_threshold(),
-                )?)
-            }
+            #[expect(deprecated)]
+            "vnode_aligned_level_size_threshold" => MutableConfig::VnodeAlignedLevelSizeThreshold(
+                parse_optional_u64_value(value, &name, None)?,
+            ),
             "max_kv_count_for_xor16" => {
                 MutableConfig::MaxKvCountForXor16(parse_optional_u64_value(
                     value,
                     &name,
                     compaction_config::max_kv_count_for_xor16(),
+                )?)
+            }
+            "max_vnode_key_range_bytes" => {
+                MutableConfig::MaxVnodeKeyRangeBytes(parse_optional_u64_value(
+                    value,
+                    &name,
+                    compaction_config::max_vnode_key_range_bytes(),
                 )?)
             }
             "split_weight_by_vnode" => {
