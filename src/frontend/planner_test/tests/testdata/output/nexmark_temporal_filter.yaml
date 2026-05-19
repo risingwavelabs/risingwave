@@ -168,7 +168,7 @@
     GROUP BY Q.category;
   stream_plan: |-
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr5, (sum(max($expr8)) / count(max($expr8))::Decimal) as $expr10] }
+    └─StreamProject { exprs: [$expr5, Case((count(max($expr8)) = 0:Int32), null:Decimal, (sum(max($expr8)) / count(max($expr8))::Decimal)) as $expr10] }
       └─StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] }
         └─StreamExchange { dist: HashShard($expr5) }
           └─StreamProject { exprs: [$expr2, $expr5, max($expr8)] }
@@ -201,15 +201,13 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [$expr5, (sum(max($expr8)) / count(max($expr8))::Decimal) as $expr10] }
-        └── StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] }
-            ├── tables: [ HashAggState: 0 ]
+    └── StreamProject { exprs: [$expr5, Case((count(max($expr8)) = 0:Int32), null:Decimal, (sum(max($expr8)) / count(max($expr8))::Decimal)) as $expr10] }
+        └── StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([1]) from 1
 
     Fragment 1
     StreamProject { exprs: [$expr2, $expr5, max($expr8)] }
-    └── StreamHashAgg { group_key: [$expr2, $expr5], aggs: [max($expr8), count] }
-        ├── tables: [ HashAggState: 2, HashAggCall0: 1 ]
+    └── StreamHashAgg { group_key: [$expr2, $expr5], aggs: [max($expr8), count] } { tables: [ HashAggState: 2, HashAggCall0: 1 ] }
         └── StreamProject { exprs: [$expr2, $expr5, $expr8, _row_id, _row_id] }
             └── StreamFilter { predicate: ($expr9 >= $expr3) AND ($expr9 <= $expr4) }
                 └── StreamHashJoin { type: Inner, predicate: $expr2 = $expr7, output: all }
@@ -473,7 +471,7 @@
     WHERE Q.rank <= 1;
   stream_plan: |-
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr5, (sum / count::Decimal) as $expr10, $expr2] }
+    └─StreamProject { exprs: [$expr5, Case((count = 0:Int32), null:Decimal, (sum / count::Decimal)) as $expr10, $expr2] }
       └─StreamOverWindow { window_functions: [sum($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard($expr5) }
           └─StreamProject { exprs: [$expr5, $expr8, $expr9, $expr2] }
@@ -506,7 +504,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [$expr5, (sum / count::Decimal) as $expr10, $expr2] }
+    └── StreamProject { exprs: [$expr5, Case((count = 0:Int32), null:Decimal, (sum / count::Decimal)) as $expr10, $expr2] }
         └── StreamOverWindow { window_functions: [sum($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
             ├── tables: [ OverWindow: 0 ]
             └── StreamExchange Hash([0]) from 1
