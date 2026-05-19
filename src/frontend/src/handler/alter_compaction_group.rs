@@ -396,11 +396,18 @@ fn parse_optional_positive_u64_value(
     name: &str,
     default_value: Option<u64>,
 ) -> Result<u64> {
+    if matches!(value, SetVariableValue::Default) {
+        return Ok(default_value.unwrap_or(OPTIONAL_U64_UNSET_WIRE));
+    }
+
     let value = parse_optional_u64_value(value, name, default_value)?;
-    if value == 0 {
-        return Err(
-            ErrorCode::InvalidInputSyntax(format!("{} must be positive or DEFAULT", name)).into(),
-        );
+    if value == 0 || value == OPTIONAL_U64_UNSET_WIRE {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "{} must be between 1 and {}, or DEFAULT",
+            name,
+            OPTIONAL_U64_UNSET_WIRE - 1
+        ))
+        .into());
     }
     Ok(value)
 }

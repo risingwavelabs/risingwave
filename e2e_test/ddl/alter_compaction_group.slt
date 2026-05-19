@@ -147,12 +147,18 @@ SELECT (compaction_config::jsonb)->>'maxVnodeKeyRangeBytes' FROM rw_hummock_comp
 ----
 NULL
 
-# Optional positive configs reject 0 instead of silently treating it as unset
-statement error must be positive or DEFAULT
+# Optional positive configs reject sentinel values instead of silently treating them as unset
+statement error must be between 1 and 18446744073709551614, or DEFAULT
 ALTER COMPACTION GROUP 2 SET max_kv_count_for_xor16 = 0;
 
-statement error must be positive or DEFAULT
+statement error must be between 1 and 18446744073709551614, or DEFAULT
 ALTER COMPACTION GROUP 2 SET max_vnode_key_range_bytes = 0;
+
+statement error must be between 1 and 18446744073709551614, or DEFAULT
+ALTER COMPACTION GROUP 2 SET max_kv_count_for_xor16 = 18446744073709551615;
+
+statement error must be between 1 and 18446744073709551614, or DEFAULT
+ALTER COMPACTION GROUP 2 SET max_vnode_key_range_bytes = 18446744073709551615;
 
 # Test invalid config name
 statement error unknown compaction config parameter
