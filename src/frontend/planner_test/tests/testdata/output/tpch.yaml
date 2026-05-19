@@ -2467,7 +2467,7 @@
 
     Table 1 { columns: [ partsupp_ps_partkey, sum($expr1), _vnode, _rw_timestamp ], primary key: [ $2 ASC, $1 DESC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 2 }
 
-    Table 2 { columns: [ partsupp_ps_partkey, sum($expr1), _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ partsupp_ps_partkey, sum($expr1), _rw_timestamp ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
 
     Table 3 { columns: [ $expr3, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 

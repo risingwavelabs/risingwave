@@ -12682,10 +12682,13 @@ version = "3.1.0-alpha"
 dependencies = [
  "easy-ext",
  "madsim-tokio",
+ "prost 0.14.3",
+ "risingwave_pb",
  "sea-orm",
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "thiserror-ext",
  "uuid",
 ]
 
