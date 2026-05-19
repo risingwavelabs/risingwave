@@ -1560,9 +1560,7 @@ impl<R: RangeKv> LocalRangeKvStateStoreChangeLogIter<R> {
     }
 }
 
-impl<R: RangeKv> StateStoreIter<StateStoreReadLogItem>
-    for LocalRangeKvStateStoreChangeLogIter<R>
-{
+impl<R: RangeKv> StateStoreIter<StateStoreReadLogItem> for LocalRangeKvStateStoreChangeLogIter<R> {
     async fn try_next(&mut self) -> StorageResult<Option<StateStoreReadLogItemRef<'_>>> {
         loop {
             let Some(iter) = self.vnode_iters.front_mut() else {
@@ -1572,8 +1570,7 @@ impl<R: RangeKv> StateStoreIter<StateStoreReadLogItem>
             if let Some((key, value)) = iter.try_next().await? {
                 let owned_value = value
                     .try_map(|v| Ok::<_, crate::error::StorageError>(Bytes::copy_from_slice(v)))?;
-                self.current_item =
-                    Some((TableKey(Bytes::copy_from_slice(&key.0)), owned_value));
+                self.current_item = Some((TableKey(Bytes::copy_from_slice(key.0)), owned_value));
                 let (key, value) = self
                     .current_item
                     .as_ref()

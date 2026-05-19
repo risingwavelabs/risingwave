@@ -79,11 +79,6 @@ impl EpochChunkBuffer {
         self.row_count <= self.max_rows
     }
 
-    #[cfg(test)]
-    fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
-    }
-
     fn drain(&mut self) -> impl Iterator<Item = StreamChunk> + '_ {
         self.row_count = 0;
         self.buffer.drain(..)
@@ -517,7 +512,6 @@ mod tests {
     use std::collections::HashSet;
     use std::sync::Arc;
 
-    use futures::TryStreamExt;
     use risingwave_common::array::{StreamChunk, StreamChunkTestExt};
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -529,16 +523,10 @@ mod tests {
     use risingwave_pb::catalog::Table;
     use risingwave_storage::StateStore;
 
-    use super::{
-        ChangeBufferExecutor, ChangeBufferStateWriter, EpochChunkBuffer, create_epoch_writer,
-    };
+    use super::{ChangeBufferExecutor, ChangeBufferStateWriter, create_epoch_writer};
     use crate::common::table::test_utils::gen_pbtable_with_dist_key;
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, ActorContextRef, Barrier, Execute, Message, StreamKey};
-
-    fn gen_change_buffer_table(table_id: TableId) -> Table {
-        gen_change_buffer_table_with_pk(table_id, vec![0], vec![0])
-    }
 
     fn gen_change_buffer_table_with_pk(
         table_id: TableId,
