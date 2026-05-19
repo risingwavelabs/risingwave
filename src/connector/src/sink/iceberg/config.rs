@@ -126,6 +126,8 @@ pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS: &str =
 pub const COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: &str =
     "compaction.write_parquet_max_row_group_bytes";
 pub const ORDER_KEY: &str = "order_key";
+pub const DEFAULT_SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: i64 = 3_600_000;
+pub const DEFAULT_SNAPSHOT_EXPIRATION_RETAIN_LAST: i32 = 12;
 pub const ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES: usize = 128 * 1024 * 1024;
 pub const ENABLE_PK_INDEX: &str = "enable_pk_index";
 
@@ -150,6 +152,14 @@ fn default_true() -> bool {
 
 fn default_some_true() -> Option<bool> {
     Some(true)
+}
+
+fn default_snapshot_expiration_max_age_millis() -> Option<i64> {
+    Some(DEFAULT_SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
+}
+
+fn default_snapshot_expiration_retain_last() -> Option<i32> {
+    Some(DEFAULT_SNAPSHOT_EXPIRATION_RETAIN_LAST)
 }
 
 fn parse_format_version_str(value: &str) -> std::result::Result<FormatVersion, String> {
@@ -349,7 +359,7 @@ pub struct IcebergConfig {
     /// Whether to enable iceberg expired snapshots.
     #[serde(
         rename = "enable_snapshot_expiration",
-        default,
+        default = "default_true",
         deserialize_with = "deserialize_bool_from_string"
     )]
     #[with_option(allow_alter_on_fly)]
@@ -369,13 +379,19 @@ pub struct IcebergConfig {
 
     /// The maximum age (in milliseconds) for snapshots before they expire
     /// For example, if set to 3600000, snapshots older than 1 hour will be expired
-    #[serde(rename = "snapshot_expiration_max_age_millis", default)]
+    #[serde(
+        rename = "snapshot_expiration_max_age_millis",
+        default = "default_snapshot_expiration_max_age_millis"
+    )]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub snapshot_expiration_max_age_millis: Option<i64>,
 
     /// The number of snapshots to retain
-    #[serde(rename = "snapshot_expiration_retain_last", default)]
+    #[serde(
+        rename = "snapshot_expiration_retain_last",
+        default = "default_snapshot_expiration_retain_last"
+    )]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
     pub snapshot_expiration_retain_last: Option<i32>,
