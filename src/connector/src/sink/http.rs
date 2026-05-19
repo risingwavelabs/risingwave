@@ -266,10 +266,6 @@ pub struct HttpSinkWriter {
     payload_index: usize,
 }
 
-struct HttpPayload {
-    body: String,
-}
-
 impl HttpSinkWriter {
     fn new(url: HttpUrl, payload_index: usize, header_map: HeaderMap) -> Result<Self> {
         let client = reqwest::Client::builder()
@@ -285,40 +281,38 @@ impl HttpSinkWriter {
         })
     }
 
-    fn extract_url(&self, row: impl Row) -> Result<Option<reqwest::Url>> {
+    fn extract_url<'a>(&'a self, row: &'a impl Row) -> Result<Option<&'a str>> {
         match &self.url {
-            HttpUrl::Static(url) => Ok(Some(url.clone())),
+            HttpUrl::Static(url) => Ok(Some(url.as_str())),
             HttpUrl::Dynamic { url_index } => match row.datum_at(*url_index) {
-                Some(ScalarRefImpl::Utf8(url)) if !url.is_empty() => match url.parse() {
-                    Ok(url) => Ok(Some(url)),
-                    Err(err) => {
-                        tracing::warn!(
-                            error = %err,
-                            payload = %self.strip_payload_for_log(&row),
-                            "skip HTTP sink row due to invalid URL in url column"
-                        );
-                        Ok(None)
+                Some(ScalarRefImpl::Utf8(url)) if !url.is_empty() => {
+                    match url.parse::<reqwest::Url>() {
+                        Ok(_) => Ok(Some(url)),
+                        Err(err) => {
+                            tracing::warn!(
+                                error = %err,
+                                payload = %self.strip_payload_for_log(row),
+                                "skip HTTP sink row due to invalid URL in url column"
+                            );
+                            Ok(None)
+                        }
                     }
-                },
+                }
                 Some(ScalarRefImpl::Utf8(_)) | None => {
                     tracing::warn!(
-                        payload = %self.strip_payload_for_log(&row),
+                        payload = %self.strip_payload_for_log(row),
                         "skip HTTP sink row due to null or empty url column"
                     );
                     Ok(None)
                 }
-                Some(_) => {
-                    tracing::warn!(
-                        payload = %self.strip_payload_for_log(&row),
-                        "skip HTTP sink row due to unexpected url column type"
-                    );
-                    Ok(None)
-                }
+                Some(_) => Err(SinkError::Http(anyhow!(
+                    "unexpected url column type, expected varchar"
+                ))),
             },
         }
     }
 
-    fn strip_payload_for_log(&self, row: impl Row) -> String {
+    fn strip_payload_for_log(&self, row: &impl Row) -> String {
         match row.datum_at(self.payload_index) {
             Some(ScalarRefImpl::Utf8(s)) => strip_text_payload(s),
             Some(ScalarRefImpl::Jsonb(j)) => strip_jsonb_payload(j),
@@ -327,12 +321,10 @@ impl HttpSinkWriter {
         }
     }
 
-    fn extract_payload(&self, row: impl Row) -> Result<Option<HttpPayload>> {
+    fn extract_payload(&self, row: &impl Row) -> Result<Option<String>> {
         Ok(match row.datum_at(self.payload_index) {
-            Some(ScalarRefImpl::Utf8(s)) => Some(HttpPayload { body: s.to_owned() }),
-            Some(ScalarRefImpl::Jsonb(j)) => Some(HttpPayload {
-                body: j.to_string(),
-            }),
+            Some(ScalarRefImpl::Utf8(s)) => Some(s.to_owned()),
+            Some(ScalarRefImpl::Jsonb(j)) => Some(j.to_string()),
             Some(_) => {
                 return Err(SinkError::Http(anyhow!(
                     "unexpected payload column type, expected varchar or jsonb"
@@ -415,17 +407,17 @@ impl AsyncTruncateSinkWriter for HttpSinkWriter {
                 continue;
             }
 
-            let Some(payload) = self.extract_payload(row)? else {
+            let Some(payload) = self.extract_payload(&row)? else {
                 continue;
             };
-            let Some(url) = self.extract_url(row)? else {
+            let Some(url) = self.extract_url(&row)? else {
                 continue;
             };
 
             let resp = self
                 .client
                 .post(url)
-                .body(payload.body)
+                .body(payload)
                 .send()
                 .await
                 .context("HTTP request failed")
