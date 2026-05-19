@@ -25,7 +25,7 @@ use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{DatabaseId, PartialGraphId};
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource,
+    PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
 use tokio::task::JoinHandle;
 
@@ -71,6 +71,8 @@ pub(super) struct CompleteBarrierTask {
     pub(super) load_finished_source_ids: Vec<PbLoadFinishedSource>,
     /// Table IDs that have finished materialize refresh and need completion signaling
     pub(super) refresh_finished_table_job_ids: Vec<JobId>,
+    /// Iceberg V3 sink reports collected during this barrier
+    pub(super) iceberg_v3_sink_metadata: Vec<PbIcebergV3SinkMetadata>,
 }
 
 impl CompleteBarrierTask {
@@ -103,7 +105,26 @@ impl CompleteBarrierTask {
             let wait_commit_timer = GLOBAL_META_METRICS
                 .barrier_wait_commit_latency
                 .start_timer();
+
+            // Iceberg V3 sink metadata reports are handled in three steps around hummock `commit_epoch`:
+            //   1. pre_commit: persist pending rows under `pending_sink_state` (no iceberg I/O).
+            //   2. commit_epoch: advance hummock.
+            //   3. commit: drive iceberg overwrite_files for queued epochs.
+            let mut iceberg_v3_commit_sink_ids = Vec::new();
+            if !self.iceberg_v3_sink_metadata.is_empty() {
+                let res = context
+                    .pre_commit_iceberg_v3_sink_metadata(self.iceberg_v3_sink_metadata)
+                    .await?;
+                iceberg_v3_commit_sink_ids = res;
+            }
+
             let version_stats = context.commit_epoch(self.commit_info).await?;
+
+            if !iceberg_v3_commit_sink_ids.is_empty() {
+                context
+                    .commit_iceberg_v3_sink_metadata(iceberg_v3_commit_sink_ids)
+                    .await?;
+            }
 
             // Handle list finished source IDs for refreshable batch sources
             // Spawn this asynchronously to avoid deadlock during barrier collection

@@ -1,0 +1,72 @@
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+create secret lakekeeper_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection lakekeeper_catalog_conn
+with (
+    type = 'iceberg',
+    catalog.type = 'rest',
+    catalog.uri = 'http://127.0.0.1:8181/catalog/',
+    warehouse.path = 'risingwave-warehouse',
+    s3.access.key = secret lakekeeper_secret,
+    s3.secret.key = secret lakekeeper_secret,
+    s3.path.style.access = 'true',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1'
+);
+
+statement ok
+CREATE TABLE t_v3_no_partition_pk_index (id int, v1 int primary key, v2 bigint, v3 varchar, v4 date);
+
+statement ok
+INSERT INTO t_v3_no_partition_pk_index VALUES
+    (1, 1, 2, '1-2', '2022-03-11');
+
+statement ok
+CREATE SINK s_v3_no_partition_pk_index FROM t_v3_no_partition_pk_index
+WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    force_append_only = 'false',
+    connection = lakekeeper_catalog_conn,
+    database.name = 'public',
+    table.name = 'no_partition_upsert_v3_pk_index_table',
+    create_table_if_not_exists = 'true',
+    primary_key = 'v1',
+    write_mode = 'merge-on-read',
+    format_version = '3',
+    enable_pk_index = 'true'
+);
+
+statement ok
+CREATE SOURCE iceberg_no_partition_v3_pk_index_source WITH (
+    connector = 'iceberg',
+    database.name = 'public',
+    table.name = 'no_partition_upsert_v3_pk_index_table',
+    connection = lakekeeper_catalog_conn
+);
+
+query ????? rowsort retry 11 backoff 1s
+select * from iceberg_no_partition_v3_pk_index_source;
+----
+1 1 2 1-2 2022-03-11
+
+statement ok
+DROP SOURCE iceberg_no_partition_v3_pk_index_source;
+
+statement ok
+DROP SINK s_v3_no_partition_pk_index;
+
+statement ok
+DROP TABLE t_v3_no_partition_pk_index;
+
+statement ok
+DROP CONNECTION lakekeeper_catalog_conn;
+
+statement ok
+DROP SECRET lakekeeper_secret;

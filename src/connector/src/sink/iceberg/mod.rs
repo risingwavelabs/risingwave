@@ -16,6 +16,7 @@
 mod test;
 
 mod commit;
+pub mod commit_retry;
 mod config;
 mod create_table;
 mod prometheus;
