@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::time::Duration;
 
+use anyhow::Context;
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, ReplayPolicy};
 use serde::Deserialize;
@@ -241,7 +242,9 @@ impl NatsPropertiesConsumer {
             c.filter_subjects = v.clone()
         }
         if let Some(v) = &self.replay_policy {
-            c.replay_policy = ReplayPolicyWrapper::parse_str(v).map_err(ConnectorError::from)?
+            c.replay_policy = ReplayPolicyWrapper::parse_str(v)
+                .with_context(|| format!("invalid value for `consumer.replay_policy`: {v}"))
+                .map_err(ConnectorError::from)?
         }
         if let Some(v) = &self.rate_limit {
             c.rate_limit = *v
@@ -284,7 +287,9 @@ impl NatsPropertiesConsumer {
 
     fn effective_ack_policy(&self) -> ConnectorResult<AckPolicy> {
         match &self.ack_policy {
-            Some(policy) => Ok(AckPolicyWrapper::parse_str(policy).map_err(ConnectorError::from)?),
+            Some(policy) => Ok(AckPolicyWrapper::parse_str(policy)
+                .with_context(|| format!("invalid value for `consumer.ack_policy`: {policy}"))
+                .map_err(ConnectorError::from)?),
             None => Ok(AckPolicy::Explicit),
         }
     }
@@ -317,7 +322,7 @@ mod test {
 
     use super::*;
 
-    fn parse_props(config: BTreeMap<String, String>) -> NatsProperties {
+    fn parse_nats_properties(config: BTreeMap<String, String>) -> NatsProperties {
         serde_json::from_value(
             serde_json::to_value(config).expect("failed to serialize NATS test config"),
         )
@@ -364,7 +369,7 @@ mod test {
         let mut config = base_config();
         config.insert("consumer.ack_policy".to_owned(), "all".to_owned());
 
-        let props = parse_props(config);
+        let props = parse_nats_properties(config);
 
         assert_eq!(
             props.nats_properties_consumer.name,
@@ -407,7 +412,7 @@ mod test {
 
     #[test]
     fn test_default_ack_policy_is_explicit() {
-        let props = parse_props(base_config());
+        let props = parse_nats_properties(base_config());
 
         let mut consumer_config = Config::default();
         props.set_config(&mut consumer_config).unwrap();
@@ -423,7 +428,7 @@ mod test {
     fn test_ack_policy_none_is_preserved() {
         let mut config = base_config();
         config.insert("consumer.ack_policy".to_owned(), "none".to_owned());
-        let props = parse_props(config);
+        let props = parse_nats_properties(config);
 
         let mut consumer_config = Config::default();
         props.set_config(&mut consumer_config).unwrap();
@@ -439,7 +444,7 @@ mod test {
     fn test_invalid_ack_policy_returns_error() {
         let mut config = base_config();
         config.insert("consumer.ack_policy".to_owned(), "invalid".to_owned());
-        let props = parse_props(config);
+        let props = parse_nats_properties(config);
 
         let err = props.nats_properties_consumer.get_ack_policy().unwrap_err();
         let err_message = format!("{err:#}");
