@@ -8,7 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [package.metadata.cargo-machete]
-ignored = ["enum-as-inner", "pbjson", "prost-helpers", "strum"]
+ignored = ["enum-as-inner", "pbjson", "prost-helpers", "strum", "tonic-prost"]
 
 [dependencies]
 enum-as-inner = "0.7"

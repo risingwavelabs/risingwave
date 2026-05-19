@@ -52,6 +52,7 @@ use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
     alter_swap_rename_request, create_connection_request, streaming_job_resource_type,
 };
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
@@ -1445,6 +1446,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _limit: Option<u32>,
     ) -> RpcResult<TableChangeLogs> {
         Ok(HashMap::default())
+    }
+
+    async fn update_compaction_config(
+        &self,
+        _compaction_group_ids: Vec<risingwave_hummock_sdk::CompactionGroupId>,
+        _configs: Vec<PbMutableConfig>,
+    ) -> RpcResult<()> {
+        Ok(())
     }
 }
 
