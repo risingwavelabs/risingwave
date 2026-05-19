@@ -412,6 +412,13 @@
   - optimized_logical_plan_for_batch
   - logical_plan
   - stream_plan
+- name: avg filter clause with empty input group
+  sql: |
+    create table t(a int, b int);
+    select avg(a) FILTER (WHERE false) AS avga from t group by b;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
 - name: count filter clause
   sql: |
     create table t(a int, b int);

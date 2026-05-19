@@ -416,7 +416,7 @@ impl HummockManager {
                 .into_iter()
                 .map(|m| {
                     (
-                        HummockVersionId::new(m.id as _),
+                        m.id,
                         HummockVersionDelta::from_persisted_protobuf(&m.into()),
                     )
                 })
@@ -479,7 +479,7 @@ impl HummockManager {
             .map(HummockVersionStats::from)
             .unwrap_or_else(|| HummockVersionStats {
                 // version_stats.hummock_version_id is always 0 in meta store.
-                hummock_version_id: 0,
+                hummock_version_id: 0.into(),
                 ..Default::default()
             });
 

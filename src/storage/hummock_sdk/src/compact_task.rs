@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::mem::size_of;
 
 use itertools::Itertools;
@@ -213,7 +213,7 @@ impl CompactTask {
     // The compact task may need to reclaim key with split sst
     pub fn contains_split_sst(&self) -> bool {
         self.read_input_ssts()
-            .any(|sst| sst.sst_id.inner() != sst.object_id.inner())
+            .any(|sst| sst.sst_id.as_raw_id() != sst.object_id.as_raw_id())
     }
 
     /// Returns sorted and deduplicated table ids from this task's normalized input SST metadata.
@@ -224,15 +224,6 @@ impl CompactTask {
             .flat_map(|sst| sst.table_ids.iter().copied())
             .sorted()
             .dedup()
-    }
-
-    // filter the table-id that in existing_table_ids with the table-id in compact-task
-    pub fn build_compact_table_ids(&self) -> Vec<StateTableId> {
-        let existing_table_ids: HashSet<TableId> =
-            HashSet::from_iter(self.existing_table_ids.iter().copied());
-        self.get_table_ids_from_input_ssts()
-            .filter(|table_id| existing_table_ids.contains(table_id))
-            .collect()
     }
 
     pub fn is_expired(&self, compaction_group_version_id_expected: u64) -> bool {
@@ -251,14 +242,6 @@ impl CompactTask {
             .sum::<u64>();
 
         crate::filter_utils::is_kv_count_too_large_for_xor16(kv_count, self.max_kv_count_for_xor16)
-    }
-
-    /// Returns the effective vnode key-range hint limit (in bytes) for this compaction task.
-    ///
-    /// The hint is only meaningful when all input SSTs belong to a single table.
-    pub fn effective_max_vnode_key_range_bytes(&self) -> Option<usize> {
-        let limit = self.max_vnode_key_range_bytes.filter(|&v| v > 0)? as usize;
-        (self.get_table_ids_from_input_ssts().count() == 1).then_some(limit)
     }
 
     /// Returns input SSTs that should be read by the compactor.
@@ -569,7 +552,7 @@ impl From<PbValidationTask> for ValidationTask {
             sst_id_to_worker_id: pb_validation_task
                 .sst_id_to_worker_id
                 .into_iter()
-                .map(|(object_id, worker_id)| (object_id.into(), worker_id.into()))
+                .map(|(object_id, worker_id)| (object_id, worker_id.into()))
                 .collect(),
         }
     }
@@ -586,7 +569,7 @@ impl From<ValidationTask> for PbValidationTask {
             sst_id_to_worker_id: validation_task
                 .sst_id_to_worker_id
                 .into_iter()
-                .map(|(object_id, worker_id)| (object_id.inner(), worker_id.as_raw_id()))
+                .map(|(object_id, worker_id)| (object_id, worker_id.as_raw_id()))
                 .collect(),
         }
     }
@@ -623,11 +606,7 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(SstableInfo::from)
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.into(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }
@@ -643,11 +622,7 @@ impl From<ReportTask> for PbReportTask {
                 .into_iter()
                 .map(|sst| sst.into())
                 .collect_vec(),
-            object_timestamps: value
-                .object_timestamps
-                .into_iter()
-                .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
-                .collect(),
+            object_timestamps: value.object_timestamps,
         }
     }
 }

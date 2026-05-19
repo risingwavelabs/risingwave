@@ -528,7 +528,7 @@ pub mod tests {
                 ret.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|t| t.sst_id.inner())
+                    .map(|t| t.sst_id.as_raw_id())
                     .collect_vec(),
                 vec![1]
             );
@@ -537,7 +537,7 @@ pub mod tests {
                 ret.input_levels[1]
                     .table_infos
                     .iter()
-                    .map(|t| t.sst_id.inner())
+                    .map(|t| t.sst_id.as_raw_id())
                     .collect_vec(),
                 vec![3]
             );
