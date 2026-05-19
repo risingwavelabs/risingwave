@@ -318,7 +318,10 @@ mod test {
     use super::*;
 
     fn parse_props(config: BTreeMap<String, String>) -> NatsProperties {
-        serde_json::from_value(serde_json::to_value(config).unwrap()).unwrap()
+        serde_json::from_value(
+            serde_json::to_value(config).expect("failed to serialize NATS test config"),
+        )
+        .expect("failed to deserialize NATS test config into NatsProperties")
     }
 
     fn base_config() -> BTreeMap<String, String> {
