@@ -131,6 +131,22 @@ SELECT (compaction_config::jsonb)->>'vnodeAlignedLevelSizeThreshold' FROM rw_hum
 ----
 NULL
 
+statement ok
+ALTER COMPACTION GROUP 2 SET max_vnode_key_range_bytes = 1024;
+
+query T
+SELECT (compaction_config::jsonb)->>'maxVnodeKeyRangeBytes' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+1024
+
+statement ok
+ALTER COMPACTION GROUP 2 SET max_vnode_key_range_bytes = DEFAULT;
+
+query T
+SELECT (compaction_config::jsonb)->>'maxVnodeKeyRangeBytes' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+NULL
+
 # Test invalid config name
 statement error unknown compaction config parameter
 ALTER COMPACTION GROUP 2 SET invalid_config_name = 123;

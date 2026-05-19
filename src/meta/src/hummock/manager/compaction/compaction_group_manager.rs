@@ -648,15 +648,19 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                 // Deprecated. Keep accepting the field for old clients but do not apply it.
             }
             MutableConfig::MaxKvCountForXor16(c) => {
-                target.max_kv_count_for_xor16 = (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+                target.max_kv_count_for_xor16 = optional_u64_config(*c);
             }
             MutableConfig::MaxVnodeKeyRangeBytes(c) => {
-                target.max_vnode_key_range_bytes = (*c > 0).then_some(*c);
+                target.max_vnode_key_range_bytes = optional_u64_config(*c);
             }
         }
     }
 
     Ok(())
+}
+
+fn optional_u64_config(value: u64) -> Option<u64> {
+    (value != u64::MIN && value != u64::MAX && value > 0).then_some(value)
 }
 
 fn try_u32_max_level(max_level: u64) -> Result<u32> {
