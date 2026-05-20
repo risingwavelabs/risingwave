@@ -56,7 +56,10 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::Parser;
 
 use super::RwPgResponse;
-use super::create_mv::get_column_names;
+use super::create_mv::{
+    check_resource_group_arrangement_backfill, check_resource_group_available, get_column_names,
+    reject_cloud_serverless_backfill_enabled, remove_streaming_job_resource_group_option,
+};
 use super::create_source::UPSTREAM_SOURCE_KEY;
 use super::util::gen_query_from_table_name;
 use crate::binder::{Binder, Relation};
@@ -109,6 +112,7 @@ pub struct SinkPlanContext {
     pub sink_catalog: SinkCatalog,
     pub target_table_catalog: Option<Arc<TableCatalog>>,
     pub dependencies: HashSet<ObjectId>,
+    pub resource_type: risingwave_pb::ddl_service::streaming_job_resource_type::ResourceType,
 }
 
 pub async fn gen_sink_plan(
@@ -125,6 +129,10 @@ pub async fn gen_sink_plan(
         Binder::resolve_schema_qualified_name(db_name, &stmt.sink_name)?;
 
     let mut with_options = handler_args.with_options.clone();
+    let resource_group_option = remove_streaming_job_resource_group_option(&mut with_options);
+    reject_cloud_serverless_backfill_enabled(&mut with_options, "CREATE SINK")?;
+    check_resource_group_available(&resource_group_option.resource_type)?;
+    check_resource_group_arrangement_backfill(session, &resource_group_option.resource_type)?;
 
     if session
         .env()
@@ -512,6 +520,7 @@ pub async fn gen_sink_plan(
         sink_catalog,
         target_table_catalog,
         dependencies,
+        resource_type: resource_group_option.resource_type,
     })
 }
 
@@ -628,7 +637,7 @@ pub async fn handle_create_sink(
         ))));
     }
 
-    let (mut sink, graph, target_table_catalog, dependencies) = {
+    let (mut sink, graph, target_table_catalog, dependencies, resource_type) = {
         let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
 
         let SinkPlanContext {
@@ -637,6 +646,7 @@ pub async fn handle_create_sink(
             sink_catalog: sink,
             target_table_catalog,
             dependencies,
+            resource_type,
         } = gen_sink_plan(handle_args, stmt, None, is_iceberg_engine_internal).await?;
 
         let has_order_by = !query.order_by.is_empty();
@@ -653,7 +663,13 @@ pub async fn handle_create_sink(
         let graph =
             build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
-        (sink, graph, target_table_catalog, dependencies)
+        (
+            sink,
+            graph,
+            target_table_catalog,
+            dependencies,
+            resource_type,
+        )
     };
 
     if let Some(table_catalog) = target_table_catalog {
@@ -673,7 +689,13 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     execute_with_long_running_notification(
-        catalog_writer.create_sink(sink.to_proto(), graph, dependencies, if_not_exists),
+        catalog_writer.create_sink(
+            sink.to_proto(),
+            graph,
+            dependencies,
+            resource_type,
+            if_not_exists,
+        ),
         &session,
         "CREATE SINK",
         LongRunningNotificationAction::MonitorBackfillJob,

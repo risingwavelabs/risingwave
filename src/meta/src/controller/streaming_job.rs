@@ -180,17 +180,22 @@ impl CatalogController {
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
         resource_type: streaming_job_resource_type::ResourceType,
+        is_serverless_backfill: bool,
         backfill_parallelism: Option<StreamingParallelism>,
         backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
-        let specific_resource_group = resource_type.resource_group();
-        let is_serverless_backfill = matches!(
-            &resource_type,
-            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
-        );
+        let specific_resource_group = match &resource_type {
+            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group) => {
+                Some(group.clone())
+            }
+            // Serverless backfill is an active backfill placement policy, not a steady-state
+            // streaming-job resource-group override.
+            streaming_job_resource_type::ResourceType::Regular(_)
+            | streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_) => None,
+        };
         let model = streaming_job::Model {
             job_id,
             job_status: JobStatus::Initial,
@@ -232,6 +237,7 @@ impl CatalogController {
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
+        is_serverless_backfill: bool,
         backfill_parallelism: &Option<Parallelism>,
         adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
@@ -328,6 +334,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
+                    is_serverless_backfill,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     refresh_interval_sec,
@@ -362,6 +369,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
+                    is_serverless_backfill,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     None, // refresh_interval_sec: only for MV
@@ -385,6 +393,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
+                    is_serverless_backfill,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     None, // refresh_interval_sec: only for MV
@@ -450,6 +459,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
+                    is_serverless_backfill,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     None, // refresh_interval_sec: only for MV
@@ -488,6 +498,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     resource_type,
+                    is_serverless_backfill,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
                     None, // refresh_interval_sec: only for MV
@@ -1141,6 +1152,7 @@ impl CatalogController {
             parallelism,
             original_job.max_parallelism as _,
             resource_type,
+            false,
             // `backfill_parallelism` is intentionally NOT inherited from the original job.
             // Replace has no "backfill finish -> restore parallelism" phase, so inheriting it
             // would render actors at the backfill parallelism and never recover to steady-state.

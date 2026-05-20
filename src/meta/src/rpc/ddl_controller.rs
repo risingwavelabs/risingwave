@@ -165,6 +165,7 @@ pub enum DdlCommand {
         fragment_graph: StreamFragmentGraphProto,
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
+        serverless_backfill_resource_group: Option<String>,
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
     },
@@ -453,6 +454,7 @@ impl DdlController {
                     fragment_graph,
                     dependencies,
                     resource_type,
+                    serverless_backfill_resource_group,
                     if_not_exists,
                     refresh_interval_sec,
                 } => {
@@ -461,6 +463,7 @@ impl DdlController {
                         fragment_graph,
                         dependencies,
                         resource_type,
+                        serverless_backfill_resource_group,
                         if_not_exists,
                         refresh_interval_sec,
                     )
@@ -1050,6 +1053,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
+        serverless_backfill_resource_group: Option<String>,
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
@@ -1081,6 +1085,13 @@ impl DdlController {
                 fragment_graph.max_parallelism as _,
                 dependencies,
                 resource_type.clone(),
+                serverless_backfill_resource_group.is_some()
+                    || matches!(
+                        &resource_type,
+                        streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(
+                            _
+                        )
+                    ),
                 &fragment_graph.backfill_parallelism,
                 adaptive_parallelism_strategy,
                 backfill_adaptive_parallelism_strategy,
@@ -1140,6 +1151,7 @@ impl DdlController {
                 streaming_job,
                 fragment_graph,
                 resource_type,
+                serverless_backfill_resource_group,
                 streaming_job_model,
             )
             .await
@@ -1193,6 +1205,7 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         resource_type: streaming_job_resource_type::ResourceType,
+        serverless_backfill_resource_group: Option<String>,
         streaming_job_model: streaming_job::Model,
     ) -> MetaResult<(StreamJobFragmentsToCreate, CreateStreamingJobContext)> {
         let mut fragment_graph =
@@ -1219,6 +1232,7 @@ impl DdlController {
                 streaming_job,
                 fragment_graph,
                 resource_type,
+                serverless_backfill_resource_group,
                 streaming_job_model,
             )
             .await?;
@@ -1766,6 +1780,7 @@ impl DdlController {
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraph,
         resource_type: streaming_job_resource_type::ResourceType,
+        serverless_backfill_resource_group: Option<String>,
         streaming_job_model: streaming_job::Model,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
@@ -1840,17 +1855,37 @@ impl DdlController {
             },
             (&stream_job).into(),
         )?;
-        let resource_group = if let Some(group) = resource_type.resource_group() {
-            group
-        } else {
-            self.metadata_manager
-                .get_database_resource_group(stream_job.database_id())
-                .await?
+        let steady_state_resource_group = match &resource_type {
+            streaming_job_resource_type::ResourceType::Regular(_) => {
+                self.metadata_manager
+                    .get_database_resource_group(stream_job.database_id())
+                    .await?
+            }
+            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group) => {
+                group.clone()
+            }
+            // Backward compatibility for older clients: a legacy serverless-only resource type
+            // does not represent a steady-state SQL resource-group override.
+            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_) => {
+                self.metadata_manager
+                    .get_database_resource_group(stream_job.database_id())
+                    .await?
+            }
         };
-        let is_serverless_backfill = matches!(
-            &resource_type,
-            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
-        );
+        let is_serverless_backfill = serverless_backfill_resource_group.is_some()
+            || matches!(
+                &resource_type,
+                streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+            );
+        let active_resource_group = serverless_backfill_resource_group
+            .clone()
+            .or_else(|| match &resource_type {
+                streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(
+                    group,
+                ) => Some(group.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| steady_state_resource_group.clone());
 
         // 3. Build the actor graph.
         let actor_graph_builder = ActorGraphBuilder::new(complete_graph)?;
@@ -1927,7 +1962,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
-            database_resource_group: resource_group,
+            database_resource_group: active_resource_group,
             definition: stream_job.definition(),
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),

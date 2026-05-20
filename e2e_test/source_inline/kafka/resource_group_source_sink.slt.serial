@@ -1,0 +1,200 @@
+# Verify create-time resource_group on shared Kafka source, Kafka sink, and index.
+control substitution on
+
+statement ok
+SET rw_implicit_flush = true;
+
+statement ok
+SET sink_decouple = false;
+
+statement ok
+SET streaming_use_arrangement_backfill = true;
+
+statement ok
+DROP SOURCE IF EXISTS rg_sink_readback;
+
+statement ok
+DROP SINK IF EXISTS rg_sink;
+
+statement ok
+DROP INDEX IF EXISTS rg_idx;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS rg_mv;
+
+statement ok
+DROP SOURCE IF EXISTS rg_src;
+
+system ok
+rpk topic delete rw_rg_source_input || true
+
+system ok
+rpk topic delete rw_rg_sink_output || true
+
+system ok
+rpk topic create rw_rg_source_input -p 1
+
+system ok
+rpk topic create rw_rg_sink_output -p 1
+
+system ok
+cat <<EOF2 | rpk topic produce rw_rg_source_input -f "%v\n"
+{"id":1,"v":"a"}
+{"id":2,"v":"b"}
+{"id":3,"v":"c"}
+EOF2
+
+statement ok
+SET streaming_use_shared_source = true;
+
+statement ok
+CREATE SOURCE rg_src (
+  id int,
+  v varchar
+) WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'rw_rg_source_input',
+  scan.startup.mode = 'earliest',
+  resource_group = 'default'
+) FORMAT PLAIN ENCODE JSON;
+
+query T
+SELECT resource_group FROM rw_catalog.rw_streaming_jobs WHERE name = 'rg_src';
+----
+default
+
+statement ok
+CREATE MATERIALIZED VIEW rg_mv AS SELECT id, v FROM rg_src;
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM rg_mv;
+----
+3
+
+statement ok
+CREATE INDEX rg_idx ON rg_mv(id) WITH (resource_group = 'default');
+
+query T
+SELECT resource_group FROM rw_catalog.rw_streaming_jobs WHERE name = 'rg_idx';
+----
+default
+
+query T
+SELECT status FROM rw_catalog.rw_streaming_jobs WHERE name = 'rg_idx';
+----
+CREATED
+
+statement ok
+SET streaming_use_arrangement_backfill = false;
+
+statement ok
+CREATE INDEX IF NOT EXISTS rg_idx ON rg_mv(id) WITH (resource_group = 'default');
+
+statement ok
+SET streaming_use_arrangement_backfill = true;
+
+statement ok
+CREATE SINK rg_sink FROM rg_mv WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'rw_rg_sink_output',
+  resource_group = 'default'
+) FORMAT PLAIN ENCODE JSON (
+  force_append_only = 'true'
+);
+
+statement ok
+FLUSH;
+
+query T
+SELECT resource_group FROM rw_catalog.rw_streaming_jobs WHERE name = 'rg_sink';
+----
+default
+
+statement ok
+CREATE SOURCE rg_sink_readback (
+  id int,
+  v varchar
+) WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'rw_rg_sink_output',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+query IT rowsort retry 30 backoff 1s
+SELECT id, v FROM rg_sink_readback;
+----
+1 a
+2 b
+3 c
+
+statement ok
+SET streaming_use_shared_source = false;
+
+statement error resource_group can only be specified for shared sources
+CREATE SOURCE rg_non_shared_src (
+  id int,
+  v varchar
+) WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'rw_rg_source_input',
+  scan.startup.mode = 'earliest',
+  resource_group = 'default'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+SET streaming_use_shared_source = true;
+
+statement error resource_group can only be specified for shared sources
+CREATE TEMPORARY SOURCE rg_temp_src (
+  id int,
+  v varchar
+) WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'rw_rg_source_input',
+  scan.startup.mode = 'earliest',
+  resource_group = 'default'
+) FORMAT PLAIN ENCODE JSON;
+
+statement error cloud.serverless_backfill_enabled is not a CREATE SOURCE option
+CREATE SOURCE rg_serverless_src (
+  id int,
+  v varchar
+) WITH (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'rw_rg_source_input',
+  scan.startup.mode = 'earliest',
+  cloud.serverless_backfill_enabled = true
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+DROP SOURCE rg_sink_readback;
+
+statement ok
+DROP SINK rg_sink;
+
+statement ok
+DROP INDEX rg_idx;
+
+statement ok
+DROP MATERIALIZED VIEW rg_mv;
+
+statement ok
+DROP SOURCE rg_src;
+
+statement ok
+SET streaming_use_shared_source TO DEFAULT;
+
+statement ok
+SET streaming_use_arrangement_backfill TO DEFAULT;
+
+statement ok
+SET sink_decouple TO DEFAULT;
+
+statement ok
+SET rw_implicit_flush TO DEFAULT;
+
+system ok
+rpk topic delete rw_rg_source_input || true
+
+system ok
+rpk topic delete rw_rg_sink_output || true

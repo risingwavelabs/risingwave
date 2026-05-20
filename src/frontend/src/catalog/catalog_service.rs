@@ -97,6 +97,7 @@ pub trait CatalogWriter: Send + Sync {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
+        serverless_backfill_resource_group: Option<String>,
     ) -> Result<()>;
 
     async fn replace_materialized_view(
@@ -130,6 +131,7 @@ pub trait CatalogWriter: Send + Sync {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()>;
 
@@ -137,6 +139,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()>;
 
@@ -145,6 +148,7 @@ pub trait CatalogWriter: Send + Sync {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()>;
 
@@ -349,6 +353,7 @@ impl CatalogWriter for CatalogWriterImpl {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         refresh_interval_sec: Option<u64>,
+        serverless_backfill_resource_group: Option<String>,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
@@ -360,6 +365,7 @@ impl CatalogWriter for CatalogWriterImpl {
                 resource_type,
                 if_not_exists,
                 refresh_interval_sec,
+                serverless_backfill_resource_group,
             )
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
@@ -398,11 +404,12 @@ impl CatalogWriter for CatalogWriterImpl {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_index(index, table, graph, if_not_exists)
+            .create_index(index, table, graph, resource_type, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -461,11 +468,12 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         source: PbSource,
         graph: Option<StreamFragmentGraph>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_source(source, graph, if_not_exists)
+            .create_source(source, graph, resource_type, if_not_exists)
             .await?;
         self.wait_version(version).await
     }
@@ -475,11 +483,12 @@ impl CatalogWriter for CatalogWriterImpl {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .create_sink(sink, graph, dependencies, if_not_exists)
+            .create_sink(sink, graph, dependencies, resource_type, if_not_exists)
             .await?;
         self.wait_version(version).await
     }

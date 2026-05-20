@@ -586,6 +586,8 @@ impl CatalogController {
             Option<String>,
             Option<StreamingParallelism>,
             Option<String>,
+            bool,
+            Option<String>,
         )>,
     > {
         let inner = self.inner.read().await;
@@ -597,11 +599,15 @@ impl CatalogController {
                 streaming_job::Column::AdaptiveParallelismStrategy,
                 streaming_job::Column::BackfillParallelism,
                 streaming_job::Column::BackfillAdaptiveParallelismStrategy,
+                streaming_job::Column::IsServerlessBackfill,
+                streaming_job::Column::SpecificResourceGroup,
             ])
             .into_tuple::<(
                 StreamingParallelism,
                 Option<String>,
                 Option<StreamingParallelism>,
+                Option<String>,
+                bool,
                 Option<String>,
             )>()
             .one(&inner.db)
@@ -651,11 +657,21 @@ impl CatalogController {
             .join(JoinType::InnerJoin, object::Relation::Table.def())
             .join(JoinType::InnerJoin, object::Relation::Database2.def())
             .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .column(object::Column::Oid)
             .column(database::Column::Name)
             .column(schema::Column::Name)
             .column(table::Column::Name)
-            .column(database::Column::ResourceGroup)
+            .column_as(
+                Expr::if_null(
+                    Expr::col((
+                        streaming_job::Entity,
+                        streaming_job::Column::SpecificResourceGroup,
+                    )),
+                    Expr::col((database::Entity, database::Column::ResourceGroup)),
+                ),
+                "resource_group",
+            )
             .column(table::Column::TableType)
             .into_tuple()
             .all(&inner.db)
@@ -672,11 +688,21 @@ impl CatalogController {
             .join(JoinType::InnerJoin, object::Relation::Source.def())
             .join(JoinType::InnerJoin, object::Relation::Database2.def())
             .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .column(object::Column::Oid)
             .column(database::Column::Name)
             .column(schema::Column::Name)
             .column(source::Column::Name)
-            .column(database::Column::ResourceGroup)
+            .column_as(
+                Expr::if_null(
+                    Expr::col((
+                        streaming_job::Entity,
+                        streaming_job::Column::SpecificResourceGroup,
+                    )),
+                    Expr::col((database::Entity, database::Column::ResourceGroup)),
+                ),
+                "resource_group",
+            )
             .into_tuple()
             .all(&inner.db)
             .await?)
@@ -692,11 +718,21 @@ impl CatalogController {
             .join(JoinType::InnerJoin, object::Relation::Sink.def())
             .join(JoinType::InnerJoin, object::Relation::Database2.def())
             .join(JoinType::InnerJoin, object::Relation::Schema2.def())
+            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .column(object::Column::Oid)
             .column(database::Column::Name)
             .column(schema::Column::Name)
             .column(sink::Column::Name)
-            .column(database::Column::ResourceGroup)
+            .column_as(
+                Expr::if_null(
+                    Expr::col((
+                        streaming_job::Entity,
+                        streaming_job::Column::SpecificResourceGroup,
+                    )),
+                    Expr::col((database::Entity, database::Column::ResourceGroup)),
+                ),
+                "resource_group",
+            )
             .into_tuple()
             .all(&inner.db)
             .await?)

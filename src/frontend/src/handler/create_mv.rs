@@ -52,6 +52,68 @@ use crate::{TableCatalog, WithOptions};
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
 pub const CLOUD_SERVERLESS_BACKFILL_ENABLED: &str = "cloud.serverless_backfill_enabled";
 
+pub(super) struct StreamingJobResourceGroupOption {
+    pub present: bool,
+    pub resource_type: streaming_job_resource_type::ResourceType,
+}
+
+pub(super) fn remove_streaming_job_resource_group_option(
+    with_options: &mut WithOptions,
+) -> StreamingJobResourceGroupOption {
+    let Some(group) = with_options.remove(RESOURCE_GROUP_KEY) else {
+        return StreamingJobResourceGroupOption {
+            present: false,
+            resource_type: streaming_job_resource_type::ResourceType::Regular(true),
+        };
+    };
+
+    StreamingJobResourceGroupOption {
+        present: true,
+        resource_type: streaming_job_resource_type::ResourceType::SpecificResourceGroup(group),
+    }
+}
+
+pub(super) fn check_resource_group_available(
+    resource_type: &streaming_job_resource_type::ResourceType,
+) -> Result<()> {
+    if let streaming_job_resource_type::ResourceType::SpecificResourceGroup(_) = resource_type {
+        risingwave_common::license::Feature::ResourceGroup.check_available()?;
+    }
+    Ok(())
+}
+
+pub(super) fn check_resource_group_arrangement_backfill(
+    session: &crate::session::SessionImpl,
+    resource_type: &streaming_job_resource_type::ResourceType,
+) -> Result<()> {
+    if matches!(
+        resource_type,
+        streaming_job_resource_type::ResourceType::SpecificResourceGroup(_)
+    ) && !session.config().streaming_use_arrangement_backfill()
+    {
+        return Err(RwError::from(ProtocolError(
+            "The session config arrangement backfill must be enabled to use the resource_group option"
+                .to_owned(),
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn reject_cloud_serverless_backfill_enabled(
+    with_options: &mut WithOptions,
+    statement: &str,
+) -> Result<()> {
+    if with_options
+        .remove(CLOUD_SERVERLESS_BACKFILL_ENABLED)
+        .is_some()
+    {
+        return Err(RwError::from(InvalidInputSyntax(format!(
+            "{CLOUD_SERVERLESS_BACKFILL_ENABLED} is not a {statement} option; serverless backfill is controlled by system/session configuration"
+        ))));
+    }
+    Ok(())
+}
+
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
         None
@@ -262,7 +324,14 @@ pub async fn handle_create_mv_bound(
         "CREATE MATERIALIZED VIEW",
     )?;
 
-    let (table, graph, dependencies, resource_type, refresh_interval_sec) = {
+    let (
+        table,
+        graph,
+        dependencies,
+        resource_type,
+        serverless_backfill_resource_group,
+        refresh_interval_sec,
+    ) = {
         gen_create_mv_graph(
             handler_args,
             name,
@@ -297,6 +366,7 @@ pub async fn handle_create_mv_bound(
             resource_type,
             if_not_exists,
             refresh_interval_sec,
+            serverless_backfill_resource_group,
         ),
         &session,
         "CREATE MATERIALIZED VIEW",
@@ -323,6 +393,7 @@ pub(crate) async fn gen_create_mv_graph(
     PbStreamFragmentGraph,
     HashSet<ObjectId>,
     streaming_job_resource_type::ResourceType,
+    Option<String>,
     Option<u64>,
 )> {
     let mut with_options = get_with_options(handler_args.clone());
@@ -337,22 +408,8 @@ pub(crate) async fn gen_create_mv_graph(
     let serverless_backfill_from_with = with_options
         .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
         .map(|value| value.parse::<bool>().unwrap_or(false));
-    let is_serverless_backfill = match serverless_backfill_from_with {
-        Some(value) => value,
-        None => {
-            if resource_group.is_some() {
-                false
-            } else {
-                handler_args.session.config().enable_serverless_backfill()
-            }
-        }
-    };
-
-    if resource_group.is_some() && is_serverless_backfill {
-        return Err(RwError::from(InvalidInputSyntax(
-            "Please do not specify serverless backfilling and resource group together".to_owned(),
-        )));
-    }
+    let is_serverless_backfill = serverless_backfill_from_with
+        .unwrap_or_else(|| handler_args.session.config().enable_serverless_backfill());
 
     if !with_options.is_empty() {
         // get other useful fields by `remove`, the logic here is to reject unknown options.
@@ -374,8 +431,7 @@ pub(crate) async fn gen_create_mv_graph(
         )));
     }
 
-    let resource_type = if is_serverless_backfill {
-        assert_eq!(resource_group, None);
+    let serverless_backfill_resource_group = if is_serverless_backfill {
         match provision_resource_group(sbc_addr).await {
             Err(e) => {
                 return Err(RwError::from(ProtocolError(format!(
@@ -388,11 +444,20 @@ pub(crate) async fn gen_create_mv_graph(
                     resource_group = group,
                     "provisioning serverless backfill resource group"
                 );
-                streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group)
+                Some(group)
             }
         }
-    } else if let Some(group) = resource_group {
+    } else {
+        None
+    };
+
+    let resource_type = if let Some(group) = resource_group {
         streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+    } else if let Some(group) = &serverless_backfill_resource_group {
+        // Preserve the legacy MV serverless-backfill wire representation when there is no
+        // steady-state SQL resource-group override. New meta nodes also read the split request
+        // field below; older meta nodes ignore that field but still understand this oneof arm.
+        streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group.clone())
     } else {
         streaming_job_resource_type::ResourceType::Regular(true)
     };
@@ -404,14 +469,7 @@ It only indicates the physical clustering of the data, which may improve the per
 "#.to_owned());
     }
 
-    if resource_type.resource_group().is_some()
-        && !context
-            .session_ctx()
-            .config()
-            .streaming_use_arrangement_backfill()
-    {
-        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
-    }
+    check_resource_group_arrangement_backfill(context.session_ctx(), &resource_type)?;
 
     let context: OptimizerContextRef = context.into();
     let session = context.session_ctx().as_ref();
@@ -456,6 +514,7 @@ It only indicates the physical clustering of the data, which may improve the per
         graph,
         dependencies,
         resource_type,
+        serverless_backfill_resource_group,
         refresh_interval_sec,
     ))
 }

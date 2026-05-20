@@ -34,6 +34,10 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
+use super::create_mv::{
+    check_resource_group_arrangement_backfill, check_resource_group_available,
+    reject_cloud_serverless_backfill_enabled, remove_streaming_job_resource_group_option,
+};
 use crate::TableCatalog;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
@@ -640,7 +644,7 @@ fn assemble_materialize(
 }
 
 pub async fn handle_create_index(
-    handler_args: HandlerArgs,
+    mut handler_args: HandlerArgs,
     if_not_exists: bool,
     index_name: ObjectName,
     table_name: ObjectName,
@@ -651,9 +655,29 @@ pub async fn handle_create_index(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    let (graph, index_table, index) = {
+    let (graph, index_table, index, resource_type) = {
         let (schema_name, table, index_table_name) =
             resolve_index_schema(&session, index_name, table_name)?;
+        let search_path = session.config().search_path();
+        let user_name = session.user_name();
+        let database = session.database();
+        let schema_path = SchemaPath::new(Some(&schema_name), &search_path, &user_name);
+        if let Ok((index, _)) = session
+            .env()
+            .catalog_reader()
+            .read_guard()
+            .get_any_index_by_name(&database, schema_path, &index_table_name)
+            && if_not_exists
+            && index.is_created()
+        {
+            return Ok(PgResponse::builder(StatementType::CREATE_INDEX)
+                .notice(format!(
+                    "relation \"{}\" already exists, skipping",
+                    index_table_name
+                ))
+                .into());
+        }
+
         let qualified_index_name = ObjectName(vec![
             Ident::from_real_value(&schema_name),
             Ident::from_real_value(&index_table_name),
@@ -665,6 +689,13 @@ pub async fn handle_create_index(
         )? {
             return Ok(resp);
         }
+
+        let resource_group_option =
+            remove_streaming_job_resource_group_option(&mut handler_args.with_options);
+        reject_cloud_serverless_backfill_enabled(&mut handler_args.with_options, "CREATE INDEX")?;
+        check_resource_group_available(&resource_group_option.resource_type)?;
+        check_resource_group_arrangement_backfill(&session, &resource_group_option.resource_type)?;
+        let resource_type = resource_group_option.resource_type;
 
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, index_table, index) = gen_create_index_plan(
@@ -680,7 +711,7 @@ pub async fn handle_create_index(
         )?;
         let graph = build_graph(plan, Some(GraphJobType::Index))?;
 
-        (graph, index_table, index)
+        (graph, index_table, index, resource_type)
     };
 
     tracing::trace!(
@@ -702,7 +733,13 @@ pub async fn handle_create_index(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_index(index, index_table.to_prost(), graph, if_not_exists)
+        .create_index(
+            index,
+            index_table.to_prost(),
+            graph,
+            resource_type,
+            if_not_exists,
+        )
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))

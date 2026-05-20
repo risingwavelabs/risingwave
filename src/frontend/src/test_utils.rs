@@ -309,6 +309,7 @@ impl CatalogWriter for MockCatalogWriter {
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
         _refresh_interval_sec: Option<u64>,
+        _serverless_backfill_resource_group: Option<String>,
     ) -> Result<()> {
         table.id = self.gen_id();
         table.stream_job_status = PbStreamJobStatus::Created as _;
@@ -359,6 +360,7 @@ impl CatalogWriter for MockCatalogWriter {
             streaming_job_resource_type::ResourceType::Regular(true),
             if_not_exists,
             None,
+            None,
         )
         .await?;
         Ok(())
@@ -386,6 +388,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         source: PbSource,
         _graph: Option<StreamFragmentGraph>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
@@ -396,6 +399,7 @@ impl CatalogWriter for MockCatalogWriter {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         let sink_id = self.create_sink_inner(sink, graph)?;
@@ -412,6 +416,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut index: PbIndex,
         mut index_table: PbTable,
         _graph: StreamFragmentGraph,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         index_table.id = self.gen_id();

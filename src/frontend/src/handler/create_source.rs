@@ -85,6 +85,10 @@ use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
 
 use super::RwPgResponse;
+use super::create_mv::{
+    check_resource_group_arrangement_backfill, check_resource_group_available,
+    reject_cloud_serverless_backfill_enabled, remove_streaming_job_resource_group_option,
+};
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::catalog::source_catalog::SourceCatalog;
@@ -1147,11 +1151,26 @@ pub async fn handle_create_source(
         )));
     }
 
+    let resource_group_option =
+        remove_streaming_job_resource_group_option(&mut handler_args.with_options);
+    reject_cloud_serverless_backfill_enabled(&mut handler_args.with_options, "CREATE SOURCE")?;
+
     let format_encode = stmt.format_encode.into_v2_with_warning();
     let (with_properties, refresh_mode) =
         bind_connector_props(&handler_args, &format_encode, true)?;
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
+    if resource_group_option.present && (stmt.temporary || !create_source_type.is_shared()) {
+        return Err(RwError::from(InvalidInputSyntax(
+            "resource_group can only be specified for shared sources".to_owned(),
+        )));
+    }
+
+    if create_source_type.is_shared() {
+        check_resource_group_available(&resource_group_option.resource_type)?;
+        check_resource_group_arrangement_backfill(&session, &resource_group_option.resource_type)?;
+    }
+
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         &session,
         &format_encode,
@@ -1207,12 +1226,22 @@ pub async fn handle_create_source(
     if create_source_type.is_shared() {
         let graph = generate_stream_graph_for_source(handler_args, source_catalog)?;
         catalog_writer
-            .create_source(source, Some(graph), stmt.if_not_exists)
+            .create_source(
+                source,
+                Some(graph),
+                resource_group_option.resource_type,
+                stmt.if_not_exists,
+            )
             .await?;
     } else {
         // For other sources we don't create a streaming job
         catalog_writer
-            .create_source(source, None, stmt.if_not_exists)
+            .create_source(
+                source,
+                None,
+                resource_group_option.resource_type,
+                stmt.if_not_exists,
+            )
             .await?;
     }
 
