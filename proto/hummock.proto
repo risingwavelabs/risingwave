@@ -882,6 +882,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 max_kv_count_for_xor16 = 32;
       // Max bytes for vnode key-range hints recorded into each SST.
       uint64 max_vnode_key_range_bytes = 33;
+      // Reset compression algorithm for all levels to defaults according to group max_level.
+      bool reset_compression_algorithm = 34;
     }
   }
   repeated uint64 compaction_group_ids = 1;

@@ -182,6 +182,7 @@ impl CatalogController {
         resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: Option<StreamingParallelism>,
         backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+        refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
@@ -208,6 +209,7 @@ impl CatalogController {
             max_parallelism: max_parallelism as _,
             specific_resource_group,
             is_serverless_backfill,
+            refresh_interval_sec: refresh_interval_sec.map(|s| s as i64),
         };
         let job = model.clone().into_active_model();
         StreamingJobModel::insert(job).exec(txn).await?;
@@ -220,6 +222,7 @@ impl CatalogController {
     ///
     /// Some of the fields in the given streaming job are placeholders, which will
     /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
+    #[expect(clippy::too_many_arguments)]
     #[await_tree::instrument]
     pub async fn create_job_catalog(
         &self,
@@ -232,6 +235,7 @@ impl CatalogController {
         backfill_parallelism: &Option<Parallelism>,
         adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+        refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -292,6 +296,22 @@ impl CatalogController {
                     "some dependent relations are being altered",
                 ));
             }
+
+            // Check if any dependency is a batch refresh job.
+            // Streaming on batch refresh materialized views is not supported.
+            let batch_refresh_cnt = StreamingJobModel::find()
+                .filter(
+                    streaming_job::Column::JobId
+                        .is_in(dependencies.iter().map(|id| JobId::new(id.as_raw_id())))
+                        .and(streaming_job::Column::RefreshIntervalSec.is_not_null()),
+                )
+                .count(&txn)
+                .await?;
+            if batch_refresh_cnt != 0 {
+                return Err(MetaError::permission_denied(
+                    "creating streaming jobs on batch refresh materialized views is not supported",
+                ));
+            }
         }
 
         let streaming_job_model = match streaming_job {
@@ -310,6 +330,7 @@ impl CatalogController {
                     resource_type,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
+                    refresh_interval_sec,
                 )
                 .await?;
                 table.id = streaming_job_model.job_id.as_mv_table_id();
@@ -343,6 +364,7 @@ impl CatalogController {
                     resource_type,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 sink.id = streaming_job_model.job_id.as_sink_id();
@@ -365,6 +387,7 @@ impl CatalogController {
                     resource_type,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 let job_id = streaming_job_model.job_id;
@@ -429,6 +452,7 @@ impl CatalogController {
                     resource_type,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -466,6 +490,7 @@ impl CatalogController {
                     resource_type,
                     backfill_parallelism.clone(),
                     backfill_adaptive_parallelism_strategy,
+                    None, // refresh_interval_sec: only for MV
                 )
                 .await?;
                 src.id = streaming_job_model.job_id.as_shared_source_id();
@@ -1053,6 +1078,27 @@ impl CatalogController {
             ));
         }
 
+        // Check if any dependent job is a batch refresh job.
+        // Replace table is not supported when a batch refresh MV depends on it.
+        let batch_refresh_dep_cnt = ObjectDependency::find()
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(
+                object_dependency::Column::Oid
+                    .eq(id)
+                    .and(streaming_job::Column::RefreshIntervalSec.is_not_null()),
+            )
+            .count(&txn)
+            .await?;
+        if batch_refresh_dep_cnt != 0 {
+            return Err(MetaError::permission_denied(
+                "replacing a table with dependent batch refresh materialized views is not supported",
+            ));
+        }
+
         // 3. check parallelism.
         let original_job = StreamingJobModel::find_by_id(id)
             .one(&txn)
@@ -1100,6 +1146,7 @@ impl CatalogController {
             // would render actors at the backfill parallelism and never recover to steady-state.
             None,
             None,
+            None, // refresh_interval_sec: not applicable for replace jobs
         )
         .await?;
 

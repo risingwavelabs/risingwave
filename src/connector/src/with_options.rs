@@ -164,12 +164,6 @@ pub trait WithPropertiesExt: Get + GetKeyIter + Sized {
         self.is_cdc_connector() && ExternalCdcTableType::from_properties(self).can_backfill()
     }
 
-    /// Tables with MySQL and PostgreSQL connectors are maintained for backward compatibility.
-    /// The newly added SQL Server CDC connector is only supported when created as shared.
-    fn is_shareable_only_cdc_connector(&self) -> bool {
-        self.is_cdc_connector() && ExternalCdcTableType::from_properties(self).shareable_only()
-    }
-
     fn enable_transaction_metadata(&self) -> bool {
         ExternalCdcTableType::from_properties(self).enable_transaction_metadata()
     }

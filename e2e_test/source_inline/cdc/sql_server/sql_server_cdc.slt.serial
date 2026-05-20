@@ -63,7 +63,7 @@ CREATE SOURCE mssql_source WITH (
     database.name = 'wrong_mydb',
 );
 
-statement error Protocol error: connector sqlserver-cdc does not support `CREATE TABLE`, please use `CREATE SOURCE` instead
+statement error directly creating a CDC table for connector sqlserver-cdc is no longer supported
 CREATE TABLE orders (
   order_id INT PRIMARY KEY,
   order_date BIGINT,
@@ -81,7 +81,7 @@ CREATE TABLE orders (
   database.name = '${SQLCMDDBNAME}',
 );
 
-statement error Protocol error: connector sqlserver-cdc does not support `CREATE TABLE`, please use `CREATE SOURCE` instead
+statement error directly creating a CDC table for connector sqlserver-cdc is no longer supported
 CREATE TABLE single_type (
   id INT,
   c_time time,
@@ -96,7 +96,7 @@ CREATE TABLE single_type (
   database.name = '${SQLCMDDBNAME}',
 );
 
-statement error Protocol error: connector sqlserver-cdc does not support `CREATE TABLE`, please use `CREATE SOURCE` instead
+statement error directly creating a CDC table for connector sqlserver-cdc is no longer supported
 CREATE TABLE sqlserver_all_data_types (
   id INT PRIMARY KEY,
   c_bit BOOLEAN,
