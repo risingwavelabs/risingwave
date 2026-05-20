@@ -211,30 +211,37 @@ pub struct KafkaConnectionProps {
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
     /// Path to CA certificate file for verifying the broker's key.
     #[serde(rename = "properties.ssl.ca.location")]
+    #[with_option(allow_alter_on_fly)]
     ssl_ca_location: Option<String>,
 
     /// CA certificate string (PEM format) for verifying the broker's key.
     #[serde(rename = "properties.ssl.ca.pem")]
+    #[with_option(allow_alter_on_fly)]
     ssl_ca_pem: Option<String>,
 
     /// Path to client's certificate file (PEM).
     #[serde(rename = "properties.ssl.certificate.location")]
+    #[with_option(allow_alter_on_fly)]
     ssl_certificate_location: Option<String>,
 
     /// Client's public key string (PEM format) used for authentication.
     #[serde(rename = "properties.ssl.certificate.pem")]
+    #[with_option(allow_alter_on_fly)]
     ssl_certificate_pem: Option<String>,
 
     /// Path to client's private key file (PEM).
     #[serde(rename = "properties.ssl.key.location")]
+    #[with_option(allow_alter_on_fly)]
     ssl_key_location: Option<String>,
 
     /// Client's private key string (PEM format) used for authentication.
     #[serde(rename = "properties.ssl.key.pem")]
+    #[with_option(allow_alter_on_fly)]
     ssl_key_pem: Option<String>,
 
     /// Passphrase of client's private key.
     #[serde(rename = "properties.ssl.key.password")]
+    #[with_option(allow_alter_on_fly)]
     ssl_key_password: Option<String>,
 
     /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
