@@ -2,6 +2,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+SET streaming_parallelism = 1;
+
+statement ok
 create table stream(id1 int, a1 int, b1 int, v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '10' SECOND) APPEND ONLY;
 
 # FIXME. If we don't insert at first, it would cause a panic when create eowc_mv.
@@ -63,3 +66,6 @@ drop table stream cascade;
 
 statement ok
 drop table version cascade;
+
+statement ok
+SET streaming_parallelism = 0;
