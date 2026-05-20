@@ -73,7 +73,7 @@ impl NotificationClient for MockNotificationClient {
         };
 
         self.notification_manager
-            .notify_snapshot(worker_key, subscribe_type, meta_snapshot);
+            .notify_snapshot(tx.clone(), meta_snapshot);
 
         Ok(TestChannel(rx))
     }
