@@ -84,10 +84,12 @@ where
     session: Option<Arc<SM::Session>>,
 
     result_cache: HashMap<String, ResultCache<<SM::Session as Session>::ValuesStream>>,
-    unnamed_prepare_statement: Option<<SM::Session as Session>::PreparedStatement>,
-    prepare_statement_store: HashMap<String, <SM::Session as Session>::PreparedStatement>,
-    unnamed_portal: Option<<SM::Session as Session>::Portal>,
-    portal_store: HashMap<String, <SM::Session as Session>::Portal>,
+    unnamed_prepare_statement:
+        Option<PreparedStatementData<<SM::Session as Session>::PreparedStatement>>,
+    prepare_statement_store:
+        HashMap<String, PreparedStatementData<<SM::Session as Session>::PreparedStatement>>,
+    unnamed_portal: Option<PortalData<<SM::Session as Session>::Portal>>,
+    portal_store: HashMap<String, PortalData<<SM::Session as Session>::Portal>>,
     // Used to store the dependency of portal and prepare statement.
     // When we close a prepare statement, we need to close all the portals that depend on it.
     statement_portal_dependency: HashMap<String, Vec<String>>,
@@ -173,6 +175,18 @@ where
 enum PgProtocolState {
     Startup,
     Regular,
+}
+
+#[derive(Clone)]
+struct PreparedStatementData<S> {
+    statement: S,
+    sql: Arc<str>,
+}
+
+#[derive(Clone)]
+struct PortalData<P> {
+    portal: P,
+    sql: Arc<str>,
 }
 
 /// Truncate 0 from C string in Bytes and stringify it (returns slice, no allocations).
@@ -354,10 +368,21 @@ where
             sql = tracing::field::Empty,
             user = tracing::field::Empty,
         );
-        if let Ok(sql) = msg.get_sql()
-            && let Some(sql) = sql
-        {
-            record_sql_in_span(sql, self.redact_sql_option_keywords.clone(), &mut span);
+        match msg {
+            FeMessage::Execute(execute_msg) => {
+                if let Ok(portal_name) = cstr_to_str(&execute_msg.portal_name)
+                    && let Ok(sql) = self.get_portal_sql(portal_name)
+                {
+                    record_sql_in_span(&sql, self.redact_sql_option_keywords.clone(), &mut span);
+                }
+            }
+            _ => {
+                if let Ok(sql) = msg.get_sql()
+                    && let Some(sql) = sql
+                {
+                    record_sql_in_span(sql, self.redact_sql_option_keywords.clone(), &mut span);
+                }
+            }
         }
         if let Some(current_session) = self.session.as_ref() {
             record_user_in_span(&current_session.user(), &mut span);
@@ -988,7 +1013,6 @@ where
         let stmt = {
             let stmts = Parser::parse_sql(&sql)
                 .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
-            drop(sql);
             if stmts.len() > 1 {
                 return Err(PsqlError::ExtendedPrepareError(
                     "Only one statement is allowed in extended query mode".into(),
@@ -1017,6 +1041,10 @@ where
             .parse(stmt, param_types)
             .await
             .map_err(|e| PsqlError::ExtendedPrepareError(e.into()))?;
+        let prepare_statement = PreparedStatementData {
+            statement: prepare_statement,
+            sql,
+        };
 
         if statement_name.is_empty() {
             self.unnamed_prepare_statement.replace(prepare_statement);
@@ -1043,7 +1071,7 @@ where
             return Err(PsqlError::Uncategorized("Duplicated portal name".into()));
         }
 
-        let prepare_statement = self.get_statement(&statement_name)?;
+        let prepare_statement = self.get_statement_data(&statement_name)?.clone();
 
         let result_formats = msg
             .result_format_codes
@@ -1057,8 +1085,17 @@ where
             .try_collect()?;
 
         let portal = session
-            .bind(prepare_statement, msg.params, param_formats, result_formats)
+            .bind(
+                prepare_statement.statement,
+                msg.params,
+                param_formats,
+                result_formats,
+            )
             .map_err(|e| PsqlError::Uncategorized(e.into()))?;
+        let portal = PortalData {
+            portal,
+            sql: prepare_statement.sql,
+        };
 
         if portal_name.is_empty() {
             self.result_cache.remove(&portal_name);
@@ -1098,8 +1135,8 @@ where
                 }
             }
             _ => {
-                let portal = self.get_portal(&portal_name)?;
-                let sql = format!("{}", portal);
+                let portal = self.get_portal_data(&portal_name)?.clone();
+                let sql = format!("{}", portal.portal);
                 let truncated_sql =
                     get_redacted_and_truncated_sql(&sql, self.redact_sql_option_keywords.clone());
                 drop(sql);
@@ -1107,7 +1144,7 @@ where
                 session.check_idle_in_transaction_timeout()?;
                 // Store only truncated SQL in context to prevent excessive memory usage from large SQL.
                 let _exec_context_guard = session.init_exec_context(truncated_sql.into());
-                let result = session.clone().execute(portal).await;
+                let result = session.clone().execute(portal.portal).await;
 
                 let pg_response = result.map_err(|e| PsqlError::ExtendedExecuteError(e.into()))?;
                 let mut result_cache = ResultCache::new(pg_response);
@@ -1202,20 +1239,21 @@ where
     }
 
     fn get_portal(&self, portal_name: &str) -> PsqlResult<<SM::Session as Session>::Portal> {
+        Ok(self.get_portal_data(portal_name)?.portal.clone())
+    }
+
+    fn get_portal_data(
+        &self,
+        portal_name: &str,
+    ) -> PsqlResult<&PortalData<<SM::Session as Session>::Portal>> {
         if portal_name.is_empty() {
-            Ok(self
-                .unnamed_portal
+            self.unnamed_portal
                 .as_ref()
-                .ok_or_else(|| PsqlError::Uncategorized("unnamed portal not found".into()))?
-                .clone())
+                .ok_or_else(|| PsqlError::Uncategorized("unnamed portal not found".into()))
         } else {
-            Ok(self
-                .portal_store
-                .get(portal_name)
-                .ok_or_else(|| {
-                    PsqlError::Uncategorized(format!("Portal {} not found", portal_name).into())
-                })?
-                .clone())
+            self.portal_store.get(portal_name).ok_or_else(|| {
+                PsqlError::Uncategorized(format!("Portal {} not found", portal_name).into())
+            })
         }
     }
 
@@ -1223,25 +1261,30 @@ where
         &self,
         statement_name: &str,
     ) -> PsqlResult<<SM::Session as Session>::PreparedStatement> {
+        Ok(self.get_statement_data(statement_name)?.statement.clone())
+    }
+
+    fn get_statement_data(
+        &self,
+        statement_name: &str,
+    ) -> PsqlResult<&PreparedStatementData<<SM::Session as Session>::PreparedStatement>> {
         if statement_name.is_empty() {
-            Ok(self
-                .unnamed_prepare_statement
-                .as_ref()
-                .ok_or_else(|| {
-                    PsqlError::Uncategorized("unnamed prepare statement not found".into())
-                })?
-                .clone())
+            self.unnamed_prepare_statement.as_ref().ok_or_else(|| {
+                PsqlError::Uncategorized("unnamed prepare statement not found".into())
+            })
         } else {
-            Ok(self
-                .prepare_statement_store
+            self.prepare_statement_store
                 .get(statement_name)
                 .ok_or_else(|| {
                     PsqlError::Uncategorized(
                         format!("Prepare statement {} not found", statement_name).into(),
                     )
-                })?
-                .clone())
+                })
         }
+    }
+
+    fn get_portal_sql(&self, portal_name: &str) -> PsqlResult<Arc<str>> {
+        Ok(self.get_portal_data(portal_name)?.sql.clone())
     }
 }
 
