@@ -152,8 +152,22 @@ pub(crate) fn flush_pending_iceberg_task_reports(
 #[cfg(test)]
 mod tests {
     use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request;
+    use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::Event;
 
     use super::*;
+
+    fn expect_report_event(
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<SubscribeIcebergCompactionEventRequest>,
+        expected_task_id: u64,
+        expected_sink_id: u32,
+    ) {
+        let request = rx.try_recv().expect("report should be sent");
+        let Some(Event::ReportTask(report)) = request.event else {
+            panic!("expected report task event");
+        };
+        assert_eq!(report.task_id, expected_task_id);
+        assert_eq!(report.sink_id, expected_sink_id);
+    }
 
     #[test]
     fn test_send_iceberg_task_report_returns_payload_on_send_failure() {
@@ -169,9 +183,100 @@ mod tests {
     }
 
     #[test]
+    fn test_send_or_buffer_sends_immediately_when_stream_is_open() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut pending_reports = VecDeque::new();
+
+        let result = send_or_buffer_iceberg_task_report(
+            &tx,
+            &mut pending_reports,
+            build_iceberg_task_report(7, 9, None),
+        );
+
+        assert!(matches!(result, ReportSendResult::Sent));
+        assert!(pending_reports.is_empty());
+        expect_report_event(&mut rx, 7, 9);
+    }
+
+    #[test]
+    fn test_send_or_buffer_keeps_report_when_stream_is_closed() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(rx);
+        let mut pending_reports = VecDeque::new();
+
+        let result = send_or_buffer_iceberg_task_report(
+            &tx,
+            &mut pending_reports,
+            build_iceberg_task_report(7, 9, Some("closed".to_owned())),
+        );
+
+        assert!(matches!(result, ReportSendResult::RestartStream));
+        assert_eq!(pending_reports.len(), 1);
+        let report = pending_reports.pop_front().unwrap();
+        assert_eq!(report.task_id, 7);
+        assert_eq!(report.sink_id, 9);
+        assert_eq!(report.error_message.as_deref(), Some("closed"));
+    }
+
+    #[test]
+    fn test_flush_pending_reports_preserves_fifo_order() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut pending_reports = VecDeque::from([
+            build_iceberg_task_report(7, 9, None),
+            build_iceberg_task_report(8, 9, None),
+            build_iceberg_task_report(9, 10, None),
+        ]);
+
+        let result = flush_pending_iceberg_task_reports(&tx, &mut pending_reports);
+
+        assert!(matches!(result, ReportSendResult::Sent));
+        assert!(pending_reports.is_empty());
+        expect_report_event(&mut rx, 7, 9);
+        expect_report_event(&mut rx, 8, 9);
+        expect_report_event(&mut rx, 9, 10);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn test_flush_pending_reports_keeps_unsent_report_on_failure() {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        drop(rx);
+        let mut pending_reports = VecDeque::from([
+            build_iceberg_task_report(7, 9, None),
+            build_iceberg_task_report(8, 9, None),
+        ]);
+
+        let result = flush_pending_iceberg_task_reports(&tx, &mut pending_reports);
+
+        assert!(matches!(result, ReportSendResult::RestartStream));
+        assert_eq!(pending_reports.len(), 2);
+        assert_eq!(pending_reports[0].task_id, 7);
+        assert_eq!(pending_reports[1].task_id, 8);
+    }
+
+    #[test]
     fn test_build_iceberg_task_result_partial_enqueue_is_success_if_admitted_plan_succeeds() {
         let mut tracker = IcebergTaskTracker::new(9, 1);
+        assert!(!tracker.is_finished());
         tracker.record_completion(None);
+        assert!(tracker.is_finished());
+
+        let report = tracker.into_report(7);
+
+        assert_eq!(
+            report.status,
+            subscribe_iceberg_compaction_event_request::report_task::Status::Success as i32
+        );
+        assert!(report.error_message.is_none());
+    }
+
+    #[test]
+    fn test_build_iceberg_task_result_succeeds_if_any_admitted_plan_succeeds() {
+        let mut tracker = IcebergTaskTracker::new(9, 2);
+        tracker.record_completion(Some("first failure".to_owned()));
+        assert!(!tracker.is_finished());
+        tracker.record_completion(None);
+        assert!(tracker.is_finished());
 
         let report = tracker.into_report(7);
 
