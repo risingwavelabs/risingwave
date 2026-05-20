@@ -55,15 +55,18 @@ pub enum LocalNotification {
 }
 
 #[derive(Debug)]
-struct Target {
-    subscribe_type: SubscribeType,
-    // `None` indicates sending to all subscribers of `subscribe_type`.
-    worker_key: Option<WorkerKey>,
+enum Target {
+    Subscribers {
+        subscribe_type: SubscribeType,
+        // `None` indicates sending to all subscribers of `subscribe_type`.
+        worker_key: Option<WorkerKey>,
+    },
+    Direct(UnboundedSender<Notification>),
 }
 
 impl From<SubscribeType> for Target {
     fn from(value: SubscribeType) -> Self {
-        Self {
+        Self::Subscribers {
             subscribe_type: value,
             worker_key: None,
         }
@@ -161,15 +164,11 @@ impl NotificationManager {
 
     pub fn notify_snapshot(
         &self,
-        worker_key: WorkerKey,
-        subscribe_type: SubscribeType,
+        sender: UnboundedSender<Notification>,
         meta_snapshot: MetaSnapshot,
     ) {
         self.notify_without_version(
-            Target {
-                subscribe_type,
-                worker_key: Some(worker_key),
-            },
+            Target::Direct(sender),
             Operation::Snapshot,
             Info::Snapshot(meta_snapshot),
         )
@@ -348,29 +347,41 @@ impl NotificationManagerCore {
             };
         }
 
-        let senders = self.senders_of(target.subscribe_type);
+        match target {
+            Target::Subscribers {
+                subscribe_type,
+                worker_key,
+            } => {
+                let senders = self.senders_of(subscribe_type);
 
-        if let Some(worker_key) = target.worker_key {
-            match senders.entry(worker_key.clone()) {
-                Entry::Occupied(entry) => {
-                    let _ = entry.get().send(Ok(response)).inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
-                        entry.remove_entry();
+                if let Some(worker_key) = worker_key {
+                    match senders.entry(worker_key.clone()) {
+                        Entry::Occupied(entry) => {
+                            let _ = entry.get().send(Ok(response)).inspect_err(|err| {
+                                warn_send_failure!(subscribe_type, &worker_key, err.as_report());
+                                entry.remove_entry();
+                            });
+                        }
+                        Entry::Vacant(_) => {
+                            tracing::warn!("Failed to find notification sender of {:?}", worker_key)
+                        }
+                    }
+                } else {
+                    senders.retain(|worker_key, sender| {
+                        sender
+                            .send(Ok(response.clone()))
+                            .inspect_err(|err| {
+                                warn_send_failure!(subscribe_type, &worker_key, err.as_report());
+                            })
+                            .is_ok()
                     });
                 }
-                Entry::Vacant(_) => {
-                    tracing::warn!("Failed to find notification sender of {:?}", worker_key)
-                }
             }
-        } else {
-            senders.retain(|worker_key, sender| {
-                sender
-                    .send(Ok(response.clone()))
-                    .inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
-                    })
-                    .is_ok()
-            });
+            Target::Direct(sender) => {
+                let _ = sender.send(Ok(response)).inspect_err(|err| {
+                    tracing::warn!("Failed to notify direct subscriber: {}", err.as_report());
+                });
+            }
         }
     }
 
@@ -407,14 +418,10 @@ mod tests {
         let (tx1, mut rx1) = mpsc::unbounded_channel();
         let (tx2, mut rx2) = mpsc::unbounded_channel();
         let (tx3, mut rx3) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1);
+        mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1.clone());
         mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), tx2);
         mgr.insert_sender(SubscribeType::Frontend, worker_key2, tx3);
-        mgr.notify_snapshot(
-            worker_key1.clone(),
-            SubscribeType::Hummock,
-            MetaSnapshot::default(),
-        );
+        mgr.notify_snapshot(tx1.clone(), MetaSnapshot::default());
         assert!(rx1.recv().await.is_some());
         assert!(rx2.try_recv().is_err());
         assert!(rx3.try_recv().is_err());
@@ -424,6 +431,29 @@ mod tests {
         assert!(rx1.try_recv().is_err());
         assert!(rx2.recv().await.is_some());
         assert!(rx3.recv().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_uses_original_sender_after_resubscribe() {
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let worker_key = WorkerKey(HostAddress {
+            host: "a".to_owned(),
+            port: 1,
+        });
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Hummock, worker_key.clone(), tx1.clone());
+        mgr.notify_snapshot(tx1, MetaSnapshot::default());
+
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Hummock, worker_key, tx2);
+
+        assert!(rx1.recv().await.is_some());
+        assert!(rx2.try_recv().is_err());
+
+        mgr.notify_hummock(Operation::Add, Info::Database(Default::default()))
+            .await;
+        assert!(rx1.try_recv().is_err());
+        assert!(rx2.recv().await.is_some());
     }
 
     #[tokio::test]
