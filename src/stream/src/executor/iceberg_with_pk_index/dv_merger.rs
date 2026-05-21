@@ -110,9 +110,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeSet, HashMap};
+    use std::collections::BTreeSet;
     use std::sync::{Arc, Mutex};
 
+    use hashbrown::HashMap;
     use risingwave_common::array::{Array, ArrayBuilder, I64ArrayBuilder, Op, Utf8ArrayBuilder};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
@@ -163,7 +164,7 @@ mod tests {
             self.existing_dvs
                 .lock()
                 .unwrap()
-                .insert(file_path.to_string(), positions);
+                .insert(file_path.to_owned(), positions);
             self
         }
     }
@@ -174,7 +175,7 @@ mod tests {
             self.pending_dvs
                 .lock()
                 .unwrap()
-                .entry(path.to_string())
+                .entry_ref(path)
                 .or_default()
                 .insert(pos);
             Ok(())

@@ -326,7 +326,7 @@ mod tests {
     impl IcebergWriterMock {
         fn new(file_path: &str) -> Self {
             Self {
-                file_path: file_path.to_string(),
+                file_path: file_path.to_owned(),
                 next_offset: 0,
                 written_chunks: Arc::new(Mutex::new(Vec::new())),
             }
