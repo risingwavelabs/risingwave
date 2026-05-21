@@ -1021,13 +1021,12 @@ fn derive_with_options_for_cdc_table(
                 return Ok((with_options, external_table_name));
             }
             POSTGRES_CDC_CONNECTOR => {
-                let (schema_name, table_name) = external_table_name
-                    .split_once('.')
-                    .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'"))?;
+                let (schema_name, table_name) =
+                    parse_postgres_cdc_external_table_name(&external_table_name)?;
 
                 // insert 'schema.name' into connect properties
-                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
-                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name);
+                with_options.insert(TABLE_NAME_KEY.into(), table_name);
                 // Return original external_table_name unchanged for Postgres
                 return Ok((with_options, external_table_name));
             }
@@ -1104,6 +1103,84 @@ fn derive_with_options_for_cdc_table(
         };
     }
     unreachable!("All valid CDC connectors should have returned by now")
+}
+
+/// Parse the schema/table name from the CDC `TABLE` clause.
+///
+/// Column names do not need the same parsing here: wildcard schema derivation reads
+/// them from PostgreSQL catalogs after the exact table has been identified.
+fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(String, String)> {
+    let mut parts = vec![];
+    let mut current = String::new();
+    let mut chars = external_table_name.chars().peekable();
+    let mut in_quote = false;
+    let mut just_closed_quote = false;
+
+    while let Some(ch) = chars.next() {
+        if in_quote {
+            if ch == '"' {
+                if chars.peek() == Some(&'"') {
+                    current.push('"');
+                    chars.next();
+                } else {
+                    in_quote = false;
+                    just_closed_quote = true;
+                }
+            } else {
+                current.push(ch);
+            }
+        } else {
+            match ch {
+                '.' => {
+                    if current.is_empty() {
+                        return Err(anyhow!(
+                            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                            external_table_name
+                        )
+                        .into());
+                    }
+                    parts.push(std::mem::take(&mut current));
+                    just_closed_quote = false;
+                }
+                '"' if current.is_empty() => {
+                    in_quote = true;
+                }
+                '"' => {
+                    return Err(anyhow!(
+                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                        external_table_name
+                    )
+                    .into());
+                }
+                _ if just_closed_quote => {
+                    return Err(anyhow!(
+                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                        external_table_name
+                    )
+                    .into());
+                }
+                _ => current.push(ch),
+            }
+        }
+    }
+
+    if in_quote || current.is_empty() {
+        return Err(anyhow!(
+            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+            external_table_name
+        )
+        .into());
+    }
+    parts.push(current);
+
+    if let [schema_name, table_name] = parts.as_slice() {
+        Ok((schema_name.clone(), table_name.clone()))
+    } else {
+        Err(
+            anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'")
+                .into(),
+        )
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2985,6 +3062,39 @@ mod tests {
                 .contains("only NULL column option is supported for webhook tables"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn test_parse_postgres_cdc_external_table_name() {
+        for (input, expected) in [
+            ("public.Note", ("public", "Note")),
+            ("public.\"Note\"", ("public", "Note")),
+            (
+                "\"Mixed.Schema\".\"Note.Table\"",
+                ("Mixed.Schema", "Note.Table"),
+            ),
+            ("public.\"Note\"\"Archive\"", ("public", "Note\"Archive")),
+        ] {
+            assert_eq!(
+                parse_postgres_cdc_external_table_name(input).unwrap(),
+                (expected.0.to_owned(), expected.1.to_owned()),
+                "input: {input}"
+            );
+        }
+
+        for input in [
+            "Note",
+            "public.",
+            ".Note",
+            "public.\"Note",
+            "public.\"Note\"Archive",
+            "public.Note.Archive",
+        ] {
+            assert!(
+                parse_postgres_cdc_external_table_name(input).is_err(),
+                "input should be rejected: {input}"
+            );
+        }
     }
 
     #[test]
