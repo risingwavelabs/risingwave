@@ -565,7 +565,7 @@ pub fn start(
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),
                 frontend_client_config: config.meta.developer.frontend_client_config.clone(),
-                redact_sql_option_keywords: Arc::new(
+                redact_sql_sensitive_keywords: Arc::new(
                     config
                         .batch
                         .redact_sql_option_keywords

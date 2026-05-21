@@ -242,7 +242,7 @@ pub fn start(
 
         let session_mgr = Arc::new(SessionManagerImpl::new(opts).await.unwrap());
         SESSION_MANAGER.get_or_init(|| session_mgr.clone());
-        let redact_sql_option_keywords = Arc::new(
+        let redact_sql_sensitive_keywords = Arc::new(
             session_mgr
                 .env()
                 .batch_config()
@@ -267,7 +267,7 @@ pub fn start(
             session_mgr.clone(),
             ConnectionContext {
                 tls_config,
-                redact_sql_option_keywords: Some(redact_sql_option_keywords),
+                redact_sql_sensitive_keywords: Some(redact_sql_sensitive_keywords),
                 message_memory_manager,
             },
             shutdown,

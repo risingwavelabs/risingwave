@@ -602,7 +602,7 @@ mod tests {
                 Arc::new(session_mgr),
                 ConnectionContext {
                     tls_config: None,
-                    redact_sql_option_keywords: None,
+                    redact_sql_sensitive_keywords: None,
                     message_memory_manager: MessageMemoryManager::new(u64::MAX, u64::MAX, u64::MAX)
                         .into(),
                 },

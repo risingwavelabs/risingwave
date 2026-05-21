@@ -35,7 +35,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::EventLog;
 use risingwave_pb::meta::event_log::Event;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
+use risingwave_sqlparser::ast::RedactSqlSensitiveKeywordsRef;
 use risingwave_sqlparser::parser::Parser;
 use serde_json::json;
 use thiserror_ext::AsReport;
@@ -58,7 +58,7 @@ pub struct DiagnoseCommand {
     event_log_manager: EventLogManagerRef,
     prometheus_client: Option<prometheus_http_query::Client>,
     prometheus_selector: String,
-    redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
+    redact_sql_sensitive_keywords: RedactSqlSensitiveKeywordsRef,
     system_params_controller: SystemParamsControllerRef,
 }
 
@@ -71,7 +71,7 @@ impl DiagnoseCommand {
         event_log_manager: EventLogManagerRef,
         prometheus_client: Option<prometheus_http_query::Client>,
         prometheus_selector: String,
-        redact_sql_option_keywords: RedactSqlOptionKeywordsRef,
+        redact_sql_sensitive_keywords: RedactSqlSensitiveKeywordsRef,
         system_params_controller: SystemParamsControllerRef,
     ) -> Self {
         Self {
@@ -82,7 +82,7 @@ impl DiagnoseCommand {
             event_log_manager,
             prometheus_client,
             prometheus_selector,
-            redact_sql_option_keywords,
+            redact_sql_sensitive_keywords,
             system_params_controller,
         }
     }
@@ -981,8 +981,9 @@ impl DiagnoseCommand {
             for (id, (name, database_id, schema_id, definition, created_at_epoch)) in items {
                 obj_id_to_name.insert(id, name.clone());
                 let mut row = Row::new();
-                let may_redact = redact_sql(&definition, self.redact_sql_option_keywords.clone())
-                    .unwrap_or_else(|| "[REDACTED]".into());
+                let may_redact =
+                    redact_sql(&definition, self.redact_sql_sensitive_keywords.clone())
+                        .unwrap_or_else(|| "[REDACTED]".into());
                 let created_at = if let Some(created_at_epoch) = created_at_epoch {
                     format!("{}", Epoch::from(created_at_epoch).as_timestamptz())
                 } else {
@@ -1211,7 +1212,7 @@ fn merge_prometheus_selector<'a>(selectors: impl IntoIterator<Item = &'a str>) -
     selectors.into_iter().filter(|s| !s.is_empty()).join(",")
 }
 
-fn redact_sql(sql: &str, keywords: RedactSqlOptionKeywordsRef) -> Option<String> {
+fn redact_sql(sql: &str, keywords: RedactSqlSensitiveKeywordsRef) -> Option<String> {
     match Parser::parse_sql(sql) {
         Ok(sqls) => Some(
             sqls.into_iter()

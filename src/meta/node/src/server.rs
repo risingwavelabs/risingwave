@@ -611,7 +611,7 @@ pub async fn start_service_as_election_leader(
         env.event_log_manager_ref(),
         prometheus_client.clone(),
         prometheus_selector.clone(),
-        opts.redact_sql_option_keywords.clone(),
+        opts.redact_sql_sensitive_keywords.clone(),
         env.system_params_manager_impl_ref(),
     ));
 
