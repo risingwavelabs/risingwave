@@ -402,7 +402,7 @@ impl NotificationService for NotificationServiceImpl {
 
         self.env
             .notification_manager()
-            .notify_snapshot(tx.clone(), meta_snapshot);
+            .notify_snapshot(tx, meta_snapshot);
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
