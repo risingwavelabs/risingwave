@@ -22,7 +22,7 @@ use super::ddl::SourceWatermark;
 use super::legacy_source::{CompatibleFormatEncode, parse_format_encode};
 use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
-    ColumnDef, ObjectName, REDACT_SQL_SENSITIVE_KEYWORDS, SqlOption, TableConstraint,
+    ColumnDef, ObjectName, REDACT_SQL_OPTION_KEYWORDS, SqlOption, TableConstraint,
     display_comma_separated, display_separated,
 };
 use crate::keywords::Keyword;
@@ -1052,7 +1052,7 @@ impl fmt::Display for UserOption {
             UserOption::Admin => write!(f, "ADMIN"),
             UserOption::NoAdmin => write!(f, "NOADMIN"),
             UserOption::EncryptedPassword(p) => {
-                if is_redacting_sensitive_sql() {
+                if should_redact_user_password() {
                     write!(f, "ENCRYPTED PASSWORD [REDACTED]")
                 } else {
                     write!(f, "ENCRYPTED PASSWORD {}", p)
@@ -1060,7 +1060,7 @@ impl fmt::Display for UserOption {
             }
             UserOption::Password(None) => write!(f, "PASSWORD NULL"),
             UserOption::Password(Some(p)) => {
-                if is_redacting_sensitive_sql() {
+                if should_redact_user_password() {
                     write!(f, "PASSWORD [REDACTED]")
                 } else {
                     write!(f, "PASSWORD {}", p)
@@ -1076,8 +1076,8 @@ impl fmt::Display for UserOption {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserOptions(pub Vec<UserOption>, pub bool);
 
-fn is_redacting_sensitive_sql() -> bool {
-    REDACT_SQL_SENSITIVE_KEYWORDS.try_with(|_| ()).is_ok()
+fn should_redact_user_password() -> bool {
+    REDACT_SQL_OPTION_KEYWORDS.try_with(|_| ()).is_ok()
 }
 
 #[derive(Default)]

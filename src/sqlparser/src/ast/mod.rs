@@ -57,10 +57,10 @@ use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrEr
 pub use crate::quote_ident::QuoteIdent;
 use crate::tokenizer::Tokenizer;
 
-pub type RedactSqlSensitiveKeywordsRef = Arc<HashSet<String>>;
+pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
 
 task_local::task_local! {
-    pub static REDACT_SQL_SENSITIVE_KEYWORDS: RedactSqlSensitiveKeywordsRef;
+    pub static REDACT_SQL_OPTION_KEYWORDS: RedactSqlOptionKeywordsRef;
 }
 
 pub struct DisplaySeparated<'a, T>
@@ -3285,7 +3285,7 @@ pub struct SqlOption {
 
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let should_redact = REDACT_SQL_SENSITIVE_KEYWORDS
+        let should_redact = REDACT_SQL_OPTION_KEYWORDS
             .try_with(|keywords| {
                 let sql_option_name = self.name.real_value().to_lowercase();
                 keywords.iter().any(|k| sql_option_name.contains(k))
@@ -3950,8 +3950,8 @@ impl fmt::Display for BackfillOrderStrategy {
 }
 
 impl Statement {
-    pub fn to_redacted_string(&self, keywords: RedactSqlSensitiveKeywordsRef) -> String {
-        REDACT_SQL_SENSITIVE_KEYWORDS.sync_scope(keywords, || self.to_string_unchecked())
+    pub fn to_redacted_string(&self, keywords: RedactSqlOptionKeywordsRef) -> String {
+        REDACT_SQL_OPTION_KEYWORDS.sync_scope(keywords, || self.to_string_unchecked())
     }
 
     /// Create a new `CREATE TABLE` statement with the given `name` and empty fields.
