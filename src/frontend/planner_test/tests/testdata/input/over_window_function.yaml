@@ -176,6 +176,14 @@
     - stream_plan
     - optimized_logical_plan_for_batch
     - batch_plan
+- id: avg aggregate over preceding-only frame
+  sql: |
+    create table t(id int, grp int, val double precision);
+    select id, avg(val) over(PARTITION BY grp ORDER BY id ROWS BETWEEN 3 PRECEDING AND 1 PRECEDING) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
 
 # RowNumber/Rank/...
 - id: row_number with empty over clause

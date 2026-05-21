@@ -78,7 +78,7 @@ use risingwave_pb::hummock::{
     SubscribeCompactionEventResponse,
 };
 use risingwave_rpc_client::HummockMetaClient;
-pub use shared_buffer_compact::{compact, merge_imms_in_memory};
+pub use shared_buffer_compact::compact;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;

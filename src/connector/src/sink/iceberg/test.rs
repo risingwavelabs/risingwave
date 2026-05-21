@@ -712,6 +712,9 @@ fn test_parse_compaction_config() {
     .collect();
 
     let config = IcebergConfig::from_btreemap(values).unwrap();
+    assert!(config.enable_snapshot_expiration);
+    assert_eq!(config.snapshot_expiration_max_age_millis, None);
+    assert_eq!(config.snapshot_expiration_retain_last, None);
     assert_eq!(config.target_file_size_mb(), 1024); // Default
     assert_eq!(config.write_parquet_compression(), "zstd"); // Default
     assert_eq!(config.write_parquet_max_row_group_rows(), None); // Default

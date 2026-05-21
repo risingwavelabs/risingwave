@@ -349,7 +349,7 @@ pub struct IcebergConfig {
     /// Whether to enable iceberg expired snapshots.
     #[serde(
         rename = "enable_snapshot_expiration",
-        default,
+        default = "default_true",
         deserialize_with = "deserialize_bool_from_string"
     )]
     #[with_option(allow_alter_on_fly)]

@@ -1069,6 +1069,27 @@ pub mod default {
             Some(DEFAULT_MAX_KV_COUNT_FOR_XOR16)
         }
 
+        /// Default compression algorithm for a given LSM-tree level.
+        ///
+        /// This is the single source of truth used by meta's default compaction config builder
+        /// and by SQL `ALTER COMPACTION GROUP ... SET compression_algorithm = DEFAULT`.
+        pub fn compression_algorithm_for_level(level: u32) -> &'static str {
+            // L0/L1 and L2 do not use compression algorithms.
+            // L3 - L4 use Lz4, else use Zstd.
+            match level {
+                0..=2 => "None",
+                3 | 4 => "Lz4",
+                _ => "Zstd",
+            }
+        }
+
+        /// Default compression algorithm vector for levels `0..=max_level`.
+        pub fn compression_algorithm_vec(max_level: u32) -> Vec<String> {
+            (0..=max_level)
+                .map(|level| compression_algorithm_for_level(level).to_owned())
+                .collect()
+        }
+
         pub fn max_vnode_key_range_bytes() -> Option<u64> {
             DEFAULT_MAX_VNODE_KEY_RANGE_BYTES
         }

@@ -21,21 +21,41 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
-sink_test_env_setup "$profile"
+sink_test_env_setup "$profile" --sleep-duration 0
 
+create_starrocks_tables() {
+  local ddl
 
-echo "--- create starrocks table"
-sleep 2
-mysql -uroot -P 9030 -h starrocks-fe-server -e "CREATE database demo;use demo;
-CREATE table demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 date,v8 datetime,v9 boolean,v10 json,v11 decimal(10,5)) ENGINE=OLAP
+  ddl="CREATE DATABASE IF NOT EXISTS demo;
+USE demo;
+DROP TABLE IF EXISTS demo_bhv_table;
+CREATE TABLE demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 date,v8 datetime,v9 boolean,v10 json,v11 decimal(10,5)) ENGINE=OLAP
 PRIMARY KEY(\`v1\`)
 DISTRIBUTED BY HASH(\`v1\`) properties(\"replication_num\" = \"1\");
-CREATE table demo_agg_table(id int, value string REPLACE_IF_NOT_NULL) ENGINE=OLAP
+DROP TABLE IF EXISTS demo_agg_table;
+CREATE TABLE demo_agg_table(id int, value string REPLACE_IF_NOT_NULL) ENGINE=OLAP
 AGGREGATE KEY(\`id\`)
 DISTRIBUTED BY HASH(\`id\`) properties(\"replication_num\" = \"1\");
+DROP TABLE IF EXISTS demo_reserved_words;
 CREATE TABLE demo_reserved_words(id int, \`order\` string, \`from\` string) ENGINE=OLAP
-PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");
-CREATE USER 'users'@'%' IDENTIFIED BY '123456';
+PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");"
+
+  echo "--- create starrocks table"
+  for _ in $(seq 1 60); do
+    if mysql -uroot -P 9030 -h starrocks-fe-server -e "$ddl"; then
+      return
+    fi
+    mysql -uroot -P 9030 -h starrocks-fe-server -e "SHOW FRONTENDS; SHOW BACKENDS;" || true
+    sleep 2
+  done
+
+  echo "StarRocks backend did not become ready for table creation in time"
+  mysql -uroot -P 9030 -h starrocks-fe-server -e "SHOW FRONTENDS; SHOW BACKENDS;" || true
+  exit 1
+}
+
+create_starrocks_tables
+mysql -uroot -P 9030 -h starrocks-fe-server -e "CREATE USER 'users'@'%' IDENTIFIED BY '123456';
 GRANT ALL ON *.* TO 'users'@'%';"
 sleep 2
 
