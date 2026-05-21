@@ -421,7 +421,7 @@ mod tests {
         mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1.clone());
         mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), tx2);
         mgr.insert_sender(SubscribeType::Frontend, worker_key2, tx3);
-        mgr.notify_snapshot(tx1.clone(), MetaSnapshot::default());
+        mgr.notify_snapshot(tx1, MetaSnapshot::default());
         assert!(rx1.recv().await.is_some());
         assert!(rx2.try_recv().is_err());
         assert!(rx3.try_recv().is_err());
