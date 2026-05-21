@@ -439,7 +439,7 @@ HttpConfig:
   - name: url
     field_type: String
     comments: The endpoint URL to POST data to.
-    required: true
+    required: false
   - name: content_type
     field_type: String
     comments: |-
