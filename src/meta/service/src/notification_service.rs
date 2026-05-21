@@ -383,7 +383,7 @@ impl NotificationService for NotificationServiceImpl {
         let (tx, rx) = mpsc::unbounded_channel();
         self.env.notification_manager().insert_sender(
             subscribe_type,
-            worker_key.clone(),
+            worker_key,
             tx.clone(),
         );
 
