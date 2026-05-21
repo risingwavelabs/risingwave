@@ -251,12 +251,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.86"
+version = "1.0.102"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
-dependencies = [
- "backtrace",
-]
+checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "apache-avro"
@@ -291,7 +288,7 @@ version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a033b4ced7c585199fb78ef50fca7fe2f444369ec48080c5fd072efa1a03cc7"
 dependencies = [
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "bon",
  "digest",
  "log",
@@ -1879,9 +1876,9 @@ dependencies = [
 
 [[package]]
 name = "bigdecimal"
-version = "0.4.8"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a22f228ab7a1b23027ccc6c350b72868017af7ea8356fbdf19f8d991c690013"
+checksum = "4d6867f1565b3aad85681f1015055b087fcfd840d6aeee6eee7f2da317603695"
 dependencies = [
  "autocfg",
  "libm",
@@ -1935,7 +1932,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -4100,7 +4097,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89abd9868770386fede29e5a4b14f49c0bf48d652c3b9d7a8a0332329b87d50b"
 dependencies = [
  "arrow",
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "datafusion-common",
  "datafusion-expr",
  "indexmap 2.12.0",
@@ -5721,7 +5718,7 @@ dependencies = [
  "async-trait",
  "backon",
  "base64 0.22.1",
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "gcloud-auth",
  "gcloud-gax",
  "gcloud-googleapis",
@@ -6558,7 +6555,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=10410fa883791d3b38d3751d050c79223ad4317f#10410fa883791d3b38d3751d050c79223ad4317f"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2bd756526f45f3ffda95745c7c5ab2d3fe0714b0#2bd756526f45f3ffda95745c7c5ab2d3fe0714b0"
 dependencies = [
  "anyhow",
  "apache-avro 0.20.0",
@@ -6617,7 +6614,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=10410fa883791d3b38d3751d050c79223ad4317f#10410fa883791d3b38d3751d050c79223ad4317f"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2bd756526f45f3ffda95745c7c5ab2d3fe0714b0#2bd756526f45f3ffda95745c7c5ab2d3fe0714b0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6632,7 +6629,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=10410fa883791d3b38d3751d050c79223ad4317f#10410fa883791d3b38d3751d050c79223ad4317f"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2bd756526f45f3ffda95745c7c5ab2d3fe0714b0#2bd756526f45f3ffda95745c7c5ab2d3fe0714b0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6654,7 +6651,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=68df67448dcad974a4a011691eff4fdea8941891#68df67448dcad974a4a011691eff4fdea8941891"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=91d2fb126e408dcabd92adc196f9b82b514b74cd#91d2fb126e408dcabd92adc196f9b82b514b74cd"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6684,7 +6681,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=10410fa883791d3b38d3751d050c79223ad4317f#10410fa883791d3b38d3751d050c79223ad4317f"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2bd756526f45f3ffda95745c7c5ab2d3fe0714b0#2bd756526f45f3ffda95745c7c5ab2d3fe0714b0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7026,15 +7023,15 @@ dependencies = [
 
 [[package]]
 name = "jiff-tzdb"
-version = "0.1.1"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91335e575850c5c4c673b9bd467b0e025f164ca59d0564f69d0c2ee0ffad4653"
+checksum = "c900ef84826f1338a557697dc8fc601df9ca9af4ac137c7fb61d4c6f2dfd3076"
 
 [[package]]
 name = "jiff-tzdb-platform"
-version = "0.1.1"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9835f0060a626fe59f160437bc725491a6af23133ea906500027d1bd2f8f4329"
+checksum = "875a5a69ac2bab1a891711cf5eccbec1ce0341ea805560dcd90b7a2e925132e8"
 dependencies = [
  "jiff-tzdb",
 ]
@@ -9318,7 +9315,7 @@ name = "pg_bigdecimal"
 version = "0.1.5"
 source = "git+https://github.com/risingwavelabs/rust-pg_bigdecimal?rev=0b7893d88894ca082b4525f94f812da034486f7c#0b7893d88894ca082b4525f94f812da034486f7c"
 dependencies = [
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "byteorder",
  "bytes",
  "num-bigint",
@@ -9587,9 +9584,9 @@ checksum = "325a6d2ac5dee293c3b2612d4993b98aec1dff096b0a2dae70ed7d95784a05da"
 
 [[package]]
 name = "portable-atomic"
-version = "1.6.0"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7170ef9988bc169ba16dd36a7fa041e5c4cbeb6a35b76d4c03daded371eae7c0"
+checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "postcard"
@@ -10021,7 +10018,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "heck 0.5.0",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "multimap 0.10.0",
  "once_cell",
@@ -10053,7 +10050,7 @@ version = "0.13.4"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=4a442caf7c0a43feb4aea64bde6aea4488d9917f#4a442caf7c0a43feb4aea64bde6aea4488d9917f"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -10699,9 +10696,9 @@ dependencies = [
 
 [[package]]
 name = "regex-lite"
-version = "0.1.6"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53a49587ad06b26609c52e423de037e7f57f20d53535d66e08c695f347df952a"
+checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
 
 [[package]]
 name = "regex-syntax"
@@ -11701,7 +11698,7 @@ version = "2.8.3"
 dependencies = [
  "anyhow",
  "apache-avro 0.16.0",
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "chrono",
  "easy-ext",
  "expect-test",
@@ -13455,7 +13452,7 @@ checksum = "d5680a8b686985116607ef5f5af2b1f9e1cc2c228330e93101816a0baa279afa"
 dependencies = [
  "async-stream",
  "async-trait",
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "chrono",
  "futures",
  "log",
@@ -13529,7 +13526,7 @@ version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "085e94f7d7271c0393ac2d164a39994b1dff1b06bc40cd9a0da04f3d672b0fee"
 dependencies = [
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "chrono",
  "inherent",
  "ordered-float 3.9.1",
@@ -13546,7 +13543,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0019f47430f7995af63deda77e238c17323359af241233ec768aba1faea7608"
 dependencies = [
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "chrono",
  "rust_decimal",
  "sea-query",
@@ -14429,7 +14426,7 @@ version = "0.8.2"
 source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30dee69f647e28dec81#3efe6d0065963db2a2b7f30dee69f647e28dec81"
 dependencies = [
  "atoi",
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "byteorder",
  "bytes",
  "chrono",
@@ -14511,7 +14508,7 @@ source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30d
 dependencies = [
  "atoi",
  "base64 0.22.1",
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "bitflags 2.10.0",
  "byteorder",
  "bytes",
@@ -14557,7 +14554,7 @@ source = "git+https://github.com/madsim-rs/sqlx.git?rev=3efe6d0065963db2a2b7f30d
 dependencies = [
  "atoi",
  "base64 0.22.1",
- "bigdecimal 0.4.8",
+ "bigdecimal 0.4.10",
  "bitflags 2.10.0",
  "byteorder",
  "chrono",
