@@ -26,8 +26,8 @@ use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, PbServingTableVnodeMappings,
-    PbTableRefillRuntimeConfig, SubscribeRequest, SubscribeType,
+    FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
+    SubscribeType,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -37,9 +37,8 @@ use tonic::{Request, Response, Status};
 use crate::backup_restore::BackupManagerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{MetaSrvEnv, Notification, NotificationVersion, WorkerKey};
-use crate::serving::{
-    ServingVnodeMappingRef, build_worker_table_vnode_mapping, to_pb_serving_table_vnode_mappings,
-};
+use crate::serving::ServingVnodeMappingRef;
+use crate::table_refill::build_hummock_table_refill_runtime_config;
 
 pub struct NotificationServiceImpl {
     env: MetaSrvEnv,
@@ -176,63 +175,6 @@ impl NotificationServiceImpl {
                 mapping: Some(mapping.to_protobuf()),
             })
             .collect()
-    }
-
-    async fn get_hummock_serving_table_vnode_mappings(
-        &self,
-        worker_key: &WorkerKey,
-    ) -> MetaResult<PbServingTableVnodeMappings> {
-        let active_serving_workers = self
-            .metadata_manager
-            .cluster_controller
-            .list_active_serving_workers()
-            .await?;
-        let Some(worker_id) = active_serving_workers
-            .iter()
-            .find(|worker| worker.host.as_ref() == Some(&worker_key.0))
-            .map(|worker| worker.id)
-        else {
-            return Ok(PbServingTableVnodeMappings::default());
-        };
-
-        let streaming_parallelisms = self
-            .metadata_manager
-            .catalog_controller
-            .running_fragment_parallelisms(None)?;
-        let serving_vnode_mappings = self.serving_vnode_mapping.all();
-        let worker_table_vnode_mapping = build_worker_table_vnode_mapping(
-            &active_serving_workers,
-            &serving_vnode_mappings,
-            &streaming_parallelisms,
-        );
-
-        let mappings = worker_table_vnode_mapping
-            .get(&worker_id)
-            .map(to_pb_serving_table_vnode_mappings)
-            .unwrap_or_default();
-
-        Ok(mappings)
-    }
-
-    async fn get_hummock_table_refill_runtime_config(
-        &self,
-        worker_key: &WorkerKey,
-    ) -> MetaResult<PbTableRefillRuntimeConfig> {
-        let version = self.env.notification_manager().current_version().await;
-        let table_cache_refill_policies = self
-            .metadata_manager
-            .catalog_controller
-            .table_cache_refill_policies_snapshot()
-            .await?;
-        let serving_table_vnode_mappings = self
-            .get_hummock_serving_table_vnode_mappings(worker_key)
-            .await?;
-
-        Ok(PbTableRefillRuntimeConfig {
-            table_cache_refill_policies: Some(table_cache_refill_policies),
-            serving_table_vnode_mappings: Some(serving_table_vnode_mappings),
-            version,
-        })
     }
 
     async fn get_worker_node_snapshot(&self) -> MetaResult<(Vec<WorkerNode>, NotificationVersion)> {
@@ -390,9 +332,13 @@ impl NotificationServiceImpl {
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
         let cluster_resource = self.get_cluster_resource().await;
-        let table_refill_runtime_config = self
-            .get_hummock_table_refill_runtime_config(worker_key)
-            .await?;
+        let table_refill_runtime_config = build_hummock_table_refill_runtime_config(
+            &self.metadata_manager,
+            &self.serving_vnode_mapping,
+            worker_key,
+            self.env.notification_manager().current_version().await,
+        )
+        .await?;
 
         Ok(MetaSnapshot {
             tables,

@@ -127,12 +127,9 @@ impl NotificationManager {
         &self,
         target: Target,
         operation: Operation,
-        mut info: Info,
+        info: Info,
         version: Option<NotificationVersion>,
     ) {
-        if let (Some(version), Info::TableRefillRuntimeConfig(config)) = (version, &mut info) {
-            config.version = version;
-        }
         let task = Task {
             target,
             operation,
@@ -215,23 +212,6 @@ impl NotificationManager {
     pub async fn notify_hummock(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Hummock.into(), operation, info)
             .await
-    }
-
-    pub async fn notify_hummock_with_worker_key(
-        &self,
-        worker_key: Option<WorkerKey>,
-        operation: Operation,
-        info: Info,
-    ) -> NotificationVersion {
-        self.notify_with_version(
-            Target {
-                subscribe_type: SubscribeType::Hummock,
-                worker_key,
-            },
-            operation,
-            info,
-        )
-        .await
     }
 
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
@@ -444,34 +424,6 @@ mod tests {
         assert!(rx1.try_recv().is_err());
         assert!(rx2.recv().await.is_some());
         assert!(rx3.recv().await.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_versioned_table_refill_runtime_config_carries_version() {
-        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
-        let worker_key = WorkerKey(HostAddress {
-            host: "a".to_owned(),
-            port: 1,
-        });
-        let (tx, mut rx) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Hummock, worker_key.clone(), tx);
-
-        let version = mgr
-            .notify_hummock_with_worker_key(
-                Some(worker_key),
-                Operation::Update,
-                Info::TableRefillRuntimeConfig(Default::default()),
-            )
-            .await;
-
-        let notification = rx.recv().await.unwrap().unwrap();
-        assert_eq!(notification.version, version);
-        match notification.info.unwrap() {
-            Info::TableRefillRuntimeConfig(config) => {
-                assert_eq!(config.version, version);
-            }
-            info => panic!("unexpected notification: {info:?}"),
-        }
     }
 
     #[tokio::test]

@@ -271,16 +271,18 @@ impl HummockEventHandler {
         operation: Operation,
         config: PbTableRefillRuntimeConfig,
     ) {
+        // Meta only emits non-snapshot table refill runtime config after recovery. Online
+        // runtime updates are not supported for either policies or serving vnode mappings.
         if let Some(policies) = config.table_cache_refill_policies {
             refiller
                 .update_table_cache_refill_policies(table_cache_refill_policies_to_map(policies));
         }
 
-        if let Some(mappings) = config.serving_table_vnode_mappings {
-            refiller.update_serving_table_vnode_mapping(
-                operation,
-                serving_table_vnode_mappings_to_map(mappings),
-            );
+        if operation == Operation::Snapshot
+            && let Some(mappings) = config.serving_table_vnode_mappings
+        {
+            refiller
+                .replace_serving_table_vnode_mapping(serving_table_vnode_mappings_to_map(mappings));
         }
     }
 
@@ -1058,7 +1060,7 @@ mod tests {
     use std::task::Poll;
 
     use futures::FutureExt;
-    use parking_lot::Mutex;
+    use parking_lot::{Mutex, RwLock};
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
     use risingwave_common::config::Role;
@@ -1164,6 +1166,60 @@ mod tests {
             Some(&CacheRefillPolicy::Serving)
         );
         assert_eq!(context.serving.get(&table_id), Some(&serving_vnodes));
+    }
+
+    #[tokio::test]
+    async fn test_recovery_policy_update_preserves_serving_mapping() {
+        let table_id = TableId::new(233);
+        let serving_vnodes = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
+        let read_version_mapping = Arc::new(RwLock::new(HashMap::new()));
+        let storage_opt = default_opts_for_test();
+        let mut refiller = CacheRefiller::new(
+            Role::Serving,
+            CacheRefillConfig::from_storage_opts(&storage_opt),
+            mock_sstable_store().await,
+            CacheRefiller::default_spawn_refill_task(),
+            read_version_mapping,
+        );
+        let policies = || TableCacheRefillPolicies {
+            policies: vec![PbTableCacheRefillPolicy {
+                table_id: table_id.as_raw_id(),
+                policy: PbCacheRefillPolicy::Serving as i32,
+            }],
+        };
+
+        HummockEventHandler::apply_table_refill_runtime_config(
+            &mut refiller,
+            Operation::Snapshot,
+            table_refill_runtime_config_for_test(
+                policies(),
+                HashMap::from([(table_id, serving_vnodes.clone())]),
+            ),
+        );
+        HummockEventHandler::apply_table_refill_runtime_config(
+            &mut refiller,
+            Operation::Update,
+            PbTableRefillRuntimeConfig {
+                table_cache_refill_policies: Some(TableCacheRefillPolicies {
+                    policies: vec![PbTableCacheRefillPolicy {
+                        table_id: table_id.as_raw_id(),
+                        policy: PbCacheRefillPolicy::Disabled as i32,
+                    }],
+                }),
+                ..Default::default()
+            },
+        );
+
+        let context = refiller.table_cache_refill_context().read();
+        assert_eq!(
+            context.policies.get(&table_id),
+            Some(&CacheRefillPolicy::Disabled)
+        );
+        assert!(!context.serving.contains_key(&table_id));
+        assert_eq!(
+            context.serving_table_vnode_mapping.read().get(&table_id),
+            Some(&serving_vnodes)
+        );
     }
 
     #[tokio::test]

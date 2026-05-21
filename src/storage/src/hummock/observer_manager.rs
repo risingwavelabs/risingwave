@@ -94,24 +94,6 @@ impl ObserverState for HummockObserverNode {
             Info::ClusterResource(resource) => {
                 LicenseManager::get().update_cluster_resource(resource);
             }
-            Info::ServingTableVnodeMappings(mappings) => {
-                self.handle_table_refill_runtime_config(
-                    resp.operation(),
-                    PbTableRefillRuntimeConfig {
-                        serving_table_vnode_mappings: Some(mappings),
-                        ..Default::default()
-                    },
-                );
-            }
-            Info::TableCacheRefillPolicies(policies) => {
-                self.handle_table_refill_runtime_config(
-                    resp.operation(),
-                    PbTableRefillRuntimeConfig {
-                        table_cache_refill_policies: Some(policies),
-                        ..Default::default()
-                    },
-                );
-            }
             Info::TableRefillRuntimeConfig(config) => {
                 self.handle_table_refill_runtime_config(resp.operation(), config);
             }

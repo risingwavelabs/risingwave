@@ -637,8 +637,6 @@ message MetaSnapshot {
   TableRefillRuntimeConfig table_refill_runtime_config = 27;
 
   SnapshotVersion version = 13;
-  reserved 28;
-  reserved "serving_table_vnode_mappings";
 }
 
 message Object {
@@ -698,8 +696,6 @@ message SubscribeResponse {
     FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
     catalog.Secret secret = 29;
     common.ClusterResource cluster_resource = 31;
-    TableCacheRefillPolicies table_cache_refill_policies = 32;
-    ServingTableVnodeMappings serving_table_vnode_mappings = 33;
     TableRefillRuntimeConfig table_refill_runtime_config = 34;
   }
   reserved 12;

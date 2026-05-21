@@ -117,12 +117,6 @@ impl ObserverState for FrontendObserverNode {
             Info::ClusterResource(resource) => {
                 LicenseManager::get().update_cluster_resource(resource);
             }
-            Info::ServingTableVnodeMappings(_) => {
-                panic!("frontend node should not receive ServingTableVnodeMappings");
-            }
-            Info::TableCacheRefillPolicies(_) => {
-                panic!("frontend node should not receive TableCacheRefillPolicies");
-            }
             Info::TableRefillRuntimeConfig(_) => {
                 panic!("frontend node should not receive TableRefillRuntimeConfig");
             }

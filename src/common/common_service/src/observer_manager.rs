@@ -134,7 +134,6 @@ where
                         .streaming_worker_slot_mapping_version
             }
             Info::ServingWorkerSlotMappings(_) => true,
-            Info::ServingTableVnodeMappings(_) | Info::TableCacheRefillPolicies(_) => false,
             Info::TableRefillRuntimeConfig(_) => {
                 notification.version
                     > info
@@ -267,8 +266,7 @@ mod tests {
     use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
     use risingwave_pb::meta::subscribe_response::Info;
     use risingwave_pb::meta::{
-        MetaSnapshot, ServingTableVnodeMappings, SubscribeResponse, SubscribeType,
-        TableCacheRefillPolicies, TableRefillRuntimeConfig,
+        MetaSnapshot, SubscribeResponse, SubscribeType, TableRefillRuntimeConfig,
     };
 
     use super::*;
@@ -371,14 +369,6 @@ mod tests {
                     }),
                 ),
                 notification(1, Info::Database(Default::default())),
-                notification(
-                    0,
-                    Info::TableCacheRefillPolicies(TableCacheRefillPolicies::default()),
-                ),
-                notification(
-                    0,
-                    Info::ServingTableVnodeMappings(ServingTableVnodeMappings::default()),
-                ),
                 snapshot,
             ]),
         };

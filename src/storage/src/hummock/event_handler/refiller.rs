@@ -40,7 +40,6 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::key::{FullKey, vnode_range};
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use risingwave_pb::id::TableId;
-use risingwave_pb::meta::subscribe_response::Operation;
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -274,6 +273,12 @@ pub struct TableCacheRefillContext {
     pub serving_table_vnode_mapping: Arc<RwLock<HashMap<TableId, Bitmap>>>,
 }
 
+fn vnode_range_bitmap(num_bits: usize, vnode_range: (usize, usize)) -> Bitmap {
+    let start = vnode_range.0.min(num_bits);
+    let end = vnode_range.1.min(num_bits);
+    Bitmap::from_range(num_bits, start..end)
+}
+
 impl TableCacheRefillContext {
     /// Check whether the given sstable block should be refilled according to the vnode mapping.
     fn check_table_refill_vnodes(&self, sstable: &Sstable, block_index: usize) -> bool {
@@ -309,7 +314,7 @@ impl TableCacheRefillContext {
         if num_bits == 0 {
             return false;
         }
-        let bitmap = Bitmap::from_range(num_bits, vnode_range.0..vnode_range.1 + 1);
+        let bitmap = vnode_range_bitmap(num_bits, vnode_range);
         if let Some(streaming_bitmap) = streaming_bitmap
             && (&bitmap & streaming_bitmap).any()
         {
@@ -425,56 +430,23 @@ impl CacheRefiller {
         }
     }
 
-    pub(crate) fn update_serving_table_vnode_mapping(
+    pub(crate) fn replace_serving_table_vnode_mapping(
         &mut self,
-        op: Operation,
         mapping: HashMap<TableId, Bitmap>,
     ) {
         let mut table_cache_refill_context = self.table_cache_refill_context.write();
-        match op {
-            Operation::Snapshot => {
-                let mut table_ids = table_cache_refill_context
-                    .serving_table_vnode_mapping
-                    .read()
-                    .keys()
-                    .chain(mapping.keys())
-                    .copied()
-                    .collect::<HashSet<_>>();
-                *table_cache_refill_context
-                    .serving_table_vnode_mapping
-                    .write() = mapping;
-                for table_id in table_ids.drain() {
-                    self.update_table_cache_refill_vnodes_inner(
-                        &mut table_cache_refill_context,
-                        table_id,
-                    );
-                }
-            }
-            Operation::Update => {
-                for (table_id, bitmap) in mapping {
-                    table_cache_refill_context
-                        .serving_table_vnode_mapping
-                        .write()
-                        .insert(table_id, bitmap);
-                    self.update_table_cache_refill_vnodes_inner(
-                        &mut table_cache_refill_context,
-                        table_id,
-                    );
-                }
-            }
-            Operation::Delete => {
-                for table_id in mapping.keys() {
-                    table_cache_refill_context
-                        .serving_table_vnode_mapping
-                        .write()
-                        .remove(table_id);
-                    self.update_table_cache_refill_vnodes_inner(
-                        &mut table_cache_refill_context,
-                        *table_id,
-                    );
-                }
-            }
-            _ => unreachable!(),
+        let mut table_ids = table_cache_refill_context
+            .serving_table_vnode_mapping
+            .read()
+            .keys()
+            .chain(mapping.keys())
+            .copied()
+            .collect::<HashSet<_>>();
+        *table_cache_refill_context
+            .serving_table_vnode_mapping
+            .write() = mapping;
+        for table_id in table_ids.drain() {
+            self.update_table_cache_refill_vnodes_inner(&mut table_cache_refill_context, table_id);
         }
     }
 
@@ -1033,9 +1005,8 @@ mod tests {
     use risingwave_common::config::streaming::CacheRefillPolicy;
     use risingwave_common::hash::VirtualNode;
     use risingwave_pb::id::TableId;
-    use risingwave_pb::meta::subscribe_response::Operation;
 
-    use super::{CacheRefillConfig, CacheRefiller};
+    use super::{CacheRefillConfig, CacheRefiller, vnode_range_bitmap};
     use crate::hummock::iterator::test_utils::mock_sstable_store;
 
     fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
@@ -1077,10 +1048,10 @@ mod tests {
                 .is_empty()
         );
 
-        refiller.update_serving_table_vnode_mapping(
-            Operation::Snapshot,
-            HashMap::from([(table_id, serving_vnodes.clone())]),
-        );
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([(
+            table_id,
+            serving_vnodes.clone(),
+        )]));
 
         let context = refiller.table_cache_refill_context().read();
         assert!(context.streaming.is_empty());
@@ -1105,13 +1076,10 @@ mod tests {
             (table_id, CacheRefillPolicy::Serving),
             (removed_table_id, CacheRefillPolicy::Serving),
         ]));
-        refiller.update_serving_table_vnode_mapping(
-            Operation::Snapshot,
-            HashMap::from([
-                (table_id, serving_vnodes.clone()),
-                (removed_table_id, serving_vnodes.clone()),
-            ]),
-        );
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([
+            (table_id, serving_vnodes.clone()),
+            (removed_table_id, serving_vnodes.clone()),
+        ]));
         assert!(
             refiller
                 .table_cache_refill_context()
@@ -1120,10 +1088,10 @@ mod tests {
                 .contains_key(&removed_table_id)
         );
 
-        refiller.update_serving_table_vnode_mapping(
-            Operation::Snapshot,
-            HashMap::from([(table_id, serving_vnodes.clone())]),
-        );
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([(
+            table_id,
+            serving_vnodes.clone(),
+        )]));
 
         let context = refiller.table_cache_refill_context().read();
         assert_eq!(context.serving.get(&table_id), Some(&serving_vnodes));
@@ -1149,10 +1117,7 @@ mod tests {
             read_version_mapping,
         );
 
-        refiller.update_serving_table_vnode_mapping(
-            Operation::Snapshot,
-            HashMap::from([(table_id, serving_vnodes)]),
-        );
+        refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, serving_vnodes)]));
         refiller.update_table_cache_refill_policies(HashMap::from([(
             table_id,
             CacheRefillPolicy::Serving,
@@ -1170,5 +1135,21 @@ mod tests {
         let context = refiller.table_cache_refill_context().read();
         assert!(context.policies.is_empty());
         assert!(context.serving.is_empty());
+    }
+
+    #[test]
+    fn test_vnode_range_bitmap_uses_right_exclusive_end() {
+        let bitmap = vnode_range_bitmap(VirtualNode::COUNT_FOR_TEST, (10, 12));
+        assert_eq!(bitmap.count_ones(), 2);
+        assert!(bitmap.is_set(10));
+        assert!(bitmap.is_set(11));
+        assert!(!bitmap.is_set(12));
+
+        let last = vnode_range_bitmap(
+            VirtualNode::COUNT_FOR_TEST,
+            (VirtualNode::COUNT_FOR_TEST - 1, VirtualNode::COUNT_FOR_TEST),
+        );
+        assert_eq!(last.count_ones(), 1);
+        assert!(last.is_set(VirtualNode::COUNT_FOR_TEST - 1));
     }
 }
