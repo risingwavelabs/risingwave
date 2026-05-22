@@ -36,10 +36,12 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
-use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
     SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+};
+use risingwave_connector::source::cdc::{
+    build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, source,
@@ -943,7 +945,15 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
-    let cdc_table_id = build_cdc_table_id(source.id, &external_table_name);
+    let cdc_table_id_external_table_name = if let ExternalCdcTableType::Postgres = cdc_table_type
+        && let Some(normalized_table_name) =
+            normalize_simple_postgres_quoted_table_name(&external_table_name)
+    {
+        normalized_table_name
+    } else {
+        external_table_name
+    };
+    let cdc_table_id = build_cdc_table_id(source.id, &cdc_table_id_external_table_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,

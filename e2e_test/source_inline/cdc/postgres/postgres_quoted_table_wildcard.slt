@@ -8,6 +8,10 @@ drop source if exists quoted_note_source;
 
 system ok
 PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_table_wildcard_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
     SELECT pg_drop_replication_slot(slot_name)
     FROM pg_replication_slots
     WHERE slot_name = 'quoted_table_wildcard_slot';
@@ -30,8 +34,10 @@ create source quoted_note_source with (
     username = '${PGUSER:$USER}',
     password = '${PGPASSWORD:}',
     database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
     publication.name = 'quoted_table_wildcard_pub',
-    slot.name = 'quoted_table_wildcard_slot'
+    slot.name = 'quoted_table_wildcard_slot',
+    auto.schema.change = 'true'
 );
 
 statement ok
@@ -43,6 +49,29 @@ select id, "authorId", content from quoted_note_auto_derived order by id;
 ----
 n1 a1 hello
 
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    INSERT INTO public.\"QuotedNoteE2e\" (\"id\", \"authorId\", \"content\") VALUES ('n2', 'a2', 'stream');
+    "
+
+query TTT retry 30 backoff 1s
+select id, "authorId", content from quoted_note_auto_derived where id = 'n2';
+----
+n2 a2 stream
+
+sleep 2s
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    ALTER TABLE public.\"QuotedNoteE2e\" ADD COLUMN \"category\" varchar DEFAULT 'general';
+    INSERT INTO public.\"QuotedNoteE2e\" (\"id\", \"authorId\", \"content\", \"category\") VALUES ('n3', 'a3', 'schema-change', 'custom');
+    "
+
+query TTTT retry 30 backoff 1s
+select id, "authorId", content, category from quoted_note_auto_derived where id = 'n3';
+----
+n3 a3 schema-change custom
+
 statement ok
 drop source quoted_note_source cascade;
 
@@ -50,9 +79,107 @@ sleep 2s
 
 system ok
 PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_table_wildcard_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
     SELECT pg_drop_replication_slot(slot_name)
     FROM pg_replication_slots
     WHERE slot_name = 'quoted_table_wildcard_slot';
     DROP PUBLICATION IF EXISTS quoted_table_wildcard_pub;
     DROP TABLE IF EXISTS public.\"QuotedNoteE2e\" CASCADE;
+    "
+
+statement ok
+drop table if exists pg_my_table_explicit;
+
+statement ok
+drop source if exists pg_my_table_source;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_table_explicit_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_table_explicit_slot';
+    DROP PUBLICATION IF EXISTS quoted_table_explicit_pub;
+    DROP TABLE IF EXISTS public.\"pg_my_table\" CASCADE;
+    CREATE TABLE public.\"pg_my_table\" (
+        id INT PRIMARY KEY,
+        \"name\" VARCHAR
+    );
+    INSERT INTO public.\"pg_my_table\" VALUES
+        (1, 'aa'), (2, 'bb'), (3, '33'), (4, '44'),
+        (5, '55'), (6, '66'), (7, '77'), (8, '88'),
+        (9, '99'), (10, '1010'), (11, '1111'), (12, '1212');
+    "
+
+statement ok
+create source pg_my_table_source with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    publication.name = 'quoted_table_explicit_pub',
+    slot.name = 'quoted_table_explicit_slot',
+    auto.schema.change = 'true'
+);
+
+statement ok
+create table pg_my_table_explicit (
+    id INT PRIMARY KEY,
+    "name" VARCHAR
+)
+from pg_my_table_source table 'public."pg_my_table"';
+
+query I retry 30 backoff 1s
+select count(*) from pg_my_table_explicit;
+----
+12
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    INSERT INTO public.\"pg_my_table\" VALUES (1000, 'aa');
+    "
+
+query IT retry 30 backoff 1s
+select id, "name" from pg_my_table_explicit where id = 1000;
+----
+1000 aa
+
+sleep 2s
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    ALTER TABLE public.\"pg_my_table\" ADD COLUMN tag VARCHAR DEFAULT 'general';
+    INSERT INTO public.\"pg_my_table\" (id, \"name\", tag) VALUES (1001, 'bb', 'schema-change');
+    "
+
+query ITT retry 30 backoff 1s
+select id, "name", tag from pg_my_table_explicit where id = 1001;
+----
+1001 bb schema-change
+
+statement ok
+drop source pg_my_table_source cascade;
+
+sleep 2s
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_table_explicit_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_table_explicit_slot';
+    DROP PUBLICATION IF EXISTS quoted_table_explicit_pub;
+    DROP TABLE IF EXISTS public.\"pg_my_table\" CASCADE;
     "
