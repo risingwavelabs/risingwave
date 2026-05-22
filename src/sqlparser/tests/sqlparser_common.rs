@@ -3600,6 +3600,14 @@ fn parse_create_user() {
 }
 
 #[test]
+fn parse_alter_user_without_with_prefix() {
+    one_statement_parses_to(
+        "ALTER USER WITH PASSWORD 'rw_password_2'",
+        "ALTER USER WITH PASSWORD 'rw_password_2'",
+    );
+}
+
+#[test]
 fn parse_invalid_subquery_without_parens() {
     let res = parse_sql_statements("SELECT SELECT 1 FROM bar WHERE 1=1 FROM baz");
     assert!(format!("{}", res.unwrap_err()).contains("expected end of statement, found: 1"));

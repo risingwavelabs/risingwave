@@ -22,7 +22,8 @@ use super::ddl::SourceWatermark;
 use super::legacy_source::{CompatibleFormatEncode, parse_format_encode};
 use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
-    ColumnDef, ObjectName, SqlOption, TableConstraint, display_comma_separated, display_separated,
+    ColumnDef, ObjectName, REDACT_SQL_OPTION_KEYWORDS, SqlOption, TableConstraint,
+    display_comma_separated, display_separated,
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IsOptional, Parser};
@@ -1050,9 +1051,21 @@ impl fmt::Display for UserOption {
             UserOption::NoLogin => write!(f, "NOLOGIN"),
             UserOption::Admin => write!(f, "ADMIN"),
             UserOption::NoAdmin => write!(f, "NOADMIN"),
-            UserOption::EncryptedPassword(p) => write!(f, "ENCRYPTED PASSWORD {}", p),
+            UserOption::EncryptedPassword(p) => {
+                if should_redact_user_password() {
+                    write!(f, "ENCRYPTED PASSWORD [REDACTED]")
+                } else {
+                    write!(f, "ENCRYPTED PASSWORD {}", p)
+                }
+            }
             UserOption::Password(None) => write!(f, "PASSWORD NULL"),
-            UserOption::Password(Some(p)) => write!(f, "PASSWORD {}", p),
+            UserOption::Password(Some(p)) => {
+                if should_redact_user_password() {
+                    write!(f, "PASSWORD [REDACTED]")
+                } else {
+                    write!(f, "PASSWORD {}", p)
+                }
+            }
             UserOption::OAuth(options) => {
                 write!(f, "({})", display_comma_separated(options.as_slice()))
             }
@@ -1061,10 +1074,15 @@ impl fmt::Display for UserOption {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UserOptions(pub Vec<UserOption>);
+pub struct UserOptions(pub Vec<UserOption>, pub bool);
+
+fn should_redact_user_password() -> bool {
+    REDACT_SQL_OPTION_KEYWORDS.try_with(|_| ()).is_ok()
+}
 
 #[derive(Default)]
 struct UserOptionsBuilder {
+    with_prefix: bool,
     super_user: Option<UserOption>,
     create_db: Option<UserOption>,
     create_user: Option<UserOption>,
@@ -1094,13 +1112,16 @@ impl UserOptionsBuilder {
         if let Some(option) = self.password {
             options.push(option);
         }
-        UserOptions(options)
+        UserOptions(options, self.with_prefix)
     }
 }
 
 impl ParseTo for UserOptions {
     fn parse_to(parser: &mut Parser<'_>) -> ModalResult<Self> {
-        let mut builder = UserOptionsBuilder::default();
+        let mut builder = UserOptionsBuilder {
+            with_prefix: parser.parse_keyword(Keyword::WITH),
+            ..Default::default()
+        };
         let add_option = |item: &mut Option<UserOption>, user_option| {
             let old_value = item.replace(user_option);
             if old_value.is_some() {
@@ -1108,7 +1129,6 @@ impl ParseTo for UserOptions {
             }
             Ok(())
         };
-        let _ = parser.parse_keyword(Keyword::WITH);
         loop {
             let token = parser.peek_token();
             if token == Token::EOF || token == Token::SemiColon {
@@ -1166,7 +1186,10 @@ impl ParseTo for UserOptions {
 impl fmt::Display for UserOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if !self.0.is_empty() {
-            write!(f, "WITH {}", display_separated(self.0.as_slice(), " "))
+            if self.1 {
+                write!(f, "WITH ")?;
+            }
+            write!(f, "{}", display_separated(self.0.as_slice(), " "))
         } else {
             Ok(())
         }
