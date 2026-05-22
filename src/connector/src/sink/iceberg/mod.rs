@@ -2525,7 +2525,6 @@ impl IcebergSinkCommitter {
         tracing::debug!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
         if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
-            && self.config.enable_compaction
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: self.sink_id,

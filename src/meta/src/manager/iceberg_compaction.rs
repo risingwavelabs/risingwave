@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -260,6 +260,7 @@ impl Drop for IcebergCompactionHandle {
 
 struct IcebergCompactionManagerInner {
     pub sink_schedules: HashMap<SinkId, CompactionTrack>,
+    snapshot_expiration_sink_ids: HashSet<SinkId>,
 }
 
 #[derive(Debug, Clone)]
@@ -300,6 +301,7 @@ impl IcebergCompactionManager {
                 env,
                 inner: Arc::new(RwLock::new(IcebergCompactionManagerInner {
                     sink_schedules: HashMap::default(),
+                    snapshot_expiration_sink_ids: HashSet::default(),
                 })),
                 metadata_manager,
                 iceberg_compactor_manager,
@@ -352,6 +354,19 @@ impl IcebergCompactionManager {
 
             let new_track = match iceberg_config {
                 Ok(config) => {
+                    {
+                        let mut guard = self.inner.write();
+                        if config.enable_snapshot_expiration {
+                            guard.snapshot_expiration_sink_ids.insert(sink_id);
+                        } else {
+                            guard.snapshot_expiration_sink_ids.remove(&sink_id);
+                        }
+
+                        if !config.enable_compaction {
+                            guard.sink_schedules.remove(&sink_id);
+                            return;
+                        }
+                    }
                     // Call synchronous create function with the config
                     match self.create_compaction_track(sink_id, &config) {
                         Ok(track) => track,
@@ -529,9 +544,10 @@ impl IcebergCompactionManager {
             .collect()
     }
 
-    pub fn clear_iceberg_commits_by_sink_id(&self, sink_id: SinkId) {
+    pub fn clear_iceberg_maintenance_by_sink_id(&self, sink_id: SinkId) {
         let mut guard = self.inner.write();
         guard.sink_schedules.remove(&sink_id);
+        guard.snapshot_expiration_sink_ids.remove(&sink_id);
     }
 
     pub async fn list_compaction_statuses(&self) -> Vec<IcebergCompactionScheduleStatus> {
@@ -808,7 +824,11 @@ impl IcebergCompactionManager {
     async fn perform_gc_operations(&self) -> MetaResult<()> {
         let sink_ids = {
             let guard = self.inner.read();
-            guard.sink_schedules.keys().cloned().collect::<Vec<_>>()
+            guard
+                .snapshot_expiration_sink_ids
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
         };
 
         tracing::info!("Starting GC operations for {} tables", sink_ids.len());
@@ -896,6 +916,8 @@ impl IcebergCompactionManager {
 
         let iceberg_config = self.load_iceberg_config(sink_id).await?;
         if !iceberg_config.enable_snapshot_expiration {
+            let mut guard = self.inner.write();
+            guard.snapshot_expiration_sink_ids.remove(&sink_id);
             return Ok(());
         }
 

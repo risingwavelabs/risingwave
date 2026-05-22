@@ -1276,14 +1276,6 @@ impl DdlController {
             self.sink_manager
                 .stop_sink_coordinator(iceberg_sink_ids)
                 .await;
-<<<<<<< HEAD
-=======
-
-            for sink_id in iceberg_sink_ids {
-                self.iceberg_compaction_manager
-                    .clear_iceberg_maintenance_by_sink_id(sink_id);
-            }
->>>>>>> cd719aff27 (fix(iceberg): seperate iceberg snapshot expiration and compaction trigger (#25749))
         }
 
         // remove secrets.
