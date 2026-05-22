@@ -261,11 +261,11 @@ fn build_compaction_config_from_params(params: &[ConfigParam]) -> Result<Vec<Mut
                 )
                 .into());
             }
-            "max_kv_count_for_xor16" => {
-                MutableConfig::MaxKvCountForXor16(parse_optional_positive_u64_value(
+            "blocked_xor_filter_kv_count_threshold" | "max_kv_count_for_xor16" => {
+                MutableConfig::BlockedXorFilterKvCountThreshold(parse_optional_positive_u64_value(
                     value,
                     &name,
-                    compaction_config::max_kv_count_for_xor16(),
+                    compaction_config::blocked_xor_filter_kv_count_threshold(),
                 )?)
             }
             "max_vnode_key_range_bytes" => {

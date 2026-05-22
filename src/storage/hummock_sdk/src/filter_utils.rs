@@ -13,16 +13,256 @@
 // limitations under the License.
 
 use risingwave_common::config::meta::default::compaction_config;
+use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableFilterType};
 
-/// Determines whether the key count is large enough to warrant using a block-based filter.
+/// Determines whether the key count is large enough to warrant using a blocked SST filter.
 ///
 /// # Arguments
 /// * `kv_count` - The total number of keys
-/// * `max_kv_count` - Optional configured threshold. If None, uses `DEFAULT_MAX_KV_COUNT_FOR_XOR16`
+/// * `blocked_kv_count_threshold` - Optional configured threshold. If None, uses
+///   `DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD`.
 ///
 /// # Returns
-/// `true` if `kv_count` exceeds the threshold, indicating block-based filter should be used
-pub fn is_kv_count_too_large_for_xor16(kv_count: u64, max_kv_count: Option<u64>) -> bool {
-    let threshold = max_kv_count.unwrap_or(compaction_config::DEFAULT_MAX_KV_COUNT_FOR_XOR16);
+/// `true` if `kv_count` exceeds the threshold, indicating blocked SST filter should be used.
+pub fn should_use_blocked_xor_filter_by_kv_count(
+    kv_count: u64,
+    blocked_kv_count_threshold: Option<u64>,
+) -> bool {
+    let threshold = blocked_kv_count_threshold
+        .unwrap_or(compaction_config::DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD);
     kv_count > threshold
+}
+
+pub fn parse_sstable_filter_kind(kind: &str) -> Result<PbSstableFilterType, String> {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "xor16" => Ok(PbSstableFilterType::SstableFilterXor16),
+        "xor8" => Ok(PbSstableFilterType::SstableFilterXor8),
+        "binary_fuse8" | "binary-fuse8" | "binaryfuse8" | "bfuse8" | "fuse8" => {
+            Ok(PbSstableFilterType::SstableFilterBinaryFuse8)
+        }
+        "binary_fuse16" | "binary-fuse16" | "binaryfuse16" | "bfuse16" | "fuse16" => {
+            Ok(PbSstableFilterType::SstableFilterBinaryFuse16)
+        }
+        _ => Err(format!("unsupported sstable filter kind: {kind}")),
+    }
+}
+
+pub fn parse_sstable_filter_layout(layout: &str) -> Result<PbSstableFilterLayout, String> {
+    match layout.trim().to_ascii_lowercase().as_str() {
+        "" | "auto" => Ok(PbSstableFilterLayout::Auto),
+        "plain" | "normal" | "nonblocked" | "non_blocked" | "non-blocked" => {
+            Ok(PbSstableFilterLayout::Plain)
+        }
+        _ => Err(format!("unsupported sstable filter layout: {layout}")),
+    }
+}
+
+pub fn get_sstable_filter_kind(
+    compaction_config: &CompactionConfig,
+    base_level: usize,
+    level: usize,
+) -> Result<PbSstableFilterType, String> {
+    let idx = compression_style_config_index(base_level, level);
+    if compaction_config.sstable_filter_kind.is_empty() {
+        // Old compaction configs did not carry sstable_filter_kind. New compaction outputs should
+        // still use the current default filter families.
+        let default_filter_kind = compaction_config::sstable_filter_kind();
+        let raw_kind = default_filter_kind
+            .get(idx)
+            .map(String::as_str)
+            .unwrap_or("binary_fuse16");
+        return parse_sstable_filter_kind(raw_kind);
+    }
+
+    let raw_kind = compaction_config
+        .sstable_filter_kind
+        .get(idx)
+        .ok_or_else(|| format!("sstable_filter_kind is not configured for index {idx}"))?;
+
+    parse_sstable_filter_kind(raw_kind)
+}
+
+pub fn must_resolve_sstable_filter_kind(
+    compaction_config: &CompactionConfig,
+    base_level: usize,
+    level: usize,
+) -> PbSstableFilterType {
+    get_sstable_filter_kind(compaction_config, base_level, level)
+        .unwrap_or_else(|err| panic!("invalid sstable_filter_kind compaction config: {err}"))
+}
+
+pub fn get_sstable_filter_layout(
+    compaction_config: &CompactionConfig,
+    base_level: usize,
+    level: usize,
+) -> Result<PbSstableFilterLayout, String> {
+    if compaction_config.sstable_filter_layout.is_empty() {
+        return Ok(PbSstableFilterLayout::Auto);
+    }
+
+    let idx = compression_style_config_index(base_level, level);
+    let raw_layout = compaction_config
+        .sstable_filter_layout
+        .get(idx)
+        .ok_or_else(|| format!("sstable_filter_layout is not configured for index {idx}"))?;
+
+    parse_sstable_filter_layout(raw_layout)
+}
+
+fn compression_style_config_index(base_level: usize, level: usize) -> usize {
+    if level == 0 || level < base_level {
+        0
+    } else {
+        level - base_level + 1
+    }
+}
+
+pub fn must_resolve_sstable_filter_layout(
+    compaction_config: &CompactionConfig,
+    base_level: usize,
+    level: usize,
+) -> PbSstableFilterLayout {
+    get_sstable_filter_layout(compaction_config, base_level, level)
+        .unwrap_or_else(|err| panic!("invalid sstable_filter_layout compaction config: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::CompactionConfig;
+
+    use super::{
+        PbSstableFilterLayout, PbSstableFilterType, get_sstable_filter_kind,
+        get_sstable_filter_layout, parse_sstable_filter_kind, parse_sstable_filter_layout,
+    };
+
+    #[test]
+    fn test_parse_sstable_filter_kind() {
+        assert_eq!(
+            parse_sstable_filter_kind("xor16").unwrap(),
+            PbSstableFilterType::SstableFilterXor16
+        );
+        assert_eq!(
+            parse_sstable_filter_kind("XOR8").unwrap(),
+            PbSstableFilterType::SstableFilterXor8
+        );
+        assert_eq!(
+            parse_sstable_filter_kind("bfuse8").unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse8
+        );
+        assert_eq!(
+            parse_sstable_filter_kind("bfuse16").unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse16
+        );
+    }
+
+    #[test]
+    fn test_parse_sstable_filter_layout() {
+        assert_eq!(
+            parse_sstable_filter_layout("auto").unwrap(),
+            PbSstableFilterLayout::Auto
+        );
+        assert_eq!(
+            parse_sstable_filter_layout("").unwrap(),
+            PbSstableFilterLayout::Auto
+        );
+        assert_eq!(
+            parse_sstable_filter_layout("plain").unwrap(),
+            PbSstableFilterLayout::Plain
+        );
+        assert_eq!(
+            parse_sstable_filter_layout("NORMAL").unwrap(),
+            PbSstableFilterLayout::Plain
+        );
+        assert!(parse_sstable_filter_layout("blocked").is_err());
+    }
+
+    #[test]
+    fn test_get_sstable_filter_kind_uses_compression_style_index() {
+        let config = CompactionConfig {
+            sstable_filter_kind: vec![
+                "binary_fuse16".to_owned(),
+                "binary_fuse8".to_owned(),
+                "binary_fuse16".to_owned(),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            get_sstable_filter_kind(&config, 2, 0).unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse16
+        );
+        assert_eq!(
+            get_sstable_filter_kind(&config, 2, 1).unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse16
+        );
+        assert_eq!(
+            get_sstable_filter_kind(&config, 2, 2).unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse8
+        );
+        assert_eq!(
+            get_sstable_filter_kind(&config, 2, 3).unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse16
+        );
+        assert!(get_sstable_filter_kind(&config, 2, 4).is_err());
+    }
+
+    #[test]
+    fn test_get_sstable_filter_kind_default_when_missing() {
+        let config = CompactionConfig {
+            sstable_filter_kind: vec![],
+            ..Default::default()
+        };
+        assert_eq!(
+            get_sstable_filter_kind(&config, 2, 0).unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse16
+        );
+        assert_eq!(
+            get_sstable_filter_kind(&config, 2, 2).unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse8
+        );
+        assert_eq!(
+            get_sstable_filter_kind(&config, 2, 6).unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse16
+        );
+    }
+
+    #[test]
+    fn test_get_sstable_filter_layout_uses_compression_style_index() {
+        let config = CompactionConfig {
+            sstable_filter_layout: vec!["plain".to_owned(), "auto".to_owned(), "normal".to_owned()],
+            ..Default::default()
+        };
+        assert_eq!(
+            get_sstable_filter_layout(&config, 2, 0).unwrap(),
+            PbSstableFilterLayout::Plain
+        );
+        assert_eq!(
+            get_sstable_filter_layout(&config, 2, 1).unwrap(),
+            PbSstableFilterLayout::Plain
+        );
+        assert_eq!(
+            get_sstable_filter_layout(&config, 2, 2).unwrap(),
+            PbSstableFilterLayout::Auto
+        );
+        assert_eq!(
+            get_sstable_filter_layout(&config, 2, 3).unwrap(),
+            PbSstableFilterLayout::Plain
+        );
+        assert!(get_sstable_filter_layout(&config, 2, 4).is_err());
+    }
+
+    #[test]
+    fn test_get_sstable_filter_layout_default_when_missing() {
+        let config = CompactionConfig {
+            sstable_filter_layout: vec![],
+            ..Default::default()
+        };
+        assert_eq!(
+            get_sstable_filter_layout(&config, 2, 0).unwrap(),
+            PbSstableFilterLayout::Auto
+        );
+        assert_eq!(
+            get_sstable_filter_layout(&config, 2, 6).unwrap(),
+            PbSstableFilterLayout::Auto
+        );
+    }
 }

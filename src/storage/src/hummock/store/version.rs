@@ -712,6 +712,7 @@ impl HummockVersionReader {
                 full_key.to_ref(),
                 &read_options,
                 dist_key_hash,
+                "staging",
                 local_stats,
             )
             .await?
@@ -745,6 +746,7 @@ impl HummockVersionReader {
             if level.table_infos.is_empty() {
                 continue;
             }
+            let level_label = level.level_idx.to_string();
 
             match level.level_type {
                 LevelType::Overlapping | LevelType::Unspecified => {
@@ -771,6 +773,7 @@ impl HummockVersionReader {
                             full_key.to_ref(),
                             &read_options,
                             dist_key_hash,
+                            level_label.as_str(),
                             local_stats,
                         )
                         .await?
@@ -837,6 +840,7 @@ impl HummockVersionReader {
                         full_key.to_ref(),
                         &read_options,
                         dist_key_hash,
+                        level_label.as_str(),
                         local_stats,
                     )
                     .await?
@@ -1058,6 +1062,7 @@ impl HummockVersionReader {
                     &table_holder,
                     &user_key_range_ref,
                     *prefix_hash,
+                    "staging",
                     local_stats,
                 )
             {
@@ -1080,6 +1085,7 @@ impl HummockVersionReader {
             if level.table_infos.is_empty() {
                 continue;
             }
+            let level_label = level.level_idx.to_string();
 
             if level.level_type == LevelType::Nonoverlapping {
                 let mut table_infos =
@@ -1110,6 +1116,7 @@ impl HummockVersionReader {
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
+                            level_label.as_str(),
                             local_stats,
                         )
                     {
@@ -1147,6 +1154,7 @@ impl HummockVersionReader {
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
+                            level_label.as_str(),
                             local_stats,
                         )
                     {
@@ -1524,6 +1532,7 @@ mod tests {
             uncompressed_file_size: 0,
             range_tombstone_count: 0,
             bloom_filter_kind: PbBloomFilterType::Sstable,
+            filter_type: risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
             sst_size: 1,
             vnode_statistics: Some(vnode_stats),
         }

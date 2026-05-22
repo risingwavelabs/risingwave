@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use prometheus::local::{LocalHistogram, LocalIntCounter};
 use risingwave_common::catalog::TableId;
-use risingwave_common::metrics::LabelGuardedLocalIntCounter;
+use risingwave_common::metrics::{LabelGuardedLocalIntCounter, RelabeledGuardedIntCounterVec};
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 
 use super::HummockStateStoreMetrics;
@@ -39,6 +39,19 @@ pub(crate) fn flush_local_metrics_for_test() {
 }
 
 #[derive(Default, Debug)]
+pub struct BloomFilterLevelStats {
+    pub check_counts: u64,
+    pub true_negative_counts: u64,
+}
+
+impl BloomFilterLevelStats {
+    fn add(&mut self, other: &BloomFilterLevelStats) {
+        self.check_counts += other.check_counts;
+        self.true_negative_counts += other.true_negative_counts;
+    }
+}
+
+#[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
     pub cache_data_block_total: u64,
@@ -53,6 +66,7 @@ pub struct StoreLocalStatistic {
     pub skip_delete_key_count: u64,
     pub processed_key_count: u64,
     pub bloom_filter_true_negative_counts: u64,
+    pub bloom_filter_level_stats: HashMap<String, BloomFilterLevelStats>,
     pub remote_io_time: Arc<AtomicU64>,
     pub bloom_filter_check_counts: u64,
     pub get_shared_buffer_hit_counts: u64,
@@ -83,10 +97,29 @@ pub struct StoreLocalStatistic {
 }
 
 impl StoreLocalStatistic {
+    pub fn record_bloom_filter_check(&mut self, level_label: &str, may_exist: bool) {
+        self.bloom_filter_check_counts += 1;
+        let level_stats = self
+            .bloom_filter_level_stats
+            .entry(level_label.to_owned())
+            .or_default();
+        level_stats.check_counts += 1;
+        if !may_exist {
+            self.bloom_filter_true_negative_counts += 1;
+            level_stats.true_negative_counts += 1;
+        }
+    }
+
     pub fn add(&mut self, other: &StoreLocalStatistic) {
         self.add_count(other);
         self.add_histogram(other);
         self.bloom_filter_true_negative_counts += other.bloom_filter_true_negative_counts;
+        for (level_label, level_stats) in &other.bloom_filter_level_stats {
+            self.bloom_filter_level_stats
+                .entry(level_label.clone())
+                .or_default()
+                .add(level_stats);
+        }
         self.remote_io_time.fetch_add(
             other.remote_io_time.load(Ordering::Relaxed),
             Ordering::Relaxed,
@@ -187,6 +220,25 @@ impl StoreLocalStatistic {
             // positive
             // checks SST bloom filters and at least one bloom filter returns positive
             metrics.read_req_bloom_filter_positive_counts.inc();
+        }
+
+        for (level_label, level_stats) in &self.bloom_filter_level_stats {
+            if level_stats.check_counts == 0 {
+                continue;
+            }
+            let positive_counts = level_stats
+                .check_counts
+                .saturating_sub(level_stats.true_negative_counts);
+            metrics.inc_level_counts(level_label, "check", level_stats.check_counts);
+            metrics.inc_level_counts(
+                level_label,
+                "true_negative",
+                level_stats.true_negative_counts,
+            );
+            metrics.inc_level_counts(level_label, "positive", positive_counts);
+            if !self.found_key {
+                metrics.inc_level_counts(level_label, "false_positive", positive_counts);
+            }
         }
     }
 
@@ -501,6 +553,9 @@ macro_rules! define_bloom_filter_metrics {
     ($($x:ident),*) => (
         struct BloomFilterLocalMetrics {
             $($x: LabelGuardedLocalIntCounter,)*
+            bloom_filter_level_counts: RelabeledGuardedIntCounterVec,
+            table_id_label: String,
+            oper_type: String,
         }
 
         impl BloomFilterLocalMetrics {
@@ -508,7 +563,24 @@ macro_rules! define_bloom_filter_metrics {
                 // checks SST bloom filters
                 Self {
                     $($x: metrics.$x.with_guarded_label_values(&[table_id_label, oper_type]).local(),)*
+                    bloom_filter_level_counts: metrics.bloom_filter_level_counts.clone(),
+                    table_id_label: table_id_label.to_owned(),
+                    oper_type: oper_type.to_owned(),
                 }
+            }
+
+            pub fn inc_level_counts(&self, level_label: &str, result: &str, count: u64) {
+                if count == 0 {
+                    return;
+                }
+                self.bloom_filter_level_counts
+                    .with_guarded_label_values(&[
+                        self.table_id_label.as_str(),
+                        self.oper_type.as_str(),
+                        level_label,
+                        result,
+                    ])
+                    .inc_by(count);
             }
 
             pub fn flush(&mut self) {

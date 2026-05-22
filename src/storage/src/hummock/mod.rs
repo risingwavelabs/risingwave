@@ -75,6 +75,7 @@ pub async fn get_from_sstable_info(
     full_key: FullKey<&[u8]>,
     read_options: &ReadOptions,
     dist_key_hash: Option<u64>,
+    level_label: &str,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<impl HummockIterator>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
@@ -89,6 +90,7 @@ pub async fn get_from_sstable_info(
                 Bound::Included(full_key.user_key),
             ),
             hash,
+            level_label,
             local_stats,
         )
     {
@@ -124,13 +126,11 @@ pub fn hit_sstable_bloom_filter(
     sstable_ref: &Sstable,
     user_key_range: &UserKeyRangeRef<'_>,
     prefix_hash: u64,
+    level_label: &str,
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
-    local_stats.bloom_filter_check_counts += 1;
     let may_exist = sstable_ref.may_match_hash(user_key_range, prefix_hash);
-    if !may_exist {
-        local_stats.bloom_filter_true_negative_counts += 1;
-    }
+    local_stats.record_bloom_filter_check(level_label, may_exist);
     may_exist
 }
 

@@ -35,7 +35,8 @@ use tokio::sync::OnceCell;
 
 use super::CompactionGroupStatistic;
 use crate::hummock::compaction::compaction_config::{
-    CompactionConfigBuilder, validate_compaction_config,
+    CompactionConfigBuilder, default_sstable_filter_kind, default_sstable_filter_layout,
+    validate_compaction_config,
 };
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
@@ -647,11 +648,37 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::VnodeAlignedLevelSizeThreshold(_) => {
                 // Deprecated. Keep accepting the field for old clients but do not apply it.
             }
-            MutableConfig::MaxKvCountForXor16(c) => {
-                target.max_kv_count_for_xor16 = optional_u64_config(*c);
+            MutableConfig::BlockedXorFilterKvCountThreshold(c) => {
+                target.blocked_xor_filter_kv_count_threshold = optional_u64_config(*c);
             }
             MutableConfig::MaxVnodeKeyRangeBytes(c) => {
                 target.max_vnode_key_range_bytes = optional_positive_u64_config(*c);
+            }
+            MutableConfig::SstableFilterKind(c) => {
+                if target.sstable_filter_kind.is_empty() {
+                    target.sstable_filter_kind = default_sstable_filter_kind(target.max_level);
+                }
+                let idx = c.get_level() as usize;
+                let level_entry = target.sstable_filter_kind.get_mut(idx).ok_or_else(|| {
+                    Error::CompactionGroup(format!(
+                        "sstable_filter_kind level {} is out of range",
+                        idx
+                    ))
+                })?;
+                level_entry.clone_from(&c.filter_kind);
+            }
+            MutableConfig::SstableFilterLayout(c) => {
+                if target.sstable_filter_layout.is_empty() {
+                    target.sstable_filter_layout = default_sstable_filter_layout(target.max_level);
+                }
+                let idx = c.get_level() as usize;
+                let level_entry = target.sstable_filter_layout.get_mut(idx).ok_or_else(|| {
+                    Error::CompactionGroup(format!(
+                        "sstable_filter_layout level {} is out of range",
+                        idx
+                    ))
+                })?;
+                level_entry.clone_from(&c.layout);
             }
         }
     }
@@ -895,7 +922,7 @@ mod tests {
             env.meta_store_ref(),
             &mut inner,
             &[100],
-            &[MutableConfig::MaxKvCountForXor16(0)],
+            &[MutableConfig::BlockedXorFilterKvCountThreshold(0)],
         )
         .await
         .unwrap();
@@ -904,14 +931,14 @@ mod tests {
                 .try_get_compaction_group_config(100)
                 .unwrap()
                 .compaction_config
-                .max_kv_count_for_xor16,
+                .blocked_xor_filter_kv_count_threshold,
             None
         );
         update_compaction_config(
             env.meta_store_ref(),
             &mut inner,
             &[100],
-            &[MutableConfig::MaxKvCountForXor16(1024)],
+            &[MutableConfig::BlockedXorFilterKvCountThreshold(1024)],
         )
         .await
         .unwrap();
@@ -920,14 +947,14 @@ mod tests {
                 .try_get_compaction_group_config(100)
                 .unwrap()
                 .compaction_config
-                .max_kv_count_for_xor16,
+                .blocked_xor_filter_kv_count_threshold,
             Some(1024)
         );
         update_compaction_config(
             env.meta_store_ref(),
             &mut inner,
             &[100],
-            &[MutableConfig::MaxKvCountForXor16(u64::MAX)],
+            &[MutableConfig::BlockedXorFilterKvCountThreshold(u64::MAX)],
         )
         .await
         .unwrap();
@@ -936,7 +963,7 @@ mod tests {
                 .try_get_compaction_group_config(100)
                 .unwrap()
                 .compaction_config
-                .max_kv_count_for_xor16,
+                .blocked_xor_filter_kv_count_threshold,
             None
         );
 

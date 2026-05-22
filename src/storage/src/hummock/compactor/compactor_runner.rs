@@ -106,6 +106,7 @@ impl CompactorRunner {
                 gc_delete_keys: task.gc_delete_keys,
                 retain_multiple_version: false,
                 use_block_based_filter,
+                sstable_filter_kind: task.sstable_filter_kind,
                 table_vnode_partition: task.table_vnode_partition.clone(),
                 table_schemas: task
                     .table_schemas
@@ -424,7 +425,7 @@ pub async fn compact_with_agent(
         });
 
     if optimize_by_copy_block {
-        let runner = fast_compactor_runner::CompactorRunner::new(
+        let runner = fast_compactor_runner::run(
             context.clone(),
             compact_task.clone(),
             compaction_catalog_agent_ref.clone(),
@@ -439,7 +440,7 @@ pub async fn compact_with_agent(
                 task_status = TaskStatus::ManualCanceled;
             },
 
-            ret = runner.run() => {
+            ret = runner => {
                 match ret {
                     Ok((ssts, statistics)) => {
                         output_ssts.push((0, ssts, statistics));

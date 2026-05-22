@@ -43,6 +43,7 @@ use tracing::warn;
 pub struct HummockStateStoreMetrics {
     pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec,
     pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec,
+    pub bloom_filter_level_counts: RelabeledGuardedIntCounterVec,
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
     pub vnode_pruning_counts: RelabeledGuardedIntCounterVec,
     pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec,
@@ -137,6 +138,19 @@ impl HummockStateStoreMetrics {
         let bloom_filter_check_counts = RelabeledMetricVec::with_metric_level(
             MetricLevel::Debug,
             bloom_filter_check_counts,
+            metric_level,
+        );
+
+        let bloom_filter_level_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_bloom_filter_level_counts",
+            "Total number of SST bloom filter checks grouped by LSM level",
+            &["table_id", "type", "level", "result"],
+            registry
+        )
+        .unwrap();
+        let bloom_filter_level_counts = RelabeledMetricVec::with_metric_level(
+            MetricLevel::Debug,
+            bloom_filter_level_counts,
             metric_level,
         );
 
@@ -597,6 +611,7 @@ impl HummockStateStoreMetrics {
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
+            bloom_filter_level_counts,
             iter_merge_sstable_counts,
             vnode_pruning_counts,
             sst_store_block_request_counts,

@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
-use risingwave_pb::hummock::BloomFilterType;
+use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
@@ -48,8 +48,9 @@ use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedBinaryFuse8FilterBuilder,
-    CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
-    TableHolder, UnifiedSstableWriterFactory,
+    BlockedBinaryFuse16FilterBuilder, BlockedXor8FilterBuilder, BlockedXor16FilterBuilder,
+    CachePolicy, CompressionAlgorithm, FilterBuilder, GetObjectId, HummockResult,
+    SstableBuilderOptions, TableHolder, UnifiedSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -350,19 +351,16 @@ impl ConcatSstableIterator {
     }
 }
 
-pub struct CompactorRunner<C: CompactionFilter = MultiCompactionFilter> {
+pub struct CompactorRunner<F: FilterBuilder, C: CompactionFilter = MultiCompactionFilter> {
     left: Box<ConcatSstableIterator>,
     right: Box<ConcatSstableIterator>,
     task_id: u64,
-    executor: CompactTaskExecutor<
-        RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedBinaryFuse8FilterBuilder>,
-        C,
-    >,
+    executor: CompactTaskExecutor<RemoteBuilderFactory<UnifiedSstableWriterFactory, F>, C>,
     compression_algorithm: CompressionAlgorithm,
     metrics: Arc<CompactorMetrics>,
 }
 
-impl<C: CompactionFilter> CompactorRunner<C> {
+impl<F: FilterBuilder, C: CompactionFilter> CompactorRunner<F, C> {
     pub fn new(
         context: CompactorContext,
         task: CompactTask,
@@ -389,12 +387,13 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             retain_multiple_version: false,
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
+            sstable_filter_kind: task.sstable_filter_kind,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
         };
         let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
 
-        let builder_factory = RemoteBuilderFactory::<_, BlockedBinaryFuse8FilterBuilder> {
+        let builder_factory = RemoteBuilderFactory::<_, F> {
             object_id_getter,
             limiter: context.memory_limiter.clone(),
             options,
@@ -660,6 +659,67 @@ impl<C: CompactionFilter> CompactorRunner<C> {
     }
 }
 
+pub async fn run<C: CompactionFilter>(
+    context: CompactorContext,
+    task: CompactTask,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    object_id_getter: Arc<dyn GetObjectId>,
+    task_progress: Arc<TaskProgress>,
+    compaction_filter: C,
+) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
+    match task.sstable_filter_kind {
+        PbSstableFilterType::SstableFilterXor8 => {
+            CompactorRunner::<BlockedXor8FilterBuilder, _>::new(
+                context,
+                task,
+                compaction_catalog_agent_ref,
+                object_id_getter,
+                task_progress,
+                compaction_filter,
+            )
+            .run()
+            .await
+        }
+        PbSstableFilterType::SstableFilterXor16 => {
+            CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
+                context,
+                task,
+                compaction_catalog_agent_ref,
+                object_id_getter,
+                task_progress,
+                compaction_filter,
+            )
+            .run()
+            .await
+        }
+        PbSstableFilterType::SstableFilterBinaryFuse8 => {
+            CompactorRunner::<BlockedBinaryFuse8FilterBuilder, _>::new(
+                context,
+                task,
+                compaction_catalog_agent_ref,
+                object_id_getter,
+                task_progress,
+                compaction_filter,
+            )
+            .run()
+            .await
+        }
+        PbSstableFilterType::SstableFilterBinaryFuse16 => {
+            CompactorRunner::<BlockedBinaryFuse16FilterBuilder, _>::new(
+                context,
+                task,
+                compaction_catalog_agent_ref,
+                object_id_getter,
+                task_progress,
+                compaction_filter,
+            )
+            .run()
+            .await
+        }
+        kind => unreachable!("unsupported fast-compaction filter kind: {kind:?}"),
+    }
+}
+
 pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     last_key: FullKey<Vec<u8>>,
     compaction_statistics: CompactionStatistics,
@@ -891,7 +951,7 @@ mod tests {
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::level::InputLevel;
     use risingwave_pb::hummock::compact_task::TaskType;
-    use risingwave_pb::hummock::{BloomFilterType, LevelType};
+    use risingwave_pb::hummock::{BloomFilterType, LevelType, PbSstableFilterType};
 
     use super::CompactorRunner;
     use crate::compaction_catalog_manager::CompactionCatalogAgent;
@@ -988,13 +1048,15 @@ mod tests {
             existing_table_ids: vec![TableId::new(2)],
             target_file_size: 1 << 20,
             task_type: TaskType::Dynamic,
+            blocked_xor_filter_kv_count_threshold: Some(0),
+            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
             ..Default::default()
         };
 
         assert_eq!(task.input_ssts[0].read_sstable_infos().count(), 1);
         assert!(optimize_by_copy_block(&task, &context));
 
-        let runner = CompactorRunner::new(
+        let runner = CompactorRunner::<BlockedXor16FilterBuilder, _>::new(
             context,
             task,
             CompactionCatalogAgent::for_test(vec![1, 2]),

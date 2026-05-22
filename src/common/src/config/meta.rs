@@ -648,10 +648,36 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
-    #[serde(default = "default::compaction_config::max_kv_count_for_xor16")]
-    pub max_kv_count_for_xor16: Option<u64>,
+    /// KV-count threshold for using blocked SST filters when output filter layout is "auto".
+    ///
+    /// When `sstable_filter_layout[level]` is "auto", compaction will build blocked SST filters if
+    /// the estimated total key count of the task exceeds this threshold. Otherwise it will build a
+    /// single non-blocked SST filter.
+    ///
+    /// Note: shared-buffer flush does not read compaction group config, and always uses the
+    /// built-in default threshold.
+    #[serde(default = "default::compaction_config::blocked_xor_filter_kv_count_threshold")]
+    #[serde(alias = "max_kv_count_for_xor16")]
+    pub blocked_xor_filter_kv_count_threshold: Option<u64>,
     #[serde(default = "default::compaction_config::max_vnode_key_range_bytes")]
     pub max_vnode_key_range_bytes: Option<u64>,
+    /// Compression-style per-level SST filter family for compaction output.
+    ///
+    /// Index 0 applies to L0 and levels above the dynamic base level. Index 1 applies to the
+    /// current dynamic base level. Index 2+ applies to levels below the base level.
+    /// Shared-buffer flush ignores this config and always uses "binary_fuse16".
+    #[serde(default = "default::compaction_config::sstable_filter_kind")]
+    pub sstable_filter_kind: Vec<String>,
+    /// Compression-style per-level SST filter layout for compaction output.
+    ///
+    /// "auto" uses the kv-count heuristic; "plain"/"normal" forces non-blocked filters and ignores
+    /// kv-count threshold.
+    ///
+    /// Index 0 applies to L0 and levels above the dynamic base level. Index 1 applies to the
+    /// current dynamic base level. Index 2+ applies to levels below the base level.
+    /// Shared-buffer flush ignores this config and always uses "auto".
+    #[serde(default = "default::compaction_config::sstable_filter_layout")]
+    pub sstable_filter_layout: Vec<String>,
 }
 
 pub mod default {
@@ -956,7 +982,7 @@ pub mod default {
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 5000;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
         const DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION: bool = true;
-        pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
+        pub const DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD: u64 = 256 * 1024;
         const DEFAULT_MAX_VNODE_KEY_RANGE_BYTES: Option<u64> = None;
 
         use crate::catalog::hummock::CompactionFilterFlag;
@@ -1065,8 +1091,8 @@ pub mod default {
             DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION
         }
 
-        pub fn max_kv_count_for_xor16() -> Option<u64> {
-            Some(DEFAULT_MAX_KV_COUNT_FOR_XOR16)
+        pub fn blocked_xor_filter_kv_count_threshold() -> Option<u64> {
+            Some(DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD)
         }
 
         /// Default compression algorithm for a given LSM-tree level.
@@ -1092,6 +1118,30 @@ pub mod default {
 
         pub fn max_vnode_key_range_bytes() -> Option<u64> {
             DEFAULT_MAX_VNODE_KEY_RANGE_BYTES
+        }
+
+        pub fn sstable_filter_kind() -> Vec<String> {
+            vec![
+                "binary_fuse16".to_owned(),
+                "binary_fuse8".to_owned(),
+                "binary_fuse16".to_owned(),
+                "binary_fuse16".to_owned(),
+                "binary_fuse16".to_owned(),
+                "binary_fuse16".to_owned(),
+                "binary_fuse16".to_owned(),
+            ]
+        }
+
+        pub fn sstable_filter_layout() -> Vec<String> {
+            vec![
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+            ]
         }
     }
 }
