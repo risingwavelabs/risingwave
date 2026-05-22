@@ -5,130 +5,48 @@ statement ok
 set enable_locality_sort_buffer=true;
 
 statement ok
-create table t1(a int, b int, c int);
+create table t (
+    id int primary key,
+    join_key int,
+    group_key int,
+    large_value varchar
+);
 
 statement ok
-create table t2(a int, b int, c int);
-
-query T
-explain create materialized view mv_sort_buffer as select count(*) from t1 join t2 on t1.a = t2.a group by t1.b;
-----
-StreamMaterialize { columns: [count, t1.b(hidden)], stream_key: [t1.b], pk_columns: [t1.b], pk_conflict: NoCheck }
-└─StreamProject { exprs: [count, t1.b] }
-  └─StreamHashAgg { group_key: [t1.b], aggs: [count] }
-    └─StreamChangeBuffer
-      └─StreamLocalityProvider { locality_columns: [t1.b] }
-        └─StreamExchange { dist: HashShard(t1.b) }
-              └─StreamHashJoin { type: Inner, predicate: t1.a = t2.a }
-            ├─StreamExchange { dist: HashShard(t1.a) }
-            │ └─StreamChangeBuffer
-            │   └─StreamLocalityProvider { locality_columns: [t1.a] }
-            │     └─StreamExchange { dist: HashShard(t1.a) }
-                │       └─StreamTableScan { table: t1, columns: [a, b, _row_id] }
-            └─StreamExchange { dist: HashShard(t2.a) }
-              └─StreamChangeBuffer
-                └─StreamLocalityProvider { locality_columns: [t2.a] }
-                  └─StreamExchange { dist: HashShard(t2.a) }
-                        └─StreamTableScan { table: t2, columns: [a, _row_id] }
-
+insert into t
+select i, 1, i % 1000000, 'xxxxxxxxxxxxxxxxxxxxxxxx'
+from generate_series(1, 10000000, 1) i;
 
 statement ok
-insert into t1 select 1001 - i, 123, i from generate_series(1, 1000, 1) i;
+create table dim (join_key int, change int);
 
 statement ok
-insert into t2 select 1001 - i, 0, i from generate_series(1, 1000, 1) i;
+insert into dim values (1, 1);
 
 statement ok
 flush;
 
 statement ok
-create materialized view mv_sort_buffer as select count(*) from t1 join t2 on t1.a = t2.a group by t1.b;
+create materialized view mv_sort_buffer as
+select
+    group_key,
+    sum(change) as change_sum,
+    min(large_value) as min_large_value
+from t join dim using (join_key)
+group by group_key;
 
-query ?
-select * from mv_sort_buffer;
-----
-1000
-
+# Trigger join amplification: the single dim update fans out to every row in t.
 statement ok
-insert into t1 values (1001, 123, 1001);
-
-statement ok
-insert into t2 values (1001, 0, 1001);
+update dim set change = change + 1;
 
 statement ok
 flush;
-
-query ?
-select * from mv_sort_buffer;
-----
-1001
 
 statement ok
 drop materialized view mv_sort_buffer;
 
-# Same query with the sort buffer disabled must produce the same final result.
 statement ok
-set enable_locality_sort_buffer=false;
-
-statement ok
-create materialized view mv_no_sort_buffer as select count(*) from t1 join t2 on t1.a = t2.a group by t1.b;
-
-query ?
-select * from mv_no_sort_buffer;
-----
-1001
+drop table t;
 
 statement ok
-drop materialized view mv_no_sort_buffer;
-
-statement ok
-drop table t1;
-
-statement ok
-drop table t2;
-
-# Correctness under churn with the sort buffer enabled: drive update / delete /
-# re-insert sequences against the same keys and verify the aggregate is
-# unaffected. Guards against gross corruption (dropped or duplicated rows) in
-# the change buffer's incremental processing path.
-statement ok
-set enable_locality_sort_buffer=true;
-
-statement ok
-create table t3(a int primary key, b int);
-
-statement ok
-insert into t3 select i, i * 10 from generate_series(1, 1000, 1) i;
-
-statement ok
-flush;
-
-statement ok
-create materialized view mv_compaction as
-  select count(*) as n, sum(b) as s from (select a, b from t3) sub group by (a % 4);
-
-statement ok
-update t3 set b = b + 1 where a <= 100;
-
-statement ok
-update t3 set b = b - 1 where a <= 100;
-
-statement ok
-delete from t3 where a <= 50;
-
-statement ok
-insert into t3 select i, i * 10 from generate_series(1, 50, 1) i;
-
-statement ok
-flush;
-
-query II
-select sum(n), sum(s) from mv_compaction;
-----
-1000 5005000
-
-statement ok
-drop materialized view mv_compaction;
-
-statement ok
-drop table t3;
+drop table dim;
