@@ -52,6 +52,7 @@ pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
+const BYTES_PER_MB: usize = 1024 * 1024;
 
 pub const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
@@ -128,6 +129,13 @@ pub struct StarrocksConfig {
     #[serde(rename = "starrocks.partial_update")]
     pub partial_update: Option<String>,
 
+    /// The maximum size in MB for each StarRocks stream load request payload.
+    /// If unset, RisingWave does not split the request by payload size.
+    #[serde(rename = "starrocks.max_batch_size_mb", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub max_batch_size_mb: Option<usize>,
+
     pub r#type: String, // accept "append-only" or "upsert"
 }
 
@@ -159,8 +167,36 @@ impl StarrocksConfig {
                 "`commit_checkpoint_interval` must be greater than 0"
             )));
         }
+        if let Some(max_batch_size_mb) = config.max_batch_size_mb {
+            if max_batch_size_mb == 0 {
+                return Err(SinkError::Config(anyhow!(
+                    "`starrocks.max_batch_size_mb` must be greater than 0"
+                )));
+            }
+            if max_batch_size_mb.checked_mul(BYTES_PER_MB).is_none() {
+                return Err(SinkError::Config(anyhow!(
+                    "`starrocks.max_batch_size_mb` is too large"
+                )));
+            }
+        }
         Ok(config)
     }
+
+    fn max_batch_size_bytes(&self) -> Option<usize> {
+        self.max_batch_size_mb
+            .map(|max_batch_size_mb| max_batch_size_mb * BYTES_PER_MB)
+    }
+}
+
+fn should_finish_current_load_before_row(
+    current_load_bytes: usize,
+    row_size: usize,
+    max_batch_size_bytes: usize,
+) -> bool {
+    current_load_bytes > 0
+        && current_load_bytes
+            .checked_add(row_size)
+            .is_none_or(|next_load_bytes| next_load_bytes > max_batch_size_bytes)
 }
 
 #[derive(Debug)]
@@ -392,6 +428,7 @@ pub struct StarrocksSinkWriter {
     txn_client: Arc<StarrocksTxnClient>,
     row_encoder: JsonEncoder,
     curr_txn_label: Option<String>,
+    current_load_bytes: usize,
 }
 
 impl TryFrom<SinkParam> for StarrocksSink {
@@ -454,7 +491,54 @@ impl StarrocksSinkWriter {
             txn_client: Arc::new(StarrocksTxnClient::new(txn_request_builder)),
             row_encoder: JsonEncoder::new_with_starrocks(schema, None, time_zone),
             curr_txn_label: None,
+            current_load_bytes: 0,
         })
+    }
+
+    async fn finish_load_request(&mut self) -> Result<()> {
+        if let Some(client) = self.client.take() {
+            client.finish().await?;
+            self.current_load_bytes = 0;
+        }
+        Ok(())
+    }
+
+    async fn write_row_json(&mut self, row_json_string: String) -> Result<()> {
+        let row_size = row_json_string.len();
+        if let Some(max_batch_size_bytes) = self.config.max_batch_size_bytes() {
+            if row_size > max_batch_size_bytes {
+                return Err(SinkError::Starrocks(format!(
+                    "single row payload size {} bytes exceeds `starrocks.max_batch_size_mb` limit {} bytes",
+                    row_size, max_batch_size_bytes
+                )));
+            }
+            if self.client.is_some()
+                && should_finish_current_load_before_row(
+                    self.current_load_bytes,
+                    row_size,
+                    max_batch_size_bytes,
+                )
+            {
+                self.finish_load_request().await?;
+            }
+        }
+
+        if self.client.is_none() {
+            let txn_label = self.curr_txn_label.clone().ok_or_else(|| {
+                SinkError::Starrocks("Can't find current starrocks transaction label".to_owned())
+            })?;
+            self.client = Some(StarrocksClient::new(
+                self.txn_client.load(txn_label).await?,
+            ));
+            self.current_load_bytes = 0;
+        }
+        self.client
+            .as_mut()
+            .ok_or_else(|| SinkError::Starrocks("Can't find starrocks sink insert".to_owned()))?
+            .write(row_json_string.into())
+            .await?;
+        self.current_load_bytes = self.current_load_bytes.saturating_add(row_size);
+        Ok(())
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
@@ -463,11 +547,7 @@ impl StarrocksSinkWriter {
                 continue;
             }
             let row_json_string = Value::Object(self.row_encoder.encode(row)?).to_string();
-            self.client
-                .as_mut()
-                .ok_or_else(|| SinkError::Starrocks("Can't find starrocks sink insert".to_owned()))?
-                .write(row_json_string.into())
-                .await?;
+            self.write_row_json(row_json_string).await?;
         }
         Ok(())
     }
@@ -484,13 +564,7 @@ impl StarrocksSinkWriter {
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
                     })?;
-                    self.client
-                        .as_mut()
-                        .ok_or_else(|| {
-                            SinkError::Starrocks("Can't find starrocks sink insert".to_owned())
-                        })?
-                        .write(row_json_string.into())
-                        .await?;
+                    self.write_row_json(row_json_string).await?;
                 }
                 Op::Delete => {
                     let mut row_json_value = self.row_encoder.encode(row)?;
@@ -501,13 +575,7 @@ impl StarrocksSinkWriter {
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
                     })?;
-                    self.client
-                        .as_mut()
-                        .ok_or_else(|| {
-                            SinkError::Starrocks("Can't find starrocks sink insert".to_owned())
-                        })?
-                        .write(row_json_string.into())
-                        .await?;
+                    self.write_row_json(row_json_string).await?;
                 }
                 Op::UpdateDelete => {}
                 Op::UpdateInsert => {
@@ -519,13 +587,7 @@ impl StarrocksSinkWriter {
                     let row_json_string = serde_json::to_string(&row_json_value).map_err(|e| {
                         SinkError::Starrocks(format!("Json derialize error: {}", e.as_report()))
                     })?;
-                    self.client
-                        .as_mut()
-                        .ok_or_else(|| {
-                            SinkError::Starrocks("Can't find starrocks sink insert".to_owned())
-                        })?
-                        .write(row_json_string.into())
-                        .await?;
+                    self.write_row_json(row_json_string).await?;
                 }
             }
         }
@@ -600,13 +662,7 @@ impl SinkWriter for StarrocksSinkWriter {
                     txn_label, txn_label_res
                 )));
             }
-            self.curr_txn_label = Some(txn_label.clone());
-        }
-        if self.client.is_none() {
-            let txn_label = self.curr_txn_label.clone();
-            self.client = Some(StarrocksClient::new(
-                self.txn_client.load(txn_label.unwrap()).await?,
-            ));
+            self.curr_txn_label = Some(txn_label);
         }
         if self.is_append_only {
             self.append_only(chunk).await
@@ -616,14 +672,12 @@ impl SinkWriter for StarrocksSinkWriter {
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if let Some(client) = self.client.take() {
-            // Here we finish the `/api/transaction/load` request when a barrier is received. Therefore,
-            // one or more load requests should be made within one commit_checkpoint_interval period.
-            // StarRocks will take care of merging those splits into a larger one during prepare transaction.
-            // Thus, only one version will be produced when the transaction is committed. See Stream Load
-            // transaction interface for more information.
-            client.finish().await?;
-        }
+        // Here we finish the `/api/transaction/load` request when a barrier is received. Therefore,
+        // one or more load requests should be made within one commit_checkpoint_interval period.
+        // StarRocks will take care of merging those splits into a larger one during prepare transaction.
+        // Thus, only one version will be produced when the transaction is committed. See Stream Load
+        // transaction interface for more information.
+        self.finish_load_request().await?;
 
         if is_checkpoint
             && let Some(txn_label) = self.curr_txn_label.take()
@@ -916,4 +970,60 @@ mod tests {
         }
     }
 
+    fn base_properties() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("starrocks.host".to_owned(), "127.0.0.1".to_owned()),
+            ("starrocks.mysqlport".to_owned(), "9030".to_owned()),
+            ("starrocks.httpport".to_owned(), "8030".to_owned()),
+            ("starrocks.user".to_owned(), "root".to_owned()),
+            ("starrocks.password".to_owned(), "".to_owned()),
+            ("starrocks.database".to_owned(), "demo".to_owned()),
+            ("starrocks.table".to_owned(), "sink_table".to_owned()),
+            ("type".to_owned(), SINK_TYPE_APPEND_ONLY.to_owned()),
+        ])
+    }
+
+    #[test]
+    fn starrocks_max_batch_size_mb_is_optional() {
+        let config = StarrocksConfig::from_btreemap(base_properties()).unwrap();
+
+        assert_eq!(config.max_batch_size_mb, None);
+        assert_eq!(config.max_batch_size_bytes(), None);
+    }
+
+    #[test]
+    fn starrocks_max_batch_size_mb_parses_to_bytes() {
+        let mut properties = base_properties();
+        properties.insert("starrocks.max_batch_size_mb".to_owned(), "2".to_owned());
+
+        let config = StarrocksConfig::from_btreemap(properties).unwrap();
+
+        assert_eq!(config.max_batch_size_mb, Some(2));
+        assert_eq!(config.max_batch_size_bytes(), Some(2 * BYTES_PER_MB));
+    }
+
+    #[test]
+    fn starrocks_max_batch_size_mb_rejects_zero() {
+        let mut properties = base_properties();
+        properties.insert("starrocks.max_batch_size_mb".to_owned(), "0".to_owned());
+
+        let err = StarrocksConfig::from_btreemap(properties).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("`starrocks.max_batch_size_mb` must be greater than 0")
+        );
+    }
+
+    #[test]
+    fn starrocks_batch_rollover_keeps_single_payload_within_limit() {
+        assert!(!should_finish_current_load_before_row(0, 10, 10));
+        assert!(!should_finish_current_load_before_row(4, 6, 10));
+        assert!(should_finish_current_load_before_row(5, 6, 10));
+        assert!(should_finish_current_load_before_row(
+            usize::MAX - 1,
+            10,
+            usize::MAX
+        ));
+    }
 }
