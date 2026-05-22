@@ -505,10 +505,20 @@ async fn check_result<
     Ok(true)
 }
 
-pub fn optimize_by_copy_block(compact_task: &CompactTask, context: &CompactorContext) -> bool {
+pub fn optimize_by_copy_block(
+    compact_task: &CompactTask,
+    context: &CompactorContext,
+    compaction_catalog_agent_ref: &CompactionCatalogAgentRef,
+) -> bool {
     let input_ssts = compact_task.read_input_ssts().collect_vec();
     let compaction_size = input_ssts_size(&input_ssts);
-    optimize_by_copy_block_with_input(compact_task, context, &input_ssts, compaction_size)
+    optimize_by_copy_block_with_input(
+        compact_task,
+        context,
+        &input_ssts,
+        compaction_size,
+        compaction_catalog_agent_ref.is_single_table_no_filter(),
+    )
 }
 
 fn optimize_by_copy_block_with_input(
@@ -516,10 +526,12 @@ fn optimize_by_copy_block_with_input(
     context: &CompactorContext,
     input_ssts: &[&SstableInfo],
     compaction_size: u64,
+    allow_sstable_no_filter: bool,
 ) -> bool {
-    let all_ssts_are_blocked_filter = input_ssts
-        .iter()
-        .all(|table_info| table_info.bloom_filter_kind == BloomFilterType::Blocked);
+    let all_ssts_have_copyable_filter = input_ssts.iter().all(|table_info| {
+        table_info.bloom_filter_kind == BloomFilterType::Blocked
+            || (allow_sstable_no_filter && table_info.bloom_filter_kind == BloomFilterType::Sstable)
+    });
 
     let delete_key_count = input_ssts
         .iter()
@@ -532,7 +544,7 @@ fn optimize_by_copy_block_with_input(
 
     let single_table = compact_task.get_table_ids_from_input_ssts().count() == 1;
     context.storage_opts.enable_fast_compaction
-        && all_ssts_are_blocked_filter
+        && all_ssts_have_copyable_filter
         && !compact_task.contains_range_tombstone()
         && !compact_task.contains_ttl()
         && !compact_task.contains_split_sst()
@@ -626,8 +638,15 @@ fn read_sstable_size_and_count<'a>(
 pub fn calculate_task_parallelism(compact_task: &CompactTask, context: &CompactorContext) -> usize {
     let input_ssts = compact_task.read_input_ssts().collect_vec();
     let compaction_size = input_ssts_size(&input_ssts);
-    let optimize_by_copy_block =
-        optimize_by_copy_block_with_input(compact_task, context, &input_ssts, compaction_size);
+    let optimize_by_copy_block = optimize_by_copy_block_with_input(
+        compact_task,
+        context,
+        &input_ssts,
+        compaction_size,
+        // Parallelism is estimated before acquiring table catalogs, so keep the fast-compaction
+        // eligibility conservative. The execution path may relax this with catalog information.
+        false,
+    );
 
     if optimize_by_copy_block {
         return 1;
