@@ -389,6 +389,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 degree_pk_indices_l,
                 degree_join_key_indices_l,
                 degree_state_table_l,
+                None,
             )
         });
         let degree_state_r = need_degree_table_r.then(|| {
@@ -396,6 +397,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 degree_pk_indices_r,
                 degree_join_key_indices_r,
                 degree_state_table_r,
+                None,
             )
         });
 

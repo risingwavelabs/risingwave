@@ -22,7 +22,7 @@ use join_row_set::JoinRowSet;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::metrics::LabelGuardedIntCounter;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -31,7 +31,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
-use super::row::{CachedJoinRow, DegreeType, build_degree_row};
+use super::row::{CachedJoinRow, DegreeType};
 use crate::cache::ManagedLruCache;
 use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{StateTable, StateTablePostCommit};
@@ -357,25 +357,18 @@ pub(crate) fn update_degree<S: StateStore, const INCREMENT: bool>(
     degree_state: &mut TableInner<S>,
     matched_row: &mut JoinRow<impl Row>,
 ) {
-    let inequality_idx = degree_state.degree_inequality_idx;
-    let old_degree_row = build_degree_row(
-        order_key_indices,
-        matched_row.degree,
-        inequality_idx,
-        &matched_row.row,
-    );
+    let old_degree_row = (&matched_row.row)
+        .project(order_key_indices)
+        .chain(row::once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
     if INCREMENT {
         matched_row.degree += 1;
     } else {
         // DECREMENT
         matched_row.degree -= 1;
     }
-    let new_degree_row = build_degree_row(
-        order_key_indices,
-        matched_row.degree,
-        inequality_idx,
-        &matched_row.row,
-    );
+    let new_degree_row = (&matched_row.row)
+        .project(order_key_indices)
+        .chain(row::once(Some(ScalarImpl::Int64(matched_row.degree as i64))));
     degree_state.table.update(old_degree_row, new_degree_row);
 }
 
@@ -611,10 +604,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
 
         // Update the flush buffer.
         if let Some(degree_state) = self.degree_state.as_mut() {
-            let (row, degree) = value.to_table_rows(
-                &self.state.order_key_indices,
-                degree_state.degree_inequality_idx,
-            );
+            let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
             self.state.table.insert(row);
             degree_state.table.insert(degree);
         } else {
@@ -661,10 +651,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
 
         // If no cache maintained, only update the state table.
         let degree_state = self.degree_state.as_mut().expect("degree table missing");
-        let (row, degree) = value.to_table_rows(
-            &self.state.order_key_indices,
-            degree_state.degree_inequality_idx,
-        );
+        let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.delete(row);
         degree_state.table.delete(degree);
         Ok(())

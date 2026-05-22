@@ -41,6 +41,9 @@ use super::watermark::*;
 use crate::executor::join::builder::JoinChunkBuilder;
 use crate::executor::prelude::*;
 
+/// Evict the cache every n rows.
+const EVICT_EVERY_N_ROWS: u32 = 16;
+
 pub struct JoinParams {
     /// Indices of the join keys
     pub join_key_indices: Vec<usize>,
@@ -184,11 +187,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
         use_cache: bool,
         high_join_amplification_threshold: usize,
     ) -> Self {
-        let join_cache_evict_interval_rows = ctx
-            .config
-            .developer
-            .join_hash_map_evict_interval_rows
-            .max(1);
+        let join_cache_evict_interval_rows = EVICT_EVERY_N_ROWS;
         let cache_epoch = if use_cache {
             Some(watermark_epoch)
         } else {
