@@ -101,6 +101,7 @@ fn new_test_iceberg_config(
         }
         .to_owned(),
     );
+    values.insert("enable_compaction".to_owned(), "true".to_owned());
 
     IcebergConfig::from_btreemap(values).unwrap()
 }
@@ -391,8 +392,6 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
         PreparedSinkUpdate {
             sink_id,
             kind: SinkUpdateKind::Commit,
-            enable_compaction: true,
-            enable_snapshot_expiration: false,
             now: refresh_at,
             allow_track_initialization: false,
             loaded_config: Some(config),
@@ -423,8 +422,6 @@ async fn test_update_iceberg_commit_info_skips_missing_track_on_load_failure() {
     manager
         .update_iceberg_commit_info(IcebergSinkCompactionUpdate {
             sink_id,
-            enable_compaction: true,
-            enable_snapshot_expiration: false,
             force_compaction: false,
         })
         .await;
@@ -446,8 +443,6 @@ async fn test_update_iceberg_commit_info_refresh_failure_keeps_refresh_deadline_
     manager
         .update_iceberg_commit_info(IcebergSinkCompactionUpdate {
             sink_id,
-            enable_compaction: true,
-            enable_snapshot_expiration: false,
             force_compaction: false,
         })
         .await;
@@ -477,8 +472,6 @@ async fn test_apply_sink_update_creates_missing_track() {
         PreparedSinkUpdate {
             sink_id,
             kind: SinkUpdateKind::Commit,
-            enable_compaction: true,
-            enable_snapshot_expiration: false,
             now,
             allow_track_initialization: true,
             loaded_config: Some(config),
@@ -492,6 +485,35 @@ async fn test_apply_sink_update_creates_missing_track() {
     assert_eq!(track.pending_commit_count, 1);
     assert_eq!(track.last_config_refresh_at, now);
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+}
+
+#[tokio::test]
+async fn test_apply_sink_update_tracks_snapshot_expiration_without_compaction() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(144);
+    let now = Instant::now();
+    let mut config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
+    config.enable_compaction = false;
+    config.enable_snapshot_expiration = true;
+    let mut guard = IcebergCompactionManagerInner {
+        sink_schedules: HashMap::new(),
+        snapshot_expiration_sink_ids: HashSet::new(),
+        manual_task_waiters: HashMap::new(),
+    };
+
+    manager.apply_sink_update(
+        &mut guard,
+        PreparedSinkUpdate {
+            sink_id,
+            kind: SinkUpdateKind::Commit,
+            now,
+            allow_track_initialization: true,
+            loaded_config: Some(config),
+        },
+    );
+
+    assert!(!guard.sink_schedules.contains_key(&sink_id));
+    assert!(guard.snapshot_expiration_sink_ids.contains(&sink_id));
 }
 
 #[tokio::test]
@@ -511,8 +533,6 @@ async fn test_apply_sink_update_does_not_resurrect_disappeared_track() {
         PreparedSinkUpdate {
             sink_id,
             kind: SinkUpdateKind::Commit,
-            enable_compaction: true,
-            enable_snapshot_expiration: false,
             now,
             allow_track_initialization: false,
             loaded_config: Some(config),
