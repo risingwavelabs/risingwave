@@ -34,7 +34,7 @@ python3 -m pip install --break-system-packages psycopg2-binary
 
 host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
 
-export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn,risingwave_storage::hummock::compactor=error,risingwave_hummock_sdk::compaction_group::hummock_version_ext=error,risingwave_storage::hummock::event_handler::hummock_event_handler=error"
+export RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn,risingwave_storage::hummock::compactor=error,risingwave_hummock_sdk::compaction_group::hummock_version_ext=error,risingwave_storage::hummock::event_handler::hummock_event_handler=error,await_tree::future=error"
 
 echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, streaming"
 risedev ci-start ci-3cn-3fe-opendal-fs-backend

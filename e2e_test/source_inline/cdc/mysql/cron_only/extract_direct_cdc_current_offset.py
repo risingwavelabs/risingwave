@@ -36,6 +36,7 @@ def main() -> None:
     parser.add_argument('--port', required=True, type=int)
     parser.add_argument('--database', required=True)
     parser.add_argument('--job-name', default='direct_cdc_inject_offset')
+    parser.add_argument('--job-type', default='table')
     parser.add_argument('--source-id-file', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--timeout-secs', type=int, default=60)
@@ -50,7 +51,7 @@ def main() -> None:
             'SELECT name '
             'FROM rw_catalog.rw_internal_table_info '
             f"WHERE job_name = '{args.job_name}' "
-            "AND job_type = 'table' "
+            f"AND job_type = '{args.job_type}' "
             'ORDER BY job_id DESC '
             'LIMIT 1;'
         ),

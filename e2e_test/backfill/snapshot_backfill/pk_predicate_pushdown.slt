@@ -1,0 +1,255 @@
+# Test predicate pushdown on PK prefix for snapshot backfill.
+# Verifies that range filters and equality predicates on PK columns
+# are correctly pushed down and produce the same results as batch queries.
+
+statement ok
+set streaming_use_snapshot_backfill = true;
+
+# Create a table with composite primary key (a, b)
+statement ok
+CREATE TABLE t_pk_pred(a INT, b INT, c INT, PRIMARY KEY(a, b));
+
+# Insert test data covering various ranges
+statement ok
+INSERT INTO t_pk_pred SELECT
+  i / 10 AS a,
+  i % 10 AS b,
+  i * 10 AS c
+FROM generate_series(0, 99) AS s(i);
+
+statement ok
+flush;
+
+# ---- Test 1: Prefix equality pushdown (a = 3) ----
+
+statement ok
+CREATE MATERIALIZED VIEW mv_eq AS SELECT * FROM t_pk_pred WHERE a = 3;
+
+query III rowsort
+SELECT * FROM mv_eq;
+----
+3 0 300
+3 1 310
+3 2 320
+3 3 330
+3 4 340
+3 5 350
+3 6 360
+3 7 370
+3 8 380
+3 9 390
+
+# Verify MV matches batch query
+query T
+SELECT * FROM mv_eq EXCEPT SELECT * FROM t_pk_pred WHERE a = 3;
+----
+
+query T
+SELECT * FROM t_pk_pred WHERE a = 3 EXCEPT SELECT * FROM mv_eq;
+----
+
+# ---- Test 2: Range filter on first PK column (a >= 7 AND a <= 9) ----
+
+statement ok
+CREATE MATERIALIZED VIEW mv_range AS SELECT * FROM t_pk_pred WHERE a >= 7 AND a <= 9;
+
+query T
+SELECT * FROM mv_range EXCEPT SELECT * FROM t_pk_pred WHERE a >= 7 AND a <= 9;
+----
+
+query T
+SELECT * FROM t_pk_pred WHERE a >= 7 AND a <= 9 EXCEPT SELECT * FROM mv_range;
+----
+
+query I
+SELECT count(*) FROM mv_range;
+----
+30
+
+# ---- Test 3: Prefix equality + range on second PK column (a = 5 AND b >= 3 AND b <= 7) ----
+
+statement ok
+CREATE MATERIALIZED VIEW mv_eq_range AS SELECT * FROM t_pk_pred WHERE a = 5 AND b >= 3 AND b <= 7;
+
+query III rowsort
+SELECT * FROM mv_eq_range;
+----
+5 3 530
+5 4 540
+5 5 550
+5 6 560
+5 7 570
+
+query T
+SELECT * FROM mv_eq_range EXCEPT SELECT * FROM t_pk_pred WHERE a = 5 AND b >= 3 AND b <= 7;
+----
+
+query T
+SELECT * FROM t_pk_pred WHERE a = 5 AND b >= 3 AND b <= 7 EXCEPT SELECT * FROM mv_eq_range;
+----
+
+# ---- Test 4: Prefix equality + one-sided range (a = 2 AND b > 5) ----
+
+statement ok
+CREATE MATERIALIZED VIEW mv_eq_onesided AS SELECT * FROM t_pk_pred WHERE a = 2 AND b > 5;
+
+query III rowsort
+SELECT * FROM mv_eq_onesided;
+----
+2 6 260
+2 7 270
+2 8 280
+2 9 290
+
+query T
+SELECT * FROM mv_eq_onesided EXCEPT SELECT * FROM t_pk_pred WHERE a = 2 AND b > 5;
+----
+
+query T
+SELECT * FROM t_pk_pred WHERE a = 2 AND b > 5 EXCEPT SELECT * FROM mv_eq_onesided;
+----
+
+# ---- Test 5: Verify correctness after new inserts ----
+# After backfill completes, new data matching the predicate should appear in MVs
+
+statement ok
+INSERT INTO t_pk_pred VALUES (3, 10, 999), (5, 5, 888), (2, 8, 777);
+
+statement ok
+flush;
+
+# New row (3, 10, 999) should appear in mv_eq (a = 3 matches, but technically
+# the StreamFilter above will handle new data, not the backfill pushdown).
+# This just confirms end-to-end correctness.
+query T
+SELECT * FROM mv_eq EXCEPT SELECT * FROM t_pk_pred WHERE a = 3;
+----
+
+query T
+SELECT * FROM t_pk_pred WHERE a = 3 EXCEPT SELECT * FROM mv_eq;
+----
+
+# (5, 5, 888) replaces the old (5, 5, 550) since (5, 5) is the PK
+query T
+SELECT * FROM mv_eq_range EXCEPT SELECT * FROM t_pk_pred WHERE a = 5 AND b >= 3 AND b <= 7;
+----
+
+query T
+SELECT * FROM t_pk_pred WHERE a = 5 AND b >= 3 AND b <= 7 EXCEPT SELECT * FROM mv_eq_range;
+----
+
+# (2, 8, 777) replaces old (2, 8, 280)
+query T
+SELECT * FROM mv_eq_onesided EXCEPT SELECT * FROM t_pk_pred WHERE a = 2 AND b > 5;
+----
+
+query T
+SELECT * FROM t_pk_pred WHERE a = 2 AND b > 5 EXCEPT SELECT * FROM mv_eq_onesided;
+----
+
+statement ok
+DROP TABLE t_pk_pred cascade;
+
+# ============================================================
+# DESC index PK order tests
+# Snapshot backfill can scan an index instead of the base table.
+# When the index has DESC columns, range bounds must be swapped.
+# ============================================================
+
+statement ok
+CREATE TABLE t_idx(a INT, b INT, c INT, PRIMARY KEY(a));
+
+statement ok
+CREATE INDEX idx_bc_desc ON t_idx(b, c DESC);
+
+statement ok
+INSERT INTO t_idx VALUES
+  (1, 1, 1),
+  (2, 1, 3),
+  (3, 1, 5),
+  (4, 1, 7),
+  (5, 1, 9),
+  (6, 2, 2),
+  (7, 2, 4),
+  (8, 2, 6),
+  (9, 2, 8),
+  (10, 2, 10);
+
+statement ok
+flush;
+
+# ---- Test 6: Select from DESC index with prefix eq + range on DESC column ----
+# Index idx_bc_desc has PK (b ASC, c DESC, a ASC).
+# Predicate b = 1 AND c > 5 should push down as eq_conds=[1], range=(Excluded(5), Unbounded).
+# With DESC on c, storage needs to swap bounds.
+
+statement ok
+CREATE MATERIALIZED VIEW mv_idx_desc AS SELECT * FROM idx_bc_desc WHERE b = 1 AND c > 5;
+
+query III rowsort
+SELECT * FROM mv_idx_desc;
+----
+1 7 4
+1 9 5
+
+query T
+SELECT * FROM mv_idx_desc EXCEPT SELECT b, c, a FROM t_idx WHERE b = 1 AND c > 5;
+----
+
+query T
+SELECT b, c, a FROM t_idx WHERE b = 1 AND c > 5 EXCEPT SELECT * FROM mv_idx_desc;
+----
+
+# ---- Test 7: DESC index with two-sided range ----
+# b = 2 AND c >= 4 AND c <= 8
+
+statement ok
+CREATE MATERIALIZED VIEW mv_idx_desc_range AS SELECT * FROM idx_bc_desc WHERE b = 2 AND c >= 4 AND c <= 8;
+
+query III rowsort
+SELECT * FROM mv_idx_desc_range;
+----
+2 4 7
+2 6 8
+2 8 9
+
+query T
+SELECT * FROM mv_idx_desc_range EXCEPT SELECT b, c, a FROM t_idx WHERE b = 2 AND c >= 4 AND c <= 8;
+----
+
+query T
+SELECT b, c, a FROM t_idx WHERE b = 2 AND c >= 4 AND c <= 8 EXCEPT SELECT * FROM mv_idx_desc_range;
+----
+
+# ---- Test 8: DESC index, verify post-backfill inserts ----
+
+statement ok
+INSERT INTO t_idx VALUES (11, 1, 8), (12, 2, 5);
+
+statement ok
+flush;
+
+query T
+SELECT * FROM mv_idx_desc EXCEPT SELECT b, c, a FROM t_idx WHERE b = 1 AND c > 5;
+----
+
+query T
+SELECT b, c, a FROM t_idx WHERE b = 1 AND c > 5 EXCEPT SELECT * FROM mv_idx_desc;
+----
+
+query T
+SELECT * FROM mv_idx_desc_range EXCEPT SELECT b, c, a FROM t_idx WHERE b = 2 AND c >= 4 AND c <= 8;
+----
+
+query T
+SELECT b, c, a FROM t_idx WHERE b = 2 AND c >= 4 AND c <= 8 EXCEPT SELECT * FROM mv_idx_desc_range;
+----
+
+statement ok
+DROP MATERIALIZED VIEW mv_idx_desc;
+
+statement ok
+DROP MATERIALIZED VIEW mv_idx_desc_range;
+
+statement ok
+DROP TABLE t_idx cascade;

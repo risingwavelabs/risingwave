@@ -386,6 +386,7 @@ impl DdlService for DdlServiceImpl {
                         dependencies: HashSet::new(),
                         resource_type: Self::default_streaming_job_resource_type(),
                         if_not_exists: req.if_not_exists,
+                        refresh_interval_sec: None,
                     })
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -458,6 +459,7 @@ impl DdlService for DdlServiceImpl {
             dependencies,
             resource_type: Self::default_streaming_job_resource_type(),
             if_not_exists: req.if_not_exists,
+            refresh_interval_sec: None,
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -486,6 +488,8 @@ impl DdlService for DdlServiceImpl {
         self.sink_manager
             .stop_sink_coordinator(vec![SinkId::from(sink_id)])
             .await;
+        self.iceberg_compaction_manager
+            .clear_iceberg_maintenance_by_sink_id(SinkId::from(sink_id));
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -551,6 +555,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies,
                 resource_type,
                 if_not_exists: req.if_not_exists,
+                refresh_interval_sec: req.refresh_interval_sec,
             })
             .await?;
 
@@ -604,6 +609,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies: HashSet::new(),
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: req.if_not_exists,
+                refresh_interval_sec: None,
             })
             .await?;
 
@@ -694,6 +700,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies,
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: request.if_not_exists,
+                refresh_interval_sec: None,
             })
             .await?;
 
@@ -1672,6 +1679,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies: HashSet::new(),
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
+                refresh_interval_sec: None,
             })
             .await?;
 
@@ -1753,6 +1761,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies,
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
+                refresh_interval_sec: None,
             })
             .await;
 

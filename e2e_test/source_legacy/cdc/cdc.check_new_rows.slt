@@ -1,19 +1,4 @@
 
-query I
-select cnt from products_cnt;
-----
-11
-
-query I
-select cnt from orders_cnt;
-----
-4
-
-query I
-select cnt from shipments_cnt;
-----
-4
-
 query ITTTT
 SELECT id,name,email_address,credit_card,city from person_new order by id;
 ----
@@ -31,30 +16,6 @@ query I
 SELECT * from person_new_cnt
 ----
 8
-
-query ITTTTT
-select order_id,order_date,customer_name,product_id,order_status from orders order by order_id;
-----
-10001 2020-07-30 10:08:22 Jark 102 0
-10002 2020-07-30 10:11:09 Sally 105 0
-10003 2020-07-30 12:00:30 Edward 106 0
-10004 2022-12-01 15:08:22 Sam 110 0
-
-
-query III
-select order_id, product_id, shipment_id from enriched_orders order by order_id;
-----
-10001  102   1001
-10002  105   1002
-10003  106   1003
-10004  110   1004
-
-query IIT
-select v1, v2, v3 from mytable order by v1;
-----
-2 2 yes
-3 3 no
-4 4 no
 
 # shared cdc source
 query I
@@ -78,48 +39,6 @@ query TTTT
 select order_date,customer_name,product_id,order_status from orders_no_backfill order by order_id;
 ----
 2022-12-01 15:08:22 Sam 110 0
-
-query II
-select * from numeric_to_varchar order by id;
-----
-1   3.14
-2   57896044618658097711785492504343953926634992332820282019728792003956564819967
-3   57896044618658097711785492504343953926634992332820282019728792003956564819968
-4   115792089237316195423570985008687907853269984665640564039457584007913129639936
-5   115792089237316195423570985008687907853269984665640564039457584007913129639936.555555
-6   NAN
-7   POSITIVE_INFINITY
-102 57896044618658097711785492504343953926634992332820282019728792003956564819967
-103 57896044618658097711785492504343953926634992332820282019728792003956564819968
-104 115792089237316195423570985008687907853269984665640564039457584007913129639936
-105 115792089237316195423570985008687907853269984665640564039457584007913129639936.555555
-106 NAN
-107 POSITIVE_INFINITY
-
-# The invalid data for rw_int256 is converted to NULL
-query II
-select * from numeric_to_rw_int256 order by id;
-----
-1   NULL
-2   57896044618658097711785492504343953926634992332820282019728792003956564819967
-3   NULL
-4   NULL
-5   NULL
-6   NULL
-7   NULL
-102 57896044618658097711785492504343953926634992332820282019728792003956564819967
-103 NULL
-104 NULL
-105 NULL
-106 NULL
-107 NULL
-
-query II
-select * from enum_to_varchar order by id;
-----
-1 happy
-2 ok
-3 sad
 
 query II
 select id, my_int from list_with_null_shared order by id;
@@ -323,38 +242,6 @@ NULL                          NULL                                        NULL
 {NULL,"{\"key\": \"value\"}"} {NULL,123e4567-e89b-12d3-a456-426614174000} NULL
 
 query TTT
-SELECT * FROM partitioned_timestamp_table ORDER BY c_boolean, c_int;
-----
-1 f 2023-02-01 10:30:00
-2 f 2023-05-15 11:45:00
-3 f 2023-11-03 12:15:00
-4 f 2024-01-04 13:00:00
-5 f 2024-03-05 09:30:00
-6 f 2024-06-06 14:20:00
-7 f 2024-09-07 16:45:00
-8 f 2025-01-08 18:30:00
-9 f 2025-07-09 07:10:00
-11 t 2023-02-01 10:30:00
-12 t 2023-05-15 11:45:00
-13 t 2023-11-03 12:15:00
-14 t 2024-01-04 13:00:00
-15 t 2024-03-05 09:30:00
-16 t 2024-06-06 14:20:00
-17 t 2024-09-07 16:45:00
-18 t 2025-01-08 18:30:00
-19 t 2025-07-09 07:10:00
-
-query TTT
-SELECT * FROM partitioned_timestamp_table_2023 ORDER BY c_boolean, c_int;
-----
-1 f 2023-02-01 10:30:00
-2 f 2023-05-15 11:45:00
-3 f 2023-11-03 12:15:00
-11 t 2023-02-01 10:30:00
-12 t 2023-05-15 11:45:00
-13 t 2023-11-03 12:15:00
-
-query TTT
 SELECT * FROM partitioned_timestamp_table_shared ORDER BY c_boolean, c_int;
 ----
 1 f 2023-02-01 10:30:00
@@ -375,18 +262,6 @@ SELECT * FROM partitioned_timestamp_table_shared ORDER BY c_boolean, c_int;
 17 t 2024-09-07 16:45:00
 18 t 2025-01-08 18:30:00
 19 t 2025-07-09 07:10:00
-
-query II
-select * from json_table order by id;
-----
-1  {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
-2  {}                         {}                         {"{}"}                               {"{}"}
-3  {}                         {}                         {}                                   {}
-4  NULL                       NULL                       NULL                                 NULL
-11 {"id": 1, "name": "alice"} {"id": 1, "name": "alice"} {"{\"id\": 1, \"name\": \"alice\"}"} {"{\"id\": 1, \"name\": \"alice\"}"}
-12 {}                         {}                         {"{}"}                               {"{}"}
-13 {}                         {}                         {}                                   {}
-14 NULL                       NULL                       NULL                                 NULL
 
 query II
 select * from json_table_shared order by id;

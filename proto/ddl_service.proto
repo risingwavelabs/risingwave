@@ -163,6 +163,7 @@ message CreateMaterializedViewRequest {
   repeated uint32 dependencies = 4;
 
   bool if_not_exists = 6;
+  optional uint64 refresh_interval_sec = 7;
 }
 
 message CreateMaterializedViewResponse {
