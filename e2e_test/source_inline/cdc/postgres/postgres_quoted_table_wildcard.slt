@@ -1,0 +1,58 @@
+control substitution on
+
+statement ok
+drop table if exists quoted_note_auto_derived;
+
+statement ok
+drop source if exists quoted_note_source;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_table_wildcard_slot';
+    DROP PUBLICATION IF EXISTS quoted_table_wildcard_pub;
+    DROP TABLE IF EXISTS public.\"QuotedNoteE2e\" CASCADE;
+    CREATE TABLE public.\"QuotedNoteE2e\" (
+        \"id\" text NOT NULL,
+        \"authorId\" text NOT NULL,
+        \"content\" text NOT NULL,
+        CONSTRAINT \"QuotedNoteE2e_pkey\" PRIMARY KEY (\"id\")
+    );
+    INSERT INTO public.\"QuotedNoteE2e\" (\"id\", \"authorId\", \"content\") VALUES ('n1', 'a1', 'hello');
+    "
+
+statement ok
+create source quoted_note_source with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    publication.name = 'quoted_table_wildcard_pub',
+    slot.name = 'quoted_table_wildcard_slot'
+);
+
+statement ok
+create table quoted_note_auto_derived (*)
+from quoted_note_source table 'public."QuotedNoteE2e"';
+
+query TTT retry 30 backoff 1s
+select id, "authorId", content from quoted_note_auto_derived order by id;
+----
+n1 a1 hello
+
+statement ok
+drop source quoted_note_source cascade;
+
+sleep 2s
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'quoted_table_wildcard_slot';
+    DROP PUBLICATION IF EXISTS quoted_table_wildcard_pub;
+    DROP TABLE IF EXISTS public.\"QuotedNoteE2e\" CASCADE;
+    "
