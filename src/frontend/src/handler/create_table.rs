@@ -36,10 +36,12 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
-use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
     SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+};
+use risingwave_connector::source::cdc::{
+    build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
 };
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, source};
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
@@ -936,7 +938,15 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
-    let cdc_table_id = build_cdc_table_id(source.id, &external_table_name);
+    let cdc_table_id_external_table_name = if let ExternalCdcTableType::Postgres = cdc_table_type
+        && let Some(normalized_table_name) =
+            normalize_simple_postgres_quoted_table_name(&external_table_name)
+    {
+        normalized_table_name
+    } else {
+        external_table_name
+    };
+    let cdc_table_id = build_cdc_table_id(source.id, &cdc_table_id_external_table_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
@@ -1011,13 +1021,12 @@ fn derive_with_options_for_cdc_table(
                 return Ok((with_options, external_table_name));
             }
             POSTGRES_CDC_CONNECTOR => {
-                let (schema_name, table_name) = external_table_name
-                    .split_once('.')
-                    .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'"))?;
+                let (schema_name, table_name) =
+                    parse_postgres_cdc_external_table_name(&external_table_name)?;
 
                 // insert 'schema.name' into connect properties
-                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
-                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name);
+                with_options.insert(TABLE_NAME_KEY.into(), table_name);
                 // Return original external_table_name unchanged for Postgres
                 return Ok((with_options, external_table_name));
             }
@@ -1094,6 +1103,84 @@ fn derive_with_options_for_cdc_table(
         };
     }
     unreachable!("All valid CDC connectors should have returned by now")
+}
+
+/// Parse the schema/table name from the CDC `TABLE` clause.
+///
+/// Column names do not need the same parsing here: wildcard schema derivation reads
+/// them from PostgreSQL catalogs after the exact table has been identified.
+fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(String, String)> {
+    let mut parts = vec![];
+    let mut current = String::new();
+    let mut chars = external_table_name.chars().peekable();
+    let mut in_quote = false;
+    let mut just_closed_quote = false;
+
+    while let Some(ch) = chars.next() {
+        if in_quote {
+            if ch == '"' {
+                if chars.peek() == Some(&'"') {
+                    current.push('"');
+                    chars.next();
+                } else {
+                    in_quote = false;
+                    just_closed_quote = true;
+                }
+            } else {
+                current.push(ch);
+            }
+        } else {
+            match ch {
+                '.' => {
+                    if current.is_empty() {
+                        return Err(anyhow!(
+                            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                            external_table_name
+                        )
+                        .into());
+                    }
+                    parts.push(std::mem::take(&mut current));
+                    just_closed_quote = false;
+                }
+                '"' if current.is_empty() => {
+                    in_quote = true;
+                }
+                '"' => {
+                    return Err(anyhow!(
+                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                        external_table_name
+                    )
+                    .into());
+                }
+                _ if just_closed_quote => {
+                    return Err(anyhow!(
+                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                        external_table_name
+                    )
+                    .into());
+                }
+                _ => current.push(ch),
+            }
+        }
+    }
+
+    if in_quote || current.is_empty() {
+        return Err(anyhow!(
+            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+            external_table_name
+        )
+        .into());
+    }
+    parts.push(current);
+
+    if let [schema_name, table_name] = parts.as_slice() {
+        Ok((schema_name.clone(), table_name.clone()))
+    } else {
+        Err(
+            anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'")
+                .into(),
+        )
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
