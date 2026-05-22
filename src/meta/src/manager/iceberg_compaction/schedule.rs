@@ -489,6 +489,19 @@ impl IcebergCompactionManager {
         } = prepared_update;
         let refresh_interval = self.config_refresh_interval();
 
+        if let Some(config) = loaded_config.as_ref() {
+            if config.enable_snapshot_expiration {
+                guard.snapshot_expiration_sink_ids.insert(sink_id);
+            } else {
+                guard.snapshot_expiration_sink_ids.remove(&sink_id);
+            }
+
+            if !config.enable_compaction {
+                guard.sink_schedules.remove(&sink_id);
+                return;
+            }
+        }
+
         match guard.sink_schedules.entry(sink_id) {
             Entry::Occupied(entry) => {
                 let track = entry.into_mut();
@@ -600,9 +613,10 @@ impl IcebergCompactionManager {
             .collect()
     }
 
-    pub fn clear_iceberg_commits_by_sink_id(&self, sink_id: SinkId) {
+    pub fn clear_iceberg_maintenance_by_sink_id(&self, sink_id: SinkId) {
         let mut guard = self.inner.write();
         guard.sink_schedules.remove(&sink_id);
+        guard.snapshot_expiration_sink_ids.remove(&sink_id);
     }
 
     pub fn list_compaction_statuses(&self) -> Vec<IcebergCompactionScheduleStatus> {
