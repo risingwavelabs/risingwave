@@ -1421,7 +1421,7 @@ impl DdlController {
 
             for sink_id in iceberg_sink_ids {
                 self.iceberg_compaction_manager
-                    .clear_iceberg_commits_by_sink_id(sink_id);
+                    .clear_iceberg_maintenance_by_sink_id(sink_id);
             }
         }
 
