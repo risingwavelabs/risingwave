@@ -616,10 +616,11 @@ impl IcebergSinkCommitter {
         tracing::debug!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
         if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
-            && self.config.enable_compaction
             && iceberg_compact_stat_sender
                 .send(IcebergSinkCompactionUpdate {
                     sink_id: self.sink_id,
+                    enable_compaction: self.config.enable_compaction,
+                    enable_snapshot_expiration: self.config.enable_snapshot_expiration,
                     force_compaction: false,
                 })
                 .is_err()
@@ -867,6 +868,8 @@ impl IcebergSinkCommitter {
                     && iceberg_compact_stat_sender
                         .send(IcebergSinkCompactionUpdate {
                             sink_id: self.sink_id,
+                            enable_compaction: self.config.enable_compaction,
+                            enable_snapshot_expiration: self.config.enable_snapshot_expiration,
                             force_compaction: true,
                         })
                         .is_err()

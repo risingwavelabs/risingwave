@@ -488,6 +488,8 @@ impl DdlService for DdlServiceImpl {
         self.sink_manager
             .stop_sink_coordinator(vec![SinkId::from(sink_id)])
             .await;
+        self.iceberg_compaction_manager
+            .clear_iceberg_maintenance_by_sink_id(SinkId::from(sink_id));
 
         Ok(Response::new(DropSinkResponse {
             status: None,

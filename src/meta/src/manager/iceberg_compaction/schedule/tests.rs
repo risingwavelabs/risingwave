@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use prometheus::Registry;
@@ -391,6 +391,8 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
         PreparedSinkUpdate {
             sink_id,
             kind: SinkUpdateKind::Commit,
+            enable_compaction: true,
+            enable_snapshot_expiration: false,
             now: refresh_at,
             allow_track_initialization: false,
             loaded_config: Some(config),
@@ -421,6 +423,8 @@ async fn test_update_iceberg_commit_info_skips_missing_track_on_load_failure() {
     manager
         .update_iceberg_commit_info(IcebergSinkCompactionUpdate {
             sink_id,
+            enable_compaction: true,
+            enable_snapshot_expiration: false,
             force_compaction: false,
         })
         .await;
@@ -442,6 +446,8 @@ async fn test_update_iceberg_commit_info_refresh_failure_keeps_refresh_deadline_
     manager
         .update_iceberg_commit_info(IcebergSinkCompactionUpdate {
             sink_id,
+            enable_compaction: true,
+            enable_snapshot_expiration: false,
             force_compaction: false,
         })
         .await;
@@ -462,6 +468,7 @@ async fn test_apply_sink_update_creates_missing_track() {
     let config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
     let mut guard = IcebergCompactionManagerInner {
         sink_schedules: HashMap::new(),
+        snapshot_expiration_sink_ids: HashSet::new(),
         manual_task_waiters: HashMap::new(),
     };
 
@@ -470,6 +477,8 @@ async fn test_apply_sink_update_creates_missing_track() {
         PreparedSinkUpdate {
             sink_id,
             kind: SinkUpdateKind::Commit,
+            enable_compaction: true,
+            enable_snapshot_expiration: false,
             now,
             allow_track_initialization: true,
             loaded_config: Some(config),
@@ -493,6 +502,7 @@ async fn test_apply_sink_update_does_not_resurrect_disappeared_track() {
     let config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
     let mut guard = IcebergCompactionManagerInner {
         sink_schedules: HashMap::new(),
+        snapshot_expiration_sink_ids: HashSet::new(),
         manual_task_waiters: HashMap::new(),
     };
 
@@ -501,6 +511,8 @@ async fn test_apply_sink_update_does_not_resurrect_disappeared_track() {
         PreparedSinkUpdate {
             sink_id,
             kind: SinkUpdateKind::Commit,
+            enable_compaction: true,
+            enable_snapshot_expiration: false,
             now,
             allow_track_initialization: false,
             loaded_config: Some(config),

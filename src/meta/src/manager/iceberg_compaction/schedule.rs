@@ -388,6 +388,8 @@ impl SinkUpdateKind {
 struct PreparedSinkUpdate {
     sink_id: SinkId,
     kind: SinkUpdateKind,
+    enable_compaction: bool,
+    enable_snapshot_expiration: bool,
     now: Instant,
     allow_track_initialization: bool,
     loaded_config: Option<IcebergConfig>,
@@ -434,6 +436,8 @@ impl IcebergCompactionManager {
     ) -> PreparedSinkUpdate {
         let IcebergSinkCompactionUpdate {
             sink_id,
+            enable_compaction,
+            enable_snapshot_expiration,
             force_compaction,
         } = msg;
         let kind = if force_compaction {
@@ -469,6 +473,8 @@ impl IcebergCompactionManager {
         PreparedSinkUpdate {
             sink_id,
             kind,
+            enable_compaction,
+            enable_snapshot_expiration,
             now,
             allow_track_initialization,
             loaded_config,
@@ -483,11 +489,24 @@ impl IcebergCompactionManager {
         let PreparedSinkUpdate {
             sink_id,
             kind,
+            enable_compaction,
+            enable_snapshot_expiration,
             now,
             allow_track_initialization,
             loaded_config,
         } = prepared_update;
         let refresh_interval = self.config_refresh_interval();
+
+        if enable_snapshot_expiration {
+            guard.snapshot_expiration_sink_ids.insert(sink_id);
+        } else {
+            guard.snapshot_expiration_sink_ids.remove(&sink_id);
+        }
+
+        if !enable_compaction {
+            guard.sink_schedules.remove(&sink_id);
+            return;
+        }
 
         match guard.sink_schedules.entry(sink_id) {
             Entry::Occupied(entry) => {
@@ -600,9 +619,10 @@ impl IcebergCompactionManager {
             .collect()
     }
 
-    pub fn clear_iceberg_commits_by_sink_id(&self, sink_id: SinkId) {
+    pub fn clear_iceberg_maintenance_by_sink_id(&self, sink_id: SinkId) {
         let mut guard = self.inner.write();
         guard.sink_schedules.remove(&sink_id);
+        guard.snapshot_expiration_sink_ids.remove(&sink_id);
     }
 
     pub fn list_compaction_statuses(&self) -> Vec<IcebergCompactionScheduleStatus> {

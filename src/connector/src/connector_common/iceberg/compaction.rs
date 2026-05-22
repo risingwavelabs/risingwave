@@ -17,5 +17,7 @@ use crate::sink::catalog::SinkId;
 pub struct IcebergSinkCompactionUpdate {
     // runtime event information
     pub sink_id: SinkId,
+    pub enable_compaction: bool,
+    pub enable_snapshot_expiration: bool,
     pub force_compaction: bool,
 }
