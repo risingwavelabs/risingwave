@@ -794,6 +794,7 @@ message TriggerManualCompactionRequest {
   uint32 level = 4;
   repeated uint64 sst_ids = 5;
   optional bool exclusive = 6;
+  optional uint32 target_level = 7;
 }
 
 message TriggerManualCompactionResponse {

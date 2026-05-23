@@ -1123,9 +1123,9 @@ pub mod default {
         pub fn sstable_filter_kind() -> Vec<String> {
             vec![
                 "binary_fuse16".to_owned(),
+                "binary_fuse16".to_owned(),
+                "binary_fuse16".to_owned(),
                 "binary_fuse8".to_owned(),
-                "binary_fuse16".to_owned(),
-                "binary_fuse16".to_owned(),
                 "binary_fuse16".to_owned(),
                 "binary_fuse16".to_owned(),
                 "binary_fuse16".to_owned(),

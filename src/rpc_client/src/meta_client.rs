@@ -2091,6 +2091,7 @@ impl HummockMetaClient for MetaClient {
         table_id: JobId,
         level: u32,
         sst_ids: Vec<HummockSstableId>,
+        target_level: Option<u32>,
         exclusive: bool,
     ) -> Result<bool> {
         // TODO: support key_range parameter
@@ -2101,6 +2102,7 @@ impl HummockMetaClient for MetaClient {
             // without check internal_table_id
             level,
             sst_ids,
+            target_level,
             exclusive: Some(exclusive),
             ..Default::default()
         };

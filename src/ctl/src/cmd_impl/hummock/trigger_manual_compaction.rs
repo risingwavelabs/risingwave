@@ -25,12 +25,16 @@ pub async fn trigger_manual_compaction(
     table_id: JobId,
     levels: Vec<u32>,
     sst_ids: Vec<HummockSstableId>,
+    target_level: Option<u32>,
     exclusive: bool,
     retry_interval_ms: u64,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     for level in levels {
-        tracing::info!("Triggering manual compaction for level {level}...");
+        tracing::info!(
+            ?target_level,
+            "Triggering manual compaction for level {level}..."
+        );
         loop {
             let result = meta_client
                 .trigger_manual_compaction(
@@ -38,6 +42,7 @@ pub async fn trigger_manual_compaction(
                     table_id,
                     level,
                     sst_ids.clone(),
+                    target_level,
                     exclusive,
                 )
                 .await;

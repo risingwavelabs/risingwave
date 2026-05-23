@@ -231,6 +231,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         _table_id: JobId,
         _level: u32,
         _sst_ids: Vec<HummockSstableId>,
+        _target_level: Option<u32>,
         _exclusive: bool,
     ) -> Result<bool> {
         todo!()

@@ -142,6 +142,9 @@ enum HummockCommands {
         #[clap(short, long = "sst-ids", value_delimiter = ',')]
         sst_ids: Vec<HummockSstableId>,
 
+        #[clap(long = "target-level")]
+        target_level: Option<u32>,
+
         #[clap(long = "exclusive", default_value_t = false)]
         exclusive: bool,
 
@@ -679,6 +682,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             table_id,
             levels,
             sst_ids,
+            target_level,
             exclusive,
             retry_interval_ms,
         }) => {
@@ -688,6 +692,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 table_id.into(),
                 levels,
                 sst_ids,
+                target_level,
                 exclusive,
                 retry_interval_ms,
             )

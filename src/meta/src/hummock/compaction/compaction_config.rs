@@ -296,11 +296,12 @@ mod tests {
     }
 
     #[test]
-    fn test_default_sstable_filter_kind_uses_binary_fuse8_for_base_level_only() {
+    fn test_default_sstable_filter_kind_uses_binary_fuse8_for_base_plus_two_only() {
         let filter_kind = default_sstable_filter_kind(6);
         assert_eq!(filter_kind[0], "binary_fuse16");
-        assert_eq!(filter_kind[1], "binary_fuse8");
+        assert_eq!(filter_kind[1], "binary_fuse16");
         assert_eq!(filter_kind[2], "binary_fuse16");
+        assert_eq!(filter_kind[3], "binary_fuse8");
         assert_eq!(filter_kind[6], "binary_fuse16");
     }
 

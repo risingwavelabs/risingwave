@@ -186,6 +186,7 @@ impl HummockManagerService for HummockServiceImpl {
         let mut option = ManualCompactionOption {
             level: request.level as usize,
             sst_ids: request.sst_ids,
+            target_level: request.target_level.map(|level| level as usize),
             exclusive: request.exclusive.unwrap_or(false),
             ..Default::default()
         };

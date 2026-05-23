@@ -42,6 +42,9 @@ pub struct ManualCompactionOption {
     pub internal_table_id: HashSet<StateTableId>,
     /// Input level.
     pub level: usize,
+    /// Optional output level. When unset, the selector keeps the original
+    /// target-level inference.
+    pub target_level: Option<usize>,
     /// When true, skip manual compaction if any task is pending in the compaction group.
     pub exclusive: bool,
 }
@@ -57,6 +60,7 @@ impl Default for ManualCompactionOption {
             },
             internal_table_id: HashSet::default(),
             level: 1,
+            target_level: None,
             exclusive: false,
         }
     }
@@ -100,13 +104,34 @@ impl CompactionSelector for ManualCompactionSelector {
         let overlap_strategy = create_overlap_strategy(group.compaction_config.compaction_mode());
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let (mut picker, base_level) = {
-            let target_level = if self.option.level == 0 {
+            let target_level = if let Some(target_level) = self.option.target_level {
+                target_level
+            } else if self.option.level == 0 {
                 ctx.base_level
             } else if self.option.level == group.compaction_config.max_level as usize {
                 self.option.level
             } else {
                 self.option.level + 1
             };
+            if target_level > group.compaction_config.max_level as usize {
+                tracing::warn!(
+                    target_level,
+                    max_level = group.compaction_config.max_level,
+                    "skip manual compaction due to invalid target level"
+                );
+                return None;
+            }
+            if self.option.level > 0
+                && target_level != self.option.level
+                && target_level != self.option.level + 1
+            {
+                tracing::warn!(
+                    input_level = self.option.level,
+                    target_level,
+                    "skip manual compaction due to unsupported target level"
+                );
+                return None;
+            }
             if self.option.level > 0 && self.option.level < ctx.base_level {
                 return None;
             }
