@@ -141,9 +141,7 @@ where
                 )?;
 
                 if let Some(error) = validate_source_response.error {
-                    return Err(
-                        anyhow!(error.error_message).context("source cannot pass validation")
-                    );
+                    return Err(anyhow!(error.error_message).context("source validation failed"));
                 }
 
                 Ok(())
