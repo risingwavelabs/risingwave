@@ -52,6 +52,19 @@ impl BloomFilterLevelStats {
 }
 
 #[derive(Default, Debug)]
+pub struct MetaCacheMissLevelStats {
+    pub miss_counts: u64,
+    pub miss_bytes: u64,
+}
+
+impl MetaCacheMissLevelStats {
+    fn add(&mut self, other: &MetaCacheMissLevelStats) {
+        self.miss_counts += other.miss_counts;
+        self.miss_bytes += other.miss_bytes;
+    }
+}
+
+#[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
     pub cache_data_block_total: u64,
@@ -67,6 +80,7 @@ pub struct StoreLocalStatistic {
     pub processed_key_count: u64,
     pub bloom_filter_true_negative_counts: u64,
     pub bloom_filter_level_stats: HashMap<String, BloomFilterLevelStats>,
+    pub meta_cache_miss_level_stats: HashMap<String, MetaCacheMissLevelStats>,
     pub remote_io_time: Arc<AtomicU64>,
     pub bloom_filter_check_counts: u64,
     pub get_shared_buffer_hit_counts: u64,
@@ -110,12 +124,27 @@ impl StoreLocalStatistic {
         }
     }
 
+    pub fn record_meta_cache_miss(&mut self, level_label: &str, miss_bytes: u64) {
+        let level_stats = self
+            .meta_cache_miss_level_stats
+            .entry(level_label.to_owned())
+            .or_default();
+        level_stats.miss_counts += 1;
+        level_stats.miss_bytes += miss_bytes;
+    }
+
     pub fn add(&mut self, other: &StoreLocalStatistic) {
         self.add_count(other);
         self.add_histogram(other);
         self.bloom_filter_true_negative_counts += other.bloom_filter_true_negative_counts;
         for (level_label, level_stats) in &other.bloom_filter_level_stats {
             self.bloom_filter_level_stats
+                .entry(level_label.clone())
+                .or_default()
+                .add(level_stats);
+        }
+        for (level_label, level_stats) in &other.meta_cache_miss_level_stats {
+            self.meta_cache_miss_level_stats
                 .entry(level_label.clone())
                 .or_default()
                 .add(level_stats);
@@ -135,6 +164,7 @@ impl StoreLocalStatistic {
     fn report(&self, metrics: &mut LocalStoreMetrics) {
         metrics.add_count(self);
         metrics.add_histogram(self);
+        metrics.report_meta_cache_miss_level_metrics(&self.meta_cache_miss_level_stats);
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {
             metrics.remote_io_time.observe(t / 1000.0);
@@ -308,6 +338,11 @@ struct LocalStoreMetrics {
     sub_iter_count: LocalHistogram,
     iter_filter_metrics: BloomFilterLocalMetrics,
     get_filter_metrics: BloomFilterLocalMetrics,
+    meta_cache_miss_level_count_vec: RelabeledGuardedIntCounterVec,
+    meta_cache_miss_level_byte_vec: RelabeledGuardedIntCounterVec,
+    meta_cache_miss_level_counts: HashMap<String, LabelGuardedLocalIntCounter>,
+    meta_cache_miss_level_bytes: HashMap<String, LabelGuardedLocalIntCounter>,
+    table_id_label: String,
     collect_count: usize,
 
     staging_imm_get_count: LocalHistogram,
@@ -403,6 +438,8 @@ impl LocalStoreMetrics {
             .local();
         let get_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "get");
         let iter_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "iter");
+        let meta_cache_miss_level_count_vec = metrics.meta_cache_miss_level_counts.clone();
+        let meta_cache_miss_level_byte_vec = metrics.meta_cache_miss_level_bytes.clone();
 
         let staging_imm_get_count = metrics
             .iter_merge_sstable_counts
@@ -450,6 +487,11 @@ impl LocalStoreMetrics {
             non_overlapping_iter_count,
             get_filter_metrics,
             iter_filter_metrics,
+            meta_cache_miss_level_count_vec,
+            meta_cache_miss_level_byte_vec,
+            meta_cache_miss_level_counts: HashMap::new(),
+            meta_cache_miss_level_bytes: HashMap::new(),
+            table_id_label: table_id_label.to_owned(),
             collect_count: 0,
             staging_imm_get_count,
             staging_sst_get_count,
@@ -464,8 +506,41 @@ impl LocalStoreMetrics {
         self.remote_io_time.flush();
         self.iter_filter_metrics.flush();
         self.get_filter_metrics.flush();
+        for counter in self.meta_cache_miss_level_counts.values_mut() {
+            counter.flush();
+        }
+        for counter in self.meta_cache_miss_level_bytes.values_mut() {
+            counter.flush();
+        }
         self.flush_histogram();
         self.flush_count();
+    }
+
+    fn report_meta_cache_miss_level_metrics(
+        &mut self,
+        level_stats: &HashMap<String, MetaCacheMissLevelStats>,
+    ) {
+        for (level_label, stats) in level_stats {
+            if stats.miss_counts == 0 {
+                continue;
+            }
+            self.meta_cache_miss_level_counts
+                .entry(level_label.clone())
+                .or_insert_with(|| {
+                    self.meta_cache_miss_level_count_vec
+                        .with_guarded_label_values(&[self.table_id_label.as_str(), level_label])
+                        .local()
+                })
+                .inc_by(stats.miss_counts);
+            self.meta_cache_miss_level_bytes
+                .entry(level_label.clone())
+                .or_insert_with(|| {
+                    self.meta_cache_miss_level_byte_vec
+                        .with_guarded_label_values(&[self.table_id_label.as_str(), level_label])
+                        .local()
+                })
+                .inc_by(stats.miss_bytes);
+        }
     }
 }
 

@@ -78,7 +78,20 @@ pub async fn get_from_sstable_info(
     level_label: &str,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<impl HummockIterator>> {
+    let meta_miss_count = local_stats.cache_meta_block_miss;
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
+    let meta_miss_delta = local_stats
+        .cache_meta_block_miss
+        .saturating_sub(meta_miss_count);
+    if meta_miss_delta > 0 {
+        local_stats.record_meta_cache_miss(
+            level_label,
+            sstable_info
+                .file_size
+                .saturating_sub(sstable_info.meta_offset)
+                .saturating_mul(meta_miss_delta),
+        );
+    }
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.

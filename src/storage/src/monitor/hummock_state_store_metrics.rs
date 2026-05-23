@@ -47,6 +47,8 @@ pub struct HummockStateStoreMetrics {
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
     pub vnode_pruning_counts: RelabeledGuardedIntCounterVec,
     pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec,
+    pub meta_cache_miss_level_counts: RelabeledGuardedIntCounterVec,
+    pub meta_cache_miss_level_bytes: RelabeledGuardedIntCounterVec,
     pub iter_scan_key_counts: RelabeledGuardedIntCounterVec,
     pub get_shared_buffer_hit_counts: RelabeledCounterVec,
     pub remote_read_time: RelabeledHistogramVec,
@@ -193,6 +195,32 @@ impl HummockStateStoreMetrics {
         let sst_store_block_request_counts = RelabeledGuardedIntCounterVec::with_metric_level(
             MetricLevel::Info,
             sst_store_block_request_counts,
+            metric_level,
+        );
+
+        let meta_cache_miss_level_counts = register_guarded_int_counter_vec_with_registry!(
+            "state_store_meta_cache_miss_level_counts",
+            "Total number of SST meta cache misses grouped by LSM level",
+            &["table_id", "level"],
+            registry
+        )
+        .unwrap();
+        let meta_cache_miss_level_counts = RelabeledGuardedIntCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            meta_cache_miss_level_counts,
+            metric_level,
+        );
+
+        let meta_cache_miss_level_bytes = register_guarded_int_counter_vec_with_registry!(
+            "state_store_meta_cache_miss_level_bytes",
+            "Estimated bytes read from object store for SST meta cache misses grouped by LSM level",
+            &["table_id", "level"],
+            registry
+        )
+        .unwrap();
+        let meta_cache_miss_level_bytes = RelabeledGuardedIntCounterVec::with_metric_level(
+            MetricLevel::Debug,
+            meta_cache_miss_level_bytes,
             metric_level,
         );
 
@@ -615,6 +643,8 @@ impl HummockStateStoreMetrics {
             iter_merge_sstable_counts,
             vnode_pruning_counts,
             sst_store_block_request_counts,
+            meta_cache_miss_level_counts,
+            meta_cache_miss_level_bytes,
             iter_scan_key_counts,
             get_shared_buffer_hit_counts,
             remote_read_time,
