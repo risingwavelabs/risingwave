@@ -503,9 +503,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         let (tx, rx) = oneshot::channel();
                         rebuild_sink_tx
                             .send(RebuildSinkMessage::RebuildSink(new_vnode_bitmap, tx))
-                            .map_err(|_| anyhow!("fail to send rebuild sink to reader"))?;
+                            .map_err(|_| {
+                                anyhow!("failed to send the rebuild-sink request to the reader")
+                            })?;
                         rx.await
-                            .map_err(|_| anyhow!("fail to wait rebuild sink finish"))?;
+                            .map_err(|_| anyhow!("failed to wait for sink rebuild to finish"))?;
                     }
                     post_flush.post_yield_barrier().await?;
 
@@ -530,7 +532,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     if let Err(e) = rate_limit_tx.send(entry.rate_limit.into()) {
                                         error!(
                                             error = %e.as_report(),
-                                            "fail to send sink rate limit update"
+                                            "failed to send the sink rate limit update"
                                         );
                                         return Err(StreamExecutorError::from(
                                             e.to_report_string(),
@@ -545,7 +547,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 {
                                     error!(
                                         error = %e.as_report(),
-                                        "fail to send sink alter props"
+                                        "failed to send sink property updates"
                                     );
                                     return Err(StreamExecutorError::from(e.to_report_string()));
                                 }
@@ -841,7 +843,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             Err(rewind_err) => {
                                 error!(
                                     error = %rewind_err.as_report(),
-                                    "fail to rewind log reader"
+                                    "failed to rewind the log reader"
                                 );
                                 Err(e)
                             }
@@ -901,9 +903,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             Err(rewind_err) => {
                                 error!(
                                     error = %rewind_err.as_report(),
-                                    "fail to rewind log reader for alter sink config "
+                                    "failed to rewind the log reader for ALTER SINK CONFIG"
                                 );
-                                Err(anyhow!("fail to rewind log reader after alter sink config notification").into())
+                                Err(anyhow!("failed to rewind the log after ALTER SINK CONFIG").into())
                             }
                         }
                     } else {
