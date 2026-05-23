@@ -80,6 +80,13 @@ pub type ActorContextRef = Arc<ActorContext>;
 
 impl ActorContext {
     pub fn for_test(id: impl Into<ActorId>) -> ActorContextRef {
+        Self::for_test_with_config(id, StreamingConfig::default())
+    }
+
+    pub fn for_test_with_config(
+        id: impl Into<ActorId>,
+        config: StreamingConfig,
+    ) -> ActorContextRef {
         Arc::new(Self {
             id: id.into(),
             fragment_id: 0.into(),
@@ -94,7 +101,7 @@ impl ActorContext {
             initial_subscriber_ids: Default::default(),
             initial_upstream_actors: Default::default(),
             meta_client: None,
-            config: Arc::new(StreamingConfig::default()),
+            config: Arc::new(config),
             stream_env: StreamEnvironment::for_test(),
         })
     }

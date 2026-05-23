@@ -17,6 +17,7 @@ use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinInequalityType};
 
 use crate::error::StreamResult;
 
+pub mod asof_join;
 pub mod builder;
 pub mod hash_join;
 pub mod join_row_set;

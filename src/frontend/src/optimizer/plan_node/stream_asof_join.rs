@@ -300,6 +300,13 @@ impl StreamNode for StreamAsOfJoin {
             _ => unreachable!(),
         };
 
+        let use_cache = self
+            .base
+            .ctx()
+            .session_ctx()
+            .config()
+            .streaming_asof_join_use_cache();
+
         NodeBody::AsOfJoin(Box::new(AsOfJoinNode {
             join_type: asof_join_type.into(),
             left_key: left_jk_indices_prost,
@@ -314,6 +321,7 @@ impl StreamNode for StreamAsOfJoin {
             // Join encoding type should now be read from per-job config override.
             #[allow(deprecated)]
             join_encoding_type: PbJoinEncodingType::Unspecified as _,
+            use_cache: Some(use_cache),
         }))
     }
 }
