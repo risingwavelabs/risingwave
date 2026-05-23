@@ -17,7 +17,7 @@ create sink s as select * from t with (connector = 'blackhole', auto.schema.chan
 statement ok
 create materialized view m1 as select * from t;
 
-statement error auto schema change only support on TABLE, but got MaterializedView
+statement error auto schema change is supported only on TABLE, but got MaterializedView
 create sink s from m1 with (connector = 'blackhole', auto.schema.change = 'true');
 
 statement ok
