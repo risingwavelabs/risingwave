@@ -306,7 +306,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "expect json schema {\"host\": \"endpoint url\"} but got {\"somekey_1\":\"aaaa\"}"
+            "expected JSON in the form {\"host\": \"endpoint url\"}, but got {\"somekey_1\":\"aaaa\"}"
         );
 
         // illegal json
