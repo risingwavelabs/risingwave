@@ -90,7 +90,7 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockResult, ObjectIdManager, SstableBuilderOptions, Xor16FilterBuilder,
+    BinaryFuse8FilterBuilder, GetObjectId, HummockResult, ObjectIdManager, SstableBuilderOptions,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -100,8 +100,8 @@ use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact
 use crate::hummock::compactor::iceberg_compaction::TaskKey;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
-    BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
-    UnifiedSstableWriterFactory, validate_ssts,
+    BlockedBinaryFuse8FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager,
+    SstableWriterFactory, UnifiedSstableWriterFactory, validate_ssts,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -213,7 +213,7 @@ impl Compactor {
         let (split_table_outputs, table_stats_map) = {
             let factory = UnifiedSstableWriterFactory::new(self.context.sstable_store.clone());
             if self.task_config.use_block_based_filter {
-                self.compact_key_range_impl::<_, BlockedXor16FilterBuilder>(
+                self.compact_key_range_impl::<_, BlockedBinaryFuse8FilterBuilder>(
                     factory,
                     iter,
                     compaction_filter,
@@ -224,7 +224,7 @@ impl Compactor {
                 .instrument_await("compact".verbose())
                 .await?
             } else {
-                self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                self.compact_key_range_impl::<_, BinaryFuse8FilterBuilder>(
                     factory,
                     iter,
                     compaction_filter,

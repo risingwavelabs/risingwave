@@ -47,7 +47,7 @@ use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFacto
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
+    Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedBinaryFuse8FilterBuilder,
     CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
     TableHolder, UnifiedSstableWriterFactory,
 };
@@ -355,7 +355,7 @@ pub struct CompactorRunner<C: CompactionFilter = MultiCompactionFilter> {
     right: Box<ConcatSstableIterator>,
     task_id: u64,
     executor: CompactTaskExecutor<
-        RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedXor16FilterBuilder>,
+        RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedBinaryFuse8FilterBuilder>,
         C,
     >,
     compression_algorithm: CompressionAlgorithm,
@@ -394,7 +394,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         };
         let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
 
-        let builder_factory = RemoteBuilderFactory::<_, BlockedXor16FilterBuilder> {
+        let builder_factory = RemoteBuilderFactory::<_, BlockedBinaryFuse8FilterBuilder> {
             object_id_getter,
             limiter: context.memory_limiter.clone(),
             options,
