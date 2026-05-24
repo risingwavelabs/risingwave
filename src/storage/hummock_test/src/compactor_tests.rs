@@ -2638,6 +2638,10 @@ pub(crate) mod tests {
             base_level: 4,
             target_file_size: capacity,
             compression_algorithm: 1,
+            // Fast compaction runner currently expects blocked xor16 output.
+            sstable_filter_kind: risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
+            sstable_filter_layout: risingwave_pb::hummock::PbSstableFilterLayout::Auto,
+            blocked_xor_filter_kv_count_threshold: Some(0),
             gc_delete_keys: true,
             ..Default::default()
         };
