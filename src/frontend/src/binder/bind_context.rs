@@ -116,6 +116,8 @@ pub struct BindContext {
     /// Map the cte's name to its binding state.
     /// The `ShareId` in `BindingCte` of the value is used to help the planner identify the share plan.
     pub cte_to_relation: HashMap<String, Rc<RefCell<BindingCte>>>,
+    /// Exposed relation names of CTE references in the current FROM scope.
+    pub cte_relation_names: HashSet<String>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
     /// Whether the security invoker is set, currently only used for views.
@@ -264,6 +266,36 @@ impl BindContext {
         } else {
             Ok(columns.clone())
         }
+    }
+
+    pub fn check_catalog_name(&self, exposed_relation_name: &str) -> Result<()> {
+        if self.cte_relation_names.contains(exposed_relation_name) {
+            return Err(ErrorCode::DuplicateRelationName(format!(
+                "table name \"{}\" specified more than once",
+                exposed_relation_name
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
+    pub fn check_cte_name(&self, exposed_relation_name: &str) -> Result<()> {
+        if self
+            .range_of
+            .keys()
+            .any(|(_, relation_name)| relation_name == exposed_relation_name)
+        {
+            return Err(ErrorCode::DuplicateRelationName(format!(
+                "table name \"{}\" specified more than once",
+                exposed_relation_name
+            ))
+            .into());
+        }
+        Ok(())
+    }
+
+    pub fn add_cte_name(&mut self, exposed_relation_name: String) {
+        self.cte_relation_names.insert(exposed_relation_name);
     }
 
     /// Identifies two columns as being in the same group. Additionally, possibly provides one of
@@ -453,6 +485,7 @@ impl BindContext {
                 }
             }
         }
+        self.cte_relation_names.extend(other.cte_relation_names);
         // To merge the column_group_contexts, we just need to offset RHS
         // with the next_group_id of LHS.
         let ColumnGroupContext {

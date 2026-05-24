@@ -47,6 +47,26 @@ with t1 as (values(100, 200)) select * from public.t1;
 ----
 1 2
 
+statement ok
+create schema cte_conflict;
+
+statement ok
+create table cte_conflict.a(id int, b int);
+
+# resolved the conflict of relation name on addition context
+# https://github.com/risingwavelabs/risingwave/issues/5176
+statement error table name "a" specified more than once
+with a(id, c) as (select 1, 2) select b, c from cte_conflict.a join a on cte_conflict.a.id = a.id;
+
+statement ok
+WITH a(id, c) AS (SELECT 1, 2) SELECT t.b, a.c FROM cte_conflict.a AS t JOIN a ON t.id = a.id;
+
+statement ok
+drop table cte_conflict.a;
+
+statement ok
+drop schema cte_conflict;
+
 query I rowsort
 with c as (values(1)) select * from (with c as (values(2)) select * from c) foo union all select * from c order by 1;
 ----
