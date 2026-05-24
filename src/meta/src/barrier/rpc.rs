@@ -65,7 +65,9 @@ use crate::barrier::BackfillOrderState;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
-    BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
+    BarrierWorkerState, BatchRefreshJobCheckpointControl, BatchRefreshRenderResult,
+    CreatingStreamingJobControl, DatabaseCheckpointControl, DatabaseCheckpointControlMetrics,
+    IndependentCheckpointJobControl,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -590,7 +592,7 @@ impl DatabaseInitialBarrierCollector {
         database_partial_graphs(
             self.database_id,
             self.database
-                .creating_streaming_job_controls
+                .independent_checkpoint_job_controls
                 .keys()
                 .copied(),
         )
@@ -624,6 +626,7 @@ impl PartialGraphRecoverer<'_> {
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
+        batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
     ) -> MetaResult<DatabaseCheckpointControl> {
         fn collect_source_splits(
             fragment_infos: impl Iterator<Item = &InflightFragmentInfo>,
@@ -663,11 +666,11 @@ impl PartialGraphRecoverer<'_> {
             })
         }
 
-        fn resolve_jobs_committed_epoch<'a>(
+        fn resolve_jobs_committed_epoch(
             state_table_committed_epochs: &mut HashMap<TableId, u64>,
-            fragments: impl Iterator<Item = &'a InflightFragmentInfo> + 'a,
+            table_ids: impl Iterator<Item = TableId>,
         ) -> u64 {
-            let mut epochs = InflightFragmentInfo::existing_table_ids(fragments).map(|table_id| {
+            let mut epochs = table_ids.map(|table_id| {
                 (
                     table_id,
                     state_table_committed_epochs
@@ -750,7 +753,9 @@ impl PartialGraphRecoverer<'_> {
 
         let prev_epoch = resolve_jobs_committed_epoch(
             state_table_committed_epochs,
-            database_jobs.values().flat_map(|(job, _)| job.values()),
+            InflightFragmentInfo::existing_table_ids(
+                database_jobs.values().flat_map(|(job, _)| job.values()),
+            ),
         );
         let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
         // Use a different `curr_epoch` for each recovery attempt.
@@ -763,8 +768,10 @@ impl PartialGraphRecoverer<'_> {
 
         let mut ongoing_snapshot_backfill_jobs: HashMap<JobId, _> = HashMap::new();
         for (job_id, fragment_infos) in snapshot_backfill_jobs {
-            let committed_epoch =
-                resolve_jobs_committed_epoch(state_table_committed_epochs, fragment_infos.values());
+            let committed_epoch = resolve_jobs_committed_epoch(
+                state_table_committed_epochs,
+                InflightFragmentInfo::existing_table_ids(fragment_infos.values()),
+            );
             if committed_epoch == barrier_info.prev_epoch() {
                 info!(
                     "recovered creating snapshot backfill job {} catch up with upstream already",
@@ -994,6 +1001,7 @@ impl PartialGraphRecoverer<'_> {
                 &nodes_actors,
                 InflightFragmentInfo::existing_table_ids(database_jobs.values().flatten()),
                 new_actors,
+                DatabaseCheckpointControlMetrics::new(database_id),
             )?;
             debug!(
                 %database_id,
@@ -1001,8 +1009,10 @@ impl PartialGraphRecoverer<'_> {
             );
         };
 
-        let mut creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl> =
-            HashMap::new();
+        let mut independent_checkpoint_job_controls: HashMap<
+            JobId,
+            IndependentCheckpointJobControl,
+        > = HashMap::new();
         for (job_id, (info, upstream_table_ids, committed_epoch, snapshot_epoch)) in
             ongoing_snapshot_backfill_jobs
         {
@@ -1063,7 +1073,86 @@ impl PartialGraphRecoverer<'_> {
                 mutation.clone(),
                 self,
             )?;
-            creating_streaming_job_controls.insert(job_id, job);
+            independent_checkpoint_job_controls.insert(
+                job_id,
+                IndependentCheckpointJobControl::CreatingStreamingJob(job),
+            );
+        }
+
+        // Recover batch refresh jobs (both idle and consuming snapshot).
+        // Actors were already rendered by `render_runtime_info()`.
+        for (job_id, render_result) in batch_refresh {
+            background_jobs.remove(&job_id);
+            debug!(%job_id, "recovered batch refresh job");
+
+            // Resolve committed epoch from state tables.
+            let committed_epoch = resolve_jobs_committed_epoch(
+                state_table_committed_epochs,
+                InflightFragmentInfo::existing_table_ids(render_result.fragment_infos.values()),
+            );
+
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                render_result
+                    .fragment_infos
+                    .values()
+                    .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| anyhow!("batch refresh job {} has no snapshot backfill info", job_id))?;
+
+            let upstream_table_ids: HashSet<TableId> = snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .keys()
+                .copied()
+                .collect();
+            let snapshot_epoch = snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .values()
+                .find_map(|e| *e)
+                .unwrap_or(committed_epoch);
+
+            // Register subscribers for the upstream tables.
+            for upstream_table_id in &upstream_table_ids {
+                subscribers
+                    .entry(*upstream_table_id)
+                    .or_default()
+                    .try_insert(job_id.as_subscriber_id(), SubscriberType::SnapshotBackfill)
+                    .expect("non-duplicate");
+            }
+
+            let job_backfill_orders = job_backfill_orders(job_extra_info, job_id);
+            let job_backfill_orders =
+                StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
+                    job_backfill_orders,
+                    fragment_relations,
+                    || {
+                        render_result
+                            .fragment_infos
+                            .iter()
+                            .map(|(fid, f)| (*fid, f.fragment_type_mask, &f.nodes))
+                    },
+                );
+            let mutation = build_mutation(
+                &Default::default(), // batch refresh has no source splits
+                Default::default(),
+                &job_backfill_orders,
+                false,
+            );
+
+            let job = BatchRefreshJobCheckpointControl::recover(
+                database_id,
+                job_id,
+                upstream_table_ids,
+                snapshot_epoch,
+                committed_epoch,
+                job_backfill_orders,
+                hummock_version_stats,
+                mutation,
+                render_result,
+                self,
+            )?;
+            independent_checkpoint_job_controls
+                .insert(job_id, IndependentCheckpointJobControl::BatchRefresh(job));
         }
 
         self.control_stream_manager()
@@ -1078,9 +1167,14 @@ impl PartialGraphRecoverer<'_> {
                             .map(move |fragment| (fragment, info.job_id))
                     })
                     .chain(
-                        creating_streaming_job_controls
-                            .values()
-                            .flat_map(|job| job.fragment_infos_with_job_id()),
+                        independent_checkpoint_job_controls
+                            .iter()
+                            .flat_map(|(job_id, job)| {
+                                let job_id = *job_id;
+                                job.fragment_infos()
+                                    .into_iter()
+                                    .flat_map(move |infos| infos.values().map(move |f| (f, job_id)))
+                            }),
                     ),
             );
 
@@ -1100,7 +1194,7 @@ impl PartialGraphRecoverer<'_> {
             database_state,
             committed_epoch,
             database_info,
-            creating_streaming_job_controls,
+            independent_checkpoint_job_controls,
         ))
     }
 }

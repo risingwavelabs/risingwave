@@ -65,8 +65,8 @@ select * from iceberg_t1_source order by i1;
 query I
 explain select * from iceberg_t1_source;
 ----
- BatchExchange { order: [], dist: Single }
- └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan }
+CooperativeExec
+  IcebergScan: table=demo_db.test_explain_for_delete, columns=[i1, i2, i3]
 
 statement ok
 flush;
@@ -87,12 +87,11 @@ select * from iceberg_t1_source order by i1;
 query I
 explain select * from iceberg_t1_source;
 ----
- BatchExchange { order: [], dist: Single }
- └─BatchHashJoin { type: LeftAnti, predicate: i1 = i1 AND i2 = i2 AND (_iceberg_sequence_number < _iceberg_sequence_number) }
-   ├─BatchExchange { order: [], dist: HashShard(i1, i2) }
-   │ └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3, _iceberg_sequence_number], iceberg_scan_type: DataScan }
-   └─BatchExchange { order: [], dist: HashShard(i1, i2) }
-     └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, _iceberg_sequence_number], iceberg_scan_type: EqualityDeleteScan }
+HashJoinExec: mode=CollectLeft, join_type=RightAnti, on=[(i1@0, i1@0), (i2@1, i2@1)], filter=_iceberg_sequence_number@0 < _iceberg_sequence_number@1, projection=[i1@0, i2@1, i3@2]
+  CooperativeExec
+    IcebergScan: table=demo_db.test_explain_for_delete, columns=[i1, i2, _iceberg_sequence_number]
+  CooperativeExec
+    IcebergScan: table=demo_db.test_explain_for_delete, columns=[i1, i2, i3, _iceberg_sequence_number]
 
 statement ok
 DROP SINK sink1;

@@ -132,10 +132,8 @@ impl OptimizerContext {
         }
     }
 
-    // TODO(TaoWu): Remove the async.
     #[cfg(test)]
-    #[expect(clippy::unused_async)]
-    pub async fn mock() -> OptimizerContextRef {
+    pub fn mock() -> OptimizerContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             sql: Arc::from(""),
@@ -302,6 +300,11 @@ impl OptimizerContext {
 
     pub fn session_ctx(&self) -> &Arc<SessionImpl> {
         &self.session_ctx
+    }
+
+    pub fn batch_plan_dml_wait_persistence(&self) -> bool {
+        let session_config = self.session_ctx.config();
+        !session_config.implicit_flush() && session_config.dml_wait_persistence()
     }
 
     /// Return the original SQL.

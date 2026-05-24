@@ -166,7 +166,7 @@ pub struct LocalityProviderExecutor<S: StateStore> {
     upstream: Executor,
 
     /// Locality columns (indices in input schema)
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     locality_columns: Vec<usize>,
 
     /// State table for buffering input data
@@ -192,7 +192,7 @@ pub struct LocalityProviderExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> LocalityProviderExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         upstream: Executor,
         locality_columns: Vec<usize>,

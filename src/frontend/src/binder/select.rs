@@ -677,7 +677,10 @@ impl Binder {
         })
     }
 
-    fn generate_except_indices(&mut self, except: Option<&[Expr]>) -> Result<HashSet<usize>> {
+    pub(super) fn generate_except_indices(
+        &mut self,
+        except: Option<&[Expr]>,
+    ) -> Result<HashSet<usize>> {
         let mut except_indices: HashSet<usize> = HashSet::new();
         if let Some(exprs) = except {
             for expr in exprs {

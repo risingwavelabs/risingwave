@@ -671,7 +671,7 @@ pub struct SplitDiffOptions {
     pub enable_adaptive: bool,
 }
 
-#[allow(clippy::derivable_impls)]
+#[expect(clippy::derivable_impls)]
 impl Default for SplitDiffOptions {
     fn default() -> Self {
         SplitDiffOptions {

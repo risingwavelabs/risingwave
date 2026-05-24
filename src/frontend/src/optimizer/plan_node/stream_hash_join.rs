@@ -716,7 +716,7 @@ impl TryToStreamPb for StreamHashJoin {
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             is_append_only: self.is_append_only,
             // Join encoding type should now be read from per-job config override.
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             join_encoding_type: PbJoinEncodingType::Unspecified as _,
         })))
     }

@@ -30,10 +30,10 @@ use winnow::ModalResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFragmentOperation,
-    AlterFunctionOperation, AlterSchemaOperation, AlterSecretOperation, AlterTableOperation,
-    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
-    WebhookSourceInfo,
+    AlterColumnOperation, AlterCompactionGroupOperation, AlterConnectionOperation,
+    AlterDatabaseOperation, AlterFragmentOperation, AlterFunctionOperation, AlterSchemaOperation,
+    AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
 };
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
@@ -1246,8 +1246,17 @@ pub enum CopyTarget {
     Stdout,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum WaitTarget {
+    All,
+    Table(ObjectName),
+    MaterializedView(ObjectName),
+    Sink(ObjectName),
+    Index(ObjectName),
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
-#[allow(clippy::large_enum_variant)]
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Statement {
     /// Analyze (Hive)
@@ -1495,6 +1504,11 @@ pub enum Statement {
         fragment_ids: Vec<u32>,
         operation: AlterFragmentOperation,
     },
+    /// ALTER COMPACTION GROUP
+    AlterCompactionGroup {
+        group_ids: Vec<u64>,
+        operation: AlterCompactionGroupOperation,
+    },
     /// DESCRIBE relation
     /// ALTER DEFAULT PRIVILEGES
     AlterDefaultPrivileges {
@@ -1685,9 +1699,9 @@ pub enum Statement {
     ///
     /// Note: RisingWave specific statement.
     Flush,
-    /// WAIT for ALL running stream jobs to finish.
-    /// It will block the current session the condition is met.
-    Wait,
+    /// WAIT for background stream jobs to finish.
+    /// It will block the current session until the condition is met.
+    Wait(WaitTarget),
     /// Trigger meta backup.
     Backup,
     /// Trigger stream job recover
@@ -1764,7 +1778,7 @@ impl Statement {
     //
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
-    #[allow(clippy::cognitive_complexity)]
+    #[expect(clippy::cognitive_complexity)]
     fn fmt_unchecked(&self, mut f: impl std::fmt::Write) -> fmt::Result {
         match self {
             Statement::Explain {
@@ -2454,9 +2468,15 @@ impl Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
-            Statement::Wait => {
-                write!(f, "WAIT")
-            }
+            Statement::Wait(target) => match target {
+                WaitTarget::All => write!(f, "WAIT"),
+                WaitTarget::Table(name) => write!(f, "WAIT TABLE {name}"),
+                WaitTarget::MaterializedView(name) => {
+                    write!(f, "WAIT MATERIALIZED VIEW {name}")
+                }
+                WaitTarget::Sink(name) => write!(f, "WAIT SINK {name}"),
+                WaitTarget::Index(name) => write!(f, "WAIT INDEX {name}"),
+            },
             Statement::Backup => {
                 write!(f, "BACKUP")?;
                 Ok(())
@@ -2500,6 +2520,17 @@ impl Statement {
                     f,
                     "ALTER FRAGMENT {} {}",
                     display_comma_separated(fragment_ids),
+                    operation
+                )
+            }
+            Statement::AlterCompactionGroup {
+                group_ids,
+                operation,
+            } => {
+                write!(
+                    f,
+                    "ALTER COMPACTION GROUP {} {}",
+                    display_comma_separated(group_ids),
                     operation
                 )
             }
@@ -2975,6 +3006,8 @@ pub enum FunctionArgExpr {
     QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
     /// An unqualified `*` or `* except (columns)`
     Wildcard(Option<Vec<Expr>>),
+    /// A secret reference, e.g. `SECRET my_secret` or `SECRET my_secret AS FILE`
+    SecretRef(SecretRefValue),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -3006,6 +3039,7 @@ impl fmt::Display for FunctionArgExpr {
                 None => write!(f, "{}.*", prefix),
             },
 
+            FunctionArgExpr::SecretRef(secret_ref) => write!(f, "SECRET {}", secret_ref),
             FunctionArgExpr::Wildcard(except) => match except {
                 Some(exprs) => write!(
                     f,
@@ -3817,13 +3851,15 @@ impl fmt::Display for SetVariableValue {
 pub enum SetVariableValueSingle {
     Ident(Ident),
     Literal(Value),
+    Raw(String),
 }
 
 impl SetVariableValueSingle {
     pub fn to_string_unquoted(&self) -> String {
         match self {
             Self::Literal(Value::SingleQuotedString(s))
-            | Self::Literal(Value::DoubleQuotedString(s)) => s.clone(),
+            | Self::Literal(Value::DoubleQuotedString(s))
+            | Self::Raw(s) => s.clone(),
             _ => self.to_string(),
         }
     }
@@ -3835,6 +3871,7 @@ impl fmt::Display for SetVariableValueSingle {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            Raw(raw) => write!(f, "{}", raw),
         }
     }
 }

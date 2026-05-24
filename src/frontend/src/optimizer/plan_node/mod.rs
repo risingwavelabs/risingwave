@@ -244,7 +244,7 @@ impl_downcast!(StreamPlanNode);
 
 // Using a new type wrapper allows direct function implementation on `PlanRef`,
 // and we currently need a manual implementation of `PartialEq` for `PlanRef`.
-#[allow(clippy::derived_hash_with_manual_eq)]
+#[expect(clippy::derived_hash_with_manual_eq)]
 #[derive(Debug, Eq, Hash)]
 pub struct PlanRef<C: ConventionMarker>(Rc<C::PlanRefDyn>);
 
@@ -260,7 +260,7 @@ pub type BatchPlanRef = PlanRef<Batch>;
 
 // Cannot use the derived implementation for now.
 // See https://github.com/rust-lang/rust/issues/31740
-#[allow(clippy::op_ref)]
+#[expect(clippy::op_ref)]
 impl<C: ConventionMarker> PartialEq for PlanRef<C> {
     fn eq(&self, other: &Self) -> bool {
         &self.0 == &other.0
@@ -602,7 +602,6 @@ impl LogicalPlanRef {
 }
 
 impl ColPrunable for LogicalPlanRef {
-    #[allow(clippy::let_and_return)]
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> LogicalPlanRef {
         let res = self.prune_col_inner(required_cols, ctx);
         #[cfg(debug_assertions)]
@@ -616,7 +615,6 @@ impl ColPrunable for LogicalPlanRef {
 }
 
 impl PredicatePushdown for LogicalPlanRef {
-    #[allow(clippy::let_and_return)]
     fn predicate_pushdown(
         &self,
         predicate: Condition,
@@ -1093,6 +1091,8 @@ mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
+mod stream_iceberg_with_pk_index_dv_merger;
+mod stream_iceberg_with_pk_index_writer;
 mod stream_join_common;
 mod stream_local_approx_percentile;
 mod stream_locality_provider;
@@ -1236,6 +1236,8 @@ pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
+pub use stream_iceberg_with_pk_index_dv_merger::StreamIcebergWithPkIndexDvMerger;
+pub use stream_iceberg_with_pk_index_writer::StreamIcebergWithPkIndexWriter;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_locality_provider::StreamLocalityProvider;
@@ -1255,6 +1257,7 @@ pub use stream_source::StreamSource;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
 pub use stream_sync_log_store::StreamSyncLogStore;
+pub(crate) use stream_sync_log_store::ensure_sync_log_store_fragment_root;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -1413,6 +1416,8 @@ macro_rules! for_all_plan_nodes {
             , { Stream, LocalityProvider }
             , { Stream, EowcGapFill }
             , { Stream, GapFill }
+            , { Stream, IcebergWithPkIndexWriter }
+            , { Stream, IcebergWithPkIndexDvMerger }
             $(,$rest)*
         }
     };

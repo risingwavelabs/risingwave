@@ -35,7 +35,6 @@ use tracing::warn;
 use crate::MetaResult;
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::{ClusterControllerRef, StreamingClusterInfo, WorkerExtraInfo};
-use crate::controller::fragment::FragmentParallelismInfo;
 use crate::controller::scale::find_fragment_no_shuffle_dags_detailed;
 use crate::manager::{LocalNotification, NotificationVersion};
 use crate::model::{ActorId, ClusterId, Fragment, FragmentId, StreamJobFragments, SubscriptionId};
@@ -360,19 +359,6 @@ impl MetadataManager {
 
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
         self.catalog_controller.list_sources().await
-    }
-
-    pub fn running_fragment_parallelisms(
-        &self,
-        id_filter: Option<HashSet<FragmentId>>,
-    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
-        let id_filter = id_filter.map(|ids| ids.into_iter().map(|id| id as _).collect());
-        Ok(self
-            .catalog_controller
-            .running_fragment_parallelisms(id_filter)?
-            .into_iter()
-            .map(|(k, v)| (k as FragmentId, v))
-            .collect())
     }
 
     /// Get and filter the "**root**" fragments of the specified relations.

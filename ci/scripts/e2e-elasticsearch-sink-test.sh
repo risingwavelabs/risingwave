@@ -3,8 +3,26 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-echo "--- check elasticsearch"
-curl -u elastic:risingwave http://elasticsearch:9200
+ES_HEALTH_RESPONSE=$(mktemp)
+trap 'rm -f "$ES_HEALTH_RESPONSE"' EXIT
+
+echo "--- wait for elasticsearch"
+curl -fsS \
+  --connect-timeout 2 \
+  --max-time 5 \
+  --retry 60 \
+  --retry-delay 2 \
+  --retry-connrefused \
+  -u elastic:risingwave \
+  "http://elasticsearch:9200/_cluster/health?wait_for_status=yellow&timeout=1s" \
+  > "$ES_HEALTH_RESPONSE" || {
+    echo "Elasticsearch did not become ready in time"
+    curl -fsS -u elastic:risingwave http://elasticsearch:9200/ || true
+    exit 1
+  }
+echo "Elasticsearch is ready:"
+cat "$ES_HEALTH_RESPONSE"
+echo
 
 echo "--- testing elasticsearch sink"
 sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch/elasticsearch_sink.slt'
@@ -12,9 +30,9 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/elasticsearch/elasticsearch_sink.sl
 sleep 5
 
 echo "--- checking elasticsearch sink result"
-curl -XGET -u elastic:risingwave "http://elasticsearch:9200/test/_search" -H 'Content-Type: application/json' -d'{"query":{"match_all":{}}}' > ./e2e_test/sink/elasticsearch/elasticsearch_sink.tmp.result
-curl -XGET -u elastic:risingwave "http://elasticsearch:9200/test1/_search" -H 'Content-Type: application/json' -d'{"query":{"match_all":{}}}' > ./e2e_test/sink/elasticsearch/elasticsearch_with_pk_sink.tmp.result
-curl -XGET -u elastic:risingwave "http://elasticsearch:9200/test_route/_search" -H 'Content-Type: application/json' -d'{"query":{"match_all":{}}}' > ./e2e_test/sink/elasticsearch/elasticsearch_with_route.tmp.result
+curl -fsS -XGET -u elastic:risingwave "http://elasticsearch:9200/test/_search" -H 'Content-Type: application/json' -d'{"query":{"match_all":{}}}' > ./e2e_test/sink/elasticsearch/elasticsearch_sink.tmp.result
+curl -fsS -XGET -u elastic:risingwave "http://elasticsearch:9200/test1/_search" -H 'Content-Type: application/json' -d'{"query":{"match_all":{}}}' > ./e2e_test/sink/elasticsearch/elasticsearch_with_pk_sink.tmp.result
+curl -fsS -XGET -u elastic:risingwave "http://elasticsearch:9200/test_route/_search" -H 'Content-Type: application/json' -d'{"query":{"match_all":{}}}' > ./e2e_test/sink/elasticsearch/elasticsearch_with_route.tmp.result
 python3 e2e_test/sink/elasticsearch/elasticsearch.py e2e_test/sink/elasticsearch/elasticsearch_sink.result e2e_test/sink/elasticsearch/elasticsearch_sink.tmp.result
 python3 e2e_test/sink/elasticsearch/elasticsearch.py e2e_test/sink/elasticsearch/elasticsearch_with_pk_sink.result e2e_test/sink/elasticsearch/elasticsearch_with_pk_sink.tmp.result
 python3 e2e_test/sink/elasticsearch/elasticsearch.py e2e_test/sink/elasticsearch/elasticsearch_with_route.result e2e_test/sink/elasticsearch/elasticsearch_with_route.tmp.result

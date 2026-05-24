@@ -28,6 +28,7 @@ use rdkafka::{ClientConfig, Offset, TopicPartitionList};
 use risingwave_common::bail;
 use risingwave_common::id::FragmentId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
+use thiserror_ext::AsReport;
 
 use crate::connector_common::read_kafka_log_level;
 use crate::error::{ConnectorError, ConnectorResult};
@@ -129,6 +130,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         }
         properties.connection.set_security_properties(&mut config);
         properties.set_client(&mut config);
+        // The meta-side split enumerator does not export librdkafka native stats, so disable
+        // periodic statistics callbacks here even if the source properties enable them for
+        // compute-side readers.
+        config.set("statistics.interval.ms", "0");
         let mut scan_start_offset = match properties
             .scan_startup_mode
             .as_ref()
@@ -182,6 +187,26 @@ impl SplitEnumerator for KafkaSplitEnumerator {
     }
 
     async fn list_splits(&mut self) -> ConnectorResult<Vec<KafkaSplit>> {
+        // `KafkaSplitEnumerator` uses `BaseConsumer`, which does not have a background polling
+        // thread. Poll once per `list_splits` invocation so meta's periodic source-manager tick
+        // can serve queued callbacks like librdkafka statistics events.
+        if let Some(Err(poll_err)) = {
+            #[cfg(not(madsim))]
+            {
+                self.client.poll(Duration::ZERO)
+            }
+            #[cfg(madsim)]
+            {
+                self.client.poll(Duration::ZERO).await
+            }
+        } {
+            tracing::warn!(
+                error = %poll_err.as_report(),
+                topic = self.topic,
+                broker_address = self.broker_address,
+                "failed to poll kafka client");
+        }
+
         let topic_partitions = self.fetch_topic_partition().await.with_context(|| {
             format!(
                 "failed to fetch metadata from kafka ({})",

@@ -215,7 +215,8 @@ impl Sstable {
 
     #[inline(always)]
     pub fn may_match_hash(&self, user_key_range: &UserKeyRangeRef<'_>, hash: u64) -> bool {
-        self.filter_reader.may_match(user_key_range, hash)
+        self.filter_reader
+            .may_match(&self.meta.block_metas, user_key_range, hash)
     }
 
     #[inline(always)]

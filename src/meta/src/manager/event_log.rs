@@ -29,8 +29,12 @@ type ShutdownSender = tokio::sync::oneshot::Sender<()>;
 ///
 /// Currently all channels apply the same one strategy: keep latest N events.
 ///
-/// Currently each event type has its own channel.
-type ChannelId = u32;
+/// `BarrierComplete` is retained separately per database
+#[derive(Hash, PartialEq, Eq)]
+enum ChannelId {
+    EventType(u32),
+    BarrierComplete(u32),
+}
 type Channel = VecDeque<EventLog>;
 type EventStoreRef = Arc<RwLock<HashMap<ChannelId, Channel>>>;
 
@@ -164,16 +168,16 @@ fn keep_latest_n(channel: &mut Channel, max_n: usize) {
 impl From<&EventLog> for ChannelId {
     fn from(value: &EventLog) -> Self {
         match value.payload.event.as_ref().unwrap() {
-            Event::CreateStreamJobFail(_) => 1,
-            Event::DirtyStreamJobClear(_) => 2,
-            Event::MetaNodeStart(_) => 3,
-            Event::BarrierComplete(_) => 4,
-            Event::InjectBarrierFail(_) => 5,
-            Event::CollectBarrierFail(_) => 6,
-            Event::WorkerNodePanic(_) => 7,
-            Event::AutoSchemaChangeFail(_) => 8,
-            Event::SinkFail(_) => 9,
-            Event::Recovery(_) => 10,
+            Event::CreateStreamJobFail(_) => ChannelId::EventType(1),
+            Event::DirtyStreamJobClear(_) => ChannelId::EventType(2),
+            Event::MetaNodeStart(_) => ChannelId::EventType(3),
+            Event::BarrierComplete(event) => ChannelId::BarrierComplete(event.database_id),
+            Event::InjectBarrierFail(_) => ChannelId::EventType(5),
+            Event::CollectBarrierFail(_) => ChannelId::EventType(6),
+            Event::WorkerNodePanic(_) => ChannelId::EventType(7),
+            Event::AutoSchemaChangeFail(_) => ChannelId::EventType(8),
+            Event::SinkFail(_) => ChannelId::EventType(9),
+            Event::Recovery(_) => ChannelId::EventType(10),
         }
     }
 }

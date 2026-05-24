@@ -34,7 +34,7 @@ impl WrapperExecutor {
         Self { input, actor_ctx }
     }
 
-    #[allow(clippy::let_and_return)]
+    #[expect(clippy::let_and_return)]
     fn wrap_debug(
         info: Arc<ExecutorInfo>,
         stream: impl MessageStream + 'static,

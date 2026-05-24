@@ -57,6 +57,7 @@ use super::info::InflightDatabaseInfo;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
+use crate::barrier::partial_graph::PartialGraphBarrierInfo;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::utils::{collect_new_vector_index_info, collect_resp_info};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -358,6 +359,8 @@ pub struct CreateStreamingJobCommandInfo {
     pub is_serverless: bool,
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
+    /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
+    pub refresh_interval_sec: Option<u64>,
 }
 
 impl StreamJobFragments {
@@ -413,10 +416,17 @@ pub struct SnapshotBackfillInfo {
 }
 
 #[derive(Debug, Clone)]
+pub struct BatchRefreshInfo {
+    pub snapshot_backfill_info: SnapshotBackfillInfo,
+    pub refresh_interval_sec: u64,
+}
+
+#[derive(Debug, Clone)]
 pub enum CreateStreamingJobType {
     Normal,
     SinkIntoTable(UpstreamSinkInfo),
     SnapshotBackfill(SnapshotBackfillInfo),
+    BatchRefresh(BatchRefreshInfo),
 }
 
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
@@ -447,8 +457,8 @@ pub enum Command {
     /// drop actors, and then delete the job fragments info from meta store.
     DropStreamingJobs {
         streaming_job_ids: HashSet<JobId>,
+        /// Used by recovery quick path when draining buffered drop/cancel commands.
         unregistered_state_table_ids: HashSet<TableId>,
-        unregistered_fragment_ids: HashSet<FragmentId>,
         // target_fragment -> [sink_fragments]
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     },
@@ -677,10 +687,7 @@ impl Command {
 #[derive(Debug)]
 pub enum PostCollectCommand {
     Command(String),
-    DropStreamingJobs {
-        streaming_job_ids: HashSet<JobId>,
-        unregistered_state_table_ids: HashSet<TableId>,
-    },
+    DropStreamingJobs,
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
@@ -711,10 +718,24 @@ impl PostCollectCommand {
         PostCollectCommand::Command("barrier".to_owned())
     }
 
+    pub fn should_checkpoint(&self) -> bool {
+        match self {
+            PostCollectCommand::DropStreamingJobs
+            | PostCollectCommand::CreateStreamingJob { .. }
+            | PostCollectCommand::Reschedule { .. }
+            | PostCollectCommand::ReplaceStreamJob { .. }
+            | PostCollectCommand::SourceChangeSplit { .. }
+            | PostCollectCommand::CreateSubscription { .. }
+            | PostCollectCommand::ConnectorPropsChange(_)
+            | PostCollectCommand::ResumeBackfill { .. } => true,
+            PostCollectCommand::Command(_) => false,
+        }
+    }
+
     pub fn command_name(&self) -> &str {
         match self {
             PostCollectCommand::Command(name) => name.as_str(),
-            PostCollectCommand::DropStreamingJobs { .. } => "DropStreamingJobs",
+            PostCollectCommand::DropStreamingJobs => "DropStreamingJobs",
             PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
             PostCollectCommand::Reschedule { .. } => "Reschedule",
             PostCollectCommand::ReplaceStreamJob { .. } => "ReplaceStreamJob",
@@ -732,7 +753,7 @@ impl Display for PostCollectCommand {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BarrierKind {
     Initial,
     Barrier,
@@ -766,68 +787,22 @@ impl BarrierKind {
     }
 }
 
-/// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
-/// [`Command`].
-pub(super) struct CommandContext {
-    mv_subscription_max_retention: HashMap<TableId, u64>,
-
-    pub(super) barrier_info: BarrierInfo,
-
-    pub(super) table_ids_to_commit: HashSet<TableId>,
-
-    pub(super) command: PostCollectCommand,
-
-    /// The tracing span of this command.
-    ///
-    /// Differs from [`crate::barrier::TracedEpoch`], this span focuses on the lifetime of the corresponding
-    /// barrier, including the process of waiting for the barrier to be sent, flowing through the
-    /// stream graph on compute nodes, and finishing its `post_collect` stuffs.
-    _span: tracing::Span,
-}
-
-impl std::fmt::Debug for CommandContext {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CommandContext")
-            .field("barrier_info", &self.barrier_info)
-            .field("command", &self.command.command_name())
-            .finish()
-    }
-}
-
-impl CommandContext {
-    pub(super) fn new(
-        barrier_info: BarrierInfo,
-        mv_subscription_max_retention: HashMap<TableId, u64>,
-        table_ids_to_commit: HashSet<TableId>,
-        command: PostCollectCommand,
-        span: tracing::Span,
-    ) -> Self {
-        Self {
-            mv_subscription_max_retention,
-            barrier_info,
-            table_ids_to_commit,
-            command,
-            _span: span,
-        }
-    }
-
+impl BarrierInfo {
     fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
         let Some(truncate_timestamptz) = Timestamptz::from_secs(
-            self.barrier_info
-                .prev_epoch
-                .value()
-                .as_timestamptz()
-                .timestamp()
-                - retention_second as i64,
+            self.prev_epoch.value().as_timestamptz().timestamp() - retention_second as i64,
         ) else {
-            warn!(retention_second, prev_epoch = ?self.barrier_info.prev_epoch.value(), "invalid retention second value");
-            return self.barrier_info.prev_epoch.value();
+            warn!(retention_second, prev_epoch = ?self.prev_epoch.value(), "invalid retention second value");
+            return self.prev_epoch.value();
         };
         Epoch::from_unix_millis(truncate_timestamptz.timestamp_millis() as u64)
     }
+}
 
+impl Command {
     pub(super) fn collect_commit_epoch_info(
-        &self,
+        database_info: &InflightDatabaseInfo,
+        barrier_info: &PartialGraphBarrierInfo,
         info: &mut CommitEpochInfo,
         resps: Vec<BarrierCompleteResponse>,
         backfill_pinned_log_epoch: HashMap<JobId, (u64, HashSet<TableId>)>,
@@ -842,10 +817,13 @@ impl CommandContext {
         ) = collect_resp_info(resps);
 
         let new_table_fragment_infos =
-            if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } = &self.command {
+            if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } =
+                &barrier_info.post_collect_command
+            {
                 assert!(!matches!(
                     job_type,
                     CreateStreamingJobType::SnapshotBackfill(_)
+                        | CreateStreamingJobType::BatchRefresh(_)
                 ));
                 let table_fragments = &info.stream_job_fragments;
                 let mut table_ids: HashSet<_> =
@@ -873,9 +851,12 @@ impl CommandContext {
                     entry.insert(truncate_epoch);
                 }
             };
-        for (mv_table_id, max_retention) in &self.mv_subscription_max_retention {
-            let truncate_epoch = self.get_truncate_epoch(*max_retention).0;
-            update_truncate_epoch(*mv_table_id, truncate_epoch);
+        for (mv_table_id, max_retention) in database_info.max_subscription_retention() {
+            let truncate_epoch = barrier_info
+                .barrier_info
+                .get_truncate_epoch(max_retention)
+                .0;
+            update_truncate_epoch(mv_table_id, truncate_epoch);
         }
         for (_, (backfill_epoch, upstream_mv_table_ids)) in backfill_pinned_log_epoch {
             for mv_table_id in upstream_mv_table_ids {
@@ -886,12 +867,12 @@ impl CommandContext {
         let table_new_change_log = build_table_change_log_delta(
             old_value_ssts.into_iter(),
             synced_ssts.iter().map(|sst| &sst.sst_info),
-            must_match!(&self.barrier_info.kind, BarrierKind::Checkpoint(epochs) => epochs),
+            must_match!(&barrier_info.barrier_info.kind, BarrierKind::Checkpoint(epochs) => epochs),
             mv_log_store_truncate_epoch.into_iter(),
         );
 
-        let epoch = self.barrier_info.prev_epoch();
-        for table_id in &self.table_ids_to_commit {
+        let epoch = barrier_info.barrier_info.prev_epoch();
+        for table_id in &barrier_info.table_ids_to_commit {
             info.tables_to_commit
                 .try_insert(*table_id, epoch)
                 .expect("non duplicate");
@@ -908,7 +889,8 @@ impl CommandContext {
                 .try_insert(table_id, VectorIndexDelta::Adds(vector_index_adds))
                 .expect("non-duplicate");
         }
-        if let PostCollectCommand::CreateStreamingJob { info: job_info, .. } = &self.command
+        if let PostCollectCommand::CreateStreamingJob { info: job_info, .. } =
+            &barrier_info.post_collect_command
             && let Some(index_table) = collect_new_vector_index_info(job_info)
         {
             info.vector_index_delta
@@ -1032,8 +1014,11 @@ impl Command {
                     .flat_map(build_actor_connector_splits)
                     .collect();
                 let subscriptions_to_add =
-                    if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) =
-                        job_type
+                    if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
+                    | CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+                        snapshot_backfill_info,
+                        ..
+                    }) = job_type
                     {
                         snapshot_backfill_info
                             .upstream_mv_table_id_to_backfill_epoch

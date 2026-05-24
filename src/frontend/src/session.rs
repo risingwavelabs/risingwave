@@ -75,6 +75,7 @@ use risingwave_common_service::{MetricsManager, ObserverManager};
 use risingwave_connector::source::monitor::{GLOBAL_SOURCE_METRICS, SourceMetrics};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
+use risingwave_pb::configured_monitor_service_server;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -453,7 +454,9 @@ impl FrontendEnv {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
                 .add_service(FrontendServiceServer::new(frontend_srv))
-                .add_service(MonitorServiceServer::new(monitor_srv))
+                .add_service(configured_monitor_service_server(
+                    MonitorServiceServer::new(monitor_srv),
+                ))
                 .serve(frontend_rpc_addr)
                 .await
                 .unwrap();

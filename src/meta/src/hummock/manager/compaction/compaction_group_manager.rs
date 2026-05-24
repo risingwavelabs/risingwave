@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::meta::default::compaction_config as default_compaction_config;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -40,7 +41,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{HummockManager, commit_multi_var};
-use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
+use crate::hummock::metrics_utils::remove_compaction_group_metrics;
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::next_compaction_group_id;
 use crate::manager::MetaSrvEnv;
@@ -298,61 +299,63 @@ impl HummockManager {
             &self.env.opts,
         );
         let mut new_version_delta = version.new_delta();
-        let mut modified_groups: HashMap<CompactionGroupId, /* #member table */ u64> =
-            HashMap::new();
+        struct UnregisterGroupChange {
+            remaining_member_count: usize,
+            removed_table_ids: HashSet<TableId>,
+        }
+        let mut group_changes: HashMap<CompactionGroupId, UnregisterGroupChange> = HashMap::new();
         // Remove member tables
         for table_id in table_ids.into_iter().unique() {
             let version = new_version_delta.latest_version();
             let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
             };
+            let compaction_group_id = info.compaction_group_id;
 
-            modified_groups
-                .entry(info.compaction_group_id)
-                .and_modify(|count| *count -= 1)
-                .or_insert(
-                    version
-                        .state_table_info
-                        .compaction_group_member_tables()
-                        .get(&info.compaction_group_id)
-                        .expect("should exist")
-                        .len() as u64
-                        - 1,
-                );
+            let group_change =
+                group_changes
+                    .entry(compaction_group_id)
+                    .or_insert_with(|| UnregisterGroupChange {
+                        remaining_member_count: version
+                            .state_table_info
+                            .compaction_group_member_tables()
+                            .get(&compaction_group_id)
+                            .expect("should exist")
+                            .len(),
+                        removed_table_ids: HashSet::new(),
+                    });
+            group_change.remaining_member_count = group_change
+                .remaining_member_count
+                .checked_sub(1)
+                .expect("member table count should be positive");
+            assert!(group_change.removed_table_ids.insert(table_id));
             new_version_delta.removed_table_ids.insert(table_id);
         }
 
-        let groups_to_remove = modified_groups
-            .into_iter()
-            .filter_map(|(group_id, member_count)| {
-                if member_count == 0 && group_id > StaticCompactionGroupId::End {
-                    return Some((
-                        group_id,
-                        new_version_delta
-                            .latest_version()
-                            .get_compaction_group_levels(group_id)
-                            .levels
-                            .len(),
-                    ));
-                }
-                None
-            })
-            .collect_vec();
-        for (group_id, _) in &groups_to_remove {
-            let group_deltas = &mut new_version_delta
-                .group_deltas
-                .entry(*group_id)
-                .or_default()
-                .group_deltas;
-
-            let group_delta = GroupDelta::GroupDestroy(PbGroupDestroy {});
-            group_deltas.push(group_delta);
-        }
-
-        for (group_id, max_level) in groups_to_remove {
-            remove_compaction_group_in_sst_stat(&self.metrics, group_id, max_level);
-            // clean up compaction schedule state for the removed group
-            self.compaction_state.remove_compaction_group(group_id);
+        for (group_id, change) in group_changes {
+            if change.remaining_member_count == 0 && group_id > StaticCompactionGroupId::End {
+                let max_level = new_version_delta
+                    .latest_version()
+                    .get_compaction_group_levels(group_id)
+                    .levels
+                    .len();
+                new_version_delta
+                    .group_deltas
+                    .entry(group_id)
+                    .or_default()
+                    .group_deltas
+                    .push(GroupDelta::GroupDestroy(PbGroupDestroy {}));
+                remove_compaction_group_metrics(&self.metrics, group_id, max_level);
+                // clean up compaction schedule state for the removed group
+                self.compaction_state.remove_compaction_group(group_id);
+            } else {
+                new_version_delta
+                    .group_deltas
+                    .entry(group_id)
+                    .or_default()
+                    .group_deltas
+                    .push(GroupDelta::PruneTableIdsFromSsts(change.removed_table_ids));
+            }
         }
 
         new_version_delta.pre_apply();
@@ -535,10 +538,7 @@ impl CompactionGroupManager {
     }
 }
 
-fn update_compaction_config(
-    target: &mut CompactionConfig,
-    items: &[MutableConfig],
-) -> std::result::Result<(), String> {
+fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) -> Result<()> {
     for item in items {
         match item {
             MutableConfig::MaxBytesForLevelBase(c) => {
@@ -587,11 +587,31 @@ fn update_compaction_config(
                 target.tombstone_reclaim_ratio = *c;
             }
             MutableConfig::CompressionAlgorithm(c) => {
-                let idx = c.get_level() as usize;
-                let slot = target.compression_algorithm.get_mut(idx).ok_or_else(|| {
-                    format!("compression_algorithm level {} is out of range", idx)
-                })?;
-                slot.clone_from(&c.compression_algorithm);
+                let level = c.get_level();
+                let max_level = try_u32_max_level(target.max_level)?;
+                if level > max_level {
+                    return Err(Error::CompactionGroup(format!(
+                        "invalid compression_algorithm level {}, max_level is {}",
+                        level, target.max_level
+                    )));
+                }
+
+                let Some(algorithm) = target.compression_algorithm.get_mut(level as usize) else {
+                    return Err(Error::CompactionGroup(format!(
+                        "invalid compression_algorithm level {}, compression_algorithm len is {}",
+                        level,
+                        target.compression_algorithm.len()
+                    )));
+                };
+                algorithm.clone_from(&c.compression_algorithm);
+            }
+            MutableConfig::ResetCompressionAlgorithm(reset) => {
+                if *reset {
+                    target.compression_algorithm =
+                        default_compaction_config::compression_algorithm_vec(try_u32_max_level(
+                            target.max_level,
+                        )?);
+                }
             }
             MutableConfig::MaxL0CompactLevelCount(c) => {
                 target.max_l0_compact_level_count = Some(*c);
@@ -626,16 +646,15 @@ fn update_compaction_config(
             MutableConfig::EnableOptimizeL0IntervalSelection(c) => {
                 target.enable_optimize_l0_interval_selection = Some(*c);
             }
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             MutableConfig::VnodeAlignedLevelSizeThreshold(_) => {
                 // Deprecated. Keep accepting the field for old clients but do not apply it.
             }
-            MutableConfig::BlockedXorFilterKvCountThreshold(c) => {
-                target.blocked_xor_filter_kv_count_threshold =
-                    (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+            MutableConfig::MaxKvCountForXor16(c) => {
+                target.max_kv_count_for_xor16 = optional_non_sentinel_u64_config(*c);
             }
             MutableConfig::MaxVnodeKeyRangeBytes(c) => {
-                target.max_vnode_key_range_bytes = (*c > 0).then_some(*c);
+                target.max_vnode_key_range_bytes = optional_positive_u64_config(*c);
             }
             MutableConfig::SstableFilterKind(c) => {
                 if target.sstable_filter_kind.is_empty() {
@@ -643,10 +662,12 @@ fn update_compaction_config(
                         vec!["xor16".to_owned(); target.max_level as usize + 1];
                 }
                 let idx = c.get_level() as usize;
-                let level_entry = target
-                    .sstable_filter_kind
-                    .get_mut(idx)
-                    .ok_or_else(|| format!("sstable_filter_kind level {} is out of range", idx))?;
+                let level_entry = target.sstable_filter_kind.get_mut(idx).ok_or_else(|| {
+                    Error::CompactionGroup(format!(
+                        "sstable_filter_kind level {} is out of range",
+                        idx
+                    ))
+                })?;
                 level_entry.clone_from(&c.filter_kind);
             }
             MutableConfig::SstableFilterLayout(c) => {
@@ -656,13 +677,38 @@ fn update_compaction_config(
                 }
                 let idx = c.get_level() as usize;
                 let level_entry = target.sstable_filter_layout.get_mut(idx).ok_or_else(|| {
-                    format!("sstable_filter_layout level {} is out of range", idx)
+                    Error::CompactionGroup(format!(
+                        "sstable_filter_layout level {} is out of range",
+                        idx
+                    ))
                 })?;
                 level_entry.clone_from(&c.layout);
             }
         }
     }
     Ok(())
+}
+
+fn optional_u64_config(value: u64) -> Option<u64> {
+    (value != u64::MIN && value != u64::MAX).then_some(value)
+}
+
+fn optional_non_sentinel_u64_config(value: u64) -> Option<u64> {
+    (value != u64::MAX).then_some(value)
+}
+
+fn optional_positive_u64_config(value: u64) -> Option<u64> {
+    optional_u64_config(value).filter(|value| *value > 0)
+}
+
+fn try_u32_max_level(max_level: u64) -> Result<u32> {
+    u32::try_from(max_level).map_err(|_| {
+        Error::CompactionGroup(format!(
+            "invalid max_level {}, expect <= {}",
+            max_level,
+            u32::MAX
+        ))
+    })
 }
 
 impl CompactionGroupTransaction<'_> {
@@ -729,9 +775,7 @@ impl CompactionGroupTransaction<'_> {
                 Error::CompactionGroup(format!("invalid group {}", *compaction_group_id))
             })?;
             let mut config = group.compaction_config.as_ref().clone();
-            if let Err(reason) = update_compaction_config(&mut config, config_to_update) {
-                return Err(Error::CompactionGroup(reason));
-            }
+            update_compaction_config(&mut config, config_to_update)?;
             if let Err(reason) = validate_compaction_config(&config) {
                 return Err(Error::CompactionGroup(reason));
             }
@@ -748,6 +792,7 @@ impl CompactionGroupTransaction<'_> {
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashSet};
+    use std::sync::Arc;
 
     use itertools::Itertools;
     use risingwave_common::id::JobId;
@@ -839,6 +884,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_reset_compression_algorithm_false_is_noop() {
+        let mut config = CompactionConfigBuilder::new().build();
+        config.compression_algorithm[3] = "Zstd".to_owned();
+
+        super::update_compaction_config(
+            &mut config,
+            &[MutableConfig::ResetCompressionAlgorithm(false)],
+        )
+        .unwrap();
+
+        assert_eq!(config.compression_algorithm[3], "Zstd");
+    }
+
     #[tokio::test]
     async fn test_inner() {
         let (env, ..) = setup_compute_env(8080).await;
@@ -870,6 +929,23 @@ mod tests {
             ) {
                 commit_multi_var!(meta, compaction_groups_txn).unwrap();
             }
+        }
+
+        async fn insert_compaction_group_config_with_max_level(
+            meta: &SqlMetaStore,
+            inner: &mut CompactionGroupManager,
+            cg_id: u64,
+            max_level: u64,
+        ) {
+            let mut config = inner.default_compaction_config().as_ref().clone();
+            config.max_level = max_level;
+            config.compression_algorithm =
+                super::default_compaction_config::compression_algorithm_vec(
+                    super::try_u32_max_level(max_level).expect("max_level should fit u32 in test"),
+                );
+            let mut compaction_groups_txn = inner.start_compaction_groups_txn();
+            compaction_groups_txn.create_compaction_groups(cg_id.into(), Arc::new(config));
+            commit_multi_var!(meta, compaction_groups_txn).unwrap();
         }
 
         update_compaction_config(env.meta_store_ref(), &mut inner, &[100, 200], &[])
@@ -904,6 +980,122 @@ mod tests {
                 .compaction_config
                 .max_sub_compaction,
             123
+        );
+
+        insert_compaction_group_config_with_max_level(env.meta_store_ref(), &mut inner, 300, 4)
+            .await;
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[300],
+            &[MutableConfig::ResetCompressionAlgorithm(true)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(300)
+                .unwrap()
+                .compaction_config
+                .compression_algorithm,
+            super::default_compaction_config::compression_algorithm_vec(4)
+        );
+        let err = update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[300],
+            &[MutableConfig::CompressionAlgorithm(CompressionAlgorithm {
+                level: 6,
+                compression_algorithm: "Zstd".to_owned(),
+            })],
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("invalid compression_algorithm level 6")
+        );
+
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxKvCountForXor16(0)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_kv_count_for_xor16,
+            Some(0)
+        );
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxKvCountForXor16(1024)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_kv_count_for_xor16,
+            Some(1024)
+        );
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxKvCountForXor16(u64::MAX)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_kv_count_for_xor16,
+            None
+        );
+
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxVnodeKeyRangeBytes(0)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_vnode_key_range_bytes,
+            None
+        );
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxVnodeKeyRangeBytes(1024)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_vnode_key_range_bytes,
+            Some(1024)
         );
     }
 

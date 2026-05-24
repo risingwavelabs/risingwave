@@ -31,11 +31,14 @@ use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
 use thiserror_ext::AsReport;
+use tiberius::Config;
 use tokio_postgres::types::PgLsn;
 
 use crate::connector_common::{SslMode, create_pg_client};
 use crate::error::ConnectorResult;
+use crate::sink::sqlserver::SqlServerClient;
 use crate::source::cdc::external::mysql::build_mysql_connection_pool;
+use crate::source::cdc::split::parse_sql_server_lsn_str;
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
     SqlServer, table_schema_exclude_additional_columns,
@@ -155,6 +158,10 @@ where
 }
 
 impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
+    fn sql_server_lsn_to_i64(lsn: &str) -> Option<i64> {
+        parse_sql_server_lsn_str(lsn).map(|v| v.min(i64::MAX as u128) as i64)
+    }
+
     async fn monitor_postgres_confirmed_flush_lsn(&mut self) -> ConnectorResult<()> {
         // Query upstream LSNs and update metrics.
         match self.query_postgres_lsns().await {
@@ -274,6 +281,121 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
                 Ok(None)
             }
         }
+    }
+
+    /// Query min/max LSNs from SQL Server CDC.
+    async fn query_sql_server_lsns(&self) -> ConnectorResult<Option<(String, String)>> {
+        let hostname = self
+            .properties
+            .get("hostname")
+            .ok_or_else(|| anyhow!("hostname not found in CDC properties"))?;
+        let port = self
+            .properties
+            .get("port")
+            .ok_or_else(|| anyhow!("port not found in CDC properties"))?
+            .parse::<u16>()
+            .context("failed to parse port as u16")?;
+        let username = self
+            .properties
+            .get("username")
+            .ok_or_else(|| anyhow!("username not found in CDC properties"))?;
+        let password = self
+            .properties
+            .get("password")
+            .ok_or_else(|| anyhow!("password not found in CDC properties"))?;
+        let database = self
+            .properties
+            .get("database.name")
+            .ok_or_else(|| anyhow!("database.name not found in CDC properties"))?;
+
+        let mut config = Config::new();
+        config.host(hostname);
+        config.port(port);
+        config.database(database);
+        config.authentication(tiberius::AuthMethod::sql_server(username, password));
+        config.trust_cert();
+
+        let mut client = SqlServerClient::new_with_config(config).await?;
+        let row = client
+            .inner_client
+            .simple_query(
+                "SELECT \
+                    sys.fn_cdc_get_max_lsn() AS max_lsn, \
+                    (SELECT MIN(sys.fn_cdc_get_min_lsn(capture_instance)) FROM cdc.change_tables) AS min_lsn"
+                    .to_owned(),
+            )
+            .await?
+            .into_row()
+            .await?
+            .ok_or_else(|| anyhow!("No result returned when querying SQL Server max/min LSN"))?;
+
+        let lsn_bytes_to_hex = |bytes: &[u8]| -> ConnectorResult<String> {
+            if bytes.len() != 10 {
+                return Err(anyhow!(
+                    "SQL Server LSN should be 10 bytes, got {} bytes",
+                    bytes.len()
+                )
+                .into());
+            }
+            let mut hex_string = String::with_capacity(22);
+            for byte in &bytes[0..4] {
+                hex_string.push_str(&format!("{:02x}", byte));
+            }
+            hex_string.push(':');
+            for byte in &bytes[4..8] {
+                hex_string.push_str(&format!("{:02x}", byte));
+            }
+            hex_string.push(':');
+            for byte in &bytes[8..10] {
+                hex_string.push_str(&format!("{:02x}", byte));
+            }
+            Ok(hex_string)
+        };
+
+        let max_lsn = row
+            .try_get::<&[u8], usize>(0)?
+            .map(lsn_bytes_to_hex)
+            .transpose()?
+            .ok_or_else(|| anyhow!("SQL Server max_lsn is NULL"))?;
+        let min_lsn = row
+            .try_get::<&[u8], usize>(1)?
+            .map(lsn_bytes_to_hex)
+            .transpose()?
+            .ok_or_else(|| anyhow!("SQL Server min_lsn is NULL"))?;
+
+        Ok(Some((min_lsn, max_lsn)))
+    }
+
+    async fn monitor_sql_server_lsns(&mut self) -> ConnectorResult<()> {
+        match self.query_sql_server_lsns().await {
+            Ok(Some((min_lsn, max_lsn))) => {
+                let source_id = self.source_id.to_string();
+
+                if let Some(value) = Self::sql_server_lsn_to_i64(&min_lsn) {
+                    self.metrics
+                        .sqlserver_cdc_upstream_min_lsn
+                        .with_guarded_label_values(&[&source_id])
+                        .set(value);
+                }
+
+                if let Some(value) = Self::sql_server_lsn_to_i64(&max_lsn) {
+                    self.metrics
+                        .sqlserver_cdc_upstream_max_lsn
+                        .with_guarded_label_values(&[&source_id])
+                        .set(value);
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::error!(
+                    "Failed to query SQL Server LSNs for source {}: {}",
+                    self.source_id,
+                    e.as_report()
+                );
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -536,5 +658,12 @@ impl ListCdcSplits for DebeziumSplitEnumerator<SqlServer> {
             None,
             None,
         )]
+    }
+}
+
+#[async_trait]
+impl CdcMonitor for DebeziumSplitEnumerator<SqlServer> {
+    async fn monitor_cdc(&mut self) -> ConnectorResult<()> {
+        self.monitor_sql_server_lsns().await
     }
 }

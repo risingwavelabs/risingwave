@@ -200,6 +200,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::streaming_hash_join_entry_state_max_rows")]
     pub hash_join_entry_state_max_rows: usize,
 
+    /// Number of processed rows between periodic join cache evictions.
+    /// Values smaller than 1 will be clamped to 1 by the executor.
+    #[serde(default = "default::developer::streaming_join_hash_map_evict_interval_rows")]
+    pub join_hash_map_evict_interval_rows: u32,
+
     #[serde(default = "default::developer::streaming_now_progress_ratio")]
     pub now_progress_ratio: Option<f32>,
 
@@ -273,6 +278,10 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::sync_log_store_buffer_size")]
     pub sync_log_store_buffer_size: usize,
 
+    /// Disable the optimized dispatcher path for sync log store.
+    #[serde(default = "default::developer::disable_sync_log_store_dispatcher")]
+    pub disable_sync_log_store_dispatcher: bool,
+
     /// Cache policy for partition cache in streaming over window.
     /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.
     #[serde(default)]
@@ -285,6 +294,17 @@ pub struct StreamingDeveloperConfig {
     /// validating the correctness of vnode stats pruning before enabling it in production.
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
+
+    /// Whether `MaterializeExecutor` enables vnode key stats for its state table.
+    #[serde(default = "default::developer::enable_vnode_key_stats_for_materialize")]
+    pub enable_vnode_key_stats_for_materialize: bool,
+
+    /// The maximum number of kv log store readers that can concurrently read historical data
+    /// (i.e., from the state store) during initialization. A reader is considered "initializing"
+    /// until it has read at least one row from the historical stream or the stream returns empty.
+    /// Set to 0 to disable the limit (unlimited concurrency).
+    #[serde(default = "default::developer::max_concurrent_kv_log_store_historical_read")]
+    pub max_concurrent_kv_log_store_historical_read: usize,
 
     #[serde(default, flatten)]
     #[serde_prefix_all(skip)]

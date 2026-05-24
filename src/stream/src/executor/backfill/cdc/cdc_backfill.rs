@@ -88,7 +88,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> CdcBackfillExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         external_table: ExternalStorageTable,

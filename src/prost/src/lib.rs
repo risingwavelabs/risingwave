@@ -121,6 +121,8 @@ pub mod telemetry;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/iceberg_compaction.rs")]
 pub mod iceberg_compaction;
+#[rustfmt::skip]
+pub mod window_function;
 
 #[rustfmt::skip]
 #[path = "sim/secret.rs"]
@@ -198,6 +200,56 @@ pub mod secret_serde;
 #[rustfmt::skip]
 #[path = "serverless_backfill_controller.serde.rs"]
 pub mod serverless_backfill_controller_serde;
+
+pub const MONITOR_SERVICE_MESSAGE_SIZE_LIMIT: usize = 64 * 1024 * 1024;
+
+#[cfg(not(madsim))]
+pub fn configured_monitor_service_client<T>(
+    client: monitor_service::monitor_service_client::MonitorServiceClient<T>,
+) -> monitor_service::monitor_service_client::MonitorServiceClient<T>
+where
+    T: tonic::client::GrpcService<tonic::body::Body>,
+    T::Error: Into<tonic::codegen::StdError>,
+    T::ResponseBody: tonic::codegen::Body<Data = tonic::codegen::Bytes> + Send + 'static,
+    <T::ResponseBody as tonic::codegen::Body>::Error: Into<tonic::codegen::StdError> + Send,
+{
+    client
+        .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
+        .max_decoding_message_size(MONITOR_SERVICE_MESSAGE_SIZE_LIMIT)
+}
+
+#[cfg(madsim)]
+pub fn configured_monitor_service_client<F>(
+    client: monitor_service::monitor_service_client::MonitorServiceClient<
+        tonic::transport::Channel,
+        F,
+    >,
+) -> monitor_service::monitor_service_client::MonitorServiceClient<tonic::transport::Channel, F>
+where
+    F: tonic::service::Interceptor,
+{
+    client
+        .accept_compressed(tonic::codec::CompressionEncoding::Zstd)
+        .max_decoding_message_size(MONITOR_SERVICE_MESSAGE_SIZE_LIMIT)
+}
+
+#[cfg(not(madsim))]
+pub fn configured_monitor_service_server<T>(
+    server: monitor_service::monitor_service_server::MonitorServiceServer<T>,
+) -> monitor_service::monitor_service_server::MonitorServiceServer<T> {
+    server.send_compressed(tonic::codec::CompressionEncoding::Zstd)
+}
+
+#[cfg(madsim)]
+pub fn configured_monitor_service_server<T, F>(
+    server: monitor_service::monitor_service_server::MonitorServiceServer<T, F>,
+) -> monitor_service::monitor_service_server::MonitorServiceServer<T, F>
+where
+    T: monitor_service::monitor_service_server::MonitorService,
+    F: tonic::service::Interceptor,
+{
+    server.send_compressed(tonic::codec::CompressionEncoding::Zstd)
+}
 
 #[derive(Clone, PartialEq, Eq, Debug, Error)]
 #[error("field `{0}` not found")]

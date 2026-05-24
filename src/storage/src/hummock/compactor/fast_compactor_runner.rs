@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
-use risingwave_pb::hummock::PbSstableFilterType;
+use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
@@ -111,8 +111,8 @@ impl BlockStreamIterator {
     }
 
     async fn create_stream(&mut self) -> HummockResult<()> {
-        // Fast compact only support the single table compaction.(not split sst)
-        // So we don't need to filter the block_metas with table_id and key_range
+        // Fast compaction streams the physical SST blocks directly. Table-id pruning is handled
+        // later by `CompactTaskExecutor` before raw block copy or decoded block compaction.
         let block_stream = self
             .sstable_store
             .get_stream_for_blocks(
@@ -390,13 +390,13 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         );
 
         let key_range = KeyRange::inf();
+        let read_table_ids = HashSet::from_iter(task.get_table_ids_from_input_ssts());
 
         let task_config = TaskConfig {
             key_range,
             cache_policy: CachePolicy::NotFill,
             gc_delete_keys: task.gc_delete_keys,
             retain_multiple_version: false,
-            stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
             sstable_filter_kind: task.sstable_filter_kind,
@@ -433,14 +433,30 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             task.target_level,
             compact_task_to_string(&task)
         );
+        let left_ssts = task.input_ssts[0]
+            .read_sstable_infos()
+            .cloned()
+            .collect_vec();
+        let right_ssts = task.input_ssts[1]
+            .read_sstable_infos()
+            .cloned()
+            .collect_vec();
+        assert!(
+            left_ssts
+                .iter()
+                .chain(right_ssts.iter())
+                .all(|sst| sst.bloom_filter_kind == BloomFilterType::Blocked),
+            "fast compaction requires blocked-filter SSTs: {}",
+            compact_task_to_string(&task)
+        );
         let left = Box::new(ConcatSstableIterator::new(
-            task.input_ssts[0].table_infos.clone(),
+            left_ssts,
             context.sstable_store.clone(),
             task_progress.clone(),
             context.storage_opts.compactor_iter_max_io_retry_times,
         ));
         let right = Box::new(ConcatSstableIterator::new(
-            task.input_ssts[1].table_infos.clone(),
+            right_ssts,
             context.sstable_store,
             task_progress.clone(),
             context.storage_opts.compactor_iter_max_io_retry_times,
@@ -468,6 +484,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                 non_pk_prefix_state,
                 value_skip_watermark_state,
                 compaction_filter,
+                read_table_ids,
             ),
             left,
             right,
@@ -552,6 +569,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
 
             let target_key = second.current_sstable().key();
             let iter = first.sstable_iter.as_mut().unwrap().iter.as_mut().unwrap();
+            self.executor.reset_watermark();
             self.executor.run(iter, target_key).await?;
             if !iter.is_valid() {
                 first.sstable_iter.as_mut().unwrap().iter.take();
@@ -570,6 +588,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             let sstable_iter = rest_data.sstable_iter.as_mut().unwrap();
             let target_key = FullKey::decode(&sstable_iter.sstable.meta.largest_key);
             if let Some(iter) = sstable_iter.iter.as_mut() {
+                self.executor.reset_watermark();
                 self.executor.run(iter, target_key).await?;
                 assert!(
                     !iter.is_valid(),
@@ -597,6 +616,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                     let target_key = FullKey::decode(&largest_key);
                     sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
                     let mut iter = sstable_iter.iter.take().unwrap();
+                    self.executor.reset_watermark();
                     self.executor.run(&mut iter, target_key).await?;
                 } else {
                     let largest_key = sstable_iter.current_block_largest();
@@ -665,6 +685,7 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
     value_skip_watermark_state: ValueSkipWatermarkState,
     compaction_filter: C,
+    read_table_ids: HashSet<TableId>,
 }
 
 impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
@@ -676,6 +697,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
         value_skip_watermark_state: ValueSkipWatermarkState,
         compaction_filter: C,
+        read_table_ids: HashSet<TableId>,
     ) -> Self {
         Self {
             builder,
@@ -691,6 +713,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             non_pk_prefix_skip_watermark_state,
             value_skip_watermark_state,
             compaction_filter,
+            read_table_ids,
         }
     }
 
@@ -710,6 +733,17 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         self.last_key_is_delete = false;
     }
 
+    fn reset_watermark(&mut self) {
+        self.pk_prefix_skip_watermark_state.reset_watermark();
+        self.non_pk_prefix_skip_watermark_state.reset_watermark();
+        self.value_skip_watermark_state.reset_watermark();
+    }
+
+    #[inline(always)]
+    fn should_skip_block(&self, table_id: TableId) -> bool {
+        !self.read_table_ids.contains(&table_id)
+    }
+
     #[inline(always)]
     fn may_report_process_key(&mut self, key_count: u32) {
         const PROGRESS_KEY_INTERVAL: u32 = 100;
@@ -726,8 +760,10 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
-        self.pk_prefix_skip_watermark_state.reset_watermark();
-        self.non_pk_prefix_skip_watermark_state.reset_watermark();
+        if self.should_skip_block(iter.table_id()) {
+            iter.finish_block();
+            return Ok(());
+        }
 
         while iter.is_valid() && iter.key().le(&target_key) {
             let is_new_user_key =
@@ -775,17 +811,9 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             if drop {
                 self.compaction_statistics.iter_drop_key_counts += 1;
 
-                let should_count = match self.task_config.stats_target_table_ids.as_ref() {
-                    Some(target_table_ids) => {
-                        target_table_ids.contains(&self.last_key.user_key.table_id)
-                    }
-                    None => true,
-                };
-                if should_count {
-                    self.last_table_stats.total_key_count -= 1;
-                    self.last_table_stats.total_key_size -= self.last_key.encoded_len() as i64;
-                    self.last_table_stats.total_value_size -= value.encoded_len() as i64;
-                }
+                self.last_table_stats.total_key_count -= 1;
+                self.last_table_stats.total_key_size -= self.last_key.encoded_len() as i64;
+                self.last_table_stats.total_value_size -= value.encoded_len() as i64;
                 iter.next();
                 continue;
             }
@@ -798,6 +826,11 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
     }
 
     pub fn shall_copy_raw_block(&mut self, smallest_key: &FullKey<&[u8]>) -> bool {
+        if self.should_skip_block(smallest_key.user_key.table_id) {
+            // If the table id of smallest key is not in read_table_ids, we can not copy the raw block.
+            return false;
+        }
+
         if self.last_key_is_delete && self.last_key.user_key.as_ref().eq(&smallest_key.user_key) {
             // If the last key is delete tombstone, we can not append the origin block
             // because it would cause a deleted key could be see by user again.
@@ -854,5 +887,134 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
                     .should_delete(key, value))
             || (self.value_skip_watermark_state.has_watermark()
                 && self.value_skip_watermark_state.should_delete(key, value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, VecDeque};
+    use std::sync::Arc;
+
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::compact_task::CompactTask;
+    use risingwave_hummock_sdk::key::FullKey;
+    use risingwave_hummock_sdk::level::InputLevel;
+    use risingwave_pb::hummock::compact_task::TaskType;
+    use risingwave_pb::hummock::{BloomFilterType, LevelType, PbSstableFilterType};
+
+    use super::CompactorRunner;
+    use crate::compaction_catalog_manager::CompactionCatalogAgent;
+    use crate::hummock::compactor::compaction_utils::optimize_by_copy_block;
+    use crate::hummock::compactor::task_progress::TaskProgress;
+    use crate::hummock::compactor::{CompactorContext, MultiCompactionFilter};
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, default_opts_for_test, gen_test_sstable_impl, test_value_of,
+    };
+    use crate::hummock::value::HummockValue;
+    use crate::hummock::{
+        BlockedXor16FilterBuilder, CachePolicy, SharedComapctorObjectIdManager, Xor16FilterBuilder,
+    };
+    use crate::monitor::CompactorMetrics;
+
+    fn test_key(table_id: u32, idx: usize) -> FullKey<Vec<u8>> {
+        let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+        table_key.extend_from_slice(format!("key_test_{idx:05}").as_bytes());
+        FullKey::for_test(TableId::new(table_id), table_key, test_epoch(1))
+    }
+
+    #[tokio::test]
+    async fn test_fast_compact_skips_empty_table_id_sst() {
+        let sstable_store = mock_sstable_store().await;
+        let table_id_to_vnode = HashMap::from([
+            (1, VirtualNode::COUNT_FOR_TEST),
+            (2, VirtualNode::COUNT_FOR_TEST),
+        ]);
+        let table_id_to_watermark_serde = HashMap::from([(1, None), (2, None)]);
+
+        let mut dropped_only_sst = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+            default_builder_opt_for_test(),
+            1,
+            (0..2).map(|idx| (test_key(1, idx), HummockValue::put(test_value_of(idx)))),
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            table_id_to_vnode.clone(),
+            table_id_to_watermark_serde.clone(),
+        )
+        .await;
+        assert_eq!(dropped_only_sst.bloom_filter_kind, BloomFilterType::Sstable);
+        let mut inner = dropped_only_sst.get_inner();
+        inner.table_ids.clear();
+        dropped_only_sst.set_inner(inner);
+
+        let live_left_sst = gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
+            default_builder_opt_for_test(),
+            2,
+            (0..2).map(|idx| (test_key(2, idx), HummockValue::put(test_value_of(idx)))),
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            table_id_to_vnode.clone(),
+            table_id_to_watermark_serde.clone(),
+        )
+        .await;
+        let live_right_sst = gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
+            default_builder_opt_for_test(),
+            3,
+            (2..4).map(|idx| (test_key(2, idx), HummockValue::put(test_value_of(idx)))),
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        )
+        .await;
+
+        let mut storage_opts = default_opts_for_test();
+        storage_opts.enable_fast_compaction = true;
+        storage_opts.compactor_fast_max_compact_task_size = u64::MAX;
+        storage_opts.compactor_fast_max_compact_delete_ratio = 100;
+        let context = CompactorContext::new_local_compact_context(
+            Arc::new(storage_opts),
+            sstable_store,
+            Arc::new(CompactorMetrics::unused()),
+            None,
+        );
+
+        let task = CompactTask {
+            input_ssts: vec![
+                InputLevel {
+                    level_idx: 1,
+                    level_type: LevelType::Nonoverlapping,
+                    table_infos: vec![dropped_only_sst, live_left_sst],
+                },
+                InputLevel {
+                    level_idx: 2,
+                    level_type: LevelType::Nonoverlapping,
+                    table_infos: vec![live_right_sst],
+                },
+            ],
+            task_id: 42,
+            target_level: 2,
+            existing_table_ids: vec![TableId::new(2)],
+            target_file_size: 1 << 20,
+            task_type: TaskType::Dynamic,
+            blocked_xor_filter_kv_count_threshold: Some(0),
+            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+            ..Default::default()
+        };
+
+        assert_eq!(task.input_ssts[0].read_sstable_infos().count(), 1);
+        assert!(optimize_by_copy_block(&task, &context));
+
+        let runner = CompactorRunner::new(
+            context,
+            task,
+            CompactionCatalogAgent::for_test(vec![1, 2]),
+            SharedComapctorObjectIdManager::for_test(VecDeque::from([100])),
+            Arc::new(TaskProgress::default()),
+            MultiCompactionFilter::default(),
+        );
+        runner.run().await.unwrap();
     }
 }

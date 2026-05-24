@@ -107,7 +107,7 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
             _ => {
                 parser_err!(
                     "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO \
-                    | AVRO | UPSERT_AVRO | MAXWELL | CANAL_JSON | BYTES | NATIVE after ROW FORMAT"
+                    | AVRO | UPSERT_AVRO | BYTES | NATIVE after ROW FORMAT"
                 );
             }
         };

@@ -356,7 +356,7 @@ pub(crate) fn sum_affected_row(dml: BatchPlanRef) -> Result<BatchPlanRef> {
 macro_rules! plan_node_name {
     ($name:literal $(, { $prop:literal, $cond:expr } )* $(,)?) => {
         {
-            #[allow(unused_mut)]
+
             let mut properties: Vec<&str> = vec![];
             $( if $cond { properties.push($prop); } )*
             let mut name = $name.to_string();
@@ -392,7 +392,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
         table_catalog_builder.add_order_column(i, *ordering);
     }
 
-    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+    let read_prefix_len_hint = 0;
 
     if columns.len() != input.schema().fields().len()
         || columns
@@ -443,7 +443,7 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
         table_catalog_builder.add_order_column(i, *ordering);
     }
 
-    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+    let read_prefix_len_hint = 0;
 
     let payload_indices = {
         let mut payload_indices = Vec::with_capacity(columns.len());

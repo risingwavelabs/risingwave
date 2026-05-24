@@ -27,9 +27,9 @@ risingwave_sqlparser = { workspace = true }
 serde = { workspace = true }
 serde_yaml = "0.9"
 similar = "2.7.0"
-strum = { version = "0.27", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio" }
+tokio = { workspace = true }
 tokio-postgres = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }

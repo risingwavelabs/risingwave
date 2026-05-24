@@ -3,6 +3,9 @@
 # This test verifies that the session config correctly controls which storage is used.
 
 statement ok
+SET enable_datafusion_engine = 'false';
+
+statement ok
 create secret my_secret with (
   backend = 'meta'
 ) as 'hummockadmin';

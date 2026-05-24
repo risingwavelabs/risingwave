@@ -28,11 +28,27 @@ use risingwave_connector::parser::{
     SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxSourceChunkStream, BoxSourceMessageStream, SourceColumnDesc, SourceMessage, SourceMeta,
+    BoxSourceChunkStream, BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc,
+    SourceMessage, SourceMessageEvent, SourceMeta, SourceReaderEvent,
 };
 use tokio::runtime::Runtime;
 use tracing::Level;
 use tracing_subscriber::prelude::*;
+
+fn into_data_chunk_stream(
+    stream: impl futures::Stream<Item = risingwave_connector::error::ConnectorResult<SourceReaderEvent>>
+    + Send
+    + 'static,
+) -> impl SourceChunkStream {
+    stream
+        .try_filter_map(|event| async move {
+            Ok(match event {
+                SourceReaderEvent::DataChunk(chunk) => Some(chunk),
+                SourceReaderEvent::SplitProgress(_) => None,
+            })
+        })
+        .boxed()
+}
 
 static BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(make_batch);
 
@@ -198,7 +214,11 @@ fn make_parser(rt: &Runtime) -> ByteStreamSourceParserImpl {
 }
 
 fn make_stream_iter(rt: &Runtime) -> impl Iterator<Item = StreamChunk> {
-    let mut stream: BoxSourceChunkStream = make_parser(rt).parse_stream(make_data_stream()).boxed();
+    let mut stream: BoxSourceChunkStream = into_data_chunk_stream(
+        make_parser(rt)
+            .parse_stream_with_events(make_data_stream().map_ok(SourceMessageEvent::Data).boxed()),
+    )
+    .boxed();
 
     std::iter::from_fn(move || {
         stream

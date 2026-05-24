@@ -41,10 +41,12 @@ use crate::catalog::{DatabaseId, SchemaId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, is_impure_func_call};
 use crate::handler::HandlerArgs;
+use crate::handler::util::reject_internal_table_dependency;
 use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::{
     Explain, LogicalProject, LogicalScan, StreamMaterialize, StreamPlanRef as PlanRef,
+    ensure_sync_log_store_fragment_root,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRoot, OptimizerContext, OptimizerContextRef, PlanRoot};
@@ -70,6 +72,7 @@ pub(crate) fn resolve_index_schema(
     let read_guard = catalog_reader.read_guard();
     let (table, schema_name) =
         read_guard.get_created_table_by_name(db_name, schema_path, &table_name)?;
+    reject_internal_table_dependency(table.as_ref(), "CREATE INDEX")?;
     Ok((schema_name.to_owned(), table.clone(), index_table_name))
 }
 
@@ -395,7 +398,7 @@ pub(crate) fn gen_create_index_plan(
             },
         )?;
         let index_table = vector_index_write.table().clone();
-        let plan: PlanRef = vector_index_write.into();
+        let plan: PlanRef = ensure_sync_log_store_fragment_root(vector_index_write.into());
         (plan, index_table)
     } else {
         // Manually assemble the materialization plan for the index MV.
@@ -416,7 +419,7 @@ pub(crate) fn gen_create_index_plan(
             },
         )?;
         let index_table = materialize.table().clone();
-        let plan: PlanRef = materialize.into();
+        let plan: PlanRef = ensure_sync_log_store_fragment_root(materialize.into());
         (plan, index_table)
     };
 

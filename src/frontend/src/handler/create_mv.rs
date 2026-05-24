@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{FunctionId, ObjectId};
+use risingwave_common::catalog::{FunctionId, ObjectId, SecretId};
 use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
@@ -32,16 +32,21 @@ use crate::catalog::check_column_name_not_reserved;
 use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
-use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
+use crate::handler::util::{
+    LongRunningNotificationAction, execute_with_long_running_notification,
+    reject_internal_table_dependencies,
+};
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
+use crate::optimizer::plan_node::{
+    BackfillType, Explain, StreamPlanRef as PlanRef, ensure_sync_log_store_fragment_root,
+};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::{SESSION_MANAGER, SessionImpl};
 use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
-use crate::utils::ordinal;
+use crate::utils::{MV_REFRESH_INTERVAL_SEC_KEY, ordinal};
 use crate::{TableCatalog, WithOptions};
 
 pub const RESOURCE_GROUP_KEY: &str = "resource_group";
@@ -85,7 +90,7 @@ pub(super) fn get_column_names(
 }
 
 /// Bind and generate create MV plan, return plan and mv table info.
-pub fn gen_create_mv_plan(
+pub fn explain_create_mv_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     query: Query,
@@ -95,7 +100,7 @@ pub fn gen_create_mv_plan(
 ) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
     let bound = binder.bind_query(&query)?;
-    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
+    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode, None)
 }
 
 /// Generate create MV plan from a bound query
@@ -106,6 +111,7 @@ pub fn gen_create_mv_plan_bound(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
+    refresh_interval_sec: Option<u64>,
 ) -> Result<(PlanRef, TableCatalog)> {
     if session.config().create_compaction_group_for_mv() {
         context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
@@ -132,18 +138,27 @@ pub fn gen_create_mv_plan_bound(
         }
         plan_root.set_out_names(col_names)?;
     }
+
+    let backfill_type = if refresh_interval_sec.is_some() {
+        plan_root.require_snapshot_backfill_for_batch_refresh()?;
+        BackfillType::SnapshotBackfill
+    } else {
+        plan_root.derive_backfill_type(true)
+    };
+
     let materialize = plan_root.gen_materialize_plan(
         database_id,
         schema_id,
         table_name,
         definition,
         emit_on_window_close,
+        backfill_type,
     )?;
 
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
 
-    let plan: PlanRef = materialize.into();
+    let plan: PlanRef = ensure_sync_log_store_fragment_root(materialize.into());
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -163,12 +178,13 @@ pub async fn handle_create_mv(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
-    let (dependent_relations, dependent_udfs, bound_query) = {
+    let (dependent_relations, dependent_udfs, dependent_secrets, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
         let bound_query = binder.bind_query(&query)?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),
+            binder.included_secrets().clone(),
             bound_query,
         )
     };
@@ -179,6 +195,7 @@ pub async fn handle_create_mv(
         bound_query,
         dependent_relations,
         dependent_udfs,
+        dependent_secrets,
         columns,
         emit_mode,
     )
@@ -222,6 +239,7 @@ pub async fn handle_create_mv_bound(
     query: BoundQuery,
     dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
+    dependent_secrets: HashSet<SecretId>,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
@@ -238,13 +256,20 @@ pub async fn handle_create_mv_bound(
         return Ok(resp);
     }
 
-    let (table, graph, dependencies, resource_type) = {
+    reject_internal_table_dependencies(
+        session.as_ref(),
+        &dependent_relations,
+        "CREATE MATERIALIZED VIEW",
+    )?;
+
+    let (table, graph, dependencies, resource_type, refresh_interval_sec) = {
         gen_create_mv_graph(
             handler_args,
             name,
             query,
             dependent_relations,
             dependent_udfs,
+            dependent_secrets,
             columns,
             emit_mode,
         )
@@ -271,6 +296,7 @@ pub async fn handle_create_mv_bound(
             dependencies,
             resource_type,
             if_not_exists,
+            refresh_interval_sec,
         ),
         &session,
         "CREATE MATERIALIZED VIEW",
@@ -289,6 +315,7 @@ pub(crate) async fn gen_create_mv_graph(
     query: BoundQuery,
     dependent_relations: HashSet<ObjectId>,
     dependent_udfs: HashSet<FunctionId>,
+    dependent_secrets: HashSet<SecretId>,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<(
@@ -296,8 +323,11 @@ pub(crate) async fn gen_create_mv_graph(
     PbStreamFragmentGraph,
     HashSet<ObjectId>,
     streaming_job_resource_type::ResourceType,
+    Option<u64>,
 )> {
     let mut with_options = get_with_options(handler_args.clone());
+    let refresh_interval_sec = with_options.refresh_interval_sec()?;
+    with_options.remove(MV_REFRESH_INTERVAL_SEC_KEY);
     let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
     if resource_group.is_some() {
@@ -386,8 +416,15 @@ It only indicates the physical clustering of the data, which may improve the per
     let context: OptimizerContextRef = context.into();
     let session = context.session_ctx().as_ref();
 
-    let (plan, table) =
-        gen_create_mv_plan_bound(session, context.clone(), query, name, columns, emit_mode)?;
+    let (plan, table) = gen_create_mv_plan_bound(
+        session,
+        context.clone(),
+        query,
+        name,
+        columns,
+        emit_mode,
+        refresh_interval_sec,
+    )?;
 
     let backfill_order = plan_backfill_order(
         session,
@@ -400,6 +437,12 @@ It only indicates the physical clustering of the data, which may improve the per
     let dependencies = RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
         .into_iter()
         .chain(dependent_udfs.iter().copied().map_into())
+        .chain(
+            dependent_secrets
+                .iter()
+                .copied()
+                .map(|id| id.as_object_id()),
+        )
         .collect();
 
     let graph = build_graph_with_strategy(
@@ -408,7 +451,13 @@ It only indicates the physical clustering of the data, which may improve the per
         Some(backfill_order),
     )?;
 
-    Ok((table, graph, dependencies, resource_type))
+    Ok((
+        table,
+        graph,
+        dependencies,
+        resource_type,
+        refresh_interval_sec,
+    ))
 }
 
 #[cfg(test)]

@@ -26,7 +26,7 @@ pub struct CompactionConfigBuilder {
 
 impl CompactionConfigBuilder {
     pub fn new() -> Self {
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         Self {
             config: CompactionConfig {
                 max_bytes_for_level_base: compaction_config::max_bytes_for_level_base(),
@@ -38,18 +38,9 @@ impl CompactionConfigBuilder {
                 ),
                 target_file_size_base: compaction_config::target_file_size_base(),
                 compaction_mode: CompactionMode::Range as i32,
-                // support compression setting per level
-                // L0/L1 and L2 do not use compression algorithms
-                // L3 - L4 use Lz4, else use Zstd
-                compression_algorithm: vec![
-                    "None".to_owned(),
-                    "None".to_owned(),
-                    "None".to_owned(),
-                    "Lz4".to_owned(),
-                    "Lz4".to_owned(),
-                    "Zstd".to_owned(),
-                    "Zstd".to_owned(),
-                ],
+                compression_algorithm: compaction_config::compression_algorithm_vec(
+                    compaction_config::max_level(),
+                ),
                 sstable_filter_kind: compaction_config::sstable_filter_kind(),
                 sstable_filter_layout: compaction_config::sstable_filter_layout(),
                 compaction_filter_mask: compaction_config::compaction_filter_mask(),
@@ -97,8 +88,7 @@ impl CompactionConfigBuilder {
                     compaction_config::enable_optimize_l0_interval_selection(),
                 ),
                 vnode_aligned_level_size_threshold: None,
-                blocked_xor_filter_kv_count_threshold:
-                    compaction_config::blocked_xor_filter_kv_count_threshold(),
+                max_kv_count_for_xor16: compaction_config::blocked_xor_filter_kv_count_threshold(),
                 max_vnode_key_range_bytes: compaction_config::max_vnode_key_range_bytes(),
             },
         }
@@ -139,7 +129,7 @@ impl CompactionConfigBuilder {
             ))
             .level0_stop_write_threshold_max_size(Some(opt.level0_stop_write_threshold_max_size))
             .enable_optimize_l0_interval_selection(Some(opt.enable_optimize_l0_interval_selection))
-            .blocked_xor_filter_kv_count_threshold(opt.blocked_xor_filter_kv_count_threshold)
+            .max_kv_count_for_xor16(opt.blocked_xor_filter_kv_count_threshold)
             .max_vnode_key_range_bytes(opt.max_vnode_key_range_bytes)
             .sstable_filter_kind(opt.sstable_filter_kind.clone())
             .sstable_filter_layout(opt.sstable_filter_layout.clone())
@@ -247,7 +237,7 @@ builder_field! {
     level0_stop_write_threshold_max_sst_count: Option<u32>,
     level0_stop_write_threshold_max_size: Option<u64>,
     enable_optimize_l0_interval_selection: Option<bool>,
-    blocked_xor_filter_kv_count_threshold: Option<u64>,
+    max_kv_count_for_xor16: Option<u64>,
     max_vnode_key_range_bytes: Option<u64>,
 }
 

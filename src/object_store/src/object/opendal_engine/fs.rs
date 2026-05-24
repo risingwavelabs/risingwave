@@ -19,7 +19,7 @@ use opendal::layers::LoggingLayer;
 use opendal::services::Fs;
 use risingwave_common::config::ObjectStoreConfig;
 
-use super::{MediaType, OpendalObjectStore};
+use super::{MediaType, OpendalObjectStore, new_operator};
 use crate::object::ObjectResult;
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::opendal_engine::ATOMIC_WRITE_DIR;
@@ -38,9 +38,10 @@ impl OpendalObjectStore {
             builder = builder.atomic_write_dir(&atomic_write_dir);
         }
 
-        let op: Operator = Operator::new(builder)?
-            .layer(LoggingLayer::default())
-            .finish();
+        let op = new_operator(
+            &config,
+            Operator::new(builder)?.layer(LoggingLayer::default()),
+        );
 
         Ok(Self {
             op,

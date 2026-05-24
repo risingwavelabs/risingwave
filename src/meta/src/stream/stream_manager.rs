@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use await_tree::span;
@@ -34,15 +34,17 @@ use tokio::sync::{Mutex, OwnedSemaphorePermit, oneshot};
 use tracing::Instrument;
 
 use super::{
-    ReschedulePolicy, ScaleControllerRef, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
+    GlobalRefreshManagerRef, ParallelismPolicy, ReschedulePolicy, ScaleControllerRef,
+    StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
-    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, SnapshotBackfillInfo,
+    BarrierScheduler, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo,
+    CreateStreamingJobType, ReplaceStreamJobPlan, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::error::bail_invalid_parameter;
+use crate::hummock::HummockManagerRef;
 use crate::manager::{
     MetaSrvEnv, MetadataManager, NotificationVersion, StreamingJob, StreamingJobType,
 };
@@ -55,6 +57,32 @@ use crate::stream::{ReplaceJobSplitPlan, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
+
+pub(crate) async fn cleanup_dropped_streaming_jobs(
+    refresh_manager: &GlobalRefreshManagerRef,
+    hummock_manager: &HummockManagerRef,
+    metadata_manager: &MetadataManager,
+    streaming_job_ids: impl IntoIterator<Item = JobId>,
+    state_table_ids: Vec<TableId>,
+    progress_status: &str,
+) -> MetaResult<()> {
+    for job_id in streaming_job_ids {
+        refresh_manager.remove_progress_tracker(job_id.as_mv_table_id(), progress_status);
+    }
+
+    if state_table_ids.is_empty() {
+        return Ok(());
+    }
+
+    hummock_manager
+        .unregister_table_ids(state_table_ids.clone())
+        .await?;
+    metadata_manager
+        .catalog_controller
+        .complete_dropped_tables(state_table_ids)
+        .await;
+    Ok(())
+}
 
 #[derive(Default)]
 pub struct CreateStreamingJobOption {
@@ -109,6 +137,9 @@ pub struct CreateStreamingJobContext {
 
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
+
+    /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
+    pub refresh_interval_sec: Option<u64>,
 }
 
 struct StreamingJobExecution {
@@ -192,7 +223,7 @@ pub struct AutoRefreshSchemaSinkContext {
     pub newly_add_fields: Vec<Field>,
     pub removed_column_names: Vec<String>,
     pub new_fragment: Fragment,
-    pub new_log_store_table: Option<PbTable>,
+    pub new_log_store_table: Option<Box<PbTable>>,
     /// The sink's own stream context (timezone, `config_override`).
     pub ctx: StreamContext,
 }
@@ -267,8 +298,12 @@ pub struct GlobalStreamManager {
     /// Broadcasts and collect barriers
     pub barrier_scheduler: BarrierScheduler,
 
+    pub hummock_manager: HummockManagerRef,
+
     /// Maintains streaming sources from external system like kafka
     pub source_manager: SourceManagerRef,
+
+    pub refresh_manager: GlobalRefreshManagerRef,
 
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
@@ -281,14 +316,18 @@ impl GlobalStreamManager {
         env: MetaSrvEnv,
         metadata_manager: MetadataManager,
         barrier_scheduler: BarrierScheduler,
+        hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
+        refresh_manager: GlobalRefreshManagerRef,
         scale_controller: ScaleControllerRef,
     ) -> MetaResult<Self> {
         Ok(Self {
             env,
             metadata_manager,
             barrier_scheduler,
+            hummock_manager,
             source_manager,
+            refresh_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             scale_controller,
         })
@@ -395,6 +434,8 @@ impl GlobalStreamManager {
                                 let cancel_command = self.metadata_manager.catalog_controller
                                     .build_cancel_command(&job_fragments)
                                     .await?;
+                                let cleanup_state_table_ids =
+                                    job_fragments.all_table_ids().collect_vec();
                                 self.metadata_manager.catalog_controller
                                     .try_abort_creating_streaming_job(job_id, true)
                                     .await?;
@@ -402,6 +443,15 @@ impl GlobalStreamManager {
                                 self.barrier_scheduler
                                     .run_command(database_id, cancel_command)
                                     .await?;
+                                cleanup_dropped_streaming_jobs(
+                                    &self.refresh_manager,
+                                    &self.hummock_manager,
+                                    &self.metadata_manager,
+                                    [job_id],
+                                    cleanup_state_table_ids,
+                                    "cancel_streaming_job",
+                                )
+                                .await?;
                                 Ok(())
                             }
                             .await;
@@ -471,6 +521,7 @@ impl GlobalStreamManager {
             cdc_table_snapshot_splits,
             is_serverless_backfill,
             streaming_job_model,
+            refresh_interval_sec,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -516,9 +567,39 @@ impl GlobalStreamManager {
             locality_fragment_state_table_mapping,
             is_serverless: is_serverless_backfill,
             streaming_job_model,
+            refresh_interval_sec,
         };
 
-        let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
+        let job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+            let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "batch refresh materialized view must have snapshot backfill upstream"
+                )
+            })?;
+            // Batch refresh jobs must not contain source or source-backfill nodes,
+            // because we skip split assignment resolution for them.
+            for fragment in info.stream_job_fragments.inner.fragments.values() {
+                let mask = fragment.fragment_type_mask;
+                if mask.contains(FragmentTypeFlag::Source)
+                    || mask.contains(FragmentTypeFlag::SourceScan)
+                {
+                    bail!(
+                        "batch refresh materialized views must not depend on sources directly; \
+                         fragment {} has source/source-backfill nodes",
+                        fragment.fragment_id
+                    );
+                }
+            }
+            tracing::debug!(
+                ?snapshot_backfill_info,
+                refresh_interval_sec,
+                "sending Command::CreateBatchRefreshStreamingJob"
+            );
+            CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+                snapshot_backfill_info,
+                refresh_interval_sec,
+            })
+        } else if let Some(snapshot_backfill_info) = snapshot_backfill_info {
             tracing::debug!(
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"
@@ -619,25 +700,39 @@ impl GlobalStreamManager {
         database_id: DatabaseId,
         streaming_job_ids: Vec<JobId>,
         state_table_ids: Vec<TableId>,
-        fragment_ids: HashSet<FragmentId>,
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     ) {
         if !streaming_job_ids.is_empty() || !state_table_ids.is_empty() {
-            let _ = self
+            let cleanup_streaming_job_ids = streaming_job_ids.clone();
+            let cleanup_state_table_ids = state_table_ids.clone();
+            let run_result = self
                 .barrier_scheduler
                 .run_command(
                     database_id,
                     Command::DropStreamingJobs {
                         streaming_job_ids: streaming_job_ids.into_iter().collect(),
                         unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
-                        unregistered_fragment_ids: fragment_ids,
                         dropped_sink_fragment_by_targets,
                     },
                 )
-                .await
-                .inspect_err(|err| {
-                    tracing::error!(error = ?err.as_report(), "failed to run drop command");
-                });
+                .await;
+            let result = match run_result {
+                Ok(()) => {
+                    cleanup_dropped_streaming_jobs(
+                        &self.refresh_manager,
+                        &self.hummock_manager,
+                        &self.metadata_manager,
+                        cleanup_streaming_job_ids,
+                        cleanup_state_table_ids,
+                        "drop_streaming_jobs",
+                    )
+                    .await
+                }
+                Err(err) => Err(err),
+            };
+            let _ = result.inspect_err(|err| {
+                tracing::error!(error = ?err.as_report(), "failed to run drop command");
+            });
         }
     }
 
@@ -645,8 +740,7 @@ impl GlobalStreamManager {
     /// 1. Send cancel message to stream jobs (via `cancel_jobs`).
     /// 2. Send cancel message to recovered stream jobs (via `barrier_scheduler`).
     ///
-    /// Cleanup of their state will be cleaned up after the `CancelStreamJob` command succeeds,
-    /// by the barrier manager for both of them.
+    /// Cleanup of their state is handled by the caller after the drop command is collected.
     pub async fn cancel_streaming_jobs(&self, job_ids: Vec<JobId>) -> MetaResult<Vec<JobId>> {
         if job_ids.is_empty() {
             return Ok(vec![]);
@@ -695,6 +789,7 @@ impl GlobalStreamManager {
                 .catalog_controller
                 .build_cancel_command(&fragment)
                 .await?;
+            let cleanup_state_table_ids = fragment.all_table_ids().collect_vec();
 
             let (_, database_id) = self
                 .metadata_manager
@@ -706,6 +801,15 @@ impl GlobalStreamManager {
                 self.barrier_scheduler
                     .run_command(database_id, cancel_command)
                     .await?;
+                cleanup_dropped_streaming_jobs(
+                    &self.refresh_manager,
+                    &self.hummock_manager,
+                    &self.metadata_manager,
+                    [id],
+                    cleanup_state_table_ids,
+                    "cancel_streaming_job",
+                )
+                .await?;
             }
 
             tracing::info!(?id, "cancelled background streaming job");
@@ -768,7 +872,7 @@ impl GlobalStreamManager {
     pub(crate) async fn reschedule_streaming_job_backfill_parallelism(
         &self,
         job_id: JobId,
-        parallelism: Option<StreamingParallelism>,
+        parallelism: Option<ParallelismPolicy>,
         deferred: bool,
     ) -> MetaResult<()> {
         let _reschedule_job_lock = self.reschedule_lock_write_guard().await;

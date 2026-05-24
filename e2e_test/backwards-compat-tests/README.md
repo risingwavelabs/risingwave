@@ -15,5 +15,8 @@ We currently cover the following:
 1. Basic mv
 2. Hash join with watermark / EOWC
 3. Nexmark (on rw table not nexmark source)
-4. TPC-H
-5. Kafka Source
+4. EOWC over window numbering functions
+5. TPC-H
+6. Kafka Source
+7. AsOf join
+8. Hummock stale SST table ids after dropping one table from a mixed-table SST (old version >= 2.8.0)
