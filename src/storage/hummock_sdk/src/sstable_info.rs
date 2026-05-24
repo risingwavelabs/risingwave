@@ -70,8 +70,10 @@ impl SstableInfoInner {
             + size_of::<u64>() // max_epoch
             + size_of::<u64>() // uncompressed_file_size
             + size_of::<u64>() // range_tombstone_count
-            + size_of::<u32>() // bloom_filter_kind
-            + size_of::<u64>(); // sst_size
+            + size_of::<u32>(); // bloom_filter_kind
+        if self.encoded_sst_size() != 0 {
+            basic += size_of::<u64>(); // sst_size
+        }
         basic += self.key_range.left.len() + self.key_range.right.len() + size_of::<bool>();
         if let Some(vnode_statistics) = &self.vnode_statistics {
             for (min_key, max_key) in vnode_statistics.vnode_user_key_ranges.values() {
@@ -84,6 +86,14 @@ impl SstableInfoInner {
 
     pub fn to_protobuf(&self) -> PbSstableInfo {
         self.into()
+    }
+
+    fn encoded_sst_size(&self) -> u64 {
+        if self.sst_size == self.file_size {
+            0
+        } else {
+            self.sst_size
+        }
     }
 }
 
@@ -226,6 +236,7 @@ impl From<&PbSstableInfo> for SstableInfoInner {
 impl From<SstableInfoInner> for PbSstableInfo {
     fn from(sstable_info: SstableInfoInner) -> Self {
         assert!(sstable_info.table_ids.is_sorted());
+        let sst_size = sstable_info.encoded_sst_size();
         PbSstableInfo {
             object_id: sstable_info.object_id,
             sst_id: sstable_info.sst_id,
@@ -256,7 +267,7 @@ impl From<SstableInfoInner> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
-            sst_size: sstable_info.sst_size,
+            sst_size,
             vnode_statistics: sstable_info
                 .vnode_statistics
                 .as_ref()
@@ -295,7 +306,7 @@ impl From<&SstableInfoInner> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
-            sst_size: sstable_info.sst_size,
+            sst_size: sstable_info.encoded_sst_size(),
             vnode_statistics: sstable_info
                 .vnode_statistics
                 .as_ref()
@@ -403,5 +414,115 @@ impl SstableIdReader for SstableInfo {
 impl ObjectIdReader for SstableInfo {
     fn object_id(&self) -> HummockSstableObjectId {
         self.object_id
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use risingwave_common::catalog::TableId;
+    use risingwave_pb::Message;
+    use risingwave_pb::hummock::hummock_version::Levels as PbHummockVersionLevels;
+    use risingwave_pb::hummock::{
+        PbBloomFilterType, PbHummockVersion, PbLevel, PbLevelType, PbOverlappingLevel,
+        PbSstableInfo,
+    };
+
+    use super::SstableInfoInner;
+    use crate::key_range::KeyRange;
+    use crate::{CompactionGroupId, HummockSstableId, HummockSstableObjectId, HummockVersionId};
+
+    fn test_sstable_info() -> SstableInfoInner {
+        SstableInfoInner {
+            object_id: HummockSstableObjectId::new(42),
+            sst_id: HummockSstableId::new(42),
+            key_range: KeyRange {
+                left: b"table-0001-vnode-0001-a".to_vec().into(),
+                right: b"table-0001-vnode-0001-z".to_vec().into(),
+                right_exclusive: false,
+            },
+            file_size: 64 * 1024 * 1024,
+            table_ids: vec![TableId::new(1)],
+            meta_offset: 1234,
+            stale_key_count: 0,
+            total_key_count: 1_000_000,
+            min_epoch: 100,
+            max_epoch: 200,
+            uncompressed_file_size: 128 * 1024 * 1024,
+            range_tombstone_count: 0,
+            bloom_filter_kind: PbBloomFilterType::Sstable,
+            sst_size: 64 * 1024 * 1024,
+            vnode_statistics: None,
+        }
+    }
+
+    #[expect(deprecated)]
+    fn test_hummock_version_with_sst(pb_sst: PbSstableInfo) -> PbHummockVersion {
+        let file_size = pb_sst.file_size;
+        let uncompressed_file_size = pb_sst.uncompressed_file_size;
+        let mut levels = HashMap::new();
+        levels.insert(
+            CompactionGroupId::new(1),
+            PbHummockVersionLevels {
+                levels: vec![PbLevel {
+                    level_idx: 1,
+                    level_type: PbLevelType::Nonoverlapping.into(),
+                    table_infos: vec![pb_sst],
+                    total_file_size: file_size,
+                    sub_level_id: 0,
+                    uncompressed_file_size,
+                    vnode_partition_count: 0,
+                }],
+                l0: Some(PbOverlappingLevel {
+                    sub_levels: vec![],
+                    total_file_size: 0,
+                    uncompressed_file_size: 0,
+                }),
+                group_id: CompactionGroupId::new(1),
+                parent_group_id: CompactionGroupId::new(0),
+                member_table_ids: vec![],
+                compaction_group_version_id: 1,
+            },
+        );
+
+        PbHummockVersion {
+            id: HummockVersionId::new(1),
+            levels,
+            max_committed_epoch: 0,
+            table_watermarks: HashMap::new(),
+            table_change_logs: HashMap::new(),
+            state_table_info: HashMap::new(),
+            vector_indexes: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_omit_sst_size_when_equal_to_file_size() {
+        let sst = test_sstable_info();
+        let pb_sst = PbSstableInfo::from(&sst);
+        assert_eq!(pb_sst.sst_size, 0);
+        assert_eq!(SstableInfoInner::from(&pb_sst).sst_size, sst.file_size);
+
+        let mut unoptimized_pb_sst = pb_sst.clone();
+        unoptimized_pb_sst.sst_size = sst.file_size;
+        assert_eq!(unoptimized_pb_sst.encoded_len() - pb_sst.encoded_len(), 5);
+
+        let optimized_version = test_hummock_version_with_sst(pb_sst);
+        let unoptimized_version = test_hummock_version_with_sst(unoptimized_pb_sst);
+        assert_eq!(
+            unoptimized_version.encoded_len() - optimized_version.encoded_len(),
+            5
+        );
+    }
+
+    #[test]
+    fn test_keep_sst_size_when_different_from_file_size() {
+        let mut sst = test_sstable_info();
+        sst.sst_size = sst.file_size / 2;
+
+        let pb_sst = PbSstableInfo::from(&sst);
+        assert_eq!(pb_sst.sst_size, sst.sst_size);
+        assert_eq!(SstableInfoInner::from(&pb_sst).sst_size, sst.sst_size);
     }
 }
