@@ -28,11 +28,14 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use picker::{LevelCompactionPicker, TierCompactionPicker};
+use risingwave_hummock_sdk::filter_utils::{
+    must_resolve_sstable_filter_kind, must_resolve_sstable_filter_layout,
+};
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
-use risingwave_pb::hummock::CompactionConfig;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
+use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableFilterType};
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
 use self::selector::{EmergencySelector, LocalSelectorStatistic};
@@ -69,6 +72,8 @@ pub struct CompactionTask {
     pub input: CompactionInput,
     pub base_level: usize,
     pub compression_algorithm: String,
+    pub sstable_filter_kind: PbSstableFilterType,
+    pub sstable_filter_layout: PbSstableFilterLayout,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
 }
@@ -177,6 +182,16 @@ pub fn create_compaction_task(
 
     CompactionTask {
         compression_algorithm: get_compression_algorithm(
+            compaction_config,
+            base_level,
+            input.target_level,
+        ),
+        sstable_filter_kind: must_resolve_sstable_filter_kind(
+            compaction_config,
+            base_level,
+            input.target_level,
+        ),
+        sstable_filter_layout: must_resolve_sstable_filter_layout(
             compaction_config,
             base_level,
             input.target_level,

@@ -635,8 +635,32 @@ pub struct CompactionConfig {
     pub enable_optimize_l0_interval_selection: bool,
     #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
     pub vnode_aligned_level_size_threshold: Option<u64>,
-    #[serde(default = "default::compaction_config::max_kv_count_for_xor16")]
-    pub max_kv_count_for_xor16: Option<u64>,
+    /// KV-count threshold for using blocked xor filters when output filter layout is "auto".
+    ///
+    /// When `sstable_filter_layout[level]` is "auto", compaction will build blocked xor filters if
+    /// the estimated total key count of the task exceeds this threshold. Otherwise it will build a
+    /// single non-blocked xor filter.
+    ///
+    /// Note: shared-buffer flush does not read compaction group config, and always uses the
+    /// built-in default threshold.
+    #[serde(default = "default::compaction_config::blocked_xor_filter_kv_count_threshold")]
+    #[serde(alias = "max_kv_count_for_xor16")]
+    pub blocked_xor_filter_kv_count_threshold: Option<u64>,
+    /// Per-level xor filter family for compaction output.
+    ///
+    /// Index by LSM level: `0..=max_level`. Note: L0 (index 0) is currently ignored by shared-buffer
+    /// flush, which always uses "xor16".
+    #[serde(default = "default::compaction_config::sstable_filter_kind")]
+    pub sstable_filter_kind: Vec<String>,
+    /// Per-level xor filter layout for compaction output.
+    ///
+    /// "auto" uses the kv-count heuristic; "plain"/"normal" forces non-blocked filters and ignores
+    /// kv-count threshold.
+    ///
+    /// Index by LSM level: `0..=max_level`. Note: L0 (index 0) is currently ignored by shared-buffer
+    /// flush, which always uses "auto".
+    #[serde(default = "default::compaction_config::sstable_filter_layout")]
+    pub sstable_filter_layout: Vec<String>,
 }
 
 pub mod default {
@@ -935,7 +959,7 @@ pub mod default {
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
         const DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION: bool = true;
         const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
-        pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
+        pub const DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD: u64 = 256 * 1024;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -1047,8 +1071,32 @@ pub mod default {
             DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD
         }
 
-        pub fn max_kv_count_for_xor16() -> Option<u64> {
-            Some(DEFAULT_MAX_KV_COUNT_FOR_XOR16)
+        pub fn blocked_xor_filter_kv_count_threshold() -> Option<u64> {
+            Some(DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD)
+        }
+
+        pub fn sstable_filter_kind() -> Vec<String> {
+            vec![
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+            ]
+        }
+
+        pub fn sstable_filter_layout() -> Vec<String> {
+            vec![
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+            ]
         }
     }
 }

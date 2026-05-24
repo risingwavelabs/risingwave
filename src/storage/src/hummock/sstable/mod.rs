@@ -29,7 +29,8 @@ mod xor_filter;
 pub use bloom::BloomFilterBuilder;
 use serde::{Deserialize, Serialize};
 pub use xor_filter::{
-    BlockedXor16FilterBuilder, Xor8FilterBuilder, Xor16FilterBuilder, XorFilterReader,
+    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, Xor8FilterBuilder, Xor16FilterBuilder,
+    XorFilterReader,
 };
 pub mod builder;
 pub use builder::*;

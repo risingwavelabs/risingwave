@@ -569,7 +569,7 @@ impl CompactionGroupManager {
     }
 }
 
-fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) {
+fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfig]) -> Result<()> {
     for item in items {
         match item {
             MutableConfig::MaxBytesForLevelBase(c) => {
@@ -659,10 +659,39 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                     (*c != u64::MIN && *c != u64::MAX).then_some(*c);
             }
             MutableConfig::MaxKvCountForXor16(c) => {
-                target.max_kv_count_for_xor16 = (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+                target.max_kv_count_for_xor16 = (*c != u64::MAX).then_some(*c);
+            }
+            MutableConfig::SstableFilterKind(c) => {
+                if target.sstable_filter_kind.is_empty() {
+                    target.sstable_filter_kind =
+                        vec!["xor16".to_owned(); target.max_level as usize + 1];
+                }
+                let idx = c.get_level() as usize;
+                let level_entry = target.sstable_filter_kind.get_mut(idx).ok_or_else(|| {
+                    Error::CompactionGroup(format!(
+                        "sstable_filter_kind level {} is out of range",
+                        idx
+                    ))
+                })?;
+                level_entry.clone_from(&c.filter_kind);
+            }
+            MutableConfig::SstableFilterLayout(c) => {
+                if target.sstable_filter_layout.is_empty() {
+                    target.sstable_filter_layout =
+                        vec!["auto".to_owned(); target.max_level as usize + 1];
+                }
+                let idx = c.get_level() as usize;
+                let level_entry = target.sstable_filter_layout.get_mut(idx).ok_or_else(|| {
+                    Error::CompactionGroup(format!(
+                        "sstable_filter_layout level {} is out of range",
+                        idx
+                    ))
+                })?;
+                level_entry.clone_from(&c.layout);
             }
         }
     }
+    Ok(())
 }
 
 impl CompactionGroupTransaction<'_> {
@@ -729,7 +758,7 @@ impl CompactionGroupTransaction<'_> {
                 Error::CompactionGroup(format!("invalid group {}", *compaction_group_id))
             })?;
             let mut config = group.compaction_config.as_ref().clone();
-            update_compaction_config(&mut config, config_to_update);
+            update_compaction_config(&mut config, config_to_update)?;
             if let Err(reason) = validate_compaction_config(&config) {
                 return Err(Error::CompactionGroup(reason));
             }
@@ -751,13 +780,80 @@ mod tests {
     use risingwave_common::id::JobId;
     use risingwave_hummock_sdk::CompactionGroupId;
     use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+    use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::{
+        CompressionAlgorithm, SstableFilterKind, SstableFilterLayout,
+    };
 
     use crate::controller::SqlMetaStore;
     use crate::hummock::commit_multi_var;
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::error::Result;
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
     use crate::hummock::test_utils::setup_compute_env;
     use crate::model::{Fragment, StreamJobFragments};
+
+    #[test]
+    fn test_update_compaction_config_filter_kind_layout_backward_compat() {
+        let mut config = CompactionConfigBuilder::new().build();
+        config.sstable_filter_kind.clear();
+        config.sstable_filter_layout.clear();
+
+        super::update_compaction_config(
+            &mut config,
+            &[MutableConfig::SstableFilterKind(SstableFilterKind {
+                level: 0,
+                filter_kind: "xor8".to_owned(),
+            })],
+        )
+        .unwrap();
+        assert_eq!(
+            config.sstable_filter_kind.len(),
+            config.max_level as usize + 1
+        );
+        assert_eq!(config.sstable_filter_kind[0], "xor8");
+
+        super::update_compaction_config(
+            &mut config,
+            &[MutableConfig::SstableFilterLayout(SstableFilterLayout {
+                level: 1,
+                layout: "plain".to_owned(),
+            })],
+        )
+        .unwrap();
+        assert_eq!(
+            config.sstable_filter_layout.len(),
+            config.max_level as usize + 1
+        );
+        assert_eq!(config.sstable_filter_layout[1], "plain");
+    }
+
+    #[test]
+    fn test_update_compaction_config_rejects_out_of_range_level() {
+        let mut config = CompactionConfigBuilder::new().build();
+        let oob = config.max_level as u32 + 1;
+
+        assert!(
+            super::update_compaction_config(
+                &mut config,
+                &[MutableConfig::SstableFilterKind(SstableFilterKind {
+                    level: oob,
+                    filter_kind: "xor8".to_owned(),
+                })],
+            )
+            .is_err()
+        );
+
+        assert!(
+            super::update_compaction_config(
+                &mut config,
+                &[MutableConfig::SstableFilterLayout(SstableFilterLayout {
+                    level: oob,
+                    layout: "plain".to_owned(),
+                })],
+            )
+            .is_err()
+        );
+    }
 
     #[tokio::test]
     async fn test_inner() {
@@ -824,6 +920,54 @@ mod tests {
                 .compaction_config
                 .max_sub_compaction,
             123
+        );
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxKvCountForXor16(0)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_kv_count_for_xor16,
+            Some(0)
+        );
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxKvCountForXor16(1024)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_kv_count_for_xor16,
+            Some(1024)
+        );
+        update_compaction_config(
+            env.meta_store_ref(),
+            &mut inner,
+            &[100],
+            &[MutableConfig::MaxKvCountForXor16(u64::MAX)],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            inner
+                .try_get_compaction_group_config(100)
+                .unwrap()
+                .compaction_config
+                .max_kv_count_for_xor16,
+            None
         );
     }
 
