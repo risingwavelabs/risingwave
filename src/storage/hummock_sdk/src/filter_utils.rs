@@ -15,7 +15,7 @@
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableFilterType};
 
-/// Determines whether the key count is large enough to warrant using a blocked xor filter.
+/// Determines whether the key count is large enough to warrant using a blocked SST filter.
 ///
 /// # Arguments
 /// * `kv_count` - The total number of keys
@@ -23,7 +23,7 @@ use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableF
 ///   `DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD`.
 ///
 /// # Returns
-/// `true` if `kv_count` exceeds the threshold, indicating blocked xor filter should be used.
+/// `true` if `kv_count` exceeds the threshold, indicating blocked SST filter should be used.
 pub fn should_use_blocked_xor_filter_by_kv_count(
     kv_count: u64,
     blocked_kv_count_threshold: Option<u64>,
@@ -37,6 +37,12 @@ pub fn parse_sstable_filter_kind(kind: &str) -> Result<PbSstableFilterType, Stri
     match kind.trim().to_ascii_lowercase().as_str() {
         "xor16" => Ok(PbSstableFilterType::SstableFilterXor16),
         "xor8" => Ok(PbSstableFilterType::SstableFilterXor8),
+        "binaryfuse8" | "binary_fuse8" | "binary-fuse8" | "bfuse8" => {
+            Ok(PbSstableFilterType::SstableFilterBinaryFuse8)
+        }
+        "binaryfuse16" | "binary_fuse16" | "binary-fuse16" | "bfuse16" => {
+            Ok(PbSstableFilterType::SstableFilterBinaryFuse16)
+        }
         _ => Err(format!("unsupported sstable filter kind: {kind}")),
     }
 }
@@ -124,7 +130,15 @@ mod tests {
             parse_sstable_filter_kind("XOR8").unwrap(),
             PbSstableFilterType::SstableFilterXor8
         );
-        assert!(parse_sstable_filter_kind("bfuse8").is_err());
+        assert_eq!(
+            parse_sstable_filter_kind("BinaryFuse8").unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse8
+        );
+        assert_eq!(
+            parse_sstable_filter_kind("bfuse16").unwrap(),
+            PbSstableFilterType::SstableFilterBinaryFuse16
+        );
+        assert!(parse_sstable_filter_kind("fuse8").is_err());
     }
 
     #[test]
@@ -151,7 +165,11 @@ mod tests {
     #[test]
     fn test_get_sstable_filter_kind_for_level() {
         let config = CompactionConfig {
-            sstable_filter_kind: vec!["xor8".to_owned(), "xor16".to_owned(), "xor8".to_owned()],
+            sstable_filter_kind: vec![
+                "xor8".to_owned(),
+                "binary_fuse16".to_owned(),
+                "bfuse8".to_owned(),
+            ],
             ..Default::default()
         };
         assert_eq!(
@@ -160,11 +178,11 @@ mod tests {
         );
         assert_eq!(
             get_sstable_filter_kind(&config, 2, 1).unwrap(),
-            PbSstableFilterType::SstableFilterXor16
+            PbSstableFilterType::SstableFilterBinaryFuse16
         );
         assert_eq!(
             get_sstable_filter_kind(&config, 2, 2).unwrap(),
-            PbSstableFilterType::SstableFilterXor8
+            PbSstableFilterType::SstableFilterBinaryFuse8
         );
         assert!(get_sstable_filter_kind(&config, 2, 3).is_err());
     }
