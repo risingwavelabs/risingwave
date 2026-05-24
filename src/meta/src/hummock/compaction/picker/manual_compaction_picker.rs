@@ -520,6 +520,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::from([2.into()]),
+                target_level: None,
                 exclusive: false,
             };
 
@@ -687,6 +688,7 @@ pub mod tests {
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
+            target_level: None,
             exclusive: false,
         };
         let mut picker =
@@ -716,6 +718,7 @@ pub mod tests {
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
+            target_level: None,
             exclusive: false,
         };
         let mut picker = ManualCompactionPicker::new(
@@ -766,6 +769,7 @@ pub mod tests {
                 right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
+            target_level: None,
             exclusive: false,
         };
         let mut picker =
@@ -818,6 +822,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -861,6 +866,7 @@ pub mod tests {
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100.into()]),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -886,6 +892,7 @@ pub mod tests {
                 },
                 // Include all sub level's table ids
                 internal_table_id: HashSet::from([1.into(), 2.into(), 3.into()]),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -931,6 +938,7 @@ pub mod tests {
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3.into()]),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -976,6 +984,7 @@ pub mod tests {
                 // Only include partial top sub level's table id, but the whole top sub level is
                 // picked.
                 internal_table_id: HashSet::from([1.into()]),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -1020,6 +1029,7 @@ pub mod tests {
                 },
                 // Only include bottom sub level's table id
                 internal_table_id: HashSet::from([3.into()]),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -1056,6 +1066,7 @@ pub mod tests {
                 },
                 // No matching internal table id.
                 internal_table_id: HashSet::from([100.into()]),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -1082,6 +1093,7 @@ pub mod tests {
                 },
                 // Only include partial input level's table id
                 internal_table_id: HashSet::from([1.into()]),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -1134,6 +1146,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -1181,6 +1194,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 internal_table_id: HashSet::default(),
+                target_level: None,
                 exclusive: false,
             };
             let mut picker = ManualCompactionPicker::new(
@@ -1253,6 +1267,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 0,
+                target_level: None,
                 exclusive: false,
             };
             let mut selector = ManualCompactionSelector::new(option);
@@ -1296,6 +1311,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 0,
+                target_level: None,
                 exclusive: false,
             };
             let mut selector = ManualCompactionSelector::new(option);
@@ -1375,6 +1391,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 3,
+                target_level: None,
                 exclusive: false,
             };
             let mut selector = ManualCompactionSelector::new(option);
@@ -1409,6 +1426,52 @@ pub mod tests {
             }
         }
 
+        // pick l3 -> l3
+        {
+            let option = ManualCompactionOption {
+                sst_ids: [0, 1].iter().cloned().map(Into::into).collect(),
+                key_range: KeyRange {
+                    left: Bytes::default(),
+                    right: Bytes::default(),
+                    right_exclusive: false,
+                },
+                internal_table_id: HashSet::default(),
+                level: 3,
+                target_level: Some(3),
+                exclusive: false,
+            };
+            let mut selector = ManualCompactionSelector::new(option);
+            let task = selector
+                .pick_compaction(
+                    2,
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &BTreeSet::new(),
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &HashMap::default(),
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
+                )
+                .unwrap();
+            assert_compaction_task(&task, &levels_handler);
+            assert_eq!(task.input.input_levels.len(), 2);
+            assert_eq!(task.input.input_levels[0].level_idx, 3);
+            assert_eq!(task.input.input_levels[0].table_infos.len(), 2);
+            assert_eq!(task.input.input_levels[1].level_idx, 3);
+            assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
+            assert_eq!(task.input.target_level, 3);
+        }
+
+        for level_handler in &mut levels_handler {
+            for pending_task_id in &level_handler.pending_tasks_ids() {
+                level_handler.remove_task(*pending_task_id);
+            }
+        }
+
         // pick l4 -> l4
         {
             let option = ManualCompactionOption {
@@ -1420,6 +1483,7 @@ pub mod tests {
                 },
                 internal_table_id: HashSet::default(),
                 level: 4,
+                target_level: None,
                 exclusive: false,
             };
             let mut selector = ManualCompactionSelector::new(option);

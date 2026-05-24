@@ -137,6 +137,9 @@ enum HummockCommands {
         #[clap(short, long = "level", value_delimiter = ',', default_values_t = vec![1u32])]
         levels: Vec<u32>,
 
+        #[clap(long = "target-level")]
+        target_level: Option<u32>,
+
         #[clap(short, long = "sst-ids", value_delimiter = ',')]
         sst_ids: Vec<HummockSstableId>,
 
@@ -656,6 +659,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             compaction_group_id,
             table_id,
             levels,
+            target_level,
             sst_ids,
             exclusive,
             retry_interval_ms,
@@ -665,6 +669,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 compaction_group_id,
                 table_id.into(),
                 levels,
+                target_level,
                 sst_ids,
                 exclusive,
                 retry_interval_ms,
