@@ -21,7 +21,8 @@ use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_pb::hummock::{
-    PbBloomFilterType, PbKeyRange, PbSstableInfo, PbVnodeStatistics, PbVnodeUserKeyRange,
+    PbBloomFilterType, PbKeyRange, PbSstableFilterType, PbSstableInfo, PbVnodeStatistics,
+    PbVnodeUserKeyRange,
 };
 
 use crate::key::UserKey;
@@ -53,6 +54,7 @@ pub struct SstableInfoInner {
     pub uncompressed_file_size: u64,
     pub range_tombstone_count: u64,
     pub bloom_filter_kind: PbBloomFilterType,
+    pub filter_type: PbSstableFilterType,
     pub sst_size: u64,
     pub vnode_statistics: Option<VnodeStatistics>,
 }
@@ -71,6 +73,7 @@ impl SstableInfoInner {
             + size_of::<u64>() // uncompressed_file_size
             + size_of::<u64>() // range_tombstone_count
             + size_of::<u32>() // bloom_filter_kind
+            + size_of::<u32>() // filter_type
             + size_of::<u64>(); // sst_size
         basic += self.key_range.left.len() + self.key_range.right.len() + size_of::<bool>();
         if let Some(vnode_statistics) = &self.vnode_statistics {
@@ -169,6 +172,8 @@ impl From<PbSstableInfo> for SstableInfoInner {
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
             bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
                 .unwrap(),
+            filter_type: PbSstableFilterType::try_from(pb_sstable_info.filter_type)
+                .unwrap_or(PbSstableFilterType::SstableFilterUnspecified),
             sst_size: if pb_sstable_info.sst_size == 0 {
                 pb_sstable_info.file_size
             } else {
@@ -210,6 +215,8 @@ impl From<&PbSstableInfo> for SstableInfoInner {
             range_tombstone_count: pb_sstable_info.range_tombstone_count,
             bloom_filter_kind: PbBloomFilterType::try_from(pb_sstable_info.bloom_filter_kind)
                 .unwrap(),
+            filter_type: PbSstableFilterType::try_from(pb_sstable_info.filter_type)
+                .unwrap_or(PbSstableFilterType::SstableFilterUnspecified),
             sst_size: if pb_sstable_info.sst_size == 0 {
                 pb_sstable_info.file_size
             } else {
@@ -256,6 +263,7 @@ impl From<SstableInfoInner> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
+            filter_type: sstable_info.filter_type.into(),
             sst_size: sstable_info.sst_size,
             vnode_statistics: sstable_info
                 .vnode_statistics
@@ -295,6 +303,7 @@ impl From<&SstableInfoInner> for PbSstableInfo {
             uncompressed_file_size: sstable_info.uncompressed_file_size,
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
+            filter_type: sstable_info.filter_type.into(),
             sst_size: sstable_info.sst_size,
             vnode_statistics: sstable_info
                 .vnode_statistics
@@ -327,6 +336,15 @@ impl SstableInfo {
         let mut sst = self.get_inner();
         sst.key_range = KeyRange::default();
         *self = sst.into()
+    }
+
+    pub fn filter_type_compatible_with(&self, filter_type: PbSstableFilterType) -> bool {
+        match self.filter_type {
+            PbSstableFilterType::SstableFilterUnspecified => {
+                filter_type == PbSstableFilterType::SstableFilterXor16
+            }
+            ty => ty == filter_type,
+        }
     }
 }
 
