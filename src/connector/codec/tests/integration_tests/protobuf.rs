@@ -735,7 +735,7 @@ fn test_recursive() -> anyhow::Result<()> {
 // compile user protos importing `google/type/` and `confluent/type/` with zero
 // user-supplied dependencies.
 #[test]
-fn test_bundled_common_types() -> anyhow::Result<()> {
+fn test_bundled_ambient_types() -> anyhow::Result<()> {
     let main = r#"
         syntax = "proto3";
         package test;
