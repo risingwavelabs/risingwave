@@ -210,10 +210,10 @@ pub async fn put_sst(
     let bloom_filter = {
         let mut filter_builder = BlockedXor16FilterBuilder::new(100);
         for _ in &meta.block_metas {
-            filter_builder.switch_block(None);
+            filter_builder.switch_block(None)?;
         }
 
-        filter_builder.finish(None)
+        filter_builder.finish(None)?
     };
 
     meta.meta_offset = writer.data_len() as u64;
