@@ -747,6 +747,9 @@ impl HummockManager {
         let task = self
             .get_compact_task(compaction_group_id, &mut selector)
             .await?;
+        if let Some(err) = selector.validation_error() {
+            return Err(Error::InvalidManualCompactionOption(err.to_owned()));
+        }
         Ok((task, selector.blocked_by_pending()))
     }
 
@@ -1047,6 +1050,9 @@ impl HummockManager {
             Ok((compact_task, blocked_by_pending)) => (compact_task, blocked_by_pending),
             Err(err) => {
                 tracing::warn!(error = %err.as_report(), "Failed to get compaction task");
+                if matches!(err, Error::InvalidManualCompactionOption(_)) {
+                    return Err(err);
+                }
 
                 return Err(anyhow::anyhow!(err)
                     .context(format!(

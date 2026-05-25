@@ -2090,6 +2090,7 @@ impl HummockMetaClient for MetaClient {
         compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
+        target_level: Option<u32>,
         sst_ids: Vec<HummockSstableId>,
         exclusive: bool,
     ) -> Result<bool> {
@@ -2100,6 +2101,7 @@ impl HummockMetaClient for MetaClient {
             // if table_id not exist, manual_compaction will include all the sst
             // without check internal_table_id
             level,
+            target_level,
             sst_ids,
             exclusive: Some(exclusive),
             ..Default::default()
