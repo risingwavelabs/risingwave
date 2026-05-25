@@ -18,6 +18,7 @@ use risingwave_sqlparser::ast::{CommentObject, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
+use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 
 pub async fn handle_comment(
@@ -75,6 +76,13 @@ pub async fn handle_comment(
                 let (database_id, schema_id) =
                     session.get_database_and_schema_id_for_create(schema.clone())?;
                 let table = binder.bind_table(schema.as_deref(), &table)?;
+                if table.table_catalog.table_type() != TableType::Table {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "{} is not a table",
+                        table.table_catalog.name
+                    ))
+                    .into());
+                }
                 if table.table_catalog.owner != session.user_id() && !session.is_super_user() {
                     return Err(ErrorCode::PermissionDenied(format!(
                         "must be owner of relation {}",
