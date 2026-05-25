@@ -704,7 +704,7 @@ impl StateStoreImpl {
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                    u64::BITS as usize / 8 + value.estimate_size()
+                    u64::BITS as usize / 8 + value.estimated_meta_cache_weight()
                 })
                 .storage();
 

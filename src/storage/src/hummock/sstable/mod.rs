@@ -216,8 +216,12 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
+    pub fn estimated_meta_cache_weight(&self) -> usize {
+        // Foyer uses this as a cache weight. Keep it aligned with the serialized-size proxy used
+        // by SST metadata accounting instead of treating it as an exact Rust heap footprint.
+        std::mem::size_of_val(&self.id)
+            + self.filter_reader.estimate_size()
+            + self.meta.encoded_size()
     }
 }
 
