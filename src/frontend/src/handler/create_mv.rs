@@ -114,6 +114,21 @@ pub(super) fn reject_cloud_serverless_backfill_enabled(
     Ok(())
 }
 
+fn remove_cloud_serverless_backfill_enabled(
+    with_options: &mut WithOptions,
+) -> Result<Option<bool>> {
+    with_options
+        .remove(CLOUD_SERVERLESS_BACKFILL_ENABLED)
+        .map(|value| {
+            value.parse::<bool>().map_err(|_| {
+                RwError::from(InvalidInputSyntax(format!(
+                    "{CLOUD_SERVERLESS_BACKFILL_ENABLED} expects a boolean value, got {value:?}"
+                )))
+            })
+        })
+        .transpose()
+}
+
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
         None
@@ -405,9 +420,8 @@ pub(crate) async fn gen_create_mv_graph(
         risingwave_common::license::Feature::ResourceGroup.check_available()?;
     }
 
-    let serverless_backfill_from_with = with_options
-        .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
-        .map(|value| value.parse::<bool>().unwrap_or(false));
+    let serverless_backfill_from_with =
+        remove_cloud_serverless_backfill_enabled(&mut with_options)?;
     let is_serverless_backfill = serverless_backfill_from_with
         .unwrap_or_else(|| handler_args.session.config().enable_serverless_backfill());
 
@@ -521,7 +535,7 @@ It only indicates the physical clustering of the data, which may improve the per
 
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
     use risingwave_common::catalog::{
@@ -529,8 +543,33 @@ pub mod tests {
     };
     use risingwave_common::types::{DataType, StructType};
 
+    use super::{CLOUD_SERVERLESS_BACKFILL_ENABLED, remove_cloud_serverless_backfill_enabled};
+    use crate::WithOptions;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
+
+    #[test]
+    fn test_cloud_serverless_backfill_enabled_requires_boolean() {
+        let mut with_options = WithOptions::new_with_options(BTreeMap::from([(
+            CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned(),
+            "true".to_owned(),
+        )]));
+        assert_eq!(
+            remove_cloud_serverless_backfill_enabled(&mut with_options).unwrap(),
+            Some(true)
+        );
+        assert!(with_options.is_empty());
+
+        let mut with_options = WithOptions::new_with_options(BTreeMap::from([(
+            CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned(),
+            "definitely".to_owned(),
+        )]));
+        let err = remove_cloud_serverless_backfill_enabled(&mut with_options).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            r#"Invalid input syntax: cloud.serverless_backfill_enabled expects a boolean value, got "definitely""#
+        );
+    }
 
     #[tokio::test]
     async fn test_create_mv_handler() {

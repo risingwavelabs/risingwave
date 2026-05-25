@@ -1856,17 +1856,13 @@ impl DdlController {
             (&stream_job).into(),
         )?;
         let steady_state_resource_group = match &resource_type {
-            streaming_job_resource_type::ResourceType::Regular(_) => {
-                self.metadata_manager
-                    .get_database_resource_group(stream_job.database_id())
-                    .await?
-            }
             streaming_job_resource_type::ResourceType::SpecificResourceGroup(group) => {
                 group.clone()
             }
             // Backward compatibility for older clients: a legacy serverless-only resource type
             // does not represent a steady-state SQL resource-group override.
-            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_) => {
+            streaming_job_resource_type::ResourceType::Regular(_)
+            | streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_) => {
                 self.metadata_manager
                     .get_database_resource_group(stream_job.database_id())
                     .await?
@@ -1878,13 +1874,14 @@ impl DdlController {
                 streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
             );
         let active_resource_group = serverless_backfill_resource_group
-            .clone()
+            .as_ref()
             .or_else(|| match &resource_type {
                 streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(
                     group,
-                ) => Some(group.clone()),
+                ) => Some(group),
                 _ => None,
             })
+            .cloned()
             .unwrap_or_else(|| steady_state_resource_group.clone());
 
         // 3. Build the actor graph.

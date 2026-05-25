@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, ensure};
 use rdkafka::ClientConfig;
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 use risingwave_common::config::meta::default;
@@ -154,14 +154,22 @@ async fn assert_streaming_job_actor_placement(
         for actor in &fragment.actors {
             actor_count += 1;
             let worker_id = table_fragments.actor_status[&actor.actor_id].worker_id();
-            assert_eq!(
-                worker_resource_groups[&worker_id], expected_resource_group,
-                "actor {} of job {} is scheduled on worker {} outside resource group {}",
-                actor.actor_id, job_name, worker_id, expected_resource_group
+            let actual_resource_group =
+                worker_resource_groups.get(&worker_id).ok_or_else(|| {
+                    anyhow!("worker {worker_id} not found for actor {}", actor.actor_id)
+                })?;
+            ensure!(
+                actual_resource_group == expected_resource_group,
+                "actor {} of job {} is scheduled on worker {} in resource group {}, expected {}",
+                actor.actor_id,
+                job_name,
+                worker_id,
+                actual_resource_group,
+                expected_resource_group
             );
         }
     }
-    assert!(
+    ensure!(
         actor_count > 0,
         "job {job_name} has no actors matching the placement assertion"
     );
