@@ -43,7 +43,7 @@ use crate::barrier::rpc::to_partial_graph_id;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragment, LoadedFragmentContext, RenderedGraph,
-    render_actor_assignments,
+    ResourceGroupRenderPolicy, render_actor_assignments,
 };
 use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
@@ -174,6 +174,7 @@ pub fn render_runtime_info(
             worker_nodes.current(),
             &database_model.resource_group,
             streaming_job_model,
+            ResourceGroupRenderPolicy::SpecificThenProvided,
             partial_graph_id,
         )?;
 

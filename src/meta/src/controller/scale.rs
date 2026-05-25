@@ -995,6 +995,7 @@ fn render_actors_with_allocator(
             worker_map,
             entry_fragment_parallelism,
             database_resource_group,
+            ResourceGroupRenderPolicy::SpecificThenProvided,
             distribution_type,
             vnode_count,
         )?;
@@ -1086,6 +1087,26 @@ fn render_actors_with_allocator(
     Ok(all_fragments)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ResourceGroupRenderPolicy {
+    /// Prefer the persisted job-level resource group and fall back to the provided group.
+    SpecificThenProvided,
+    /// Use the provided group as the active placement target for this render.
+    Provided,
+}
+
+impl ResourceGroupRenderPolicy {
+    pub(crate) fn for_create(is_serverless_backfill: bool) -> Self {
+        if is_serverless_backfill {
+            // The create path passes the temporary serverless backfill group as the provided
+            // group, while the persisted job-specific group remains the steady-state target.
+            Self::Provided
+        } else {
+            Self::SpecificThenProvided
+        }
+    }
+}
+
 pub(crate) struct EnsembleActorTemplate {
     assignment: BTreeMap<WorkerId, BTreeMap<u32, Option<Bitmap>>>,
     distribution_type: DistributionType,
@@ -1097,7 +1118,8 @@ impl EnsembleActorTemplate {
         job: &streaming_job::Model,
         worker_map: &HashMap<WorkerId, WorkerNode>,
         entry_fragment_parallelism: Option<StreamingParallelism>,
-        database_resource_group: String,
+        provided_resource_group: String,
+        resource_group_policy: ResourceGroupRenderPolicy,
         distribution_type: DistributionType,
         vnode_count: usize,
     ) -> MetaResult<Self> {
@@ -1111,9 +1133,12 @@ impl EnsembleActorTemplate {
             .as_deref()
             .map(|s| parse_strategy(s).expect("strategy should be validated before persisting"));
 
-        let resource_group = match &job.specific_resource_group {
-            None => database_resource_group,
-            Some(resource_group) => resource_group.clone(),
+        let resource_group = match resource_group_policy {
+            ResourceGroupRenderPolicy::SpecificThenProvided => job
+                .specific_resource_group
+                .clone()
+                .unwrap_or(provided_resource_group),
+            ResourceGroupRenderPolicy::Provided => provided_resource_group,
         };
 
         let available_workers: BTreeMap<WorkerId, NonZeroUsize> = worker_map
@@ -1801,6 +1826,80 @@ mod tests {
             }),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn render_new_respects_resource_group_policy() {
+        let worker_map: HashMap<WorkerId, WorkerNode> = HashMap::from([
+            (1.into(), build_worker_node(1, 1, "serverless_rg")),
+            (2.into(), build_worker_node(2, 1, "steady_rg")),
+        ]);
+
+        let mut job = streaming_job::Model {
+            job_id: 106.into(),
+            job_status: JobStatus::Initial,
+            create_type: CreateType::Background,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: None,
+            parallelism: StreamingParallelism::Fixed(1),
+            backfill_parallelism: None,
+            backfill_adaptive_parallelism_strategy: None,
+            backfill_orders: None,
+            max_parallelism: 1,
+            specific_resource_group: Some("steady_rg".to_owned()),
+            is_serverless_backfill: true,
+            refresh_interval_sec: None,
+        };
+
+        let rendered = EnsembleActorTemplate::render_new(
+            &job,
+            &worker_map,
+            None,
+            "serverless_rg".to_owned(),
+            ResourceGroupRenderPolicy::Provided,
+            DistributionType::Single,
+            1,
+        )
+        .expect("active resource group render succeeds");
+        assert_eq!(
+            rendered.assignment.keys().copied().collect_vec(),
+            vec![1],
+            "active create-time rendering should use the provided serverless group"
+        );
+
+        let rendered = EnsembleActorTemplate::render_new(
+            &job,
+            &worker_map,
+            None,
+            "serverless_rg".to_owned(),
+            ResourceGroupRenderPolicy::SpecificThenProvided,
+            DistributionType::Single,
+            1,
+        )
+        .expect("steady-state resource group render succeeds");
+        assert_eq!(
+            rendered.assignment.keys().copied().collect_vec(),
+            vec![2],
+            "steady-state rendering should honor the persisted specific_resource_group"
+        );
+
+        job.specific_resource_group = None;
+        let rendered = EnsembleActorTemplate::render_new(
+            &job,
+            &worker_map,
+            None,
+            "serverless_rg".to_owned(),
+            ResourceGroupRenderPolicy::SpecificThenProvided,
+            DistributionType::Single,
+            1,
+        )
+        .expect("fallback resource group render succeeds");
+        assert_eq!(
+            rendered.assignment.keys().copied().collect_vec(),
+            vec![1],
+            "steady-state rendering should fall back to the provided group"
+        );
     }
 
     #[test]

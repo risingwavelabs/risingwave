@@ -59,7 +59,7 @@ use crate::barrier::{
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::{
     ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
-    build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs,
+    ResourceGroupRenderPolicy, build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs,
 };
 use crate::model::{
     FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate, StreamingJobModelContextExt,
@@ -174,6 +174,7 @@ impl BatchRefreshJobCheckpointControl {
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         database_resource_group: &str,
         streaming_job_model: &streaming_job::Model,
+        resource_group_policy: ResourceGroupRenderPolicy,
         // Edge building context:
         partial_graph_id: PartialGraphId,
     ) -> MetaResult<BatchRefreshRenderResult> {
@@ -222,6 +223,7 @@ impl BatchRefreshJobCheckpointControl {
                 worker_nodes,
                 entry_fragment_parallelism,
                 database_resource_group.to_owned(),
+                resource_group_policy,
                 distribution_type,
                 vnode_count,
             )?;
@@ -448,6 +450,7 @@ impl BatchRefreshJobCheckpointControl {
             worker_nodes,
             &create_info.info.database_resource_group,
             &create_info.info.streaming_job_model,
+            ResourceGroupRenderPolicy::for_create(create_info.info.is_serverless),
             partial_graph_id,
         )?;
         let initial_partial_graph_mutation =

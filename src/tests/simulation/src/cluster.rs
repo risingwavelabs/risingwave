@@ -98,6 +98,9 @@ pub struct Configuration {
     /// Roles for compute nodes (1-indexed). If not set, defaults to "both".
     /// Values: "serving", "streaming", "both".
     pub compute_node_roles: HashMap<usize, String>,
+
+    /// Optional serverless backfill controller address passed to frontend nodes.
+    pub serverless_backfill_controller_addr: Option<String>,
 }
 
 impl Default for Configuration {
@@ -127,6 +130,7 @@ metrics_level = "Disabled"
             per_session_queries: vec![].into(),
             compute_resource_groups: Default::default(),
             compute_node_roles: Default::default(),
+            serverless_backfill_controller_addr: None,
         }
     }
 }
@@ -251,6 +255,7 @@ default_parallelism = {default_parallelism}
             per_session_queries: vec![].into(),
             compute_resource_groups: Default::default(),
             compute_node_roles: Default::default(),
+            serverless_backfill_controller_addr: None,
         }
     }
 
@@ -496,19 +501,24 @@ impl Cluster {
 
         // frontend node
         for i in 1..=conf.frontend_nodes {
-            let opts = risingwave_frontend::FrontendOpts::parse_from([
-                "frontend-node",
-                "--config-path",
-                conf.config_path.as_str(),
-                "--listen-addr",
-                "0.0.0.0:4566",
-                "--health-check-listener-addr",
-                "0.0.0.0:6786",
-                "--advertise-addr",
-                &format!("192.168.2.{i}:4566"),
-                "--temp-secret-file-dir",
-                &format!("./secrets/frontend-{i}"),
-            ]);
+            let mut args = vec![
+                "frontend-node".to_owned(),
+                "--config-path".to_owned(),
+                conf.config_path.as_str().to_owned(),
+                "--listen-addr".to_owned(),
+                "0.0.0.0:4566".to_owned(),
+                "--health-check-listener-addr".to_owned(),
+                "0.0.0.0:6786".to_owned(),
+                "--advertise-addr".to_owned(),
+                format!("192.168.2.{i}:4566"),
+                "--temp-secret-file-dir".to_owned(),
+                format!("./secrets/frontend-{i}"),
+            ];
+            if let Some(addr) = &conf.serverless_backfill_controller_addr {
+                args.push("--serverless-backfill-controller-addr".to_owned());
+                args.push(addr.clone());
+            }
+            let opts = risingwave_frontend::FrontendOpts::parse_from(args);
             handle
                 .create_node()
                 .name(format!("frontend-{i}"))

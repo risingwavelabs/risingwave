@@ -179,6 +179,7 @@ async fn main() {
         },
         compute_resource_groups: Default::default(),
         compute_node_roles: Default::default(),
+        serverless_backfill_controller_addr: None,
     };
     let kill_opts = KillOpts {
         kill_meta: false,

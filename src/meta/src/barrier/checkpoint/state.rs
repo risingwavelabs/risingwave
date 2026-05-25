@@ -58,7 +58,7 @@ use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
     ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
-    build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs,
+    ResourceGroupRenderPolicy, build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs,
 };
 use crate::model::{
     ActorId, ActorNewNoShuffle, FragmentDownstreamRelation, FragmentId, StreamActor, StreamContext,
@@ -270,6 +270,7 @@ pub(super) fn render_actors(
     worker_map: &HashMap<WorkerId, WorkerNode>,
     ensembles: &[NoShuffleEnsemble],
     database_resource_group: &str,
+    resource_group_policy: ResourceGroupRenderPolicy,
 ) -> MetaResult<RenderResult> {
     // Step 2: Render actors for each ensemble.
     // For each new fragment, produce a simple assignment: actor_id -> (worker_id, vnode_bitmap).
@@ -331,6 +332,7 @@ pub(super) fn render_actors(
                 worker_map,
                 None,
                 database_resource_group.to_owned(),
+                resource_group_policy,
                 distribution_type,
                 vnode_count,
             )?
@@ -511,6 +513,7 @@ impl DatabaseCheckpointControl {
                     worker_nodes,
                     &ensembles,
                     &info.database_resource_group,
+                    ResourceGroupRenderPolicy::for_create(info.is_serverless),
                 )?;
                 {
                     assert!(!self.state.is_paused());
@@ -801,6 +804,7 @@ impl DatabaseCheckpointControl {
                     worker_nodes,
                     &ensembles,
                     &info.database_resource_group,
+                    ResourceGroupRenderPolicy::for_create(info.is_serverless),
                 )?;
                 for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
                     fill_snapshot_backfill_epoch(
@@ -1105,6 +1109,7 @@ impl DatabaseCheckpointControl {
                     worker_nodes,
                     &ensembles,
                     &plan.database_resource_group,
+                    ResourceGroupRenderPolicy::SpecificThenProvided,
                 )?;
 
                 // Render actors for auto_refresh_schema_sinks.

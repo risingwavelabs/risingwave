@@ -15,15 +15,68 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use rdkafka::ClientConfig;
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
 use risingwave_common::config::meta::default;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+#[cfg(madsim)]
+use risingwave_pb::serverless_backfill_controller::node_group_controller_service_server::{
+    NodeGroupControllerService, NodeGroupControllerServiceServer,
+};
+#[cfg(madsim)]
+use risingwave_pb::serverless_backfill_controller::{ProvisionRequest, ProvisionResponse};
 use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
+#[cfg(madsim)]
+use tonic::{Request, Response, Status};
+
+#[cfg(madsim)]
+const SERVERLESS_BACKFILL_RESOURCE_GROUP: &str = "serverless_rg";
+#[cfg(madsim)]
+const SERVERLESS_BACKFILL_CONTROLLER_ADDR: &str = "http://192.168.13.1:50051";
+#[cfg(madsim)]
+const SERVERLESS_BACKFILL_CONTROLLER_BIND_ADDR: &str = "0.0.0.0:50051";
+
+#[cfg(madsim)]
+struct FixedServerlessBackfillController;
+
+#[cfg(madsim)]
+#[async_trait::async_trait]
+impl NodeGroupControllerService for FixedServerlessBackfillController {
+    async fn provision(
+        &self,
+        _request: Request<ProvisionRequest>,
+    ) -> std::result::Result<Response<ProvisionResponse>, Status> {
+        Ok(Response::new(ProvisionResponse {
+            resource_group: SERVERLESS_BACKFILL_RESOURCE_GROUP.to_owned(),
+        }))
+    }
+}
+
+#[cfg(madsim)]
+fn start_fixed_serverless_backfill_controller() {
+    madsim::runtime::Handle::current()
+        .create_node()
+        .name("serverless-backfill-controller")
+        .ip([192, 168, 13, 1].into())
+        .init(|| async {
+            tonic::transport::Server::builder()
+                .add_service(NodeGroupControllerServiceServer::new(
+                    FixedServerlessBackfillController,
+                ))
+                .serve(
+                    SERVERLESS_BACKFILL_CONTROLLER_BIND_ADDR
+                        .parse()
+                        .expect("valid serverless backfill controller bind address"),
+                )
+                .await
+                .expect("serverless backfill controller should serve");
+        })
+        .build();
+}
 
 async fn assert_streaming_job_effective_resource_group(
     session: &mut Session,
@@ -40,6 +93,7 @@ async fn assert_streaming_job_effective_resource_group(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
 enum FragmentPlacementFilter {
     All,
     SourceBackfill,
@@ -79,7 +133,7 @@ async fn assert_streaming_job_actor_placement(
         .table_fragments
         .iter()
         .find(|fragments| fragments.table_id.as_raw_id() == job_id)
-        .unwrap_or_else(|| panic!("streaming job fragments not found for {job_name}({job_id})"));
+        .ok_or_else(|| anyhow!("streaming job fragments not found for {job_name}({job_id})"))?;
 
     let mut actor_count = 0;
     for fragment in table_fragments.fragments.values() {
@@ -113,6 +167,34 @@ async fn assert_streaming_job_actor_placement(
     );
 
     Ok(())
+}
+
+#[cfg(madsim)]
+async fn wait_streaming_job_actor_placement(
+    cluster: &Cluster,
+    session: &mut Session,
+    job_name: &str,
+    expected_resource_group: &str,
+    fragment_filter: FragmentPlacementFilter,
+) -> Result<()> {
+    let mut last_error = None;
+    for _ in 0..50 {
+        match assert_streaming_job_actor_placement(
+            cluster,
+            session,
+            job_name,
+            expected_resource_group,
+            fragment_filter,
+        )
+        .await
+        {
+            Ok(()) => return Ok(()),
+            Err(err) => last_error = Some(err),
+        }
+        sleep(Duration::from_millis(200)).await;
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow!("timed out waiting for actor placement")))
 }
 
 async fn assert_streaming_job_placement(
@@ -281,6 +363,65 @@ async fn test_resource_group() -> Result<()> {
 
     assert_eq!(union_fragment.inner.actors.len(), 2);
     assert_eq!(mat_fragment.inner.actors.len(), 2);
+
+    Ok(())
+}
+
+#[cfg(madsim)]
+#[tokio::test]
+async fn test_mv_serverless_backfill_uses_active_resource_group_during_create() -> Result<()> {
+    start_fixed_serverless_backfill_controller();
+
+    let mut config = Configuration::for_arrangement_backfill();
+    config.compute_nodes = 3;
+    config.compute_node_cores = 2;
+    config.serverless_backfill_controller_addr =
+        Some(SERVERLESS_BACKFILL_CONTROLLER_ADDR.to_owned());
+    config.compute_resource_groups = HashMap::from([
+        (1, DEFAULT_RESOURCE_GROUP.to_owned()),
+        (2, "mv_rg".to_owned()),
+        (3, SERVERLESS_BACKFILL_RESOURCE_GROUP.to_owned()),
+    ]);
+
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session
+        .run("set streaming_use_arrangement_backfill = true")
+        .await?;
+    session.run("set background_ddl = true").await?;
+    session.run("set backfill_rate_limit = 1").await?;
+
+    session.run("create table rg_serverless_t(v int)").await?;
+    session
+        .run("insert into rg_serverless_t select * from generate_series(1, 1000)")
+        .await?;
+    session
+        .run(
+            "create materialized view rg_serverless_mv with (
+                resource_group = 'mv_rg',
+                cloud.serverless_backfill_enabled = true
+            ) as select * from rg_serverless_t",
+        )
+        .await?;
+
+    assert_streaming_job_effective_resource_group(&mut session, "rg_serverless_mv", "mv_rg")
+        .await?;
+    wait_streaming_job_actor_placement(
+        &cluster,
+        &mut session,
+        "rg_serverless_mv",
+        SERVERLESS_BACKFILL_RESOURCE_GROUP,
+        FragmentPlacementFilter::All,
+    )
+    .await?;
+
+    let job_id = session
+        .run("select id from rw_streaming_jobs where name = 'rg_serverless_mv'")
+        .await?;
+    session
+        .run(format!("cancel job {};", job_id.trim()))
+        .await?;
 
     Ok(())
 }
