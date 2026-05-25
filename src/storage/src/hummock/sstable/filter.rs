@@ -23,12 +23,12 @@ use crate::hummock::MemoryLimiter;
 pub trait FilterBuilder: Send {
     /// add key which need to be filter for construct filter data.
     fn add_key(&mut self, dist_key: &[u8], table_id: u32);
-    /// Builds Bloom filter from key hashes
+    /// Builds SST filter from key hashes.
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8>;
     /// approximate memory of filter builder
     fn approximate_len(&self) -> usize;
 
-    fn create(fpr: f64, capacity: usize) -> Self;
+    fn create(capacity: usize) -> Self;
     fn switch_block(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) {}
     /// approximate memory when finish filter
     fn approximate_building_memory(&self) -> usize;

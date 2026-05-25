@@ -83,10 +83,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         let builder = SstableBuilder::new(
             table_id,
             writer,
-            Self::Filter::create(
-                self.options.bloom_false_positive,
-                self.options.capacity / DEFAULT_ENTRY_SIZE + 1,
-            ),
+            Self::Filter::create(self.options.capacity / DEFAULT_ENTRY_SIZE + 1),
             self.options.clone(),
             self.compaction_catalog_agent_ref.clone(),
             Some(self.limiter.clone()),

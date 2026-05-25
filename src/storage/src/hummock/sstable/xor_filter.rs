@@ -77,9 +77,7 @@ impl Xor16FilterBuilder {
             .fingerprints
             .iter()
             .for_each(|x| buf.put_u16_le(*x));
-        // We add an extra byte so we can distinguish bloom filter and xor filter by the last
-        // byte(255 indicates a xor16 filter, 254 indicates a xor8 filter and others indicate a
-        // bloom filter).
+        // Add an extra byte so readers can distinguish tagged xor filter formats.
         buf.put_u8(FOOTER_XOR16);
         buf
     }
@@ -88,7 +86,7 @@ impl Xor16FilterBuilder {
 impl FilterBuilder for Xor16FilterBuilder {
     fn add_key(&mut self, key: &[u8], table_id: u32) {
         self.key_hash_entries
-            .push(Sstable::hash_for_bloom_filter(key, table_id));
+            .push(Sstable::hash_for_filter(key, table_id));
     }
 
     fn approximate_len(&self) -> usize {
@@ -108,7 +106,7 @@ impl FilterBuilder for Xor16FilterBuilder {
         Self::build_from_xor16(&xor_filter)
     }
 
-    fn create(_fpr: f64, capacity: usize) -> Self {
+    fn create(capacity: usize) -> Self {
         Xor16FilterBuilder::new(capacity)
     }
 
@@ -126,7 +124,7 @@ impl FilterBuilder for Xor16FilterBuilder {
 impl FilterBuilder for Xor8FilterBuilder {
     fn add_key(&mut self, key: &[u8], table_id: u32) {
         self.key_hash_entries
-            .push(Sstable::hash_for_bloom_filter(key, table_id));
+            .push(Sstable::hash_for_filter(key, table_id));
     }
 
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
@@ -146,7 +144,7 @@ impl FilterBuilder for Xor8FilterBuilder {
         self.key_hash_entries.len() * 4
     }
 
-    fn create(_fpr: f64, capacity: usize) -> Self {
+    fn create(capacity: usize) -> Self {
         Xor8FilterBuilder::new(capacity)
     }
 
@@ -200,7 +198,7 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
     }
 
     fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
-        // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
+        // Add footer to tell which kind of filter.
         self.data.put_u32_le(self.block_count as u32);
         self.data.put_u8(FOOTER_BLOCKED_XOR16);
         std::mem::take(&mut self.data)
@@ -210,7 +208,7 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
         self.current.approximate_len() + self.data.len()
     }
 
-    fn create(_fpr: f64, capacity: usize) -> Self {
+    fn create(capacity: usize) -> Self {
         BlockedXor16FilterBuilder::new(capacity)
     }
 
@@ -256,7 +254,7 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
         self.current.approximate_len() + self.data.len()
     }
 
-    fn create(_fpr: f64, capacity: usize) -> Self {
+    fn create(capacity: usize) -> Self {
         BlockedXor8FilterBuilder::new(capacity)
     }
 
@@ -612,7 +610,7 @@ mod tests {
     use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
-    async fn test_blocked_bloom_filter() {
+    async fn test_blocked_xor_filter() {
         let sstable_store = mock_sstable_store().await;
         let writer_opts = SstableWriterOptions {
             capacity_hint: None,
@@ -643,7 +641,7 @@ mod tests {
         let mut builder = SstableBuilder::new(
             object_id,
             writer,
-            BlockedXor16FilterBuilder::create(0.01, 2048),
+            BlockedXor16FilterBuilder::create(2048),
             opts,
             compaction_catalog_agent_ref,
             None,
@@ -679,10 +677,7 @@ mod tests {
                 iter.seek_to_first();
                 while iter.is_valid() {
                     let k = iter.key().user_key.encode();
-                    let h = Sstable::hash_for_bloom_filter(
-                        &k,
-                        iter.key().user_key.table_id.as_raw_id(),
-                    );
+                    let h = Sstable::hash_for_filter(&k, iter.key().user_key.table_id.as_raw_id());
                     assert!(reader.filters[idx].contains(&h));
                     iter.next();
                 }

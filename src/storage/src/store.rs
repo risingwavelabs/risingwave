@@ -278,7 +278,7 @@ pub trait StateStoreRead: StateStoreGet + StaticSendSync {
     type RevIter: StateStoreReadIter;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// Internally, `prefix_hint` will be used for checking the SST filter and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
     /// in `key_range`) The returned iterator will iterate data based on a snapshot
     /// corresponding to the given `epoch`.
@@ -375,7 +375,7 @@ pub trait LocalStateStore: StateStoreGet + StateStoreWriteEpochControl + StaticS
     type RevIter<'a>: StateStoreIter + 'a;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// Internally, `prefix_hint` will be used for checking the SST filter and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
     /// in `key_range`) The returned iterator will iterate data based on the latest written
     /// snapshot.
@@ -506,7 +506,7 @@ impl From<PrefetchOptions> for TracedPrefetchOptions {
 
 #[derive(Default, Clone)]
 pub struct ReadOptions {
-    /// A hint for prefix key to check bloom filter.
+    /// A hint for prefix key to check the SST filter.
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Bytes>,
