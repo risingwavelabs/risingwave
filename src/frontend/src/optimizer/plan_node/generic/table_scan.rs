@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use educe::Educe;
@@ -359,15 +359,29 @@ impl GenericPlanNode for TableScan {
         }
         let id_to_op_idx =
             Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_catalog);
-        self.table_catalog
-            .stream_key()
+        // A table scan replays the table's physical changelog, so downstream operators must be
+        // able to distinguish rows by the physical table pk. Keep any extra catalog stream-key
+        // columns as well, e.g. TTL watermark columns that intentionally distinguish row versions.
+        let mut stream_key = self
+            .table_catalog
+            .pk()
             .iter()
-            .map(|&c| {
+            .map(|c| {
                 id_to_op_idx
-                    .get(&self.table_catalog.columns[c].column_id)
+                    .get(&self.table_catalog.columns[c.column_index].column_id)
                     .copied()
             })
-            .collect::<Option<Vec<_>>>()
+            .collect::<Option<Vec<_>>>()?;
+        let mut seen = stream_key.iter().copied().collect::<HashSet<_>>();
+        for c in self.table_catalog.stream_key() {
+            let op_idx = id_to_op_idx
+                .get(&self.table_catalog.columns[c].column_id)
+                .copied()?;
+            if seen.insert(op_idx) {
+                stream_key.push(op_idx);
+            }
+        }
+        Some(stream_key)
     }
 
     fn ctx(&self) -> OptimizerContextRef {
