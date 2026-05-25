@@ -31,6 +31,9 @@ pub async fn persist_pre_commit_metadata(
     commit_metadata: Option<Vec<u8>>,
     schema_change: Option<&PbSinkSchemaChange>,
 ) -> anyhow::Result<()> {
+    fail::fail_point!("iceberg_v3_persist_pre_commit_fail", |_| Err(
+        anyhow::anyhow!("injected: iceberg_v3_persist_pre_commit_fail")
+    ));
     let schema_change = schema_change.map(Into::into);
     let m = pending_sink_state::ActiveModel {
         sink_id: Set(sink_id),
@@ -57,6 +60,9 @@ pub async fn commit_and_prune_epoch(
     epoch: u64,
     prev_epoch: Option<u64>,
 ) -> anyhow::Result<()> {
+    fail::fail_point!("iceberg_v3_commit_prune_fail", |_| Err(anyhow::anyhow!(
+        "injected: iceberg_v3_commit_prune_fail"
+    )));
     let txn = db.begin().await?;
     pending_sink_state::Entity::update(pending_sink_state::ActiveModel {
         sink_id: Set(sink_id),
