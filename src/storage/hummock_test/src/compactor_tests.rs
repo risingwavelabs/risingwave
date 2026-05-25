@@ -1275,7 +1275,7 @@ pub(crate) mod tests {
                         .unwrap()
                 ),
             );
-            let hash = Sstable::hash_for_bloom_filter(
+            let hash = Sstable::hash_for_filter(
                 fast_iter.key().user_key.encode().as_slice(),
                 fast_iter.key().user_key.table_id.as_raw_id(),
             );
@@ -1356,7 +1356,7 @@ pub(crate) mod tests {
             sstable_store
                 .clone()
                 .create_sst_writer(object_id, SstableWriterOptions::default()),
-            BlockedXor16FilterBuilder::create(opts.bloom_false_positive, opts.capacity / 16),
+            BlockedXor16FilterBuilder::create(opts.capacity / 16),
             opts,
             compaction_catalog_agent_ref,
             None,
@@ -1623,7 +1623,7 @@ pub(crate) mod tests {
                 sstable_store
                     .clone()
                     .create_sst_writer(object_id, SstableWriterOptions::default()),
-                BlockedXor16FilterBuilder::create(opts.bloom_false_positive, opts.capacity / 16),
+                BlockedXor16FilterBuilder::create(opts.capacity / 16),
                 opts.clone(),
                 compaction_catalog_agent_ref.clone(),
                 None,
@@ -1751,7 +1751,7 @@ pub(crate) mod tests {
                 sstable_store
                     .clone()
                     .create_sst_writer(object_id, SstableWriterOptions::default()),
-                BlockedXor16FilterBuilder::create(opts.bloom_false_positive, opts.capacity / 16),
+                BlockedXor16FilterBuilder::create(opts.capacity / 16),
                 opts.clone(),
                 compaction_catalog_agent_ref.clone(),
                 None,

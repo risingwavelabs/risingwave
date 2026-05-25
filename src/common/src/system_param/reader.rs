@@ -161,6 +161,7 @@ where
         self.inner().block_size_kb.unwrap()
     }
 
+    #[expect(deprecated)]
     fn bloom_false_positive(&self) -> f64 {
         self.inner().bloom_false_positive.unwrap()
     }

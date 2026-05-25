@@ -62,7 +62,7 @@ use crate::hummock::{
     BackwardIteratorFactory, ForwardIteratorFactory, HummockError, HummockResult,
     HummockStorageIterator, HummockStorageIteratorInner, HummockStorageRevIteratorInner,
     ReadVersionTuple, Sstable, SstableIterator, get_from_batch, get_from_sstable_info,
-    hit_sstable_bloom_filter,
+    hit_sstable_filter,
 };
 use crate::mem_table::{
     ImmId, ImmutableMemtable, MemTableHummockIterator, MemTableHummockRevIterator,
@@ -688,9 +688,10 @@ impl HummockVersionReader {
         }
 
         // 2. order guarantee: imm -> sst
-        let dist_key_hash = read_options.prefix_hint.as_ref().map(|dist_key| {
-            Sstable::hash_for_bloom_filter(dist_key.as_ref(), table_id.as_raw_id())
-        });
+        let dist_key_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|dist_key| Sstable::hash_for_filter(dist_key.as_ref(), table_id.as_raw_id()));
 
         // Here epoch passed in is pure epoch, and we will seek the constructed `full_key` later.
         // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
@@ -1036,10 +1037,10 @@ impl HummockVersionReader {
         );
         let mut staging_sst_iter_count = 0;
         // encode once
-        let bloom_filter_prefix_hash = read_options
+        let filter_prefix_hash = read_options
             .prefix_hint
             .as_ref()
-            .map(|hint| Sstable::hash_for_bloom_filter(hint, table_id.as_raw_id()));
+            .map(|hint| Sstable::hash_for_filter(hint, table_id.as_raw_id()));
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
         if read_options.prefetch_options.prefetch {
             sst_read_options.must_iterated_end_user_key =
@@ -1053,8 +1054,8 @@ impl HummockVersionReader {
                 .sstable(sstable_info, local_stats)
                 .await?;
 
-            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref()
-                && !hit_sstable_bloom_filter(
+            if let Some(prefix_hash) = filter_prefix_hash.as_ref()
+                && !hit_sstable_filter(
                     &table_holder,
                     &user_key_range_ref,
                     *prefix_hash,
@@ -1105,8 +1106,8 @@ impl HummockVersionReader {
                         .sstable(sstable_info, local_stats)
                         .await?;
 
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
-                        && !hit_sstable_bloom_filter(
+                    if let Some(dist_hash) = filter_prefix_hash.as_ref()
+                        && !hit_sstable_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,
@@ -1142,8 +1143,8 @@ impl HummockVersionReader {
                         .sstable(sstable_info, local_stats)
                         .await?;
                     assert_eq!(sstable_info.object_id, sstable.id);
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
-                        && !hit_sstable_bloom_filter(
+                    if let Some(dist_hash) = filter_prefix_hash.as_ref()
+                        && !hit_sstable_filter(
                             &sstable,
                             &user_key_range_ref,
                             *dist_hash,

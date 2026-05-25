@@ -509,7 +509,7 @@ impl StreamMaterialize {
             version_column_indices,
             // Refresh staging tables are consumed by the refresh merge path with
             // `iter_keyed_row_with_vnode` range scans. They are not read by
-            // fixed-prefix lookups, so prefix bloom filters would only add write cost.
+            // fixed-prefix lookups, so prefix SST filters would only add write cost.
             read_prefix_len_hint: 0,
             version,
             created_at_epoch,

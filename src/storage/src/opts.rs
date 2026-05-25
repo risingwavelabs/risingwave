@@ -28,7 +28,7 @@ pub struct StorageOpts {
     pub min_sstable_size_mb: u32,
     /// Size of each block in bytes in SST.
     pub block_size_kb: u32,
-    /// False positive probability of bloom filter.
+    /// Deprecated and ignored by SST filter builders; kept for backward compatibility.
     pub bloom_false_positive: f64,
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
     pub share_buffers_sync_parallelism: u32,
