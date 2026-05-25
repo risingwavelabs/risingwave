@@ -796,6 +796,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_optimize_by_copy_block_accepts_legacy_unspecified_as_xor16_only() {
+        let context = test_context().await;
+        let table_id = TableId::new(1);
+        let mut compact_task = test_compact_task(
+            PbSstableFilterLayout::Auto,
+            PbSstableFilterType::SstableFilterXor16,
+            Some(1),
+        );
+        for level in &mut compact_task.input_ssts {
+            level.table_infos[0] =
+                test_sstable(table_id, 10, PbSstableFilterType::SstableFilterUnspecified);
+        }
+        assert!(optimize_by_copy_block(&compact_task, &context));
+
+        compact_task.sstable_filter_kind = PbSstableFilterType::SstableFilterBinaryFuse8;
+        assert!(!optimize_by_copy_block(&compact_task, &context));
+    }
+
+    #[tokio::test]
     async fn test_optimize_by_copy_block_accepts_blocked_binary_fuse8() {
         let context = test_context().await;
         let compact_task = test_compact_task(

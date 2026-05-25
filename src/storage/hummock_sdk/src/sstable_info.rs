@@ -423,3 +423,23 @@ impl ObjectIdReader for SstableInfo {
         self.object_id
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::hummock::PbSstableInfo;
+
+    use super::*;
+
+    #[test]
+    fn test_legacy_unspecified_filter_type_is_xor16_compatible() {
+        let sst = SstableInfo::from(PbSstableInfo::default());
+
+        assert_eq!(
+            sst.filter_type,
+            PbSstableFilterType::SstableFilterUnspecified
+        );
+        assert!(sst.filter_type_compatible_with(PbSstableFilterType::SstableFilterXor16));
+        assert!(!sst.filter_type_compatible_with(PbSstableFilterType::SstableFilterBinaryFuse8));
+        assert!(!sst.filter_type_compatible_with(PbSstableFilterType::SstableFilterBinaryFuse16));
+    }
+}
