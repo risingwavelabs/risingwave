@@ -42,7 +42,7 @@ use risingwave_storage::compaction_catalog_manager::{
 use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::hummock::backup_reader::BackupReader;
-use risingwave_storage::hummock::event_handler::HummockVersionUpdate;
+use risingwave_storage::hummock::event_handler::{HummockObserverEvent, HummockVersionUpdate};
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
@@ -61,11 +61,10 @@ pub async fn prepare_first_valid_version(
     worker_id: WorkerId,
 ) -> (
     PinnedVersion,
-    UnboundedSender<HummockVersionUpdate>,
-    UnboundedReceiver<HummockVersionUpdate>,
+    UnboundedSender<HummockObserverEvent>,
+    UnboundedReceiver<HummockObserverEvent>,
 ) {
-    let (version_update_tx, mut version_update_rx) = unbounded_channel();
-    let (table_refill_runtime_config_tx, _table_refill_runtime_config_rx) = unbounded_channel();
+    let (observer_event_tx, mut observer_event_rx) = unbounded_channel();
 
     let notification_client = get_notification_client_for_test(
         env,
@@ -81,22 +80,23 @@ pub async fn prepare_first_valid_version(
         HummockObserverNode::new(
             Arc::new(CompactionCatalogManager::default()),
             backup_manager,
-            version_update_tx.clone(),
-            table_refill_runtime_config_tx,
+            observer_event_tx.clone(),
             write_limiter,
         ),
     )
     .await;
     observer_manager.start().await;
-    let hummock_version = match version_update_rx.recv().await {
-        Some(HummockVersionUpdate::PinnedVersion(version)) => version,
+    let hummock_version = match observer_event_rx.recv().await {
+        Some(HummockObserverEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(version))) => {
+            version
+        }
         _ => unreachable!("should be full version"),
     };
 
     (
         PinnedVersion::new(*hummock_version, unbounded_channel().0),
-        version_update_tx,
-        version_update_rx,
+        observer_event_tx,
+        observer_event_rx,
     )
 }
 

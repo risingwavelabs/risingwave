@@ -54,8 +54,8 @@ use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
 };
 use crate::hummock::event_handler::{
-    HummockEvent, HummockReadVersionRef, HummockVersionUpdate, ReadOnlyReadVersionMapping,
-    ReadOnlyRwLockRef,
+    HummockEvent, HummockObserverEvent, HummockReadVersionRef, HummockVersionUpdate,
+    ReadOnlyReadVersionMapping, ReadOnlyRwLockRef,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
@@ -232,8 +232,8 @@ fn serving_table_vnode_mappings_to_map(
 pub(crate) struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
-    version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
-    table_refill_runtime_config_rx: UnboundedReceiver<(Operation, PbTableRefillRuntimeConfig)>,
+    observer_event_rx: UnboundedReceiver<HummockObserverEvent>,
+    pending_observer_events: VecDeque<HummockObserverEvent>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
@@ -288,9 +288,7 @@ impl HummockEventHandler {
 
     pub fn new(
         role: Role,
-        version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
-        initial_table_refill_runtime_config: (Operation, PbTableRefillRuntimeConfig),
-        table_refill_runtime_config_rx: UnboundedReceiver<(Operation, PbTableRefillRuntimeConfig)>,
+        observer_event_rx: UnboundedReceiver<HummockObserverEvent>,
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
         compaction_catalog_manager_ref: CompactionCatalogManagerRef,
@@ -311,9 +309,7 @@ impl HummockEventHandler {
             BufferTracker::from_storage_opts(&compactor_context.storage_opts, &state_store_metrics);
         Self::new_inner(
             role,
-            version_update_rx,
-            initial_table_refill_runtime_config,
-            table_refill_runtime_config_rx,
+            observer_event_rx,
             compactor_context.sstable_store.clone(),
             state_store_metrics,
             CacheRefillConfig::from_storage_opts(&compactor_context.storage_opts),
@@ -370,9 +366,7 @@ impl HummockEventHandler {
     #[expect(clippy::too_many_arguments)]
     fn new_inner(
         role: Role,
-        version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
-        initial_table_refill_runtime_config: (Operation, PbTableRefillRuntimeConfig),
-        table_refill_runtime_config_rx: UnboundedReceiver<(Operation, PbTableRefillRuntimeConfig)>,
+        mut observer_event_rx: UnboundedReceiver<HummockObserverEvent>,
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         refill_config: CacheRefillConfig,
@@ -416,17 +410,21 @@ impl HummockEventHandler {
             spawn_refill_task,
             read_version_mapping.clone(),
         );
-        Self::apply_table_refill_runtime_config(
-            &mut refiller,
-            initial_table_refill_runtime_config.0,
-            initial_table_refill_runtime_config.1,
-        );
+        let mut pending_observer_events = VecDeque::new();
+        while let Ok(event) = observer_event_rx.try_recv() {
+            match event {
+                HummockObserverEvent::TableRefillRuntimeConfig(operation, config) => {
+                    Self::apply_table_refill_runtime_config(&mut refiller, operation, config);
+                }
+                event => pending_observer_events.push_back(event),
+            }
+        }
 
         Self {
             hummock_event_tx,
             hummock_event_rx,
-            version_update_rx,
-            table_refill_runtime_config_rx,
+            observer_event_rx,
+            pending_observer_events,
             version_update_notifier_tx,
             recent_versions: Arc::new(ArcSwap::from_pointee(recent_versions)),
             read_version_mapping,
@@ -615,6 +613,17 @@ impl HummockEventHandler {
         info!("clear finished");
     }
 
+    fn handle_observer_event(&mut self, event: HummockObserverEvent) {
+        match event {
+            HummockObserverEvent::VersionUpdate(version_update) => {
+                self.handle_version_update(version_update);
+            }
+            HummockObserverEvent::TableRefillRuntimeConfig(operation, config) => {
+                Self::apply_table_refill_runtime_config(&mut self.refiller, operation, config);
+            }
+        }
+    }
+
     fn handle_version_update(&mut self, version_payload: HummockVersionUpdate) {
         let _timer = self
             .metrics
@@ -771,6 +780,10 @@ impl HummockEventHandler {
 impl HummockEventHandler {
     pub async fn start_hummock_event_handler_worker(mut self) {
         loop {
+            if let Some(event) = self.pending_observer_events.pop_front() {
+                self.handle_observer_event(event);
+                continue;
+            }
             tokio::select! {
                 ssts = self.uploader.next_uploaded_ssts() => {
                     self.handle_uploaded_ssts(ssts);
@@ -790,23 +803,12 @@ impl HummockEventHandler {
                         }
                     }
                 }
-                version_update = pin!(self.version_update_rx.recv()) => {
-                    let Some(version_update) = version_update else {
-                        warn!("version update stream ends. event handle shutdown");
+                observer_event = pin!(self.observer_event_rx.recv()) => {
+                    let Some(observer_event) = observer_event else {
+                        warn!("observer event stream ends. event handle shutdown");
                         return;
                     };
-                    self.handle_version_update(version_update);
-                }
-                table_refill_runtime_config = pin!(self.table_refill_runtime_config_rx.recv()) => {
-                    let Some((operation, config)) = table_refill_runtime_config else {
-                        warn!("table refill runtime config stream ends. event handle shutdown");
-                        return;
-                    };
-                    Self::apply_table_refill_runtime_config(
-                        &mut self.refiller,
-                        operation,
-                        config,
-                    );
+                    self.handle_observer_event(observer_event);
                 }
             }
         }
@@ -1090,7 +1092,8 @@ mod tests {
         prepare_uploader_order_test_spawn_task_fn,
     };
     use crate::hummock::event_handler::{
-        HummockEvent, HummockEventHandler, HummockReadVersionRef, LocalInstanceGuard,
+        HummockEvent, HummockEventHandler, HummockObserverEvent, HummockReadVersionRef,
+        LocalInstanceGuard,
     };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -1130,15 +1133,9 @@ mod tests {
             }),
             unbounded_channel().0,
         );
-        let (_version_update_tx, version_update_rx) = unbounded_channel();
-        let (_table_refill_runtime_config_tx, table_refill_runtime_config_rx) = unbounded_channel();
-        let storage_opt = default_opts_for_test();
-        let metrics = Arc::new(HummockStateStoreMetrics::unused());
-
-        let event_handler = HummockEventHandler::new_inner(
-            Role::Serving,
-            version_update_rx,
-            (
+        let (observer_event_tx, observer_event_rx) = unbounded_channel();
+        observer_event_tx
+            .send(HummockObserverEvent::TableRefillRuntimeConfig(
                 Operation::Snapshot,
                 table_refill_runtime_config_for_test(
                     TableCacheRefillPolicies {
@@ -1149,8 +1146,14 @@ mod tests {
                     },
                     HashMap::from([(table_id, serving_vnodes.clone())]),
                 ),
-            ),
-            table_refill_runtime_config_rx,
+            ))
+            .unwrap();
+        let storage_opt = default_opts_for_test();
+        let metrics = Arc::new(HummockStateStoreMetrics::unused());
+
+        let event_handler = HummockEventHandler::new_inner(
+            Role::Serving,
+            observer_event_rx,
             mock_sstable_store().await,
             metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),
@@ -1241,8 +1244,7 @@ mod tests {
             unbounded_channel().0,
         );
 
-        let (_version_update_tx, version_update_rx) = unbounded_channel();
-        let (_table_refill_runtime_config_tx, table_refill_runtime_config_rx) = unbounded_channel();
+        let (_observer_event_tx, observer_event_rx) = unbounded_channel();
 
         let epoch1 = epoch0.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -1254,9 +1256,7 @@ mod tests {
 
         let event_handler = HummockEventHandler::new_inner(
             Role::None,
-            version_update_rx,
-            (Operation::Snapshot, PbTableRefillRuntimeConfig::default()),
-            table_refill_runtime_config_rx,
+            observer_event_rx,
             mock_sstable_store().await,
             metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),
@@ -1407,8 +1407,7 @@ mod tests {
             unbounded_channel().0,
         );
 
-        let (_version_update_tx, version_update_rx) = unbounded_channel();
-        let (_table_refill_runtime_config_tx, table_refill_runtime_config_rx) = unbounded_channel();
+        let (_observer_event_tx, observer_event_rx) = unbounded_channel();
 
         let epoch1 = epoch0.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -1435,9 +1434,7 @@ mod tests {
 
         let event_handler = HummockEventHandler::new_inner(
             Role::None,
-            version_update_rx,
-            (Operation::Snapshot, PbTableRefillRuntimeConfig::default()),
-            table_refill_runtime_config_rx,
+            observer_event_rx,
             mock_sstable_store().await,
             metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),

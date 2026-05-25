@@ -24,15 +24,14 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::backup_reader::BackupReaderRef;
-use crate::hummock::event_handler::HummockVersionUpdate;
+use crate::hummock::event_handler::{HummockObserverEvent, HummockVersionUpdate};
 use crate::hummock::write_limiter::WriteLimiterRef;
 
 pub struct HummockObserverNode {
     compaction_catalog_manager: CompactionCatalogManagerRef,
     backup_reader: BackupReaderRef,
     write_limiter: WriteLimiterRef,
-    version_update_sender: UnboundedSender<HummockVersionUpdate>,
-    table_refill_runtime_config_sender: UnboundedSender<(Operation, PbTableRefillRuntimeConfig)>,
+    observer_event_sender: UnboundedSender<HummockObserverEvent>,
     version: u64,
 }
 
@@ -69,13 +68,15 @@ impl ObserverState for HummockObserverNode {
             }
             Info::HummockVersionDeltas(hummock_version_deltas) => {
                 let _ = self
-                    .version_update_sender
-                    .send(HummockVersionUpdate::VersionDeltas(
-                        hummock_version_deltas
-                            .version_deltas
-                            .iter()
-                            .map(HummockVersionDelta::from_rpc_protobuf)
-                            .collect(),
+                    .observer_event_sender
+                    .send(HummockObserverEvent::VersionUpdate(
+                        HummockVersionUpdate::VersionDeltas(
+                            hummock_version_deltas
+                                .version_deltas
+                                .iter()
+                                .map(HummockVersionDelta::from_rpc_protobuf)
+                                .collect(),
+                        ),
                     ))
                     .inspect_err(|e| {
                         tracing::error!(event = ?e.0, "unable to send version delta");
@@ -125,14 +126,14 @@ impl ObserverState for HummockObserverNode {
                 .write_limits,
         );
         let _ = self
-            .version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(Box::new(
-                HummockVersion::from_rpc_protobuf(
+            .observer_event_sender
+            .send(HummockObserverEvent::VersionUpdate(
+                HummockVersionUpdate::PinnedVersion(Box::new(HummockVersion::from_rpc_protobuf(
                     &snapshot
                         .hummock_version
                         .expect("should get hummock version"),
-                ),
-            )))
+                ))),
+            ))
             .inspect_err(|e| {
                 tracing::error!(event = ?e.0, "unable to send full version");
             });
@@ -151,18 +152,13 @@ impl HummockObserverNode {
     pub fn new(
         compaction_catalog_manager: CompactionCatalogManagerRef,
         backup_reader: BackupReaderRef,
-        version_update_sender: UnboundedSender<HummockVersionUpdate>,
-        table_refill_runtime_config_sender: UnboundedSender<(
-            Operation,
-            PbTableRefillRuntimeConfig,
-        )>,
+        observer_event_sender: UnboundedSender<HummockObserverEvent>,
         write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {
             compaction_catalog_manager,
             backup_reader,
-            version_update_sender,
-            table_refill_runtime_config_sender,
+            observer_event_sender,
             version: 0,
             write_limiter,
         }
@@ -185,12 +181,13 @@ impl HummockObserverNode {
         );
 
         let _ = self
-            .table_refill_runtime_config_sender
-            .send((operation, config))
+            .observer_event_sender
+            .send(HummockObserverEvent::TableRefillRuntimeConfig(
+                operation, config,
+            ))
             .inspect_err(|e| {
                 tracing::error!(
-                    operation = ?e.0.0,
-                    config = ?e.0.1,
+                    event = ?e.0,
                     "unable to send table refill runtime config"
                 );
             });
@@ -232,6 +229,7 @@ mod tests {
     use super::HummockObserverNode;
     use crate::compaction_catalog_manager::CompactionCatalogManager;
     use crate::hummock::backup_reader::BackupReader;
+    use crate::hummock::event_handler::{HummockObserverEvent, HummockVersionUpdate};
     use crate::hummock::write_limiter::WriteLimiter;
 
     fn policy_snapshot(catalog_version: u64, table_id: u32) -> SubscribeResponse {
@@ -264,33 +262,44 @@ mod tests {
 
     #[tokio::test]
     async fn test_resubscribe_snapshot_refreshes_table_cache_refill_policies() {
-        let (version_update_tx, mut version_update_rx) = unbounded_channel();
-        let (table_refill_runtime_config_tx, mut table_refill_runtime_config_rx) =
-            unbounded_channel();
+        let (observer_event_tx, mut observer_event_rx) = unbounded_channel();
         let mut observer = HummockObserverNode::new(
             Arc::new(CompactionCatalogManager::default()),
             BackupReader::unused().await,
-            version_update_tx,
-            table_refill_runtime_config_tx,
+            observer_event_tx,
             WriteLimiter::unused(),
         );
 
         observer.handle_initialization_notification(policy_snapshot(1, 233));
-        let (operation, config) = table_refill_runtime_config_rx.recv().await.unwrap();
+        assert!(matches!(
+            observer_event_rx.recv().await.unwrap(),
+            HummockObserverEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(_))
+        ));
+        let HummockObserverEvent::TableRefillRuntimeConfig(operation, config) =
+            observer_event_rx.recv().await.unwrap()
+        else {
+            panic!("expect table refill runtime config");
+        };
         assert_eq!(operation, Operation::Snapshot);
         assert_eq!(
             config.table_cache_refill_policies.unwrap().policies[0].table_id,
             233
         );
-        version_update_rx.recv().await.unwrap();
 
         observer.handle_initialization_notification(policy_snapshot(2, 234));
-        let (operation, config) = table_refill_runtime_config_rx.recv().await.unwrap();
+        assert!(matches!(
+            observer_event_rx.recv().await.unwrap(),
+            HummockObserverEvent::VersionUpdate(HummockVersionUpdate::PinnedVersion(_))
+        ));
+        let HummockObserverEvent::TableRefillRuntimeConfig(operation, config) =
+            observer_event_rx.recv().await.unwrap()
+        else {
+            panic!("expect table refill runtime config");
+        };
         assert_eq!(operation, Operation::Snapshot);
         assert_eq!(
             config.table_cache_refill_policies.unwrap().policies[0].table_id,
             234
         );
-        version_update_rx.recv().await.unwrap();
     }
 }
