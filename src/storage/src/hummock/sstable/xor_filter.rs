@@ -436,6 +436,14 @@ where
     }
 }
 
+fn xor8_filter_heap_size(filter: &Xor8) -> usize {
+    filter.fingerprints.len()
+}
+
+fn xor16_filter_heap_size(filter: &Xor16) -> usize {
+    filter.fingerprints.len() * std::mem::size_of::<u16>()
+}
+
 pub enum XorFilter {
     Xor8(Xor8),
     Xor16(Xor16),
@@ -575,6 +583,32 @@ impl XorFilterReader {
                     })
                     .sum();
                 blocked_xor_filter_serialized_len(finished_blocks_len, reader.filters.len(), 0)
+            }
+        }
+    }
+
+    /// Estimates heap memory held by decoded filter data.
+    ///
+    /// Inline fields of `XorFilterReader` are counted by `Sstable::estimated_meta_cache_weight`.
+    pub fn estimated_heap_size(&self) -> usize {
+        match &self.filter {
+            XorFilter::Xor8(filter) => xor8_filter_heap_size(filter),
+            XorFilter::Xor16(filter) => xor16_filter_heap_size(filter),
+            XorFilter::BlockXor8(reader) => {
+                reader.filters.capacity() * std::mem::size_of::<Xor8>()
+                    + reader
+                        .filters
+                        .iter()
+                        .map(xor8_filter_heap_size)
+                        .sum::<usize>()
+            }
+            XorFilter::BlockXor16(reader) => {
+                reader.filters.capacity() * std::mem::size_of::<Xor16>()
+                    + reader
+                        .filters
+                        .iter()
+                        .map(xor16_filter_heap_size)
+                        .sum::<usize>()
             }
         }
     }

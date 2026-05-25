@@ -217,11 +217,11 @@ impl Sstable {
 
     #[inline(always)]
     pub fn estimated_meta_cache_weight(&self) -> usize {
-        // Foyer uses this as a cache weight. Keep it aligned with the serialized-size proxy used
-        // by SST metadata accounting instead of treating it as an exact Rust heap footprint.
-        std::mem::size_of_val(&self.id)
-            + self.filter_reader.serialized_len()
-            + self.meta.encoded_size()
+        // Foyer uses this as an in-memory cache weight. Count the decoded `Sstable` shape instead
+        // of the SST wire format used by `SstableMeta::encoded_size`.
+        std::mem::size_of::<Self>()
+            + self.meta.estimated_heap_size()
+            + self.filter_reader.estimated_heap_size()
     }
 }
 
@@ -292,6 +292,10 @@ impl BlockMeta {
 
     pub fn table_id(&self) -> TableId {
         FullKey::decode(&self.smallest_key).user_key.table_id
+    }
+
+    fn estimated_heap_size(&self) -> usize {
+        self.smallest_key.capacity()
     }
 }
 
@@ -482,6 +486,21 @@ impl SstableMeta {
             + 4 // version
             + 4 // magic
     }
+
+    #[expect(deprecated)]
+    fn estimated_heap_size(&self) -> usize {
+        self.block_metas.capacity() * std::mem::size_of::<BlockMeta>()
+            + self
+                .block_metas
+                .iter()
+                .map(BlockMeta::estimated_heap_size)
+                .sum::<usize>()
+            + self.bloom_filter.capacity()
+            + self.smallest_key.capacity()
+            + self.largest_key.capacity()
+            + self.monotonic_tombstone_events.capacity()
+                * std::mem::size_of::<MonotonicDeleteEvent>()
+    }
 }
 
 #[derive(Default)]
@@ -604,9 +623,9 @@ mod tests {
         let sstable = Sstable::new(42.into(), meta, false);
         assert!(sstable.meta.bloom_filter.is_empty());
 
-        let expected_weight = std::mem::size_of_val(&sstable.id)
-            + sstable.filter_reader.serialized_len()
-            + sstable.meta.encoded_size();
+        let expected_weight = std::mem::size_of::<Sstable>()
+            + sstable.meta.estimated_heap_size()
+            + sstable.filter_reader.estimated_heap_size();
         assert_eq!(sstable.estimated_meta_cache_weight(), expected_weight);
     }
 }
