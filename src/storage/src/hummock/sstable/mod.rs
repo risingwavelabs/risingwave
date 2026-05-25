@@ -216,9 +216,9 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn estimated_meta_cache_weight(&self) -> usize {
-        // Foyer uses this as an in-memory cache weight. Count the decoded `Sstable` shape instead
-        // of the SST wire format used by `SstableMeta::encoded_size`.
+    pub fn estimated_meta_cache_memory_weight(&self) -> usize {
+        // This is for foyer's in-memory cache weighter. The disk tier uses foyer `Code`
+        // serialization and `estimated_size` instead.
         std::mem::size_of::<Self>()
             + self.meta.estimated_heap_size()
             + self.filter_reader.estimated_heap_size()
@@ -626,6 +626,9 @@ mod tests {
         let expected_weight = std::mem::size_of::<Sstable>()
             + sstable.meta.estimated_heap_size()
             + sstable.filter_reader.estimated_heap_size();
-        assert_eq!(sstable.estimated_meta_cache_weight(), expected_weight);
+        assert_eq!(
+            sstable.estimated_meta_cache_memory_weight(),
+            expected_weight
+        );
     }
 }

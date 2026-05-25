@@ -589,7 +589,7 @@ impl XorFilterReader {
 
     /// Estimates heap memory held by decoded filter data.
     ///
-    /// Inline fields of `XorFilterReader` are counted by `Sstable::estimated_meta_cache_weight`.
+    /// Inline fields of `XorFilterReader` are counted by `Sstable::estimated_meta_cache_memory_weight`.
     pub fn estimated_heap_size(&self) -> usize {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_heap_size(filter),
@@ -824,7 +824,7 @@ mod tests {
     }
 
     fn assert_plain_filter_builder_approx_len_matches_output<F: FilterBuilder>(key_count: usize) {
-        let mut builder = F::create(0.01, key_count);
+        let mut builder = F::create(key_count);
         for i in 0..key_count {
             builder.add_key(&test_user_key_of(i).encode(), 0);
         }
@@ -842,7 +842,7 @@ mod tests {
     }
 
     fn assert_blocked_filter_builder_approx_len_matches_output<F: FilterBuilder>() {
-        let mut builder = F::create(0.01, 1024);
+        let mut builder = F::create(1024);
         for i in 0..50 {
             builder.add_key(&test_user_key_of(i).encode(), 0);
         }
@@ -850,7 +850,7 @@ mod tests {
         builder.switch_block(None).unwrap();
         assert_eq!(approximate_len, builder.finish(None).unwrap().len());
 
-        let mut builder = F::create(0.01, 1024);
+        let mut builder = F::create(1024);
         for block_idx in 0..3 {
             for i in 0..50 {
                 let key_idx = block_idx * 50 + i;

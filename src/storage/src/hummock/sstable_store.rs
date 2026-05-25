@@ -274,7 +274,8 @@ impl SstableStore {
             .memory(meta_cache_capacity)
             .with_shards(1)
             .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                std::mem::size_of::<HummockSstableObjectId>() + value.estimated_meta_cache_weight()
+                std::mem::size_of::<HummockSstableObjectId>()
+                    + value.estimated_meta_cache_memory_weight()
             })
             .storage()
             .build()
