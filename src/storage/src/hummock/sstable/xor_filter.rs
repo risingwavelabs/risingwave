@@ -31,6 +31,8 @@ const FOOTER_BLOCKED_XOR16: u8 = 253;
 const FOOTER_BLOCKED_XOR8: u8 = 252;
 // Plain Xor filter bytes are encoded as seed, block length, fingerprints, and footer.
 const FILTER_FIXED_LEN: usize = std::mem::size_of::<u64>() + std::mem::size_of::<u32>() + 1;
+const BLOCK_FILTER_ENTRY_FIXED_LEN: usize = std::mem::size_of::<u32>();
+const BLOCK_FILTER_FIXED_LEN: usize = std::mem::size_of::<u32>() + 1;
 
 pub struct Xor16FilterBuilder {
     key_hash_entries: Vec<u64>,
@@ -100,6 +102,14 @@ fn approximate_xor_filter_len(key_count: usize, fingerprint_size: usize) -> usiz
     } else {
         FILTER_FIXED_LEN + fingerprint_len * fingerprint_size
     }
+}
+
+fn xor8_filter_len(filter: &Xor8) -> usize {
+    FILTER_FIXED_LEN + filter.fingerprints.len()
+}
+
+fn xor16_filter_len(filter: &Xor16) -> usize {
+    FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
 }
 
 impl FilterBuilder for Xor16FilterBuilder {
@@ -224,7 +234,17 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        self.current.approximate_len() + self.data.len()
+        let current_len = if self.current.key_hash_entries.is_empty() {
+            0
+        } else {
+            BLOCK_FILTER_ENTRY_FIXED_LEN + self.current.approximate_len()
+        };
+        let footer_len = if self.block_count == 0 && current_len == 0 {
+            0
+        } else {
+            BLOCK_FILTER_FIXED_LEN
+        };
+        self.data.len() + current_len + footer_len
     }
 
     fn create(capacity: usize) -> Self {
@@ -271,7 +291,17 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        self.current.approximate_len() + self.data.len()
+        let current_len = if self.current.key_hash_entries.is_empty() {
+            0
+        } else {
+            BLOCK_FILTER_ENTRY_FIXED_LEN + self.current.approximate_len()
+        };
+        let footer_len = if self.block_count == 0 && current_len == 0 {
+            0
+        } else {
+            BLOCK_FILTER_FIXED_LEN
+        };
+        self.data.len() + current_len + footer_len
     }
 
     fn create(capacity: usize) -> Self {
@@ -482,19 +512,28 @@ impl XorFilterReader {
     }
 
     pub fn estimate_size(&self) -> usize {
+        if self.is_empty() {
+            return 0;
+        }
         match &self.filter {
-            XorFilter::Xor8(filter) => filter.fingerprints.len(),
-            XorFilter::Xor16(filter) => filter.fingerprints.len() * std::mem::size_of::<u16>(),
-            XorFilter::BlockXor8(reader) => reader
-                .filters
-                .iter()
-                .map(|filter| filter.fingerprints.len())
-                .sum(),
-            XorFilter::BlockXor16(reader) => reader
-                .filters
-                .iter()
-                .map(|filter| filter.fingerprints.len() * std::mem::size_of::<u16>())
-                .sum(),
+            XorFilter::Xor8(filter) => xor8_filter_len(filter),
+            XorFilter::Xor16(filter) => xor16_filter_len(filter),
+            XorFilter::BlockXor8(reader) => {
+                reader
+                    .filters
+                    .iter()
+                    .map(|filter| BLOCK_FILTER_ENTRY_FIXED_LEN + xor8_filter_len(filter))
+                    .sum::<usize>()
+                    + BLOCK_FILTER_FIXED_LEN
+            }
+            XorFilter::BlockXor16(reader) => {
+                reader
+                    .filters
+                    .iter()
+                    .map(|filter| BLOCK_FILTER_ENTRY_FIXED_LEN + xor16_filter_len(filter))
+                    .sum::<usize>()
+                    + BLOCK_FILTER_FIXED_LEN
+            }
         }
     }
 
@@ -726,6 +765,33 @@ mod tests {
         }
     }
 
+    fn assert_blocked_filter_builder_approx_len_matches_output<F: FilterBuilder>() {
+        let mut builder = F::create(0.01, 1024);
+        for i in 0..50 {
+            builder.add_key(&test_user_key_of(i).encode(), 0);
+        }
+        let approximate_len = builder.approximate_len();
+        builder.switch_block(None).unwrap();
+        assert_eq!(approximate_len, builder.finish(None).unwrap().len());
+
+        let mut builder = F::create(0.01, 1024);
+        for block_idx in 0..3 {
+            for i in 0..50 {
+                let key_idx = block_idx * 50 + i;
+                builder.add_key(&test_user_key_of(key_idx).encode(), 0);
+            }
+            builder.switch_block(None).unwrap();
+        }
+        let approximate_len = builder.approximate_len();
+        assert_eq!(approximate_len, builder.finish(None).unwrap().len());
+    }
+
+    #[test]
+    fn test_blocked_filter_builder_approx_len_matches_output() {
+        assert_blocked_filter_builder_approx_len_matches_output::<BlockedXor8FilterBuilder>();
+        assert_blocked_filter_builder_approx_len_matches_output::<BlockedXor16FilterBuilder>();
+    }
+
     // Test to make sure filter key builder finish produce the same result as the filter reader encode_to_bytes
     #[tokio::test]
     async fn test_xor_filter_builder_and_reader() {
@@ -737,6 +803,7 @@ mod tests {
         let xor8_bytes = xor8_builder.finish(None).unwrap();
         let xor8_reader = XorFilterReader::new(&xor8_bytes, &[]);
         let xor8_encoded = xor8_reader.encode_to_bytes();
+        assert_eq!(xor8_reader.estimate_size(), xor8_encoded.len());
         assert_eq!(
             xor8_bytes, xor8_encoded,
             "Xor8 builder and reader should produce identical bytes"
@@ -750,6 +817,7 @@ mod tests {
         let xor16_bytes = xor16_builder.finish(None).unwrap();
         let xor16_reader = XorFilterReader::new(&xor16_bytes, &[]);
         let xor16_encoded = xor16_reader.encode_to_bytes();
+        assert_eq!(xor16_reader.estimate_size(), xor16_encoded.len());
         assert_eq!(
             xor16_bytes, xor16_encoded,
             "Xor16 builder and reader should produce identical bytes"
@@ -785,6 +853,10 @@ mod tests {
         let blocked_xor8_reader = XorFilterReader::new(&blocked_xor8_bytes, &block_metas);
         let blocked_xor8_encoded = blocked_xor8_reader.encode_to_bytes();
         assert_eq!(
+            blocked_xor8_reader.estimate_size(),
+            blocked_xor8_encoded.len()
+        );
+        assert_eq!(
             blocked_xor8_bytes, blocked_xor8_encoded,
             "BlockedXor8 builder and reader should produce identical bytes"
         );
@@ -801,6 +873,10 @@ mod tests {
         let blocked_xor16_bytes = blocked_xor16_builder.finish(None).unwrap();
         let blocked_xor16_reader = XorFilterReader::new(&blocked_xor16_bytes, &block_metas);
         let blocked_xor16_encoded = blocked_xor16_reader.encode_to_bytes();
+        assert_eq!(
+            blocked_xor16_reader.estimate_size(),
+            blocked_xor16_encoded.len()
+        );
         assert_eq!(
             blocked_xor16_bytes, blocked_xor16_encoded,
             "BlockedXor16 builder and reader should produce identical bytes"
