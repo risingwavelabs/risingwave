@@ -1340,6 +1340,60 @@ pub mod tests {
         }
     }
 
+    #[test]
+    fn test_manual_compaction_selector_rejects_l0_non_base_target_level() {
+        let config = CompactionConfigBuilder::new().max_level(4).build();
+        let group_config = CompactionGroup::new(1, config);
+        let l0 = generate_l0_nonoverlapping_sublevels(vec![
+            generate_table(0, 1, 0, 500, 1),
+            generate_table(1, 1, 0, 500, 1),
+        ]);
+        let levels = Levels {
+            levels: vec![
+                generate_level(1, vec![]),
+                generate_level(2, vec![]),
+                generate_level(3, vec![generate_table(2, 1, 0, 500, 1)]),
+                generate_level(4, vec![]),
+            ],
+            l0,
+            ..Default::default()
+        };
+        let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
+        let mut local_stats = LocalSelectorStatistic::default();
+        let option = ManualCompactionOption {
+            sst_ids: vec![],
+            key_range: KeyRange {
+                left: Bytes::default(),
+                right: Bytes::default(),
+                right_exclusive: false,
+            },
+            internal_table_id: HashSet::default(),
+            level: 0,
+            target_level: Some(4),
+            exclusive: false,
+        };
+        let mut selector = ManualCompactionSelector::new(option);
+
+        assert!(
+            selector
+                .pick_compaction(
+                    1,
+                    compaction_selector_context(
+                        &group_config,
+                        &levels,
+                        &BTreeSet::new(),
+                        &mut levels_handler,
+                        &mut local_stats,
+                        &HashMap::default(),
+                        Arc::new(CompactionDeveloperConfig::default()),
+                        &Default::default(),
+                        &HummockVersionStateTableInfo::empty(),
+                    ),
+                )
+                .is_none()
+        );
+    }
+
     /// tests `DynamicLevelSelector::manual_pick_compaction`
     #[test]
     fn test_manual_compaction_selector() {

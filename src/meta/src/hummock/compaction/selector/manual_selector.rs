@@ -119,6 +119,9 @@ impl CompactionSelector for ManualCompactionSelector {
             if target_level > max_level {
                 return None;
             }
+            if self.option.level == 0 && target_level != ctx.base_level {
+                return None;
+            }
             if self.option.level > 0
                 && target_level != self.option.level
                 && target_level != self.option.level + 1
