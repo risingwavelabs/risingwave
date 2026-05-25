@@ -61,7 +61,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::compactor::compactor_runner::{
         CompactorRunner, compact_with_agent,
     };
-    use risingwave_storage::hummock::compactor::fast_compactor_runner::CompactorRunner as FastCompactorRunner;
+    use risingwave_storage::hummock::compactor::fast_compactor_runner::run as run_fast_compaction;
     use risingwave_storage::hummock::compactor::{
         CompactionExecutor, CompactorContext, DummyCompactionFilter, TaskProgress,
     };
@@ -1305,7 +1305,7 @@ pub(crate) mod tests {
         compaction_catalog_agent_ref: CompactionCatalogAgentRef,
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
         let mut task = task;
-        // The fast compaction path can only preserve blocked xor16 filters today.
+        // Keep the test fixtures on blocked xor16 filters.
         task.sstable_filter_kind = risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16;
         task.sstable_filter_layout = risingwave_pb::hummock::PbSstableFilterLayout::Auto;
         task.blocked_xor_filter_kv_count_threshold = Some(0);
@@ -1320,26 +1320,27 @@ pub(crate) mod tests {
             ])),
         );
 
-        let fast_compact_runner = FastCompactorRunner::new(
-            compact_ctx.clone(),
-            task.clone(),
-            compaction_catalog_agent_ref.clone(),
-            SharedComapctorObjectIdManager::for_test(VecDeque::from_iter([
-                22, 23, 24, 25, 26, 27, 28, 29,
-            ])),
-            Arc::new(TaskProgress::default()),
-            compaction_filter.clone(),
-        );
         let (_, ret1, _) = slow_compact_runner
             .run(
                 compaction_filter.clone(),
-                compaction_catalog_agent_ref,
+                compaction_catalog_agent_ref.clone(),
                 Arc::new(TaskProgress::default()),
             )
             .await
             .unwrap();
         let ret = ret1.into_iter().map(|sst| sst.sst_info).collect_vec();
-        let (ssts, _) = fast_compact_runner.run().await.unwrap();
+        let (ssts, _) = run_fast_compaction(
+            compact_ctx.clone(),
+            task.clone(),
+            compaction_catalog_agent_ref,
+            SharedComapctorObjectIdManager::for_test(VecDeque::from_iter([
+                22, 23, 24, 25, 26, 27, 28, 29,
+            ])),
+            Arc::new(TaskProgress::default()),
+            compaction_filter.clone(),
+        )
+        .await
+        .unwrap();
         let fast_ret = ssts.into_iter().map(|sst| sst.sst_info).collect_vec();
         (ret, fast_ret)
     }
@@ -1453,7 +1454,7 @@ pub(crate) mod tests {
             base_level: 4,
             target_file_size: capacity,
             compression_algorithm: 1,
-            // Fast compaction runner currently expects blocked xor16 output.
+            // Keep the test fixtures on blocked xor16 filters.
             sstable_filter_kind: risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
             // Force blocked output regardless of input size (the fast compaction path only
             // preserves blocked filters today).
@@ -2653,19 +2654,10 @@ pub(crate) mod tests {
             task.clone(),
             SharedComapctorObjectIdManager::for_test(VecDeque::from_iter([11, 12, 13, 14, 15, 16])),
         );
-        let fast_compact_runner = FastCompactorRunner::new(
-            compact_ctx.clone(),
-            task,
-            compaction_catalog_agent_ref.clone(),
-            SharedComapctorObjectIdManager::for_test(VecDeque::from_iter([21, 22, 23, 24, 25, 26])),
-            Arc::new(TaskProgress::default()),
-            compaction_filter.clone(),
-        );
-
         let (_, normal_ssts, _) = slow_compact_runner
             .run(
-                compaction_filter,
-                compaction_catalog_agent_ref,
+                compaction_filter.clone(),
+                compaction_catalog_agent_ref.clone(),
                 Arc::new(TaskProgress::default()),
             )
             .await
@@ -2675,11 +2667,22 @@ pub(crate) mod tests {
             .map(|sst| sst.sst_info)
             .collect_vec();
 
-        let (fast_ssts, fast_stats) =
-            tokio::time::timeout(Duration::from_secs(5), fast_compact_runner.run())
-                .await
-                .expect("fast compactor should skip filtered blocks in the merge/raw-copy stage")
-                .unwrap();
+        let (fast_ssts, fast_stats) = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_fast_compaction(
+                compact_ctx.clone(),
+                task,
+                compaction_catalog_agent_ref,
+                SharedComapctorObjectIdManager::for_test(VecDeque::from_iter([
+                    21, 22, 23, 24, 25, 26,
+                ])),
+                Arc::new(TaskProgress::default()),
+                compaction_filter.clone(),
+            ),
+        )
+        .await
+        .expect("fast compactor should skip filtered blocks in the merge/raw-copy stage")
+        .unwrap();
         let fast_ret = fast_ssts.into_iter().map(|sst| sst.sst_info).collect_vec();
 
         assert_eq!(

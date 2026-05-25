@@ -539,7 +539,6 @@ fn optimize_by_copy_block_with_input(
 
     let single_table = compact_task.get_table_ids_from_input_ssts().count() == 1;
     context.storage_opts.enable_fast_compaction
-        && current_filter_type == PbSstableFilterType::SstableFilterXor16
         && all_ssts_are_blocked_filter
         && all_ssts_match_filter_family
         && output_wants_blocked_filter
@@ -690,6 +689,7 @@ mod tests {
     fn test_sstable(
         table_id: TableId,
         total_key_count: u64,
+        filter_type: PbSstableFilterType,
     ) -> risingwave_hummock_sdk::sstable_info::SstableInfo {
         SstableInfoInner {
             object_id: 1.into(),
@@ -698,7 +698,7 @@ mod tests {
             total_key_count,
             sst_size: 1024,
             bloom_filter_kind: PbBloomFilterType::Blocked,
-            filter_type: PbSstableFilterType::SstableFilterXor16,
+            filter_type,
             ..Default::default()
         }
         .into()
@@ -717,6 +717,7 @@ mod tests {
 
     fn test_compact_task(
         layout: PbSstableFilterLayout,
+        filter_type: PbSstableFilterType,
         blocked_xor_filter_kv_count_threshold: Option<u64>,
     ) -> CompactTask {
         let table_id = TableId::new(1);
@@ -725,18 +726,18 @@ mod tests {
                 InputLevel {
                     level_idx: 1,
                     level_type: PbLevelType::Nonoverlapping,
-                    table_infos: vec![test_sstable(table_id, 10)],
+                    table_infos: vec![test_sstable(table_id, 10, filter_type)],
                 },
                 InputLevel {
                     level_idx: 2,
                     level_type: PbLevelType::Nonoverlapping,
-                    table_infos: vec![test_sstable(table_id, 10)],
+                    table_infos: vec![test_sstable(table_id, 10, filter_type)],
                 },
             ],
             existing_table_ids: vec![table_id],
             target_level: 2,
             task_type: PbTaskType::Dynamic,
-            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+            sstable_filter_kind: filter_type,
             sstable_filter_layout: layout,
             blocked_xor_filter_kv_count_threshold,
             ..Default::default()
@@ -746,7 +747,11 @@ mod tests {
     #[tokio::test]
     async fn test_optimize_by_copy_block_respects_plain_layout() {
         let context = test_context().await;
-        let compact_task = test_compact_task(PbSstableFilterLayout::Plain, Some(1));
+        let compact_task = test_compact_task(
+            PbSstableFilterLayout::Plain,
+            PbSstableFilterType::SstableFilterXor16,
+            Some(1),
+        );
 
         assert!(!optimize_by_copy_block(&compact_task, &context));
     }
@@ -754,7 +759,11 @@ mod tests {
     #[tokio::test]
     async fn test_optimize_by_copy_block_respects_auto_threshold() {
         let context = test_context().await;
-        let compact_task = test_compact_task(PbSstableFilterLayout::Auto, Some(1024));
+        let compact_task = test_compact_task(
+            PbSstableFilterLayout::Auto,
+            PbSstableFilterType::SstableFilterXor16,
+            Some(1024),
+        );
 
         assert!(!optimize_by_copy_block(&compact_task, &context));
     }
@@ -762,7 +771,50 @@ mod tests {
     #[tokio::test]
     async fn test_optimize_by_copy_block_keeps_blocked_output_when_requested() {
         let context = test_context().await;
-        let compact_task = test_compact_task(PbSstableFilterLayout::Auto, Some(1));
+        let compact_task = test_compact_task(
+            PbSstableFilterLayout::Auto,
+            PbSstableFilterType::SstableFilterXor16,
+            Some(1),
+        );
+
+        assert!(optimize_by_copy_block(&compact_task, &context));
+    }
+
+    #[tokio::test]
+    async fn test_optimize_by_copy_block_rejects_mismatched_filter_type() {
+        let context = test_context().await;
+        let table_id = TableId::new(1);
+        let mut compact_task = test_compact_task(
+            PbSstableFilterLayout::Auto,
+            PbSstableFilterType::SstableFilterBinaryFuse8,
+            Some(1),
+        );
+        compact_task.input_ssts[0].table_infos[0] =
+            test_sstable(table_id, 10, PbSstableFilterType::SstableFilterXor16);
+
+        assert!(!optimize_by_copy_block(&compact_task, &context));
+    }
+
+    #[tokio::test]
+    async fn test_optimize_by_copy_block_accepts_blocked_binary_fuse8() {
+        let context = test_context().await;
+        let compact_task = test_compact_task(
+            PbSstableFilterLayout::Auto,
+            PbSstableFilterType::SstableFilterBinaryFuse8,
+            Some(1),
+        );
+
+        assert!(optimize_by_copy_block(&compact_task, &context));
+    }
+
+    #[tokio::test]
+    async fn test_optimize_by_copy_block_accepts_blocked_binary_fuse16() {
+        let context = test_context().await;
+        let compact_task = test_compact_task(
+            PbSstableFilterLayout::Auto,
+            PbSstableFilterType::SstableFilterBinaryFuse16,
+            Some(1),
+        );
 
         assert!(optimize_by_copy_block(&compact_task, &context));
     }
