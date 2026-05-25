@@ -23,20 +23,22 @@ use crate::hummock::{HummockResult, MemoryLimiter};
 pub trait FilterBuilder: Send {
     /// add key which need to be filter for construct filter data.
     fn add_key(&mut self, dist_key: &[u8], table_id: u32);
-    /// Builds SST filter from key hashes.
+    /// Builds serialized filter bytes from key hashes.
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>>;
     /// Approximate serialized filter bytes counted toward SST builder capacity.
     ///
     /// `SstableBuilder::reach_capacity` uses this value to decide when to seal the current
-    /// SST. It should track bytes that will be appended to the SST, not the temporary memory
-    /// held by the filter builder. Use `approximate_building_memory` for build-time memory.
+    /// SST. It should track the filter bytes that would be appended to the SST if the builder
+    /// were finished now, including any pending block-local filter bytes. It is not a heap memory
+    /// estimate for the builder or the decoded filter reader. Use `approximate_building_memory`
+    /// for build-time temporary memory.
     fn approximate_len(&self) -> usize;
 
     fn create(capacity: usize) -> Self;
     fn switch_block(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<()> {
         Ok(())
     }
-    /// approximate memory when finish filter
+    /// Approximate temporary memory needed when finishing the filter.
     fn approximate_building_memory(&self) -> usize;
 
     /// Add raw data which build by keys directly. Please make sure that you have finished the last

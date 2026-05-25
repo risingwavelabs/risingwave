@@ -511,6 +511,10 @@ impl XorFilterReader {
         BlockBasedXor8Filter { filters }
     }
 
+    /// Estimates decoded filter-reader weight with the serialized filter byte length.
+    ///
+    /// This is used as part of meta-cache accounting. It intentionally follows RisingWave's
+    /// filter encoding size, not the exact Rust heap footprint of the decoded reader.
     pub fn estimate_size(&self) -> usize {
         if self.is_empty() {
             return 0;
