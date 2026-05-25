@@ -425,7 +425,7 @@ pub async fn compact_with_agent(
         });
 
     if optimize_by_copy_block {
-        let runner = fast_compactor_runner::CompactorRunner::new(
+        let runner = fast_compactor_runner::run(
             context.clone(),
             compact_task.clone(),
             compaction_catalog_agent_ref.clone(),
@@ -440,7 +440,7 @@ pub async fn compact_with_agent(
                 task_status = TaskStatus::ManualCanceled;
             },
 
-            ret = runner.run() => {
+            ret = runner => {
                 match ret {
                     Ok((ssts, statistics)) => {
                         output_ssts.push((0, ssts, statistics));

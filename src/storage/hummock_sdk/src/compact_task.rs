@@ -251,7 +251,7 @@ impl CompactTask {
             .map(|sst| sst.total_key_count)
             .sum::<u64>();
 
-        crate::filter_utils::should_use_blocked_xor_filter_by_kv_count(
+        crate::filter_utils::should_use_blocked_sst_filter_by_kv_count(
             kv_count,
             self.blocked_xor_filter_kv_count_threshold,
         )

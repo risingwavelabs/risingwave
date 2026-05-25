@@ -20,9 +20,11 @@ enum SstableFilterType {
   SSTABLE_FILTER_NONE = 1;
   SSTABLE_FILTER_XOR8 = 2;
   SSTABLE_FILTER_XOR16 = 3;
+  SSTABLE_FILTER_BINARY_FUSE8 = 4;
+  SSTABLE_FILTER_BINARY_FUSE16 = 5;
 }
 
-// Layout strategy of the xor filter stored in SST.
+// Layout strategy of the filter stored in SST.
 //
 // Note: the actual on-disk encoding is still determined by the filter bytes footer.
 // This enum is used for task planning and configuration.
@@ -589,19 +591,19 @@ message CompactTask {
   uint32 max_sub_compaction = 26;
   // The compaction group id when the compaction task is created.
   uint64 compaction_group_version_id = 27;
-  // KV-count threshold for using blocked xor filter in this task when `sstable_filter_layout` is
+  // KV-count threshold for using blocked SST filter in this task when `sstable_filter_layout` is
   // AUTO.
   //
-  // If the total kv-count of input SSTs exceeds this threshold, compaction will build blocked xor
-  // filters. Otherwise it will build a single non-blocked xor filter.
+  // If the total kv-count of input SSTs exceeds this threshold, compaction will build blocked SST
+  // filters. Otherwise it will build a single non-blocked SST filter.
   //
   // Keep the historical protobuf field name for wire and JSON compatibility.
   optional uint64 max_kv_count_for_xor16 = 28;
   // Max bytes for vnode-level key range hints to embed into output SSTs.
   optional uint64 max_vnode_key_range_bytes = 29;
-  // The xor filter family that output SSTs in this task should use.
+  // The SST filter family that output SSTs in this task should use.
   SstableFilterType sstable_filter_kind = 30;
-  // The xor filter layout to use for output SSTs in this task.
+  // The SST filter layout to use for output SSTs in this task.
   SstableFilterLayout sstable_filter_layout = 31;
 }
 
@@ -919,7 +921,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       bool enable_optimize_l0_interval_selection = 30;
       // Deprecated. Kept for backward compatibility and ignored by meta.
       uint64 vnode_aligned_level_size_threshold = 31 [deprecated = true];
-      // KV-count threshold for using blocked xor filter when layout is "auto".
+      // KV-count threshold for using blocked SST filter when layout is "auto".
       // Keep the historical protobuf field name for wire and JSON compatibility.
       uint64 max_kv_count_for_xor16 = 32;
       // Max bytes for vnode key-range hints recorded into each SST.
@@ -1156,10 +1158,10 @@ message CompactionConfig {
   // Deprecated. Kept for backward compatibility and ignored by meta.
   optional uint64 vnode_aligned_level_size_threshold = 31 [deprecated = true];
 
-  // KV-count threshold for using blocked xor filter when `sstable_filter_layout[level]` is AUTO.
+  // KV-count threshold for using blocked SST filter when `sstable_filter_layout[level]` is AUTO.
   //
   // When the number of keys in a compaction task exceeds this threshold, compaction will build
-  // blocked xor filters. Otherwise it will build a single non-blocked xor filter.
+  // blocked SST filters. Otherwise it will build a single non-blocked SST filter.
   //
   // Typical value: 256 * 1024 (256K keys).
   //
@@ -1169,7 +1171,7 @@ message CompactionConfig {
   // Max bytes for vnode key-range hints recorded into each SST.
   optional uint64 max_vnode_key_range_bytes = 33;
 
-  // The xor filter family to use for each output level (for compaction tasks).
+  // The SST filter family to use for each output level (for compaction tasks).
   //
   // Index by LSM level.
   //
@@ -1178,7 +1180,7 @@ message CompactionConfig {
   // applies to L6 output, etc.
   repeated string sstable_filter_kind = 34;
 
-  // The xor filter layout to use for each output level (for compaction tasks).
+  // The SST filter layout to use for each output level (for compaction tasks).
   //
   // Supported values:
   // - "auto": decide by heuristics (currently by kv-count threshold)

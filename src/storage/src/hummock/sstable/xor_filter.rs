@@ -20,15 +20,22 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use risingwave_pb::hummock::PbSstableFilterType;
-use xorf::{Filter, Xor8, Xor16};
+use xorf::{
+    BinaryFuse8, BinaryFuse8Ref, BinaryFuse16, BinaryFuse16Ref, DmaSerializable, Filter,
+    FilterRef as _, Xor8, Xor16,
+};
 
 use super::{FilterBuilder, Sstable};
-use crate::hummock::{BlockMeta, HummockResult, MemoryLimiter};
+use crate::hummock::{BlockMeta, HummockError, HummockResult, MemoryLimiter};
 
 const FOOTER_XOR8: u8 = 254;
 const FOOTER_XOR16: u8 = 255;
 const FOOTER_BLOCKED_XOR16: u8 = 253;
 const FOOTER_BLOCKED_XOR8: u8 = 252;
+const FOOTER_BINARY_FUSE8: u8 = 251;
+const FOOTER_BINARY_FUSE16: u8 = 250;
+const FOOTER_BLOCKED_BINARY_FUSE8: u8 = 249;
+const FOOTER_BLOCKED_BINARY_FUSE16: u8 = 248;
 // Plain Xor filter bytes are encoded as seed, block length, fingerprints, and footer.
 const PLAIN_XOR_FILTER_FIXED_LEN: usize =
     std::mem::size_of::<u64>() + std::mem::size_of::<u32>() + 1;
@@ -40,6 +47,14 @@ pub struct Xor16FilterBuilder {
 }
 
 pub struct Xor8FilterBuilder {
+    key_hash_entries: Vec<u64>,
+}
+
+pub struct BinaryFuse8FilterBuilder {
+    key_hash_entries: Vec<u64>,
+}
+
+pub struct BinaryFuse16FilterBuilder {
     key_hash_entries: Vec<u64>,
 }
 
@@ -60,6 +75,48 @@ impl Xor8FilterBuilder {
         buf.put_slice(xor_filter.fingerprints.as_ref());
         // Add footer to tell which kind of filter. 254 indicates a xor8 filter.
         buf.put_u8(FOOTER_XOR8);
+        buf
+    }
+}
+
+impl BinaryFuse8FilterBuilder {
+    pub fn new(capacity: usize) -> Self {
+        let key_hash_entries = if capacity > 0 {
+            Vec::with_capacity(capacity)
+        } else {
+            vec![]
+        };
+        Self { key_hash_entries }
+    }
+
+    fn build_from_binary_fuse8(filter: &BinaryFuse8) -> Vec<u8> {
+        let descriptor_len = <BinaryFuse8 as DmaSerializable>::DESCRIPTOR_LEN;
+        let mut buf = vec![0; descriptor_len];
+        filter.dma_copy_descriptor_to(&mut buf);
+        buf.extend_from_slice(filter.dma_fingerprints());
+        buf.put_u8(FOOTER_BINARY_FUSE8);
+        buf
+    }
+}
+
+impl BinaryFuse16FilterBuilder {
+    pub fn new(capacity: usize) -> Self {
+        let key_hash_entries = if capacity > 0 {
+            Vec::with_capacity(capacity)
+        } else {
+            vec![]
+        };
+        Self { key_hash_entries }
+    }
+
+    fn build_from_binary_fuse16(filter: &BinaryFuse16) -> Vec<u8> {
+        let descriptor_len = <BinaryFuse16 as DmaSerializable>::DESCRIPTOR_LEN;
+        let mut buf = vec![0; descriptor_len];
+        filter.dma_copy_descriptor_to(&mut buf);
+        for fingerprint in &filter.fingerprints {
+            buf.put_u16_le(*fingerprint);
+        }
+        buf.put_u8(FOOTER_BINARY_FUSE16);
         buf
     }
 }
@@ -117,6 +174,65 @@ fn xor8_filter_serialized_len(filter: &Xor8) -> usize {
 
 fn xor16_filter_serialized_len(filter: &Xor16) -> usize {
     PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
+}
+
+// Mirror xorf's BinaryFuse arity-3 sizing formula so `approximate_len` can estimate the
+// serialized SST bytes without constructing the filter twice. Keep this in sync with xorf when
+// upgrading the crate.
+fn binary_fuse_segment_length(size: usize) -> u32 {
+    if size == 0 {
+        return 4;
+    }
+    let exponent = ((size as f64).ln() / 3.33_f64.ln() + 2.25).floor() as u32;
+    1u32.checked_shl(exponent).unwrap_or(u32::MAX).min(262144)
+}
+
+fn binary_fuse_size_factor(size: usize) -> f64 {
+    debug_assert!(size > 1);
+    1.125_f64.max(0.875 + 0.25 * 1_000_000_f64.ln() / (size as f64).ln())
+}
+
+fn binary_fuse_fingerprint_len(key_count: usize) -> usize {
+    if key_count == 0 {
+        return 0;
+    }
+    let arity = 3;
+    let segment_length = binary_fuse_segment_length(key_count);
+    let capacity = if key_count > 1 {
+        (key_count as f64 * binary_fuse_size_factor(key_count)).round() as u32
+    } else {
+        0
+    };
+    let init_segment_count = capacity.div_ceil(segment_length);
+    let array_len = init_segment_count * segment_length;
+    let proposed_segment_count = array_len.div_ceil(segment_length);
+    let segment_count = if proposed_segment_count < arity {
+        1
+    } else {
+        proposed_segment_count - (arity - 1)
+    };
+    ((segment_count + arity - 1) * segment_length) as usize
+}
+
+fn approximate_binary_fuse_filter_serialized_len(
+    key_count: usize,
+    descriptor_len: usize,
+    fingerprint_size: usize,
+) -> usize {
+    let fingerprint_len = binary_fuse_fingerprint_len(key_count);
+    if fingerprint_len == 0 {
+        0
+    } else {
+        descriptor_len + fingerprint_len * fingerprint_size + 1
+    }
+}
+
+fn binary_fuse8_filter_serialized_len(filter: &BinaryFuse8FilterData) -> usize {
+    filter.descriptor.len() + filter.fingerprints.len() + 1
+}
+
+fn binary_fuse16_filter_serialized_len(filter: &BinaryFuse16FilterData) -> usize {
+    filter.descriptor.len() + filter.fingerprints.len() * std::mem::size_of::<u16>() + 1
 }
 
 /// Computes the serialized byte length of a blocked Xor filter.
@@ -223,6 +339,112 @@ impl FilterBuilder for Xor8FilterBuilder {
     }
 }
 
+impl FilterBuilder for BinaryFuse8FilterBuilder {
+    fn add_key(&mut self, key: &[u8], table_id: u32) {
+        self.key_hash_entries
+            .push(Sstable::hash_for_filter(key, table_id));
+    }
+
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
+        self.key_hash_entries.sort();
+        self.key_hash_entries.dedup();
+
+        if self.key_hash_entries.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
+            memory_limit.must_require_memory(self.approximate_building_memory() as u64)
+        });
+
+        let binary_fuse_filter = match BinaryFuse8::try_from(&self.key_hash_entries) {
+            Ok(filter) => filter,
+            Err(err) => {
+                self.key_hash_entries.clear();
+                return Err(HummockError::other(format!(
+                    "failed to build binary fuse8 filter from distinct key hashes: {err}"
+                )));
+            }
+        };
+        self.key_hash_entries.clear();
+        Ok(Self::build_from_binary_fuse8(&binary_fuse_filter))
+    }
+
+    fn approximate_len(&self) -> usize {
+        approximate_binary_fuse_filter_serialized_len(
+            self.key_hash_entries.len(),
+            <BinaryFuse8 as DmaSerializable>::DESCRIPTOR_LEN,
+            std::mem::size_of::<u8>(),
+        )
+    }
+
+    fn create(capacity: usize) -> Self {
+        BinaryFuse8FilterBuilder::new(capacity)
+    }
+
+    fn approximate_building_memory(&self) -> usize {
+        const BINARY_FUSE_MEMORY_PROPORTION: usize = 123;
+        self.key_hash_entries.len() * BINARY_FUSE_MEMORY_PROPORTION
+    }
+
+    fn filter_type(&self) -> PbSstableFilterType {
+        PbSstableFilterType::SstableFilterBinaryFuse8
+    }
+}
+
+impl FilterBuilder for BinaryFuse16FilterBuilder {
+    fn add_key(&mut self, key: &[u8], table_id: u32) {
+        self.key_hash_entries
+            .push(Sstable::hash_for_filter(key, table_id));
+    }
+
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
+        self.key_hash_entries.sort();
+        self.key_hash_entries.dedup();
+
+        if self.key_hash_entries.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
+            memory_limit.must_require_memory(self.approximate_building_memory() as u64)
+        });
+
+        let binary_fuse_filter = match BinaryFuse16::try_from(&self.key_hash_entries) {
+            Ok(filter) => filter,
+            Err(err) => {
+                self.key_hash_entries.clear();
+                return Err(HummockError::other(format!(
+                    "failed to build binary fuse16 filter from distinct key hashes: {err}"
+                )));
+            }
+        };
+        self.key_hash_entries.clear();
+        Ok(Self::build_from_binary_fuse16(&binary_fuse_filter))
+    }
+
+    fn approximate_len(&self) -> usize {
+        approximate_binary_fuse_filter_serialized_len(
+            self.key_hash_entries.len(),
+            <BinaryFuse16 as DmaSerializable>::DESCRIPTOR_LEN,
+            std::mem::size_of::<u16>(),
+        )
+    }
+
+    fn create(capacity: usize) -> Self {
+        BinaryFuse16FilterBuilder::new(capacity)
+    }
+
+    fn approximate_building_memory(&self) -> usize {
+        const BINARY_FUSE_MEMORY_PROPORTION: usize = 123;
+        self.key_hash_entries.len() * BINARY_FUSE_MEMORY_PROPORTION
+    }
+
+    fn filter_type(&self) -> PbSstableFilterType {
+        PbSstableFilterType::SstableFilterBinaryFuse16
+    }
+}
+
 pub struct BlockedXor16FilterBuilder {
     current: Xor16FilterBuilder,
     data: Vec<u8>,
@@ -231,6 +453,18 @@ pub struct BlockedXor16FilterBuilder {
 
 pub struct BlockedXor8FilterBuilder {
     current: Xor8FilterBuilder,
+    data: Vec<u8>,
+    block_count: usize,
+}
+
+pub struct BlockedBinaryFuse8FilterBuilder {
+    current: BinaryFuse8FilterBuilder,
+    data: Vec<u8>,
+    block_count: usize,
+}
+
+pub struct BlockedBinaryFuse16FilterBuilder {
+    current: BinaryFuse16FilterBuilder,
     data: Vec<u8>,
     block_count: usize,
 }
@@ -257,13 +491,33 @@ impl BlockedXor8FilterBuilder {
     }
 }
 
+impl BlockedBinaryFuse8FilterBuilder {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            current: BinaryFuse8FilterBuilder::new(BLOCK_FILTER_CAPACITY),
+            data: Vec::with_capacity(capacity),
+            block_count: 0,
+        }
+    }
+}
+
+impl BlockedBinaryFuse16FilterBuilder {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            current: BinaryFuse16FilterBuilder::new(BLOCK_FILTER_CAPACITY),
+            data: Vec::with_capacity(capacity),
+            block_count: 0,
+        }
+    }
+}
+
 impl FilterBuilder for BlockedXor16FilterBuilder {
     fn add_key(&mut self, key: &[u8], table_id: u32) {
         self.current.add_key(key, table_id)
     }
 
     fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
-        // Add footer to tell which kind of filter.
+        // Add footer to tell which kind of blocked filter is encoded.
         self.data.put_u32_le(self.block_count as u32);
         self.data.put_u8(FOOTER_BLOCKED_XOR16);
         Ok(std::mem::take(&mut self.data))
@@ -311,6 +565,118 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
 
     fn filter_type(&self) -> PbSstableFilterType {
         PbSstableFilterType::SstableFilterXor16
+    }
+}
+
+impl FilterBuilder for BlockedBinaryFuse8FilterBuilder {
+    fn add_key(&mut self, key: &[u8], table_id: u32) {
+        self.current.add_key(key, table_id)
+    }
+
+    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
+        self.data.put_u32_le(self.block_count as u32);
+        self.data.put_u8(FOOTER_BLOCKED_BINARY_FUSE8);
+        Ok(std::mem::take(&mut self.data))
+    }
+
+    fn approximate_len(&self) -> usize {
+        let pending_plain_filter_len = if self.current.key_hash_entries.is_empty() {
+            0
+        } else {
+            self.current.approximate_len()
+        };
+        blocked_xor_filter_serialized_len(
+            self.data.len(),
+            self.block_count,
+            pending_plain_filter_len,
+        )
+    }
+
+    fn create(capacity: usize) -> Self {
+        BlockedBinaryFuse8FilterBuilder::new(capacity)
+    }
+
+    fn switch_block(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<()> {
+        let block = self.current.finish(memory_limiter)?;
+        self.data.put_u32_le(block.len() as u32);
+        self.data.extend(block);
+        self.block_count += 1;
+        Ok(())
+    }
+
+    fn approximate_building_memory(&self) -> usize {
+        self.current.approximate_building_memory()
+    }
+
+    fn add_raw_data(&mut self, raw: Vec<u8>) {
+        assert!(self.current.key_hash_entries.is_empty());
+        self.data.put_u32_le(raw.len() as u32);
+        self.data.extend(raw);
+        self.block_count += 1;
+    }
+
+    fn support_blocked_raw_data(&self) -> bool {
+        true
+    }
+
+    fn filter_type(&self) -> PbSstableFilterType {
+        PbSstableFilterType::SstableFilterBinaryFuse8
+    }
+}
+
+impl FilterBuilder for BlockedBinaryFuse16FilterBuilder {
+    fn add_key(&mut self, key: &[u8], table_id: u32) {
+        self.current.add_key(key, table_id)
+    }
+
+    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
+        self.data.put_u32_le(self.block_count as u32);
+        self.data.put_u8(FOOTER_BLOCKED_BINARY_FUSE16);
+        Ok(std::mem::take(&mut self.data))
+    }
+
+    fn approximate_len(&self) -> usize {
+        let pending_plain_filter_len = if self.current.key_hash_entries.is_empty() {
+            0
+        } else {
+            self.current.approximate_len()
+        };
+        blocked_xor_filter_serialized_len(
+            self.data.len(),
+            self.block_count,
+            pending_plain_filter_len,
+        )
+    }
+
+    fn create(capacity: usize) -> Self {
+        BlockedBinaryFuse16FilterBuilder::new(capacity)
+    }
+
+    fn switch_block(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<()> {
+        let block = self.current.finish(memory_limiter)?;
+        self.data.put_u32_le(block.len() as u32);
+        self.data.extend(block);
+        self.block_count += 1;
+        Ok(())
+    }
+
+    fn approximate_building_memory(&self) -> usize {
+        self.current.approximate_building_memory()
+    }
+
+    fn add_raw_data(&mut self, raw: Vec<u8>) {
+        assert!(self.current.key_hash_entries.is_empty());
+        self.data.put_u32_le(raw.len() as u32);
+        self.data.extend(raw);
+        self.block_count += 1;
+    }
+
+    fn support_blocked_raw_data(&self) -> bool {
+        true
+    }
+
+    fn filter_type(&self) -> PbSstableFilterType {
+        PbSstableFilterType::SstableFilterBinaryFuse16
     }
 }
 
@@ -370,14 +736,75 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
     }
 }
 
-pub struct BlockBasedXorFilter<F> {
+pub struct BlockBasedFilter<F> {
     filters: Vec<F>,
 }
 
-pub type BlockBasedXor8Filter = BlockBasedXorFilter<Xor8>;
-pub type BlockBasedXor16Filter = BlockBasedXorFilter<Xor16>;
+pub type BlockBasedXor8Filter = BlockBasedFilter<Xor8>;
+pub type BlockBasedXor16Filter = BlockBasedFilter<Xor16>;
+pub type BlockBasedBinaryFuse8Filter = BlockBasedFilter<BinaryFuse8FilterData>;
+pub type BlockBasedBinaryFuse16Filter = BlockBasedFilter<BinaryFuse16FilterData>;
 
-impl<F: Clone> Clone for BlockBasedXorFilter<F> {
+#[derive(Clone)]
+pub struct BinaryFuse8FilterData {
+    descriptor: Box<[u8]>,
+    fingerprints: Box<[u8]>,
+}
+
+#[derive(Clone)]
+pub struct BinaryFuse16FilterData {
+    descriptor: Box<[u8]>,
+    fingerprints: Box<[u16]>,
+}
+
+impl Filter<u64> for BinaryFuse8FilterData {
+    fn contains(&self, key: &u64) -> bool {
+        if self.fingerprints.is_empty() {
+            return true;
+        }
+        BinaryFuse8Ref::from_dma(&self.descriptor, &self.fingerprints).contains(key)
+    }
+
+    fn len(&self) -> usize {
+        self.fingerprints.len()
+    }
+}
+
+impl Filter<u64> for BinaryFuse16FilterData {
+    fn contains(&self, key: &u64) -> bool {
+        if self.fingerprints.is_empty() {
+            return true;
+        }
+        BinaryFuse16Ref::from_dma(
+            &self.descriptor,
+            binary_fuse16_fingerprints_as_dma_bytes(&self.fingerprints),
+        )
+        .contains(key)
+    }
+
+    fn len(&self) -> usize {
+        self.fingerprints.len()
+    }
+}
+
+fn binary_fuse16_fingerprints_as_dma_bytes(fingerprints: &[u16]) -> &[u8] {
+    // SST bytes are encoded as little-endian u16 values and parsed into `Box<[u16]>` before they
+    // reach this helper. `xorf::BinaryFuse16Ref::from_dma` does not parse SST bytes; it expects an
+    // aligned native u16 memory view. This helper only creates that temporary view for the official
+    // xorf lookup path, and must not be used as the SST serialization format.
+    //
+    // SAFETY: `fingerprints` is already a `[u16]` slice, so the returned byte slice keeps the same
+    // alignment, lifetime, and initialized memory. The length is computed with `size_of_val`, so it
+    // exactly covers the underlying u16 slice.
+    unsafe {
+        std::slice::from_raw_parts(
+            fingerprints.as_ptr().cast::<u8>(),
+            std::mem::size_of_val(fingerprints),
+        )
+    }
+}
+
+impl<F: Clone> Clone for BlockBasedFilter<F> {
     fn clone(&self) -> Self {
         Self {
             filters: self.filters.clone(),
@@ -385,7 +812,7 @@ impl<F: Clone> Clone for BlockBasedXorFilter<F> {
     }
 }
 
-impl<F> BlockBasedXorFilter<F>
+impl<F> BlockBasedFilter<F>
 where
     F: Filter<u64>,
 {
@@ -444,11 +871,23 @@ fn xor16_filter_heap_size(filter: &Xor16) -> usize {
     filter.fingerprints.len() * std::mem::size_of::<u16>()
 }
 
+fn binary_fuse8_filter_heap_size(filter: &BinaryFuse8FilterData) -> usize {
+    filter.descriptor.len() + filter.fingerprints.len()
+}
+
+fn binary_fuse16_filter_heap_size(filter: &BinaryFuse16FilterData) -> usize {
+    filter.descriptor.len() + filter.fingerprints.len() * std::mem::size_of::<u16>()
+}
+
 pub enum XorFilter {
     Xor8(Xor8),
     Xor16(Xor16),
+    BinaryFuse8(BinaryFuse8FilterData),
+    BinaryFuse16(BinaryFuse16FilterData),
     BlockXor8(BlockBasedXor8Filter),
     BlockXor16(BlockBasedXor16Filter),
+    BlockBinaryFuse8(BlockBasedBinaryFuse8Filter),
+    BlockBinaryFuse16(BlockBasedBinaryFuse16Filter),
 }
 
 pub struct XorFilterReader {
@@ -456,7 +895,7 @@ pub struct XorFilterReader {
 }
 
 impl XorFilterReader {
-    /// Creates an xor filter from a byte slice
+    /// Creates an SST filter from a byte slice.
     pub fn new(data: &[u8], metas: &[BlockMeta]) -> Self {
         if data.len() <= 1 {
             return Self {
@@ -473,6 +912,14 @@ impl XorFilterReader {
             XorFilter::BlockXor16(Self::to_block_xor16(data, metas))
         } else if kind == FOOTER_BLOCKED_XOR8 {
             XorFilter::BlockXor8(Self::to_block_xor8(data, metas))
+        } else if kind == FOOTER_BLOCKED_BINARY_FUSE16 {
+            XorFilter::BlockBinaryFuse16(Self::to_block_binary_fuse16(data, metas))
+        } else if kind == FOOTER_BLOCKED_BINARY_FUSE8 {
+            XorFilter::BlockBinaryFuse8(Self::to_block_binary_fuse8(data, metas))
+        } else if kind == FOOTER_BINARY_FUSE16 {
+            XorFilter::BinaryFuse16(Self::to_binary_fuse16(data))
+        } else if kind == FOOTER_BINARY_FUSE8 {
+            XorFilter::BinaryFuse8(Self::to_binary_fuse8(data))
         } else if kind == FOOTER_XOR16 {
             XorFilter::Xor16(Self::to_xor16(data))
         } else {
@@ -521,6 +968,43 @@ impl XorFilterReader {
         }
     }
 
+    fn to_binary_fuse8(data: &[u8]) -> BinaryFuse8FilterData {
+        let kind = *data.last().unwrap();
+        assert_eq!(kind, FOOTER_BINARY_FUSE8);
+        let descriptor_len = <BinaryFuse8 as DmaSerializable>::DESCRIPTOR_LEN;
+        assert!(data.len() > descriptor_len);
+        let fingerprint_end = data.len() - 1;
+        BinaryFuse8FilterData {
+            descriptor: data[..descriptor_len].to_vec().into_boxed_slice(),
+            fingerprints: data[descriptor_len..fingerprint_end]
+                .to_vec()
+                .into_boxed_slice(),
+        }
+    }
+
+    fn to_binary_fuse16(mut data: &[u8]) -> BinaryFuse16FilterData {
+        let kind = *data.last().unwrap();
+        assert_eq!(kind, FOOTER_BINARY_FUSE16);
+        let descriptor_len = <BinaryFuse16 as DmaSerializable>::DESCRIPTOR_LEN;
+        assert!(data.len() > descriptor_len);
+        let fingerprint_end = data.len() - 1;
+        assert_eq!(
+            (fingerprint_end - descriptor_len) % std::mem::size_of::<u16>(),
+            0
+        );
+        let descriptor = data[..descriptor_len].to_vec().into_boxed_slice();
+        data.advance(descriptor_len);
+        let fingerprint_len = (fingerprint_end - descriptor_len) / std::mem::size_of::<u16>();
+        let fingerprints = (0..fingerprint_len)
+            .map(|_| data.get_u16_le())
+            .collect_vec()
+            .into_boxed_slice();
+        BinaryFuse16FilterData {
+            descriptor,
+            fingerprints,
+        }
+    }
+
     fn to_block_xor16(mut data: &[u8], metas: &[BlockMeta]) -> BlockBasedXor16Filter {
         let l = data.len();
         let reader = &mut &data[(l - 5)..];
@@ -553,6 +1037,55 @@ impl XorFilterReader {
         BlockBasedXor8Filter { filters }
     }
 
+    fn to_block_binary_fuse16(
+        mut data: &[u8],
+        metas: &[BlockMeta],
+    ) -> BlockBasedBinaryFuse16Filter {
+        let l = data.len();
+        let reader = &mut &data[(l - 5)..];
+        let block_count = reader.get_u32_le() as usize;
+        assert_eq!(block_count, metas.len());
+        let reader = &mut data;
+        let mut filters = Vec::with_capacity(block_count);
+        for _ in 0..block_count {
+            let len = reader.get_u32_le() as usize;
+            let binary_fuse16 = if len == 0 {
+                BinaryFuse16FilterData {
+                    descriptor: Box::default(),
+                    fingerprints: Box::default(),
+                }
+            } else {
+                Self::to_binary_fuse16(&reader[..len])
+            };
+            reader.advance(len);
+            filters.push(binary_fuse16);
+        }
+        BlockBasedBinaryFuse16Filter { filters }
+    }
+
+    fn to_block_binary_fuse8(mut data: &[u8], metas: &[BlockMeta]) -> BlockBasedBinaryFuse8Filter {
+        let l = data.len();
+        let reader = &mut &data[(l - 5)..];
+        let block_count = reader.get_u32_le() as usize;
+        assert_eq!(block_count, metas.len());
+        let reader = &mut data;
+        let mut filters = Vec::with_capacity(block_count);
+        for _ in 0..block_count {
+            let len = reader.get_u32_le() as usize;
+            let binary_fuse8 = if len == 0 {
+                BinaryFuse8FilterData {
+                    descriptor: Box::default(),
+                    fingerprints: Box::default(),
+                }
+            } else {
+                Self::to_binary_fuse8(&reader[..len])
+            };
+            reader.advance(len);
+            filters.push(binary_fuse8);
+        }
+        BlockBasedBinaryFuse8Filter { filters }
+    }
+
     /// Returns the serialized byte length of the decoded filter reader.
     ///
     /// This intentionally follows RisingWave's filter encoding size, not the exact Rust heap
@@ -564,6 +1097,8 @@ impl XorFilterReader {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_serialized_len(filter),
             XorFilter::Xor16(filter) => xor16_filter_serialized_len(filter),
+            XorFilter::BinaryFuse8(filter) => binary_fuse8_filter_serialized_len(filter),
+            XorFilter::BinaryFuse16(filter) => binary_fuse16_filter_serialized_len(filter),
             XorFilter::BlockXor8(reader) => {
                 let finished_blocks_len = reader
                     .filters
@@ -584,6 +1119,28 @@ impl XorFilterReader {
                     .sum();
                 blocked_xor_filter_serialized_len(finished_blocks_len, reader.filters.len(), 0)
             }
+            XorFilter::BlockBinaryFuse8(reader) => {
+                let finished_blocks_len = reader
+                    .filters
+                    .iter()
+                    .map(|filter| {
+                        BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX
+                            + binary_fuse8_filter_serialized_len(filter)
+                    })
+                    .sum();
+                blocked_xor_filter_serialized_len(finished_blocks_len, reader.filters.len(), 0)
+            }
+            XorFilter::BlockBinaryFuse16(reader) => {
+                let finished_blocks_len = reader
+                    .filters
+                    .iter()
+                    .map(|filter| {
+                        BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX
+                            + binary_fuse16_filter_serialized_len(filter)
+                    })
+                    .sum();
+                blocked_xor_filter_serialized_len(finished_blocks_len, reader.filters.len(), 0)
+            }
         }
     }
 
@@ -594,6 +1151,8 @@ impl XorFilterReader {
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_heap_size(filter),
             XorFilter::Xor16(filter) => xor16_filter_heap_size(filter),
+            XorFilter::BinaryFuse8(filter) => binary_fuse8_filter_heap_size(filter),
+            XorFilter::BinaryFuse16(filter) => binary_fuse16_filter_heap_size(filter),
             XorFilter::BlockXor8(reader) => {
                 reader.filters.capacity() * std::mem::size_of::<Xor8>()
                     + reader
@@ -610,6 +1169,22 @@ impl XorFilterReader {
                         .map(xor16_filter_heap_size)
                         .sum::<usize>()
             }
+            XorFilter::BlockBinaryFuse8(reader) => {
+                reader.filters.capacity() * std::mem::size_of::<BinaryFuse8FilterData>()
+                    + reader
+                        .filters
+                        .iter()
+                        .map(binary_fuse8_filter_heap_size)
+                        .sum::<usize>()
+            }
+            XorFilter::BlockBinaryFuse16(reader) => {
+                reader.filters.capacity() * std::mem::size_of::<BinaryFuse16FilterData>()
+                    + reader
+                        .filters
+                        .iter()
+                        .map(binary_fuse16_filter_heap_size)
+                        .sum::<usize>()
+            }
         }
     }
 
@@ -617,8 +1192,12 @@ impl XorFilterReader {
         match &self.filter {
             XorFilter::Xor8(filter) => filter.block_length == 0,
             XorFilter::Xor16(filter) => filter.block_length == 0,
+            XorFilter::BinaryFuse8(filter) => filter.len() == 0,
+            XorFilter::BinaryFuse16(filter) => filter.len() == 0,
             XorFilter::BlockXor8(reader) => reader.filters.is_empty(),
             XorFilter::BlockXor16(reader) => reader.filters.is_empty(),
+            XorFilter::BlockBinaryFuse8(reader) => reader.filters.is_empty(),
+            XorFilter::BlockBinaryFuse16(reader) => reader.filters.is_empty(),
         }
     }
 
@@ -641,8 +1220,16 @@ impl XorFilterReader {
             match &self.filter {
                 XorFilter::Xor8(filter) => filter.contains(&h),
                 XorFilter::Xor16(filter) => filter.contains(&h),
+                XorFilter::BinaryFuse8(filter) => filter.contains(&h),
+                XorFilter::BinaryFuse16(filter) => filter.contains(&h),
                 XorFilter::BlockXor8(reader) => reader.may_exist(block_metas, user_key_range, h),
                 XorFilter::BlockXor16(reader) => reader.may_exist(block_metas, user_key_range, h),
+                XorFilter::BlockBinaryFuse8(reader) => {
+                    reader.may_exist(block_metas, user_key_range, h)
+                }
+                XorFilter::BlockBinaryFuse16(reader) => {
+                    reader.may_exist(block_metas, user_key_range, h)
+                }
             }
         }
     }
@@ -655,14 +1242,23 @@ impl XorFilterReader {
             XorFilter::BlockXor16(reader) => {
                 Xor16FilterBuilder::build_from_xor16(&reader.filters[block_index])
             }
-            _ => unreachable!("get_block_raw_filter requires a blocked xor filter"),
+            XorFilter::BlockBinaryFuse8(reader) => {
+                build_from_binary_fuse8_data(&reader.filters[block_index])
+            }
+            XorFilter::BlockBinaryFuse16(reader) => {
+                build_from_binary_fuse16_data(&reader.filters[block_index])
+            }
+            _ => unreachable!("get_block_raw_filter requires a blocked SST filter"),
         }
     }
 
     pub fn is_block_based_filter(&self) -> bool {
         matches!(
             self.filter,
-            XorFilter::BlockXor8(_) | XorFilter::BlockXor16(_)
+            XorFilter::BlockXor8(_)
+                | XorFilter::BlockXor16(_)
+                | XorFilter::BlockBinaryFuse8(_)
+                | XorFilter::BlockBinaryFuse16(_)
         )
     }
 
@@ -670,6 +1266,8 @@ impl XorFilterReader {
         match &self.filter {
             XorFilter::Xor8(filter) => Xor8FilterBuilder::build_from_xor8(filter),
             XorFilter::Xor16(filter) => Xor16FilterBuilder::build_from_xor16(filter),
+            XorFilter::BinaryFuse8(filter) => build_from_binary_fuse8_data(filter),
+            XorFilter::BinaryFuse16(filter) => build_from_binary_fuse16_data(filter),
             XorFilter::BlockXor8(reader) => {
                 let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
                 for filter in &reader.filters {
@@ -693,8 +1291,56 @@ impl XorFilterReader {
                 data.put_u8(FOOTER_BLOCKED_XOR16);
                 data
             }
+            XorFilter::BlockBinaryFuse8(reader) => {
+                let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
+                for filter in &reader.filters {
+                    let block = build_from_binary_fuse8_data(filter);
+                    data.put_u32_le(block.len() as u32);
+                    data.extend(block);
+                }
+                data.put_u32_le(reader.filters.len() as u32);
+                data.put_u8(FOOTER_BLOCKED_BINARY_FUSE8);
+                data
+            }
+            XorFilter::BlockBinaryFuse16(reader) => {
+                let mut data = Vec::with_capacity(4 + reader.filters.len() * 1024);
+                for filter in &reader.filters {
+                    let block = build_from_binary_fuse16_data(filter);
+                    data.put_u32_le(block.len() as u32);
+                    data.extend(block);
+                }
+                data.put_u32_le(reader.filters.len() as u32);
+                data.put_u8(FOOTER_BLOCKED_BINARY_FUSE16);
+                data
+            }
         }
     }
+}
+
+fn build_from_binary_fuse8_data(filter: &BinaryFuse8FilterData) -> Vec<u8> {
+    if filter.fingerprints.is_empty() {
+        return vec![];
+    }
+
+    let mut data = Vec::with_capacity(filter.descriptor.len() + filter.fingerprints.len() + 1);
+    data.extend_from_slice(&filter.descriptor);
+    data.extend_from_slice(&filter.fingerprints);
+    data.put_u8(FOOTER_BINARY_FUSE8);
+    data
+}
+
+fn build_from_binary_fuse16_data(filter: &BinaryFuse16FilterData) -> Vec<u8> {
+    if filter.fingerprints.is_empty() {
+        return vec![];
+    }
+
+    let mut data = Vec::with_capacity(filter.descriptor.len() + filter.fingerprints.len() * 2 + 1);
+    data.extend_from_slice(&filter.descriptor);
+    for fingerprint in &filter.fingerprints {
+        data.put_u16_le(*fingerprint);
+    }
+    data.put_u8(FOOTER_BINARY_FUSE16);
+    data
 }
 
 impl Clone for XorFilterReader {
@@ -714,11 +1360,23 @@ impl Clone for XorFilterReader {
                     fingerprints: filter.fingerprints.clone(),
                 }),
             },
+            XorFilter::BinaryFuse8(filter) => Self {
+                filter: XorFilter::BinaryFuse8(filter.clone()),
+            },
+            XorFilter::BinaryFuse16(filter) => Self {
+                filter: XorFilter::BinaryFuse16(filter.clone()),
+            },
             XorFilter::BlockXor8(reader) => Self {
                 filter: XorFilter::BlockXor8(reader.clone()),
             },
             XorFilter::BlockXor16(reader) => Self {
                 filter: XorFilter::BlockXor16(reader.clone()),
+            },
+            XorFilter::BlockBinaryFuse8(reader) => Self {
+                filter: XorFilter::BlockBinaryFuse8(reader.clone()),
+            },
+            XorFilter::BlockBinaryFuse16(reader) => Self {
+                filter: XorFilter::BlockBinaryFuse16(reader.clone()),
             },
         }
     }
@@ -744,6 +1402,32 @@ mod tests {
     use crate::hummock::value::HummockValue;
     use crate::hummock::{BlockIterator, CachePolicy, SstableWriterOptions};
     use crate::monitor::StoreLocalStatistic;
+
+    fn assert_reader_contains_keys(reader: &XorFilterReader, start: usize, end: usize) {
+        let user_key_range = (Bound::Unbounded, Bound::Unbounded);
+        for i in start..end {
+            let key = test_user_key_of(i).encode();
+            let hash = Sstable::hash_for_filter(&key, 0);
+            assert!(reader.may_match(&[], &user_key_range, hash));
+        }
+    }
+
+    fn assert_blocked_reader_contains_keys(
+        reader: &XorFilterReader,
+        block_metas: &[BlockMeta],
+        start: usize,
+        end: usize,
+    ) {
+        let user_key_range = (Bound::Unbounded, Bound::Unbounded);
+        for i in start..end {
+            let key = test_user_key_of(i).encode();
+            let hash = Sstable::hash_for_filter(&key, 0);
+            assert!(
+                reader.may_match(block_metas, &user_key_range, hash),
+                "blocked filter missed key index {i}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_blocked_xor_filter() {
@@ -838,6 +1522,12 @@ mod tests {
         for key_count in [1, 2, 100, 1000] {
             assert_plain_filter_builder_approx_len_matches_output::<Xor8FilterBuilder>(key_count);
             assert_plain_filter_builder_approx_len_matches_output::<Xor16FilterBuilder>(key_count);
+            assert_plain_filter_builder_approx_len_matches_output::<BinaryFuse8FilterBuilder>(
+                key_count,
+            );
+            assert_plain_filter_builder_approx_len_matches_output::<BinaryFuse16FilterBuilder>(
+                key_count,
+            );
         }
     }
 
@@ -866,6 +1556,10 @@ mod tests {
     fn test_blocked_filter_builder_approx_len_matches_output() {
         assert_blocked_filter_builder_approx_len_matches_output::<BlockedXor8FilterBuilder>();
         assert_blocked_filter_builder_approx_len_matches_output::<BlockedXor16FilterBuilder>();
+        assert_blocked_filter_builder_approx_len_matches_output::<BlockedBinaryFuse8FilterBuilder>(
+        );
+        assert_blocked_filter_builder_approx_len_matches_output::<BlockedBinaryFuse16FilterBuilder>(
+        );
     }
 
     // Test to make sure filter key builder finish produce the same result as the filter reader encode_to_bytes
@@ -899,6 +1593,44 @@ mod tests {
             "Xor16 builder and reader should produce identical bytes"
         );
 
+        // Empty BinaryFuse filters represent no-filter output.
+        assert_eq!(
+            BinaryFuse8FilterBuilder::new(0).finish(None).unwrap(),
+            Vec::<u8>::new()
+        );
+        assert_eq!(
+            BinaryFuse16FilterBuilder::new(0).finish(None).unwrap(),
+            Vec::<u8>::new()
+        );
+
+        // Test BinaryFuse8 filter
+        let mut binary_fuse8_builder = BinaryFuse8FilterBuilder::new(100);
+        for i in 0..100 {
+            binary_fuse8_builder.add_key(&test_user_key_of(i).encode(), 0);
+        }
+        let binary_fuse8_bytes = binary_fuse8_builder.finish(None).unwrap();
+        let binary_fuse8_reader = XorFilterReader::new(&binary_fuse8_bytes, &[]);
+        assert_reader_contains_keys(&binary_fuse8_reader, 0, 100);
+        let binary_fuse8_encoded = binary_fuse8_reader.encode_to_bytes();
+        assert_eq!(
+            binary_fuse8_bytes, binary_fuse8_encoded,
+            "BinaryFuse8 builder and reader should produce identical bytes"
+        );
+
+        // Test BinaryFuse16 filter
+        let mut binary_fuse16_builder = BinaryFuse16FilterBuilder::new(100);
+        for i in 0..100 {
+            binary_fuse16_builder.add_key(&test_user_key_of(i).encode(), 0);
+        }
+        let binary_fuse16_bytes = binary_fuse16_builder.finish(None).unwrap();
+        let binary_fuse16_reader = XorFilterReader::new(&binary_fuse16_bytes, &[]);
+        assert_reader_contains_keys(&binary_fuse16_reader, 0, 100);
+        let binary_fuse16_encoded = binary_fuse16_reader.encode_to_bytes();
+        assert_eq!(
+            binary_fuse16_bytes, binary_fuse16_encoded,
+            "BinaryFuse16 builder and reader should produce identical bytes"
+        );
+
         let mut block_metas = Vec::new();
         for block_idx in 0..3 {
             let smallest_key = FullKey {
@@ -927,6 +1659,7 @@ mod tests {
         }
         let blocked_xor8_bytes = blocked_xor8_builder.finish(None).unwrap();
         let blocked_xor8_reader = XorFilterReader::new(&blocked_xor8_bytes, &block_metas);
+        assert_blocked_reader_contains_keys(&blocked_xor8_reader, &block_metas, 0, 150);
         let blocked_xor8_encoded = blocked_xor8_reader.encode_to_bytes();
         assert_eq!(
             blocked_xor8_reader.serialized_len(),
@@ -948,6 +1681,7 @@ mod tests {
         }
         let blocked_xor16_bytes = blocked_xor16_builder.finish(None).unwrap();
         let blocked_xor16_reader = XorFilterReader::new(&blocked_xor16_bytes, &block_metas);
+        assert_blocked_reader_contains_keys(&blocked_xor16_reader, &block_metas, 0, 150);
         let blocked_xor16_encoded = blocked_xor16_reader.encode_to_bytes();
         assert_eq!(
             blocked_xor16_reader.serialized_len(),
@@ -956,6 +1690,81 @@ mod tests {
         assert_eq!(
             blocked_xor16_bytes, blocked_xor16_encoded,
             "BlockedXor16 builder and reader should produce identical bytes"
+        );
+
+        // Empty per-block BinaryFuse filters represent a no-filter block and must always match.
+        let mut empty_blocked_binary_fuse8_builder = BlockedBinaryFuse8FilterBuilder::new(1024);
+        empty_blocked_binary_fuse8_builder
+            .switch_block(None)
+            .unwrap();
+        let empty_blocked_binary_fuse8_bytes =
+            empty_blocked_binary_fuse8_builder.finish(None).unwrap();
+        let empty_blocked_binary_fuse8_reader =
+            XorFilterReader::new(&empty_blocked_binary_fuse8_bytes, &block_metas[..1]);
+        assert!(empty_blocked_binary_fuse8_reader.may_match(
+            &block_metas[..1],
+            &(Bound::Unbounded, Bound::Unbounded),
+            0
+        ));
+        assert_eq!(
+            empty_blocked_binary_fuse8_bytes,
+            empty_blocked_binary_fuse8_reader.encode_to_bytes()
+        );
+
+        let mut empty_blocked_binary_fuse16_builder = BlockedBinaryFuse16FilterBuilder::new(1024);
+        empty_blocked_binary_fuse16_builder
+            .switch_block(None)
+            .unwrap();
+        let empty_blocked_binary_fuse16_bytes =
+            empty_blocked_binary_fuse16_builder.finish(None).unwrap();
+        let empty_blocked_binary_fuse16_reader =
+            XorFilterReader::new(&empty_blocked_binary_fuse16_bytes, &block_metas[..1]);
+        assert!(empty_blocked_binary_fuse16_reader.may_match(
+            &block_metas[..1],
+            &(Bound::Unbounded, Bound::Unbounded),
+            0
+        ));
+        assert_eq!(
+            empty_blocked_binary_fuse16_bytes,
+            empty_blocked_binary_fuse16_reader.encode_to_bytes()
+        );
+
+        // Test BlockedBinaryFuse8 filter
+        let mut blocked_binary_fuse8_builder = BlockedBinaryFuse8FilterBuilder::new(1024);
+        for block_idx in 0..3 {
+            for i in 0..50 {
+                let key_idx = block_idx * 50 + i;
+                blocked_binary_fuse8_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
+            }
+            blocked_binary_fuse8_builder.switch_block(None).unwrap();
+        }
+        let blocked_binary_fuse8_bytes = blocked_binary_fuse8_builder.finish(None).unwrap();
+        let blocked_binary_fuse8_reader =
+            XorFilterReader::new(&blocked_binary_fuse8_bytes, &block_metas);
+        assert_blocked_reader_contains_keys(&blocked_binary_fuse8_reader, &block_metas, 0, 150);
+        let blocked_binary_fuse8_encoded = blocked_binary_fuse8_reader.encode_to_bytes();
+        assert_eq!(
+            blocked_binary_fuse8_bytes, blocked_binary_fuse8_encoded,
+            "BlockedBinaryFuse8 builder and reader should produce identical bytes"
+        );
+
+        // Test BlockedBinaryFuse16 filter
+        let mut blocked_binary_fuse16_builder = BlockedBinaryFuse16FilterBuilder::new(1024);
+        for block_idx in 0..3 {
+            for i in 0..50 {
+                let key_idx = block_idx * 50 + i;
+                blocked_binary_fuse16_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
+            }
+            blocked_binary_fuse16_builder.switch_block(None).unwrap();
+        }
+        let blocked_binary_fuse16_bytes = blocked_binary_fuse16_builder.finish(None).unwrap();
+        let blocked_binary_fuse16_reader =
+            XorFilterReader::new(&blocked_binary_fuse16_bytes, &block_metas);
+        assert_blocked_reader_contains_keys(&blocked_binary_fuse16_reader, &block_metas, 0, 150);
+        let blocked_binary_fuse16_encoded = blocked_binary_fuse16_reader.encode_to_bytes();
+        assert_eq!(
+            blocked_binary_fuse16_bytes, blocked_binary_fuse16_encoded,
+            "BlockedBinaryFuse16 builder and reader should produce identical bytes"
         );
     }
 }

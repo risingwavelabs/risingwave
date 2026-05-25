@@ -963,7 +963,10 @@ pub(super) mod tests {
         CompactionCatalogAgent, DummyFilterKeyExtractor, MultiFilterKeyExtractor,
     };
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
+    use crate::hummock::sstable::xor_filter::{
+        BinaryFuse8FilterBuilder, BinaryFuse16FilterBuilder, BlockedBinaryFuse8FilterBuilder,
+        BlockedBinaryFuse16FilterBuilder, BlockedXor8FilterBuilder, BlockedXor16FilterBuilder,
+    };
     use crate::hummock::test_utils::{
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer,
         test_key_of, test_value_of,
@@ -1331,9 +1334,34 @@ pub(super) mod tests {
             PbSstableFilterType::SstableFilterXor8,
         )
         .await;
+        test_with_xor_filter_builder::<BlockedXor8FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterXor8,
+        )
+        .await;
+        test_with_xor_filter_builder::<BinaryFuse8FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterBinaryFuse8,
+        )
+        .await;
+        test_with_xor_filter_builder::<BinaryFuse16FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterBinaryFuse16,
+        )
+        .await;
         test_with_xor_filter_builder::<BlockedXor16FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor16,
+        )
+        .await;
+        test_with_xor_filter_builder::<BlockedBinaryFuse8FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterBinaryFuse8,
+        )
+        .await;
+        test_with_xor_filter_builder::<BlockedBinaryFuse16FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterBinaryFuse16,
         )
         .await;
     }

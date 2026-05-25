@@ -180,7 +180,7 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     // Shared buffer compaction always goes to L0. Use block_based_filter when kv_count is large.
     // Use None to apply the default threshold since shared buffer flush doesn't have a CompactTask.
     let use_block_based_filter =
-        risingwave_hummock_sdk::filter_utils::should_use_blocked_xor_filter_by_kv_count(
+        risingwave_hummock_sdk::filter_utils::should_use_blocked_sst_filter_by_kv_count(
             total_key_count as u64,
             None,
         );

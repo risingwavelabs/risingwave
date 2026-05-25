@@ -27,8 +27,9 @@ pub use block_iterator::*;
 mod xor_filter;
 use serde::{Deserialize, Serialize};
 pub use xor_filter::{
-    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, Xor8FilterBuilder, Xor16FilterBuilder,
-    XorFilterReader,
+    BinaryFuse8FilterBuilder, BinaryFuse16FilterBuilder, BlockedBinaryFuse8FilterBuilder,
+    BlockedBinaryFuse16FilterBuilder, BlockedXor8FilterBuilder, BlockedXor16FilterBuilder,
+    Xor8FilterBuilder, Xor16FilterBuilder, XorFilterReader,
 };
 pub mod builder;
 pub use builder::*;

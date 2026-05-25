@@ -90,8 +90,9 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockResult, ObjectIdManager, SstableBuilderOptions, Xor8FilterBuilder,
-    Xor16FilterBuilder,
+    BinaryFuse8FilterBuilder, BinaryFuse16FilterBuilder, BlockedBinaryFuse8FilterBuilder,
+    BlockedBinaryFuse16FilterBuilder, GetObjectId, HummockResult, ObjectIdManager,
+    SstableBuilderOptions, Xor8FilterBuilder, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -256,6 +257,54 @@ impl Compactor {
                 }
                 (PbSstableFilterType::SstableFilterXor16, false) => {
                     self.compact_key_range_impl::<_, Xor16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
+                (PbSstableFilterType::SstableFilterBinaryFuse8, true) => {
+                    self.compact_key_range_impl::<_, BlockedBinaryFuse8FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
+                (PbSstableFilterType::SstableFilterBinaryFuse8, false) => {
+                    self.compact_key_range_impl::<_, BinaryFuse8FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
+                (PbSstableFilterType::SstableFilterBinaryFuse16, true) => {
+                    self.compact_key_range_impl::<_, BlockedBinaryFuse16FilterBuilder>(
+                        factory,
+                        iter,
+                        compaction_filter,
+                        compaction_catalog_agent_ref,
+                        task_progress.clone(),
+                        self.object_id_getter.clone(),
+                    )
+                    .instrument_await("compact".verbose())
+                    .await?
+                }
+                (PbSstableFilterType::SstableFilterBinaryFuse16, false) => {
+                    self.compact_key_range_impl::<_, BinaryFuse16FilterBuilder>(
                         factory,
                         iter,
                         compaction_filter,

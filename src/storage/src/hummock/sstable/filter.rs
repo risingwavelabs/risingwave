@@ -23,7 +23,7 @@ use crate::hummock::{HummockResult, MemoryLimiter};
 pub trait FilterBuilder: Send {
     /// add key which need to be filter for construct filter data.
     fn add_key(&mut self, dist_key: &[u8], table_id: u32);
-    /// Builds serialized filter bytes from key hashes.
+    /// Build serialized SST filter bytes from the collected key hashes.
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>>;
     /// Approximate serialized filter bytes counted toward SST builder capacity.
     ///
@@ -38,7 +38,7 @@ pub trait FilterBuilder: Send {
     fn switch_block(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<()> {
         Ok(())
     }
-    /// Approximate temporary memory needed when finishing the filter.
+    /// approximate memory when finish filter
     fn approximate_building_memory(&self) -> usize;
 
     /// Add raw data which build by keys directly. Please make sure that you have finished the last
