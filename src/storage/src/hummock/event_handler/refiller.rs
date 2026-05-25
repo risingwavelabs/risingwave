@@ -270,7 +270,7 @@ pub struct TableCacheRefillContext {
     pub default_policy: CacheRefillPolicy,
 
     pub read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
-    pub serving_table_vnode_mapping: Arc<RwLock<HashMap<TableId, Bitmap>>>,
+    pub serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
 }
 
 fn vnode_range_bitmap(num_bits: usize, vnode_range: (usize, usize)) -> Bitmap {
@@ -352,14 +352,13 @@ impl CacheRefiller {
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
-        let serving_table_vnode_mapping = Arc::new(RwLock::new(HashMap::new()));
         let table_cache_refill_context = Arc::new(RwLock::new(TableCacheRefillContext {
             streaming: HashMap::new(),
             serving: HashMap::new(),
             policies: HashMap::new(),
             default_policy: config.table_cache_refill_default_policy,
             read_version_mapping,
-            serving_table_vnode_mapping,
+            serving_table_vnode_mapping: HashMap::new(),
         }));
         let meta_refill_concurrency = if config.meta_refill_concurrency == 0 {
             None
@@ -413,7 +412,7 @@ impl CacheRefiller {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
 
-    pub(crate) fn update_table_cache_refill_policies(
+    pub(crate) fn replace_table_cache_refill_policies(
         &mut self,
         policies: HashMap<TableId, CacheRefillPolicy>,
     ) {
@@ -437,14 +436,11 @@ impl CacheRefiller {
         let mut table_cache_refill_context = self.table_cache_refill_context.write();
         let mut table_ids = table_cache_refill_context
             .serving_table_vnode_mapping
-            .read()
             .keys()
             .chain(mapping.keys())
             .copied()
             .collect::<HashSet<_>>();
-        *table_cache_refill_context
-            .serving_table_vnode_mapping
-            .write() = mapping;
+        table_cache_refill_context.serving_table_vnode_mapping = mapping;
         for table_id in table_ids.drain() {
             self.update_table_cache_refill_vnodes_inner(&mut table_cache_refill_context, table_id);
         }
@@ -480,15 +476,14 @@ impl CacheRefiller {
             }
         }
 
-        if self.role.for_serving() && policy.for_serving() {
-            let serving_table_vnode_mapping = table_cache_refill_context
+        if self.role.for_serving()
+            && policy.for_serving()
+            && let Some(vnodes) = table_cache_refill_context
                 .serving_table_vnode_mapping
-                .clone();
-            if let Some(vnodes) = serving_table_vnode_mapping.read().get(&table_id) {
-                table_cache_refill_context
-                    .serving
-                    .insert(table_id, vnodes.clone());
-            }
+                .get(&table_id)
+                .cloned()
+        {
+            table_cache_refill_context.serving.insert(table_id, vnodes);
         }
     }
 
@@ -1036,7 +1031,7 @@ mod tests {
             read_version_mapping,
         );
 
-        refiller.update_table_cache_refill_policies(HashMap::from([(
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
             table_id,
             CacheRefillPolicy::Serving,
         )]));
@@ -1072,7 +1067,7 @@ mod tests {
             read_version_mapping,
         );
 
-        refiller.update_table_cache_refill_policies(HashMap::from([
+        refiller.replace_table_cache_refill_policies(HashMap::from([
             (table_id, CacheRefillPolicy::Serving),
             (removed_table_id, CacheRefillPolicy::Serving),
         ]));
@@ -1099,7 +1094,6 @@ mod tests {
         assert!(
             !context
                 .serving_table_vnode_mapping
-                .read()
                 .contains_key(&removed_table_id)
         );
     }
@@ -1118,7 +1112,7 @@ mod tests {
         );
 
         refiller.replace_serving_table_vnode_mapping(HashMap::from([(table_id, serving_vnodes)]));
-        refiller.update_table_cache_refill_policies(HashMap::from([(
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
             table_id,
             CacheRefillPolicy::Serving,
         )]));
@@ -1130,7 +1124,7 @@ mod tests {
                 .contains_key(&table_id)
         );
 
-        refiller.update_table_cache_refill_policies(HashMap::new());
+        refiller.replace_table_cache_refill_policies(HashMap::new());
 
         let context = refiller.table_cache_refill_context().read();
         assert!(context.policies.is_empty());

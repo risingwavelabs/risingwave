@@ -275,7 +275,7 @@ impl HummockEventHandler {
         // runtime updates are not supported for either policies or serving vnode mappings.
         if let Some(policies) = config.table_cache_refill_policies {
             refiller
-                .update_table_cache_refill_policies(table_cache_refill_policies_to_map(policies));
+                .replace_table_cache_refill_policies(table_cache_refill_policies_to_map(policies));
         }
 
         if operation == Operation::Snapshot
@@ -363,7 +363,6 @@ impl HummockEventHandler {
         )
     }
 
-    #[expect(clippy::too_many_arguments)]
     fn new_inner(
         role: Role,
         mut observer_event_rx: UnboundedReceiver<HummockObserverEvent>,
@@ -1220,7 +1219,7 @@ mod tests {
         );
         assert!(!context.serving.contains_key(&table_id));
         assert_eq!(
-            context.serving_table_vnode_mapping.read().get(&table_id),
+            context.serving_table_vnode_mapping.get(&table_id),
             Some(&serving_vnodes)
         );
     }
