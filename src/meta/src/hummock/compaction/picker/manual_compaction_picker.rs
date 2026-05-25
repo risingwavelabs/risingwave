@@ -1392,6 +1392,10 @@ pub mod tests {
                 )
                 .is_none()
         );
+        assert_eq!(
+            selector.validation_error(),
+            Some("target_level for L0 must be 3, got 4")
+        );
     }
 
     /// tests `DynamicLevelSelector::manual_pick_compaction`

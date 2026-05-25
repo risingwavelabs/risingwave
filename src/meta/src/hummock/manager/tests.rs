@@ -1051,6 +1051,24 @@ async fn test_trigger_manual_compaction() {
     )
     .await;
     {
+        let option = ManualCompactionOption {
+            level: 0,
+            target_level: Some(0),
+            ..Default::default()
+        };
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault, option)
+            .await;
+
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("invalid manual compaction option: target_level for L0 must be")
+        );
+    }
+    {
         // to check compactor send task fail
         drop(receiver);
         {

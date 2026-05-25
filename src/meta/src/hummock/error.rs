@@ -44,6 +44,8 @@ pub enum Error {
     CompactionGroup(String),
     #[error("SST {0} is invalid")]
     InvalidSst(HummockSstableObjectId),
+    #[error("invalid manual compaction option: {0}")]
+    InvalidManualCompactionOption(String),
     #[error("time travel")]
     TimeTravel(
         #[source]
@@ -78,6 +80,10 @@ impl From<sea_orm::DbErr> for Error {
 
 impl From<Error> for tonic::Status {
     fn from(err: Error) -> Self {
-        err.to_status(tonic::Code::Internal, "hummock")
+        let code = match &err {
+            Error::InvalidManualCompactionOption(_) => tonic::Code::InvalidArgument,
+            _ => tonic::Code::Internal,
+        };
+        err.to_status(code, "hummock")
     }
 }
