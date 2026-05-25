@@ -272,8 +272,6 @@ pub struct StorageConfig {
     /// compaction task. Enable only when object storage API cost is a priority and memory headroom is
     /// sufficient. See also the memory-protection config knobs such as
     /// `iceberg_compaction_task_parallelism_ratio`.
-    ///
-    /// **Note**: This feature is experimental and may not be stable.
     #[serde(default = "default::storage::iceberg_compaction_enable_prefetch")]
     pub iceberg_compaction_enable_prefetch: bool,
 
