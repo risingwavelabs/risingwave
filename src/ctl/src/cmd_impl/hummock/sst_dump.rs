@@ -249,7 +249,7 @@ pub async fn sst_dump_via_sstable_store(
 
     println!("SST object id: {}", object_id);
     println!("-------------------------------------");
-    println!("File Size: {}", sstable.estimate_size());
+    println!("File Size: {}", file_size);
 
     println!("Key Range:");
     println!(

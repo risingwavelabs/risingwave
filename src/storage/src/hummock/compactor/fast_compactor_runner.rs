@@ -1124,7 +1124,7 @@ mod tests {
             let encoded_key = full_key.encode();
             let encoded_user_key = full_key.user_key.encode();
             let user_key = full_key.user_key.as_ref();
-            let hash = crate::hummock::Sstable::hash_for_bloom_filter(&encoded_user_key, 2);
+            let hash = crate::hummock::Sstable::hash_for_filter(&encoded_user_key, 2);
 
             let (_, sst) = loaded_ssts
                 .iter()

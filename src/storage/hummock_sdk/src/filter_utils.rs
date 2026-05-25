@@ -24,10 +24,12 @@ use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableF
 ///
 /// # Returns
 /// `true` if `kv_count` exceeds the threshold, indicating blocked SST filter should be used.
-pub fn should_use_blocked_xor_filter_by_kv_count(
+pub fn should_use_blocked_sst_filter_by_kv_count(
     kv_count: u64,
     blocked_kv_count_threshold: Option<u64>,
 ) -> bool {
+    // The config/protobuf field keeps its historical xor name for compatibility, but the threshold
+    // now controls the blocked layout for every SST filter family.
     let threshold = blocked_kv_count_threshold
         .unwrap_or(compaction_config::DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD);
     kv_count > threshold

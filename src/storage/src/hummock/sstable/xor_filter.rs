@@ -1522,6 +1522,12 @@ mod tests {
         for key_count in [1, 2, 100, 1000] {
             assert_plain_filter_builder_approx_len_matches_output::<Xor8FilterBuilder>(key_count);
             assert_plain_filter_builder_approx_len_matches_output::<Xor16FilterBuilder>(key_count);
+            assert_plain_filter_builder_approx_len_matches_output::<BinaryFuse8FilterBuilder>(
+                key_count,
+            );
+            assert_plain_filter_builder_approx_len_matches_output::<BinaryFuse16FilterBuilder>(
+                key_count,
+            );
         }
     }
 
@@ -1550,6 +1556,10 @@ mod tests {
     fn test_blocked_filter_builder_approx_len_matches_output() {
         assert_blocked_filter_builder_approx_len_matches_output::<BlockedXor8FilterBuilder>();
         assert_blocked_filter_builder_approx_len_matches_output::<BlockedXor16FilterBuilder>();
+        assert_blocked_filter_builder_approx_len_matches_output::<BlockedBinaryFuse8FilterBuilder>(
+        );
+        assert_blocked_filter_builder_approx_len_matches_output::<BlockedBinaryFuse16FilterBuilder>(
+        );
     }
 
     // Test to make sure filter key builder finish produce the same result as the filter reader encode_to_bytes
