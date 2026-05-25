@@ -21,7 +21,8 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::key::{FullKey, UserKeyRangeRef};
 use risingwave_pb::hummock::PbSstableFilterType;
 use xorf::{
-    BinaryFuse8, BinaryFuse8Ref, BinaryFuse16, DmaSerializable, Filter, FilterRef as _, Xor8, Xor16,
+    BinaryFuse8, BinaryFuse8Ref, BinaryFuse16, BinaryFuse16Ref, DmaSerializable, Filter,
+    FilterRef as _, Xor8, Xor16,
 };
 
 use super::{FilterBuilder, Sstable};
@@ -753,7 +754,7 @@ pub struct BinaryFuse8FilterData {
 #[derive(Clone)]
 pub struct BinaryFuse16FilterData {
     descriptor: Box<[u8]>,
-    fingerprints: Box<[u8]>,
+    fingerprints: Box<[u16]>,
 }
 
 impl Filter<u64> for BinaryFuse8FilterData {
@@ -774,94 +775,33 @@ impl Filter<u64> for BinaryFuse16FilterData {
         if self.fingerprints.is_empty() {
             return true;
         }
-        binary_fuse16_contains(&self.descriptor, &self.fingerprints, *key)
+        BinaryFuse16Ref::from_dma(
+            &self.descriptor,
+            binary_fuse16_fingerprints_as_dma_bytes(&self.fingerprints),
+        )
+        .contains(key)
     }
 
     fn len(&self) -> usize {
-        debug_assert_eq!(self.fingerprints.len() % std::mem::size_of::<u16>(), 0);
-        self.fingerprints.len() / std::mem::size_of::<u16>()
+        self.fingerprints.len()
     }
 }
 
-#[derive(Clone, Copy)]
-struct BinaryFuseDescriptor {
-    seed: u64,
-    segment_length: u32,
-    segment_length_mask: u32,
-    segment_count_length: u32,
-}
-
-impl BinaryFuseDescriptor {
-    fn read(mut descriptor: &[u8]) -> Self {
-        debug_assert_eq!(
-            descriptor.len(),
-            <BinaryFuse16 as DmaSerializable>::DESCRIPTOR_LEN
-        );
-        Self {
-            seed: descriptor.get_u64_le(),
-            segment_length: descriptor.get_u32_le(),
-            segment_length_mask: descriptor.get_u32_le(),
-            segment_count_length: descriptor.get_u32_le(),
-        }
+fn binary_fuse16_fingerprints_as_dma_bytes(fingerprints: &[u16]) -> &[u8] {
+    // SST bytes are encoded as little-endian u16 values and parsed into `Box<[u16]>` before they
+    // reach this helper. `xorf::BinaryFuse16Ref::from_dma` does not parse SST bytes; it expects an
+    // aligned native u16 memory view. This helper only creates that temporary view for the official
+    // xorf lookup path, and must not be used as the SST serialization format.
+    //
+    // SAFETY: `fingerprints` is already a `[u16]` slice, so the returned byte slice keeps the same
+    // alignment, lifetime, and initialized memory. The length is computed with `size_of_val`, so it
+    // exactly covers the underlying u16 slice.
+    unsafe {
+        std::slice::from_raw_parts(
+            fingerprints.as_ptr().cast::<u8>(),
+            std::mem::size_of_val(fingerprints),
+        )
     }
-}
-
-fn binary_fuse16_contains(descriptor: &[u8], fingerprints: &[u8], key: u64) -> bool {
-    debug_assert_eq!(fingerprints.len() % std::mem::size_of::<u16>(), 0);
-    let descriptor = BinaryFuseDescriptor::read(descriptor);
-    let hash = binary_fuse_mix(key, descriptor.seed);
-    let mut fingerprint = binary_fuse_fingerprint(hash) as u16;
-    let (h0, h1, h2) = binary_fuse_hash_of_hash(
-        hash,
-        descriptor.segment_length,
-        descriptor.segment_length_mask,
-        descriptor.segment_count_length,
-    );
-    fingerprint ^= binary_fuse16_fingerprint(fingerprints, h0 as usize)
-        ^ binary_fuse16_fingerprint(fingerprints, h1 as usize)
-        ^ binary_fuse16_fingerprint(fingerprints, h2 as usize);
-    fingerprint == 0
-}
-
-fn binary_fuse16_fingerprint(fingerprints: &[u8], index: usize) -> u16 {
-    let offset = index * std::mem::size_of::<u16>();
-    u16::from_le_bytes(
-        fingerprints[offset..offset + std::mem::size_of::<u16>()]
-            .try_into()
-            .unwrap(),
-    )
-}
-
-fn binary_fuse_fingerprint(hash: u64) -> u64 {
-    hash ^ (hash >> 32)
-}
-
-fn binary_fuse_mix(key: u64, seed: u64) -> u64 {
-    murmur3_mix64(key.wrapping_add(seed))
-}
-
-fn murmur3_mix64(mut key: u64) -> u64 {
-    key ^= key >> 33;
-    key = key.wrapping_mul(0xff51_afd7_ed55_8ccd);
-    key ^= key >> 33;
-    key = key.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
-    key ^= key >> 33;
-    key
-}
-
-fn binary_fuse_hash_of_hash(
-    hash: u64,
-    segment_length: u32,
-    segment_length_mask: u32,
-    segment_count_length: u32,
-) -> (u32, u32, u32) {
-    let hi = ((hash as u128 * segment_count_length as u128) >> 64) as u64;
-    let h0 = hi as u32;
-    let mut h1 = h0 + segment_length;
-    let mut h2 = h1 + segment_length;
-    h1 ^= ((hash >> 18) as u32) & segment_length_mask;
-    h2 ^= (hash as u32) & segment_length_mask;
-    (h0, h1, h2)
 }
 
 impl<F: Clone> Clone for BlockBasedFilter<F> {
@@ -1042,7 +982,7 @@ impl XorFilterReader {
         }
     }
 
-    fn to_binary_fuse16(data: &[u8]) -> BinaryFuse16FilterData {
+    fn to_binary_fuse16(mut data: &[u8]) -> BinaryFuse16FilterData {
         let kind = *data.last().unwrap();
         assert_eq!(kind, FOOTER_BINARY_FUSE16);
         let descriptor_len = <BinaryFuse16 as DmaSerializable>::DESCRIPTOR_LEN;
@@ -1052,11 +992,16 @@ impl XorFilterReader {
             (fingerprint_end - descriptor_len) % std::mem::size_of::<u16>(),
             0
         );
+        let descriptor = data[..descriptor_len].to_vec().into_boxed_slice();
+        data.advance(descriptor_len);
+        let fingerprint_len = (fingerprint_end - descriptor_len) / std::mem::size_of::<u16>();
+        let fingerprints = (0..fingerprint_len)
+            .map(|_| data.get_u16_le())
+            .collect_vec()
+            .into_boxed_slice();
         BinaryFuse16FilterData {
-            descriptor: data[..descriptor_len].to_vec().into_boxed_slice(),
-            fingerprints: data[descriptor_len..fingerprint_end]
-                .to_vec()
-                .into_boxed_slice(),
+            descriptor,
+            fingerprints,
         }
     }
 
@@ -1389,9 +1334,11 @@ fn build_from_binary_fuse16_data(filter: &BinaryFuse16FilterData) -> Vec<u8> {
         return vec![];
     }
 
-    let mut data = Vec::with_capacity(filter.descriptor.len() + filter.fingerprints.len() + 1);
+    let mut data = Vec::with_capacity(filter.descriptor.len() + filter.fingerprints.len() * 2 + 1);
     data.extend_from_slice(&filter.descriptor);
-    data.extend_from_slice(&filter.fingerprints);
+    for fingerprint in &filter.fingerprints {
+        data.put_u16_le(*fingerprint);
+    }
     data.put_u8(FOOTER_BINARY_FUSE16);
     data
 }
