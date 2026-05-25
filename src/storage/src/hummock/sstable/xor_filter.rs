@@ -29,6 +29,8 @@ const FOOTER_XOR8: u8 = 254;
 const FOOTER_XOR16: u8 = 255;
 const FOOTER_BLOCKED_XOR16: u8 = 253;
 const FOOTER_BLOCKED_XOR8: u8 = 252;
+// Plain Xor filter bytes are encoded as seed, block length, fingerprints, and footer.
+const FILTER_FIXED_LEN: usize = std::mem::size_of::<u64>() + std::mem::size_of::<u32>() + 1;
 
 pub struct Xor16FilterBuilder {
     key_hash_entries: Vec<u64>,
@@ -83,6 +85,23 @@ impl Xor16FilterBuilder {
     }
 }
 
+fn xor_filter_capacity(key_count: usize) -> usize {
+    if key_count == 0 {
+        return 0;
+    }
+    let capacity = (1.23 * key_count as f64) as usize + 32;
+    capacity / 3 * 3
+}
+
+fn approximate_xor_filter_len(key_count: usize, fingerprint_size: usize) -> usize {
+    let fingerprint_len = xor_filter_capacity(key_count);
+    if fingerprint_len == 0 {
+        0
+    } else {
+        FILTER_FIXED_LEN + fingerprint_len * fingerprint_size
+    }
+}
+
 impl FilterBuilder for Xor16FilterBuilder {
     fn add_key(&mut self, key: &[u8], table_id: u32) {
         self.key_hash_entries
@@ -90,7 +109,7 @@ impl FilterBuilder for Xor16FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        self.key_hash_entries.len() * 4
+        approximate_xor_filter_len(self.key_hash_entries.len(), std::mem::size_of::<u16>())
     }
 
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
@@ -141,7 +160,7 @@ impl FilterBuilder for Xor8FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        self.key_hash_entries.len() * 4
+        approximate_xor_filter_len(self.key_hash_entries.len(), std::mem::size_of::<u8>())
     }
 
     fn create(capacity: usize) -> Self {
@@ -686,6 +705,24 @@ mod tests {
             }
         } else {
             panic!();
+        }
+    }
+
+    fn assert_plain_filter_builder_approx_len_matches_output<F: FilterBuilder>(key_count: usize) {
+        let mut builder = F::create(0.01, key_count);
+        for i in 0..key_count {
+            builder.add_key(&test_user_key_of(i).encode(), 0);
+        }
+        let approximate_len = builder.approximate_len();
+        let filter = builder.finish(None).unwrap();
+        assert_eq!(approximate_len, filter.len(), "key_count={key_count}");
+    }
+
+    #[test]
+    fn test_plain_filter_builder_approx_len_matches_output() {
+        for key_count in [1, 2, 100, 1000] {
+            assert_plain_filter_builder_approx_len_matches_output::<Xor8FilterBuilder>(key_count);
+            assert_plain_filter_builder_approx_len_matches_output::<Xor16FilterBuilder>(key_count);
         }
     }
 

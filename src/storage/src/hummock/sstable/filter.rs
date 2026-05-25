@@ -25,7 +25,11 @@ pub trait FilterBuilder: Send {
     fn add_key(&mut self, dist_key: &[u8], table_id: u32);
     /// Builds SST filter from key hashes.
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>>;
-    /// approximate memory of filter builder
+    /// Approximate serialized filter bytes counted toward SST builder capacity.
+    ///
+    /// `SstableBuilder::reach_capacity` uses this value to decide when to seal the current
+    /// SST. It should track bytes that will be appended to the SST, not the temporary memory
+    /// held by the filter builder. Use `approximate_building_memory` for build-time memory.
     fn approximate_len(&self) -> usize;
 
     fn create(capacity: usize) -> Self;
