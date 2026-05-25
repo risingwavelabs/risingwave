@@ -31,8 +31,7 @@ use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet_58::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
-    iceberg_compaction_enable_heuristic_output_parallelism,
-    iceberg_compaction_enable_prefetch,
+    iceberg_compaction_enable_heuristic_output_parallelism, iceberg_compaction_enable_prefetch,
     iceberg_compaction_max_concurrent_closes,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
