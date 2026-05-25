@@ -2,7 +2,7 @@ extend = "common.toml"
 
 [env]
 LAKEKEEPER_TARGET_TRIPLE = { source = "${SYSTEM}", mapping = { "darwin-arm64" = "aarch64-apple-darwin", "darwin-amd64" = "x86_64-apple-darwin", "linux-arm64" = "aarch64-unknown-linux-musl", "linux-amd64" = "x86_64-unknown-linux-gnu" } }
-LAKEKEEPER_VERSION = { value = "v0.9.5", condition = { env_not_set = [
+LAKEKEEPER_VERSION = { value = "v0.12.2", condition = { env_not_set = [
     "LAKEKEEPER_VERSION",
 ] } }
 LAKEKEEPER_DOWNLOAD_URL = { value = "https://github.com/lakekeeper/lakekeeper/releases/download/${LAKEKEEPER_VERSION}/lakekeeper-${LAKEKEEPER_TARGET_TRIPLE}.tar.gz", condition = { env_not_set = [
