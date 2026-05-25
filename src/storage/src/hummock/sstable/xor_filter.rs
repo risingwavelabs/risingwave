@@ -30,9 +30,10 @@ const FOOTER_XOR16: u8 = 255;
 const FOOTER_BLOCKED_XOR16: u8 = 253;
 const FOOTER_BLOCKED_XOR8: u8 = 252;
 // Plain Xor filter bytes are encoded as seed, block length, fingerprints, and footer.
-const FILTER_FIXED_LEN: usize = std::mem::size_of::<u64>() + std::mem::size_of::<u32>() + 1;
-const BLOCK_FILTER_ENTRY_FIXED_LEN: usize = std::mem::size_of::<u32>();
-const BLOCK_FILTER_FIXED_LEN: usize = std::mem::size_of::<u32>() + 1;
+const PLAIN_XOR_FILTER_FIXED_LEN: usize =
+    std::mem::size_of::<u64>() + std::mem::size_of::<u32>() + 1;
+const BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX: usize = std::mem::size_of::<u32>();
+const BLOCKED_XOR_FILTER_FOOTER_LEN: usize = std::mem::size_of::<u32>() + 1;
 
 pub struct Xor16FilterBuilder {
     key_hash_entries: Vec<u64>,
@@ -87,7 +88,12 @@ impl Xor16FilterBuilder {
     }
 }
 
-fn xor_filter_capacity(key_count: usize) -> usize {
+/// Estimates the fingerprint count produced by `xorf` for a plain Xor filter.
+///
+/// This mirrors the capacity formula used by `xorf` when constructing `Xor8`/`Xor16`.
+/// Builder-side size accounting uses it before the filter is actually built, so it is
+/// approximate when later de-duplication removes repeated hashes.
+fn approximate_xor_filter_fingerprint_count(key_count: usize) -> usize {
     if key_count == 0 {
         return 0;
     }
@@ -95,21 +101,45 @@ fn xor_filter_capacity(key_count: usize) -> usize {
     capacity / 3 * 3
 }
 
-fn approximate_xor_filter_len(key_count: usize, fingerprint_size: usize) -> usize {
-    let fingerprint_len = xor_filter_capacity(key_count);
+/// Estimates the serialized byte length of a plain Xor filter before it is built.
+fn approximate_plain_xor_filter_serialized_len(key_count: usize, fingerprint_size: usize) -> usize {
+    let fingerprint_len = approximate_xor_filter_fingerprint_count(key_count);
     if fingerprint_len == 0 {
         0
     } else {
-        FILTER_FIXED_LEN + fingerprint_len * fingerprint_size
+        PLAIN_XOR_FILTER_FIXED_LEN + fingerprint_len * fingerprint_size
     }
 }
 
-fn xor8_filter_len(filter: &Xor8) -> usize {
-    FILTER_FIXED_LEN + filter.fingerprints.len()
+fn xor8_filter_serialized_len(filter: &Xor8) -> usize {
+    PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len()
 }
 
-fn xor16_filter_len(filter: &Xor16) -> usize {
-    FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
+fn xor16_filter_serialized_len(filter: &Xor16) -> usize {
+    PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
+}
+
+/// Computes the serialized byte length of a blocked Xor filter.
+///
+/// `encoded_blocks_len` already contains all finished block entries, including their
+/// per-block length prefixes. `pending_plain_filter_len` is the serialized length of
+/// the current block-local plain Xor filter if the current block has unsealed keys.
+fn blocked_xor_filter_serialized_len(
+    encoded_blocks_len: usize,
+    block_count: usize,
+    pending_plain_filter_len: usize,
+) -> usize {
+    let pending_block_len = if pending_plain_filter_len == 0 {
+        0
+    } else {
+        BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + pending_plain_filter_len
+    };
+    let footer_len = if block_count == 0 && pending_block_len == 0 {
+        0
+    } else {
+        BLOCKED_XOR_FILTER_FOOTER_LEN
+    };
+    encoded_blocks_len + pending_block_len + footer_len
 }
 
 impl FilterBuilder for Xor16FilterBuilder {
@@ -119,7 +149,10 @@ impl FilterBuilder for Xor16FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        approximate_xor_filter_len(self.key_hash_entries.len(), std::mem::size_of::<u16>())
+        approximate_plain_xor_filter_serialized_len(
+            self.key_hash_entries.len(),
+            std::mem::size_of::<u16>(),
+        )
     }
 
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
@@ -170,7 +203,10 @@ impl FilterBuilder for Xor8FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        approximate_xor_filter_len(self.key_hash_entries.len(), std::mem::size_of::<u8>())
+        approximate_plain_xor_filter_serialized_len(
+            self.key_hash_entries.len(),
+            std::mem::size_of::<u8>(),
+        )
     }
 
     fn create(capacity: usize) -> Self {
@@ -234,17 +270,16 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        let current_len = if self.current.key_hash_entries.is_empty() {
+        let pending_plain_filter_len = if self.current.key_hash_entries.is_empty() {
             0
         } else {
-            BLOCK_FILTER_ENTRY_FIXED_LEN + self.current.approximate_len()
+            self.current.approximate_len()
         };
-        let footer_len = if self.block_count == 0 && current_len == 0 {
-            0
-        } else {
-            BLOCK_FILTER_FIXED_LEN
-        };
-        self.data.len() + current_len + footer_len
+        blocked_xor_filter_serialized_len(
+            self.data.len(),
+            self.block_count,
+            pending_plain_filter_len,
+        )
     }
 
     fn create(capacity: usize) -> Self {
@@ -291,17 +326,16 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        let current_len = if self.current.key_hash_entries.is_empty() {
+        let pending_plain_filter_len = if self.current.key_hash_entries.is_empty() {
             0
         } else {
-            BLOCK_FILTER_ENTRY_FIXED_LEN + self.current.approximate_len()
+            self.current.approximate_len()
         };
-        let footer_len = if self.block_count == 0 && current_len == 0 {
-            0
-        } else {
-            BLOCK_FILTER_FIXED_LEN
-        };
-        self.data.len() + current_len + footer_len
+        blocked_xor_filter_serialized_len(
+            self.data.len(),
+            self.block_count,
+            pending_plain_filter_len,
+        )
     }
 
     fn create(capacity: usize) -> Self {
@@ -520,23 +554,27 @@ impl XorFilterReader {
             return 0;
         }
         match &self.filter {
-            XorFilter::Xor8(filter) => xor8_filter_len(filter),
-            XorFilter::Xor16(filter) => xor16_filter_len(filter),
+            XorFilter::Xor8(filter) => xor8_filter_serialized_len(filter),
+            XorFilter::Xor16(filter) => xor16_filter_serialized_len(filter),
             XorFilter::BlockXor8(reader) => {
-                reader
+                let finished_blocks_len = reader
                     .filters
                     .iter()
-                    .map(|filter| BLOCK_FILTER_ENTRY_FIXED_LEN + xor8_filter_len(filter))
-                    .sum::<usize>()
-                    + BLOCK_FILTER_FIXED_LEN
+                    .map(|filter| {
+                        BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + xor8_filter_serialized_len(filter)
+                    })
+                    .sum();
+                blocked_xor_filter_serialized_len(finished_blocks_len, reader.filters.len(), 0)
             }
             XorFilter::BlockXor16(reader) => {
-                reader
+                let finished_blocks_len = reader
                     .filters
                     .iter()
-                    .map(|filter| BLOCK_FILTER_ENTRY_FIXED_LEN + xor16_filter_len(filter))
-                    .sum::<usize>()
-                    + BLOCK_FILTER_FIXED_LEN
+                    .map(|filter| {
+                        BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + xor16_filter_serialized_len(filter)
+                    })
+                    .sum();
+                blocked_xor_filter_serialized_len(finished_blocks_len, reader.filters.len(), 0)
             }
         }
     }
