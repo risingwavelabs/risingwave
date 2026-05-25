@@ -20,6 +20,21 @@ use risingwave_pb::hummock::PbSstableFilterType;
 
 use crate::hummock::{HummockResult, MemoryLimiter};
 
+pub const DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP: usize = 256 * 1024;
+
+#[derive(Clone, Copy, Debug)]
+pub struct FilterBuilderOptions {
+    /// Estimated key count for one output SST.
+    pub estimated_key_count: usize,
+    /// Estimated data block count for one output SST.
+    pub estimated_block_count: usize,
+    /// Maximum initial allocation for the key-hash buffer.
+    ///
+    /// Plain filters use this as the upper bound for `Vec<u64>::with_capacity`. Blocked filters use
+    /// their own smaller per-block bound for the current block-local filter.
+    pub hash_prealloc_key_count_cap: usize,
+}
+
 pub trait FilterBuilder: Send {
     /// add key which need to be filter for construct filter data.
     fn add_key(&mut self, dist_key: &[u8], table_id: u32);
@@ -34,7 +49,7 @@ pub trait FilterBuilder: Send {
     /// for build-time temporary memory.
     fn approximate_len(&self) -> usize;
 
-    fn create(capacity: usize) -> Self;
+    fn create(options: FilterBuilderOptions) -> Self;
     fn switch_block(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<()> {
         Ok(())
     }

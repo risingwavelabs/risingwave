@@ -44,7 +44,8 @@ use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits_for_task,
+    blocked_xor_filter_key_count_threshold, build_multi_compaction_filter,
+    estimate_output_key_count_for_task, estimate_task_output_capacity, generate_splits_for_task,
     metrics_report_for_task, optimize_by_copy_block,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
@@ -89,8 +90,15 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
+        options.estimated_output_key_count =
+            Some(estimate_output_key_count_for_task(&task, options.capacity));
+        options.filter_hash_prealloc_key_count_cap = Some(blocked_xor_filter_key_count_threshold(
+            task.blocked_xor_filter_kv_count_threshold,
+        ));
         options.max_vnode_key_range_bytes = task.effective_max_vnode_key_range_bytes();
-        let use_block_based_filter = task.should_use_block_based_filter();
+        let use_block_based_filter = task.should_use_block_based_filter_for_output(
+            options.estimated_output_key_count.unwrap_or_default() as u64,
+        );
 
         let key_range = KeyRange {
             left: task.splits[split_index].left.clone(),

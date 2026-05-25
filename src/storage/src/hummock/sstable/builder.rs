@@ -38,7 +38,9 @@ use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
     FullKeyFilterKeyExtractor,
 };
-use crate::hummock::sstable::{FilterBuilder, utils};
+use crate::hummock::sstable::{
+    DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP, FilterBuilder, FilterBuilderOptions, utils,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockHolder, BlockIterator, HummockError, HummockResult, MemoryLimiter,
@@ -69,6 +71,10 @@ pub struct SstableBuilderOptions {
     pub shorten_block_meta_key_threshold: Option<usize>,
     /// Max bytes for vnode key-range hints in SST metadata. None disables collection.
     pub max_vnode_key_range_bytes: Option<usize>,
+    /// Estimated key count for one output SST. Used only as a filter-builder capacity hint.
+    pub estimated_output_key_count: Option<usize>,
+    /// Upper bound for the initial key-hash buffer allocation in plain filter builders.
+    pub filter_hash_prealloc_key_count_cap: Option<usize>,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
@@ -83,6 +89,8 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             max_sst_size: options.compactor_max_sst_size,
             shorten_block_meta_key_threshold: options.shorten_block_meta_key_threshold,
             max_vnode_key_range_bytes: None,
+            estimated_output_key_count: None,
+            filter_hash_prealloc_key_count_cap: None,
         }
     }
 }
@@ -98,6 +106,25 @@ impl Default for SstableBuilderOptions {
             max_sst_size: DEFAULT_MAX_SST_SIZE,
             shorten_block_meta_key_threshold: None,
             max_vnode_key_range_bytes: None,
+            estimated_output_key_count: None,
+            filter_hash_prealloc_key_count_cap: None,
+        }
+    }
+}
+
+impl SstableBuilderOptions {
+    pub fn estimated_output_key_count(&self) -> usize {
+        self.estimated_output_key_count
+            .unwrap_or(self.capacity / DEFAULT_ENTRY_SIZE + 1)
+    }
+
+    pub fn filter_builder_options(&self) -> FilterBuilderOptions {
+        FilterBuilderOptions {
+            estimated_key_count: self.estimated_output_key_count(),
+            estimated_block_count: self.capacity / self.block_capacity + 1,
+            hash_prealloc_key_count_cap: self
+                .filter_hash_prealloc_key_count_cap
+                .unwrap_or(DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP),
         }
     }
 }
@@ -172,7 +199,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
         Self::new(
             sstable_id,
             writer,
-            Xor16FilterBuilder::new(options.capacity / DEFAULT_ENTRY_SIZE + 1),
+            Xor16FilterBuilder::create(options.filter_builder_options()),
             options,
             compaction_catalog_agent_ref,
             None,
@@ -1358,7 +1385,7 @@ pub(super) mod tests {
             0
         }
 
-        fn create(_capacity: usize) -> Self {
+        fn create(_options: FilterBuilderOptions) -> Self {
             Self
         }
 

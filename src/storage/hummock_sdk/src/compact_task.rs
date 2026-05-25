@@ -238,8 +238,31 @@ impl CompactTask {
         )
     }
 
-    /// Determines whether to use block-based filter for this compaction task.
-    /// Returns true if the total key count exceeds the configured threshold.
+    /// Determines whether to use block-based filter for one output SST.
+    ///
+    /// The caller should pass an output-SST-level key-count estimate. This differs from the legacy
+    /// task-level check below: a large compaction task can produce many small output SSTs, and those
+    /// outputs should be allowed to use plain filters when each output is below the threshold.
+    pub fn should_use_block_based_filter_for_output(
+        &self,
+        estimated_output_key_count: u64,
+    ) -> bool {
+        match self.sstable_filter_layout {
+            PbSstableFilterLayout::Plain => return false,
+            PbSstableFilterLayout::Auto | PbSstableFilterLayout::Unspecified => {}
+        }
+
+        crate::filter_utils::should_use_blocked_xor_filter_by_kv_count(
+            estimated_output_key_count,
+            self.blocked_xor_filter_kv_count_threshold,
+        )
+    }
+
+    /// Determines whether to use block-based filter using task-level input key count.
+    ///
+    /// Prefer `should_use_block_based_filter_for_output` when output SST capacity is available.
+    /// This legacy fallback can over-classify blocked filters for large tasks whose individual
+    /// output SSTs are below the threshold.
     pub fn should_use_block_based_filter(&self) -> bool {
         match self.sstable_filter_layout {
             PbSstableFilterLayout::Plain => return false,
@@ -686,7 +709,7 @@ impl From<ReportTask> for PbReportTask {
 mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_pb::hummock::compact_task::TaskType;
-    use risingwave_pb::hummock::{PbCompactTask, PbLevelType};
+    use risingwave_pb::hummock::{PbCompactTask, PbLevelType, PbSstableFilterLayout};
 
     use super::CompactTask;
     use crate::level::InputLevel;
@@ -724,6 +747,26 @@ mod tests {
 
         let pb2 = PbCompactTask::from(&task);
         assert_eq!(pb2.max_kv_count_for_xor16, Some(123));
+    }
+
+    #[test]
+    fn test_should_use_block_based_filter_for_output() {
+        let task = CompactTask {
+            sstable_filter_layout: PbSstableFilterLayout::Auto,
+            blocked_xor_filter_kv_count_threshold: Some(100),
+            ..Default::default()
+        };
+
+        assert!(!task.should_use_block_based_filter_for_output(100));
+        assert!(task.should_use_block_based_filter_for_output(101));
+
+        let task = CompactTask {
+            sstable_filter_layout: PbSstableFilterLayout::Plain,
+            blocked_xor_filter_kv_count_threshold: Some(100),
+            ..Default::default()
+        };
+
+        assert!(!task.should_use_block_based_filter_for_output(101));
     }
 
     #[test]

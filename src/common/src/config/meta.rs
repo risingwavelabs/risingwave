@@ -651,8 +651,13 @@ pub struct CompactionConfig {
     /// KV-count threshold for using blocked xor filters when output filter layout is "auto".
     ///
     /// When `sstable_filter_layout[level]` is "auto", compaction will build blocked xor filters if
-    /// the estimated total key count of the task exceeds this threshold. Otherwise it will build a
-    /// single non-blocked xor filter.
+    /// the estimated key count of one output SST exceeds this threshold. Otherwise it will build a
+    /// single non-blocked xor filter for that output.
+    ///
+    /// This is an output-SST-level heuristic. Older versions compared the threshold with the total
+    /// key count of the whole compaction task, which could classify many small output SSTs as
+    /// blocked only because they came from a large task. With the current heuristic, those outputs
+    /// can be classified back to plain filters.
     ///
     /// Note: shared-buffer flush does not read compaction group config, and always uses the
     /// built-in default threshold.
