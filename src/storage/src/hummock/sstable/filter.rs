@@ -21,9 +21,9 @@ use risingwave_pb::hummock::PbSstableFilterType;
 use crate::hummock::{HummockResult, MemoryLimiter};
 
 pub trait FilterBuilder: Send {
-    /// add key which need to be filter for construct filter data.
+    /// Add a key to the filter under construction.
     fn add_key(&mut self, dist_key: &[u8], table_id: u32);
-    /// Builds serialized filter bytes from key hashes.
+    /// Build serialized SST filter bytes from the collected key hashes.
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>>;
     /// Approximate serialized filter bytes counted toward SST builder capacity.
     ///
@@ -38,11 +38,11 @@ pub trait FilterBuilder: Send {
     fn switch_block(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<()> {
         Ok(())
     }
-    /// Approximate temporary memory needed when finishing the filter.
+    /// Approximate memory usage when finishing the filter.
     fn approximate_building_memory(&self) -> usize;
 
-    /// Add raw data which build by keys directly. Please make sure that you have finished the last
-    /// block by calling `switch_block`
+    /// Add raw filter data built from keys directly. The previous block must have been finished by
+    /// calling `switch_block`.
     fn add_raw_data(&mut self, _raw: Vec<u8>) {}
 
     fn support_blocked_raw_data(&self) -> bool {
