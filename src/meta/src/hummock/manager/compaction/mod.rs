@@ -41,7 +41,8 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
-    HummockSstableObjectId, HummockVersionId, compact_task_to_string, statistics_compact_task,
+    HummockSstableObjectId, HummockVersionId, can_concat, compact_task_to_string,
+    statistics_compact_task,
 };
 use risingwave_meta_model::hummock_sequence::COMPACTION_TASK_ID;
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
@@ -899,8 +900,32 @@ impl HummockManager {
                                 "The task may be expired because of group split, task:\n {:?}",
                                 compact_task_to_string(&compact_task)
                             );
+                            false
+                        } else if compact_task.target_level > 0
+                            && !compact_task.sorted_output_ssts.is_empty()
+                            && !compact_task_output_fits_target_level(
+                                &group.levels[compact_task.target_level as usize - 1].table_infos,
+                                compact_task.target_level,
+                                &compact_task.input_ssts,
+                                &compact_task.sorted_output_ssts,
+                            )
+                        {
+                            // Two concurrent L0→base compaction tasks can select L0
+                            // SSTs from different sub-levels whose key ranges overlap,
+                            // producing outputs that conflict in the target level.
+                            // Reject so the scheduler can replan with a fresh view.
+                            compact_task.task_status = TaskStatus::InputOutdatedCanceled;
+                            warn!(
+                                "Rejecting compaction task {} because output SSTs overlap \
+                                 with target level after applying removals. This is caused \
+                                 by concurrent compaction tasks with overlapping L0 key \
+                                 ranges. The task will be rescheduled.",
+                                compact_task.task_id,
+                            );
+                            false
+                        } else {
+                            true
                         }
-                        !is_expired
                     }
                 }
             } else {
@@ -1568,6 +1593,41 @@ pub struct CompactionGroupStatistic {
     pub compaction_group_config: CompactionGroup,
 }
 
+/// Validates that a compaction task's output SSTs won't overlap with the remaining
+/// SSTs in the target level after the task's input SSTs are removed.
+///
+/// Returns `true` if applying the task would leave the target level as a valid,
+/// non-overlapping, concat-able sequence; `false` if it would create overlap.
+///
+/// Background: two concurrent L0→base compaction tasks can produce outputs with
+/// overlapping key ranges in the same target level. The existing
+/// `is_pending_compact` check only tracks SST IDs, not output key ranges, so both
+/// tasks can pass scheduling validation. If both outputs land in the target level,
+/// the LSM invariant breaks and `level_insert_ssts`'s `can_concat` assertion fails.
+///
+/// This helper simulates the post-apply target level and uses the same
+/// `can_concat` predicate to detect the overlap before any state is mutated.
+fn compact_task_output_fits_target_level(
+    target_level_ssts: &[SstableInfo],
+    target_level: u32,
+    input_ssts: &[risingwave_hummock_sdk::level::InputLevel],
+    output_ssts: &[SstableInfo],
+) -> bool {
+    let removed_sst_ids: HashSet<HummockSstableId> = input_ssts
+        .iter()
+        .filter(|l| l.level_idx == target_level)
+        .flat_map(|l| l.table_infos.iter().map(|s| s.sst_id))
+        .collect();
+    let mut merged: Vec<SstableInfo> = target_level_ssts
+        .iter()
+        .filter(|s| !removed_sst_ids.contains(&s.sst_id))
+        .cloned()
+        .collect();
+    merged.extend(output_ssts.iter().cloned());
+    merged.sort_by(|a, b| a.key_range.cmp(&b.key_range));
+    can_concat(&merged)
+}
+
 /// Updates table stats caused by vnode watermark trivial reclaim compaction.
 fn update_table_stats_for_vnode_watermark_trivial_reclaim(
     table_stats: &mut PbTableStatsMap,
@@ -2060,5 +2120,154 @@ mod compaction_state_tests {
         let (groups, task_type) = snapshot.pick_compaction_groups_and_type().unwrap();
         assert_eq!(task_type, TaskType::SpaceReclaim);
         assert_eq!(groups, vec![g1]);
+    }
+}
+
+#[cfg(test)]
+mod compact_task_output_overlap_tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::key::{FullKey, gen_key_from_str};
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::InputLevel;
+    use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
+    use risingwave_pb::hummock::PbLevelType;
+
+    use super::compact_task_output_fits_target_level;
+
+    const TEST_TABLE_ID: u32 = 1;
+
+    /// Encode `tag` as a properly-formed `FullKey` so the raw bytes can be
+    /// stored in [`KeyRange`] and round-trip through `compare_right_with`'s
+    /// `FullKey::decode` call inside [`can_concat`].
+    fn encode_key(tag: &str) -> bytes::Bytes {
+        FullKey::for_test(
+            TableId::new(TEST_TABLE_ID),
+            gen_key_from_str(VirtualNode::ZERO, tag),
+            test_epoch(20),
+        )
+        .encode()
+        .into()
+    }
+
+    /// Build an `SstableInfo` with key range `[left_tag, right_tag]`.
+    fn sst(id: u64, left_tag: &str, right_tag: &str) -> SstableInfo {
+        SstableInfoInner {
+            sst_id: id.into(),
+            object_id: id.into(),
+            key_range: KeyRange {
+                left: encode_key(left_tag),
+                right: encode_key(right_tag),
+                right_exclusive: false,
+            },
+            table_ids: vec![TEST_TABLE_ID.into()],
+            file_size: 100,
+            sst_size: 100,
+            ..Default::default()
+        }
+        .into()
+    }
+
+    /// Reproduces the bug scenario from the patch description:
+    ///
+    /// Target level (before task B): `[K1, K5]` (output of task A, already
+    /// applied), `[K5b, K7]` (existing SST `T3`).
+    ///
+    /// Task B inputs do not include `T3`, but its output covers `[K3, K7]`,
+    /// which overlaps `[K1, K5]`. The helper must reject this.
+    #[test]
+    fn test_rejects_overlapping_output() {
+        let task_a_output = sst(101, "K1", "K5"); // existing in target level
+        let t3 = sst(3, "K5b", "K7"); // existing in target level, disjoint from K1..K5
+        let target_level_ssts = vec![task_a_output, t3];
+
+        // Task B consumes some L0 SSTs (not in target level) and outputs
+        // [K3, K7] which overlaps [K1, K5].
+        let input_ssts = vec![InputLevel {
+            level_idx: 0,
+            level_type: PbLevelType::Overlapping,
+            table_infos: vec![sst(50, "K3", "K7")],
+        }];
+        let task_b_output = vec![sst(201, "K3", "K7")];
+
+        let fits = compact_task_output_fits_target_level(
+            &target_level_ssts,
+            // target_level
+            1,
+            &input_ssts,
+            &task_b_output,
+        );
+        assert!(
+            !fits,
+            "task B's output [K3, K7] overlaps existing target-level SST [K1, K5]; \
+             helper should reject it"
+        );
+    }
+
+    /// A task that consumes a target-level SST and replaces it with a
+    /// disjoint output must be accepted.
+    #[test]
+    fn test_accepts_non_overlapping_output() {
+        let t3 = sst(3, "K5b", "K7");
+        let target_level_ssts = vec![t3.clone()];
+
+        // Task consumes T3 (removes [K5b, K7]) and produces a single output
+        // covering the same key range. After removal+insert, target level is
+        // [[K5b, K7]] again.
+        let input_ssts = vec![InputLevel {
+            level_idx: 1,
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![t3],
+        }];
+        let output = vec![sst(202, "K5b", "K7")];
+
+        let fits = compact_task_output_fits_target_level(
+            &target_level_ssts,
+            // target_level
+            1,
+            &input_ssts,
+            &output,
+        );
+        assert!(fits, "non-overlapping replacement should be accepted");
+    }
+
+    /// A task whose output extends the target level into a gap (without
+    /// touching existing SSTs) and stays non-overlapping must be accepted.
+    #[test]
+    fn test_accepts_output_into_gap() {
+        // Existing target level has a single SST at [K5b, K7]. The task fills
+        // the gap to the left with output [K1, K3].
+        let existing = sst(3, "K5b", "K7");
+        let target_level_ssts = vec![existing];
+
+        let input_ssts = vec![InputLevel {
+            level_idx: 0,
+            level_type: PbLevelType::Overlapping,
+            table_infos: vec![sst(50, "K1", "K3")],
+        }];
+        let output = vec![sst(203, "K1", "K3")];
+
+        let fits = compact_task_output_fits_target_level(
+            &target_level_ssts,
+            // target_level
+            1,
+            &input_ssts,
+            &output,
+        );
+        assert!(fits, "non-overlapping fill of gap should be accepted");
+    }
+
+    /// Smoke test: empty target level + single output SST is trivially valid.
+    #[test]
+    fn test_accepts_single_output_into_empty_level() {
+        let fits = compact_task_output_fits_target_level(
+            &[],
+            // target_level
+            1,
+            &[],
+            &[sst(204, "K1", "K3")],
+        );
+        assert!(fits);
     }
 }

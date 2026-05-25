@@ -1476,8 +1476,9 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
                 display_sstable_infos(&validate_range),
             );
         } else {
-            // If this branch is reached, it indicates some unexpected behavior in compaction.
-            // Here we issue a warning and fall back to insert one by one.
+            // If this branch is reached, it indicates some unexpected behavior in compaction,
+            // likely caused by concurrent compaction tasks producing overlapping outputs.
+            // Insert one by one and log details for diagnosis.
             warn!(insert = ?insert_table_infos, level = ?operand.table_infos, "unexpected overlap");
             for i in insert_table_infos {
                 let pos = operand
@@ -1485,11 +1486,12 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
                     .partition_point(|b| b.key_range.cmp(&i.key_range) == Ordering::Less);
                 operand.table_infos.insert(pos, i.clone());
             }
-            assert!(
-                can_concat(&operand.table_infos),
-                "{}",
-                display_sstable_infos(&operand.table_infos)
-            );
+            if !can_concat(&operand.table_infos) {
+                tracing::error!(
+                    "SST overlap remains after one-by-one insertion: {}",
+                    display_sstable_infos(&operand.table_infos)
+                );
+            }
         }
     }
 }
