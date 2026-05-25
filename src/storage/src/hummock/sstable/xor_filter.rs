@@ -1584,7 +1584,7 @@ mod tests {
         for i in 0..100 {
             binary_fuse8_builder.add_key(&test_user_key_of(i).encode(), 0);
         }
-        let binary_fuse8_bytes = binary_fuse8_builder.finish(None);
+        let binary_fuse8_bytes = binary_fuse8_builder.finish(None).unwrap();
         let binary_fuse8_reader = XorFilterReader::new(&binary_fuse8_bytes, &[]);
         assert_reader_contains_keys(&binary_fuse8_reader, 0, 100);
         let binary_fuse8_encoded = binary_fuse8_reader.encode_to_bytes();
@@ -1598,7 +1598,7 @@ mod tests {
         for i in 0..100 {
             binary_fuse16_builder.add_key(&test_user_key_of(i).encode(), 0);
         }
-        let binary_fuse16_bytes = binary_fuse16_builder.finish(None);
+        let binary_fuse16_bytes = binary_fuse16_builder.finish(None).unwrap();
         let binary_fuse16_reader = XorFilterReader::new(&binary_fuse16_bytes, &[]);
         assert_reader_contains_keys(&binary_fuse16_reader, 0, 100);
         let binary_fuse16_encoded = binary_fuse16_reader.encode_to_bytes();
@@ -1712,9 +1712,9 @@ mod tests {
                 let key_idx = block_idx * 50 + i;
                 blocked_binary_fuse8_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
             }
-            blocked_binary_fuse8_builder.switch_block(None);
+            blocked_binary_fuse8_builder.switch_block(None).unwrap();
         }
-        let blocked_binary_fuse8_bytes = blocked_binary_fuse8_builder.finish(None);
+        let blocked_binary_fuse8_bytes = blocked_binary_fuse8_builder.finish(None).unwrap();
         let blocked_binary_fuse8_reader =
             XorFilterReader::new(&blocked_binary_fuse8_bytes, &block_metas);
         assert_blocked_reader_contains_keys(&blocked_binary_fuse8_reader, &block_metas, 0, 150);
@@ -1731,9 +1731,9 @@ mod tests {
                 let key_idx = block_idx * 50 + i;
                 blocked_binary_fuse16_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
             }
-            blocked_binary_fuse16_builder.switch_block(None);
+            blocked_binary_fuse16_builder.switch_block(None).unwrap();
         }
-        let blocked_binary_fuse16_bytes = blocked_binary_fuse16_builder.finish(None);
+        let blocked_binary_fuse16_bytes = blocked_binary_fuse16_builder.finish(None).unwrap();
         let blocked_binary_fuse16_reader =
             XorFilterReader::new(&blocked_binary_fuse16_bytes, &block_metas);
         assert_blocked_reader_contains_keys(&blocked_binary_fuse16_reader, &block_metas, 0, 150);

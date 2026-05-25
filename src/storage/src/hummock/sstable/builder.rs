@@ -965,7 +965,7 @@ pub(super) mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::xor_filter::{
         BinaryFuse8FilterBuilder, BinaryFuse16FilterBuilder, BlockedBinaryFuse8FilterBuilder,
-        BlockedBinaryFuse16FilterBuilder, BlockedXor16FilterBuilder,
+        BlockedBinaryFuse16FilterBuilder, BlockedXor8FilterBuilder, BlockedXor16FilterBuilder,
     };
     use crate::hummock::test_utils::{
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer,
@@ -1330,6 +1330,11 @@ pub(super) mod tests {
         )
         .await;
         test_with_xor_filter_builder::<Xor8FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterXor8,
+        )
+        .await;
+        test_with_xor_filter_builder::<BlockedXor8FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor8,
         )
