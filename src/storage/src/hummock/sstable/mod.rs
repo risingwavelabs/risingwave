@@ -220,7 +220,7 @@ impl Sstable {
         // Foyer uses this as a cache weight. Keep it aligned with the serialized-size proxy used
         // by SST metadata accounting instead of treating it as an exact Rust heap footprint.
         std::mem::size_of_val(&self.id)
-            + self.filter_reader.estimate_size()
+            + self.filter_reader.serialized_len()
             + self.meta.encoded_size()
     }
 }
@@ -586,5 +586,27 @@ mod tests {
             s.filter_reader.encode_to_bytes(),
             sstable.filter_reader.encode_to_bytes()
         );
+    }
+
+    #[tokio::test]
+    async fn test_sstable_meta_cache_weight() {
+        let (_, meta) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            (0..100).map(|x| {
+                (
+                    iterator_test_key_of(x),
+                    HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec()),
+                )
+            }),
+        )
+        .await;
+
+        let sstable = Sstable::new(42.into(), meta, false);
+        assert!(sstable.meta.bloom_filter.is_empty());
+
+        let expected_weight = std::mem::size_of_val(&sstable.id)
+            + sstable.filter_reader.serialized_len()
+            + sstable.meta.encoded_size();
+        assert_eq!(sstable.estimated_meta_cache_weight(), expected_weight);
     }
 }

@@ -545,11 +545,11 @@ impl XorFilterReader {
         BlockBasedXor8Filter { filters }
     }
 
-    /// Estimates decoded filter-reader weight with the serialized filter byte length.
+    /// Returns the serialized byte length of the decoded filter reader.
     ///
-    /// This is used as part of meta-cache accounting. It intentionally follows RisingWave's
-    /// filter encoding size, not the exact Rust heap footprint of the decoded reader.
-    pub fn estimate_size(&self) -> usize {
+    /// This intentionally follows RisingWave's filter encoding size, not the exact Rust heap
+    /// footprint of the decoded reader.
+    pub fn serialized_len(&self) -> usize {
         if self.is_empty() {
             return 0;
         }
@@ -845,7 +845,7 @@ mod tests {
         let xor8_bytes = xor8_builder.finish(None).unwrap();
         let xor8_reader = XorFilterReader::new(&xor8_bytes, &[]);
         let xor8_encoded = xor8_reader.encode_to_bytes();
-        assert_eq!(xor8_reader.estimate_size(), xor8_encoded.len());
+        assert_eq!(xor8_reader.serialized_len(), xor8_encoded.len());
         assert_eq!(
             xor8_bytes, xor8_encoded,
             "Xor8 builder and reader should produce identical bytes"
@@ -859,7 +859,7 @@ mod tests {
         let xor16_bytes = xor16_builder.finish(None).unwrap();
         let xor16_reader = XorFilterReader::new(&xor16_bytes, &[]);
         let xor16_encoded = xor16_reader.encode_to_bytes();
-        assert_eq!(xor16_reader.estimate_size(), xor16_encoded.len());
+        assert_eq!(xor16_reader.serialized_len(), xor16_encoded.len());
         assert_eq!(
             xor16_bytes, xor16_encoded,
             "Xor16 builder and reader should produce identical bytes"
@@ -895,7 +895,7 @@ mod tests {
         let blocked_xor8_reader = XorFilterReader::new(&blocked_xor8_bytes, &block_metas);
         let blocked_xor8_encoded = blocked_xor8_reader.encode_to_bytes();
         assert_eq!(
-            blocked_xor8_reader.estimate_size(),
+            blocked_xor8_reader.serialized_len(),
             blocked_xor8_encoded.len()
         );
         assert_eq!(
@@ -916,7 +916,7 @@ mod tests {
         let blocked_xor16_reader = XorFilterReader::new(&blocked_xor16_bytes, &block_metas);
         let blocked_xor16_encoded = blocked_xor16_reader.encode_to_bytes();
         assert_eq!(
-            blocked_xor16_reader.estimate_size(),
+            blocked_xor16_reader.serialized_len(),
             blocked_xor16_encoded.len()
         );
         assert_eq!(
