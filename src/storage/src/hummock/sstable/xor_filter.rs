@@ -313,14 +313,6 @@ fn blocked_filter_current_hash_prealloc_capacity(options: FilterBuilderOptions) 
 }
 
 impl BlockedXor16FilterBuilder {
-    pub fn new(estimated_key_count: usize) -> Self {
-        Self::with_options(FilterBuilderOptions {
-            estimated_key_count,
-            estimated_block_count: 0,
-            hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
-        })
-    }
-
     fn with_options(options: FilterBuilderOptions) -> Self {
         Self {
             current: Xor16FilterBuilder::new(blocked_filter_current_hash_prealloc_capacity(
@@ -336,14 +328,6 @@ impl BlockedXor16FilterBuilder {
 }
 
 impl BlockedXor8FilterBuilder {
-    pub fn new(estimated_key_count: usize) -> Self {
-        Self::with_options(FilterBuilderOptions {
-            estimated_key_count,
-            estimated_block_count: 0,
-            hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
-        })
-    }
-
     fn with_options(options: FilterBuilderOptions) -> Self {
         Self {
             current: Xor8FilterBuilder::new(blocked_filter_current_hash_prealloc_capacity(options)),
@@ -1042,8 +1026,14 @@ mod tests {
             });
         }
 
+        let blocked_options = FilterBuilderOptions {
+            estimated_key_count: 150,
+            estimated_block_count: block_metas.len(),
+            hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+        };
+
         // Test BlockedXor8 filter
-        let mut blocked_xor8_builder = BlockedXor8FilterBuilder::new(1024);
+        let mut blocked_xor8_builder = BlockedXor8FilterBuilder::create(blocked_options);
         for block_idx in 0..3 {
             for i in 0..50 {
                 let key_idx = block_idx * 50 + i;
@@ -1064,7 +1054,7 @@ mod tests {
         );
 
         // Test BlockedXor16 filter
-        let mut blocked_xor16_builder = BlockedXor16FilterBuilder::new(1024);
+        let mut blocked_xor16_builder = BlockedXor16FilterBuilder::create(blocked_options);
         for block_idx in 0..3 {
             for i in 0..50 {
                 let key_idx = block_idx * 50 + i;

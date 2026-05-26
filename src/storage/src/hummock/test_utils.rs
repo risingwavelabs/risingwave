@@ -48,8 +48,9 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, FilterBuilder, LruCache, Sstable, SstableBuilder,
-    SstableBuilderOptions, SstableStoreRef, SstableWriter, TableHolder, Xor16FilterBuilder,
+    BlockedXor16FilterBuilder, CachePolicy, DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+    FilterBuilder, FilterBuilderOptions, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
+    SstableStoreRef, SstableWriter, TableHolder, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -208,7 +209,11 @@ pub async fn put_sst(
 
     // dummy
     let bloom_filter = {
-        let mut filter_builder = BlockedXor16FilterBuilder::new(100);
+        let mut filter_builder = BlockedXor16FilterBuilder::create(FilterBuilderOptions {
+            estimated_key_count: 0,
+            estimated_block_count: meta.block_metas.len(),
+            hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
+        });
         for _ in &meta.block_metas {
             filter_builder.switch_block(None);
         }
