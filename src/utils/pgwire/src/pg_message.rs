@@ -899,7 +899,7 @@ fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) -> Re
 mod tests {
     use bytes::Bytes;
 
-    use crate::pg_message::{FeParseMessage, FeQueryMessage};
+    use crate::pg_message::{FeParseMessage, FeQueryMessage, FeStartupMessage};
 
     #[test]
     fn test_get_sql() {
@@ -918,5 +918,12 @@ mod tests {
             type_ids: vec![],
         };
         assert_eq!(fe.get_sql().unwrap(), "select 1");
+    }
+
+    #[test]
+    fn test_startup_build() {
+        let payload = b"user\0dev\0options\0\0\0";
+        let msg = FeStartupMessage::build_with_payload(payload).unwrap();
+        assert_eq!(msg.config.get("options").unwrap(), "");
     }
 }
