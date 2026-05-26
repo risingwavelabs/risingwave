@@ -349,7 +349,7 @@ impl BigQuerySink {
                 ))
             })?;
             let data_type_string = Self::get_string_and_check_support_from_datatype(&i.data_type)?;
-            if data_type_string.ne(value) {
+            if !Self::big_query_type_matches(&data_type_string, value) {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Data type mismatch for column `{:?}`. BigQuery side: `{:?}`, RisingWave side: `{:?}`. ",
                     i.name,
@@ -359,6 +359,75 @@ impl BigQuerySink {
             };
         }
         Ok(())
+    }
+
+    fn big_query_type_matches(rw_type: &str, big_query_type: &str) -> bool {
+        Self::normalize_big_query_decimal_type(rw_type)
+            == Self::normalize_big_query_decimal_type(big_query_type)
+    }
+
+    fn normalize_big_query_decimal_type(big_query_type: &str) -> String {
+        let bytes = big_query_type.as_bytes();
+        let mut result = String::with_capacity(big_query_type.len());
+        let mut i = 0;
+
+        while i < bytes.len() {
+            if bytes[i].is_ascii_alphabetic() || bytes[i] == b'_' {
+                let start = i;
+                i += 1;
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+
+                let token = &big_query_type[start..i];
+                if matches!(
+                    token.to_ascii_uppercase().as_str(),
+                    "NUMERIC" | "DECIMAL" | "BIGNUMERIC" | "BIGDECIMAL"
+                ) {
+                    result.push_str("NUMERIC");
+
+                    let mut cursor = i;
+                    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                        cursor += 1;
+                    }
+                    if cursor < bytes.len()
+                        && bytes[cursor] == b'('
+                        && let Some(closing_paren) =
+                            Self::find_closing_paren(big_query_type, cursor)
+                    {
+                        i = closing_paren + 1;
+                    }
+                } else {
+                    result.push_str(token);
+                }
+            } else {
+                let ch = big_query_type[i..]
+                    .chars()
+                    .next()
+                    .expect("index should be within string bounds");
+                result.push(ch);
+                i += ch.len_utf8();
+            }
+        }
+
+        result
+    }
+
+    fn find_closing_paren(s: &str, open_paren: usize) -> Option<usize> {
+        let mut depth = 0;
+        for (offset, byte) in s.as_bytes()[open_paren..].iter().enumerate() {
+            match byte {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(open_paren + offset);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     fn get_string_and_check_support_from_datatype(rw_data_type: &DataType) -> Result<String> {
@@ -1007,6 +1076,27 @@ mod test {
             BigQuerySink::get_string_and_check_support_from_datatype(&rw_datatype).unwrap(),
             big_query_type_string
         );
+    }
+
+    #[tokio::test]
+    async fn test_type_check_accepts_parameterized_decimal() {
+        assert!(BigQuerySink::big_query_type_matches(
+            "NUMERIC",
+            "NUMERIC(31, 2)"
+        ));
+        assert!(BigQuerySink::big_query_type_matches(
+            "NUMERIC",
+            "BIGNUMERIC(76, 38)"
+        ));
+        assert!(BigQuerySink::big_query_type_matches(
+            "NUMERIC",
+            "BIGDECIMAL(76, 38)"
+        ));
+        assert!(BigQuerySink::big_query_type_matches(
+            "ARRAY<STRUCT<v1 NUMERIC, v2 ARRAY<NUMERIC>>>",
+            "ARRAY<STRUCT<v1 BIGNUMERIC(76, 38), v2 ARRAY<NUMERIC(31, 2)>>>"
+        ));
+        assert!(!BigQuerySink::big_query_type_matches("NUMERIC", "FLOAT64"));
     }
 
     #[tokio::test]
