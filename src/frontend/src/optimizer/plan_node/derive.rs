@@ -119,6 +119,8 @@ pub(crate) fn derive_pk(
 
     let mut in_order = FixedBitSet::with_capacity(schema.len());
     let mut pk = vec![];
+    let mut remaining_stream_key = stream_key.clone();
+    let stop_order_by_after_stream_key = !remaining_stream_key.is_empty();
 
     let func_dep = input.functional_dependency();
     let user_order_by = func_dep.minimize_order_key(
@@ -135,9 +137,18 @@ pub(crate) fn derive_pk(
         let idx = order.column_index;
         pk.push(*order);
         in_order.insert(idx);
+        if let Some(pos) = remaining_stream_key
+            .iter()
+            .position(|stream_key_idx| *stream_key_idx == idx)
+        {
+            remaining_stream_key.remove(pos);
+            if stop_order_by_after_stream_key && remaining_stream_key.is_empty() {
+                break;
+            }
+        }
     }
 
-    for &idx in &stream_key {
+    for &idx in &remaining_stream_key {
         if in_order.contains(idx) {
             continue;
         }
