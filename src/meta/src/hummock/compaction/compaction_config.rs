@@ -264,7 +264,7 @@ mod tests {
     fn test_validate_compaction_config_rejects_invalid_filter_layout_value() {
         let mut config = CompactionConfigBuilder::new().build();
         config.sstable_filter_layout = vec!["auto".to_owned(); config.max_level as usize + 1];
-        config.sstable_filter_layout[0] = "blocked".to_owned();
+        config.sstable_filter_layout[0] = "unknown".to_owned();
         assert!(validate_compaction_config(&config).is_err());
     }
 

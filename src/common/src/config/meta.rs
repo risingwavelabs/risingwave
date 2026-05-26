@@ -674,8 +674,9 @@ pub struct CompactionConfig {
     pub sstable_filter_kind: Vec<String>,
     /// Per-level xor filter layout for compaction output.
     ///
-    /// "auto" uses the kv-count heuristic; "plain"/"normal" forces non-blocked filters and ignores
-    /// kv-count threshold.
+    /// "auto" uses the kv-count heuristic; "plain"/"normal" forces non-blocked filters; "blocked"
+    /// forces block-based filters. Explicit "plain" and "blocked" values ignore the kv-count
+    /// threshold.
     ///
     /// Index by LSM level: `0..=max_level`. Note: L0 (index 0) is currently ignored by shared-buffer
     /// flush, which always uses "auto".
@@ -1138,12 +1139,12 @@ pub mod default {
         pub fn sstable_filter_layout() -> Vec<String> {
             vec![
                 "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
-                "auto".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
+                "blocked".to_owned(),
             ]
         }
     }

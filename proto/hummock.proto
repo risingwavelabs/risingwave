@@ -32,6 +32,8 @@ enum SstableFilterLayout {
   SSTABLE_FILTER_LAYOUT_AUTO = 1;
   // Always use a single non-blocked filter. Ignore kv-count threshold.
   SSTABLE_FILTER_LAYOUT_PLAIN = 2;
+  // Always use per-block filters. Ignore kv-count threshold.
+  SSTABLE_FILTER_LAYOUT_BLOCKED = 3;
 }
 
 // Key range for a single vnode within an SST.

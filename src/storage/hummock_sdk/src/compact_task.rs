@@ -249,6 +249,7 @@ impl CompactTask {
     ) -> bool {
         match self.sstable_filter_layout {
             PbSstableFilterLayout::Plain => return false,
+            PbSstableFilterLayout::Blocked => return true,
             PbSstableFilterLayout::Auto | PbSstableFilterLayout::Unspecified => {}
         }
 
@@ -266,6 +267,7 @@ impl CompactTask {
     pub fn should_use_block_based_filter(&self) -> bool {
         match self.sstable_filter_layout {
             PbSstableFilterLayout::Plain => return false,
+            PbSstableFilterLayout::Blocked => return true,
             PbSstableFilterLayout::Auto | PbSstableFilterLayout::Unspecified => {}
         }
 
@@ -767,6 +769,14 @@ mod tests {
         };
 
         assert!(!task.should_use_block_based_filter_for_output(101));
+
+        let task = CompactTask {
+            sstable_filter_layout: PbSstableFilterLayout::Blocked,
+            blocked_xor_filter_kv_count_threshold: Some(100),
+            ..Default::default()
+        };
+
+        assert!(task.should_use_block_based_filter_for_output(0));
     }
 
     #[test]
