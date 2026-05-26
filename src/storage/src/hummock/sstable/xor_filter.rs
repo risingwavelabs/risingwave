@@ -144,20 +144,17 @@ fn xor16_filter_serialized_len(filter: &Xor16) -> usize {
 
 /// Computes the serialized byte length of a blocked Xor filter.
 ///
-/// `encoded_blocks_len` already contains all finished block entries, including their
-/// per-block length prefixes. `pending_plain_filter_len` is the serialized length of
-/// the current block-local plain Xor filter if the current block has unsealed keys.
-/// A serialized blocked filter always has a footer; callers that skip writing a
-/// filter should represent that as empty bytes outside this helper.
+/// `encoded_blocks_len` already contains all finished block entries, including their per-block
+/// length prefixes. `pending_block_plain_filter_len` is the serialized length of the current
+/// block-local plain Xor filter, if the filter builder already has pending keys for it.
+/// Use `None` when there is no pending block-local filter to account for.
 fn blocked_xor_filter_serialized_len(
     encoded_blocks_len: usize,
-    pending_plain_filter_len: usize,
+    pending_block_plain_filter_len: Option<usize>,
 ) -> usize {
-    let pending_block_len = if pending_plain_filter_len == 0 {
-        0
-    } else {
-        BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + pending_plain_filter_len
-    };
+    let pending_block_len = pending_block_plain_filter_len
+        .map(|len| BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + len)
+        .unwrap_or(0);
     encoded_blocks_len + pending_block_len + BLOCKED_XOR_FILTER_FOOTER_LEN
 }
 
@@ -372,12 +369,9 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        let pending_plain_filter_len = if self.current.key_hash_entries.is_empty() {
-            0
-        } else {
-            self.current.approximate_len()
-        };
-        blocked_xor_filter_serialized_len(self.data.len(), pending_plain_filter_len)
+        let pending_block_plain_filter_len =
+            (!self.current.key_hash_entries.is_empty()).then(|| self.current.approximate_len());
+        blocked_xor_filter_serialized_len(self.data.len(), pending_block_plain_filter_len)
     }
 
     fn create(options: FilterBuilderOptions) -> Self {
@@ -423,12 +417,9 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
     }
 
     fn approximate_len(&self) -> usize {
-        let pending_plain_filter_len = if self.current.key_hash_entries.is_empty() {
-            0
-        } else {
-            self.current.approximate_len()
-        };
-        blocked_xor_filter_serialized_len(self.data.len(), pending_plain_filter_len)
+        let pending_block_plain_filter_len =
+            (!self.current.key_hash_entries.is_empty()).then(|| self.current.approximate_len());
+        blocked_xor_filter_serialized_len(self.data.len(), pending_block_plain_filter_len)
     }
 
     fn create(options: FilterBuilderOptions) -> Self {
@@ -662,7 +653,7 @@ impl XorFilterReader {
                         BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + xor8_filter_serialized_len(filter)
                     })
                     .sum();
-                blocked_xor_filter_serialized_len(finished_blocks_len, 0)
+                blocked_xor_filter_serialized_len(finished_blocks_len, None)
             }
             XorFilter::BlockXor16(reader) => {
                 let finished_blocks_len = reader
@@ -672,7 +663,7 @@ impl XorFilterReader {
                         BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + xor16_filter_serialized_len(filter)
                     })
                     .sum();
-                blocked_xor_filter_serialized_len(finished_blocks_len, 0)
+                blocked_xor_filter_serialized_len(finished_blocks_len, None)
             }
         }
     }
