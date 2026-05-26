@@ -36,10 +36,12 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
-use risingwave_connector::source::cdc::build_cdc_table_id;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
     SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+};
+use risingwave_connector::source::cdc::{
+    build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, source,
@@ -84,6 +86,7 @@ use crate::handler::util::{
 use crate::optimizer::plan_node::generic::{SourceNodeKind, build_cdc_scan_options_with_options};
 use crate::optimizer::plan_node::{
     LogicalCdcScan, LogicalPlanRef, LogicalSource, StreamPlanRef as PlanRef,
+    ensure_sync_log_store_fragment_root,
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRoot};
@@ -97,17 +100,16 @@ mod col_id_gen;
 pub use col_id_gen::*;
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
-    COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_DELETE_FILES_COUNT_THRESHOLD,
-    COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM, COMPACTION_SMALL_FILES_THRESHOLD_MB,
-    COMPACTION_TARGET_FILE_SIZE_MB, COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE,
-    COMPACTION_WRITE_PARQUET_COMPRESSION, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
-    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS, CompactionType, ENABLE_COMPACTION,
-    ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
-    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
-    ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode, ORDER_KEY,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
-    parse_partition_by_exprs, validate_order_key_columns,
+    COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
+    COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
+    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, COMPACTION_WRITE_PARQUET_COMPRESSION,
+    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
+    CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
+    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
+    IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
+    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
+    validate_order_key_columns,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -821,7 +823,10 @@ fn gen_table_plan_inner(
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
 
-    Ok((materialize.into(), table))
+    Ok((
+        ensure_sync_log_store_fragment_root(materialize.into()),
+        table,
+    ))
 }
 
 /// Generate stream plan for cdc table based on shared source.
@@ -940,7 +945,15 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         vec![],
     );
 
-    let cdc_table_id = build_cdc_table_id(source.id, &external_table_name);
+    let cdc_table_id_external_table_name = if let ExternalCdcTableType::Postgres = cdc_table_type
+        && let Some(normalized_table_name) =
+            normalize_simple_postgres_quoted_table_name(&external_table_name)
+    {
+        normalized_table_name
+    } else {
+        external_table_name
+    };
+    let cdc_table_id = build_cdc_table_id(source.id, &cdc_table_id_external_table_name);
     let materialize = plan_root.gen_table_plan(
         context,
         resolved_table_name,
@@ -968,7 +981,10 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     table.owner = session.user_id();
     table.cdc_table_id = Some(cdc_table_id);
     table.cdc_table_type = Some(cdc_table_type);
-    Ok((materialize.into(), table))
+    Ok((
+        ensure_sync_log_store_fragment_root(materialize.into()),
+        table,
+    ))
 }
 
 /// Derive connector properties and normalize `external_table_name` for CDC tables.
@@ -1015,13 +1031,12 @@ fn derive_with_options_for_cdc_table(
                 return Ok((with_options, external_table_name));
             }
             POSTGRES_CDC_CONNECTOR => {
-                let (schema_name, table_name) = external_table_name
-                    .split_once('.')
-                    .ok_or_else(|| anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'"))?;
+                let (schema_name, table_name) =
+                    parse_postgres_cdc_external_table_name(&external_table_name)?;
 
                 // insert 'schema.name' into connect properties
-                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
-                with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+                with_options.insert(SCHEMA_NAME_KEY.into(), schema_name);
+                with_options.insert(TABLE_NAME_KEY.into(), table_name);
                 // Return original external_table_name unchanged for Postgres
                 return Ok((with_options, external_table_name));
             }
@@ -1098,6 +1113,84 @@ fn derive_with_options_for_cdc_table(
         };
     }
     unreachable!("All valid CDC connectors should have returned by now")
+}
+
+/// Parse the schema/table name from the CDC `TABLE` clause.
+///
+/// Column names do not need the same parsing here: wildcard schema derivation reads
+/// them from PostgreSQL catalogs after the exact table has been identified.
+fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(String, String)> {
+    let mut parts = vec![];
+    let mut current = String::new();
+    let mut chars = external_table_name.chars().peekable();
+    let mut in_quote = false;
+    let mut just_closed_quote = false;
+
+    while let Some(ch) = chars.next() {
+        if in_quote {
+            if ch == '"' {
+                if chars.peek() == Some(&'"') {
+                    current.push('"');
+                    chars.next();
+                } else {
+                    in_quote = false;
+                    just_closed_quote = true;
+                }
+            } else {
+                current.push(ch);
+            }
+        } else {
+            match ch {
+                '.' => {
+                    if current.is_empty() {
+                        return Err(anyhow!(
+                            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                            external_table_name
+                        )
+                        .into());
+                    }
+                    parts.push(std::mem::take(&mut current));
+                    just_closed_quote = false;
+                }
+                '"' if current.is_empty() => {
+                    in_quote = true;
+                }
+                '"' => {
+                    return Err(anyhow!(
+                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                        external_table_name
+                    )
+                    .into());
+                }
+                _ if just_closed_quote => {
+                    return Err(anyhow!(
+                        "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+                        external_table_name
+                    )
+                    .into());
+                }
+                _ => current.push(ch),
+            }
+        }
+    }
+
+    if in_quote || current.is_empty() {
+        return Err(anyhow!(
+            "Invalid Postgres CDC table name '{}'. Expected 'schema.table'.",
+            external_table_name
+        )
+        .into());
+    }
+    parts.push(current);
+
+    if let [schema_name, table_name] = parts.as_slice() {
+        Ok((schema_name.clone(), table_name.clone()))
+    } else {
+        Err(
+            anyhow!("The upstream table name must contain schema name prefix, e.g. 'public.table'")
+                .into(),
+        )
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1828,33 +1921,6 @@ pub async fn create_iceberg_engine_table(
     sink_with.insert(
         COMMIT_CHECKPOINT_INTERVAL.to_owned(),
         commit_checkpoint_interval.to_string(),
-    );
-
-    let commit_checkpoint_size_threshold_mb = handler_args
-        .with_options
-        .get(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
-        .map(|v| v.to_owned())
-        .unwrap_or_else(|| ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_string());
-    let commit_checkpoint_size_threshold_mb = commit_checkpoint_size_threshold_mb
-        .parse::<u64>()
-        .map_err(|_| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "{} must be greater than 0: {}",
-                COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, commit_checkpoint_size_threshold_mb
-            ))
-        })?;
-    if commit_checkpoint_size_threshold_mb == 0 {
-        bail!("{COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB} must be greater than 0");
-    }
-
-    // remove commit_checkpoint_size_threshold_mb from source options, otherwise it will be considered as an unknown field.
-    source.as_mut().map(|x| {
-        x.with_properties
-            .remove(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
-    });
-    sink_with.insert(
-        COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB.to_owned(),
-        commit_checkpoint_size_threshold_mb.to_string(),
     );
     sink_with.insert("create_table_if_not_exists".to_owned(), "true".to_owned());
 
@@ -3006,6 +3072,39 @@ mod tests {
                 .contains("only NULL column option is supported for webhook tables"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn test_parse_postgres_cdc_external_table_name() {
+        for (input, expected) in [
+            ("public.Note", ("public", "Note")),
+            ("public.\"Note\"", ("public", "Note")),
+            (
+                "\"Mixed.Schema\".\"Note.Table\"",
+                ("Mixed.Schema", "Note.Table"),
+            ),
+            ("public.\"Note\"\"Archive\"", ("public", "Note\"Archive")),
+        ] {
+            assert_eq!(
+                parse_postgres_cdc_external_table_name(input).unwrap(),
+                (expected.0.to_owned(), expected.1.to_owned()),
+                "input: {input}"
+            );
+        }
+
+        for input in [
+            "Note",
+            "public.",
+            ".Note",
+            "public.\"Note",
+            "public.\"Note\"Archive",
+            "public.Note.Archive",
+        ] {
+            assert!(
+                parse_postgres_cdc_external_table_name(input).is_err(),
+                "input should be rejected: {input}"
+            );
+        }
     }
 
     #[test]

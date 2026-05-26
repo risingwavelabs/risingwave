@@ -108,8 +108,10 @@ emergency_level0_sub_level_partition = 256
 level0_stop_write_threshold_max_sst_count = 5000
 level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = true
-max_kv_count_for_xor16 = 262144
+blocked_xor_filter_kv_count_threshold = 262144
 max_vnode_key_range_bytes = ""
+sstable_filter_kind = ["xor16", "xor16", "xor16", "xor16", "xor16", "xor16", "xor16"]
+sstable_filter_layout = ["auto", "auto", "auto", "auto", "auto", "auto", "auto"]
 
 [meta.developer]
 cached_traces_num = 256
@@ -255,6 +257,7 @@ refresh_scheduler_interval_sec = 60
 join_encoding_type = "memory_optimized"
 sync_log_store_pause_duration_ms = 64
 sync_log_store_buffer_size = 2048
+disable_sync_log_store_dispatcher = false
 over_window_cache_policy = "full"
 enable_state_table_vnode_stats_pruning = false
 enable_vnode_key_stats_for_materialize = false
@@ -473,7 +476,6 @@ enable_tracing = false
 use_new_object_prefix_strategy = ""
 license_key = ""
 time_travel_retention_ms = 600000
-adaptive_parallelism_strategy = "BOUNDED(64)"
 per_database_isolation = true
 enforce_secret = false
 

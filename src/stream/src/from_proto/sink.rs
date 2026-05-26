@@ -273,7 +273,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             // previously unset value
             SinkLogStoreType::InMemoryLogStore | SinkLogStoreType::Unspecified => {
                 let factory = BoundedInMemLogStoreFactory::new(1, {
-                    let state_store = state_store.clone();
+                    let state_store = state_store;
                     let table_id = node.table.as_ref().map(|table| table.id);
                     move |epoch| {
                         async move {
@@ -302,8 +302,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     chunk_size,
                     input_data_types,
                     node.rate_limit.map(|x| x as _),
-                )
-                .await?
+                )?
                 .boxed()
             }
             SinkLogStoreType::KvLogStore => {
@@ -343,8 +342,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     chunk_size,
                     input_data_types,
                     node.rate_limit.map(|x| x as _),
-                )
-                .await?
+                )?
                 .boxed()
             }
         };

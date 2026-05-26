@@ -1,0 +1,83 @@
+# Verify the legacy display on the old cluster before restart.
+#
+# Naming convention: t_{parallelism}{parallelism_for_table}{strategy}{strategy_for_table}
+#   parallelism (streaming_parallelism):                          d=default,      f=fixed(8)
+#   parallelism_for_table (streaming_parallelism_for_table):      d=default,      f=fixed(6)
+#   strategy (streaming_parallelism_strategy):                    d=default,      b=bounded(32),  r=ratio(0.5),  a=auto
+#   strategy_for_table (streaming_parallelism_strategy_for_table): d=default,     b=bounded(16),  r=ratio(0.5),  a=auto
+#
+# System strategy: ALTER SYSTEM SET adaptive_parallelism_strategy = 'BOUNDED(64)'
+#
+# In v2.8.0 the parallelism column shows "adaptive" for all adaptive jobs
+# and "fixed(N)" for fixed jobs, regardless of the strategy stored.
+
+query TT
+SELECT name, lower(parallelism)
+FROM rw_streaming_parallelism
+WHERE name ~ '^t_[df][df][dbra][dbra]$'
+ORDER BY name;
+----
+t_ddaa adaptive
+t_ddab adaptive
+t_ddad adaptive
+t_ddar adaptive
+t_ddba adaptive
+t_ddbb adaptive
+t_ddbd adaptive
+t_ddbr adaptive
+t_ddda adaptive
+t_dddb adaptive
+t_dddd adaptive
+t_dddr adaptive
+t_ddra adaptive
+t_ddrb adaptive
+t_ddrd adaptive
+t_ddrr adaptive
+t_dfaa fixed(6)
+t_dfab fixed(6)
+t_dfad fixed(6)
+t_dfar fixed(6)
+t_dfba fixed(6)
+t_dfbb fixed(6)
+t_dfbd fixed(6)
+t_dfbr fixed(6)
+t_dfda fixed(6)
+t_dfdb fixed(6)
+t_dfdd fixed(6)
+t_dfdr fixed(6)
+t_dfra fixed(6)
+t_dfrb fixed(6)
+t_dfrd fixed(6)
+t_dfrr fixed(6)
+t_fdaa fixed(8)
+t_fdab fixed(8)
+t_fdad fixed(8)
+t_fdar fixed(8)
+t_fdba fixed(8)
+t_fdbb fixed(8)
+t_fdbd fixed(8)
+t_fdbr fixed(8)
+t_fdda fixed(8)
+t_fddb fixed(8)
+t_fddd fixed(8)
+t_fddr fixed(8)
+t_fdra fixed(8)
+t_fdrb fixed(8)
+t_fdrd fixed(8)
+t_fdrr fixed(8)
+t_ffaa fixed(6)
+t_ffab fixed(6)
+t_ffad fixed(6)
+t_ffar fixed(6)
+t_ffba fixed(6)
+t_ffbb fixed(6)
+t_ffbd fixed(6)
+t_ffbr fixed(6)
+t_ffda fixed(6)
+t_ffdb fixed(6)
+t_ffdd fixed(6)
+t_ffdr fixed(6)
+t_ffra fixed(6)
+t_ffrb fixed(6)
+t_ffrd fixed(6)
+t_ffrr fixed(6)

@@ -55,6 +55,7 @@ impl FeMessage {
     pub fn get_sql(&self) -> Result<Option<&str>> {
         match self {
             FeMessage::Query(q) => Ok(Some(q.get_sql()?)),
+            FeMessage::Parse(p) => Ok(Some(p.get_sql()?)),
             _ => Ok(None),
         }
     }
@@ -257,18 +258,28 @@ impl FePasswordMessage {
 
 impl FeQueryMessage {
     pub fn get_sql(&self) -> Result<&str> {
-        match CStr::from_bytes_with_nul(&self.sql_bytes) {
-            Ok(cstr) => cstr.to_str().map_err(|err| {
-                Error::new(
-                    ErrorKind::InvalidInput,
-                    anyhow!(err).context("Invalid UTF-8 sequence"),
-                )
-            }),
-            Err(err) => Err(Error::new(
+        get_sql_from_bytes(&self.sql_bytes)
+    }
+}
+
+impl FeParseMessage {
+    pub fn get_sql(&self) -> Result<&str> {
+        get_sql_from_bytes(&self.sql_bytes)
+    }
+}
+
+fn get_sql_from_bytes(sql_bytes: &[u8]) -> Result<&str> {
+    match CStr::from_bytes_with_nul(sql_bytes) {
+        Ok(cstr) => cstr.to_str().map_err(|err| {
+            Error::new(
                 ErrorKind::InvalidInput,
-                anyhow!(err).context("Input end error"),
-            )),
-        }
+                anyhow!(err).context("Invalid UTF-8 sequence"),
+            )
+        }),
+        Err(err) => Err(Error::new(
+            ErrorKind::InvalidInput,
+            anyhow!(err).context("Input end error"),
+        )),
     }
 }
 
@@ -888,7 +899,7 @@ fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) -> Re
 mod tests {
     use bytes::Bytes;
 
-    use crate::pg_message::FeQueryMessage;
+    use crate::pg_message::{FeParseMessage, FeQueryMessage};
 
     #[test]
     fn test_get_sql() {
@@ -900,5 +911,12 @@ mod tests {
             sql_bytes: Bytes::from(vec![1, 2, 3, 4, 5, 6, 7, 8]),
         };
         assert!(fe.get_sql().is_err(), "{}", true);
+
+        let fe = FeParseMessage {
+            statement_name: Bytes::from_static(b"stmt\0"),
+            sql_bytes: Bytes::from_static(b"select 1\0"),
+            type_ids: vec![],
+        };
+        assert_eq!(fe.get_sql().unwrap(), "select 1");
     }
 }

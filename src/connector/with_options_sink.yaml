@@ -443,7 +443,7 @@ HttpConfig:
   - name: url
     field_type: String
     comments: The endpoint URL to POST data to.
-    required: true
+    required: false
   - name: content_type
     field_type: String
     comments: |-
@@ -654,14 +654,6 @@ IcebergConfig:
     required: false
     default: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL
     allow_alter_on_fly: true
-  - name: commit_checkpoint_size_threshold_mb
-    field_type: u64
-    comments: |-
-      Commit on the next checkpoint barrier after buffered write size exceeds this threshold.
-      Default is 128 MB.
-    required: false
-    default: Some (ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
-    allow_alter_on_fly: true
   - name: create_table_if_not_exists
     field_type: bool
     required: false
@@ -691,7 +683,7 @@ IcebergConfig:
     field_type: bool
     comments: Whether to enable iceberg expired snapshots.
     required: false
-    default: Default::default
+    default: 'true'
     allow_alter_on_fly: true
   - name: write_mode
     field_type: IcebergWriteMode
@@ -827,30 +819,37 @@ KafkaConfig:
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.ca.pem
     field_type: String
     comments: CA certificate string (PEM format) for verifying the broker's key.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.certificate.location
     field_type: String
     comments: Path to client's certificate file (PEM).
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.certificate.pem
     field_type: String
     comments: Client's public key string (PEM format) used for authentication.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.key.location
     field_type: String
     comments: Path to client's private key file (PEM).
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.key.pem
     field_type: String
     comments: Client's private key string (PEM format) used for authentication.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.key.password
     field_type: String
     comments: Passphrase of client's private key.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.mechanism
     field_type: String
     comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.

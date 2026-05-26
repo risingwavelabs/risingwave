@@ -262,7 +262,7 @@ struct Metrics {
     /// Number of failed UDF calls.
     failure_count: LabelGuardedIntCounter,
     /// Total number of retried UDF calls.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     retry_count: LabelGuardedIntCounter,
     /// Input chunk rows of UDF calls.
     input_chunk_rows: LabelGuardedHistogram,

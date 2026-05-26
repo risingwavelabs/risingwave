@@ -113,7 +113,7 @@ impl TableCommittedEpochNotifiers {
 #[derive(Clone, Debug)]
 struct CompactionTaskReportResult {
     task_id: HummockCompactionTaskId,
-    #[allow(dead_code)]
+
     task_status: TaskStatus,
     reported: bool,
 }

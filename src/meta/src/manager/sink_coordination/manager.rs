@@ -1586,6 +1586,145 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_init_response_skips_recovered_pending_epoch() {
+        let db = prepare_db_backend().await;
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let epoch1 = 233;
+        let metadata = vec![1u8, 2u8];
+
+        let sql = format!(
+            "INSERT INTO pending_sink_state (sink_id, epoch, sink_state, metadata) VALUES ({}, {}, 'PENDING', x'0102')",
+            param.sink_id, epoch1
+        );
+        db.execute(sea_orm::Statement::from_string(
+            db.get_database_backend(),
+            sql,
+        ))
+        .await
+        .unwrap();
+
+        let all_vnode = (0..VirtualNode::COUNT_FOR_TEST).collect_vec();
+        let build_bitmap = |indexes: &[usize]| {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+            for i in indexes {
+                builder.set(*i, true);
+            }
+            builder.finish()
+        };
+        let vnode = build_bitmap(&all_vnode);
+
+        let sender = Arc::new(tokio::sync::Mutex::new(None));
+        let mock_subscriber: SinkCommittedEpochSubscriber = {
+            let captured_sender = sender.clone();
+            Arc::new(move |_sink_id: SinkId| {
+                let (epoch_sender, receiver) = unbounded_channel();
+                let captured_sender = captured_sender.clone();
+                async move {
+                    let mut guard = captured_sender.lock().await;
+                    *guard = Some(epoch_sender);
+                    Ok((epoch1, receiver))
+                }
+                .boxed()
+            })
+        };
+
+        let pre_commit_attempt = Arc::new(AtomicI32::new(0));
+        let commit_attempt = Arc::new(AtomicI32::new(0));
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker({
+                let expected_param = param.clone();
+                let db = db.clone();
+                let metadata = metadata.clone();
+                let pre_commit_attempt = pre_commit_attempt.clone();
+                let commit_attempt = commit_attempt.clone();
+                move |param, new_writer_rx| {
+                    let expected_param = expected_param.clone();
+                    let db = db.clone();
+                    let metadata = metadata.clone();
+                    let pre_commit_attempt = pre_commit_attempt.clone();
+                    let commit_attempt = commit_attempt.clone();
+                    tokio::spawn({
+                        let subscriber = mock_subscriber.clone();
+                        async move {
+                            assert_eq!(param, expected_param);
+                            CoordinatorWorker::execute_coordinator(
+                                db,
+                                param.clone(),
+                                new_writer_rx,
+                                MockTwoPhaseCoordinator::new_coordinator(
+                                    move |_epoch, _metadata_list, _schema_change| {
+                                        pre_commit_attempt.fetch_add(
+                                            1,
+                                            std::sync::atomic::Ordering::SeqCst,
+                                        );
+                                        Err(SinkError::Coordinator(anyhow!(
+                                            "pre_commit should not be called for a known pending epoch"
+                                        )))
+                                    },
+                                    move |epoch, commit_metadata| {
+                                        assert_eq!(epoch, epoch1);
+                                        assert_eq!(commit_metadata, metadata);
+                                        commit_attempt
+                                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                        Ok(())
+                                    },
+                                    move |_epoch, _schema_change| unreachable!(),
+                                ),
+                                subscriber.clone(),
+                            )
+                            .await;
+                        }
+                    })
+                }
+            });
+
+        let (_client, log_store_rewind_start_epoch) =
+            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
+                Ok(tonic::Response::new(
+                    manager
+                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                        .await
+                        .unwrap()
+                        .boxed(),
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(log_store_rewind_start_epoch, Some(epoch1));
+
+        for _ in 0..50 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let rows = list_rows(&db).await;
+            if rows[0].2 == "COMMITTED" {
+                break;
+            }
+        }
+
+        assert_eq!(
+            pre_commit_attempt.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(commit_attempt.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let rows = list_rows(&db).await;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].1, epoch1 as i64);
+        assert_eq!(rows[0].2, "COMMITTED");
+    }
+
+    #[tokio::test]
     async fn test_pre_commit_failed() {
         let db = prepare_db_backend().await;
 

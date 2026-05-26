@@ -421,8 +421,8 @@ impl BindContext {
             ))),
             [column_index] => Ok(*column_index),
             _ => Err(ErrorCode::InvalidReference(format!(
-                "table reference \"{}\" is ambiguous",
-                table_name
+                "column reference \"{}\" is ambiguous",
+                column_name
             ))),
         }
     }

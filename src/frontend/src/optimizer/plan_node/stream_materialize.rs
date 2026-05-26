@@ -178,7 +178,7 @@ impl StreamMaterialize {
     /// Different from `create`, the `columns` are passed in directly, instead of being derived from
     /// the input. So the column IDs are preserved from the SQL columns binding step and will be
     /// consistent with the source node and DML node.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_for_table(
         input: PlanRef,
         name: String,
@@ -438,7 +438,7 @@ impl StreamMaterialize {
             definition,
             conflict_behavior,
             version_column_indices,
-            read_prefix_len_hint,
+            read_prefix_len_hint: _,
             version,
             watermark_columns: _,
             dist_key_in_pk,
@@ -507,7 +507,10 @@ impl StreamMaterialize {
             definition,
             conflict_behavior,
             version_column_indices,
-            read_prefix_len_hint,
+            // Refresh staging tables are consumed by the refresh merge path with
+            // `iter_keyed_row_with_vnode` range scans. They are not read by
+            // fixed-prefix lookups, so prefix SST filters would only add write cost.
+            read_prefix_len_hint: 0,
             version,
             created_at_epoch,
             initialized_at_epoch,

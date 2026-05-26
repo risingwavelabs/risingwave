@@ -185,6 +185,9 @@ impl HummockManagerService for HummockServiceImpl {
         let compaction_group_id = request.compaction_group_id;
         let mut option = ManualCompactionOption {
             level: request.level as usize,
+            target_level: request
+                .target_level
+                .map(|target_level| target_level as usize),
             sst_ids: request.sst_ids,
             exclusive: request.exclusive.unwrap_or(false),
             ..Default::default()

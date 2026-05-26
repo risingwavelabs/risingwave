@@ -627,8 +627,9 @@ impl InflightDatabaseInfo {
                         info!(%job_id, "newly create job get cancelled before first barrier is collected")
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill(_) => {
-                    // The progress of SnapshotBackfill won't be tracked here
+                CreateStreamingJobType::SnapshotBackfill(_)
+                | CreateStreamingJobType::BatchRefresh(_) => {
+                    // The progress of SnapshotBackfill/BatchRefresh won't be tracked here
                 }
             }
         }
@@ -1103,6 +1104,14 @@ impl InflightDatabaseInfo {
         fragment_id: FragmentId,
         drop_upstream_fragment_ids: &[FragmentId],
     ) {
+        if !self.fragment_location.contains_key(&fragment_id) {
+            warn!(
+                target_fragment_id = %fragment_id,
+                drop_upstream_fragment_ids = ?drop_upstream_fragment_ids,
+                "skip dropping upstream sink fragments for non-existing target fragment"
+            );
+            return;
+        }
         {
             {
                 {
@@ -1399,6 +1408,23 @@ impl InflightDatabaseInfo {
             }
         }
         shared_actor_writer.finish();
+    }
+
+    pub(crate) fn post_apply_remove_job(
+        &mut self,
+        job_id: JobId,
+    ) -> Option<InflightStreamingJobInfo> {
+        let job = self.jobs.remove(&job_id)?;
+        let inner = self.shared_actor_infos.clone();
+        let mut shared_actor_writer = inner.start_writer(self.database_id);
+        for (fragment_id, fragment) in &job.fragment_infos {
+            self.fragment_location
+                .remove(fragment_id)
+                .expect("should exist");
+            shared_actor_writer.remove(fragment);
+        }
+        shared_actor_writer.finish();
+        Some(job)
     }
 }
 

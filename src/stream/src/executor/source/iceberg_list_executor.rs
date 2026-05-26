@@ -65,7 +65,7 @@ pub struct IcebergListExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> IcebergListExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
         stream_source_core: StreamSourceCore<S>,

@@ -42,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_compaction_group;
 mod alter_connection_props;
 mod alter_database_param;
 mod alter_mv;
@@ -67,6 +68,7 @@ pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 mod alter_utils;
+mod alter_watermark;
 mod backup;
 pub mod cancel_job;
 pub mod close_cursor;
@@ -267,7 +269,7 @@ impl HandlerArgs {
     }
 }
 
-#[allow(clippy::large_stack_frames)]
+#[expect(clippy::large_stack_frames)]
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
@@ -831,6 +833,20 @@ pub async fn handle(
                     handler_args,
                     name,
                     operation,
+                ))
+                .await
+            }
+            AlterTableOperation::AlterWatermark {
+                column_name,
+                expr,
+                with_ttl,
+            } => {
+                Box::pin(alter_watermark::handle_alter_watermark(
+                    handler_args,
+                    name,
+                    column_name,
+                    expr,
+                    with_ttl,
                 ))
                 .await
             }
@@ -1554,10 +1570,21 @@ pub async fn handle(
         Statement::AlterDefaultPrivileges { .. } => {
             handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
         }
-        Statement::StartTransaction { modes } => {
-            transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            alter_compaction_group::handle_alter_compaction_group(
+                handler_args,
+                group_ids,
+                operation,
+            )
+            .await
         }
-        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes).await,
+        Statement::StartTransaction { modes } => {
+            transaction::handle_begin(handler_args, START_TRANSACTION, modes)
+        }
+        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes),
         Statement::Commit { chain } => {
             transaction::handle_commit(handler_args, COMMIT, chain).await
         }
@@ -1569,7 +1596,7 @@ pub async fn handle(
             modes,
             snapshot,
             session,
-        } => transaction::handle_set(handler_args, modes, snapshot, session).await,
+        } => transaction::handle_set(handler_args, modes, snapshot, session),
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
         Statement::Kill(worker_process_id) => handle_kill(handler_args, worker_process_id).await,
         Statement::Comment {
@@ -1582,9 +1609,9 @@ pub async fn handle(
             name,
             data_types,
             statement,
-        } => prepared_statement::handle_prepare(name, data_types, statement).await,
+        } => prepared_statement::handle_prepare(name, data_types, statement),
         Statement::Deallocate { name, prepare } => {
-            prepared_statement::handle_deallocate(name, prepare).await
+            prepared_statement::handle_deallocate(name, prepare)
         }
         Statement::Vacuum { object_name, full } => {
             vacuum::handle_vacuum(handler_args, object_name, full).await
@@ -1707,6 +1734,13 @@ fn check_ban_alter_table_operation_for_iceberg_engine_table(
         AlterTableOperation::SetSourceRateLimit { .. } => {
             bail!(
                 "ALTER TABLE SET SOURCE RATE LIMIT is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::AlterWatermark { .. } => {
+            bail!(
+                "ALTER TABLE ALTER WATERMARK is not supported for iceberg table: {}.{}",
                 schema_name,
                 table_name
             );
