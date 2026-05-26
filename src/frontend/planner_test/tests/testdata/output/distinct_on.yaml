@@ -62,13 +62,13 @@
     from t_probe
     left join mv_order on mv_order.k = t_probe.k;
   stream_plan: |-
-    StreamMaterialize { columns: [k, v, mv_order.k(hidden), mv_order.t_order.ts(hidden), mv_order.t_order.id(hidden)], stream_key: [k, mv_order.t_order.ts, mv_order.t_order.id], pk_columns: [k, mv_order.t_order.ts, mv_order.t_order.id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t_probe.k, mv_order.t_order.ts, mv_order.t_order.id) }
-      └─StreamHashJoin { type: LeftOuter, predicate: t_probe.k = mv_order.k, output: [t_probe.k, mv_order.v, mv_order.k, mv_order.t_order.ts, mv_order.t_order.id] }
+    StreamMaterialize { columns: [k, v, mv_order.k(hidden)], stream_key: [k], pk_columns: [k], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t_probe.k) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t_probe.k = mv_order.k, output: [t_probe.k, mv_order.v, mv_order.k] }
         ├─StreamExchange { dist: HashShard(t_probe.k) }
         │ └─StreamTableScan { table: t_probe, columns: [t_probe.k], stream_scan_type: SnapshotBackfill, stream_key: [t_probe.k], pk: [k], dist: UpstreamHashShard(t_probe.k) }
         └─StreamExchange { dist: HashShard(mv_order.k) }
-          └─StreamTableScan { table: mv_order, columns: [mv_order.k, mv_order.v, mv_order.t_order.ts, mv_order.t_order.id], stream_scan_type: SnapshotBackfill, stream_key: [mv_order.k, mv_order.t_order.ts, mv_order.t_order.id], pk: [k, t_order.ts, t_order.id], dist: UpstreamHashShard(mv_order.k) }
+          └─StreamTableScan { table: mv_order, columns: [mv_order.k, mv_order.v], stream_scan_type: SnapshotBackfill, stream_key: [mv_order.k], pk: [k], dist: UpstreamHashShard(mv_order.k) }
 - name: snapshot backfill keeps scan unchanged when stream key is already table pk
   sql: |
     set streaming_use_snapshot_backfill = true;
@@ -87,8 +87,8 @@
       order by k, ts desc, id desc;
     select k, v, ts, id from mv_order_full;
   stream_plan: |-
-    StreamMaterialize { columns: [k, v, ts, id], stream_key: [k, ts, id], pk_columns: [k, ts, id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: mv_order_full, columns: [mv_order_full.k, mv_order_full.v, mv_order_full.ts, mv_order_full.id], stream_scan_type: SnapshotBackfill, stream_key: [mv_order_full.k, mv_order_full.ts, mv_order_full.id], pk: [k, ts, id], dist: UpstreamHashShard(mv_order_full.k) }
+    StreamMaterialize { columns: [k, v, ts, id], stream_key: [k], pk_columns: [k], pk_conflict: NoCheck }
+    └─StreamTableScan { table: mv_order_full, columns: [mv_order_full.k, mv_order_full.v, mv_order_full.ts, mv_order_full.id], stream_scan_type: SnapshotBackfill, stream_key: [mv_order_full.k], pk: [k], dist: UpstreamHashShard(mv_order_full.k) }
 - name: distinct on order by stops MV pk after stream key
   sql: |
     create table t (a int, b int, c int);
