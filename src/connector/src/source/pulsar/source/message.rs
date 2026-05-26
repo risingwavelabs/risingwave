@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use prost_013::Message as _;
 use pulsar::consumer::Message;
+use pulsar::message::proto::KeyValue;
 use risingwave_common::types::{
     Datum, DatumCow, ListValue, ScalarImpl, ScalarRefImpl, StructValue,
 };
@@ -29,6 +30,20 @@ pub struct PulsarMeta {
     pub schema_version: Option<Vec<u8>>,
     pub ack_message_id: Option<Vec<u8>>,
     pub properties: Option<Vec<(String, String)>>,
+}
+
+fn build_pulsar_properties(
+    properties: Vec<KeyValue>,
+    require_header: bool,
+) -> Option<Vec<(String, String)>> {
+    require_header
+        .then(|| {
+            properties
+                .into_iter()
+                .map(|kv| (kv.key, kv.value))
+                .collect_vec()
+        })
+        .filter(|properties| !properties.is_empty())
 }
 
 impl PulsarMeta {
@@ -97,13 +112,7 @@ impl SourceMessage {
             meta: SourceMeta::Pulsar(PulsarMeta {
                 schema_version: metadata.schema_version,
                 ack_message_id: Some(ack_data_bytes),
-                properties: require_header.then(|| {
-                    metadata
-                        .properties
-                        .into_iter()
-                        .map(|kv| (kv.key, kv.value))
-                        .collect()
-                }),
+                properties: build_pulsar_properties(metadata.properties, require_header),
             }),
         }
     }
@@ -114,6 +123,21 @@ mod tests {
     use risingwave_pb::data::DataType;
 
     use super::*;
+
+    #[test]
+    fn test_build_pulsar_properties() {
+        let properties = vec![KeyValue {
+            key: "tenant".to_owned(),
+            value: "acme".to_owned(),
+        }];
+
+        assert_eq!(build_pulsar_properties(properties.clone(), false), None);
+        assert_eq!(
+            build_pulsar_properties(properties, true),
+            Some(vec![("tenant".to_owned(), "acme".to_owned())])
+        );
+        assert_eq!(build_pulsar_properties(vec![], true), None);
+    }
 
     #[test]
     fn test_extract_pulsar_header_inner() {
