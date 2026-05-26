@@ -75,14 +75,14 @@ pub struct FeStartupMessage {
 impl FeStartupMessage {
     pub fn build_with_payload(payload: &[u8]) -> Result<Self> {
         let config = match std::str::from_utf8(payload) {
-            Ok(v) => Ok(v.trim_end_matches('\0')),
+            Ok(v) => Ok(v.strip_suffix('\0').unwrap_or(v)),
             Err(err) => Err(Error::new(
                 ErrorKind::InvalidInput,
                 anyhow!(err).context("Input end error"),
             )),
         }?;
         let mut map = HashMap::new();
-        let config: Vec<&str> = config.split('\0').collect();
+        let config: Vec<&str> = config.split_terminator('\0').collect();
         if config.len() % 2 == 1 {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
