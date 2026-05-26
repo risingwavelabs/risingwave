@@ -1260,8 +1260,10 @@ impl ControlStreamManager {
                             prev: barrier_info.prev_epoch(),
                         }),
                         mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
-                        tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span())
-                            .to_protobuf(),
+                        tracing_context: TracingContext::from_fastrace_span(
+                            barrier_info.curr_epoch.fastrace_span(),
+                        )
+                        .to_protobuf(),
                         kind: barrier_info.kind.to_protobuf() as i32,
                     };
 

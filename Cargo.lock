@@ -11400,6 +11400,7 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "either",
+ "fastrace",
  "futures",
  "futures-async-stream",
  "futures-util",
@@ -11588,6 +11589,7 @@ dependencies = [
  "ethnum",
  "expect-test",
  "faiss",
+ "fastrace",
  "fixedbitset 0.5.7",
  "foyer",
  "futures",
@@ -11610,8 +11612,6 @@ dependencies = [
  "more-asserts",
  "num-integer",
  "num-traits",
- "opentelemetry",
- "opentelemetry_sdk",
  "parking_lot 0.12.5",
  "parse-display",
  "paste",
@@ -11664,7 +11664,6 @@ dependencies = [
  "tower-service",
  "tracing",
  "tracing-futures",
- "tracing-opentelemetry",
  "twox-hash",
  "unit-prefix",
  "url",
@@ -11806,6 +11805,7 @@ dependencies = [
  "async-trait",
  "axum",
  "axum-extra",
+ "fastrace",
  "futures",
  "http 1.4.0",
  "madsim-tokio",
@@ -12562,6 +12562,7 @@ dependencies = [
  "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
+ "fastrace",
  "futures",
  "futures-async-stream",
  "hex",
@@ -12835,6 +12836,7 @@ dependencies = [
  "async-trait",
  "easy-ext",
  "either",
+ "fastrace",
  "futures",
  "http 1.4.0",
  "lru 0.16.3",
@@ -12885,7 +12887,6 @@ dependencies = [
  "time",
  "tokio",
  "tracing",
- "tracing-opentelemetry",
  "tracing-subscriber",
  "workspace-hack",
 ]
@@ -13106,6 +13107,7 @@ dependencies = [
  "enum-as-inner 0.7.0",
  "expect-test",
  "fail",
+ "fastrace",
  "foyer",
  "futures",
  "futures-async-stream",
@@ -16081,25 +16083,6 @@ dependencies = [
  "log",
  "once_cell",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-opentelemetry"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e6e5658463dd88089aba75c7791e1d3120633b1bfde22478b28f625a9bb1b8e"
-dependencies = [
- "js-sys",
- "opentelemetry",
- "opentelemetry_sdk",
- "rustversion",
- "smallvec",
- "thiserror 2.0.17",
- "tracing",
- "tracing-core",
- "tracing-log",
- "tracing-subscriber",
- "web-time",
 ]
 
 [[package]]

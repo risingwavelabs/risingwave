@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::util::epoch::Epoch;
 
 /// A wrapper of [`Epoch`] with tracing span, used for issuing epoch-based tracing from the barrier
@@ -27,6 +29,7 @@ use risingwave_common::util::epoch::Epoch;
 pub struct TracedEpoch {
     epoch: Epoch,
     span: tracing::Span,
+    fastrace_span: Arc<fastrace::Span>,
 }
 
 impl TracedEpoch {
@@ -39,8 +42,15 @@ impl TracedEpoch {
             "otel.name" = format!("Epoch {}", epoch.0),
             epoch = epoch.0
         );
+        let fastrace_span = fastrace::Span::root("epoch", fastrace::prelude::SpanContext::random())
+            .with_property(|| ("otel.name", format!("Epoch {}", epoch.0)))
+            .with_property(|| ("epoch", epoch.0.to_string()));
 
-        Self { epoch, span }
+        Self {
+            epoch,
+            span,
+            fastrace_span: Arc::new(fastrace_span),
+        }
     }
 
     /// Create a new [`TracedEpoch`] with the next epoch.
@@ -56,5 +66,10 @@ impl TracedEpoch {
     /// Retrieve the tracing span.
     pub fn span(&self) -> &tracing::Span {
         &self.span
+    }
+
+    /// Retrieve the fastrace span.
+    pub fn fastrace_span(&self) -> &fastrace::Span {
+        &self.fastrace_span
     }
 }
