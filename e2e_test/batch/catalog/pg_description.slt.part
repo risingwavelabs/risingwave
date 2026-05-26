@@ -7,8 +7,34 @@ create materialized view mv_t as select a from t;
 statement error is not a table
 comment on table mv_t is 'this should fail';
 
+statement error is not a materialized view
+comment on materialized view t is 'this should fail';
+
 statement error Invalid column: missing_col
 comment on column t.missing_col is 'this should fail';
+
+statement ok
+comment on materialized view mv_t is 'Materialized view description';
+
+query TIIIT
+SELECT
+    c.relname,
+    (
+        SELECT relname FROM pg_catalog.pg_class WHERE oid = d.classoid
+    ) AS classoid,
+    d.objsubid,
+    d.description
+FROM
+    pg_catalog.pg_description d
+    JOIN pg_catalog.pg_class c
+        ON d.objoid = c.oid
+WHERE c.relname = 'mv_t'
+ORDER BY d.objsubid;
+----
+mv_t  rw_materialized_views  0  Materialized view description
+
+statement ok
+comment on materialized view mv_t is NULL
 
 statement ok
 comment on table t is 'Lorem ipsum';
