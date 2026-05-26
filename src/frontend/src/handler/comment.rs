@@ -70,16 +70,25 @@ pub async fn handle_comment(
                     description: comment,
                 }
             }
-            CommentObject::Table => {
+            CommentObject::Table | CommentObject::MaterializedView => {
                 let (schema, table) =
                     Binder::resolve_schema_qualified_name(&session.database(), &object_name)?;
                 let (database_id, schema_id) =
                     session.get_database_and_schema_id_for_create(schema.clone())?;
                 let table = binder.bind_table(schema.as_deref(), &table)?;
-                if table.table_catalog.table_type() != TableType::Table {
+
+                let (expected_table_type, expected_object_name) = match object_type {
+                    CommentObject::Table => (TableType::Table, "table"),
+                    CommentObject::MaterializedView => {
+                        (TableType::MaterializedView, "materialized view")
+                    }
+                    CommentObject::Column => unreachable!(),
+                };
+
+                if table.table_catalog.table_type() != expected_table_type {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "{} is not a table",
-                        table.table_catalog.name
+                        "{} is not a {}",
+                        table.table_catalog.name, expected_object_name
                     ))
                     .into());
                 }
