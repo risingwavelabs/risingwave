@@ -26,7 +26,7 @@ use xorf::{Filter, Xor8, Xor16};
 use super::{
     DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP, FilterBuilder, FilterBuilderOptions, Sstable,
 };
-use crate::hummock::{BlockMeta, HummockResult, MemoryLimiter};
+use crate::hummock::{BlockMeta, MemoryLimiter};
 
 const FOOTER_XOR8: u8 = 254;
 const FOOTER_XOR16: u8 = 255;
@@ -147,9 +147,10 @@ fn xor16_filter_serialized_len(filter: &Xor16) -> usize {
 /// `encoded_blocks_len` already contains all finished block entries, including their
 /// per-block length prefixes. `pending_plain_filter_len` is the serialized length of
 /// the current block-local plain Xor filter if the current block has unsealed keys.
+/// A serialized blocked filter always has a footer; callers that skip writing a
+/// filter should represent that as empty bytes outside this helper.
 fn blocked_xor_filter_serialized_len(
     encoded_blocks_len: usize,
-    block_count: usize,
     pending_plain_filter_len: usize,
 ) -> usize {
     let pending_block_len = if pending_plain_filter_len == 0 {
@@ -157,12 +158,7 @@ fn blocked_xor_filter_serialized_len(
     } else {
         BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + pending_plain_filter_len
     };
-    let footer_len = if block_count == 0 && pending_block_len == 0 {
-        0
-    } else {
-        BLOCKED_XOR_FILTER_FOOTER_LEN
-    };
-    encoded_blocks_len + pending_block_len + footer_len
+    encoded_blocks_len + pending_block_len + BLOCKED_XOR_FILTER_FOOTER_LEN
 }
 
 impl FilterBuilder for Xor16FilterBuilder {
@@ -178,7 +174,7 @@ impl FilterBuilder for Xor16FilterBuilder {
         )
     }
 
-    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
         self.key_hash_entries.sort();
         self.key_hash_entries.dedup();
 
@@ -188,7 +184,7 @@ impl FilterBuilder for Xor16FilterBuilder {
 
         let xor_filter = Xor16::from(&self.key_hash_entries);
         self.key_hash_entries.clear();
-        Ok(Self::build_from_xor16(&xor_filter))
+        Self::build_from_xor16(&xor_filter)
     }
 
     fn create(options: FilterBuilderOptions) -> Self {
@@ -218,7 +214,7 @@ impl FilterBuilder for Xor8FilterBuilder {
             .push(Sstable::hash_for_filter(key, table_id));
     }
 
-    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
         self.key_hash_entries.sort();
         self.key_hash_entries.dedup();
 
@@ -228,7 +224,7 @@ impl FilterBuilder for Xor8FilterBuilder {
 
         let xor_filter = Xor8::from(&self.key_hash_entries);
         self.key_hash_entries.clear();
-        Ok(Self::build_from_xor8(&xor_filter))
+        Self::build_from_xor8(&xor_filter)
     }
 
     fn approximate_len(&self) -> usize {
@@ -368,11 +364,11 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
         self.current.add_key(key, table_id)
     }
 
-    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
+    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
         // Add footer to tell which kind of filter.
         self.data.put_u32_le(self.block_count as u32);
         self.data.put_u8(FOOTER_BLOCKED_XOR16);
-        Ok(std::mem::take(&mut self.data))
+        std::mem::take(&mut self.data)
     }
 
     fn approximate_len(&self) -> usize {
@@ -381,23 +377,18 @@ impl FilterBuilder for BlockedXor16FilterBuilder {
         } else {
             self.current.approximate_len()
         };
-        blocked_xor_filter_serialized_len(
-            self.data.len(),
-            self.block_count,
-            pending_plain_filter_len,
-        )
+        blocked_xor_filter_serialized_len(self.data.len(), pending_plain_filter_len)
     }
 
     fn create(options: FilterBuilderOptions) -> Self {
         BlockedXor16FilterBuilder::with_options(options)
     }
 
-    fn switch_block(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<()> {
-        let block = self.current.finish(memory_limiter)?;
+    fn switch_block(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) {
+        let block = self.current.finish(memory_limiter);
         self.data.put_u32_le(block.len() as u32);
         self.data.extend(block);
         self.block_count += 1;
-        Ok(())
     }
 
     fn approximate_building_memory(&self) -> usize {
@@ -425,10 +416,10 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
         self.current.add_key(key, table_id)
     }
 
-    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>> {
+    fn finish(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8> {
         self.data.put_u32_le(self.block_count as u32);
         self.data.put_u8(FOOTER_BLOCKED_XOR8);
-        Ok(std::mem::take(&mut self.data))
+        std::mem::take(&mut self.data)
     }
 
     fn approximate_len(&self) -> usize {
@@ -437,23 +428,18 @@ impl FilterBuilder for BlockedXor8FilterBuilder {
         } else {
             self.current.approximate_len()
         };
-        blocked_xor_filter_serialized_len(
-            self.data.len(),
-            self.block_count,
-            pending_plain_filter_len,
-        )
+        blocked_xor_filter_serialized_len(self.data.len(), pending_plain_filter_len)
     }
 
     fn create(options: FilterBuilderOptions) -> Self {
         BlockedXor8FilterBuilder::with_options(options)
     }
 
-    fn switch_block(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<()> {
-        let block = self.current.finish(memory_limiter)?;
+    fn switch_block(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) {
+        let block = self.current.finish(memory_limiter);
         self.data.put_u32_le(block.len() as u32);
         self.data.extend(block);
         self.block_count += 1;
-        Ok(())
     }
 
     fn approximate_building_memory(&self) -> usize {
@@ -665,9 +651,6 @@ impl XorFilterReader {
     /// footprint of the decoded reader.
     #[cfg(test)]
     fn serialized_len(&self) -> usize {
-        if self.is_empty() {
-            return 0;
-        }
         match &self.filter {
             XorFilter::Xor8(filter) => xor8_filter_serialized_len(filter),
             XorFilter::Xor16(filter) => xor16_filter_serialized_len(filter),
@@ -679,7 +662,7 @@ impl XorFilterReader {
                         BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + xor8_filter_serialized_len(filter)
                     })
                     .sum();
-                blocked_xor_filter_serialized_len(finished_blocks_len, reader.filters.len(), 0)
+                blocked_xor_filter_serialized_len(finished_blocks_len, 0)
             }
             XorFilter::BlockXor16(reader) => {
                 let finished_blocks_len = reader
@@ -689,7 +672,7 @@ impl XorFilterReader {
                         BLOCKED_XOR_FILTER_ENTRY_LEN_PREFIX + xor16_filter_serialized_len(filter)
                     })
                     .sum();
-                blocked_xor_filter_serialized_len(finished_blocks_len, reader.filters.len(), 0)
+                blocked_xor_filter_serialized_len(finished_blocks_len, 0)
             }
         }
     }
@@ -944,7 +927,7 @@ mod tests {
             builder.add_key(&test_user_key_of(i).encode(), 0);
         }
         let approximate_len = builder.approximate_len();
-        let filter = builder.finish(None).unwrap();
+        let filter = builder.finish(None);
         assert_eq!(approximate_len, filter.len(), "key_count={key_count}");
     }
 
@@ -999,8 +982,8 @@ mod tests {
             builder.add_key(&test_user_key_of(i).encode(), 0);
         }
         let approximate_len = builder.approximate_len();
-        builder.switch_block(None).unwrap();
-        assert_eq!(approximate_len, builder.finish(None).unwrap().len());
+        builder.switch_block(None);
+        assert_eq!(approximate_len, builder.finish(None).len());
 
         let mut builder = F::create(filter_builder_options(1024));
         for block_idx in 0..3 {
@@ -1008,10 +991,10 @@ mod tests {
                 let key_idx = block_idx * 50 + i;
                 builder.add_key(&test_user_key_of(key_idx).encode(), 0);
             }
-            builder.switch_block(None).unwrap();
+            builder.switch_block(None);
         }
         let approximate_len = builder.approximate_len();
-        assert_eq!(approximate_len, builder.finish(None).unwrap().len());
+        assert_eq!(approximate_len, builder.finish(None).len());
     }
 
     #[test]
@@ -1028,7 +1011,7 @@ mod tests {
         for i in 0..100 {
             xor8_builder.add_key(&test_user_key_of(i).encode(), 0);
         }
-        let xor8_bytes = xor8_builder.finish(None).unwrap();
+        let xor8_bytes = xor8_builder.finish(None);
         let xor8_reader = XorFilterReader::new(&xor8_bytes, &[]);
         let xor8_encoded = xor8_reader.encode_to_bytes();
         assert_eq!(xor8_reader.serialized_len(), xor8_encoded.len());
@@ -1042,7 +1025,7 @@ mod tests {
         for i in 0..100 {
             xor16_builder.add_key(&test_user_key_of(i).encode(), 0);
         }
-        let xor16_bytes = xor16_builder.finish(None).unwrap();
+        let xor16_bytes = xor16_builder.finish(None);
         let xor16_reader = XorFilterReader::new(&xor16_bytes, &[]);
         let xor16_encoded = xor16_reader.encode_to_bytes();
         assert_eq!(xor16_reader.serialized_len(), xor16_encoded.len());
@@ -1075,9 +1058,9 @@ mod tests {
                 let key_idx = block_idx * 50 + i;
                 blocked_xor8_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
             }
-            blocked_xor8_builder.switch_block(None).unwrap();
+            blocked_xor8_builder.switch_block(None);
         }
-        let blocked_xor8_bytes = blocked_xor8_builder.finish(None).unwrap();
+        let blocked_xor8_bytes = blocked_xor8_builder.finish(None);
         let blocked_xor8_reader = XorFilterReader::new(&blocked_xor8_bytes, &block_metas);
         let blocked_xor8_encoded = blocked_xor8_reader.encode_to_bytes();
         assert_eq!(
@@ -1096,9 +1079,9 @@ mod tests {
                 let key_idx = block_idx * 50 + i;
                 blocked_xor16_builder.add_key(&test_user_key_of(key_idx).encode(), 0);
             }
-            blocked_xor16_builder.switch_block(None).unwrap();
+            blocked_xor16_builder.switch_block(None);
         }
-        let blocked_xor16_bytes = blocked_xor16_builder.finish(None).unwrap();
+        let blocked_xor16_bytes = blocked_xor16_builder.finish(None);
         let blocked_xor16_reader = XorFilterReader::new(&blocked_xor16_bytes, &block_metas);
         let blocked_xor16_encoded = blocked_xor16_reader.encode_to_bytes();
         assert_eq!(

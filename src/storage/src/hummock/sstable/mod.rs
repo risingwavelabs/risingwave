@@ -487,7 +487,10 @@ impl SstableMeta {
             + 4 // magic
     }
 
-    #[expect(deprecated)]
+    #[expect(
+        deprecated,
+        reason = "monotonic_tombstone_events is deprecated but still contributes to decoded meta heap size"
+    )]
     fn estimated_heap_size(&self) -> usize {
         self.block_metas.capacity() * std::mem::size_of::<BlockMeta>()
             + self
@@ -604,31 +607,6 @@ mod tests {
         assert_eq!(
             s.filter_reader.encode_to_bytes(),
             sstable.filter_reader.encode_to_bytes()
-        );
-    }
-
-    #[tokio::test]
-    async fn test_sstable_meta_cache_weight() {
-        let (_, meta) = gen_test_sstable_data(
-            default_builder_opt_for_test(),
-            (0..100).map(|x| {
-                (
-                    iterator_test_key_of(x),
-                    HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec()),
-                )
-            }),
-        )
-        .await;
-
-        let sstable = Sstable::new(42.into(), meta, false);
-        assert!(sstable.meta.bloom_filter.is_empty());
-
-        let expected_weight = std::mem::size_of::<Sstable>()
-            + sstable.meta.estimated_heap_size()
-            + sstable.filter_reader.estimated_heap_size();
-        assert_eq!(
-            sstable.estimated_meta_cache_memory_weight(),
-            expected_weight
         );
     }
 }

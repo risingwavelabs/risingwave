@@ -27,7 +27,6 @@ use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeS
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
-use thiserror_ext::AsReport;
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -43,8 +42,8 @@ use crate::hummock::sstable::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    Block, BlockHolder, BlockIterator, HummockError, HummockResult, MemoryLimiter,
-    Xor16FilterBuilder, try_shorten_block_smallest_key,
+    Block, BlockHolder, BlockIterator, HummockResult, MemoryLimiter, Xor16FilterBuilder,
+    try_shorten_block_smallest_key,
 };
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
@@ -160,8 +159,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// by `finalize_last_table_stats`
     last_table_stats: TableStats,
 
-    filter_builder: Option<F>,
-    filter_build_failed: bool,
+    filter_builder: F,
 
     epoch_set: BTreeSet<u64>,
     memory_limiter: Option<Arc<MemoryLimiter>>,
@@ -226,8 +224,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 restart_interval: options.restart_interval,
                 compression_algorithm: options.compression_algorithm,
             }),
-            filter_builder: Some(filter_builder),
-            filter_build_failed: false,
+            filter_builder,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
             last_table_id: None,
@@ -312,9 +309,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         );
         meta.offset = self.writer.data_len() as u32;
         self.block_metas.push(meta);
-        if let Some(filter_builder) = &mut self.filter_builder {
-            filter_builder.add_raw_data(filter_data);
-        }
+        self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
         self.writer.write_block_bytes(buf, block_meta).await?;
 
@@ -436,10 +431,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .compaction_catalog_agent_ref
             .extract(user_key(&self.raw_key));
         // Add SST filter check.
-        if !filter_key.is_empty()
-            && let Some(filter_builder) = &mut self.filter_builder
-        {
-            filter_builder.add_key(filter_key, table_id.as_raw_id());
+        if !filter_key.is_empty() {
+            self.filter_builder
+                .add_key(filter_key, table_id.as_raw_id());
         }
         // Use pre-encoded key to avoid redundant encoding
         self.block_builder.add(
@@ -500,32 +494,17 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
-        let mut bloom_filter_kind = if self.filter_build_failed {
-            BloomFilterType::Sstable
+        let filter_data = self.filter_builder.finish(self.memory_limiter.clone());
+        let (bloom_filter_kind, filter_type) = if filter_data.is_empty() {
+            (
+                BloomFilterType::BloomFilterUnspecified,
+                PbSstableFilterType::SstableFilterNone,
+            )
+        } else if self.filter_builder.support_blocked_raw_data() {
+            (BloomFilterType::Blocked, self.filter_builder.filter_type())
         } else {
-            BloomFilterType::BloomFilterUnspecified
+            (BloomFilterType::Sstable, self.filter_builder.filter_type())
         };
-        let mut filter_type = PbSstableFilterType::SstableFilterNone;
-        let mut filter_data = Vec::new();
-        if let Some(filter_builder) = &mut self.filter_builder {
-            match filter_builder.finish(self.memory_limiter.clone()) {
-                Ok(filter) => {
-                    if !filter.is_empty() {
-                        bloom_filter_kind = if filter_builder.support_blocked_raw_data() {
-                            BloomFilterType::Blocked
-                        } else {
-                            BloomFilterType::Sstable
-                        };
-                        filter_type = filter_builder.filter_type();
-                    }
-                    filter_data = filter;
-                }
-                Err(err) => {
-                    bloom_filter_kind = BloomFilterType::Sstable;
-                    self.disable_filter_after_build_error(err);
-                }
-            }
-        }
 
         let total_key_count = self
             .block_metas
@@ -711,11 +690,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 
     pub fn approximate_len(&self) -> usize {
-        let filter_len = self
-            .filter_builder
-            .as_ref()
-            .map_or(0, |filter_builder| filter_builder.approximate_len());
-        self.writer.data_len() + self.block_builder.approximate_len() + filter_len
+        self.writer.data_len()
+            + self.block_builder.approximate_len()
+            + self.filter_builder.approximate_len()
     }
 
     pub async fn build_block(&mut self) -> HummockResult<()> {
@@ -751,13 +728,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             )
         });
 
-        if let Some(err) = self.filter_builder.as_mut().and_then(|filter_builder| {
-            filter_builder
-                .switch_block(self.memory_limiter.clone())
-                .err()
-        }) {
-            self.disable_filter_after_build_error(err);
-        }
+        self.filter_builder
+            .switch_block(self.memory_limiter.clone());
 
         if data_len as usize > self.options.capacity * 2 {
             tracing::warn!(
@@ -769,17 +741,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         self.block_builder.clear();
         Ok(())
-    }
-
-    fn disable_filter_after_build_error(&mut self, err: HummockError) {
-        tracing::warn!(
-            error = %err.as_report(),
-            filter_type = ?self.filter_builder.as_ref().map(|filter_builder| filter_builder.filter_type()),
-            sst_object_id = self.sst_object_id.as_raw_id(),
-            "failed to build SST filter, falling back to no filter for this SST"
-        );
-        self.filter_build_failed = true;
-        self.filter_builder = None;
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1361,102 +1322,6 @@ pub(super) mod tests {
             PbSstableFilterType::SstableFilterXor16,
         )
         .await;
-    }
-
-    struct FailingFilterBuilder<const FAIL_SWITCH_BLOCK: bool>;
-
-    impl<const FAIL_SWITCH_BLOCK: bool> FilterBuilder for FailingFilterBuilder<FAIL_SWITCH_BLOCK> {
-        fn add_key(&mut self, _dist_key: &[u8], _table_id: u32) {}
-
-        fn finish(
-            &mut self,
-            _memory_limiter: Option<Arc<MemoryLimiter>>,
-        ) -> HummockResult<Vec<u8>> {
-            if FAIL_SWITCH_BLOCK {
-                Ok(vec![1])
-            } else {
-                Err(HummockError::other("injected filter finish failure"))
-            }
-        }
-
-        fn approximate_len(&self) -> usize {
-            0
-        }
-
-        fn create(_options: FilterBuilderOptions) -> Self {
-            Self
-        }
-
-        fn switch_block(
-            &mut self,
-            _memory_limiter: Option<Arc<MemoryLimiter>>,
-        ) -> HummockResult<()> {
-            if FAIL_SWITCH_BLOCK {
-                Err(HummockError::other("injected filter switch-block failure"))
-            } else {
-                Ok(())
-            }
-        }
-
-        fn approximate_building_memory(&self) -> usize {
-            0
-        }
-
-        fn support_blocked_raw_data(&self) -> bool {
-            true
-        }
-
-        fn filter_type(&self) -> PbSstableFilterType {
-            PbSstableFilterType::SstableFilterXor8
-        }
-    }
-
-    async fn test_filter_failure_fallback_to_no_filter<F: FilterBuilder>() {
-        let opts = SstableBuilderOptions {
-            capacity: 0,
-            block_capacity: 4096,
-            restart_interval: 16,
-            bloom_false_positive: 0.01,
-            ..Default::default()
-        };
-
-        let sstable_store = mock_sstable_store().await;
-        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
-        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
-        let sst_info = gen_test_sstable_impl::<Vec<u8>, F>(
-            opts,
-            0,
-            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
-            sstable_store.clone(),
-            CachePolicy::NotFill,
-            table_id_to_vnode,
-            table_id_to_watermark_serde,
-        )
-        .await;
-
-        assert_eq!(sst_info.bloom_filter_kind, BloomFilterType::Sstable);
-        assert_eq!(sst_info.filter_type, PbSstableFilterType::SstableFilterNone);
-
-        let table = sstable_store
-            .sstable(&sst_info, &mut StoreLocalStatistic::default())
-            .await
-            .unwrap();
-        assert!(!table.has_filter());
-
-        let full_key = test_key_of(0);
-        let hash = Sstable::hash_for_filter(full_key.user_key.encode().as_slice(), 0);
-        let key_ref = full_key.user_key.as_ref();
-        assert!(table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash));
-    }
-
-    #[tokio::test]
-    async fn test_filter_finish_failure_fallbacks_to_no_filter() {
-        test_filter_failure_fallback_to_no_filter::<FailingFilterBuilder<false>>().await;
-    }
-
-    #[tokio::test]
-    async fn test_filter_switch_block_failure_fallbacks_to_no_filter() {
-        test_filter_failure_fallback_to_no_filter::<FailingFilterBuilder<true>>().await;
     }
 
     #[tokio::test]

@@ -832,7 +832,7 @@ mod tests {
     #[tokio::test]
     async fn test_optimize_by_copy_block_keeps_blocked_output_when_requested() {
         let context = test_context().await;
-        let compact_task = test_compact_task(PbSstableFilterLayout::Auto, Some(1));
+        let compact_task = test_compact_task(PbSstableFilterLayout::Blocked, Some(1024));
 
         assert!(optimize_by_copy_block(&compact_task, &context));
     }

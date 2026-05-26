@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use risingwave_pb::hummock::PbSstableFilterType;
 
-use crate::hummock::{HummockResult, MemoryLimiter};
+use crate::hummock::MemoryLimiter;
 
 pub const DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP: usize = 256 * 1024;
 
@@ -39,7 +39,7 @@ pub trait FilterBuilder: Send {
     /// add key which need to be filter for construct filter data.
     fn add_key(&mut self, dist_key: &[u8], table_id: u32);
     /// Builds serialized filter bytes from key hashes.
-    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<Vec<u8>>;
+    fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Vec<u8>;
     /// Approximate serialized filter bytes counted toward SST builder capacity.
     ///
     /// `SstableBuilder::reach_capacity` uses this value to decide when to seal the current
@@ -50,9 +50,7 @@ pub trait FilterBuilder: Send {
     fn approximate_len(&self) -> usize;
 
     fn create(options: FilterBuilderOptions) -> Self;
-    fn switch_block(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) -> HummockResult<()> {
-        Ok(())
-    }
+    fn switch_block(&mut self, _memory_limiter: Option<Arc<MemoryLimiter>>) {}
     /// Approximate temporary memory needed when finishing the filter.
     fn approximate_building_memory(&self) -> usize;
 
