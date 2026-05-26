@@ -378,11 +378,11 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         let compression_algorithm: CompressionAlgorithm = task.compression_algorithm.into();
         options.compression_algorithm = compression_algorithm;
         options.capacity = task.target_file_size as usize;
-        options.estimated_output_key_count =
-            Some(estimate_output_key_count_for_task(&task, options.capacity));
-        options.filter_hash_prealloc_key_count_cap = Some(blocked_xor_filter_key_count_threshold(
-            task.blocked_xor_filter_kv_count_threshold,
-        ));
+        let estimated_output_key_count =
+            estimate_output_key_count_for_task(&task, options.capacity);
+        options.estimated_output_key_count = Some(estimated_output_key_count);
+        options.filter_hash_prealloc_key_count_cap =
+            blocked_xor_filter_key_count_threshold(task.blocked_xor_filter_kv_count_threshold);
         // Disable vnode key-range hints for fast compaction path by default.
         options.max_vnode_key_range_bytes = None;
         let get_id_time = Arc::new(AtomicU64::new(0));
@@ -393,9 +393,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             "fast compaction only supports blocked xor16 filter today"
         );
         debug_assert!(
-            task.should_use_block_based_filter_for_output(
-                options.estimated_output_key_count.unwrap_or_default() as u64
-            ),
+            task.should_use_block_based_filter_for_output(estimated_output_key_count as u64),
             "fast compaction can only preserve blocked filters; expected blocked output"
         );
 

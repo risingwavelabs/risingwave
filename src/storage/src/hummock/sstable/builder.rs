@@ -74,7 +74,7 @@ pub struct SstableBuilderOptions {
     /// Estimated key count for one output SST. Used only as a filter-builder capacity hint.
     pub estimated_output_key_count: Option<usize>,
     /// Upper bound for the initial key-hash buffer allocation in plain filter builders.
-    pub filter_hash_prealloc_key_count_cap: Option<usize>,
+    pub filter_hash_prealloc_key_count_cap: usize,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
@@ -90,7 +90,7 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             shorten_block_meta_key_threshold: options.shorten_block_meta_key_threshold,
             max_vnode_key_range_bytes: None,
             estimated_output_key_count: None,
-            filter_hash_prealloc_key_count_cap: None,
+            filter_hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
         }
     }
 }
@@ -107,7 +107,7 @@ impl Default for SstableBuilderOptions {
             shorten_block_meta_key_threshold: None,
             max_vnode_key_range_bytes: None,
             estimated_output_key_count: None,
-            filter_hash_prealloc_key_count_cap: None,
+            filter_hash_prealloc_key_count_cap: DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP,
         }
     }
 }
@@ -122,9 +122,7 @@ impl SstableBuilderOptions {
         FilterBuilderOptions {
             estimated_key_count: self.estimated_output_key_count(),
             estimated_block_count: self.capacity / self.block_capacity + 1,
-            hash_prealloc_key_count_cap: self
-                .filter_hash_prealloc_key_count_cap
-                .unwrap_or(DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP),
+            hash_prealloc_key_count_cap: self.filter_hash_prealloc_key_count_cap,
         }
     }
 }

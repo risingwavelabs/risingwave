@@ -90,15 +90,14 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
-        options.estimated_output_key_count =
-            Some(estimate_output_key_count_for_task(&task, options.capacity));
-        options.filter_hash_prealloc_key_count_cap = Some(blocked_xor_filter_key_count_threshold(
-            task.blocked_xor_filter_kv_count_threshold,
-        ));
+        let estimated_output_key_count =
+            estimate_output_key_count_for_task(&task, options.capacity);
+        options.estimated_output_key_count = Some(estimated_output_key_count);
+        options.filter_hash_prealloc_key_count_cap =
+            blocked_xor_filter_key_count_threshold(task.blocked_xor_filter_kv_count_threshold);
         options.max_vnode_key_range_bytes = task.effective_max_vnode_key_range_bytes();
-        let use_block_based_filter = task.should_use_block_based_filter_for_output(
-            options.estimated_output_key_count.unwrap_or_default() as u64,
-        );
+        let use_block_based_filter =
+            task.should_use_block_based_filter_for_output(estimated_output_key_count as u64);
 
         let key_range = KeyRange {
             left: task.splits[split_index].left.clone(),

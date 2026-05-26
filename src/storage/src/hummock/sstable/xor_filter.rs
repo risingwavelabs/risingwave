@@ -132,10 +132,12 @@ fn approximate_plain_xor_filter_serialized_len(key_count: usize, fingerprint_siz
     }
 }
 
+#[cfg(test)]
 fn xor8_filter_serialized_len(filter: &Xor8) -> usize {
     PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len()
 }
 
+#[cfg(test)]
 fn xor16_filter_serialized_len(filter: &Xor16) -> usize {
     PLAIN_XOR_FILTER_FIXED_LEN + filter.fingerprints.len() * std::mem::size_of::<u16>()
 }
@@ -661,7 +663,8 @@ impl XorFilterReader {
     ///
     /// This intentionally follows RisingWave's filter encoding size, not the exact Rust heap
     /// footprint of the decoded reader.
-    pub fn serialized_len(&self) -> usize {
+    #[cfg(test)]
+    fn serialized_len(&self) -> usize {
         if self.is_empty() {
             return 0;
         }

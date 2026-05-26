@@ -428,8 +428,7 @@ impl SharedBufferCompactRunner {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = sub_compaction_sstable_size;
         options.estimated_output_key_count = Some(estimated_output_key_count);
-        options.filter_hash_prealloc_key_count_cap =
-            Some(blocked_xor_filter_key_count_threshold(None));
+        options.filter_hash_prealloc_key_count_cap = blocked_xor_filter_key_count_threshold(None);
         let compactor = Compactor::new(
             context,
             options,

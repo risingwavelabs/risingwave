@@ -259,29 +259,6 @@ impl CompactTask {
         }
     }
 
-    /// Determines whether to use block-based filter using task-level input key count.
-    ///
-    /// Prefer `should_use_block_based_filter_for_output` when output SST capacity is available.
-    /// This legacy fallback can over-classify blocked filters for large tasks whose individual
-    /// output SSTs are below the threshold.
-    pub fn should_use_block_based_filter(&self) -> bool {
-        match self.sstable_filter_layout {
-            PbSstableFilterLayout::Plain => false,
-            PbSstableFilterLayout::Blocked => true,
-            PbSstableFilterLayout::Auto | PbSstableFilterLayout::Unspecified => {
-                let kv_count = self
-                    .read_input_ssts()
-                    .map(|sst| sst.total_key_count)
-                    .sum::<u64>();
-
-                crate::filter_utils::should_use_blocked_xor_filter_by_kv_count(
-                    kv_count,
-                    self.blocked_xor_filter_kv_count_threshold,
-                )
-            }
-        }
-    }
-
     /// Returns the effective vnode key-range hint limit (in bytes) for this compaction task.
     ///
     /// The hint is only meaningful when all input SSTs belong to a single table.
@@ -810,26 +787,22 @@ mod tests {
                 ],
                 ..Default::default()
             }],
-            blocked_xor_filter_kv_count_threshold: Some(10),
             ..Default::default()
         };
 
         assert!(!task.contains_range_tombstone());
         assert!(!task.contains_split_sst());
-        assert!(!task.should_use_block_based_filter());
 
         let task = CompactTask {
             input_ssts: vec![InputLevel {
                 table_infos: vec![test_read_property_sstable(vec![TableId::new(1)])],
                 ..Default::default()
             }],
-            blocked_xor_filter_kv_count_threshold: Some(10),
             ..Default::default()
         };
 
         assert!(task.contains_range_tombstone());
         assert!(task.contains_split_sst());
-        assert!(task.should_use_block_based_filter());
     }
 
     #[test]
