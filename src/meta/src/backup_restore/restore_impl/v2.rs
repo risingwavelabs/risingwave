@@ -106,6 +106,13 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.version_stats.clone(), db).await?;
         insert_models(metadata.compaction_configs.clone(), db).await?;
         insert_models(metadata.hummock_sequences.clone(), db).await?;
+        // The snapshot restores a full Hummock version checkpoint, not version deltas.
+        // Reject leftover deltas in the metastore so they cannot be replayed after restore.
+        insert_models::<
+            risingwave_meta_model::hummock_version_delta::Model,
+            risingwave_meta_model::hummock_version_delta::ActiveModel,
+        >(std::iter::empty(), db)
+        .await?;
         insert_models(metadata.workers.clone(), db).await?;
         insert_models(metadata.worker_properties.clone(), db).await?;
         insert_models(metadata.users.clone(), db).await?;
