@@ -52,7 +52,7 @@ pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
-const BYTES_PER_MB: usize = 1024 * 1024;
+const BYTES_PER_MB: u64 = 1024 * 1024;
 
 pub const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
@@ -134,7 +134,7 @@ pub struct StarrocksConfig {
     #[serde(rename = "starrocks.max_batch_size_mb", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[with_option(allow_alter_on_fly)]
-    pub max_batch_size_mb: Option<usize>,
+    pub max_batch_size_mb: Option<u64>,
 
     pub r#type: String, // accept "append-only" or "upsert"
 }
@@ -168,30 +168,33 @@ impl StarrocksConfig {
             )));
         }
         if let Some(max_batch_size_mb) = config.max_batch_size_mb {
-            if max_batch_size_mb == 0 {
-                return Err(SinkError::Config(anyhow!(
-                    "`starrocks.max_batch_size_mb` must be greater than 0"
-                )));
-            }
-            if max_batch_size_mb.checked_mul(BYTES_PER_MB).is_none() {
-                return Err(SinkError::Config(anyhow!(
-                    "`starrocks.max_batch_size_mb` is too large"
-                )));
-            }
+            max_batch_size_mb_to_bytes(max_batch_size_mb)?;
         }
         Ok(config)
     }
 
-    fn max_batch_size_bytes(&self) -> Option<usize> {
+    fn max_batch_size_bytes(&self) -> Result<Option<u64>> {
         self.max_batch_size_mb
-            .map(|max_batch_size_mb| max_batch_size_mb * BYTES_PER_MB)
+            .map(max_batch_size_mb_to_bytes)
+            .transpose()
     }
 }
 
+fn max_batch_size_mb_to_bytes(max_batch_size_mb: u64) -> Result<u64> {
+    if max_batch_size_mb == 0 {
+        return Err(SinkError::Config(anyhow!(
+            "`starrocks.max_batch_size_mb` must be greater than 0"
+        )));
+    }
+    max_batch_size_mb
+        .checked_mul(BYTES_PER_MB)
+        .ok_or_else(|| SinkError::Config(anyhow!("`starrocks.max_batch_size_mb` is too large")))
+}
+
 fn should_finish_current_load_before_row(
-    current_load_bytes: usize,
-    row_size: usize,
-    max_batch_size_bytes: usize,
+    current_load_bytes: u64,
+    row_size: u64,
+    max_batch_size_bytes: u64,
 ) -> bool {
     current_load_bytes > 0
         && current_load_bytes
@@ -418,7 +421,6 @@ impl Sink for StarrocksSink {
 }
 
 pub struct StarrocksSinkWriter {
-    pub config: StarrocksConfig,
     #[expect(dead_code)]
     schema: Schema,
     #[expect(dead_code)]
@@ -428,7 +430,8 @@ pub struct StarrocksSinkWriter {
     txn_client: Arc<StarrocksTxnClient>,
     row_encoder: JsonEncoder,
     curr_txn_label: Option<String>,
-    current_load_bytes: usize,
+    max_load_request_bytes: Option<u64>,
+    current_load_request_bytes: u64,
 }
 
 impl TryFrom<SinkParam> for StarrocksSink {
@@ -481,9 +484,9 @@ impl StarrocksSinkWriter {
         };
         let txn_request_builder =
             StarrocksTxnRequestBuilder::new(url, header, config.stream_load_http_timeout_ms)?;
+        let max_load_request_bytes = config.max_batch_size_bytes()?;
 
         Ok(Self {
-            config,
             schema: schema.clone(),
             pk_indices,
             is_append_only,
@@ -491,53 +494,73 @@ impl StarrocksSinkWriter {
             txn_client: Arc::new(StarrocksTxnClient::new(txn_request_builder)),
             row_encoder: JsonEncoder::new_with_starrocks(schema, None, time_zone),
             curr_txn_label: None,
-            current_load_bytes: 0,
+            max_load_request_bytes,
+            current_load_request_bytes: 0,
         })
     }
 
     async fn finish_load_request(&mut self) -> Result<()> {
         if let Some(client) = self.client.take() {
             client.finish().await?;
-            self.current_load_bytes = 0;
+            self.current_load_request_bytes = 0;
         }
         Ok(())
     }
 
-    async fn write_row_json(&mut self, row_json_string: String) -> Result<()> {
-        let row_size = row_json_string.len();
-        if let Some(max_batch_size_bytes) = self.config.max_batch_size_bytes() {
-            if row_size > max_batch_size_bytes {
+    async fn maybe_finish_load_before_row(&mut self, row_size: u64) -> Result<()> {
+        if let Some(max_load_request_bytes) = self.max_load_request_bytes {
+            if row_size > max_load_request_bytes {
                 return Err(SinkError::Starrocks(format!(
                     "single row payload size {} bytes exceeds `starrocks.max_batch_size_mb` limit {} bytes",
-                    row_size, max_batch_size_bytes
+                    row_size, max_load_request_bytes
                 )));
             }
             if self.client.is_some()
                 && should_finish_current_load_before_row(
-                    self.current_load_bytes,
+                    self.current_load_request_bytes,
                     row_size,
-                    max_batch_size_bytes,
+                    max_load_request_bytes,
                 )
             {
                 self.finish_load_request().await?;
             }
         }
+        Ok(())
+    }
 
+    async fn ensure_load_request(&mut self) -> Result<()> {
         if self.client.is_none() {
             let txn_label = self.curr_txn_label.clone().ok_or_else(|| {
                 SinkError::Starrocks("Can't find current starrocks transaction label".to_owned())
             })?;
-            self.client = Some(StarrocksClient::new(
-                self.txn_client.load(txn_label).await?,
-            ));
-            self.current_load_bytes = 0;
+            self.client = Some(StarrocksClient::new(self.txn_client.load(txn_label).await?));
+            self.current_load_request_bytes = 0;
         }
+        Ok(())
+    }
+
+    fn record_load_request_bytes(&mut self, row_size: u64) -> Result<()> {
+        if self.max_load_request_bytes.is_some() {
+            self.current_load_request_bytes = self
+                .current_load_request_bytes
+                .checked_add(row_size)
+                .ok_or_else(|| {
+                    SinkError::Starrocks("stream load payload size overflow".to_owned())
+                })?;
+        }
+        Ok(())
+    }
+
+    async fn write_row_json(&mut self, row_json_string: String) -> Result<()> {
+        let row_size = row_json_string.len() as u64;
+        self.maybe_finish_load_before_row(row_size).await?;
+        self.ensure_load_request().await?;
         self.client
             .as_mut()
             .ok_or_else(|| SinkError::Starrocks("Can't find starrocks sink insert".to_owned()))?
             .write(row_json_string.into())
             .await?;
-        self.current_load_bytes = self.current_load_bytes.saturating_add(row_size);
+        self.record_load_request_bytes(row_size)?;
         Ok(())
     }
 
@@ -988,7 +1011,7 @@ mod tests {
         let config = StarrocksConfig::from_btreemap(base_properties()).unwrap();
 
         assert_eq!(config.max_batch_size_mb, None);
-        assert_eq!(config.max_batch_size_bytes(), None);
+        assert_eq!(config.max_batch_size_bytes().unwrap(), None);
     }
 
     #[test]
@@ -999,7 +1022,10 @@ mod tests {
         let config = StarrocksConfig::from_btreemap(properties).unwrap();
 
         assert_eq!(config.max_batch_size_mb, Some(2));
-        assert_eq!(config.max_batch_size_bytes(), Some(2 * BYTES_PER_MB));
+        assert_eq!(
+            config.max_batch_size_bytes().unwrap(),
+            Some(2 * BYTES_PER_MB)
+        );
     }
 
     #[test]
@@ -1016,14 +1042,30 @@ mod tests {
     }
 
     #[test]
+    fn starrocks_max_batch_size_mb_rejects_too_large_value() {
+        let mut properties = base_properties();
+        properties.insert(
+            "starrocks.max_batch_size_mb".to_owned(),
+            (u64::MAX / BYTES_PER_MB + 1).to_string(),
+        );
+
+        let err = StarrocksConfig::from_btreemap(properties).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("`starrocks.max_batch_size_mb` is too large")
+        );
+    }
+
+    #[test]
     fn starrocks_batch_rollover_keeps_single_payload_within_limit() {
         assert!(!should_finish_current_load_before_row(0, 10, 10));
         assert!(!should_finish_current_load_before_row(4, 6, 10));
         assert!(should_finish_current_load_before_row(5, 6, 10));
         assert!(should_finish_current_load_before_row(
-            usize::MAX - 1,
+            u64::MAX - 1,
             10,
-            usize::MAX
+            u64::MAX
         ));
     }
 }
