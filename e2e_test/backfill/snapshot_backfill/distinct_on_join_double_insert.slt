@@ -4,18 +4,6 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO TRUE;
 
 statement ok
-DROP MATERIALIZED VIEW IF EXISTS repro_joined;
-
-statement ok
-DROP MATERIALIZED VIEW IF EXISTS repro_dedup;
-
-statement ok
-DROP TABLE IF EXISTS repro_t2;
-
-statement ok
-DROP TABLE IF EXISTS repro_t1;
-
-statement ok
 SET streaming_use_snapshot_backfill = true;
 
 statement ok
@@ -100,9 +88,6 @@ ALTER MATERIALIZED VIEW repro_joined SET backfill_rate_limit = default;
 statement ok
 wait;
 
-statement ok
-SET BACKGROUND_DDL = false;
-
 query TT
 SELECT * FROM repro_joined;
 ----
@@ -119,21 +104,3 @@ DROP TABLE repro_t2;
 
 statement ok
 DROP TABLE repro_t1;
-
-statement ok
-SET streaming_parallelism = default;
-
-statement ok
-SET streaming_parallelism_for_table = default;
-
-statement ok
-SET streaming_parallelism_for_materialized_view = default;
-
-statement ok
-SET streaming_parallelism_for_backfill = default;
-
-statement ok
-SET streaming_max_parallelism = default;
-
-statement ok
-SET streaming_use_snapshot_backfill = default;

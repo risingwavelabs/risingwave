@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use educe::Educe;
@@ -51,6 +51,8 @@ pub struct TableScan {
     /// Descriptors of all indexes on this table
     pub table_indexes: Vec<Arc<TableIndex>>,
     pub vector_indexes: Vec<Arc<VectorIndex>>,
+    /// Table column indices used as the stream key of this scan operator.
+    table_scan_stream_key: Option<Vec<usize>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
@@ -106,6 +108,45 @@ impl TableScan {
 
     pub fn primary_key(&self) -> &[ColumnOrder] {
         &self.table_catalog.pk
+    }
+
+    pub(crate) fn table_scan_stream_key(&self) -> Option<&[usize]> {
+        self.table_scan_stream_key.as_deref()
+    }
+
+    pub(crate) fn extend_table_scan_stream_key_with_primary_key(&mut self) {
+        let primary_key_indices = self
+            .primary_key()
+            .iter()
+            .map(|c| c.column_index)
+            .collect::<Vec<_>>();
+        let Some(table_scan_stream_key) = &mut self.table_scan_stream_key else {
+            #[cfg(debug_assertions)]
+            {
+                panic!(
+                    "table scan stream key should exist before extending with primary key: table: {}, output_col_idx: {:?}, pk: {:?}",
+                    self.table_name(),
+                    self.output_col_idx,
+                    primary_key_indices
+                );
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                tracing::warn!(
+                    table = self.table_name(),
+                    output_col_idx = ?self.output_col_idx,
+                    pk = ?primary_key_indices,
+                    "table scan stream key should exist before extending with primary key"
+                );
+                return;
+            }
+        };
+
+        for primary_key in primary_key_indices {
+            if !table_scan_stream_key.contains(&primary_key) {
+                table_scan_stream_key.push(primary_key);
+            }
+        }
     }
 
     pub fn watermark_columns(&self) -> WatermarkColumns {
@@ -264,6 +305,8 @@ impl TableScan {
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
     ) -> Self {
+        let table_scan_stream_key = (!matches!(table_catalog.table_type, TableType::Internal))
+            .then(|| table_catalog.stream_key());
         Self::new_inner(
             output_col_idx,
             table_catalog,
@@ -272,6 +315,7 @@ impl TableScan {
             ctx,
             predicate,
             as_of,
+            table_scan_stream_key,
         )
     }
 
@@ -283,6 +327,7 @@ impl TableScan {
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         as_of: Option<AsOf>,
+        table_scan_stream_key: Option<Vec<usize>>,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -306,6 +351,7 @@ impl TableScan {
             table_catalog,
             table_indexes,
             vector_indexes,
+            table_scan_stream_key,
             predicate,
             as_of,
             ctx,
@@ -354,34 +400,17 @@ impl GenericPlanNode for TableScan {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        if matches!(self.table_catalog.table_type, TableType::Internal) {
-            return None;
-        }
+        let stream_key = self.table_scan_stream_key.as_deref()?;
         let id_to_op_idx =
             Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_catalog);
-        // A table scan replays the table's physical changelog, so downstream operators must be
-        // able to distinguish rows by the physical table pk. Keep any extra catalog stream-key
-        // columns as well, e.g. TTL watermark columns that intentionally distinguish row versions.
-        let mut stream_key = self
-            .table_catalog
-            .pk()
+        stream_key
             .iter()
-            .map(|c| {
+            .map(|&c| {
                 id_to_op_idx
-                    .get(&self.table_catalog.columns[c.column_index].column_id)
+                    .get(&self.table_catalog.columns[c].column_id)
                     .copied()
             })
-            .collect::<Option<Vec<_>>>()?;
-        let mut seen = stream_key.iter().copied().collect::<HashSet<_>>();
-        for c in self.table_catalog.stream_key() {
-            let op_idx = id_to_op_idx
-                .get(&self.table_catalog.columns[c].column_id)
-                .copied()?;
-            if seen.insert(op_idx) {
-                stream_key.push(op_idx);
-            }
-        }
-        Some(stream_key)
+            .collect()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
