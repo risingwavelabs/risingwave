@@ -65,7 +65,8 @@ CREATE TABLE order_ledger_entries_composite (
     total money_type,
     listed_price money_type,
     listed_discount money_type,
-    complex_col outer_type
+    complex_col outer_type,
+    prices money_type[]
 );
 
 INSERT INTO order_ledger_entries_composite VALUES
@@ -75,7 +76,8 @@ INSERT INTO order_ledger_entries_composite VALUES
         ROW('USD', 12.34)::money_type,
         ROW('USD', 20.00)::money_type,
         ROW('USD', 7.66)::money_type,
-        ROW('foo', ROW(1, false, 'hello')::inner_type)::outer_type
+        ROW('foo', ROW(1, false, 'hello')::inner_type)::outer_type,
+        ARRAY[ROW('USD', 1.00)::money_type, ROW('EUR', 2.00)::money_type]::money_type[]
     ),
     (
         2,
@@ -83,7 +85,8 @@ INSERT INTO order_ledger_entries_composite VALUES
         ROW('EUR', 88.80)::money_type,
         ROW('EUR', 99.90)::money_type,
         ROW('EUR', 11.10)::money_type,
-        ROW('bar', ROW(2, true, 'world')::inner_type)::outer_type
+        ROW('bar', ROW(2, true, 'world')::inner_type)::outer_type,
+        ARRAY[ROW('JPY', 100)::money_type]::money_type[]
     );
 
 CREATE TABLE IF NOT EXISTS postgres_all_types(
