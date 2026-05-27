@@ -422,7 +422,7 @@ impl CacheRefiller {
             .keys()
             .chain(policies.keys())
             .copied()
-            .collect_vec();
+            .collect::<HashSet<_>>();
         table_cache_refill_context.policies = policies;
         for table_id in table_ids {
             self.update_table_cache_refill_vnodes_inner(&mut table_cache_refill_context, table_id);
