@@ -123,7 +123,7 @@ pub(super) async fn create_table_if_not_exists_impl(
             match &config.common.warehouse_path {
                 Some(warehouse_path) => {
                     let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
-                    // BigLake catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables
+                    // Lakehouse Iceberg REST catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables.
                     let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
                     let url = Url::parse(warehouse_path);
                     if url.is_err() || is_s3_tables || is_bq_catalog_federation {
