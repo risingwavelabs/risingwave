@@ -257,6 +257,7 @@ message ExprNode {
     ARRAY_CONTAINED = 551;
     ARRAY_FLATTEN = 552;
     ARRAY_REVERSE = 553;
+    ARRAY_OVERLAPS = 554;
 
     // Int256 functions
     HEX_TO_INT256 = 560;

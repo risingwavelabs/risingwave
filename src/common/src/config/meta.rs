@@ -171,6 +171,15 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::iceberg_gc_interval_sec")]
     pub iceberg_gc_interval_sec: u64,
 
+    /// Maximum time to wait for an iceberg compaction task report before the lease expires.
+    #[serde(default = "default::meta::iceberg_compaction_report_timeout_sec")]
+    pub iceberg_compaction_report_timeout_sec: u64,
+
+    /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it from
+    /// meta catalog.
+    #[serde(default = "default::meta::iceberg_compaction_config_refresh_interval_sec")]
+    pub iceberg_compaction_config_refresh_interval_sec: u64,
+
     /// Interval of hummock version checkpoint.
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
@@ -543,6 +552,10 @@ pub struct MetaDeveloperConfig {
     #[serde(default = "default::developer::hummock_time_travel_epoch_version_insert_batch_size")]
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
 
+    /// Max number of version deltas fetched from meta store per SELECT, during time travel metadata vacuum.
+    #[serde(default = "default::developer::hummock_time_travel_delta_fetch_batch_size")]
+    pub hummock_time_travel_delta_fetch_batch_size: usize,
+
     #[serde(default = "default::developer::hummock_gc_history_insert_batch_size")]
     pub hummock_gc_history_insert_batch_size: usize,
 
@@ -635,10 +648,34 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
-    #[serde(default = "default::compaction_config::max_kv_count_for_xor16")]
-    pub max_kv_count_for_xor16: Option<u64>,
+    /// KV-count threshold for using blocked xor filters when output filter layout is "auto".
+    ///
+    /// When `sstable_filter_layout[level]` is "auto", compaction will build blocked xor filters if
+    /// the estimated total key count of the task exceeds this threshold. Otherwise it will build a
+    /// single non-blocked xor filter.
+    ///
+    /// Note: shared-buffer flush does not read compaction group config, and always uses the
+    /// built-in default threshold.
+    #[serde(default = "default::compaction_config::blocked_xor_filter_kv_count_threshold")]
+    #[serde(alias = "max_kv_count_for_xor16")]
+    pub blocked_xor_filter_kv_count_threshold: Option<u64>,
     #[serde(default = "default::compaction_config::max_vnode_key_range_bytes")]
     pub max_vnode_key_range_bytes: Option<u64>,
+    /// Per-level xor filter family for compaction output.
+    ///
+    /// Index by LSM level: `0..=max_level`. Note: L0 (index 0) is currently ignored by shared-buffer
+    /// flush, which always uses "xor16".
+    #[serde(default = "default::compaction_config::sstable_filter_kind")]
+    pub sstable_filter_kind: Vec<String>,
+    /// Per-level xor filter layout for compaction output.
+    ///
+    /// "auto" uses the kv-count heuristic; "plain"/"normal" forces non-blocked filters and ignores
+    /// kv-count threshold.
+    ///
+    /// Index by LSM level: `0..=max_level`. Note: L0 (index 0) is currently ignored by shared-buffer
+    /// flush, which always uses "auto".
+    #[serde(default = "default::compaction_config::sstable_filter_layout")]
+    pub sstable_filter_layout: Vec<String>,
 }
 
 pub mod default {
@@ -681,6 +718,14 @@ pub mod default {
 
         pub fn iceberg_gc_interval_sec() -> u64 {
             3600
+        }
+
+        pub fn iceberg_compaction_report_timeout_sec() -> u64 {
+            30 * 60
+        }
+
+        pub fn iceberg_compaction_config_refresh_interval_sec() -> u64 {
+            60
         }
 
         pub fn hummock_version_checkpoint_interval_sec() -> u64 {
@@ -935,7 +980,7 @@ pub mod default {
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 5000;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
         const DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION: bool = true;
-        pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
+        pub const DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD: u64 = 256 * 1024;
         const DEFAULT_MAX_VNODE_KEY_RANGE_BYTES: Option<u64> = None;
 
         use crate::catalog::hummock::CompactionFilterFlag;
@@ -1044,12 +1089,57 @@ pub mod default {
             DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION
         }
 
-        pub fn max_kv_count_for_xor16() -> Option<u64> {
-            Some(DEFAULT_MAX_KV_COUNT_FOR_XOR16)
+        pub fn blocked_xor_filter_kv_count_threshold() -> Option<u64> {
+            Some(DEFAULT_BLOCKED_XOR_FILTER_KV_COUNT_THRESHOLD)
+        }
+
+        /// Default compression algorithm for a given LSM-tree level.
+        ///
+        /// This is the single source of truth used by meta's default compaction config builder
+        /// and by SQL `ALTER COMPACTION GROUP ... SET compression_algorithm = DEFAULT`.
+        pub fn compression_algorithm_for_level(level: u32) -> &'static str {
+            // L0/L1 and L2 do not use compression algorithms.
+            // L3 - L4 use Lz4, else use Zstd.
+            match level {
+                0..=2 => "None",
+                3 | 4 => "Lz4",
+                _ => "Zstd",
+            }
+        }
+
+        /// Default compression algorithm vector for levels `0..=max_level`.
+        pub fn compression_algorithm_vec(max_level: u32) -> Vec<String> {
+            (0..=max_level)
+                .map(|level| compression_algorithm_for_level(level).to_owned())
+                .collect()
         }
 
         pub fn max_vnode_key_range_bytes() -> Option<u64> {
             DEFAULT_MAX_VNODE_KEY_RANGE_BYTES
+        }
+
+        pub fn sstable_filter_kind() -> Vec<String> {
+            vec![
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+                "xor16".to_owned(),
+            ]
+        }
+
+        pub fn sstable_filter_layout() -> Vec<String> {
+            vec![
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+                "auto".to_owned(),
+            ]
         }
     }
 }

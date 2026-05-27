@@ -17,12 +17,16 @@ use std::sync::Arc;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
+use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_expr::expr::{NonStrictExpression, build_non_strict_from_prost};
 use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
-use risingwave_storage::table::batch_table::BatchTable;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 
 use super::*;
-use crate::common::table::state_table::{StateTable, StateTableBuilder};
+use crate::common::table::state_table::{
+    ReplicatedStateTable, StateTable, StateTableBuilder, StateTableOpConsistencyLevel,
+};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     ActorContextRef, JoinType, NestedLoopTemporalJoinExecutor, TemporalJoinExecutor,
@@ -61,46 +65,54 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             .collect_vec();
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
 
+        let versioned = table_desc.versioned;
+        // Use table_output_indices to select only the column IDs that the right-side
+        // upstream actually delivers. The planner may prune unused columns from the
+        // right table scan, so the upstream chunks may have fewer columns than the
+        // full table.
+        let output_column_ids = table_output_indices
+            .iter()
+            .map(|&x| ColumnId::new(table_desc.columns[x].column_id))
+            .collect_vec();
+        let vnodes = params.vnode_bitmap.clone().map(Arc::new);
+
         if node.get_is_nested_loop() {
-            let right_table = BatchTable::new_partial(
-                store.clone(),
-                table_output_indices
-                    .iter()
-                    .map(|&x| ColumnId::new(table_desc.columns[x].column_id))
-                    .collect_vec(),
-                params.vnode_bitmap.clone().map(Into::into),
-                table_desc,
-            );
+            macro_rules! build_nested_loop {
+                ($SD:ident) => {{
+                    let right_table =
+                        StateTableBuilder::<_, $SD, true, _>::new_from_storage_table_desc(
+                            table_desc,
+                            store.clone(),
+                            vnodes.clone(),
+                            params.fragment_id.as_raw_id(),
+                        )
+                        .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+                        .with_output_column_ids(output_column_ids.clone())
+                        .forbid_preload_all_rows()
+                        .build()
+                        .await;
 
-            let dispatcher_args = NestedLoopTemporalJoinExecutorDispatcherArgs {
-                ctx: params.actor_context,
-                info: params.info.clone(),
-                left: source_l,
-                right: source_r,
-                right_table,
-                condition,
-                output_indices,
-                chunk_size: params.config.developer.chunk_size,
-                metrics: params.executor_stats,
-                join_type_proto: node.get_join_type()?,
-            };
-            Ok((params.info, dispatcher_args.dispatch()?).into())
+                    let dispatcher_args = NestedLoopTemporalJoinExecutorDispatcherArgs {
+                        ctx: params.actor_context,
+                        info: params.info.clone(),
+                        left: source_l,
+                        right: source_r,
+                        right_table,
+                        condition,
+                        output_indices,
+                        chunk_size: params.config.developer.chunk_size,
+                        metrics: params.executor_stats,
+                        join_type_proto: node.get_join_type()?,
+                    };
+                    Ok((params.info, dispatcher_args.dispatch()?).into())
+                }};
+            }
+            if versioned {
+                build_nested_loop!(ColumnAwareSerde)
+            } else {
+                build_nested_loop!(BasicSerde)
+            }
         } else {
-            let table = {
-                let column_ids = table_desc
-                    .columns
-                    .iter()
-                    .map(|x| ColumnId::new(x.column_id))
-                    .collect_vec();
-
-                BatchTable::new_partial(
-                    store.clone(),
-                    column_ids,
-                    params.vnode_bitmap.clone().map(Into::into),
-                    table_desc,
-                )
-            };
-
             let table_stream_key_indices = table_desc
                 .stream_key
                 .iter()
@@ -145,39 +157,61 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             };
             let append_only = memo_table.is_none();
 
-            let dispatcher_args = TemporalJoinExecutorDispatcherArgs {
-                ctx: params.actor_context,
-                info: params.info.clone(),
-                left: source_l,
-                right: source_r,
-                right_table: table,
-                left_join_keys,
-                right_join_keys,
-                null_safe,
-                condition,
-                output_indices,
-                table_output_indices,
-                table_stream_key_indices,
-                watermark_epoch: params.watermark_epoch,
-                chunk_size: params.config.developer.chunk_size,
-                metrics: params.executor_stats,
-                join_type_proto: node.get_join_type()?,
-                join_key_data_types,
-                memo_table,
-                append_only,
-            };
+            macro_rules! build_hash {
+                ($SD:ident) => {{
+                    let right_table =
+                        StateTableBuilder::<_, $SD, true, _>::new_from_storage_table_desc(
+                            table_desc,
+                            store.clone(),
+                            vnodes.clone(),
+                            params.fragment_id.as_raw_id(),
+                        )
+                        .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+                        .with_output_column_ids(output_column_ids.clone())
+                        .forbid_preload_all_rows()
+                        .build()
+                        .await;
 
-            Ok((params.info, dispatcher_args.dispatch()?).into())
+                    let dispatcher_args = TemporalJoinExecutorDispatcherArgs::<_, $SD> {
+                        ctx: params.actor_context,
+                        info: params.info.clone(),
+                        left: source_l,
+                        right: source_r,
+                        right_table,
+                        left_join_keys,
+                        right_join_keys,
+                        null_safe,
+                        condition,
+                        output_indices,
+                        table_output_indices,
+                        table_stream_key_indices,
+                        watermark_epoch: params.watermark_epoch,
+                        chunk_size: params.config.developer.chunk_size,
+                        metrics: params.executor_stats,
+                        join_type_proto: node.get_join_type()?,
+                        join_key_data_types,
+                        memo_table,
+                        append_only,
+                    };
+
+                    Ok((params.info, dispatcher_args.dispatch()?).into())
+                }};
+            }
+            if versioned {
+                build_hash!(ColumnAwareSerde)
+            } else {
+                build_hash!(BasicSerde)
+            }
         }
     }
 }
 
-struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
+struct TemporalJoinExecutorDispatcherArgs<S: StateStore, SD: ValueRowSerde> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
     left: Executor,
     right: Executor,
-    right_table: BatchTable<S>,
+    right_table: ReplicatedStateTable<S, SD>,
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
@@ -194,7 +228,9 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     append_only: bool,
 }
 
-impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> {
+impl<S: StateStore, SD: ValueRowSerde> HashKeyDispatcher
+    for TemporalJoinExecutorDispatcherArgs<S, SD>
+{
     type Output = StreamResult<Box<dyn Execute>>;
 
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
@@ -204,6 +240,7 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
                 Ok(Box::new(TemporalJoinExecutor::<
                     K,
                     S,
+                    SD,
                     { JoinType::$join_type },
                     { $append_only },
                 >::new(
@@ -251,12 +288,12 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
     }
 }
 
-struct NestedLoopTemporalJoinExecutorDispatcherArgs<S: StateStore> {
+struct NestedLoopTemporalJoinExecutorDispatcherArgs<S: StateStore, SD: ValueRowSerde> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
     left: Executor,
     right: Executor,
-    right_table: BatchTable<S>,
+    right_table: ReplicatedStateTable<S, SD>,
     condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
     chunk_size: usize,
@@ -264,13 +301,14 @@ struct NestedLoopTemporalJoinExecutorDispatcherArgs<S: StateStore> {
     join_type_proto: JoinTypeProto,
 }
 
-impl<S: StateStore> NestedLoopTemporalJoinExecutorDispatcherArgs<S> {
+impl<S: StateStore, SD: ValueRowSerde> NestedLoopTemporalJoinExecutorDispatcherArgs<S, SD> {
     fn dispatch(self) -> StreamResult<Box<dyn Execute>> {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
             ($join_type:ident) => {
                 Ok(Box::new(NestedLoopTemporalJoinExecutor::<
                     S,
+                    SD,
                     { JoinType::$join_type },
                 >::new(
                     self.ctx,

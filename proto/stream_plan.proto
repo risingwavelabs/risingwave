@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "batch_plan.proto";
 import "catalog.proto";
 import "common.proto";
 import "data.proto";
@@ -378,6 +379,15 @@ message SinkNode {
   optional uint32 rate_limit = 4;
 }
 
+message IcebergWithPkIndexWriterNode {
+  SinkDesc sink_desc = 1;
+  catalog.Table pk_index_table = 2;
+}
+
+message IcebergWithPkIndexDvMergerNode {
+  SinkDesc sink_desc = 1;
+}
+
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
   // this two field is expressing a list of usize pair, which means when project receives a
@@ -666,6 +676,10 @@ message AsOfJoinNode {
   // Which encoding will be used to encode join rows in operator cache.
   // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
   JoinEncodingType join_encoding_type = 11 [deprecated = true];
+  // Whether to use the cache-based implementation (true) or the no-cache implementation (false).
+  // Controlled by session variable `streaming_asof_join_use_cache`.
+  // Optional so that legacy plans (without this field) default to true (cache-based).
+  optional bool use_cache = 12;
 }
 
 message TemporalJoinNode {
@@ -822,6 +836,9 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 
   optional uint64 snapshot_backfill_epoch = 11;
+
+  // Full scan range pushdown (eq_conds + range bounds on PK).
+  batch_plan.ScanRange pk_scan_range = 13;
 }
 
 // Config options for CDC backfill
@@ -1178,6 +1195,8 @@ message StreamNode {
     EowcGapFillNode eowc_gap_fill = 153;
     GapFillNode gap_fill = 154;
     VectorIndexLookupJoinNode vector_index_lookup_join = 155;
+    IcebergWithPkIndexWriterNode iceberg_with_pk_index_writer = 156;
+    IcebergWithPkIndexDvMergerNode iceberg_with_pk_index_dv_merger = 157;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -1287,10 +1306,8 @@ message StreamContext {
   string timezone = 1;
   // The partial config of this job to override the global config.
   string config_override = 2;
-  // The adaptive parallelism strategy for this streaming job, if explicitly set.
-  string adaptive_parallelism_strategy = 3;
-  // The adaptive parallelism strategy for the backfill override, if explicitly set.
-  string backfill_adaptive_parallelism_strategy = 4;
+  reserved 3, 4;
+  reserved "adaptive_parallelism_strategy", "backfill_adaptive_parallelism_strategy";
 }
 
 message BackfillOrder {
@@ -1348,6 +1365,10 @@ message StreamFragmentGraph {
   Parallelism parallelism = 6;
   // Parallelism to use during backfill. Falls back to `parallelism` if unset.
   Parallelism backfill_parallelism = 9;
+  // The adaptive parallelism strategy for this streaming job, if explicitly set.
+  string adaptive_parallelism_strategy = 10;
+  // The adaptive parallelism strategy for the backfill override, if explicitly set.
+  string backfill_adaptive_parallelism_strategy = 11;
 
   // Specified max parallelism, i.e., expected vnode count for the graph.
   //

@@ -38,6 +38,7 @@ use risingwave_common::id::{
     ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, UserId, ViewId, WorkerId,
 };
 use risingwave_common::monitor::EndpointExt;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
@@ -427,6 +428,7 @@ impl MetaClient {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
@@ -436,6 +438,7 @@ impl MetaClient {
             }),
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
+            refresh_interval_sec,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -657,13 +660,15 @@ impl MetaClient {
         &self,
         job_id: JobId,
         parallelism: PbTableParallelism,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterParallelismRequest {
             table_id: job_id,
             parallelism: Some(parallelism),
             deferred,
-            adaptive_parallelism_strategy: None,
+            adaptive_parallelism_strategy: adaptive_parallelism_strategy
+                .map(|strategy| strategy.to_string()),
         };
 
         self.inner.alter_parallelism(request).await?;
@@ -674,13 +679,15 @@ impl MetaClient {
         &self,
         job_id: JobId,
         parallelism: Option<PbTableParallelism>,
+        adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterBackfillParallelismRequest {
             table_id: job_id,
             parallelism,
             deferred,
-            adaptive_parallelism_strategy: None,
+            adaptive_parallelism_strategy: adaptive_parallelism_strategy
+                .map(|strategy| strategy.to_string()),
         };
 
         self.inner.alter_backfill_parallelism(request).await?;
@@ -2083,6 +2090,7 @@ impl HummockMetaClient for MetaClient {
         compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
+        target_level: Option<u32>,
         sst_ids: Vec<HummockSstableId>,
         exclusive: bool,
     ) -> Result<bool> {
@@ -2093,6 +2101,7 @@ impl HummockMetaClient for MetaClient {
             // if table_id not exist, manual_compaction will include all the sst
             // without check internal_table_id
             level,
+            target_level,
             sst_ids,
             exclusive: Some(exclusive),
             ..Default::default()

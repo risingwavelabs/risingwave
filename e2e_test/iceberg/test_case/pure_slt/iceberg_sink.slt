@@ -155,7 +155,7 @@ DROP TABLE t6 cascade;
 
 # check sink destination iceberg
 system ok
-sparksql --e "SELECT * FROM demo.demo_db.e2e_demo_table ORDER BY v1;" 2>/dev/null | tail -n +2
+sparksql --e "SELECT * FROM demo.demo_db.e2e_demo_table ORDER BY v1;" 2>/dev/null | awk 'NR == 1 && /^v1[[:space:]]+v2[[:space:]]+v3$/ { next } { print }'
 ----
 1	50	1-50
 2	2	2-2

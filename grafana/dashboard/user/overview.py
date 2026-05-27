@@ -40,12 +40,12 @@ def _(panels: Panels):
             ],
         ),
         panels.timeseries_rowsps(
-            "Materialized View Throughput(rows/s)",
-            "The figure shows the number of rows written into each materialized view per second.",
+            "Streaming Relation Throughput(rows/s)",
+            "The figure shows the number of rows written into each streaming relation (table, materialized view, or index) per second.",
             [
                 panels.target(
-                    f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
-                    "mview {{table_id}} {{table_name}}",
+                    f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name, table_type) group({metric('table_info')}) by (table_id, table_name, table_type)",
+                    "{{table_type}} {{table_id}} {{table_name}}",
                 ),
             ],
         ),

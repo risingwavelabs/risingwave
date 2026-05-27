@@ -359,6 +359,8 @@ pub struct CreateStreamingJobCommandInfo {
     pub is_serverless: bool,
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
+    /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
+    pub refresh_interval_sec: Option<u64>,
 }
 
 impl StreamJobFragments {
@@ -414,10 +416,17 @@ pub struct SnapshotBackfillInfo {
 }
 
 #[derive(Debug, Clone)]
+pub struct BatchRefreshInfo {
+    pub snapshot_backfill_info: SnapshotBackfillInfo,
+    pub refresh_interval_sec: u64,
+}
+
+#[derive(Debug, Clone)]
 pub enum CreateStreamingJobType {
     Normal,
     SinkIntoTable(UpstreamSinkInfo),
     SnapshotBackfill(SnapshotBackfillInfo),
+    BatchRefresh(BatchRefreshInfo),
 }
 
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
@@ -448,8 +457,8 @@ pub enum Command {
     /// drop actors, and then delete the job fragments info from meta store.
     DropStreamingJobs {
         streaming_job_ids: HashSet<JobId>,
+        /// Used by recovery quick path when draining buffered drop/cancel commands.
         unregistered_state_table_ids: HashSet<TableId>,
-        unregistered_fragment_ids: HashSet<FragmentId>,
         // target_fragment -> [sink_fragments]
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     },
@@ -678,10 +687,7 @@ impl Command {
 #[derive(Debug)]
 pub enum PostCollectCommand {
     Command(String),
-    DropStreamingJobs {
-        streaming_job_ids: HashSet<JobId>,
-        unregistered_state_table_ids: HashSet<TableId>,
-    },
+    DropStreamingJobs,
     CreateStreamingJob {
         info: CreateStreamingJobCommandInfo,
         job_type: CreateStreamingJobType,
@@ -714,7 +720,7 @@ impl PostCollectCommand {
 
     pub fn should_checkpoint(&self) -> bool {
         match self {
-            PostCollectCommand::DropStreamingJobs { .. }
+            PostCollectCommand::DropStreamingJobs
             | PostCollectCommand::CreateStreamingJob { .. }
             | PostCollectCommand::Reschedule { .. }
             | PostCollectCommand::ReplaceStreamJob { .. }
@@ -729,7 +735,7 @@ impl PostCollectCommand {
     pub fn command_name(&self) -> &str {
         match self {
             PostCollectCommand::Command(name) => name.as_str(),
-            PostCollectCommand::DropStreamingJobs { .. } => "DropStreamingJobs",
+            PostCollectCommand::DropStreamingJobs => "DropStreamingJobs",
             PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
             PostCollectCommand::Reschedule { .. } => "Reschedule",
             PostCollectCommand::ReplaceStreamJob { .. } => "ReplaceStreamJob",
@@ -817,6 +823,7 @@ impl Command {
                 assert!(!matches!(
                     job_type,
                     CreateStreamingJobType::SnapshotBackfill(_)
+                        | CreateStreamingJobType::BatchRefresh(_)
                 ));
                 let table_fragments = &info.stream_job_fragments;
                 let mut table_ids: HashSet<_> =
@@ -1007,8 +1014,11 @@ impl Command {
                     .flat_map(build_actor_connector_splits)
                     .collect();
                 let subscriptions_to_add =
-                    if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) =
-                        job_type
+                    if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
+                    | CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+                        snapshot_backfill_info,
+                        ..
+                    }) = job_type
                     {
                         snapshot_backfill_info
                             .upstream_mv_table_id_to_backfill_epoch

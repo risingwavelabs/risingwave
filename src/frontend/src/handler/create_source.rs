@@ -244,7 +244,7 @@ pub(crate) fn bind_all_columns(
             .cloned()
             .collect_vec();
 
-        #[allow(clippy::collapsible_else_if)]
+        #[expect(clippy::collapsible_else_if)]
         match sql_column_strategy {
             // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
             SqlColumnStrategy::FollowUnchecked => {
@@ -758,9 +758,11 @@ pub fn bind_connector_props(
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
 
-    if !is_create_source && with_properties.is_shareable_only_cdc_connector() {
+    if !is_create_source && with_properties.is_shareable_cdc_connector() {
         return Err(RwError::from(ProtocolError(format!(
-            "connector {} does not support `CREATE TABLE`, please use `CREATE SOURCE` instead",
+            "directly creating a CDC table for connector {} is no longer supported; \
+             please `CREATE SOURCE` to create a shared CDC source first, \
+             then `CREATE TABLE ... FROM <source> TABLE '<database>.<table>'`",
             with_properties.get_connector().unwrap(),
         ))));
     }
@@ -833,7 +835,7 @@ pub enum SqlColumnStrategy {
 
 /// Entrypoint for binding source connector.
 /// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
     full_name: ObjectName,
@@ -1243,6 +1245,7 @@ pub mod tests {
         DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
+    use risingwave_pb::plan_common::EncodeType;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::source_catalog::SourceCatalog;
@@ -1299,6 +1302,37 @@ pub mod tests {
             .into(),
         };
         assert_eq!(columns, expected_columns, "{columns:#?}");
+    }
+
+    #[tokio::test]
+    async fn test_create_mqtt_source_with_protobuf() {
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
+        let sql = format!(
+            r#"CREATE SOURCE t_mqtt
+    WITH (
+        connector = 'mqtt',
+        url = 'mqtt://localhost:1883',
+        topic = 'test_topic'
+    )
+    FORMAT PLAIN ENCODE PROTOBUF (
+        message = '.test.TestRecord',
+        schema.location = 'file://{}'
+    )"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t_mqtt")
+            .unwrap();
+
+        assert_eq!(source.name, "t_mqtt");
+        assert_eq!(source.info.row_encode, EncodeType::Protobuf as i32);
     }
 
     #[tokio::test]

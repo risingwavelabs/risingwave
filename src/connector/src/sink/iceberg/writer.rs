@@ -237,11 +237,8 @@ pub struct IcebergSinkWriterInner {
     // For chunk with extra partition column, we should remove this column before write.
     // This project index vec is used to avoid create project idx each time.
     project_idx_vec: ProjectIdxVec,
-    commit_checkpoint_size_threshold_bytes: Option<u64>,
-    uncommitted_write_bytes: u64,
 }
 
-#[allow(clippy::type_complexity)]
 enum IcebergWriterDispatch {
     Append {
         writer: Option<Box<dyn IcebergWriter>>,
@@ -299,13 +296,6 @@ impl IcebergSinkWriter {
 }
 
 impl IcebergSinkWriterInner {
-    fn should_commit_on_checkpoint(&self) -> bool {
-        self.commit_checkpoint_size_threshold_bytes
-            .is_some_and(|threshold| {
-                self.uncommitted_write_bytes > 0 && self.uncommitted_write_bytes >= threshold
-            })
-    }
-
     fn build_append_only(
         config: &IcebergConfig,
         table: Table,
@@ -348,7 +338,7 @@ impl IcebergSinkWriterInner {
 
         let parquet_writer_properties = WriterProperties::builder()
             .set_compression(config.get_parquet_compression())
-            .set_max_row_group_size(config.write_parquet_max_row_group_rows())
+            .set_max_row_group_bytes(config.write_parquet_max_row_group_bytes())
             .set_created_by(PARQUET_CREATED_BY.to_owned())
             .build();
 
@@ -406,8 +396,6 @@ impl IcebergSinkWriterInner {
                     ProjectIdxVec::None
                 }
             },
-            commit_checkpoint_size_threshold_bytes: config.commit_checkpoint_size_threshold_bytes(),
-            uncommitted_write_bytes: 0,
         })
     }
 
@@ -458,7 +446,7 @@ impl IcebergSinkWriterInner {
 
         let parquet_writer_properties = WriterProperties::builder()
             .set_compression(config.get_parquet_compression())
-            .set_max_row_group_size(config.write_parquet_max_row_group_rows())
+            .set_max_row_group_bytes(config.write_parquet_max_row_group_bytes())
             .set_created_by(PARQUET_CREATED_BY.to_owned())
             .build();
 
@@ -596,8 +584,6 @@ impl IcebergSinkWriterInner {
                     ProjectIdxVec::None
                 }
             },
-            commit_checkpoint_size_threshold_bytes: config.commit_checkpoint_size_threshold_bytes(),
-            uncommitted_write_bytes: 0,
         })
     }
 }
@@ -728,17 +714,7 @@ impl SinkWriter for IcebergSinkWriter {
             .await
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         inner.metrics.write_bytes.inc_by(write_batch_size as _);
-        inner.uncommitted_write_bytes = inner
-            .uncommitted_write_bytes
-            .saturating_add(write_batch_size as u64);
         Ok(())
-    }
-
-    fn should_commit_on_checkpoint(&self) -> bool {
-        match self {
-            Self::Initialized(inner) => inner.should_commit_on_checkpoint(),
-            Self::Created(_) => false,
-        }
     }
 
     /// Receive a barrier and mark the end of current epoch. When `is_checkpoint` is true, the sink
@@ -803,7 +779,6 @@ impl SinkWriter for IcebergSinkWriter {
 
         match close_result {
             Some(Ok(result)) => {
-                inner.uncommitted_write_bytes = 0;
                 let format_version = inner.table.metadata().format_version();
                 let partition_type = inner.table.metadata().default_partition_type();
                 let data_files = result

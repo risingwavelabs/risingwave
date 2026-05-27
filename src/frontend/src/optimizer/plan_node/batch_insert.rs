@@ -93,6 +93,7 @@ impl ToDistributedBatch for BatchInsert {
 
 impl ToBatchPb for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
+        let wait_for_persistence = self.base.ctx().batch_plan_dml_wait_persistence();
         let column_indices = self.core.column_indices.iter().map(|&i| i as u32).collect();
 
         let default_columns = &self.core.default_columns;
@@ -118,6 +119,7 @@ impl ToBatchPb for BatchInsert {
             row_id_index: self.core.row_id_index.map(|index| index as _),
             returning: self.core.returning,
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
+            wait_for_persistence,
         })
     }
 }

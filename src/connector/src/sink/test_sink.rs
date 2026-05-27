@@ -59,6 +59,10 @@ impl Sink for TestSink {
 
     const SINK_NAME: &'static str = "test";
 
+    fn support_schema_change() -> bool {
+        true
+    }
+
     async fn validate(&self) -> crate::sink::Result<()> {
         Ok(())
     }

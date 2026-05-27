@@ -20,3 +20,12 @@ include ./full_outer_join_global_agg.slt.part
 
 statement ok
 set streaming_join_encoding to default;
+
+# Test no-cache AsOf join (v2)
+statement ok
+set streaming_asof_join_use_cache to false;
+
+include ./asof_join.slt.part
+
+statement ok
+set streaming_asof_join_use_cache to true;

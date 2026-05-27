@@ -226,7 +226,8 @@ impl EnforceSecret for IcebergCommon {
 pub struct IcebergTableIdentifier {
     #[serde(rename = "database.name")]
     pub database_name: Option<String>,
-    /// Full name of table, must include schema name when database is provided.
+    /// Table name or namespace-qualified table name. Dots are treated as
+    /// Iceberg namespace separators.
     #[serde(rename = "table.name")]
     pub table_name: String,
 }
@@ -240,26 +241,38 @@ impl IcebergTableIdentifier {
         &self.table_name
     }
 
+    fn identifier_parts(&self) -> ConnectorResult<Vec<&str>> {
+        let mut parts = Vec::new();
+        if let Some(database_name) = &self.database_name {
+            parts.extend(database_name.split('.'));
+        }
+        parts.extend(self.table_name.split('.'));
+
+        if parts.iter().any(|part| part.is_empty()) {
+            bail!(
+                "Invalid iceberg table identifier '{}': identifier parts must not be empty",
+                self.full_identifier()
+            );
+        }
+
+        Ok(parts)
+    }
+
+    fn full_identifier(&self) -> String {
+        match &self.database_name {
+            Some(database_name) => format!("{}.{}", database_name, self.table_name),
+            None => self.table_name.clone(),
+        }
+    }
+
     pub fn to_table_ident(&self) -> ConnectorResult<TableIdent> {
-        let ret = if let Some(database_name) = &self.database_name {
-            TableIdent::from_strs(vec![database_name, &self.table_name])
-        } else {
-            TableIdent::from_strs(vec![&self.table_name])
-        };
+        let ret = TableIdent::from_strs(self.identifier_parts()?);
 
         Ok(ret.context("Failed to create table identifier")?)
     }
 
     pub fn validate(&self) -> ConnectorResult<()> {
-        if let Some(database_name) = &self.database_name
-            && database_name.contains('.')
-        {
-            bail!(
-                "Invalid database.name '{}': dots are not allowed in database names",
-                database_name
-            );
-        }
-        Ok(())
+        self.identifier_parts().map(|_| ())
     }
 }
 
@@ -668,26 +681,45 @@ impl IcebergCommon {
                     if let Some(glue_id) = self.glue_id.as_deref() {
                         java_catalog_configs.insert("glue.id".to_owned(), glue_id.to_owned());
                     }
+                    self.apply_java_s3_file_io_assume_role_configs(&mut java_catalog_configs);
                 }
                 "jdbc" => {
-                    if let Some(iam_role_arn) = &self.s3_iam_role_arn {
-                        java_catalog_configs
-                            .insert("client.assume-role.arn".to_owned(), iam_role_arn.clone());
-                        java_catalog_configs.insert(
-                            "client.factory".to_owned(),
-                            "org.apache.iceberg.aws.AssumeRoleAwsClientFactory".to_owned(),
-                        );
-                        if let Some(region) = &self.s3_region {
-                            java_catalog_configs
-                                .insert("client.assume-role.region".to_owned(), region.clone());
-                        }
-                    }
+                    self.apply_java_aws_client_assume_role_configs(&mut java_catalog_configs);
                 }
                 _ => {}
             }
         }
 
         Ok((file_io_props, java_catalog_configs))
+    }
+
+    fn apply_java_s3_file_io_assume_role_configs(
+        &self,
+        java_catalog_configs: &mut HashMap<String, String>,
+    ) {
+        if let Some(iam_role_arn) = &self.s3_iam_role_arn {
+            java_catalog_configs.insert(
+                "s3.client-factory-impl".to_owned(),
+                "com.risingwave.connector.catalog.S3FileIOAssumeRoleAwsClientFactory".to_owned(),
+            );
+            java_catalog_configs.insert("s3.iam-role-arn".to_owned(), iam_role_arn.clone());
+        }
+    }
+
+    fn apply_java_aws_client_assume_role_configs(
+        &self,
+        java_catalog_configs: &mut HashMap<String, String>,
+    ) {
+        if let Some(iam_role_arn) = &self.s3_iam_role_arn {
+            java_catalog_configs.insert("client.assume-role.arn".to_owned(), iam_role_arn.clone());
+            java_catalog_configs.insert(
+                "client.factory".to_owned(),
+                "org.apache.iceberg.aws.AssumeRoleAwsClientFactory".to_owned(),
+            );
+            if let Some(region) = &self.s3_region {
+                java_catalog_configs.insert("client.assume-role.region".to_owned(), region.clone());
+            }
+        }
     }
 }
 
@@ -1147,11 +1179,73 @@ pub async fn rebuild_table_with_shared_cache(table: Table) -> Table {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
+
+    fn test_common(catalog_type: &str) -> IcebergCommon {
+        IcebergCommon {
+            catalog_type: Some(catalog_type.to_owned()),
+            s3_region: Some("ap-southeast-2".to_owned()),
+            s3_endpoint: None,
+            s3_access_key: None,
+            s3_secret_key: None,
+            s3_iam_role_arn: None,
+            glue_access_key: None,
+            glue_secret_key: None,
+            glue_iam_role_arn: None,
+            glue_region: None,
+            glue_id: None,
+            gcs_credential: None,
+            azblob_account_name: None,
+            azblob_account_key: None,
+            azblob_endpoint_url: None,
+            adlsgen2_account_name: None,
+            adlsgen2_account_key: None,
+            adlsgen2_endpoint: None,
+            warehouse_path: Some("s3://bucket/warehouse".to_owned()),
+            catalog_name: None,
+            catalog_uri: None,
+            catalog_credential: None,
+            catalog_token: None,
+            catalog_oauth2_server_uri: None,
+            catalog_scope: None,
+            rest_signing_region: None,
+            rest_signing_name: None,
+            rest_sigv4_enabled: None,
+            s3_path_style_access: None,
+            enable_config_load: None,
+            hosted_catalog: None,
+            catalog_header: None,
+            vended_credentials: None,
+            catalog_security: None,
+            gcp_auth_scopes: None,
+            catalog_io_impl: None,
+        }
+    }
+
+    #[test]
+    fn test_glue_jni_catalog_uses_s3_assume_role_for_file_io() {
+        let common = IcebergCommon {
+            s3_iam_role_arn: Some("arn:aws:iam::123456789012:role/risingwave-s3".to_owned()),
+            ..test_common("glue")
+        };
+
+        let (_, java_catalog_configs) = common.build_jni_catalog_configs(&HashMap::new()).unwrap();
+
+        assert_eq!(
+            java_catalog_configs.get("s3.client-factory-impl").unwrap(),
+            "com.risingwave.connector.catalog.S3FileIOAssumeRoleAwsClientFactory"
+        );
+        assert_eq!(
+            java_catalog_configs.get("s3.iam-role-arn").unwrap(),
+            "arn:aws:iam::123456789012:role/risingwave-s3"
+        );
+        assert!(!java_catalog_configs.contains_key("client.factory"));
+    }
 
     #[test]
     fn test_iceberg_table_identifier_validation() {
-        // Test valid database names
         let valid_identifier = IcebergTableIdentifier {
             database_name: Some("valid_db".to_owned()),
             table_name: "test_table".to_owned(),
@@ -1170,31 +1264,78 @@ mod tests {
         };
         assert!(no_database.validate().is_ok());
 
-        // Test invalid database names with dots
-        let single_dot = IcebergTableIdentifier {
-            database_name: Some("a.b".to_owned()),
+        let empty_part = IcebergTableIdentifier {
+            database_name: Some("a..b".to_owned()),
             table_name: "test_table".to_owned(),
         };
-        let result = single_dot.validate();
+        let result = empty_part.validate();
         assert!(result.is_err());
         assert!(
             result
                 .unwrap_err()
                 .to_string()
-                .contains("dots are not allowed")
+                .contains("identifier parts must not be empty")
         );
 
-        let multiple_dots = IcebergTableIdentifier {
-            database_name: Some("a.b.c".to_owned()),
-            table_name: "test_table".to_owned(),
+        let leading_dot = IcebergTableIdentifier {
+            database_name: None,
+            table_name: ".test_table".to_owned(),
         };
-        let result = multiple_dots.validate();
+        let result = leading_dot.validate();
         assert!(result.is_err());
         assert!(
             result
                 .unwrap_err()
                 .to_string()
-                .contains("dots are not allowed")
+                .contains("identifier parts must not be empty")
         );
+    }
+
+    #[test]
+    fn test_iceberg_table_identifier_dots_as_namespace_separators() {
+        let table_ident = IcebergTableIdentifier {
+            database_name: Some("general.zia.stats".to_owned()),
+            table_name: "tagged_security_transactions".to_owned(),
+        }
+        .to_table_ident()
+        .unwrap();
+        let namespace: Vec<_> = table_ident
+            .namespace()
+            .as_ref()
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(namespace, vec!["general", "zia", "stats"]);
+        assert_eq!(table_ident.name(), "tagged_security_transactions");
+
+        let table_ident = IcebergTableIdentifier {
+            database_name: Some("general".to_owned()),
+            table_name: "zia.stats.tagged_security_transactions".to_owned(),
+        }
+        .to_table_ident()
+        .unwrap();
+        let namespace: Vec<_> = table_ident
+            .namespace()
+            .as_ref()
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(namespace, vec!["general", "zia", "stats"]);
+        assert_eq!(table_ident.name(), "tagged_security_transactions");
+
+        let table_ident = IcebergTableIdentifier {
+            database_name: None,
+            table_name: "general.zia.stats.tagged_security_transactions".to_owned(),
+        }
+        .to_table_ident()
+        .unwrap();
+        let namespace: Vec<_> = table_ident
+            .namespace()
+            .as_ref()
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(namespace, vec!["general", "zia", "stats"]);
+        assert_eq!(table_ident.name(), "tagged_security_transactions");
     }
 }

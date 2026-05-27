@@ -139,7 +139,7 @@ pub trait Endo<T: Tree> {
 
 /// A similar trait to generate traversal over tree-like structure.
 /// See `Endo` for more details.
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 pub trait Visit<T: Tree> {
     fn pre(&mut self, t: &T) {}
 

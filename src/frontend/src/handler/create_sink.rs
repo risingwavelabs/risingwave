@@ -76,7 +76,7 @@ use crate::handler::util::{
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
     IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamPlanRef as PlanRef,
-    StreamProject, generic,
+    StreamProject, ensure_sync_log_store_fragment_root, generic,
 };
 use crate::optimizer::{OptimizerContext, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -455,7 +455,8 @@ pub async fn gen_sink_plan(
 
     let sink_desc = sink_plan.sink_desc().clone();
 
-    let mut sink_plan: PlanRef = sink_plan.into();
+    let mut sink_plan: PlanRef = sink_plan.into_stream_plan()?;
+    sink_plan = ensure_sync_log_store_fragment_root(sink_plan);
 
     let ctx = sink_plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -548,7 +549,6 @@ pub async fn get_partition_compute_info(
     }
 }
 
-#[allow(clippy::unused_async)]
 async fn get_partition_compute_info_for_iceberg(
     _iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
@@ -812,7 +812,7 @@ pub(crate) fn derive_default_column_project_for_sink(
         // If users specified the columns to be inserted e.g. `CREATE SINK s INTO t(a, b)`, the expressions of `Project` will be generated accordingly.
         // The missing columns will be filled with default value (`null` if not explicitly defined).
         // Otherwise, e.g. `CREATE SINK s INTO t`, the columns will be matched by their order in `select` query and the target table.
-        #[allow(clippy::collapsible_else_if)]
+        #[expect(clippy::collapsible_else_if)]
         if user_specified_columns {
             if let Some(idx) = sink_visible_col_idxes_by_name.get(column.name()) {
                 exprs.push(sink_col_expr(*idx)?);

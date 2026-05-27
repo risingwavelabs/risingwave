@@ -213,6 +213,8 @@ impl ConfigExpander {
                     "mysql" => ServiceConfig::MySql(serde_yaml::from_str(&out_str)?),
                     "postgres" => ServiceConfig::Postgres(serde_yaml::from_str(&out_str)?),
                     "sqlserver" => ServiceConfig::SqlServer(serde_yaml::from_str(&out_str)?),
+                    "nats" => ServiceConfig::Nats(serde_yaml::from_str(&out_str)?),
+                    "mqtt" => ServiceConfig::Mqtt(serde_yaml::from_str(&out_str)?),
                     "schema-registry" => {
                         ServiceConfig::SchemaRegistry(serde_yaml::from_str(&out_str)?)
                     }

@@ -27,7 +27,7 @@ impl std::str::FromStr for StatementTimeout {
         let (val_str, unit) = s
             .find(|c: char| !c.is_numeric())
             .map(|i| s.split_at(i))
-            .ok_or_else(|| "time unit is required: ms s min h d".to_owned())?;
+            .unwrap_or((s, "ms"));
 
         let val = val_str
             .parse::<u32>()
@@ -95,9 +95,9 @@ mod tests {
             StatementTimeout(100)
         );
 
-        assert!(
-            "100".parse::<StatementTimeout>().is_err(),
-            "should fail without unit"
+        assert_eq!(
+            "100".parse::<StatementTimeout>().unwrap(),
+            StatementTimeout(100)
         );
         assert!(
             "100x".parse::<StatementTimeout>().is_err(),

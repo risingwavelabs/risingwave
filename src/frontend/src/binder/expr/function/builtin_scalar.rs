@@ -344,6 +344,9 @@ impl Binder {
                 ("arraycontains", raw_call(ExprType::ArrayContains)),
                 ("array_contained", raw_call(ExprType::ArrayContained)),
                 ("arraycontained", raw_call(ExprType::ArrayContained)),
+                ("array_overlaps", raw_call(ExprType::ArrayOverlaps)),
+                ("array_is_overlap", raw_call(ExprType::ArrayOverlaps)),
+                ("array_is_intersect", raw_call(ExprType::ArrayOverlaps)),
                 ("array_flatten", guard_by_len(|_binder, [input]| {
                     input.ensure_array_type().map_err(|_| ErrorCode::BindError("array_flatten expects `any[][]` input".into()))?;
                     let return_type = input.return_type().into_list_elem();

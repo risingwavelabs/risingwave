@@ -25,10 +25,10 @@ use risingwave_common::types::{DataType, MapType, StructType};
 use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
 use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::iceberg::{
-    COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB, IcebergConfig, IcebergOrderKeyField,
-    IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
+    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, CompactionType, ENABLE_COMPACTION,
+    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig,
+    IcebergOrderKeyField, IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
     SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_order_key_exprs, validate_order_key_columns,
 };
@@ -312,9 +312,6 @@ fn test_parse_iceberg_config() {
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
                 .collect(),
             commit_checkpoint_interval: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
-            commit_checkpoint_size_threshold_mb: Some(
-                ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB,
-            ),
             create_table_if_not_exists: false,
             is_exactly_once: Some(true),
             commit_retry_num: 8,
@@ -335,6 +332,8 @@ fn test_parse_iceberg_config() {
             compaction_type: None,
             write_parquet_compression: None,
             write_parquet_max_row_group_rows: None,
+            write_parquet_max_row_group_bytes: None,
+            enable_pk_index: false,
         };
 
     assert_eq!(iceberg_config, expected_iceberg_config);
@@ -342,82 +341,6 @@ fn test_parse_iceberg_config() {
     assert_eq!(
         &iceberg_config.full_table_name().unwrap().to_string(),
         "demo_db.demo_table"
-    );
-}
-
-#[test]
-fn test_parse_commit_checkpoint_size_threshold() {
-    let values: BTreeMap<String, String> = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("catalog.name", "test-catalog"),
-        ("catalog.type", "storage"),
-        ("warehouse.path", "s3://my-bucket/warehouse"),
-        ("database.name", "test_db"),
-        ("table.name", "test_table"),
-        ("commit_checkpoint_size_threshold_mb", "128"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    let config = IcebergConfig::from_btreemap(values).unwrap();
-    assert_eq!(config.commit_checkpoint_size_threshold_mb, Some(128));
-    assert_eq!(
-        config.commit_checkpoint_size_threshold_bytes(),
-        Some(128 * 1024 * 1024)
-    );
-}
-
-#[test]
-fn test_default_commit_checkpoint_size_threshold() {
-    let values: BTreeMap<String, String> = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("catalog.name", "test-catalog"),
-        ("catalog.type", "storage"),
-        ("warehouse.path", "s3://my-bucket/warehouse"),
-        ("database.name", "test_db"),
-        ("table.name", "test_table"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    let config = IcebergConfig::from_btreemap(values).unwrap();
-    assert_eq!(
-        config.commit_checkpoint_size_threshold_mb,
-        Some(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
-    );
-    assert_eq!(
-        config.commit_checkpoint_size_threshold_bytes(),
-        Some(ICEBERG_DEFAULT_COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB * 1024 * 1024)
-    );
-}
-
-#[test]
-fn test_reject_zero_commit_checkpoint_size_threshold() {
-    let values: BTreeMap<String, String> = [
-        ("connector", "iceberg"),
-        ("type", "append-only"),
-        ("force_append_only", "true"),
-        ("catalog.name", "test-catalog"),
-        ("catalog.type", "storage"),
-        ("warehouse.path", "s3://my-bucket/warehouse"),
-        ("database.name", "test_db"),
-        ("table.name", "test_table"),
-        ("commit_checkpoint_size_threshold_mb", "0"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-    .collect();
-
-    let err = IcebergConfig::from_btreemap(values).unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("`commit_checkpoint_size_threshold_mb` must be greater than 0")
     );
 }
 
@@ -705,10 +628,6 @@ fn test_config_constants_consistency() {
     assert_eq!(ENABLE_SNAPSHOT_EXPIRATION, "enable_snapshot_expiration");
     assert_eq!(WRITE_MODE, "write_mode");
     assert_eq!(
-        COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB,
-        "commit_checkpoint_size_threshold_mb"
-    );
-    assert_eq!(
         SNAPSHOT_EXPIRATION_RETAIN_LAST,
         "snapshot_expiration_retain_last"
     );
@@ -725,6 +644,10 @@ fn test_config_constants_consistency() {
         "snapshot_expiration_clear_expired_meta_data"
     );
     assert_eq!(COMPACTION_MAX_SNAPSHOTS_NUM, "compaction.max_snapshots_num");
+    assert_eq!(
+        COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES,
+        "compaction.write_parquet_max_row_group_bytes"
+    );
     assert_eq!(ORDER_KEY, "order_key");
 }
 
@@ -754,6 +677,7 @@ fn test_parse_compaction_config() {
         ("compaction.type", "full"),
         ("compaction.write_parquet_compression", "zstd"),
         ("compaction.write_parquet_max_row_group_rows", "50000"),
+        ("compaction.write_parquet_max_row_group_bytes", "67108864"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -769,7 +693,8 @@ fn test_parse_compaction_config() {
     assert_eq!(config.compaction_type, Some(CompactionType::Full));
     assert_eq!(config.target_file_size_mb(), 256);
     assert_eq!(config.write_parquet_compression(), "zstd");
-    assert_eq!(config.write_parquet_max_row_group_rows(), 50000);
+    assert_eq!(config.write_parquet_max_row_group_rows(), Some(50000));
+    assert_eq!(config.write_parquet_max_row_group_bytes(), Some(67_108_864));
 
     // Test default values (no compaction configs specified)
     let values: BTreeMap<String, String> = [
@@ -787,9 +712,40 @@ fn test_parse_compaction_config() {
     .collect();
 
     let config = IcebergConfig::from_btreemap(values).unwrap();
+    assert!(config.enable_snapshot_expiration);
+    assert_eq!(config.snapshot_expiration_max_age_millis, None);
+    assert_eq!(config.snapshot_expiration_retain_last, None);
     assert_eq!(config.target_file_size_mb(), 1024); // Default
     assert_eq!(config.write_parquet_compression(), "zstd"); // Default
-    assert_eq!(config.write_parquet_max_row_group_rows(), 122880); // Default
+    assert_eq!(config.write_parquet_max_row_group_rows(), None); // Default
+    assert_eq!(
+        config.write_parquet_max_row_group_bytes(),
+        Some(ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES)
+    );
+}
+
+#[test]
+fn test_reject_zero_trigger_snapshot_count() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.name", "test-catalog"),
+        ("catalog.type", "storage"),
+        ("warehouse.path", "s3://my-bucket/warehouse"),
+        ("database.name", "test_db"),
+        ("table.name", "test_table"),
+        ("compaction.trigger_snapshot_count", "0"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let err = IcebergConfig::from_btreemap(values).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`compaction.trigger_snapshot_count` must be greater than 0")
+    );
 }
 
 /// Test parquet compression parsing.

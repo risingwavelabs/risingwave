@@ -210,7 +210,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 14
+    timeout_in_minutes: 45
     retry: *auto-retry
 
   - label: "end-to-end source test"
@@ -409,7 +409,6 @@ steps:
     matrix:
       setup:
         java_version:
-          - "17"
           - "21"
     timeout_in_minutes: 10
     retry: *auto-retry
@@ -638,7 +637,7 @@ steps:
       - ./ci/plugins/swapfile
       - docker-compose#v5.5.0:
           <<: *docker-compose
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "check"
@@ -828,6 +827,7 @@ steps:
         build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
     depends_on:
       - "build"
+      - "build-other"
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose

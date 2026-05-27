@@ -93,6 +93,11 @@ pub struct SessionConfig {
     #[parameter(default = false, alias = "rw_implicit_flush")]
     implicit_flush: bool,
 
+    /// If `DML_WAIT_PERSISTENCE` is on, then every INSERT/UPDATE/DELETE statement waits until
+    /// the transaction is included in a checkpoint. This is ignored when `IMPLICIT_FLUSH` is on.
+    #[parameter(default = false)]
+    dml_wait_persistence: bool,
+
     /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
     /// MV creation.
     #[parameter(default = false)]
@@ -391,6 +396,15 @@ pub struct SessionConfig {
     /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
     #[parameter(default = true)]
     streaming_use_shared_source: bool,
+
+    /// Enable in-memory cache for `AsOf` join executor.
+    ///
+    /// When enabled (default), `AsOf` join uses the cache-based implementation.
+    ///
+    /// When disabled, `AsOf` join uses a no-cache implementation that directly queries
+    /// the state table on-demand, reducing unnecessary data fetches for cache.
+    #[parameter(default = true)]
+    streaming_asof_join_use_cache: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]
@@ -793,7 +807,6 @@ mod test {
             "default"
         );
     }
-
     #[test]
     fn test_streaming_parallelism_for_backfill_accepts_default_and_fixed() {
         let mut config = SessionConfig::default();

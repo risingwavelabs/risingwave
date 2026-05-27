@@ -49,7 +49,7 @@ pub struct TableDesc {
 
     pub value_indices: Vec<usize>,
 
-    /// The prefix len of pk, used in bloom filter.
+    /// The prefix len of pk, used in SST filters.
     pub read_prefix_len_hint: usize,
 
     /// the column indices which could receive watermarks.

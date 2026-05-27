@@ -6,18 +6,18 @@
   - create_tables
   sql: "select   ol_number,\n sum(ol_quantity) as sum_qty,\n sum(ol_amount) as sum_amount,\n avg(ol_quantity) as avg_qty,\n avg(ol_amount) as avg_amount,\n count(*) as count_order\nfrom\t order_line\nwhere\t ol_delivery_d > '2007-01-02 00:00:00.000000'\ngroup by ol_number order by ol_number;\n"
   logical_plan: |-
-    LogicalProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr1, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal) as $expr2, count] }
+    LogicalProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr1, Case((count(order_line.ol_amount) = 0:Int32), null:Decimal, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal)) as $expr2, count] }
     └─LogicalAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] }
       └─LogicalProject { exprs: [order_line.ol_number, order_line.ol_quantity, order_line.ol_amount] }
         └─LogicalFilter { predicate: (order_line.ol_delivery_d > '2007-01-02 00:00:00':Timestamp) }
           └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr1, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal) as $expr2, count] }
+    LogicalProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr1, Case((count(order_line.ol_amount) = 0:Int32), null:Decimal, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal)) as $expr2, count] }
     └─LogicalAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] }
       └─LogicalScan { table: order_line, output_columns: [order_line.ol_number, order_line.ol_quantity, order_line.ol_amount], required_columns: [order_line.ol_number, order_line.ol_quantity, order_line.ol_amount, order_line.ol_delivery_d], predicate: (order_line.ol_delivery_d > '2007-01-02 00:00:00':Timestamp) }
   batch_plan: |-
     BatchExchange { order: [order_line.ol_number ASC], dist: Single }
-    └─BatchProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr1, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal) as $expr2, count] }
+    └─BatchProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr1, Case((count(order_line.ol_amount) = 0:Int32), null:Decimal, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal)) as $expr2, count] }
       └─BatchSort { order: [order_line.ol_number ASC] }
         └─BatchHashAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] }
           └─BatchExchange { order: [], dist: HashShard(order_line.ol_number) }
@@ -26,7 +26,7 @@
                 └─BatchScan { table: order_line, columns: [order_line.ol_number, order_line.ol_quantity, order_line.ol_amount, order_line.ol_delivery_d], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [ol_number, sum_qty, sum_amount, avg_qty, avg_amount, count_order], stream_key: [ol_number], pk_columns: [ol_number], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr1, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal) as $expr2, count] }
+    └─StreamProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr1, Case((count(order_line.ol_amount) = 0:Int32), null:Decimal, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal)) as $expr2, count] }
       └─StreamHashAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] }
         └─StreamExchange { dist: HashShard(order_line.ol_number) }
           └─StreamProject { exprs: [order_line.ol_number, order_line.ol_quantity, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id] }
@@ -35,7 +35,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [ol_number, sum_qty, sum_amount, avg_qty, avg_amount, count_order], stream_key: [ol_number], pk_columns: [ol_number], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr1, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal) as $expr2, count] }
+    └── StreamProject { exprs: [order_line.ol_number, sum(order_line.ol_quantity), sum(order_line.ol_amount), Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr1, Case((count(order_line.ol_amount) = 0:Int32), null:Decimal, (sum(order_line.ol_amount) / count(order_line.ol_amount)::Decimal)) as $expr2, count] }
         └── StreamHashAgg { group_key: [order_line.ol_number], aggs: [sum(order_line.ol_quantity), sum(order_line.ol_amount), count(order_line.ol_quantity), count(order_line.ol_amount), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0]) from 1
 
@@ -1250,7 +1250,7 @@
               │     │         │ └─StreamHashJoin { type: Inner, predicate: item.i_id = stock.s_i_id, output: all }
               │     │         │   ├─StreamExchange { dist: HashShard(item.i_id) }
               │     │         │   │ └─StreamFilter { predicate: (item.i_id < 1000:Int32) }
-              │     │         │   │   └─StreamTableScan { table: item, columns: [item.i_id], stream_scan_type: SnapshotBackfill, stream_key: [item.i_id], pk: [i_id], dist: UpstreamHashShard(item.i_id) }
+              │     │         │   │   └─StreamTableScan { table: item, columns: [item.i_id], pk_scan_range: i_id < Some(Int32(1000)), stream_scan_type: SnapshotBackfill, stream_key: [item.i_id], pk: [i_id], dist: UpstreamHashShard(item.i_id) }
               │     │         │   └─StreamExchange { dist: HashShard(stock.s_i_id) }
               │     │         │     └─StreamFilter { predicate: (stock.s_i_id < 1000:Int32) }
               │     │         │       └─StreamTableScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], stream_scan_type: SnapshotBackfill, stream_key: [stock.s_w_id, stock.s_i_id], pk: [s_w_id, s_i_id], dist: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
@@ -1328,7 +1328,7 @@
 
     Fragment 9
     StreamFilter { predicate: (item.i_id < 1000:Int32) }
-    └── StreamTableScan { table: item, columns: [item.i_id], stream_scan_type: SnapshotBackfill, stream_key: [item.i_id], pk: [i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 27 ] }
+    └── StreamTableScan { table: item, columns: [item.i_id], pk_scan_range: i_id < Some(Int32(1000)), stream_scan_type: SnapshotBackfill, stream_key: [item.i_id], pk: [i_id], dist: UpstreamHashShard(item.i_id) } { tables: [ StreamScan: 27 ] }
         ├── Upstream
         └── BatchPlanNode
 
@@ -2001,7 +2001,7 @@
     StreamStatelessSimpleAgg { aggs: [sum(stock.s_order_cnt)] }
     └── StreamExchange NoShuffle from 2
 
-    Table 0 { columns: [ stock_s_i_id, sum(stock_s_order_cnt), $expr2, _rw_timestamp ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 0 { columns: [ stock_s_i_id, sum(stock_s_order_cnt), $expr2, _rw_timestamp ], primary key: [ $2 ASC, $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 0 }
 
     Table 1 { columns: [ $expr3, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
@@ -2586,7 +2586,7 @@
         └─LogicalFilter { predicate: (order_line.ol_i_id = item.i_id) AND (order_line.ol_quantity::Decimal < $expr1) }
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-            └─LogicalProject { exprs: [item.i_id, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr1] }
+            └─LogicalProject { exprs: [item.i_id, Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr1] }
               └─LogicalAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity)] }
                 └─LogicalProject { exprs: [item.i_id, order_line.ol_quantity] }
                   └─LogicalFilter { predicate: Like(item.i_data, '%b':Varchar) AND (order_line.ol_i_id = item.i_id) }
@@ -2599,7 +2599,7 @@
       └─LogicalJoin { type: Inner, on: (order_line.ol_i_id = item.i_id) AND ($expr1 < $expr2), output: [order_line.ol_amount] }
         ├─LogicalProject { exprs: [order_line.ol_i_id, order_line.ol_amount, order_line.ol_quantity::Decimal as $expr1] }
         │ └─LogicalScan { table: order_line, columns: [order_line.ol_i_id, order_line.ol_quantity, order_line.ol_amount] }
-        └─LogicalProject { exprs: [item.i_id, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr2] }
+        └─LogicalProject { exprs: [item.i_id, Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr2] }
           └─LogicalAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity)] }
             └─LogicalJoin { type: Inner, on: (order_line.ol_i_id = item.i_id), output: [item.i_id, order_line.ol_quantity] }
               ├─LogicalScan { table: item, output_columns: [item.i_id], required_columns: [item.i_id, item.i_data], predicate: Like(item.i_data, '%b':Varchar) }
@@ -2613,7 +2613,7 @@
             ├─BatchExchange { order: [], dist: HashShard(order_line.ol_i_id) }
             │ └─BatchProject { exprs: [order_line.ol_i_id, order_line.ol_amount, order_line.ol_quantity::Decimal as $expr1] }
             │   └─BatchScan { table: order_line, columns: [order_line.ol_i_id, order_line.ol_quantity, order_line.ol_amount], distribution: SomeShard }
-            └─BatchProject { exprs: [item.i_id, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr2] }
+            └─BatchProject { exprs: [item.i_id, Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr2] }
               └─BatchHashAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity)] }
                 └─BatchHashJoin { type: Inner, predicate: item.i_id = order_line.ol_i_id, output: [item.i_id, order_line.ol_quantity] }
                   ├─BatchExchange { order: [], dist: HashShard(item.i_id) }
@@ -2634,7 +2634,7 @@
                   ├─StreamExchange { dist: HashShard(order_line.ol_i_id) }
                   │ └─StreamProject { exprs: [order_line.ol_i_id, order_line.ol_amount, order_line.ol_quantity::Decimal as $expr1, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
                   │   └─StreamTableScan { table: order_line, columns: [order_line.ol_i_id, order_line.ol_quantity, order_line.ol_amount, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], stream_scan_type: SnapshotBackfill, stream_key: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], pk: [ol_w_id, ol_d_id, ol_o_id, ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
-                  └─StreamProject { exprs: [item.i_id, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr2] }
+                  └─StreamProject { exprs: [item.i_id, Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr2] }
                     └─StreamHashAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity), count] }
                       └─StreamHashJoin { type: Inner, predicate: item.i_id = order_line.ol_i_id, output: [item.i_id, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
                         ├─StreamExchange { dist: HashShard(item.i_id) }
@@ -2657,7 +2657,7 @@
         └── StreamFilter { predicate: ($expr1 < $expr2) }
             └── StreamHashJoin { type: Inner, predicate: order_line.ol_i_id = item.i_id, output: all } { tables: [ HashJoinLeft: 1, HashJoinDegreeLeft: 2, HashJoinRight: 3, HashJoinDegreeRight: 4 ] }
                 ├── StreamExchange Hash([0]) from 2
-                └── StreamProject { exprs: [item.i_id, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal) as $expr2] }
+                └── StreamProject { exprs: [item.i_id, Case((count(order_line.ol_quantity) = 0:Int32), null:Decimal, (sum(order_line.ol_quantity)::Decimal / count(order_line.ol_quantity)::Decimal)) as $expr2] }
                     └── StreamHashAgg { group_key: [item.i_id], aggs: [sum(order_line.ol_quantity), count(order_line.ol_quantity), count] } { tables: [ HashAggState: 6 ] }
                         └── StreamHashJoin { type: Inner, predicate: item.i_id = order_line.ol_i_id, output: [item.i_id, order_line.ol_quantity, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number] }
                             ├── tables: [ HashJoinLeft: 7, HashJoinDegreeLeft: 8, HashJoinRight: 9, HashJoinDegreeRight: 10 ]
@@ -3340,7 +3340,7 @@
             │ └─LogicalProject { exprs: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local] }
             │   └─LogicalFilter { predicate: (orders.o_c_id = CorrelatedInputRef { index: 0, correlated_id: 1 }) AND (orders.o_w_id = CorrelatedInputRef { index: 2, correlated_id: 1 }) AND (orders.o_d_id = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
             │     └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-            └─LogicalProject { exprs: [(sum(customer.c_balance) / count(customer.c_balance)::Decimal) as $expr1] }
+            └─LogicalProject { exprs: [Case((count(customer.c_balance) = 0:Int32), null:Decimal, (sum(customer.c_balance) / count(customer.c_balance)::Decimal)) as $expr1] }
               └─LogicalAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
                 └─LogicalProject { exprs: [customer.c_balance] }
                   └─LogicalFilter { predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
@@ -3353,7 +3353,7 @@
         │ ├─LogicalScan { table: customer, output_columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance], required_columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance, customer.c_phone], predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
         │ └─LogicalProject { exprs: [orders.o_c_id, orders.o_w_id, orders.o_d_id] }
         │   └─LogicalScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id] }
-        └─LogicalProject { exprs: [(sum(customer.c_balance) / count(customer.c_balance)::Decimal) as $expr1] }
+        └─LogicalProject { exprs: [Case((count(customer.c_balance) = 0:Int32), null:Decimal, (sum(customer.c_balance) / count(customer.c_balance)::Decimal)) as $expr1] }
           └─LogicalAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
             └─LogicalScan { table: customer, output_columns: [customer.c_balance], required_columns: [customer.c_balance, customer.c_phone], predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
   batch_plan: |-
@@ -3372,7 +3372,7 @@
               │   └─BatchExchange { order: [], dist: HashShard(orders.o_c_id, orders.o_w_id, orders.o_d_id) }
               │     └─BatchProject { exprs: [orders.o_c_id, orders.o_w_id, orders.o_d_id] }
               │       └─BatchScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id], distribution: SomeShard }
-              └─BatchProject { exprs: [(sum(sum(customer.c_balance)) / sum0(count(customer.c_balance))::Decimal) as $expr1] }
+              └─BatchProject { exprs: [Case((sum0(count(customer.c_balance)) = 0:Int32), null:Decimal, (sum(sum(customer.c_balance)) / sum0(count(customer.c_balance))::Decimal)) as $expr1] }
                 └─BatchSimpleAgg { aggs: [sum(sum(customer.c_balance)), sum0(count(customer.c_balance))] }
                   └─BatchExchange { order: [], dist: Single }
                     └─BatchSimpleAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
@@ -3394,7 +3394,7 @@
             │   └─StreamProject { exprs: [orders.o_c_id, orders.o_w_id, orders.o_d_id, orders.o_id] }
             │     └─StreamTableScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_id], stream_scan_type: SnapshotBackfill, stream_key: [orders.o_w_id, orders.o_d_id, orders.o_id], pk: [o_w_id, o_d_id, o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
             └─StreamExchange { dist: Broadcast }
-              └─StreamProject { exprs: [(sum(sum(customer.c_balance)) / sum0(count(customer.c_balance))::Decimal) as $expr1] }
+              └─StreamProject { exprs: [Case((sum0(count(customer.c_balance)) = 0:Int32), null:Decimal, (sum(sum(customer.c_balance)) / sum0(count(customer.c_balance))::Decimal)) as $expr1] }
                 └─StreamSimpleAgg [append_only] { aggs: [sum(sum(customer.c_balance)), sum0(count(customer.c_balance)), count] }
                   └─StreamExchange { dist: Single }
                     └─StreamStatelessSimpleAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }

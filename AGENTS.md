@@ -45,7 +45,7 @@ You may need to learn how to build and test RisingWave when implementing feature
 - Use `./risedev d` to run a RisingWave instance in the background via tmux.
   - It builds RisingWave binaries if necessary. The build process can take up to 10 minutes, depending on the incremental build results. Use a large timeout for this step, and be patient.
   - It kills the previous instance, if exists.
-  - Optionally pass a profile name (see `risedev.yml`) to choose external services or components. By default it uses `default`.
+  - Optionally pass a profile name (see `risedev.yml` and for local profile see `risedev-profiles.user.yml`) to choose external services or components. By default it uses `default`.
   - This runs in the background so you do not need a separate terminal.
   - You can connect right after the command finishes.
   - Logs are written to files in `.risingwave/log` folder.
@@ -65,6 +65,18 @@ When sandboxing is enabled, these commands need `require_escalated` because they
 - `./risedev psql ...` or direct `psql -h localhost -p 4566 ...` (local TCP connection)
 - `./risedev slt './path/to/e2e-test-file.slt'` (connects to local TCP via psql protocol)
 - Any command that checks running services via local TCP (for example, health checks or custom SQL clients)
+
+## Pull Request Submission Labels
+
+PR labels in this repository can affect CI coverage and documentation follow-up. To keep normal coding work lightweight, load the detailed label protocol only at PR submission time.
+
+When opening or updating a pull request, changing PR labels, or marking a PR ready for review:
+
+1. Read `.agents/PR_LABELING.md`.
+2. Inspect the current PR labels and draft state before adding anything:
+   `gh pr view <PR> --json isDraft,labels,title,body,files`
+3. Add only validated missing labels. Do not remove existing labels unless explicitly instructed by a maintainer.
+4. In the final PR report, list labels added, labels intentionally not added, local tests run, and CI labels requested.
 
 ## Connector Development
 

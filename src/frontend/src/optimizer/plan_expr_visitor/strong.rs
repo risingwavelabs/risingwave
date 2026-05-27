@@ -285,6 +285,7 @@ impl Strong {
             | ExprType::ArrayReverse
             | ExprType::ArrayContains
             | ExprType::ArrayContained
+            | ExprType::ArrayOverlaps
             | ExprType::ArrayFlatten
             | ExprType::HexToInt256
             | ExprType::JsonbAccess

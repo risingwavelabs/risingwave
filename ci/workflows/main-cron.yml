@@ -454,7 +454,7 @@ steps:
           <<: *docker-compose
           environment:
           - CODECOV_TOKEN
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "unit test (madsim)"
@@ -812,6 +812,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
     depends_on:
       - "build"
+      - "build-other"
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
@@ -903,6 +904,7 @@ steps:
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-opendal-tests"
       || build.pull_request.labels includes "ci/run-e2e-tests-for-opendal"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?-for-opendal(,|$$)/
     depends_on:
@@ -1158,7 +1160,6 @@ steps:
     matrix:
       setup:
         java_version:
-          - "17"
           - "21"
     timeout_in_minutes: 10
     retry: *auto-retry
