@@ -64,7 +64,7 @@ CREATE TABLE order_ledger_entries_composite (
     note_varchar varchar,
     total money_type,
     listed_price money_type,
-    listed_discount money_type,
+    listed_discount money_type NOT NULL,
     complex_col outer_type
 );
 
