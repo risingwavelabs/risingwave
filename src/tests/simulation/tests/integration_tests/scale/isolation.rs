@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use itertools::Itertools;
+use risingwave_common::monitor::EndpointExt;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::GetTableCacheRefillStatsRequest;
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
@@ -490,7 +491,10 @@ async fn table_cache_refill_policies_on_compute(
 
     cluster
         .run_on_client(async move {
-            let channel = Endpoint::from_shared(endpoint)?.connect().await?;
+            let channel = Endpoint::from_shared(endpoint)?
+                .connect_timeout(Duration::from_secs(5))
+                .monitored_connect("grpc-table-cache-refill-stats-client", Default::default())
+                .await?;
             let mut client = MonitorServiceClient::new(channel);
             let response = client
                 .get_table_cache_refill_stats(GetTableCacheRefillStatsRequest {})
@@ -527,9 +531,10 @@ async fn wait_refill_policy_on_compute(
 ) -> Result<()> {
     tokio::time::timeout(Duration::from_secs(100), async {
         loop {
-            let policies = table_cache_refill_policies_on_compute(cluster, worker_host).await?;
-            if refill_policy_matches(&policies, table_ids, expected_policy) {
-                return Ok(());
+            if let Ok(policies) = table_cache_refill_policies_on_compute(cluster, worker_host).await
+                && refill_policy_matches(&policies, table_ids, expected_policy)
+            {
+                return Ok::<(), anyhow::Error>(());
             }
             sleep(Duration::from_secs(1)).await;
         }

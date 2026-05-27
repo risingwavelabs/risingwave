@@ -527,8 +527,8 @@ impl From<&TableCacheRefillContext> for TableCacheRefillStats {
             })
             .collect();
 
-        let serving_table_vnode_mapping = context.serving_table_vnode_mapping.read();
-        let internal_serving = serving_table_vnode_mapping
+        let internal_serving = context
+            .serving_table_vnode_mapping
             .iter()
             .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
             .collect();
