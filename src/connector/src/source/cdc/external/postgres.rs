@@ -251,23 +251,27 @@ impl PostgresExternalTableReader {
         )
         .await?;
 
-        // Discover user-defined composite columns. tokio-postgres cannot decode
-        // composite values natively, so for these columns we cast to text in the
-        // snapshot SELECT to get the `(a,b,c)` textual representation. Other
-        // varchar columns stay as-is to preserve RW's own text rendering
-        // (e.g. numeric -> "NaN"/"POSITIVE_INFINITY").
+        // Discover user-defined composite columns and arrays of composites.
+        // tokio-postgres cannot decode composite values natively, so for these
+        // columns we cast to text in the snapshot SELECT. Scalar composites
+        // become `(a,b,c)`; arrays become `text[]` so tokio-postgres can
+        // decode them directly as `Vec<Option<String>>` matching the RW
+        // `List(Varchar)` column. Other varchar columns stay as-is to
+        // preserve RW's own text rendering (e.g. numeric -> "NaN").
         let composite_columns = client
             .query(
-                "SELECT a.attname \
+                "SELECT a.attname, (t.typcategory = 'A') AS is_array \
                  FROM pg_attribute a \
                  JOIN pg_class c ON a.attrelid = c.oid \
                  JOIN pg_namespace n ON c.relnamespace = n.oid \
                  JOIN pg_type t ON a.atttypid = t.oid \
+                 LEFT JOIN pg_type t_elem ON t.typelem = t_elem.oid \
                  WHERE n.nspname = $1 \
                    AND c.relname = $2 \
                    AND a.attnum > 0 \
                    AND NOT a.attisdropped \
-                   AND t.typtype = 'c'",
+                   AND (t.typtype = 'c' \
+                        OR (t.typcategory = 'A' AND t_elem.typtype = 'c'))",
                 &[
                     &schema_table_name.schema_name,
                     &schema_table_name.table_name,
@@ -276,8 +280,8 @@ impl PostgresExternalTableReader {
             .await
             .map(|rows| {
                 rows.into_iter()
-                    .map(|row| row.get::<_, String>(0))
-                    .collect::<std::collections::HashSet<_>>()
+                    .map(|row| (row.get::<_, String>(0), row.get::<_, bool>(1)))
+                    .collect::<std::collections::HashMap<_, _>>()
             })
             .unwrap_or_else(|err| {
                 tracing::warn!(
@@ -286,7 +290,7 @@ impl PostgresExternalTableReader {
                     table = %schema_table_name.table_name,
                     "failed to discover postgres composite columns; falling back to no text cast"
                 );
-                std::collections::HashSet::new()
+                std::collections::HashMap::new()
             });
 
         let field_names = rw_schema
@@ -294,10 +298,16 @@ impl PostgresExternalTableReader {
             .iter()
             .map(|f| {
                 let quoted = Self::quote_column(&f.name);
-                if matches!(f.data_type, DataType::Varchar) && composite_columns.contains(&f.name) {
-                    format!("{quoted}::text AS {quoted}")
-                } else {
-                    quoted
+                match composite_columns.get(&f.name) {
+                    Some(false) if matches!(f.data_type, DataType::Varchar) => {
+                        format!("{quoted}::text AS {quoted}")
+                    }
+                    Some(true) if matches!(f.data_type, DataType::List(_)) => {
+                        format!(
+                            "ARRAY(SELECT t::text FROM unnest({quoted}) t)::text[] AS {quoted}"
+                        )
+                    }
+                    _ => quoted,
                 }
             })
             .join(",");
