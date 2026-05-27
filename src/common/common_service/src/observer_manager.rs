@@ -303,7 +303,8 @@ mod tests {
     #[derive(Default)]
     struct TestObserverState {
         initialized: bool,
-        notifications: Vec<&'static str>,
+        table_refill_runtime_config_versions: Vec<u64>,
+        database_notifications: usize,
     }
 
     impl ObserverState for TestObserverState {
@@ -314,9 +315,9 @@ mod tests {
         fn handle_notification(&mut self, resp: SubscribeResponse) {
             match resp.info.unwrap() {
                 Info::TableRefillRuntimeConfig(_) => {
-                    self.notifications.push("table_refill_runtime_config")
+                    self.table_refill_runtime_config_versions.push(resp.version)
                 }
-                Info::Database(_) => self.notifications.push("database"),
+                Info::Database(_) => self.database_notifications += 1,
                 info => panic!("unexpected notification: {info:?}"),
             }
         }
@@ -382,8 +383,11 @@ mod tests {
 
         assert!(observer_manager.observer_states.initialized);
         assert_eq!(
-            observer_manager.observer_states.notifications,
-            vec!["table_refill_runtime_config"]
+            observer_manager
+                .observer_states
+                .table_refill_runtime_config_versions,
+            vec![11]
         );
+        assert_eq!(observer_manager.observer_states.database_notifications, 0);
     }
 }

@@ -704,6 +704,8 @@ message SubscribeResponse {
   reserved "serving_parallel_unit_mappings";
   reserved 30;
   reserved "compute_node_total_cpu_count";
+  reserved 32, 33;
+  reserved "table_cache_refill_policies", "serving_table_vnode_mappings";
 }
 
 message TableRefillRuntimeConfig {

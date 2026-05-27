@@ -93,7 +93,7 @@ impl Drop for HummockStorageShutdownGuard {
 #[derive(Clone)]
 pub struct HummockStorage {
     hummock_event_sender: HummockEventSender,
-    // only used in test for setting hummock version in uploader
+    // Only used in tests to inject observer events such as version updates.
     _observer_event_sender: UnboundedSender<HummockObserverEvent>,
 
     context: CompactorContext,
