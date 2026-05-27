@@ -455,14 +455,14 @@ async fn test_hive_catalog() {
     test_create_catalog(values).await;
 }
 
-/// Test parsing Google/BigLake authentication configuration.
+/// Test parsing Google Lakehouse Iceberg REST authentication configuration.
 #[test]
 fn test_parse_google_auth_config() {
     let values: BTreeMap<String, String> = [
             ("connector", "iceberg"),
             ("type", "append-only"),
             ("force_append_only", "true"),
-            ("catalog.name", "biglake-catalog"),
+            ("catalog.name", "lakehouse-catalog"),
             ("catalog.type", "rest"),
             ("catalog.uri", "https://biglake.googleapis.com/iceberg/v1/restcatalog"),
             ("warehouse.path", "bq://projects/my-gcp-project"),
