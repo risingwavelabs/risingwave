@@ -139,11 +139,20 @@ impl CompactTask {
                 .values()
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
+            // max_kv_count_for_xor16
+            + self
+                .blocked_xor_filter_kv_count_threshold
+                .map(|_| size_of::<u32>())
+                .unwrap_or_default()
+            // max_vnode_key_range_bytes
             + self
                 .max_vnode_key_range_bytes
                 .map(|_| size_of::<u32>())
                 .unwrap_or_default()
-            + size_of::<u32>()
+            // sstable_filter_kind
+            + size_of::<i32>()
+            // sstable_filter_layout
+            + size_of::<i32>()
             + self
                 .value_table_watermarks
                 .values()

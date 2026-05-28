@@ -658,7 +658,7 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::SstableFilterKind(c) => {
                 if target.sstable_filter_kind.is_empty() {
-                    target.sstable_filter_kind = default_compaction_config::sstable_filter_kind();
+                    target.sstable_filter_kind = default_compaction_config::sstable_filter_family();
                     target
                         .sstable_filter_kind
                         .resize(target.max_level as usize + 1, "xor16".to_owned());

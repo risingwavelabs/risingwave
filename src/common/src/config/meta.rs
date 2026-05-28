@@ -670,8 +670,9 @@ pub struct CompactionConfig {
     ///
     /// Index by LSM level: `0..=max_level`. Note: L0 (index 0) is currently ignored by shared-buffer
     /// flush, which always uses "xor16".
-    #[serde(default = "default::compaction_config::sstable_filter_kind")]
-    pub sstable_filter_kind: Vec<String>,
+    #[serde(default = "default::compaction_config::sstable_filter_family")]
+    #[serde(alias = "sstable_filter_kind")]
+    pub sstable_filter_type: Vec<String>,
     /// Per-level xor filter layout for compaction output.
     ///
     /// `auto` uses the kv-count heuristic; `plain`/`normal` forces non-blocked filters; `blocked`
@@ -1124,7 +1125,7 @@ pub mod default {
             DEFAULT_MAX_VNODE_KEY_RANGE_BYTES
         }
 
-        pub fn sstable_filter_kind() -> Vec<String> {
+        pub fn sstable_filter_family() -> Vec<String> {
             vec![
                 "xor16".to_owned(),
                 "xor16".to_owned(),

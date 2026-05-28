@@ -387,12 +387,12 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         options.max_vnode_key_range_bytes = None;
         let get_id_time = Arc::new(AtomicU64::new(0));
 
-        debug_assert_eq!(
+        assert_eq!(
             task.sstable_filter_kind,
             PbSstableFilterType::SstableFilterXor16,
             "fast compaction only supports blocked xor16 filter today"
         );
-        debug_assert!(
+        assert!(
             task.should_use_block_based_filter_for_output(estimated_output_key_count as u64),
             "fast compaction can only preserve blocked filters; expected blocked output"
         );

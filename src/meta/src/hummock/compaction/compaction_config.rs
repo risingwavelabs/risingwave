@@ -41,7 +41,7 @@ impl CompactionConfigBuilder {
                 compression_algorithm: compaction_config::compression_algorithm_vec(
                     compaction_config::max_level(),
                 ),
-                sstable_filter_kind: compaction_config::sstable_filter_kind(),
+                sstable_filter_kind: compaction_config::sstable_filter_family(),
                 sstable_filter_layout: compaction_config::sstable_filter_layout(),
                 compaction_filter_mask: compaction_config::compaction_filter_mask(),
                 max_sub_compaction: compaction_config::max_sub_compaction(),
@@ -131,7 +131,7 @@ impl CompactionConfigBuilder {
             .enable_optimize_l0_interval_selection(Some(opt.enable_optimize_l0_interval_selection))
             .max_kv_count_for_xor16(opt.blocked_xor_filter_kv_count_threshold)
             .max_vnode_key_range_bytes(opt.max_vnode_key_range_bytes)
-            .sstable_filter_kind(opt.sstable_filter_kind.clone())
+            .sstable_filter_kind(opt.sstable_filter_type.clone())
             .sstable_filter_layout(opt.sstable_filter_layout.clone())
     }
 
