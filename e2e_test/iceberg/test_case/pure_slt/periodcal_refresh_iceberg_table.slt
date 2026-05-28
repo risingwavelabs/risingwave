@@ -170,6 +170,43 @@ select id from iceberg_batch_table order by id;
 7
 8
 
+statement ok
+alter table t_refresh drop column foo;
+
+statement ok
+insert into t_refresh(id, name) values (9, 'ddd'), (10, 'eee');
+
+statement ok
+flush;
+
+sleep 20s
+
+query IT retry 3 backoff 1s
+select id, name from t_refresh order by id;
+----
+1 xxx
+2 yyy
+3 zzz
+5 zzz
+6 aaa
+7 bbb
+8 ccc
+9 ddd
+10 eee
+
+query IT retry 10 backoff 5s
+select id, name from iceberg_batch_table order by id;
+----
+1 xxx
+2 yyy
+3 zzz
+5 zzz
+6 aaa
+7 bbb
+8 ccc
+9 ddd
+10 eee
+
 
 # Cleanup
 
