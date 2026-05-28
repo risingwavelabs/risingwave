@@ -138,6 +138,15 @@
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2 and b1 = b2;
   expected_outputs:
     - stream_plan
+- name: arrangement backfill keeps logical stream key with table pk columns available.
+  sql: |
+    create table stream(id1 int, a1 int, b1 int);
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    create index idx1 on stream (a1, b1);
+    create index idx2 on version (a2, b2);
+    select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = a2;
+  expected_outputs:
+    - stream_plan
 - sql: |
     create table t(a int, b int, c int);
     SELECT * FROM (

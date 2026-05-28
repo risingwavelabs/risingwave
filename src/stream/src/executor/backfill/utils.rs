@@ -22,7 +22,7 @@ use futures::Stream;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
@@ -528,6 +528,110 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
         }
         Message::Chunk(chunk) => Some(Message::Chunk(mapping_chunk(chunk, upstream_indices))),
     }
+}
+
+fn same_key_columns(lhs: &[usize], rhs: &[usize]) -> bool {
+    lhs.len() == rhs.len() && lhs.iter().all(|idx| rhs.contains(idx))
+}
+
+/// Rewrites upstream updates when the input stream key is not the same column
+/// set as the current executor stream key.
+///
+/// If an upstream update keeps the input stream key unchanged but changes the
+/// current executor stream key, downstream state keyed by the current stream key
+/// must see it as a delete followed by an insert.
+pub(super) struct UpstreamStreamKeyUpdateNormalizer {
+    current_stream_key_indices: Option<Vec<usize>>,
+}
+
+impl UpstreamStreamKeyUpdateNormalizer {
+    /// Creates a normalizer for chunks with the given schema.
+    ///
+    /// `input_stream_key_indices` are the stream-key column indices of the input
+    /// executor in the incoming chunk schema.
+    ///
+    /// `current_stream_key_indices` are the stream-key column indices of the
+    /// current executor in the same incoming chunk schema.
+    ///
+    /// For example, if an upstream MV has input stream key `[k]` but the current
+    /// executor stream key is `[k, ts]`, then an update from
+    /// `(k = 1, ts = 10)` to `(k = 1, ts = 20)` is rewritten as
+    /// `Delete(k = 1, ts = 10)` plus `Insert(k = 1, ts = 20)`. If the two stream
+    /// keys are the same column set, or if an update does not change current
+    /// stream-key values, it is left unchanged.
+    pub(super) fn new(
+        input_stream_key_indices: &[usize],
+        current_stream_key_indices: Vec<usize>,
+    ) -> Self {
+        let current_stream_key_indices =
+            (!same_key_columns(input_stream_key_indices, &current_stream_key_indices))
+                .then_some(current_stream_key_indices);
+        Self {
+            current_stream_key_indices,
+        }
+    }
+
+    pub(super) fn normalize_chunk(&self, chunk: StreamChunk) -> Option<StreamChunk> {
+        if let Some(current_stream_key_indices) = &self.current_stream_key_indices {
+            normalize_update_chunk_by_key(chunk, current_stream_key_indices)
+        } else {
+            Some(chunk)
+        }
+    }
+
+    pub(super) fn normalize_message(&self, msg: Message) -> Option<Message> {
+        match msg {
+            Message::Chunk(chunk) => self.normalize_chunk(chunk).map(Message::Chunk),
+            msg => Some(msg),
+        }
+    }
+}
+
+fn normalize_update_chunk_by_key(chunk: StreamChunk, key_indices: &[usize]) -> Option<StreamChunk> {
+    let (data_chunk, ops) = chunk.into_parts();
+    let mut update_indices = vec![];
+    let mut row_idx = data_chunk.next_visible_row_idx(0);
+    while let Some(idx) = row_idx {
+        let row = data_chunk.row_at_unchecked_vis(idx);
+        match ops[idx] {
+            Op::UpdateDelete => {
+                let next_idx = data_chunk
+                    .next_visible_row_idx(idx + 1)
+                    .unwrap_or_else(|| panic!("expect a U+ after U-\nU- row: {}", row.display()));
+                let next_row = data_chunk.row_at_unchecked_vis(next_idx);
+                debug_assert_eq!(
+                    ops[next_idx],
+                    Op::UpdateInsert,
+                    "expect a U+ after U-\nU- row: {}\nrow after U-: {}",
+                    row.display(),
+                    next_row.display()
+                );
+                if row.project(key_indices) != next_row.project(key_indices) {
+                    update_indices.push((idx, next_idx));
+                }
+                row_idx = data_chunk.next_visible_row_idx(next_idx + 1);
+            }
+            Op::UpdateInsert => panic!("expect a U- before U+\nU+ row: {}", row.display()),
+            Op::Insert | Op::Delete => {
+                row_idx = data_chunk.next_visible_row_idx(idx + 1);
+            }
+        }
+    }
+
+    if update_indices.is_empty() {
+        return Some(StreamChunk::from_parts(ops, data_chunk));
+    }
+
+    let (columns, visibility) = data_chunk.into_parts();
+    let mut ops = ops.to_vec();
+    for (delete_idx, insert_idx) in update_indices {
+        ops[delete_idx] = Op::Delete;
+        ops[insert_idx] = Op::Insert;
+    }
+    Some(StreamChunk::from_parts(
+        ops,
+        DataChunk::new(columns, visibility),
+    ))
 }
 
 /// Recovers progress per vnode, so we know which to backfill.
