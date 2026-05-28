@@ -85,7 +85,9 @@ public class GlueCredentialProvider implements AwsCredentialsProvider, SdkAutoCl
         }
 
         if (useDefaultChain) {
-            return DefaultCredentialsProvider.create();
+            // `create()` returns a JVM-wide singleton. Glue catalogs are closed independently, so
+            // use an owned provider to avoid one catalog closing credentials still used by another.
+            return DefaultCredentialsProvider.builder().build();
         }
 
         Validate.notNull(accessKey, "Glue access key must not be null.", new Object[0]);
