@@ -48,9 +48,31 @@ Check the local source of truth before inventing conventions:
 - Prefer reusable helper commands in `e2e_test/commands/` for common external-system operations; put one-off scripts next to the SLT.
 - In madsim/`sslt` paths, avoid process-spawning `system ok`; if a mixed-mode SLT must keep a shell command, guard it with `skipif madsim` and preserve a non-madsim validation path.
 
-### `system` expected-output blocks
+### SLT blank-line syntax
 
-When a `system ok` command asserts stdout with `----`, format it exactly like the existing corpus:
+Think in **records**. A blank line ends the current command or expected-output block; the next non-empty line starts the next SLT directive.
+
+- Normal directive without expected output: use **one visible empty line** after the SQL or shell command.
+- Query or statement error with `----`: use **one visible empty line** after the final expected row/error line. This terminates the expected-output block.
+- `system ok` with stdout assertion (`----`): follow the existing RisingWave corpus and leave **two visible empty lines** after the final expected stdout line before the next directive. The first empty line terminates stdout; the second keeps the next directive clearly outside the shell stdout block and prevents the parser ambiguity that caused CI failures.
+- Inside a multi-line `system ok` shell command, a blank line terminates the command. Do not insert blank lines inside heredocs or shell snippets unless the shell input really needs them.
+
+Examples:
+
+```slt
+statement ok
+create table t(v int);
+
+query I
+select v from t order by v;
+----
+1
+
+system ok
+python3 e2e_test/commands/some_helper.py --flag
+```
+
+When a `system ok` command asserts stdout with `----`, use the two-empty-line form:
 
 ```slt
 system ok
@@ -63,7 +85,7 @@ system ok
 python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://public/default/topic' --partitions 0
 ```
 
-RisingWave CI has failed when a new SLT did not clearly terminate the first stdout block: sqllogictest treated the following directives as expected stdout for the shell command. Keep an empty separator before the next directive, and locally smoke-test the file if you add `----` after `system ok`.
+RisingWave CI has failed when a new SLT did not clearly terminate the first stdout block: sqllogictest treated the following directives as expected stdout for the shell command. Locally smoke-test the file if you add `----` after `system ok`.
 
 ## Query assertion rules
 
