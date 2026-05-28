@@ -5,18 +5,22 @@ curl "$PULSAR_HTTP_URL/admin/v2/brokers/ready"
 ----
 ok
 
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t 'persistent://public/default/include_header' --force
+
 system ok
 python3 e2e_test/commands/pulsar_util.py create-topic --topic 'persistent://public/default/include_header' --partitions 0
 
 system ok
-python3 e2e_test/commands/pulsar_util.py produce -t 'persistent://public/default/include_header' -P tenant=acme -P region=us <<EOF_INNER
+python3 e2e_test/commands/pulsar_util.py produce -t 'persistent://public/default/include_header' -P tenant=acme -P region=us <<EOF
 {"a":1}
-EOF_INNER
+EOF
 
 system ok
-python3 e2e_test/commands/pulsar_util.py produce -t 'persistent://public/default/include_header' <<EOF_INNER
+python3 e2e_test/commands/pulsar_util.py produce -t 'persistent://public/default/include_header' <<EOF
 {"a":2}
-EOF_INNER
+EOF
 
 statement ok
 create table pulsar_additional_columns (a int)
