@@ -39,7 +39,7 @@ pub async fn handle_refresh_schema(
     table_name: ObjectName,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let (original_table, has_incoming_sinks, _) =
+    let (original_table, has_incoming_sinks) =
         fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     if has_incoming_sinks {
