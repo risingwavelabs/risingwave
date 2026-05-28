@@ -44,7 +44,7 @@
         └─BatchExchange { order: [], dist: HashShard(t.a) }
           └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, b], stream_key: [x], pk_columns: [x, b], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, b], stream_key: [x], pk_columns: [x], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.a, t.b] }
       └─StreamGroupTopN { order: [t.a ASC, t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
         └─StreamExchange { dist: HashShard(t.a) }
@@ -62,13 +62,13 @@
     from t_probe
     left join mv_order on mv_order.k = t_probe.k;
   stream_plan: |-
-    StreamMaterialize { columns: [k, v, mv_order.k(hidden), mv_order.t_order.ts(hidden), mv_order.t_order.id(hidden)], stream_key: [k, mv_order.t_order.ts, mv_order.t_order.id], pk_columns: [k, mv_order.t_order.ts, mv_order.t_order.id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(t_probe.k, mv_order.t_order.ts, mv_order.t_order.id) }
-      └─StreamHashJoin { type: LeftOuter, predicate: t_probe.k = mv_order.k, output: [t_probe.k, mv_order.v, mv_order.k, mv_order.t_order.ts, mv_order.t_order.id] }
+    StreamMaterialize { columns: [k, v, mv_order.k(hidden)], stream_key: [k], pk_columns: [k], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t_probe.k) }
+      └─StreamHashJoin { type: LeftOuter, predicate: t_probe.k = mv_order.k, output: [t_probe.k, mv_order.v, mv_order.k] }
         ├─StreamExchange { dist: HashShard(t_probe.k) }
         │ └─StreamTableScan { table: t_probe, columns: [t_probe.k], stream_scan_type: SnapshotBackfill, stream_key: [t_probe.k], pk: [k], dist: UpstreamHashShard(t_probe.k) }
         └─StreamExchange { dist: HashShard(mv_order.k) }
-          └─StreamTableScan { table: mv_order, columns: [mv_order.k, mv_order.v, mv_order.t_order.ts, mv_order.t_order.id], stream_scan_type: SnapshotBackfill, stream_key: [mv_order.k, mv_order.t_order.ts, mv_order.t_order.id], pk: [k, t_order.ts, t_order.id], dist: UpstreamHashShard(mv_order.k) }
+          └─StreamTableScan { table: mv_order, columns: [mv_order.k, mv_order.v], stream_scan_type: SnapshotBackfill, stream_key: [mv_order.k], pk: [k], dist: UpstreamHashShard(mv_order.k) }
 - name: snapshot backfill keeps scan unchanged when stream key is already table pk
   sql: |
     set streaming_use_snapshot_backfill = true;
@@ -87,8 +87,24 @@
       order by k, ts desc, id desc;
     select k, v, ts, id from mv_order_full;
   stream_plan: |-
-    StreamMaterialize { columns: [k, v, ts, id], stream_key: [k, ts, id], pk_columns: [k, ts, id], pk_conflict: NoCheck }
-    └─StreamTableScan { table: mv_order_full, columns: [mv_order_full.k, mv_order_full.v, mv_order_full.ts, mv_order_full.id], stream_scan_type: SnapshotBackfill, stream_key: [mv_order_full.k, mv_order_full.ts, mv_order_full.id], pk: [k, ts, id], dist: UpstreamHashShard(mv_order_full.k) }
+    StreamMaterialize { columns: [k, v, ts, id], stream_key: [k], pk_columns: [k], pk_conflict: NoCheck }
+    └─StreamTableScan { table: mv_order_full, columns: [mv_order_full.k, mv_order_full.v, mv_order_full.ts, mv_order_full.id], stream_scan_type: SnapshotBackfill, stream_key: [mv_order_full.k], pk: [k], dist: UpstreamHashShard(mv_order_full.k) }
+- name: distinct on order by stops MV pk after stream key
+  sql: |
+    create table t (a int, b int, c int);
+    select distinct on (a) a, b, c from t order by a, b, c;
+  batch_plan: |-
+    BatchExchange { order: [t.a ASC, t.b ASC, t.c ASC], dist: Single }
+    └─BatchSort { order: [t.a ASC, t.b ASC, t.c ASC] }
+      └─BatchGroupTopN { order: [t.a ASC, t.b ASC, t.c ASC], limit: 1, offset: 0, group_key: [t.a] }
+        └─BatchExchange { order: [], dist: HashShard(t.a) }
+          └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [a, b, c], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.a, t.b, t.c] }
+      └─StreamGroupTopN { order: [t.a ASC, t.b ASC, t.c ASC], limit: 1, offset: 0, group_key: [t.a] }
+        └─StreamExchange { dist: HashShard(t.a) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int, b int, c int);
     select distinct on (foo, b) a as foo, b from t;
