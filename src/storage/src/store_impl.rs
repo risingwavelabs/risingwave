@@ -20,7 +20,7 @@ use std::time::Duration;
 use enum_as_inner::EnumAsInner;
 use foyer::{
     BlockEngineBuilder, CacheBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder,
-    HybridCacheBuilder,
+    HybridCacheBuilder, RecoverMode,
 };
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -85,6 +85,10 @@ fn verify_fresh_cache_dir(dir: &str, label: &str) -> Result<(), HummockError> {
     Ok(())
 }
 
+fn file_cache_recovers(enabled: bool, recover_mode: RecoverMode) -> bool {
+    enabled && recover_mode != RecoverMode::None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +112,14 @@ mod tests {
 
         let err = verify_fresh_cache_dir(dir.path().to_str().unwrap(), "cache").unwrap_err();
         assert!(err.to_string().contains("is not empty on a fresh cluster"));
+    }
+
+    #[test]
+    fn test_file_cache_recovers_only_when_enabled_and_recovery_is_on() {
+        assert!(!file_cache_recovers(false, RecoverMode::Quiet));
+        assert!(!file_cache_recovers(true, RecoverMode::None));
+        assert!(file_cache_recovers(true, RecoverMode::Quiet));
+        assert!(file_cache_recovers(true, RecoverMode::Strict));
     }
 }
 
@@ -760,6 +772,12 @@ impl StateStoreImpl {
         } else {
             false
         };
+        let meta_file_cache_enabled = file_cache_available && !opts.meta_file_cache_dir.is_empty();
+        let data_file_cache_enabled = file_cache_available && !opts.data_file_cache_dir.is_empty();
+        let meta_file_cache_recovers =
+            file_cache_recovers(meta_file_cache_enabled, opts.meta_file_cache_recover_mode);
+        let data_file_cache_recovers =
+            file_cache_recovers(data_file_cache_enabled, opts.data_file_cache_recover_mode);
 
         // Defense against reusing a previous cluster's file cache on a brand-new
         // cluster (dirty local disk on a fresh deploy, PV-reuse rebuild, etc.).
@@ -767,16 +785,16 @@ impl StateStoreImpl {
         // version is `FIRST_VERSION_ID`, meaning no SST has ever been committed.
         // Any pre-existing content under the file cache directories cannot
         // belong to this cluster and must be wiped before retrying.
-        if file_cache_available && s.starts_with("hummock+") {
+        if s.starts_with("hummock+") && (meta_file_cache_recovers || data_file_cache_recovers) {
             let current_version = hummock_meta_client
                 .get_current_version()
                 .await
                 .map_err(HummockError::other)?;
             if current_version.id == FIRST_VERSION_ID {
-                if !opts.meta_file_cache_dir.is_empty() {
+                if meta_file_cache_recovers {
                     verify_fresh_cache_dir(&opts.meta_file_cache_dir, "meta_file_cache_dir")?;
                 }
-                if !opts.data_file_cache_dir.is_empty() {
+                if data_file_cache_recovers {
                     verify_fresh_cache_dir(&opts.data_file_cache_dir, "data_file_cache_dir")?;
                 }
             }
@@ -794,7 +812,7 @@ impl StateStoreImpl {
                 })
                 .storage();
 
-            if file_cache_available && !opts.meta_file_cache_dir.is_empty() {
+            if meta_file_cache_enabled {
                 let device = FsDeviceBuilder::new(&opts.meta_file_cache_dir)
                     .with_capacity(opts.meta_file_cache_capacity_mb * MB)
                     .with_throttle(opts.meta_file_cache_throttle.clone())
@@ -840,7 +858,7 @@ impl StateStoreImpl {
                 })
                 .storage();
 
-            if file_cache_available && !opts.data_file_cache_dir.is_empty() {
+            if data_file_cache_enabled {
                 let device = FsDeviceBuilder::new(&opts.data_file_cache_dir)
                     .with_capacity(opts.data_file_cache_capacity_mb * MB)
                     .with_throttle(opts.data_file_cache_throttle.clone())
@@ -880,7 +898,7 @@ impl StateStoreImpl {
             .with_eviction_config(opts.vector_block_cache_eviction_config.clone())
             .build();
 
-        let recent_filter = if !file_cache_available || opts.data_file_cache_dir.is_empty() {
+        let recent_filter = if !data_file_cache_enabled {
             Arc::new(NoneRecentFilter::default().into())
         } else if opts.cache_refill_recent_filter_shards == 1 {
             Arc::new(
