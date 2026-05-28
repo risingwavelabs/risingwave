@@ -65,19 +65,50 @@ fn verify_fresh_cache_dir(dir: &str, label: &str) -> Result<(), HummockError> {
         return Ok(());
     }
     let path = std::path::Path::new(dir);
-    if !path.exists() {
+    if !path.try_exists().map_err(HummockError::other)? {
         return Ok(());
     }
     let mut entries = std::fs::read_dir(path).map_err(HummockError::other)?;
-    if entries.next().is_some() {
+    if entries
+        .next()
+        .transpose()
+        .map_err(HummockError::other)?
+        .is_some()
+    {
         return Err(HummockError::other(format!(
             "{label} `{dir}` is not empty on a fresh cluster (hummock version == {}); \
-             refusing to start to avoid serving stale data from a previous cluster — \
+             refusing to start to avoid serving stale data from a previous cluster; \
              please wipe the directory and retry",
             FIRST_VERSION_ID,
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_verify_fresh_cache_dir_allows_empty_or_missing_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing");
+        let empty = dir.path().join("empty");
+        std::fs::create_dir(&empty).unwrap();
+
+        assert!(verify_fresh_cache_dir("", "cache").is_ok());
+        assert!(verify_fresh_cache_dir(missing.to_str().unwrap(), "cache").is_ok());
+        assert!(verify_fresh_cache_dir(empty.to_str().unwrap(), "cache").is_ok());
+    }
+
+    #[test]
+    fn test_verify_fresh_cache_dir_rejects_non_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("stale-cache"), b"stale").unwrap();
+
+        let err = verify_fresh_cache_dir(dir.path().to_str().unwrap(), "cache").unwrap_err();
+        assert!(err.to_string().contains("is not empty on a fresh cluster"));
+    }
 }
 
 mod opaque_type {
@@ -717,20 +748,37 @@ impl StateStoreImpl {
         const KB: usize = 1 << 10;
         const MB: usize = 1 << 20;
 
+        let file_cache_configured =
+            !opts.meta_file_cache_dir.is_empty() || !opts.data_file_cache_dir.is_empty();
+        let file_cache_available = if file_cache_configured {
+            if let Err(e) = Feature::ElasticDiskCache.check_available() {
+                tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        };
+
         // Defense against reusing a previous cluster's file cache on a brand-new
         // cluster (dirty local disk on a fresh deploy, PV-reuse rebuild, etc.).
         // For hummock-backed state stores, a fresh cluster's current hummock
         // version is `FIRST_VERSION_ID`, meaning no SST has ever been committed.
         // Any pre-existing content under the file cache directories cannot
         // belong to this cluster and must be wiped before retrying.
-        if s.starts_with("hummock+") {
+        if file_cache_available && s.starts_with("hummock+") {
             let current_version = hummock_meta_client
                 .get_current_version()
                 .await
                 .map_err(HummockError::other)?;
             if current_version.id == FIRST_VERSION_ID {
-                verify_fresh_cache_dir(&opts.meta_file_cache_dir, "meta_file_cache_dir")?;
-                verify_fresh_cache_dir(&opts.data_file_cache_dir, "data_file_cache_dir")?;
+                if !opts.meta_file_cache_dir.is_empty() {
+                    verify_fresh_cache_dir(&opts.meta_file_cache_dir, "meta_file_cache_dir")?;
+                }
+                if !opts.data_file_cache_dir.is_empty() {
+                    verify_fresh_cache_dir(&opts.data_file_cache_dir, "data_file_cache_dir")?;
+                }
             }
         }
 
@@ -746,35 +794,31 @@ impl StateStoreImpl {
                 })
                 .storage();
 
-            if !opts.meta_file_cache_dir.is_empty() {
-                if let Err(e) = Feature::ElasticDiskCache.check_available() {
-                    tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
-                } else {
-                    let device = FsDeviceBuilder::new(&opts.meta_file_cache_dir)
-                        .with_capacity(opts.meta_file_cache_capacity_mb * MB)
-                        .with_throttle(opts.meta_file_cache_throttle.clone())
-                        .build()
-                        .map_err(HummockError::foyer_error)?;
-                    let engine_builder = BlockEngineBuilder::new(device)
-                        .with_block_size(opts.meta_file_cache_file_capacity_mb * MB)
-                        .with_indexer_shards(opts.meta_file_cache_indexer_shards)
-                        .with_flushers(opts.meta_file_cache_flushers)
-                        .with_reclaimers(opts.meta_file_cache_reclaimers)
-                        .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                        .with_clean_block_threshold(
-                            opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
-                        )
-                        .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
-                        .with_blob_index_size(opts.meta_file_cache_blob_index_size_kb * KB)
-                        .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                            opts.meta_file_cache_fifo_probation_ratio,
-                        ))]);
-                    builder = builder
-                        .with_engine_config(engine_builder)
-                        .with_recover_mode(opts.meta_file_cache_recover_mode)
-                        .with_compression(opts.meta_file_cache_compression)
-                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone());
-                }
+            if file_cache_available && !opts.meta_file_cache_dir.is_empty() {
+                let device = FsDeviceBuilder::new(&opts.meta_file_cache_dir)
+                    .with_capacity(opts.meta_file_cache_capacity_mb * MB)
+                    .with_throttle(opts.meta_file_cache_throttle.clone())
+                    .build()
+                    .map_err(HummockError::foyer_error)?;
+                let engine_builder = BlockEngineBuilder::new(device)
+                    .with_block_size(opts.meta_file_cache_file_capacity_mb * MB)
+                    .with_indexer_shards(opts.meta_file_cache_indexer_shards)
+                    .with_flushers(opts.meta_file_cache_flushers)
+                    .with_reclaimers(opts.meta_file_cache_reclaimers)
+                    .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                    .with_clean_block_threshold(
+                        opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
+                    )
+                    .with_recover_concurrency(opts.meta_file_cache_recover_concurrency)
+                    .with_blob_index_size(opts.meta_file_cache_blob_index_size_kb * KB)
+                    .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                        opts.meta_file_cache_fifo_probation_ratio,
+                    ))]);
+                builder = builder
+                    .with_engine_config(engine_builder)
+                    .with_recover_mode(opts.meta_file_cache_recover_mode)
+                    .with_compression(opts.meta_file_cache_compression)
+                    .with_runtime_options(opts.meta_file_cache_runtime_config.clone());
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
@@ -796,35 +840,31 @@ impl StateStoreImpl {
                 })
                 .storage();
 
-            if !opts.data_file_cache_dir.is_empty() {
-                if let Err(e) = Feature::ElasticDiskCache.check_available() {
-                    tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
-                } else {
-                    let device = FsDeviceBuilder::new(&opts.data_file_cache_dir)
-                        .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                        .with_throttle(opts.data_file_cache_throttle.clone())
-                        .build()
-                        .map_err(HummockError::foyer_error)?;
-                    let engine_builder = BlockEngineBuilder::new(device)
-                        .with_block_size(opts.data_file_cache_file_capacity_mb * MB)
-                        .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                        .with_flushers(opts.data_file_cache_flushers)
-                        .with_reclaimers(opts.data_file_cache_reclaimers)
-                        .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
-                        .with_clean_block_threshold(
-                            opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
-                        )
-                        .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                        .with_blob_index_size(opts.data_file_cache_blob_index_size_kb * KB)
-                        .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                            opts.data_file_cache_fifo_probation_ratio,
-                        ))]);
-                    builder = builder
-                        .with_engine_config(engine_builder)
-                        .with_recover_mode(opts.data_file_cache_recover_mode)
-                        .with_compression(opts.data_file_cache_compression)
-                        .with_runtime_options(opts.data_file_cache_runtime_config.clone());
-                }
+            if file_cache_available && !opts.data_file_cache_dir.is_empty() {
+                let device = FsDeviceBuilder::new(&opts.data_file_cache_dir)
+                    .with_capacity(opts.data_file_cache_capacity_mb * MB)
+                    .with_throttle(opts.data_file_cache_throttle.clone())
+                    .build()
+                    .map_err(HummockError::foyer_error)?;
+                let engine_builder = BlockEngineBuilder::new(device)
+                    .with_block_size(opts.data_file_cache_file_capacity_mb * MB)
+                    .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                    .with_flushers(opts.data_file_cache_flushers)
+                    .with_reclaimers(opts.data_file_cache_reclaimers)
+                    .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                    .with_clean_block_threshold(
+                        opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
+                    )
+                    .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
+                    .with_blob_index_size(opts.data_file_cache_blob_index_size_kb * KB)
+                    .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                        opts.data_file_cache_fifo_probation_ratio,
+                    ))]);
+                builder = builder
+                    .with_engine_config(engine_builder)
+                    .with_recover_mode(opts.data_file_cache_recover_mode)
+                    .with_compression(opts.data_file_cache_compression)
+                    .with_runtime_options(opts.data_file_cache_runtime_config.clone());
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
@@ -840,7 +880,7 @@ impl StateStoreImpl {
             .with_eviction_config(opts.vector_block_cache_eviction_config.clone())
             .build();
 
-        let recent_filter = if opts.data_file_cache_dir.is_empty() {
+        let recent_filter = if !file_cache_available || opts.data_file_cache_dir.is_empty() {
             Arc::new(NoneRecentFilter::default().into())
         } else if opts.cache_refill_recent_filter_shards == 1 {
             Arc::new(
