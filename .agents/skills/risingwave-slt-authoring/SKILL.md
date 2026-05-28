@@ -56,7 +56,7 @@ The termination rule differs by record type — verified against the `sqllogicte
 
 - **Normal directive without expected output** (`statement ok`, `system ok` without `----`, etc.): use **one visible empty line** after the SQL or shell command. The body parser (`parse_lines`) stops at the first empty line.
 - **`query <type>` results after `----`**: use **one visible empty line** after the final expected row. The results loop breaks on the first empty line.
-- **`statement error` or `query error` with multiline `----`**: use **two consecutive empty lines** after the final error line. These blocks use `parse_multiple_result`, which requires two consecutive empty lines (or one empty line at end of file) to terminate — the same rule as `system ok` stdout.
+- **`statement error` or `query error` with multiline `----`**: use **two consecutive empty lines** after the final error line. These blocks use `parse_multiple_result`, which requires two consecutive empty lines to terminate — the same rule as `system ok` stdout. Always add the two empty lines whenever another directive follows in the file.
 - **`system ok` with stdout assertion (`----`)**: use **two consecutive empty lines** after the final expected stdout line. `parse_multiple_result` consumes both empty lines before the next directive, preventing subsequent `system ok` / `statement ok` blocks from being misread as stdout content.
 - Inside a multi-line `system ok` shell command, a blank line terminates the command body. Do not insert blank lines inside heredocs or shell snippets unless the shell input really needs them.
 
@@ -102,7 +102,7 @@ statement ok
 drop table t;
 ```
 
-RisingWave CI has failed when a new SLT did not clearly terminate the first stdout block: sqllogictest treated the following directives as expected stdout for the shell command. The same two-empty-line rule applies to multiline `statement error` / `query error` blocks. Locally smoke-test the file if you add `----` after `system ok` or a bare `statement error`.
+RisingWave CI has failed when a new SLT did not clearly terminate the first stdout block: sqllogictest treated the following directives as expected stdout for the shell command. The same two-empty-line rule applies to multiline `statement error` / `query error` blocks (those that use `----` for the error text rather than an inline regex). Locally smoke-test the file if you add `----` after `system ok` or after `statement error` / `query error` without an inline error pattern.
 
 ## Query assertion rules
 
