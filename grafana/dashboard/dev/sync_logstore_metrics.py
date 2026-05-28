@@ -35,8 +35,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"(max({metric('log_store_latest_write_epoch')}) by (fragment_id, actor_id, relation)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (fragment_id, actor_id, relation)) / (2^16) / 1000",
+                            f"(max({metric('log_store_latest_write_epoch')} != 0) by (fragment_id, actor_id, relation)"
+                            + f"- max({metric('log_store_latest_read_epoch')} != 0) by (fragment_id, actor_id, relation)) / (2^16) / 1000",
                             "{{fragment_id}} {{relation}} @ actor {{actor_id}}",
                         ),
                     ],
@@ -57,8 +57,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"clamp_min((max({metric('log_store_first_write_epoch')}) by (fragment_id, actor_id, relation)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (fragment_id, actor_id, relation)) / (2^16) / 1000, 0)",
+                            f"clamp_min((max({metric('log_store_first_write_epoch')} != 0) by (fragment_id, actor_id, relation)"
+                            + f"- max({metric('log_store_latest_read_epoch')} != 0) by (fragment_id, actor_id, relation)) / (2^16) / 1000, 0)",
                             "{{fragment_id}} {{relation}} @ actor {{actor_id}}",
                         ),
                     ],
