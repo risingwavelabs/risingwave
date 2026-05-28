@@ -29,8 +29,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SyncResult};
+use risingwave_hummock_sdk::{FIRST_VERSION_ID, HummockEpoch, HummockSstableObjectId, SyncResult};
 use risingwave_object_store::object::build_remote_object_store;
+use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
 
 use crate::StateStore;
@@ -58,6 +59,26 @@ static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLo
         GLOBAL_METRICS_REGISTRY.clone(),
     ))
 });
+
+fn verify_fresh_cache_dir(dir: &str, label: &str) -> Result<(), HummockError> {
+    if dir.is_empty() {
+        return Ok(());
+    }
+    let path = std::path::Path::new(dir);
+    if !path.exists() {
+        return Ok(());
+    }
+    let mut entries = std::fs::read_dir(path).map_err(HummockError::other)?;
+    if entries.next().is_some() {
+        return Err(HummockError::other(format!(
+            "{label} `{dir}` is not empty on a fresh cluster (hummock version == {}); \
+             refusing to start to avoid serving stale data from a previous cluster — \
+             please wipe the directory and retry",
+            FIRST_VERSION_ID,
+        )));
+    }
+    Ok(())
+}
 
 mod opaque_type {
     use super::*;
@@ -695,6 +716,23 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         const KB: usize = 1 << 10;
         const MB: usize = 1 << 20;
+
+        // Defense against reusing a previous cluster's file cache on a brand-new
+        // cluster (dirty local disk on a fresh deploy, PV-reuse rebuild, etc.).
+        // For hummock-backed state stores, a fresh cluster's current hummock
+        // version is `FIRST_VERSION_ID`, meaning no SST has ever been committed.
+        // Any pre-existing content under the file cache directories cannot
+        // belong to this cluster and must be wiped before retrying.
+        if s.starts_with("hummock+") {
+            let current_version = hummock_meta_client
+                .get_current_version()
+                .await
+                .map_err(HummockError::other)?;
+            if current_version.id == FIRST_VERSION_ID {
+                verify_fresh_cache_dir(&opts.meta_file_cache_dir, "meta_file_cache_dir")?;
+                verify_fresh_cache_dir(&opts.data_file_cache_dir, "data_file_cache_dir")?;
+            }
+        }
 
         let meta_cache = {
             let mut builder = HybridCacheBuilder::new()
