@@ -108,6 +108,11 @@ pub struct SqlServerSink {
     is_append_only: bool,
 }
 
+struct SqlServerColumnMetadata {
+    is_pk: bool,
+    data_type: String,
+}
+
 impl EnforceSecret for SqlServerSink {
     fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
@@ -180,54 +185,14 @@ impl Sink for SqlServerSink {
             check_data_type_compatibility(&f.data_type)?;
         }
 
-        // Query table metadata from SQL Server.
-        let mut sql_server_table_metadata = HashMap::new();
         let mut sql_client = SqlServerClient::new(&self.config).await?;
-        let query_table_metadata_error = || {
-            SinkError::SqlServer(anyhow!(format!(
-                "SQL Server table {} metadata error",
-                self.config.full_object_path()
-            )))
-        };
-        static QUERY_TABLE_METADATA: &str = r#"
-SELECT
-    col.name AS ColumnName,
-    pk.index_id AS PkIndex
-FROM
-    sys.columns col
-LEFT JOIN
-    sys.index_columns ic ON ic.object_id = col.object_id AND ic.column_id = col.column_id
-LEFT JOIN
-    sys.indexes pk ON pk.object_id = col.object_id AND pk.index_id = ic.index_id AND pk.is_primary_key = 1
-WHERE
-    col.object_id = OBJECT_ID(@P1)
-ORDER BY
-    col.column_id;"#;
-        let rows = sql_client
-            .inner_client
-            .query(QUERY_TABLE_METADATA, &[&self.config.full_object_path()])
-            .await?
-            .into_results()
-            .await?;
-        for row in rows.into_iter().flatten() {
-            let mut iter = row.into_iter();
-            let ColumnData::String(Some(col_name)) =
-                iter.next().ok_or_else(query_table_metadata_error)?
-            else {
-                return Err(query_table_metadata_error());
-            };
-            let ColumnData::I32(col_pk_index) =
-                iter.next().ok_or_else(query_table_metadata_error)?
-            else {
-                return Err(query_table_metadata_error());
-            };
-            sql_server_table_metadata.insert(col_name.into_owned(), col_pk_index.is_some());
-        }
+        let sql_server_table_metadata =
+            query_sql_server_table_metadata(&mut sql_client, &self.config).await?;
 
-        // Validate Column name and Primary Key
+        // Validate Column name, Primary Key and data type.
         for (idx, col) in self.schema.fields().iter().enumerate() {
             let rw_is_pk = self.pk_indices.contains(&idx);
-            match sql_server_table_metadata.get(&col.name) {
+            match sql_server_table_metadata.get(&normalize_sql_server_column_name(&col.name)) {
                 None => {
                     return Err(SinkError::SqlServer(anyhow!(format!(
                         "column {} not found in the downstream SQL Server table {}",
@@ -235,18 +200,23 @@ ORDER BY
                         self.config.full_object_path()
                     ))));
                 }
-                Some(sql_server_is_pk) => {
+                Some(sql_server_col) => {
+                    validate_data_type_compatibility(
+                        &col.name,
+                        &col.data_type,
+                        &sql_server_col.data_type,
+                    )?;
                     if self.is_append_only {
                         continue;
                     }
-                    if rw_is_pk && !*sql_server_is_pk {
+                    if rw_is_pk && !sql_server_col.is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
                             "column {} specified in primary_key mismatches with the downstream SQL Server table {} PK",
                             col.name,
                             self.config.full_object_path(),
                         ))));
                     }
-                    if !rw_is_pk && *sql_server_is_pk {
+                    if !rw_is_pk && sql_server_col.is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
                             "column {} unspecified in primary_key mismatches with the downstream SQL Server table {} PK",
                             col.name,
@@ -260,7 +230,7 @@ ORDER BY
         if !self.is_append_only {
             let sql_server_pk_count = sql_server_table_metadata
                 .values()
-                .filter(|is_pk| **is_pk)
+                .filter(|metadata| metadata.is_pk)
                 .count();
             if sql_server_pk_count != self.pk_indices.len() {
                 return Err(SinkError::SqlServer(anyhow!(format!(
@@ -298,6 +268,7 @@ pub struct SqlServerSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+    downstream_column_data_types: Vec<String>,
     sql_client: SqlServerClient,
     ops: Vec<SqlOp>,
 }
@@ -309,12 +280,15 @@ impl SqlServerSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let sql_client = SqlServerClient::new(&config).await?;
+        let mut sql_client = SqlServerClient::new(&config).await?;
+        let downstream_column_data_types =
+            query_downstream_column_data_types(&mut sql_client, &config, &schema).await?;
         let writer = Self {
             config,
             schema,
             pk_indices,
             is_append_only,
+            downstream_column_data_types,
             sql_client,
             ops: vec![],
         };
@@ -382,12 +356,17 @@ impl SqlServerSinkWriter {
             .collect::<Vec<_>>()
             .join(" AND ");
         let param_placeholders = |param_id: &mut usize| {
-            let params = (*param_id..(*param_id + col_num))
-                .map(|i| format!("@P{}", i))
+            (0..col_num)
+                .map(|idx| {
+                    param_placeholder(
+                        param_id,
+                        idx,
+                        &self.schema,
+                        &self.downstream_column_data_types,
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join(",");
-            *param_id += col_num;
-            params
+                .join(",")
         };
         let set_all_source_col = non_pk_col_indices
             .iter()
@@ -438,9 +417,16 @@ impl SqlServerSinkWriter {
                         self.pk_indices
                             .iter()
                             .map(|idx| {
-                                let condition =
-                                    format!("[{}]=@P{}", self.schema[*idx].name, next_param_id);
-                                next_param_id += 1;
+                                let condition = format!(
+                                    "[{}]={}",
+                                    self.schema[*idx].name,
+                                    param_placeholder(
+                                        &mut next_param_id,
+                                        *idx,
+                                        &self.schema,
+                                        &self.downstream_column_data_types,
+                                    )
+                                );
                                 condition
                             })
                             .collect::<Vec<_>>()
@@ -455,16 +441,29 @@ impl SqlServerSinkWriter {
         for op in self.ops.drain(..) {
             match op {
                 SqlOp::Insert(row) => {
-                    bind_params(&mut query, row, &self.schema, 0..col_num)?;
+                    bind_params(
+                        &mut query,
+                        row,
+                        &self.schema,
+                        &self.downstream_column_data_types,
+                        0..col_num,
+                    )?;
                 }
                 SqlOp::Merge(row) => {
-                    bind_params(&mut query, row, &self.schema, 0..col_num)?;
+                    bind_params(
+                        &mut query,
+                        row,
+                        &self.schema,
+                        &self.downstream_column_data_types,
+                        0..col_num,
+                    )?;
                 }
                 SqlOp::Delete(row) => {
                     bind_params(
                         &mut query,
                         row,
                         &self.schema,
+                        &self.downstream_column_data_types,
                         self.pk_indices.iter().copied(),
                     )?;
                 }
@@ -566,10 +565,119 @@ impl SqlServerClient {
     }
 }
 
+async fn query_sql_server_table_metadata(
+    sql_client: &mut SqlServerClient,
+    config: &SqlServerConfig,
+) -> Result<HashMap<String, SqlServerColumnMetadata>> {
+    let mut sql_server_table_metadata = HashMap::new();
+    let query_table_metadata_error = || {
+        SinkError::SqlServer(anyhow!(format!(
+            "SQL Server table {} metadata error",
+            config.full_object_path()
+        )))
+    };
+    static QUERY_TABLE_METADATA: &str = r#"
+SELECT
+    col.name AS ColumnName,
+    CAST(CASE WHEN pk_col.column_id IS NULL THEN 0 ELSE 1 END AS int) AS IsPk,
+    typ.name AS DataType
+FROM
+    sys.columns col
+JOIN
+    sys.types typ ON typ.user_type_id = col.user_type_id
+LEFT JOIN
+    (
+        SELECT ic.object_id, ic.column_id
+        FROM sys.indexes pk
+        JOIN sys.index_columns ic ON ic.object_id = pk.object_id AND ic.index_id = pk.index_id
+        WHERE pk.is_primary_key = 1
+    ) pk_col ON pk_col.object_id = col.object_id AND pk_col.column_id = col.column_id
+WHERE
+    col.object_id = OBJECT_ID(@P1)
+ORDER BY
+    col.column_id;"#;
+    let rows = sql_client
+        .inner_client
+        .query(QUERY_TABLE_METADATA, &[&config.full_object_path()])
+        .await?
+        .into_results()
+        .await?;
+    for row in rows.into_iter().flatten() {
+        let mut iter = row.into_iter();
+        let ColumnData::String(Some(col_name)) =
+            iter.next().ok_or_else(query_table_metadata_error)?
+        else {
+            return Err(query_table_metadata_error());
+        };
+        let ColumnData::I32(Some(col_is_pk)) =
+            iter.next().ok_or_else(query_table_metadata_error)?
+        else {
+            return Err(query_table_metadata_error());
+        };
+        let ColumnData::String(Some(data_type)) =
+            iter.next().ok_or_else(query_table_metadata_error)?
+        else {
+            return Err(query_table_metadata_error());
+        };
+        sql_server_table_metadata.insert(
+            normalize_sql_server_column_name(&col_name),
+            SqlServerColumnMetadata {
+                is_pk: col_is_pk != 0,
+                data_type: normalize_sql_server_data_type(&data_type),
+            },
+        );
+    }
+    Ok(sql_server_table_metadata)
+}
+
+async fn query_downstream_column_data_types(
+    sql_client: &mut SqlServerClient,
+    config: &SqlServerConfig,
+    schema: &Schema,
+) -> Result<Vec<String>> {
+    let sql_server_table_metadata = query_sql_server_table_metadata(sql_client, config).await?;
+    schema
+        .fields()
+        .iter()
+        .map(|col| {
+            sql_server_table_metadata
+                .get(&normalize_sql_server_column_name(&col.name))
+                .map(|metadata| metadata.data_type.clone())
+                .ok_or_else(|| {
+                    SinkError::SqlServer(anyhow!(format!(
+                        "column {} not found in the downstream SQL Server table {}",
+                        col.name,
+                        config.full_object_path()
+                    )))
+                })
+        })
+        .collect()
+}
+
+fn param_placeholder(
+    param_id: &mut usize,
+    col_idx: usize,
+    schema: &Schema,
+    downstream_column_data_types: &[String],
+) -> String {
+    let placeholder = format!("@P{}", *param_id);
+    *param_id += 1;
+
+    if schema[col_idx].data_type != DataType::Timestamptz {
+        return placeholder;
+    }
+
+    match timestamptz_cast_type(&downstream_column_data_types[col_idx]) {
+        Some(cast_type) => format!("CAST({placeholder} AS {cast_type})"),
+        None => placeholder,
+    }
+}
+
 fn bind_params(
     query: &mut Query<'_>,
     row: impl Row,
     schema: &Schema,
+    downstream_column_data_types: &[String],
     col_indices: impl Iterator<Item = usize>,
 ) -> Result<()> {
     use risingwave_common::types::ScalarRefImpl;
@@ -596,7 +704,16 @@ fn bind_params(
                 },
                 ScalarRefImpl::Date(v) => query.bind(v.0),
                 ScalarRefImpl::Timestamp(v) => query.bind(v.0),
-                ScalarRefImpl::Timestamptz(v) => query.bind(v.timestamp_micros()),
+                ScalarRefImpl::Timestamptz(v) => {
+                    let downstream_data_type = &downstream_column_data_types[col_idx];
+                    if use_integer_micros_for_timestamptz(downstream_data_type) {
+                        query.bind(v.timestamp_micros());
+                    } else if use_datetimeoffset_for_timestamptz(downstream_data_type) {
+                        query.bind(v.to_datetime_utc().fixed_offset());
+                    } else {
+                        query.bind(v.to_datetime_utc().naive_utc());
+                    }
+                }
                 ScalarRefImpl::Time(v) => query.bind(v.0),
                 ScalarRefImpl::Bytea(v) => query.bind(v.to_vec()),
                 ScalarRefImpl::Interval(_) => return Err(data_type_not_supported("Interval")),
@@ -640,7 +757,14 @@ fn bind_params(
                     query.bind(None as Option<chrono::NaiveDateTime>);
                 }
                 DataType::Timestamptz => {
-                    query.bind(None as Option<i64>);
+                    let downstream_data_type = &downstream_column_data_types[col_idx];
+                    if use_integer_micros_for_timestamptz(downstream_data_type) {
+                        query.bind(None as Option<i64>);
+                    } else if use_datetimeoffset_for_timestamptz(downstream_data_type) {
+                        query.bind(None as Option<chrono::DateTime<chrono::FixedOffset>>);
+                    } else {
+                        query.bind(None as Option<chrono::NaiveDateTime>);
+                    }
                 }
                 DataType::Varchar => {
                     query.bind(None as Option<String>);
@@ -694,6 +818,100 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
     }
 }
 
+fn normalize_sql_server_column_name(column_name: &str) -> String {
+    column_name.to_lowercase()
+}
+
+fn normalize_sql_server_data_type(data_type: &str) -> String {
+    data_type.trim().to_ascii_lowercase()
+}
+
+fn timestamptz_cast_type(sql_server_data_type: &str) -> Option<&'static str> {
+    match normalize_sql_server_data_type(sql_server_data_type).as_str() {
+        "datetimeoffset" => Some("datetimeoffset"),
+        "datetime" => Some("datetime"),
+        "datetime2" => Some("datetime2"),
+        "smalldatetime" => Some("smalldatetime"),
+        "bigint" => Some("bigint"),
+        "int" => Some("int"),
+        "smallint" => Some("smallint"),
+        "tinyint" => Some("tinyint"),
+        _ => None,
+    }
+}
+
+fn use_datetimeoffset_for_timestamptz(sql_server_data_type: &str) -> bool {
+    normalize_sql_server_data_type(sql_server_data_type) == "datetimeoffset"
+}
+
+fn use_integer_micros_for_timestamptz(sql_server_data_type: &str) -> bool {
+    matches!(
+        normalize_sql_server_data_type(sql_server_data_type).as_str(),
+        "bigint" | "int" | "smallint" | "tinyint"
+    )
+}
+
+fn validate_data_type_compatibility(
+    column_name: &str,
+    rw_data_type: &DataType,
+    sql_server_data_type: &str,
+) -> Result<()> {
+    if sql_server_data_type_is_compatible(rw_data_type, sql_server_data_type) {
+        return Ok(());
+    }
+
+    Err(SinkError::SqlServer(anyhow!(format!(
+        "column {} data type {:?} is incompatible with downstream SQL Server type {}",
+        column_name, rw_data_type, sql_server_data_type
+    ))))
+}
+
+fn sql_server_data_type_is_compatible(rw_data_type: &DataType, sql_server_data_type: &str) -> bool {
+    let sql_server_data_type = normalize_sql_server_data_type(sql_server_data_type);
+    let sql_server_data_type = sql_server_data_type.as_str();
+    match rw_data_type {
+        DataType::Boolean => sql_server_data_type == "bit",
+        DataType::Int16 => matches!(sql_server_data_type, "smallint" | "int" | "bigint"),
+        DataType::Int32 => matches!(sql_server_data_type, "int" | "bigint"),
+        DataType::Int64 => sql_server_data_type == "bigint",
+        DataType::Float32 => matches!(sql_server_data_type, "real" | "float"),
+        DataType::Float64 => sql_server_data_type == "float",
+        DataType::Decimal => matches!(sql_server_data_type, "decimal" | "numeric"),
+        DataType::Date => sql_server_data_type == "date",
+        DataType::Varchar => matches!(
+            sql_server_data_type,
+            "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext"
+        ),
+        DataType::Time => sql_server_data_type == "time",
+        DataType::Timestamp => {
+            matches!(
+                sql_server_data_type,
+                "datetime" | "datetime2" | "smalldatetime"
+            )
+        }
+        DataType::Timestamptz => matches!(
+            sql_server_data_type,
+            "datetimeoffset"
+                | "datetime"
+                | "datetime2"
+                | "smalldatetime"
+                | "bigint"
+                | "int"
+                | "smallint"
+                | "tinyint"
+        ),
+        DataType::Bytea => matches!(sql_server_data_type, "binary" | "varbinary" | "image"),
+        DataType::Interval
+        | DataType::Struct(_)
+        | DataType::List(_)
+        | DataType::Jsonb
+        | DataType::Serial
+        | DataType::Int256
+        | DataType::Map(_)
+        | DataType::Vector(_) => false,
+    }
+}
+
 /// The implementation is copied from tiberius crate.
 fn decimal_to_sql(decimal: &rust_decimal::Decimal) -> Numeric {
     let unpacked = decimal.unpack();
@@ -707,4 +925,84 @@ fn decimal_to_sql(decimal: &rust_decimal::Decimal) -> Numeric {
     }
 
     Numeric::new_with_scale(value, decimal.scale() as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_sql_server_column_name() {
+        assert_eq!(normalize_sql_server_column_name("EventDate"), "eventdate");
+    }
+
+    #[test]
+    fn test_sql_server_data_type_compatibility() {
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Int16,
+            "smallint"
+        ));
+        assert!(sql_server_data_type_is_compatible(&DataType::Int16, "int"));
+        assert!(!sql_server_data_type_is_compatible(
+            &DataType::Int32,
+            "smallint"
+        ));
+
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamp,
+            "datetime2"
+        ));
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamptz,
+            "datetimeoffset"
+        ));
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamptz,
+            "datetime2"
+        ));
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamptz,
+            "bigint"
+        ));
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamptz,
+            "int"
+        ));
+        assert!(!sql_server_data_type_is_compatible(
+            &DataType::Timestamp,
+            "datetimeoffset"
+        ));
+
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Varchar,
+            "nvarchar"
+        ));
+        assert!(!sql_server_data_type_is_compatible(
+            &DataType::Varchar,
+            "uniqueidentifier"
+        ));
+    }
+
+    #[test]
+    fn test_timestamptz_cast_type() {
+        assert_eq!(
+            timestamptz_cast_type("datetimeoffset"),
+            Some("datetimeoffset")
+        );
+        assert_eq!(timestamptz_cast_type("DATETIME2"), Some("datetime2"));
+        assert_eq!(
+            timestamptz_cast_type(" smalldatetime "),
+            Some("smalldatetime")
+        );
+        assert_eq!(timestamptz_cast_type("bigint"), Some("bigint"));
+        assert_eq!(timestamptz_cast_type("INT"), Some("int"));
+        assert_eq!(timestamptz_cast_type("date"), None);
+    }
+
+    #[test]
+    fn test_use_integer_micros_for_timestamptz() {
+        assert!(use_integer_micros_for_timestamptz("bigint"));
+        assert!(use_integer_micros_for_timestamptz(" int "));
+        assert!(!use_integer_micros_for_timestamptz("datetime2"));
+    }
 }
