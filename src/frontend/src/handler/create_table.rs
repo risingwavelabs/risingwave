@@ -104,7 +104,7 @@ use risingwave_connector::sink::iceberg::{
     COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
     COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, COMPACTION_WRITE_PARQUET_COMPRESSION,
     COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_ROWS,
-    CompactionType, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
+    CompactionType, ENABLE_COMPACTION, ENABLE_PK_INDEX, ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION,
     ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
     IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
@@ -1857,10 +1857,10 @@ pub async fn create_iceberg_engine_table(
 
     let mut sink_with = with_common.clone();
 
-    // TODO: Iceberg with pk index doesn't support auto schema change
+    // Iceberg with pk index does not support auto schema change yet.
     if !handler_args
         .with_options
-        .get(ENABLE_COMPACTION)
+        .get(ENABLE_PK_INDEX)
         .is_some_and(|val| val.eq_ignore_ascii_case("true"))
     {
         sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
@@ -2114,6 +2114,29 @@ pub async fn create_iceberg_engine_table(
             WRITE_MODE.to_owned(),
             ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
         );
+    }
+
+    if let Some(enable_pk_index) = handler_args.with_options.get(ENABLE_PK_INDEX) {
+        match enable_pk_index.to_lowercase().as_str() {
+            "true" => {
+                sink_with.insert(ENABLE_PK_INDEX.to_owned(), "true".to_owned());
+            }
+            "false" => {
+                sink_with.insert(ENABLE_PK_INDEX.to_owned(), "false".to_owned());
+            }
+            _ => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "enable_pk_index must be true or false: {}",
+                    enable_pk_index
+                ))
+                .into());
+            }
+        }
+
+        // remove enable_pk_index from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(ENABLE_PK_INDEX));
     }
 
     if let Some(max_snapshots_num_before_compaction) =
