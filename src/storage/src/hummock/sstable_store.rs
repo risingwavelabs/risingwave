@@ -286,8 +286,7 @@ impl SstableStore {
             .memory(block_cache_capacity)
             .with_shards(1)
             .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
-                // FIXME(MrCroxx): Calculate block weight more accurately.
-                u64::BITS as usize * 2 / 8 + value.raw().len()
+                std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
             })
             .storage()
             .build()

@@ -115,9 +115,6 @@ fn filter_hash_prealloc_capacity_with_cap(
 /// Builder-side size accounting uses it before the filter is actually built, so it is
 /// approximate when later de-duplication removes repeated hashes.
 fn approximate_xor_filter_fingerprint_count(key_count: usize) -> usize {
-    if key_count == 0 {
-        return 0;
-    }
     let capacity = (1.23 * key_count as f64) as usize + 32;
     capacity / 3 * 3
 }
@@ -125,11 +122,7 @@ fn approximate_xor_filter_fingerprint_count(key_count: usize) -> usize {
 /// Estimates the serialized byte length of a plain Xor filter before it is built.
 fn approximate_plain_xor_filter_serialized_len(key_count: usize, fingerprint_size: usize) -> usize {
     let fingerprint_len = approximate_xor_filter_fingerprint_count(key_count);
-    if fingerprint_len == 0 {
-        0
-    } else {
-        PLAIN_XOR_FILTER_FIXED_LEN + fingerprint_len * fingerprint_size
-    }
+    PLAIN_XOR_FILTER_FIXED_LEN + fingerprint_len * fingerprint_size
 }
 
 #[cfg(test)]
@@ -908,7 +901,7 @@ mod tests {
 
     #[test]
     fn test_plain_filter_builder_approx_len_matches_output() {
-        for key_count in [1, 2, 100, 1000] {
+        for key_count in [0, 1, 2, 100, 1000] {
             assert_plain_filter_builder_approx_len_matches_output::<Xor8FilterBuilder>(key_count);
             assert_plain_filter_builder_approx_len_matches_output::<Xor16FilterBuilder>(key_count);
         }
@@ -952,6 +945,10 @@ mod tests {
     }
 
     fn assert_blocked_filter_builder_approx_len_matches_output<F: FilterBuilder>() {
+        let mut builder = F::create(filter_builder_options(0));
+        let approximate_len = builder.approximate_len();
+        assert_eq!(approximate_len, builder.finish(None).len());
+
         let mut builder = F::create(filter_builder_options(1024));
         for i in 0..50 {
             builder.add_key(&test_user_key_of(i).encode(), 0);
