@@ -510,8 +510,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     info!(?changed_worker, "worker changed");
 
                     match changed_worker {
-                        ActiveStreamingWorkerChange::Add(node) | ActiveStreamingWorkerChange::Update(node) => {
-                            self.partial_graph_manager.add_worker(node, &*self.context).await;
+                        ActiveStreamingWorkerChange::Add(node)
+                        | ActiveStreamingWorkerChange::Update(node) => {
+                            self.partial_graph_manager
+                                .add_worker(node, self.context.clone())
+                                .await;
                         }
                         ActiveStreamingWorkerChange::Remove(node) => {
                             self.partial_graph_manager.remove_worker(node);
