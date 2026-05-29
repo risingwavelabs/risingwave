@@ -17,6 +17,7 @@ mod tests {
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
+    use risingwave_pb::common::PbObjectType;
     use tokio::sync::oneshot;
 
     use crate::controller::catalog::*;
@@ -138,6 +139,62 @@ mod tests {
         assert_eq!(schema.name, "schema2");
         mgr.drop_object(ObjectType::Schema, schema_id, DropMode::Restrict)
             .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_preview_drop_schema_cascade_summary() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let mv_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        insert_test_table(
+            &txn,
+            mv_obj.oid.as_table_id(),
+            "mv_preview",
+            TableType::MaterializedView,
+            None,
+            "CREATE MATERIALIZED VIEW mv_preview AS SELECT 1",
+        )
+        .await?;
+
+        let _secret_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Secret,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let preview = mgr
+            .preview_drop_cascade(ObjectType::Schema, TEST_SCHEMA_ID)
+            .await?;
+
+        assert_eq!(preview.total_count, 3);
+        assert!(preview.object_counts.contains(&DropCascadeObjectCount {
+            object_type: PbObjectType::Schema,
+            count: 1,
+        }));
+        assert!(preview.object_counts.contains(&DropCascadeObjectCount {
+            object_type: PbObjectType::Mview,
+            count: 1,
+        }));
+        assert!(preview.object_counts.contains(&DropCascadeObjectCount {
+            object_type: PbObjectType::Secret,
+            count: 1,
+        }));
 
         Ok(())
     }

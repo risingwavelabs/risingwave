@@ -54,6 +54,7 @@ use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::common::PbObjectType;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -118,6 +119,18 @@ pub struct DropTableConnectorContext {
     pub(crate) to_change_streaming_job_id: JobId,
     pub(crate) to_remove_state_table_id: TableId,
     pub(crate) to_remove_source_id: SourceId,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DropCascadeObjectCount {
+    pub object_type: PbObjectType,
+    pub count: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DropObjectPreview {
+    pub total_count: u64,
+    pub object_counts: Vec<DropCascadeObjectCount>,
 }
 
 #[derive(Clone, Default, Debug)]

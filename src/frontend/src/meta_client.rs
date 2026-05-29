@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
 use risingwave_pb::backup_service::{BackupJobStatus, MetaSnapshotMetadata};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::ddl_service::{DdlProgress, PreviewDropCascadeResponse};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
@@ -103,6 +103,12 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn get_session_params(&self) -> Result<SessionConfig>;
 
     async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String>;
+
+    async fn preview_drop_cascade(
+        &self,
+        object_id: u32,
+        object_type: risingwave_pb::common::PbObjectType,
+    ) -> Result<PreviewDropCascadeResponse>;
 
     async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 
@@ -327,6 +333,14 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn set_session_param(&self, param: String, value: Option<String>) -> Result<String> {
         self.0.set_session_param(param, value).await
+    }
+
+    async fn preview_drop_cascade(
+        &self,
+        object_id: u32,
+        object_type: risingwave_pb::common::PbObjectType,
+    ) -> Result<PreviewDropCascadeResponse> {
+        self.0.preview_drop_cascade(object_id, object_type).await
     }
 
     async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {

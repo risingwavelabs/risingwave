@@ -250,6 +250,18 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
+    pub async fn preview_drop_cascade(
+        &self,
+        object_id: u32,
+        object_type: risingwave_pb::common::PbObjectType,
+    ) -> Result<risingwave_pb::ddl_service::PreviewDropCascadeResponse> {
+        let request = PreviewDropCascadeRequest {
+            object_id,
+            object_type: object_type as i32,
+        };
+        self.inner.preview_drop_cascade(request).await
+    }
+
     pub async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<WaitVersion> {
         let request = DropSecretRequest { secret_id, cascade };
         let resp = self.inner.drop_secret(request).await?;
@@ -2710,6 +2722,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
             ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
+            ,{ ddl_client, preview_drop_cascade, PreviewDropCascadeRequest, PreviewDropCascadeResponse }
             ,{ ddl_client, comment_on, CommentOnRequest, CommentOnResponse }
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
             ,{ ddl_client, wait, WaitRequest, WaitResponse }

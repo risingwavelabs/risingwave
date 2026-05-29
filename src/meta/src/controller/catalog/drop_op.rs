@@ -12,14 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use anyhow::anyhow;
 use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
+use risingwave_pb::common::PbObjectType;
 use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
 use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, ModelTrait, QueryFilter};
 
 use super::*;
 impl CatalogController {
+    pub async fn preview_drop_cascade(
+        &self,
+        object_type: ObjectType,
+        object_id: impl Into<ObjectId>,
+    ) -> MetaResult<DropObjectPreview> {
+        let object_id = object_id.into();
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+        let plan = self
+            .plan_drop_object(&txn, object_type, object_id, DropMode::Cascade)
+            .await?;
+
+        summarize_drop_preview(plan.removed_objects, &txn).await
+    }
+
     // Drop all kinds of objects including databases,
     // schemas, relations, connections, functions, etc.
     pub async fn drop_object(
@@ -31,178 +50,20 @@ impl CatalogController {
         let object_id = object_id.into();
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-
-        let obj: PartialObject = Object::find_by_id(object_id)
-            .into_partial_model()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
-        assert_eq!(obj.obj_type, object_type);
-        let drop_database = object_type == ObjectType::Database;
-        let database_id = if object_type == ObjectType::Database {
-            object_id.as_database_id()
-        } else {
-            obj.database_id
-                .ok_or_else(|| anyhow!("dropped object should have database_id"))?
-        };
-
-        // Check the cross-db dependency info to see if the subscription can be dropped.
-        if obj.obj_type == ObjectType::Subscription {
-            validate_subscription_deletion(&txn, object_id.as_subscription_id()).await?;
-        }
-
-        let mut removed_objects = match drop_mode {
-            DropMode::Cascade => get_referring_objects_cascade(object_id, &txn).await?,
-            DropMode::Restrict => match object_type {
-                ObjectType::Database => unreachable!("database always be dropped in cascade mode"),
-                ObjectType::Schema => {
-                    ensure_schema_empty(object_id.as_schema_id(), &txn).await?;
-                    Default::default()
-                }
-                ObjectType::Table => {
-                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
-                    let objects = get_referring_objects(object_id, &txn).await?;
-                    for obj in objects.iter().filter(|object| {
-                        object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
-                    }) {
-                        report_drop_object(obj.obj_type, obj.oid, &txn).await;
-                    }
-                    assert!(
-                        objects.iter().all(|obj| obj.obj_type == ObjectType::Index
-                            || obj.obj_type == ObjectType::Sink),
-                        "only index and iceberg sink could be dropped in restrict mode"
-                    );
-                    for obj in &objects {
-                        check_object_refer_for_drop(obj.obj_type, obj.oid, &txn).await?;
-                    }
-                    objects
-                }
-                object_type @ (ObjectType::Source | ObjectType::Sink) => {
-                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
-                    report_drop_object(object_type, object_id, &txn).await;
-                    vec![]
-                }
-
-                ObjectType::View
-                | ObjectType::Index
-                | ObjectType::Function
-                | ObjectType::Connection
-                | ObjectType::Subscription
-                | ObjectType::Secret => {
-                    check_object_refer_for_drop(object_type, object_id, &txn).await?;
-                    vec![]
-                }
-            },
-        };
-
-        // check iceberg source.
-        if obj.obj_type == ObjectType::Table {
-            let table_name = Table::find_by_id(object_id.as_table_id())
-                .select_only()
-                .column(table::Column::Name)
-                .into_tuple::<String>()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
-            let iceberg_source = Source::find()
-                .inner_join(Object)
-                .filter(
-                    object::Column::DatabaseId
-                        .eq(database_id)
-                        .and(object::Column::SchemaId.eq(obj.schema_id.unwrap()))
-                        .and(
-                            source::Column::Name
-                                .eq(format!("{}{}", ICEBERG_SOURCE_PREFIX, table_name)),
-                        ),
-                )
-                .into_partial_model()
-                .one(&txn)
-                .await?;
-            if let Some(iceberg_source) = iceberg_source {
-                removed_objects.push(iceberg_source);
-            }
-        }
-
-        removed_objects.push(obj);
-        let mut removed_object_ids: HashSet<_> =
-            removed_objects.iter().map(|obj| obj.oid).collect();
-
-        // TODO: record dependency info in object_dependency table for sink into table.
-        // Special handling for 'sink into table'.
-        let incoming_sink_ids: Vec<SinkId> = Sink::find()
-            .select_only()
-            .column(sink::Column::SinkId)
-            .filter(sink::Column::TargetTable.is_in(removed_object_ids.clone()))
-            .into_tuple()
-            .all(&txn)
+        let DropPlan {
+            database_id,
+            removed_objects,
+        } = self
+            .plan_drop_object(&txn, object_type, object_id, drop_mode)
             .await?;
-        if !incoming_sink_ids.is_empty() {
-            if self.env.opts.protect_drop_table_with_incoming_sink {
-                let sink_names: Vec<String> = Sink::find()
-                    .select_only()
-                    .column(sink::Column::Name)
-                    .filter(sink::Column::SinkId.is_in(incoming_sink_ids.clone()))
-                    .into_tuple()
-                    .all(&txn)
-                    .await?;
-
-                return Err(MetaError::permission_denied(format!(
-                    "Table used by incoming sinks: {:?}, please drop them manually",
-                    sink_names
-                )));
-            }
-
-            let removed_sink_objs: Vec<PartialObject> = Object::find()
-                .filter(object::Column::Oid.is_in(incoming_sink_ids))
-                .into_partial_model()
-                .all(&txn)
-                .await?;
-
-            removed_object_ids.extend(removed_sink_objs.iter().map(|obj| obj.oid));
-            removed_objects.extend(removed_sink_objs);
-        }
-
-        for obj in &removed_objects {
-            if obj.obj_type == ObjectType::Sink {
-                let sink = Sink::find_by_id(obj.oid.as_sink_id())
-                    .one(&txn)
-                    .await?
-                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
-
-                if let Some(target_table) = sink.target_table
-                    && !removed_object_ids.contains(&target_table.as_object_id())
-                    && !has_table_been_migrated(&txn, target_table).await?
-                {
-                    return Err(anyhow::anyhow!(
-                        "Dropping sink into table is not allowed for unmigrated table {}. Please migrate it first.",
-                        target_table
-                    ).into());
-                }
-            }
-        }
-
-        // 1. Detect when an Iceberg table is part of the dependencies.
-        // 2. Drop database with iceberg tables in it is not supported.
-        if object_type != ObjectType::Table || drop_database {
-            for obj in &removed_objects {
-                // if the obj is iceberg engine table, bail out
-                if obj.obj_type == ObjectType::Table {
-                    let table = Table::find_by_id(obj.oid.as_table_id())
-                        .one(&txn)
-                        .await?
-                        .ok_or_else(|| MetaError::catalog_id_not_found("table", obj.oid))?;
-                    if matches!(table.engine, Some(table::Engine::Iceberg)) {
-                        return Err(MetaError::permission_denied(format!(
-                            "Found iceberg table in dependency: {}, please drop it manually",
-                            table.name,
-                        )));
-                    }
-                }
-            }
-        }
+        let removed_objects: HashMap<_, _> = removed_objects
+            .into_iter()
+            .map(|obj| (obj.oid, obj))
+            .collect();
+        let removed_object_ids: HashSet<_> = removed_objects.keys().copied().collect();
 
         let removed_table_ids = removed_objects
-            .iter()
+            .values()
             .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
             .map(|obj| obj.oid.as_table_id());
 
@@ -222,104 +83,34 @@ impl CatalogController {
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
-            .filter(streaming_job::Column::JobId.is_in(removed_object_ids))
+            .filter(streaming_job::Column::JobId.is_in(removed_object_ids.clone()))
             .into_tuple()
             .all(&txn)
             .await?;
 
-        // Check if there are any streaming jobs that are creating.
-        if !removed_streaming_job_ids.is_empty() {
-            let creating = StreamingJob::find()
-                .filter(
-                    streaming_job::Column::JobStatus
-                        .ne(JobStatus::Created)
-                        .and(streaming_job::Column::JobId.is_in(removed_streaming_job_ids.clone())),
-                )
-                .count(&txn)
-                .await?;
-            if creating != 0 {
-                if creating == 1 && object_type == ObjectType::Sink {
-                    info!("dropping creating sink job, it will be cancelled");
-                } else {
-                    return Err(MetaError::permission_denied(format!(
-                        "can not drop {creating} creating streaming job, please cancel them firstly"
-                    )));
-                }
-            }
-        }
-
-        let mut removed_state_table_ids: HashSet<_> = removed_table_ids.clone().collect();
-
-        if !drop_database {
-            // Add associated sources.
-            let removed_source_ids: Vec<SourceId> = Table::find()
-                .select_only()
-                .column(table::Column::OptionalAssociatedSourceId)
-                .filter(
-                    table::Column::TableId
-                        .is_in(removed_table_ids)
-                        .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
-                )
-                .into_tuple()
-                .all(&txn)
-                .await?;
-            let removed_source_objs: Vec<PartialObject> = Object::find()
-                .filter(object::Column::Oid.is_in(removed_source_ids))
-                .into_partial_model()
-                .all(&txn)
-                .await?;
-            removed_objects.extend(removed_source_objs);
-        }
+        let mut removed_state_table_ids: HashSet<_> = removed_table_ids.collect();
 
         let removed_source_ids: HashSet<_> = removed_objects
-            .iter()
+            .values()
             .filter(|obj| obj.obj_type == ObjectType::Source)
             .map(|obj| obj.oid.as_source_id())
             .collect();
 
         let removed_secret_ids = removed_objects
-            .iter()
+            .values()
             .filter(|obj| obj.obj_type == ObjectType::Secret)
             .map(|obj| obj.oid.as_secret_id())
             .collect();
 
         if !removed_streaming_job_ids.is_empty() {
-            let removed_internal_table_objs: Vec<PartialObject> = Object::find()
+            let internal_state_table_ids: Vec<TableId> = Table::find()
                 .select_only()
-                .columns([
-                    object::Column::Oid,
-                    object::Column::ObjType,
-                    object::Column::SchemaId,
-                    object::Column::DatabaseId,
-                ])
-                .join(JoinType::InnerJoin, object::Relation::Table.def())
+                .column(table::Column::TableId)
                 .filter(table::Column::BelongsToJobId.is_in(removed_streaming_job_ids.clone()))
-                .into_partial_model()
+                .into_tuple()
                 .all(&txn)
                 .await?;
-
-            removed_state_table_ids.extend(
-                removed_internal_table_objs
-                    .iter()
-                    .map(|obj| obj.oid.as_table_id()),
-            );
-            removed_objects.extend(removed_internal_table_objs);
-        }
-
-        let removed_objects: HashMap<_, _> = removed_objects
-            .into_iter()
-            .map(|obj| (obj.oid, obj))
-            .collect();
-
-        // TODO: Support drop cascade for cross-database query.
-        for obj in removed_objects.values() {
-            if let Some(obj_database_id) = obj.database_id
-                && obj_database_id != database_id
-            {
-                return Err(MetaError::permission_denied(format!(
-                    "Referenced by other objects in database {obj_database_id}, please drop them manually"
-                )));
-            }
+            removed_state_table_ids.extend(internal_state_table_ids);
         }
 
         let (removed_source_fragments, removed_sink_fragments, removed_fragments) =
@@ -466,6 +257,332 @@ impl CatalogController {
         txn.commit().await?;
         Ok(())
     }
+}
+
+struct DropPlan {
+    database_id: DatabaseId,
+    removed_objects: Vec<PartialObject>,
+}
+
+impl CatalogController {
+    async fn plan_drop_object(
+        &self,
+        txn: &DatabaseTransaction,
+        object_type: ObjectType,
+        object_id: ObjectId,
+        drop_mode: DropMode,
+    ) -> MetaResult<DropPlan> {
+        let obj: PartialObject = Object::find_by_id(object_id)
+            .into_partial_model()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(object_type.as_str(), object_id))?;
+        assert_eq!(obj.obj_type, object_type);
+        let drop_database = object_type == ObjectType::Database;
+        let database_id = if drop_database {
+            object_id.as_database_id()
+        } else {
+            obj.database_id
+                .ok_or_else(|| anyhow!("dropped object should have database_id"))?
+        };
+
+        if obj.obj_type == ObjectType::Subscription {
+            validate_subscription_deletion(txn, object_id.as_subscription_id()).await?;
+        }
+
+        let mut removed_objects = match drop_mode {
+            DropMode::Cascade => get_referring_objects_cascade(object_id, txn).await?,
+            DropMode::Restrict => match object_type {
+                ObjectType::Database => unreachable!("database always be dropped in cascade mode"),
+                ObjectType::Schema => {
+                    ensure_schema_empty(object_id.as_schema_id(), txn).await?;
+                    Default::default()
+                }
+                ObjectType::Table => {
+                    check_object_refer_for_drop(object_type, object_id, txn).await?;
+                    let objects = get_referring_objects(object_id, txn).await?;
+                    for obj in objects.iter().filter(|object| {
+                        object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
+                    }) {
+                        report_drop_object(obj.obj_type, obj.oid, txn).await;
+                    }
+                    assert!(
+                        objects.iter().all(|obj| obj.obj_type == ObjectType::Index
+                            || obj.obj_type == ObjectType::Sink),
+                        "only index and iceberg sink could be dropped in restrict mode"
+                    );
+                    for obj in &objects {
+                        check_object_refer_for_drop(obj.obj_type, obj.oid, txn).await?;
+                    }
+                    objects
+                }
+                object_type @ (ObjectType::Source | ObjectType::Sink) => {
+                    check_object_refer_for_drop(object_type, object_id, txn).await?;
+                    report_drop_object(object_type, object_id, txn).await;
+                    vec![]
+                }
+                ObjectType::View
+                | ObjectType::Index
+                | ObjectType::Function
+                | ObjectType::Connection
+                | ObjectType::Subscription
+                | ObjectType::Secret => {
+                    check_object_refer_for_drop(object_type, object_id, txn).await?;
+                    vec![]
+                }
+            },
+        };
+
+        if obj.obj_type == ObjectType::Table {
+            let table_name = Table::find_by_id(object_id.as_table_id())
+                .select_only()
+                .column(table::Column::Name)
+                .into_tuple::<String>()
+                .one(txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+            let iceberg_source = Source::find()
+                .inner_join(Object)
+                .filter(
+                    object::Column::DatabaseId
+                        .eq(database_id)
+                        .and(object::Column::SchemaId.eq(obj.schema_id.unwrap()))
+                        .and(
+                            source::Column::Name
+                                .eq(format!("{}{}", ICEBERG_SOURCE_PREFIX, table_name)),
+                        ),
+                )
+                .into_partial_model()
+                .one(txn)
+                .await?;
+            if let Some(iceberg_source) = iceberg_source {
+                removed_objects.push(iceberg_source);
+            }
+        }
+
+        removed_objects.push(obj);
+        let mut removed_object_ids: HashSet<_> =
+            removed_objects.iter().map(|obj| obj.oid).collect();
+
+        let incoming_sink_ids: Vec<SinkId> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::TargetTable.is_in(removed_object_ids.clone()))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        if !incoming_sink_ids.is_empty() {
+            if self.env.opts.protect_drop_table_with_incoming_sink {
+                let sink_names: Vec<String> = Sink::find()
+                    .select_only()
+                    .column(sink::Column::Name)
+                    .filter(sink::Column::SinkId.is_in(incoming_sink_ids.clone()))
+                    .into_tuple()
+                    .all(txn)
+                    .await?;
+
+                return Err(MetaError::permission_denied(format!(
+                    "Table used by incoming sinks: {:?}, please drop them manually",
+                    sink_names
+                )));
+            }
+
+            let removed_sink_objs: Vec<PartialObject> = Object::find()
+                .filter(object::Column::Oid.is_in(incoming_sink_ids))
+                .into_partial_model()
+                .all(txn)
+                .await?;
+            removed_object_ids.extend(removed_sink_objs.iter().map(|obj| obj.oid));
+            removed_objects.extend(removed_sink_objs);
+        }
+
+        for obj in &removed_objects {
+            if obj.obj_type == ObjectType::Sink {
+                let sink = Sink::find_by_id(obj.oid.as_sink_id())
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", obj.oid))?;
+
+                if let Some(target_table) = sink.target_table
+                    && !removed_object_ids.contains(&target_table.as_object_id())
+                    && !has_table_been_migrated(txn, target_table).await?
+                {
+                    return Err(anyhow!(
+                        "Dropping sink into table is not allowed for unmigrated table {}. Please migrate it first.",
+                        target_table
+                    )
+                    .into());
+                }
+            }
+        }
+
+        if object_type != ObjectType::Table || drop_database {
+            for obj in &removed_objects {
+                if obj.obj_type == ObjectType::Table {
+                    let table = Table::find_by_id(obj.oid.as_table_id())
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("table", obj.oid))?;
+                    if matches!(table.engine, Some(table::Engine::Iceberg)) {
+                        return Err(MetaError::permission_denied(format!(
+                            "Found iceberg table in dependency: {}, please drop it manually",
+                            table.name,
+                        )));
+                    }
+                }
+            }
+        }
+
+        let removed_table_ids = removed_objects
+            .iter()
+            .filter(|obj| obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Index)
+            .map(|obj| obj.oid.as_table_id());
+
+        let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(streaming_job::Column::JobId.is_in(removed_object_ids))
+            .into_tuple()
+            .all(txn)
+            .await?;
+
+        if !removed_streaming_job_ids.is_empty() {
+            let creating = StreamingJob::find()
+                .filter(
+                    streaming_job::Column::JobStatus
+                        .ne(JobStatus::Created)
+                        .and(streaming_job::Column::JobId.is_in(removed_streaming_job_ids.clone())),
+                )
+                .count(txn)
+                .await?;
+            if creating != 0 {
+                if creating == 1 && object_type == ObjectType::Sink {
+                    info!("dropping creating sink job, it will be cancelled");
+                } else {
+                    return Err(MetaError::permission_denied(format!(
+                        "can not drop {creating} creating streaming job, please cancel them firstly"
+                    )));
+                }
+            }
+        }
+
+        if !drop_database {
+            let removed_source_ids: Vec<SourceId> = Table::find()
+                .select_only()
+                .column(table::Column::OptionalAssociatedSourceId)
+                .filter(
+                    table::Column::TableId
+                        .is_in(removed_table_ids)
+                        .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
+                )
+                .into_tuple()
+                .all(txn)
+                .await?;
+            let removed_source_objs: Vec<PartialObject> = Object::find()
+                .filter(object::Column::Oid.is_in(removed_source_ids))
+                .into_partial_model()
+                .all(txn)
+                .await?;
+            removed_objects.extend(removed_source_objs);
+        }
+
+        if !removed_streaming_job_ids.is_empty() {
+            let removed_internal_table_objs: Vec<PartialObject> = Object::find()
+                .select_only()
+                .columns([
+                    object::Column::Oid,
+                    object::Column::ObjType,
+                    object::Column::SchemaId,
+                    object::Column::DatabaseId,
+                ])
+                .join(JoinType::InnerJoin, object::Relation::Table.def())
+                .filter(table::Column::BelongsToJobId.is_in(removed_streaming_job_ids))
+                .into_partial_model()
+                .all(txn)
+                .await?;
+            removed_objects.extend(removed_internal_table_objs);
+        }
+
+        let removed_objects: HashMap<_, _> = removed_objects
+            .into_iter()
+            .map(|obj| (obj.oid, obj))
+            .collect();
+
+        for obj in removed_objects.values() {
+            if let Some(obj_database_id) = obj.database_id
+                && obj_database_id != database_id
+            {
+                return Err(MetaError::permission_denied(format!(
+                    "Referenced by other objects in database {obj_database_id}, please drop them manually"
+                )));
+            }
+        }
+
+        Ok(DropPlan {
+            database_id,
+            removed_objects: removed_objects.into_values().collect(),
+        })
+    }
+}
+
+async fn summarize_drop_preview(
+    removed_objects: Vec<PartialObject>,
+    txn: &DatabaseTransaction,
+) -> MetaResult<DropObjectPreview> {
+    let total_count = removed_objects.len() as u64;
+    let mut object_counts: BTreeMap<i32, u64> = BTreeMap::new();
+    let mut table_ids = Vec::new();
+
+    for obj in &removed_objects {
+        if obj.obj_type == ObjectType::Table {
+            table_ids.push(obj.oid.as_table_id());
+        } else {
+            let pb_type = match obj.obj_type {
+                ObjectType::Database => PbObjectType::Database,
+                ObjectType::Schema => PbObjectType::Schema,
+                ObjectType::Source => PbObjectType::Source,
+                ObjectType::Sink => PbObjectType::Sink,
+                ObjectType::View => PbObjectType::View,
+                ObjectType::Index => PbObjectType::Index,
+                ObjectType::Function => PbObjectType::Function,
+                ObjectType::Connection => PbObjectType::Connection,
+                ObjectType::Subscription => PbObjectType::Subscription,
+                ObjectType::Secret => PbObjectType::Secret,
+                ObjectType::Table => unreachable!(),
+            };
+            *object_counts.entry(pb_type as i32).or_default() += 1;
+        }
+    }
+
+    if !table_ids.is_empty() {
+        let table_types: Vec<(TableId, TableType)> = Table::find()
+            .select_only()
+            .columns([table::Column::TableId, table::Column::TableType])
+            .filter(table::Column::TableId.is_in(table_ids))
+            .into_tuple()
+            .all(txn)
+            .await?;
+        for (_, table_type) in table_types {
+            let pb_type = if table_type == TableType::MaterializedView {
+                PbObjectType::Mview
+            } else {
+                PbObjectType::Table
+            };
+            *object_counts.entry(pb_type as i32).or_default() += 1;
+        }
+    }
+
+    Ok(DropObjectPreview {
+        total_count,
+        object_counts: object_counts
+            .into_iter()
+            .map(|(object_type, count)| DropCascadeObjectCount {
+                object_type: PbObjectType::try_from(object_type)
+                    .expect("preview object type should be valid"),
+                count,
+            })
+            .collect(),
+    })
 }
 
 async fn report_drop_object(

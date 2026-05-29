@@ -1025,6 +1025,30 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn preview_drop_cascade(
+        &self,
+        request: Request<PreviewDropCascadeRequest>,
+    ) -> Result<Response<PreviewDropCascadeResponse>, Status> {
+        let req = request.into_inner();
+        let object_type = risingwave_meta_model::object::ObjectType::from(req.object_type());
+        let preview = self
+            .ddl_controller
+            .preview_drop_cascade(object_type, req.object_id)
+            .await?;
+
+        Ok(Response::new(PreviewDropCascadeResponse {
+            total_count: preview.total_count,
+            object_counts: preview
+                .object_counts
+                .into_iter()
+                .map(|count| ddl_service::DropCascadeObjectCount {
+                    object_type: count.object_type as i32,
+                    count: count.count,
+                })
+                .collect(),
+        }))
+    }
+
     async fn comment_on(
         &self,
         request: Request<CommentOnRequest>,

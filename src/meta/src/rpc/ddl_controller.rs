@@ -71,7 +71,7 @@ use tokio::time::sleep;
 use tracing::Instrument;
 
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
+use crate::controller::catalog::{DropObjectPreview, DropTableConnectorContext, ReleaseContext};
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter};
@@ -1430,6 +1430,17 @@ impl DdlController {
             LocalSecretManager::global().remove_secret(secret);
         }
         Ok(version)
+    }
+
+    pub async fn preview_drop_cascade(
+        &self,
+        object_type: ObjectType,
+        object_id: impl Into<ObjectId>,
+    ) -> MetaResult<DropObjectPreview> {
+        self.metadata_manager
+            .catalog_controller
+            .preview_drop_cascade(object_type, object_id)
+            .await
     }
 
     /// This is used for `ALTER TABLE ADD/DROP COLUMN` / `ALTER SOURCE ADD COLUMN`.

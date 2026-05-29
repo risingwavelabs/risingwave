@@ -1218,6 +1218,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok("".to_owned())
     }
 
+    async fn preview_drop_cascade(
+        &self,
+        _object_id: u32,
+        _object_type: PbObjectType,
+    ) -> RpcResult<risingwave_pb::ddl_service::PreviewDropCascadeResponse> {
+        Ok(Default::default())
+    }
+
     async fn get_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
     }

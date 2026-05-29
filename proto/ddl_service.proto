@@ -612,6 +612,21 @@ message DropConnectionResponse {
   WaitVersion version = 2;
 }
 
+message DropCascadeObjectCount {
+  common.ObjectType object_type = 1;
+  uint64 count = 2;
+}
+
+message PreviewDropCascadeRequest {
+  uint32 object_id = 1;
+  common.ObjectType object_type = 2;
+}
+
+message PreviewDropCascadeResponse {
+  uint64 total_count = 1;
+  repeated DropCascadeObjectCount object_counts = 2;
+}
+
 message GetTablesRequest {
   repeated uint32 table_ids = 1;
   bool include_dropped_tables = 2;
@@ -744,6 +759,7 @@ service DdlService {
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
+  rpc PreviewDropCascade(PreviewDropCascadeRequest) returns (PreviewDropCascadeResponse);
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
   rpc Wait(WaitRequest) returns (WaitResponse);
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
