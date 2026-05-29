@@ -129,7 +129,9 @@ public class S3FileIOAssumeRoleAwsClientFactory implements S3FileIOAwsClientFact
     private static AwsCredentialsProvider createBaseCredentialsProvider(
             String accessKeyId, String secretAccessKey, String sessionToken) {
         if (StringUtils.isBlank(accessKeyId) || StringUtils.isBlank(secretAccessKey)) {
-            return DefaultCredentialsProvider.create();
+            // `create()` returns a JVM-wide singleton. FileIO factories are scoped to catalogs, so
+            // use an owned provider that can follow the factory/client lifecycle independently.
+            return DefaultCredentialsProvider.builder().build();
         }
 
         AwsCredentials credentials =

@@ -44,7 +44,9 @@ use crate::executor::backfill::snapshot_backfill::state::{
     BackfillState, EpochBackfillProgress, VnodeBackfillProgress,
 };
 use crate::executor::backfill::snapshot_backfill::vnode_stream::VnodeStream;
-use crate::executor::backfill::utils::{create_builder, mapping_message};
+use crate::executor::backfill::utils::{
+    UpstreamStreamKeyUpdateNormalizer, create_builder, mapping_message,
+};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{StateTable, StreamExt, try_stream};
 use crate::executor::{
@@ -66,6 +68,9 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
+
+    /// Current executor stream-key indices in the output schema.
+    stream_key: Vec<usize>,
 
     progress: CreateMviewProgressReporter,
 
@@ -103,6 +108,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         upstream: Option<MergeExecutorInput>,
         pb_pk_scan_range: Option<&ScanRange>,
         output_indices: Vec<usize>,
+        stream_key: Vec<usize>,
         actor_ctx: ActorContextRef,
         progress: CreateMviewProgressReporter,
         chunk_size: usize,
@@ -122,6 +128,12 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 upstream_table.schema()
             )
         };
+        assert!(
+            stream_key.iter().all(|idx| *idx < output_indices.len()),
+            "stream key indices should refer to output schema: stream_key: {:?}, output_indices: {:?}",
+            stream_key,
+            output_indices
+        );
         let pk_scan_range = Self::build_pk_scan_range(pb_pk_scan_range, &upstream_table)?;
         if !matches!(rate_limit, RateLimit::Disabled) {
             trace!(
@@ -134,6 +146,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             progress_state_table,
             upstream,
             output_indices,
+            stream_key,
             progress,
             chunk_size,
             rate_limit,
@@ -477,10 +490,22 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                 (first_upstream_barrier.epoch, true, upstream)
             }
         };
+        let current_stream_key_indices = self
+            .stream_key
+            .iter()
+            .map(|idx| self.output_indices[*idx])
+            .collect();
+        let update_normalizer = UpstreamStreamKeyUpdateNormalizer::new(
+            &upstream.info.stream_key,
+            current_stream_key_indices,
+        );
         let mut upstream = upstream.into_executor(self.barrier_rx).execute();
         let mut epoch_row_count = 0;
         // Phase 3: consume upstream
         while let Some(msg) = upstream.try_next().await? {
+            let Some(msg) = update_normalizer.normalize_message(msg) else {
+                continue;
+            };
             match msg {
                 Message::Barrier(barrier) => {
                     assert_eq!(barrier.epoch.prev, barrier_epoch.curr);
@@ -1386,6 +1411,7 @@ mod tests {
             None,
             None,
             vec![0],
+            vec![0],
             actor_ctx,
             progress,
             1024,
@@ -1537,6 +1563,7 @@ mod tests {
                 upstream_rx,
             )),
             None,
+            vec![0],
             vec![0],
             actor_ctx,
             progress,

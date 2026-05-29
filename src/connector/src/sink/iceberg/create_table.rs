@@ -57,7 +57,7 @@ impl IcebergOrderKeyField {
     }
 }
 
-pub(super) async fn create_and_validate_table_impl(
+pub async fn create_and_validate_table_impl(
     config: &IcebergConfig,
     param: &SinkParam,
 ) -> Result<Table> {
