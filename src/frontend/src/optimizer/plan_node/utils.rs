@@ -155,7 +155,7 @@ impl TableCatalogBuilder {
 
     /// Consume builder and create `TableCatalog` (for proto). The `read_prefix_len_hint` is the
     /// anticipated read prefix pattern (number of fields) for the table, which can be utilized for
-    /// implementing the table's bloom filter or other storage optimization techniques.
+    /// implementing the table's SST filter or other storage optimization techniques.
     pub fn build(self, distribution_key: Vec<usize>, read_prefix_len_hint: usize) -> TableCatalog {
         assert!(read_prefix_len_hint <= self.pk.len());
         let watermark_columns = match self.watermark_columns {
@@ -392,7 +392,7 @@ pub fn infer_kv_log_store_table_catalog_inner(
         table_catalog_builder.add_order_column(i, *ordering);
     }
 
-    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+    let read_prefix_len_hint = 0;
 
     if columns.len() != input.schema().fields().len()
         || columns
@@ -443,7 +443,7 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
         table_catalog_builder.add_order_column(i, *ordering);
     }
 
-    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+    let read_prefix_len_hint = 0;
 
     let payload_indices = {
         let mut payload_indices = Vec::with_capacity(columns.len());

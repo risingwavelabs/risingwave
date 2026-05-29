@@ -17,7 +17,7 @@ mod manual;
 mod schedule;
 mod stream;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -64,6 +64,7 @@ pub struct IcebergCompactionManager {
 
 struct IcebergCompactionManagerInner {
     sink_schedules: HashMap<SinkId, CompactionTrack>,
+    snapshot_expiration_sink_ids: HashSet<SinkId>,
     manual_task_waiters: HashMap<u64, ManualTaskWaiter>,
 }
 
@@ -89,6 +90,7 @@ impl IcebergCompactionManager {
                 env,
                 inner: Arc::new(RwLock::new(IcebergCompactionManagerInner {
                     sink_schedules: HashMap::default(),
+                    snapshot_expiration_sink_ids: HashSet::default(),
                     manual_task_waiters: HashMap::default(),
                 })),
                 metadata_manager,

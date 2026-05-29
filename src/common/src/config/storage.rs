@@ -125,8 +125,8 @@ pub struct StorageConfig {
     pub meta_file_cache: FileCacheConfig,
 
     /// sst serde happens when a sst meta is written to meta disk cache.
-    /// excluding bloom filter from serde can reduce the meta disk cache entry size
-    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    /// Excluding the SST filter from serde can reduce the meta disk cache entry size
+    /// and reduce disk IO throughput at the cost of making the SST filter useless.
     #[serde(default = "default::storage::sst_skip_bloom_filter_in_serde")]
     pub sst_skip_bloom_filter_in_serde: bool,
 

@@ -308,16 +308,21 @@ IcebergProperties:
   - name: catalog.header
     field_type: String
     comments: |-
-      The http header to be used in the catalog requests.
+      The HTTP header to be used in catalog requests.
       Example:
       `catalog.header = "key1=value1;key2=value2;key3=value3"`
-      explain the format of the header:
+      For Google Cloud Lakehouse Iceberg REST catalogs, set
+      `catalog.header = "x-goog-user-project=PROJECT_ID"` to specify the billing project.
+      Explain the format of the header:
       - Each header is a key-value pair, separated by an '='.
       - Multiple headers can be specified, separated by a ';'.
     required: false
   - name: vended_credentials
     field_type: bool
-    comments: Enable vended credentials for iceberg REST catalog.
+    comments: |-
+      Enable vended credentials for Iceberg REST catalog.
+      For Google Cloud Lakehouse Iceberg REST catalogs, this sends
+      `X-Iceberg-Access-Delegation: vended-credentials`.
     required: false
     default: Default::default
   - name: catalog.security
@@ -345,6 +350,8 @@ IcebergProperties:
       - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
       - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
       - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
+      Google Cloud Lakehouse Iceberg REST catalogs with credential vending require
+      `org.apache.iceberg.gcp.gcs.GCSFileIO`.
     required: false
   - name: database.name
     field_type: String
@@ -1415,6 +1422,20 @@ PulsarProperties:
     field_type: Duration
     required: false
     default: Default::default
+  - name: pulsar.operation.retry.max.retries
+    field_type: u32
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
+  - name: pulsar.operation.retry.delay
+    field_type: Duration
+    comments: |-
+      This controls Pulsar client operation retry delay for the source.
+      It is distinct from `subscription.unacked.resend.delay`, which only affects
+      unacked message redelivery, and from sink-side `properties.retry.*` settings.
+    required: false
+    default: Default::default
+    allow_alter_on_fly: true
   - name: pulsar.read_compacted
     field_type: bool
     required: false

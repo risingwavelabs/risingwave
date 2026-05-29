@@ -121,6 +121,7 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
             "cdc.source.wait.streaming.start.timeout".to_owned(),
             "debezium.max.queue.size".to_owned(),
             "debezium.queue.memory.ratio".to_owned(),
+            "debezium.heartbeat.interval.ms".to_owned(),
             "password".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
@@ -190,6 +191,14 @@ pub static SOURCE_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<St
         std::any::type_name::<PubsubProperties>().to_owned(),
         [
             "pubsub.ack_deadline_seconds".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
+    // PulsarProperties
+    map.try_insert(
+        std::any::type_name::<PulsarProperties>().to_owned(),
+        [
+            "pulsar.operation.retry.max.retries".to_owned(),
+            "pulsar.operation.retry.delay".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
     map

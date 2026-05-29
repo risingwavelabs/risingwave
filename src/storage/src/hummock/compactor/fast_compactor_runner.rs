@@ -30,7 +30,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
-use risingwave_pb::hummock::BloomFilterType;
+use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
 use crate::hummock::block_stream::BlockDataStream;
@@ -379,6 +379,16 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         options.max_vnode_key_range_bytes = None;
         let get_id_time = Arc::new(AtomicU64::new(0));
 
+        debug_assert_eq!(
+            task.sstable_filter_kind,
+            PbSstableFilterType::SstableFilterXor16,
+            "fast compaction only supports blocked xor16 filter today"
+        );
+        debug_assert!(
+            task.should_use_block_based_filter(),
+            "fast compaction can only preserve blocked filters; expected blocked output"
+        );
+
         let key_range = KeyRange::inf();
         let read_table_ids = HashSet::from_iter(task.get_table_ids_from_input_ssts());
 
@@ -389,6 +399,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             retain_multiple_version: false,
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
+            sstable_filter_kind: task.sstable_filter_kind,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
         };
@@ -891,7 +902,7 @@ mod tests {
     use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::level::InputLevel;
     use risingwave_pb::hummock::compact_task::TaskType;
-    use risingwave_pb::hummock::{BloomFilterType, LevelType};
+    use risingwave_pb::hummock::{BloomFilterType, LevelType, PbSstableFilterType};
 
     use super::CompactorRunner;
     use crate::compaction_catalog_manager::CompactionCatalogAgent;
@@ -988,6 +999,8 @@ mod tests {
             existing_table_ids: vec![TableId::new(2)],
             target_file_size: 1 << 20,
             task_type: TaskType::Dynamic,
+            blocked_xor_filter_kv_count_threshold: Some(0),
+            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
             ..Default::default()
         };
 

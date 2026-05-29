@@ -26,7 +26,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
-use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
+use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK};
 use risingwave_connector::sink::trivial::TABLE_SINK;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
@@ -780,8 +780,11 @@ pub fn is_iceberg_with_pk_index_sink(sink_desc: &SinkDesc) -> Result<bool> {
         return Ok(false);
     }
 
-    let iceberg_config = IcebergConfig::from_btreemap(sink_desc.properties.clone())?;
-    Ok(iceberg_config.enable_pk_index)
+    let res = sink_desc
+        .properties
+        .get(ENABLE_PK_INDEX)
+        .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+    Ok(res)
 }
 
 impl PlanTreeNodeUnary<Stream> for StreamSink {

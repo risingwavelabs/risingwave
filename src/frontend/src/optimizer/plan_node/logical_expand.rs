@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use super::generic::GenericPlanRef;
@@ -131,14 +132,31 @@ impl_distill_by_unit!(LogicalExpand, core, "LogicalExpand");
 
 impl ColPrunable for LogicalExpand {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
-        // No pruning.
-        let input_required_cols = (0..self.input().schema().len()).collect_vec();
-        LogicalProject::with_out_col_idx(
-            self.clone_with_input(self.input().prune_col(&input_required_cols, ctx))
-                .into(),
-            required_cols.iter().cloned(),
-        )
-        .into()
+        let input_len = self.input().schema().len();
+        let mut input_required_cols = FixedBitSet::with_capacity(input_len);
+        for &idx in required_cols {
+            if idx < input_len {
+                input_required_cols.insert(idx);
+            } else if idx < input_len * 2 {
+                input_required_cols.insert(idx - input_len);
+            } else {
+                assert_eq!(idx, input_len * 2);
+            }
+        }
+        let input_required_cols = input_required_cols.ones().collect_vec();
+        let input_col_change =
+            ColIndexMapping::with_remaining_columns(&input_required_cols, input_len);
+        let input = self.input().prune_col(&input_required_cols, ctx);
+        let (expand, out_col_change) = self.rewrite_with_input(input, input_col_change);
+        let output_required_cols = required_cols
+            .iter()
+            .map(|idx| {
+                out_col_change
+                    .try_map(*idx)
+                    .expect("required column should be kept")
+            })
+            .collect_vec();
+        LogicalProject::with_out_col_idx(expand.into(), output_required_cols.into_iter()).into()
     }
 }
 

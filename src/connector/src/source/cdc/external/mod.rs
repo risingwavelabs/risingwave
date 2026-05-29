@@ -82,10 +82,6 @@ impl ExternalCdcTableType {
         matches!(self, Self::MySql | Self::Postgres)
     }
 
-    pub fn shareable_only(&self) -> bool {
-        matches!(self, Self::SqlServer)
-    }
-
     pub async fn create_table_reader(
         &self,
         config: ExternalTableConfig,

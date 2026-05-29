@@ -42,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_compaction_group;
 mod alter_connection_props;
 mod alter_database_param;
 mod alter_mv;
@@ -67,6 +68,7 @@ pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 mod alter_utils;
+mod alter_watermark;
 mod backup;
 pub mod cancel_job;
 pub mod close_cursor;
@@ -834,6 +836,20 @@ pub async fn handle(
                 ))
                 .await
             }
+            AlterTableOperation::AlterWatermark {
+                column_name,
+                expr,
+                with_ttl,
+            } => {
+                Box::pin(alter_watermark::handle_alter_watermark(
+                    handler_args,
+                    name,
+                    column_name,
+                    expr,
+                    with_ttl,
+                ))
+                .await
+            }
             AlterTableOperation::RenameTable { table_name } => {
                 alter_rename::handle_rename_table(handler_args, TableType::Table, name, table_name)
                     .await
@@ -1554,6 +1570,17 @@ pub async fn handle(
         Statement::AlterDefaultPrivileges { .. } => {
             handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
         }
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            alter_compaction_group::handle_alter_compaction_group(
+                handler_args,
+                group_ids,
+                operation,
+            )
+            .await
+        }
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes)
         }
@@ -1703,6 +1730,13 @@ fn check_ban_alter_table_operation_for_iceberg_engine_table(
         AlterTableOperation::SetSourceRateLimit { .. } => {
             bail!(
                 "ALTER TABLE SET SOURCE RATE LIMIT is not supported for iceberg table: {}.{}",
+                schema_name,
+                table_name
+            );
+        }
+        AlterTableOperation::AlterWatermark { .. } => {
+            bail!(
+                "ALTER TABLE ALTER WATERMARK is not supported for iceberg table: {}.{}",
                 schema_name,
                 table_name
             );

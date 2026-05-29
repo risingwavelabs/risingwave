@@ -455,14 +455,14 @@ async fn test_hive_catalog() {
     test_create_catalog(values).await;
 }
 
-/// Test parsing Google/BigLake authentication configuration.
+/// Test parsing Google Lakehouse Iceberg REST authentication configuration.
 #[test]
 fn test_parse_google_auth_config() {
     let values: BTreeMap<String, String> = [
             ("connector", "iceberg"),
             ("type", "append-only"),
             ("force_append_only", "true"),
-            ("catalog.name", "biglake-catalog"),
+            ("catalog.name", "lakehouse-catalog"),
             ("catalog.type", "rest"),
             ("catalog.uri", "https://biglake.googleapis.com/iceberg/v1/restcatalog"),
             ("warehouse.path", "bq://projects/my-gcp-project"),
@@ -712,6 +712,9 @@ fn test_parse_compaction_config() {
     .collect();
 
     let config = IcebergConfig::from_btreemap(values).unwrap();
+    assert!(config.enable_snapshot_expiration);
+    assert_eq!(config.snapshot_expiration_max_age_millis, None);
+    assert_eq!(config.snapshot_expiration_retain_last, None);
     assert_eq!(config.target_file_size_mb(), 1024); // Default
     assert_eq!(config.write_parquet_compression(), "zstd"); // Default
     assert_eq!(config.write_parquet_max_row_group_rows(), None); // Default

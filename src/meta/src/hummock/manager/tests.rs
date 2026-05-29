@@ -21,6 +21,8 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use prometheus::Registry;
+use prometheus::core::Collector;
+use prometheus::proto::MetricFamily;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
@@ -86,6 +88,21 @@ fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
 
 fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
     gen_sstable_info_impl(sst_id, table_ids, epoch).into()
+}
+
+fn metric_has_label_value(
+    metric_families: &[MetricFamily],
+    label_name: &str,
+    label_value: &str,
+) -> bool {
+    metric_families.iter().any(|metric_family| {
+        metric_family.get_metric().iter().any(|metric| {
+            metric
+                .get_label()
+                .iter()
+                .any(|label| label.name() == label_name && label.value() == label_value)
+        })
+    })
 }
 
 fn gen_sstable_info_impl(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfoInner {
@@ -1034,6 +1051,24 @@ async fn test_trigger_manual_compaction() {
     )
     .await;
     {
+        let option = ManualCompactionOption {
+            level: 0,
+            target_level: Some(0),
+            ..Default::default()
+        };
+        let result = hummock_manager
+            .trigger_manual_compaction(StaticCompactionGroupId::StateDefault, option)
+            .await;
+
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("invalid manual compaction option: target_level for L0 must be")
+        );
+    }
+    {
         // to check compactor send task fail
         drop(receiver);
         {
@@ -1742,6 +1777,102 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
             .collect_vec(),
         vec![100, 101]
     );
+}
+
+#[tokio::test]
+async fn test_merge_compaction_group_removes_split_group_metrics() {
+    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
+        hummock_manager.clone(),
+        worker_id as _,
+    ));
+
+    let compaction_group_id = StaticCompactionGroupId::StateDefault;
+    hummock_manager
+        .register_table_ids_for_test(&[
+            (100, compaction_group_id),
+            (101, compaction_group_id),
+            (102, compaction_group_id),
+        ])
+        .await
+        .unwrap();
+
+    let epoch = test_epoch(30);
+    let ssts = [100, 101, 102]
+        .into_iter()
+        .enumerate()
+        .map(|(idx, table_id)| gen_local_sstable_info(10 + idx as u64, vec![table_id], epoch))
+        .collect_vec();
+    hummock_meta_client
+        .commit_epoch(
+            epoch,
+            SyncResult {
+                uncommitted_ssts: ssts,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let (right_group_id, _) = hummock_manager
+        .move_state_tables_to_dedicated_compaction_group(
+            compaction_group_id,
+            &[101.into(), 102.into()],
+            None,
+        )
+        .await
+        .unwrap();
+    let left_group_id = get_compaction_group_id_by_table_id(hummock_manager.clone(), 100).await;
+    assert_ne!(left_group_id, right_group_id);
+
+    // Exercise production metric paths before merging: checkpoint updates split stats, and compact
+    // task picking records compact task metrics for the split group.
+    hummock_manager.create_version_checkpoint(0).await.unwrap();
+    let compact_task = hummock_manager
+        .get_compact_task(right_group_id, &mut *default_compaction_selector())
+        .await
+        .unwrap();
+    assert!(compact_task.is_some());
+
+    let right_group_label = right_group_id.to_string();
+    let collect_group_metrics = || {
+        [
+            (
+                "state_table_count",
+                hummock_manager.metrics.state_table_count.collect(),
+            ),
+            (
+                "compact_task_size",
+                hummock_manager.metrics.compact_task_size.collect(),
+            ),
+            (
+                "compact_task_file_count",
+                hummock_manager.metrics.compact_task_file_count.collect(),
+            ),
+        ]
+    };
+    for (metric_name, metric_families) in collect_group_metrics() {
+        assert!(
+            metric_has_label_value(&metric_families, "group", &right_group_label),
+            "{metric_name} should have right group metric before merge"
+        );
+    }
+
+    hummock_manager
+        .merge_compaction_group_for_test(
+            left_group_id,
+            right_group_id,
+            HashSet::from_iter([100.into(), 101.into(), 102.into()]),
+        )
+        .await
+        .unwrap();
+
+    for (metric_name, metric_families) in collect_group_metrics() {
+        assert!(
+            !metric_has_label_value(&metric_families, "group", &right_group_label),
+            "{metric_name} should not have right group metric after merge"
+        );
+    }
 }
 
 #[tokio::test]

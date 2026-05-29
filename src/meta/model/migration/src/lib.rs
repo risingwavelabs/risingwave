@@ -68,6 +68,10 @@ mod m20251224_142321_sink_schema_change;
 mod m20251231_000000_sink_ignore_delete;
 mod m20260119_153927_streaming_job_is_serverless_backfill;
 mod m20260120_120000_streaming_job_backfill_orders;
+mod m20260311_000000_legacy_streaming_parallelism_session_params;
+mod m20260312_000000_streaming_job_backfill_parallelism_strategy;
+mod m20260518_000000_disable_unused_read_prefix_hints;
+mod m20260519_000000_streaming_job_batch_refresh_seconds;
 mod utils;
 
 pub struct Migrator;
@@ -174,6 +178,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20251231_000000_sink_ignore_delete::Migration),
             Box::new(m20260119_153927_streaming_job_is_serverless_backfill::Migration),
             Box::new(m20260120_120000_streaming_job_backfill_orders::Migration),
+            Box::new(m20260311_000000_legacy_streaming_parallelism_session_params::Migration),
+            Box::new(m20260312_000000_streaming_job_backfill_parallelism_strategy::Migration),
+            Box::new(m20260518_000000_disable_unused_read_prefix_hints::Migration),
+            Box::new(m20260519_000000_streaming_job_batch_refresh_seconds::Migration),
         ]
     }
 }
