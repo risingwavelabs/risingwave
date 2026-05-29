@@ -14,10 +14,12 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::StreamJobStatus;
+use risingwave_pb::common::PbObjectType;
 use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
+use super::drop_cascade_guard::guard_drop_cascade;
 use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
@@ -85,6 +87,16 @@ pub async fn handle_drop_index(
     };
 
     let index_id = index.id;
+
+    if cascade {
+        guard_drop_cascade(
+            &session,
+            "DROP INDEX",
+            PbObjectType::Index,
+            index_id.as_raw_id(),
+        )
+        .await?;
+    }
 
     // If the index is being created, use cancel RPC instead of normal drop
     if index.index_table().stream_job_status == StreamJobStatus::Creating {

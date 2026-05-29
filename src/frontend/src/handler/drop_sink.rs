@@ -14,9 +14,11 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ICEBERG_SINK_PREFIX;
+use risingwave_pb::common::PbObjectType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
+use super::drop_cascade_guard::guard_drop_cascade;
 use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
@@ -66,6 +68,16 @@ pub async fn handle_drop_sink(
     }
 
     let sink_id = sink.id;
+
+    if cascade {
+        guard_drop_cascade(
+            &session,
+            "DROP SINK",
+            PbObjectType::Sink,
+            sink_id.as_raw_id(),
+        )
+        .await?;
+    }
 
     let catalog_writer = session.catalog_writer()?;
     execute_with_long_running_notification(

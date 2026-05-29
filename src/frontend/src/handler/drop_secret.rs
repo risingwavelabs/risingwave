@@ -16,8 +16,10 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::license::Feature;
+use risingwave_pb::common::PbObjectType;
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::drop_cascade_guard::guard_drop_cascade;
 use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::secret_catalog::SecretCatalog;
@@ -39,6 +41,16 @@ pub async fn handle_drop_secret(
     if let Some((secret_catalog, _, _)) =
         fetch_secret_catalog_with_db_schema_id(&session, &secret_name, if_exists)?
     {
+        if cascade {
+            guard_drop_cascade(
+                &session,
+                "DROP SECRET",
+                PbObjectType::Secret,
+                secret_catalog.id.as_raw_id(),
+            )
+            .await?;
+        }
+
         let catalog_writer = session.catalog_writer()?;
         catalog_writer
             .drop_secret(secret_catalog.id, cascade)

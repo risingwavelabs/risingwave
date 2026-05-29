@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::common::PbObjectType;
+
+use super::drop_cascade_guard::guard_drop_cascade;
 use super::*;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::{Binder, bind_data_type};
@@ -105,6 +108,21 @@ pub async fn handle_drop_function(
 
     let catalog_writer = session.catalog_writer()?;
     let cascade = matches!(option, Some(ReferentialAction::Cascade));
+
+    if cascade {
+        guard_drop_cascade(
+            &session,
+            if aggregate {
+                "DROP AGGREGATE"
+            } else {
+                "DROP FUNCTION"
+            },
+            PbObjectType::Function,
+            function_id.as_raw_id(),
+        )
+        .await?;
+    }
+
     catalog_writer.drop_function(function_id, cascade).await?;
 
     Ok(PgResponse::empty_result(stmt_type))

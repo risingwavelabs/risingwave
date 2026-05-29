@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_pb::common::PbObjectType;
 use risingwave_sqlparser::ast::ObjectName;
 
+use super::drop_cascade_guard::guard_drop_cascade;
 use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
@@ -61,6 +63,16 @@ pub async fn handle_drop_subscription(
     };
 
     let subscription_id = subscription.id;
+
+    if cascade {
+        guard_drop_cascade(
+            &session,
+            "DROP SUBSCRIPTION",
+            PbObjectType::Subscription,
+            subscription_id.as_raw_id(),
+        )
+        .await?;
+    }
 
     let catalog_writer = session.catalog_writer()?;
     execute_with_long_running_notification(

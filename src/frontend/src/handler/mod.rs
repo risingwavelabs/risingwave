@@ -91,6 +91,7 @@ pub mod declare_cursor;
 mod delete_meta_snapshot;
 pub mod describe;
 pub mod discard;
+mod drop_cascade_guard;
 mod drop_connection;
 mod drop_database;
 pub mod drop_function;
