@@ -108,7 +108,7 @@ enable_optimize_l0_interval_selection = true
 vnode_aligned_level_size_threshold = ""
 blocked_xor_filter_kv_count_threshold = 262144
 sstable_filter_kind = ["xor16", "xor16", "xor16", "xor16", "xor16", "xor16", "xor16"]
-sstable_filter_layout = ["auto", "auto", "auto", "auto", "auto", "auto", "auto"]
+sstable_filter_layout = ["auto", "blocked", "blocked", "blocked", "blocked", "blocked", "blocked"]
 
 [meta.developer]
 cached_traces_num = 256

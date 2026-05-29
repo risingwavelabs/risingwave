@@ -24,9 +24,7 @@ use std::ops::{BitXor, Bound, Range};
 pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
-mod bloom;
 mod xor_filter;
-pub use bloom::BloomFilterBuilder;
 use serde::{Deserialize, Serialize};
 pub use xor_filter::{
     BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, Xor8FilterBuilder, Xor16FilterBuilder,
@@ -50,7 +48,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 mod filter;
 mod utils;
 
-pub use filter::FilterBuilder;
+pub use filter::{DEFAULT_FILTER_HASH_PREALLOC_KEY_COUNT_CAP, FilterBuilder, FilterBuilderOptions};
 pub use utils::{CompressionAlgorithm, xxhash64_checksum, xxhash64_verify};
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
@@ -240,8 +238,12 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
+    pub fn estimated_meta_cache_memory_weight(&self) -> usize {
+        // This is for foyer's in-memory cache weighter. The disk tier uses foyer `Code`
+        // serialization and `estimated_size` instead.
+        std::mem::size_of::<Self>()
+            + self.meta.estimated_heap_size()
+            + self.filter_reader.estimated_heap_size()
     }
 
     /// Size of the meta disk-cache value, without cloning metadata or encoding its filter.
@@ -326,6 +328,10 @@ impl BlockMeta {
 
     pub fn table_id(&self) -> TableId {
         FullKey::decode(&self.smallest_key).user_key.table_id
+    }
+
+    fn estimated_heap_size(&self) -> usize {
+        self.smallest_key.capacity()
     }
 }
 
@@ -531,6 +537,24 @@ impl SstableMeta {
             + 8 // checksum
             + 4 // version
             + 4 // magic
+    }
+
+    #[expect(
+        deprecated,
+        reason = "monotonic_tombstone_events is deprecated but still contributes to decoded meta heap size"
+    )]
+    fn estimated_heap_size(&self) -> usize {
+        self.block_metas.capacity() * std::mem::size_of::<BlockMeta>()
+            + self
+                .block_metas
+                .iter()
+                .map(BlockMeta::estimated_heap_size)
+                .sum::<usize>()
+            + self.bloom_filter.capacity()
+            + self.smallest_key.capacity()
+            + self.largest_key.capacity()
+            + self.monotonic_tombstone_events.capacity()
+                * std::mem::size_of::<MonotonicDeleteEvent>()
     }
 }
 
