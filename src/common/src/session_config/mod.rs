@@ -483,6 +483,12 @@ pub struct SessionConfig {
     #[parameter(default = 30u32)]
     slow_ddl_notification_secs: u32,
 
+    /// Allow `DROP ... CASCADE` statements to execute.
+    /// When disabled, RisingWave rejects the statement after showing a summary of the objects that
+    /// would be removed.
+    #[parameter(default = false)]
+    allow_drop_cascade: bool,
+
     /// Unsafe: Enable storage retention for non-append-only tables.
     /// Enabling this can lead to streaming inconsistency and node panic
     /// if there is any row INSERT/UPDATE/DELETE operation corresponding to the ttled primary key.

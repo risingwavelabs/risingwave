@@ -32,7 +32,6 @@ use risingwave_rpc_client::{
 use risingwave_sqlparser::ast::RedactSqlOptionKeywordsRef;
 use sea_orm::EntityTrait;
 
-use crate::MetaResult;
 use crate::barrier::SharedActorInfos;
 use crate::controller::SqlMetaStore;
 use crate::controller::id::{
@@ -44,6 +43,7 @@ use crate::hummock::sequence::SequenceGenerator;
 use crate::manager::event_log::{EventLogManagerRef, start_event_log_manager};
 use crate::manager::{IdleManager, IdleManagerRef, NotificationManager, NotificationManagerRef};
 use crate::model::ClusterId;
+use crate::{MetaError, MetaResult};
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
@@ -427,7 +427,7 @@ impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         mut init_system_params: SystemParams,
-        init_session_config: SessionConfig,
+        mut init_session_config: SessionConfig,
         meta_store_impl: SqlMetaStore,
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
@@ -477,6 +477,9 @@ impl MetaSrvEnv {
         // For old clusters
         // - the prefix is ​​not divided for the sake of compatibility.
         init_system_params.use_new_object_prefix_strategy = Some(cluster_first_launch);
+        init_session_config
+            .set_allow_drop_cascade(!cluster_first_launch, &mut ())
+            .map_err(MetaError::from)?;
 
         let system_param_controller = Arc::new(
             SystemParamsController::new(
