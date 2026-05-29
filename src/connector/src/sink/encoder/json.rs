@@ -449,12 +449,28 @@ fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{
         Date, Decimal, Interval, Scalar, ScalarImpl, StructRef, StructType, StructValue, Time,
         Timestamp,
     };
 
     use super::*;
+
+    #[test]
+    fn test_starrocks_timestamptz_encoding() {
+        let schema = Schema::new(vec![Field::with_name(DataType::Timestamptz, "ts")]);
+        let encoder = JsonEncoder::new_with_starrocks(schema, None);
+        let tstz = "2018-01-26T18:30:09.453Z".parse().unwrap();
+        let row = OwnedRow::new(vec![Some(ScalarImpl::Timestamptz(tstz))]);
+
+        let encoded = encoder.encode(row).unwrap();
+
+        assert_eq!(
+            encoded.get("ts"),
+            Some(&json!("2018-01-26 18:30:09.453000"))
+        );
+    }
 
     #[test]
     fn test_to_json_basic_type() {
