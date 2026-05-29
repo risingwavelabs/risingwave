@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use prometheus::Registry;
+use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 
 use super::*;
 use crate::controller::catalog::CatalogController;
@@ -58,9 +59,18 @@ fn new_track(
     }
 }
 
-fn start_in_flight(track: &mut CompactionTrack, task_id: u64, now: Instant) {
+fn start_in_flight_on(
+    track: &mut CompactionTrack,
+    task_id: u64,
+    compactor_context_id: HummockContextId,
+    now: Instant,
+) {
     track.start_processing();
-    track.mark_dispatched(task_id, now);
+    track.mark_dispatched(task_id, compactor_context_id, now);
+}
+
+fn start_in_flight(track: &mut CompactionTrack, task_id: u64, now: Instant) {
+    start_in_flight_on(track, task_id, 1.into(), now);
 }
 
 fn record_commits(track: &mut CompactionTrack, n: usize) {
@@ -231,7 +241,7 @@ fn test_mark_dispatched_records_task_id_for_stale_report_filtering() {
     let mut track = new_track(now, 120, 10, 5);
     track.start_processing();
     assert!(track.is_pending_dispatch());
-    track.mark_dispatched(42, now);
+    track.mark_dispatched(42, 1.into(), now);
 
     assert!(track.is_processing_task(42));
     assert!(!track.is_processing_task(43));
@@ -570,6 +580,41 @@ async fn test_get_top_n_creates_pending_dispatch_handle_and_drop_restores_idle()
     let track = guard.sink_schedules.get(&sink_id).unwrap();
     assert_eq!(track.pending_commit_count, 3);
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+}
+
+#[tokio::test]
+async fn test_clear_iceberg_maintenance_cancels_inflight_task() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(467);
+    let task_id = 88;
+    let compactor_context_id = 1000.into();
+    let mut receiver = manager
+        .iceberg_compactor_manager
+        .add_compactor(compactor_context_id);
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 2);
+    start_in_flight_on(&mut track, task_id, compactor_context_id, now);
+    {
+        let mut guard = manager.inner.write();
+        guard.sink_schedules.insert(sink_id, track);
+        guard.snapshot_expiration_sink_ids.insert(sink_id);
+    }
+
+    manager.clear_iceberg_maintenance_by_sink_id(sink_id);
+
+    {
+        let guard = manager.inner.read();
+        assert!(!guard.sink_schedules.contains_key(&sink_id));
+        assert!(!guard.snapshot_expiration_sink_ids.contains(&sink_id));
+    }
+
+    let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
+    match event {
+        IcebergResponseEvent::CancelCompactTask(cancel_task) => {
+            assert_eq!(cancel_task.task_id, task_id);
+        }
+        other => panic!("unexpected iceberg compactor event: {other:?}"),
+    }
 }
 
 #[tokio::test]

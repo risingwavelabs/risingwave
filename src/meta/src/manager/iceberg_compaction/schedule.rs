@@ -24,6 +24,7 @@ use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{
     CompactionType, IcebergConfig, should_enable_iceberg_cow,
 };
+use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportTask as IcebergReportTask;
@@ -46,9 +47,16 @@ enum CompactionTrackState {
     /// expires before a report arrives, the task becomes retryable.
     InFlight {
         task_id: u64,
+        compactor_context_id: HummockContextId,
         pending_commit_count_at_dispatch: usize,
         report_deadline: Instant,
     },
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ScheduledCompactionTask {
+    task_id: u64,
+    compactor_context_id: HummockContextId,
 }
 
 #[derive(Debug, Clone)]
@@ -156,7 +164,12 @@ impl CompactionTrack {
         }
     }
 
-    fn mark_dispatched(&mut self, task_id: u64, now: Instant) {
+    fn mark_dispatched(
+        &mut self,
+        task_id: u64,
+        compactor_context_id: HummockContextId,
+        now: Instant,
+    ) {
         let pending_commit_count_at_dispatch = match &self.state {
             CompactionTrackState::PendingDispatch {
                 pending_commit_count_at_dispatch,
@@ -169,6 +182,7 @@ impl CompactionTrack {
         };
         self.state = CompactionTrackState::InFlight {
             task_id,
+            compactor_context_id,
             pending_commit_count_at_dispatch,
             report_deadline: now + self.report_timeout,
         };
@@ -186,6 +200,22 @@ impl CompactionTrack {
                 ..
             } if *current_task_id == task_id
         )
+    }
+
+    fn scheduled_task(&self) -> Option<ScheduledCompactionTask> {
+        match &self.state {
+            CompactionTrackState::InFlight {
+                task_id,
+                compactor_context_id,
+                ..
+            } => Some(ScheduledCompactionTask {
+                task_id: *task_id,
+                compactor_context_id: *compactor_context_id,
+            }),
+            CompactionTrackState::Idle { .. } | CompactionTrackState::PendingDispatch { .. } => {
+                None
+            }
+        }
     }
 
     fn is_report_timed_out(&self, now: Instant) -> bool {
@@ -327,25 +357,43 @@ impl IcebergCompactionHandle {
             }));
 
         if result.is_ok() {
+            let mut should_cancel_sent_task = false;
             let mut guard = self.inner.write();
             let mut dispatched = false;
             if let Some(track) = guard.sink_schedules.get_mut(&self.sink_id)
                 && track.is_pending_dispatch()
             {
-                track.mark_dispatched(task_id, Instant::now());
+                track.mark_dispatched(task_id, compactor.context_id(), Instant::now());
                 dispatched = true;
             }
             self.handle_success = dispatched;
             if !dispatched {
+                should_cancel_sent_task = true;
                 tracing::warn!(
                     sink_id = %self.sink_id,
                     task_id,
                     "Iceberg compaction task send succeeded but track was no longer pending dispatch"
                 );
             }
+            drop(guard);
+
+            if should_cancel_sent_task {
+                self.cancel_sent_task(&compactor, task_id);
+            }
         }
 
         result
+    }
+
+    fn cancel_sent_task(&self, compactor: &crate::hummock::IcebergCompactor, task_id: u64) {
+        if let Err(e) = compactor.cancel_task(task_id) {
+            tracing::warn!(
+                error = %e.as_report(),
+                sink_id = %self.sink_id,
+                task_id,
+                "Failed to cancel iceberg compaction task after schedule removal",
+            );
+        }
     }
 }
 
@@ -422,9 +470,13 @@ impl IcebergCompactionManager {
 
     pub async fn update_iceberg_commit_info(&self, msg: IcebergSinkCompactionUpdate) {
         let prepared_update = self.prepare_sink_update(msg, Instant::now()).await;
+        let sink_id = prepared_update.sink_id;
 
-        let mut guard = self.inner.write();
-        self.apply_sink_update(&mut guard, prepared_update);
+        let task_to_cancel = {
+            let mut guard = self.inner.write();
+            self.apply_sink_update(&mut guard, prepared_update)
+        };
+        self.cancel_scheduled_task_if_any(sink_id, task_to_cancel);
     }
 
     async fn prepare_sink_update(
@@ -479,7 +531,7 @@ impl IcebergCompactionManager {
         &self,
         guard: &mut IcebergCompactionManagerInner,
         prepared_update: PreparedSinkUpdate,
-    ) {
+    ) -> Option<ScheduledCompactionTask> {
         let PreparedSinkUpdate {
             sink_id,
             kind,
@@ -497,8 +549,7 @@ impl IcebergCompactionManager {
             }
 
             if !config.enable_compaction {
-                guard.sink_schedules.remove(&sink_id);
-                return;
+                return Self::remove_sink_schedule(guard, sink_id);
             }
         }
 
@@ -519,7 +570,7 @@ impl IcebergCompactionManager {
                         sink_id = %sink_id,
                         "Ignoring iceberg compaction update because track disappeared before apply"
                     );
-                    return;
+                    return None;
                 }
 
                 let Some(config) = loaded_config.as_ref() else {
@@ -527,13 +578,14 @@ impl IcebergCompactionManager {
                         sink_id = %sink_id,
                         "Ignoring iceberg compaction update because sink config is unavailable"
                     );
-                    return;
+                    return None;
                 };
 
                 let track = entry.insert(self.create_compaction_track(config, now));
                 kind.apply_to_track(track, now);
             }
         }
+        None
     }
 
     fn create_compaction_track(
@@ -614,9 +666,63 @@ impl IcebergCompactionManager {
     }
 
     pub fn clear_iceberg_maintenance_by_sink_id(&self, sink_id: SinkId) {
-        let mut guard = self.inner.write();
-        guard.sink_schedules.remove(&sink_id);
-        guard.snapshot_expiration_sink_ids.remove(&sink_id);
+        let task_to_cancel = {
+            let mut guard = self.inner.write();
+            let task_to_cancel = Self::remove_sink_schedule(&mut guard, sink_id);
+            guard.snapshot_expiration_sink_ids.remove(&sink_id);
+            task_to_cancel
+        };
+        self.cancel_scheduled_task_if_any(sink_id, task_to_cancel);
+    }
+
+    fn remove_sink_schedule(
+        guard: &mut IcebergCompactionManagerInner,
+        sink_id: SinkId,
+    ) -> Option<ScheduledCompactionTask> {
+        guard
+            .sink_schedules
+            .remove(&sink_id)
+            .and_then(|track| track.scheduled_task())
+    }
+
+    fn cancel_scheduled_task_if_any(&self, sink_id: SinkId, task: Option<ScheduledCompactionTask>) {
+        let Some(ScheduledCompactionTask {
+            task_id,
+            compactor_context_id,
+        }) = task
+        else {
+            return;
+        };
+
+        let Some(compactor) = self
+            .iceberg_compactor_manager
+            .get_compactor(compactor_context_id)
+        else {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id,
+                compactor_context_id = %compactor_context_id,
+                "Unable to cancel iceberg compaction task because compactor is no longer registered",
+            );
+            return;
+        };
+
+        tracing::info!(
+            sink_id = %sink_id,
+            task_id,
+            compactor_context_id = %compactor_context_id,
+            "Cancelling iceberg compaction task for removed schedule",
+        );
+
+        if let Err(e) = compactor.cancel_task(task_id) {
+            tracing::warn!(
+                error = %e.as_report(),
+                sink_id = %sink_id,
+                task_id,
+                compactor_context_id = %compactor_context_id,
+                "Failed to cancel iceberg compaction task for removed schedule",
+            );
+        }
     }
 
     pub fn list_compaction_statuses(&self) -> Vec<IcebergCompactionScheduleStatus> {
