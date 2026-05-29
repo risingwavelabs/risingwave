@@ -704,7 +704,8 @@ impl StateStoreImpl {
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
                 .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
-                    u64::BITS as usize / 8 + value.estimate_size()
+                    std::mem::size_of::<HummockSstableObjectId>()
+                        + value.estimated_meta_cache_memory_weight()
                 })
                 .storage();
 
@@ -753,8 +754,7 @@ impl StateStoreImpl {
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
                 .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
-                    // FIXME(MrCroxx): Calculate block weight more accurately.
-                    u64::BITS as usize * 2 / 8 + value.raw().len()
+                    std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
                 })
                 .storage();
 
