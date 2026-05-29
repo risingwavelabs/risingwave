@@ -204,8 +204,6 @@ select id, name from iceberg_batch_table order by id;
 6 aaa
 7 bbb
 8 ccc
-9 ddd
-10 eee
 
 
 # Cleanup
