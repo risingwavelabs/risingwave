@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.HashMap;
 import java.util.Map;
 import org.junit.Test;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
 
 public class S3FileIOAssumeRoleAwsClientFactoryTest {
@@ -37,5 +38,19 @@ public class S3FileIOAssumeRoleAwsClientFactoryTest {
 
         assertThat(factory.credentialsProviderForTest())
                 .isInstanceOf(StsAssumeRoleCredentialsProvider.class);
+    }
+
+    @Test
+    public void testDefaultCredentialChainDoesNotUseSharedSingleton() {
+        Map<String, String> config = new HashMap<>();
+
+        S3FileIOAssumeRoleAwsClientFactory first = new S3FileIOAssumeRoleAwsClientFactory();
+        first.initialize(config);
+        S3FileIOAssumeRoleAwsClientFactory second = new S3FileIOAssumeRoleAwsClientFactory();
+        second.initialize(config);
+
+        assertThat(first.credentialsProviderForTest())
+                .isInstanceOf(DefaultCredentialsProvider.class)
+                .isNotSameAs(second.credentialsProviderForTest());
     }
 }

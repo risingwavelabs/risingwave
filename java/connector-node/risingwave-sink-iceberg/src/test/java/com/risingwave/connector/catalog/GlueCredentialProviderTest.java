@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.Map;
 import org.junit.Test;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
 
 public class GlueCredentialProviderTest {
@@ -48,6 +49,19 @@ public class GlueCredentialProviderTest {
         try (GlueCredentialProvider provider = GlueCredentialProvider.create(config)) {
             assertThat(provider.credentialsProviderForTest())
                     .isInstanceOf(StsAssumeRoleCredentialsProvider.class);
+        }
+    }
+
+    @Test
+    public void testDefaultCredentialChainDoesNotUseSharedSingleton() {
+        Map<String, String> config = new HashMap<>();
+        config.put("glue.use-default-credential-chain", "true");
+
+        try (GlueCredentialProvider first = GlueCredentialProvider.create(config);
+                GlueCredentialProvider second = GlueCredentialProvider.create(config)) {
+            assertThat(first.credentialsProviderForTest())
+                    .isInstanceOf(DefaultCredentialsProvider.class)
+                    .isNotSameAs(second.credentialsProviderForTest());
         }
     }
 }
