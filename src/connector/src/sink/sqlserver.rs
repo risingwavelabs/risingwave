@@ -186,6 +186,8 @@ impl Sink for SqlServerSink {
         }
 
         let mut sql_client = SqlServerClient::new(&self.config).await?;
+        validate_sql_server_write_permission(&mut sql_client, &self.config, self.is_append_only)
+            .await?;
         let sql_server_table_metadata =
             query_sql_server_table_metadata(&mut sql_client, &self.config).await?;
 
@@ -630,6 +632,84 @@ ORDER BY
     Ok(sql_server_table_metadata)
 }
 
+async fn validate_sql_server_write_permission(
+    sql_client: &mut SqlServerClient,
+    config: &SqlServerConfig,
+    is_append_only: bool,
+) -> Result<()> {
+    let permission_query_error = || {
+        SinkError::SqlServer(anyhow!(format!(
+            "SQL Server table {} permission metadata error",
+            config.full_object_path()
+        )))
+    };
+    static QUERY_WRITE_PERMISSION: &str = r#"
+SELECT
+    CAST(HAS_PERMS_BY_NAME(@P1, 'OBJECT', 'INSERT') AS int) AS CanInsert,
+    CAST(HAS_PERMS_BY_NAME(@P1, 'OBJECT', 'UPDATE') AS int) AS CanUpdate,
+    CAST(HAS_PERMS_BY_NAME(@P1, 'OBJECT', 'DELETE') AS int) AS CanDelete;"#;
+    let rows = sql_client
+        .inner_client
+        .query(QUERY_WRITE_PERMISSION, &[&config.full_object_path()])
+        .await?
+        .into_results()
+        .await?;
+    let mut rows = rows.into_iter().flatten();
+    let row = rows.next().ok_or_else(permission_query_error)?;
+    let mut iter = row.into_iter();
+    let ColumnData::I32(can_insert) = iter.next().ok_or_else(permission_query_error)? else {
+        return Err(permission_query_error());
+    };
+    let ColumnData::I32(can_update) = iter.next().ok_or_else(permission_query_error)? else {
+        return Err(permission_query_error());
+    };
+    let ColumnData::I32(can_delete) = iter.next().ok_or_else(permission_query_error)? else {
+        return Err(permission_query_error());
+    };
+
+    let missing_permissions = missing_sql_server_write_permissions(
+        is_append_only,
+        permission_is_granted(can_insert),
+        permission_is_granted(can_update),
+        permission_is_granted(can_delete),
+    );
+    if missing_permissions.is_empty() {
+        return Ok(());
+    }
+
+    Err(SinkError::SqlServer(anyhow!(format!(
+        "SQL Server user {} lacks required write permission(s) {} on table {}",
+        config.user,
+        missing_permissions.join(", "),
+        config.full_object_path()
+    ))))
+}
+
+fn permission_is_granted(permission_value: Option<i32>) -> bool {
+    permission_value == Some(1)
+}
+
+fn missing_sql_server_write_permissions(
+    is_append_only: bool,
+    can_insert: bool,
+    can_update: bool,
+    can_delete: bool,
+) -> Vec<&'static str> {
+    let mut missing_permissions = vec![];
+    if !can_insert {
+        missing_permissions.push("INSERT");
+    }
+    if !is_append_only {
+        if !can_update {
+            missing_permissions.push("UPDATE");
+        }
+        if !can_delete {
+            missing_permissions.push("DELETE");
+        }
+    }
+    missing_permissions
+}
+
 async fn query_downstream_column_data_types(
     sql_client: &mut SqlServerClient,
     config: &SqlServerConfig,
@@ -1004,5 +1084,23 @@ mod tests {
         assert!(use_integer_micros_for_timestamptz("bigint"));
         assert!(use_integer_micros_for_timestamptz(" int "));
         assert!(!use_integer_micros_for_timestamptz("datetime2"));
+    }
+
+    #[test]
+    fn test_missing_sql_server_write_permissions() {
+        assert_eq!(
+            missing_sql_server_write_permissions(true, false, false, false),
+            vec!["INSERT"]
+        );
+        assert!(missing_sql_server_write_permissions(true, true, false, false).is_empty());
+        assert_eq!(
+            missing_sql_server_write_permissions(false, false, false, false),
+            vec!["INSERT", "UPDATE", "DELETE"]
+        );
+        assert_eq!(
+            missing_sql_server_write_permissions(false, true, false, true),
+            vec!["UPDATE"]
+        );
+        assert!(missing_sql_server_write_permissions(false, true, true, true).is_empty());
     }
 }

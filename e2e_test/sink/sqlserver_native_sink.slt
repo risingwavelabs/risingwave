@@ -13,6 +13,20 @@ create table t_native_sqlserver_sink_rw (
   event_ts_tinyint timestamptz
 );
 
+statement error lacks required write permission
+create sink s_native_sqlserver_sink_readonly from t_native_sqlserver_sink_rw with (
+  connector = 'sqlserver',
+  type = 'upsert',
+  sqlserver.host = 'sqlserver-server',
+  sqlserver.port = '1433',
+  sqlserver.user = 'rw_sqlserver_readonly_login',
+  sqlserver.password = 'ReadOnlyOnly123!',
+  sqlserver.database = 'SinkTest',
+  sqlserver.schema = 'test_schema',
+  sqlserver.table = 't_native_sink_pk_and_timestamptz',
+  primary_key = 'EntityId,EventDate'
+);
+
 statement ok
 create sink s_native_sqlserver_sink from t_native_sqlserver_sink_rw with (
   connector = 'sqlserver',
