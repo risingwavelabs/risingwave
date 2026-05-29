@@ -1001,50 +1001,52 @@ impl DiagnoseCommand {
             let _ = writeln!(s, "{table}");
         }
 
-        let actors = self
+        let mut fragments = BTreeMap::new();
+        for (actor_id, fragment_id, job_id, schema_id, obj_type) in self
             .metadata_manager
             .catalog_controller
             .list_actor_info()
             .await?
-            .into_iter()
-            .map(|(actor_id, fragment_id, job_id, schema_id, obj_type)| {
-                (
-                    actor_id,
-                    (
-                        fragment_id,
-                        job_id,
-                        schema_id,
-                        obj_type,
-                        obj_id_to_name.get(&job_id).cloned().unwrap_or_default(),
-                    ),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+        {
+            let entry = fragments
+                .entry(fragment_id)
+                .or_insert_with(|| (job_id, schema_id, obj_type, Vec::new()));
+            entry.3.push(actor_id);
+        }
 
         use comfy_table::{Row, Table};
         let mut table = Table::new();
         table.set_header({
             let mut row = Row::new();
-            row.add_cell("id".into());
             row.add_cell("fragment_id".into());
             row.add_cell("job_id".into());
             row.add_cell("schema_id".into());
             row.add_cell("type".into());
             row.add_cell("name".into());
+            row.add_cell("actor_count".into());
+            row.add_cell("actors".into());
             row
         });
-        for (actor_id, (fragment_id, job_id, schema_id, ddl_type, name)) in actors {
+        for (fragment_id, (job_id, schema_id, obj_type, mut actor_ids)) in fragments {
+            actor_ids.sort_unstable();
             let mut row = Row::new();
-            row.add_cell(actor_id.into());
             row.add_cell(fragment_id.into());
             row.add_cell(job_id.into());
             row.add_cell(schema_id.into());
-            row.add_cell(ddl_type.as_str().into());
-            row.add_cell(name.into());
+            row.add_cell(obj_type.as_str().into());
+            row.add_cell(
+                obj_id_to_name
+                    .get(&job_id)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into(),
+            );
+            row.add_cell(actor_ids.len().into());
+            row.add_cell(actor_ids.iter().join(", ").into());
             table.add_row(row);
         }
         let _ = writeln!(s);
-        let _ = writeln!(s, "ACTOR");
+        let _ = writeln!(s, "FRAGMENT");
         let _ = writeln!(s, "{table}");
         Ok(())
     }
