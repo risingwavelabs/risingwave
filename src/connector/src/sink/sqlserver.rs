@@ -108,6 +108,12 @@ pub struct SqlServerSink {
     is_append_only: bool,
 }
 
+struct SqlServerColumnMetadata {
+    name: String,
+    is_pk: bool,
+    data_type: String,
+}
+
 impl EnforceSecret for SqlServerSink {
     fn enforce_secret<'a>(
         prop_iter: impl Iterator<Item = &'a str>,
@@ -180,54 +186,24 @@ impl Sink for SqlServerSink {
             check_data_type_compatibility(&f.data_type)?;
         }
 
-        // Query table metadata from SQL Server.
-        let mut sql_server_table_metadata = HashMap::new();
         let mut sql_client = SqlServerClient::new(&self.config).await?;
-        let query_table_metadata_error = || {
-            SinkError::SqlServer(anyhow!(format!(
-                "SQL Server table {} metadata error",
-                self.config.full_object_path()
-            )))
-        };
-        static QUERY_TABLE_METADATA: &str = r#"
-SELECT
-    col.name AS ColumnName,
-    pk.index_id AS PkIndex
-FROM
-    sys.columns col
-LEFT JOIN
-    sys.index_columns ic ON ic.object_id = col.object_id AND ic.column_id = col.column_id
-LEFT JOIN
-    sys.indexes pk ON pk.object_id = col.object_id AND pk.index_id = ic.index_id AND pk.is_primary_key = 1
-WHERE
-    col.object_id = OBJECT_ID(@P1)
-ORDER BY
-    col.column_id;"#;
-        let rows = sql_client
-            .inner_client
-            .query(QUERY_TABLE_METADATA, &[&self.config.full_object_path()])
-            .await?
-            .into_results()
+        validate_sql_server_write_permission(&mut sql_client, &self.config, self.is_append_only)
             .await?;
-        for row in rows.into_iter().flatten() {
-            let mut iter = row.into_iter();
-            let ColumnData::String(Some(col_name)) =
-                iter.next().ok_or_else(query_table_metadata_error)?
-            else {
-                return Err(query_table_metadata_error());
-            };
-            let ColumnData::I32(col_pk_index) =
-                iter.next().ok_or_else(query_table_metadata_error)?
-            else {
-                return Err(query_table_metadata_error());
-            };
-            sql_server_table_metadata.insert(col_name.into_owned(), col_pk_index.is_some());
-        }
+        let sql_server_table_metadata =
+            query_sql_server_table_metadata(&mut sql_client, &self.config).await?;
+        let sql_server_pk_count = sql_server_table_metadata
+            .iter()
+            .filter(|metadata| metadata.is_pk)
+            .count();
+        let sql_server_table_metadata = sql_server_table_metadata
+            .into_iter()
+            .map(|metadata| (metadata.name.clone(), metadata))
+            .collect::<HashMap<_, _>>();
 
-        // Validate Column name and Primary Key
+        // Validate Column name, Primary Key and data type.
         for (idx, col) in self.schema.fields().iter().enumerate() {
             let rw_is_pk = self.pk_indices.contains(&idx);
-            match sql_server_table_metadata.get(&col.name) {
+            match sql_server_table_metadata.get(&normalize_sql_server_column_name(&col.name)) {
                 None => {
                     return Err(SinkError::SqlServer(anyhow!(format!(
                         "column {} not found in the downstream SQL Server table {}",
@@ -235,18 +211,23 @@ ORDER BY
                         self.config.full_object_path()
                     ))));
                 }
-                Some(sql_server_is_pk) => {
+                Some(sql_server_col) => {
+                    validate_data_type_compatibility(
+                        &col.name,
+                        &col.data_type,
+                        &sql_server_col.data_type,
+                    )?;
                     if self.is_append_only {
                         continue;
                     }
-                    if rw_is_pk && !*sql_server_is_pk {
+                    if rw_is_pk && !sql_server_col.is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
                             "column {} specified in primary_key mismatches with the downstream SQL Server table {} PK",
                             col.name,
                             self.config.full_object_path(),
                         ))));
                     }
-                    if !rw_is_pk && *sql_server_is_pk {
+                    if !rw_is_pk && sql_server_col.is_pk {
                         return Err(SinkError::SqlServer(anyhow!(format!(
                             "column {} unspecified in primary_key mismatches with the downstream SQL Server table {} PK",
                             col.name,
@@ -257,19 +238,27 @@ ORDER BY
             }
         }
 
-        if !self.is_append_only {
-            let sql_server_pk_count = sql_server_table_metadata
+        if !self.is_append_only && sql_server_pk_count != self.pk_indices.len() {
+            let sql_server_pk_columns = sql_server_table_metadata
                 .values()
-                .filter(|is_pk| **is_pk)
-                .count();
-            if sql_server_pk_count != self.pk_indices.len() {
-                return Err(SinkError::SqlServer(anyhow!(format!(
-                    "primary key does not match between RisingWave sink ({}) and SQL Server table {} ({})",
-                    self.pk_indices.len(),
-                    self.config.full_object_path(),
-                    sql_server_pk_count,
-                ))));
-            }
+                .filter(|metadata| metadata.is_pk)
+                .map(|metadata| metadata.name.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            let rw_pk_columns = self
+                .pk_indices
+                .iter()
+                .map(|idx| self.schema[*idx].name.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            return Err(SinkError::SqlServer(anyhow!(format!(
+                "primary key does not match between RisingWave sink ({}: [{}]) and SQL Server table {} ({}: [{}])",
+                self.pk_indices.len(),
+                rw_pk_columns,
+                self.config.full_object_path(),
+                sql_server_pk_count,
+                sql_server_pk_columns,
+            ))));
         }
 
         Ok(())
@@ -298,6 +287,7 @@ pub struct SqlServerSinkWriter {
     schema: Schema,
     pk_indices: Vec<usize>,
     is_append_only: bool,
+    downstream_column_data_types: Vec<String>,
     sql_client: SqlServerClient,
     ops: Vec<SqlOp>,
 }
@@ -309,12 +299,19 @@ impl SqlServerSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let sql_client = SqlServerClient::new(&config).await?;
+        let mut sql_client = SqlServerClient::new(&config).await?;
+        let downstream_column_data_types =
+            query_downstream_column_metadata(&mut sql_client, &config, &schema)
+                .await?
+                .into_iter()
+                .map(|metadata| metadata.data_type)
+                .collect();
         let writer = Self {
             config,
             schema,
             pk_indices,
             is_append_only,
+            downstream_column_data_types,
             sql_client,
             ops: vec![],
         };
@@ -382,12 +379,10 @@ impl SqlServerSinkWriter {
             .collect::<Vec<_>>()
             .join(" AND ");
         let param_placeholders = |param_id: &mut usize| {
-            let params = (*param_id..(*param_id + col_num))
-                .map(|i| format!("@P{}", i))
+            (0..col_num)
+                .map(|_| param_placeholder(param_id))
                 .collect::<Vec<_>>()
-                .join(",");
-            *param_id += col_num;
-            params
+                .join(",")
         };
         let set_all_source_col = non_pk_col_indices
             .iter()
@@ -438,9 +433,11 @@ impl SqlServerSinkWriter {
                         self.pk_indices
                             .iter()
                             .map(|idx| {
-                                let condition =
-                                    format!("[{}]=@P{}", self.schema[*idx].name, next_param_id);
-                                next_param_id += 1;
+                                let condition = format!(
+                                    "[{}]={}",
+                                    self.schema[*idx].name,
+                                    param_placeholder(&mut next_param_id)
+                                );
                                 condition
                             })
                             .collect::<Vec<_>>()
@@ -455,16 +452,29 @@ impl SqlServerSinkWriter {
         for op in self.ops.drain(..) {
             match op {
                 SqlOp::Insert(row) => {
-                    bind_params(&mut query, row, &self.schema, 0..col_num)?;
+                    bind_params(
+                        &mut query,
+                        row,
+                        &self.schema,
+                        &self.downstream_column_data_types,
+                        0..col_num,
+                    )?;
                 }
                 SqlOp::Merge(row) => {
-                    bind_params(&mut query, row, &self.schema, 0..col_num)?;
+                    bind_params(
+                        &mut query,
+                        row,
+                        &self.schema,
+                        &self.downstream_column_data_types,
+                        0..col_num,
+                    )?;
                 }
                 SqlOp::Delete(row) => {
                     bind_params(
                         &mut query,
                         row,
                         &self.schema,
+                        &self.downstream_column_data_types,
                         self.pk_indices.iter().copied(),
                     )?;
                 }
@@ -566,10 +576,195 @@ impl SqlServerClient {
     }
 }
 
+async fn query_sql_server_table_metadata(
+    sql_client: &mut SqlServerClient,
+    config: &SqlServerConfig,
+) -> Result<Vec<SqlServerColumnMetadata>> {
+    let mut sql_server_table_metadata = Vec::new();
+    let query_table_metadata_error = || {
+        SinkError::SqlServer(anyhow!(format!(
+            "SQL Server table {} metadata error",
+            config.full_object_path()
+        )))
+    };
+    // Query primary-key membership through a subquery filtered by `pk.is_primary_key = 1`.
+    // A column can appear in both the primary-key index and secondary indexes, and a naive
+    // join from `sys.columns` to all `sys.index_columns` would emit extra index rows or mark
+    // secondary-index-only columns as PK columns. Keep the PK filter inside the subquery so
+    // each table column is returned once with `IsPk` set only by the primary-key index.
+    static QUERY_TABLE_METADATA: &str = r#"
+SELECT
+    col.name AS ColumnName,
+    CAST(CASE WHEN pk_col.column_id IS NULL THEN 0 ELSE 1 END AS int) AS IsPk,
+    typ.name AS DataType
+FROM
+    sys.columns col
+JOIN
+    sys.types typ ON typ.user_type_id = col.user_type_id
+LEFT JOIN
+    (
+        SELECT ic.object_id, ic.column_id
+        FROM sys.indexes pk
+        JOIN sys.index_columns ic ON ic.object_id = pk.object_id AND ic.index_id = pk.index_id
+        WHERE pk.is_primary_key = 1
+    ) pk_col ON pk_col.object_id = col.object_id AND pk_col.column_id = col.column_id
+WHERE
+    col.object_id = OBJECT_ID(@P1)
+ORDER BY
+    col.column_id;"#;
+    let rows = sql_client
+        .inner_client
+        .query(QUERY_TABLE_METADATA, &[&config.full_object_path()])
+        .await?
+        .into_results()
+        .await?;
+    for row in rows.into_iter().flatten() {
+        let mut iter = row.into_iter();
+        let ColumnData::String(Some(col_name)) =
+            iter.next().ok_or_else(query_table_metadata_error)?
+        else {
+            return Err(query_table_metadata_error());
+        };
+        let ColumnData::I32(Some(col_is_pk)) =
+            iter.next().ok_or_else(query_table_metadata_error)?
+        else {
+            return Err(query_table_metadata_error());
+        };
+        let ColumnData::String(Some(data_type)) =
+            iter.next().ok_or_else(query_table_metadata_error)?
+        else {
+            return Err(query_table_metadata_error());
+        };
+        sql_server_table_metadata.push(SqlServerColumnMetadata {
+            name: normalize_sql_server_column_name(&col_name),
+            is_pk: col_is_pk != 0,
+            data_type: data_type.into_owned(),
+        });
+    }
+    Ok(sql_server_table_metadata)
+}
+
+async fn validate_sql_server_write_permission(
+    sql_client: &mut SqlServerClient,
+    config: &SqlServerConfig,
+    is_append_only: bool,
+) -> Result<()> {
+    let permission_query_error = || {
+        SinkError::SqlServer(anyhow!(format!(
+            "SQL Server table {} permission metadata error",
+            config.full_object_path()
+        )))
+    };
+    static QUERY_WRITE_PERMISSION: &str = r#"
+SELECT
+    CAST(HAS_PERMS_BY_NAME(@P1, 'OBJECT', 'INSERT') AS int) AS CanInsert,
+    CAST(HAS_PERMS_BY_NAME(@P1, 'OBJECT', 'UPDATE') AS int) AS CanUpdate,
+    CAST(HAS_PERMS_BY_NAME(@P1, 'OBJECT', 'DELETE') AS int) AS CanDelete;"#;
+    let rows = sql_client
+        .inner_client
+        .query(QUERY_WRITE_PERMISSION, &[&config.full_object_path()])
+        .await?
+        .into_results()
+        .await?;
+    let mut rows = rows.into_iter().flatten();
+    let row = rows.next().ok_or_else(permission_query_error)?;
+    let mut iter = row.into_iter();
+    let ColumnData::I32(can_insert) = iter.next().ok_or_else(permission_query_error)? else {
+        return Err(permission_query_error());
+    };
+    let ColumnData::I32(can_update) = iter.next().ok_or_else(permission_query_error)? else {
+        return Err(permission_query_error());
+    };
+    let ColumnData::I32(can_delete) = iter.next().ok_or_else(permission_query_error)? else {
+        return Err(permission_query_error());
+    };
+
+    let missing_permissions = missing_sql_server_write_permissions(
+        is_append_only,
+        permission_is_granted(can_insert),
+        permission_is_granted(can_update),
+        permission_is_granted(can_delete),
+    );
+    if missing_permissions.is_empty() {
+        return Ok(());
+    }
+
+    Err(SinkError::SqlServer(anyhow!(format!(
+        "SQL Server user {} lacks required write permission(s) {} on table {}",
+        config.user,
+        missing_permissions.join(", "),
+        config.full_object_path()
+    ))))
+}
+
+fn permission_is_granted(permission_value: Option<i32>) -> bool {
+    permission_value == Some(1)
+}
+
+fn missing_sql_server_write_permissions(
+    is_append_only: bool,
+    can_insert: bool,
+    can_update: bool,
+    can_delete: bool,
+) -> Vec<&'static str> {
+    let mut missing_permissions = vec![];
+    if !can_insert {
+        missing_permissions.push("INSERT");
+    }
+    if !is_append_only {
+        if !can_update {
+            missing_permissions.push("UPDATE");
+        }
+        if !can_delete {
+            missing_permissions.push("DELETE");
+        }
+    }
+    missing_permissions
+}
+
+async fn query_downstream_column_metadata(
+    sql_client: &mut SqlServerClient,
+    config: &SqlServerConfig,
+    schema: &Schema,
+) -> Result<Vec<SqlServerColumnMetadata>> {
+    let sql_server_table_metadata = query_sql_server_table_metadata(sql_client, config)
+        .await?
+        .into_iter()
+        .map(|metadata| (metadata.name.clone(), metadata))
+        .collect::<HashMap<_, _>>();
+    schema
+        .fields()
+        .iter()
+        .map(|col| {
+            sql_server_table_metadata
+                .get(&normalize_sql_server_column_name(&col.name))
+                .map(|metadata| SqlServerColumnMetadata {
+                    name: metadata.name.clone(),
+                    is_pk: metadata.is_pk,
+                    data_type: metadata.data_type.clone(),
+                })
+                .ok_or_else(|| {
+                    SinkError::SqlServer(anyhow!(format!(
+                        "column {} not found in the downstream SQL Server table {}",
+                        col.name,
+                        config.full_object_path()
+                    )))
+                })
+        })
+        .collect()
+}
+
+fn param_placeholder(param_id: &mut usize) -> String {
+    let placeholder = format!("@P{}", *param_id);
+    *param_id += 1;
+    placeholder
+}
+
 fn bind_params(
     query: &mut Query<'_>,
     row: impl Row,
     schema: &Schema,
+    downstream_column_data_types: &[String],
     col_indices: impl Iterator<Item = usize>,
 ) -> Result<()> {
     use risingwave_common::types::ScalarRefImpl;
@@ -596,7 +791,25 @@ fn bind_params(
                 },
                 ScalarRefImpl::Date(v) => query.bind(v.0),
                 ScalarRefImpl::Timestamp(v) => query.bind(v.0),
-                ScalarRefImpl::Timestamptz(v) => query.bind(v.timestamp_micros()),
+                ScalarRefImpl::Timestamptz(v) => {
+                    let downstream_data_type = &downstream_column_data_types[col_idx];
+                    match downstream_data_type.as_str() {
+                        "bigint" | "int" | "smallint" | "tinyint" => {
+                            query.bind(v.timestamp_micros());
+                        }
+                        "datetimeoffset" => {
+                            query.bind(v.to_datetime_utc().fixed_offset());
+                        }
+                        "datetime" | "datetime2" | "smalldatetime" => {
+                            query.bind(v.to_datetime_utc().naive_utc());
+                        }
+                        _ => {
+                            return Err(unexpected_downstream_timestamptz_type(
+                                downstream_data_type,
+                            ));
+                        }
+                    };
+                }
                 ScalarRefImpl::Time(v) => query.bind(v.0),
                 ScalarRefImpl::Bytea(v) => query.bind(v.to_vec()),
                 ScalarRefImpl::Interval(_) => return Err(data_type_not_supported("Interval")),
@@ -640,7 +853,23 @@ fn bind_params(
                     query.bind(None as Option<chrono::NaiveDateTime>);
                 }
                 DataType::Timestamptz => {
-                    query.bind(None as Option<i64>);
+                    let downstream_data_type = &downstream_column_data_types[col_idx];
+                    match downstream_data_type.as_str() {
+                        "bigint" | "int" | "smallint" | "tinyint" => {
+                            query.bind(None as Option<i64>);
+                        }
+                        "datetimeoffset" => {
+                            query.bind(None as Option<chrono::DateTime<chrono::FixedOffset>>);
+                        }
+                        "datetime" | "datetime2" | "smalldatetime" => {
+                            query.bind(None as Option<chrono::NaiveDateTime>);
+                        }
+                        _ => {
+                            return Err(unexpected_downstream_timestamptz_type(
+                                downstream_data_type,
+                            ));
+                        }
+                    };
                 }
                 DataType::Varchar => {
                     query.bind(None as Option<String>);
@@ -665,6 +894,12 @@ fn bind_params(
 fn data_type_not_supported(data_type_name: &str) -> SinkError {
     SinkError::SqlServer(anyhow!(format!(
         "{data_type_name} is not supported in SQL Server"
+    )))
+}
+
+fn unexpected_downstream_timestamptz_type(sql_server_data_type: &str) -> SinkError {
+    SinkError::SqlServer(anyhow!(format!(
+        "unexpected downstream SQL Server type {sql_server_data_type} for Timestamptz"
     )))
 }
 
@@ -694,6 +929,71 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
     }
 }
 
+fn normalize_sql_server_column_name(column_name: &str) -> String {
+    // SQL Server identifiers are usually case-insensitive depending on database collation.
+    // Match metadata by a case-insensitive key so validation follows that common behavior.
+    column_name.to_lowercase()
+}
+
+fn validate_data_type_compatibility(
+    column_name: &str,
+    rw_data_type: &DataType,
+    sql_server_data_type: &str,
+) -> Result<()> {
+    if sql_server_data_type_is_compatible(rw_data_type, sql_server_data_type) {
+        return Ok(());
+    }
+
+    Err(SinkError::SqlServer(anyhow!(format!(
+        "column {} data type {:?} is incompatible with downstream SQL Server type {}",
+        column_name, rw_data_type, sql_server_data_type
+    ))))
+}
+
+fn sql_server_data_type_is_compatible(rw_data_type: &DataType, sql_server_data_type: &str) -> bool {
+    match rw_data_type {
+        DataType::Boolean => sql_server_data_type == "bit",
+        DataType::Int16 => matches!(sql_server_data_type, "smallint" | "int" | "bigint"),
+        DataType::Int32 => matches!(sql_server_data_type, "int" | "bigint"),
+        DataType::Int64 => sql_server_data_type == "bigint",
+        DataType::Float32 => matches!(sql_server_data_type, "real" | "float"),
+        DataType::Float64 => sql_server_data_type == "float",
+        DataType::Decimal => matches!(sql_server_data_type, "decimal" | "numeric"),
+        DataType::Date => sql_server_data_type == "date",
+        DataType::Varchar => matches!(
+            sql_server_data_type,
+            "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext"
+        ),
+        DataType::Time => sql_server_data_type == "time",
+        DataType::Timestamp => {
+            matches!(
+                sql_server_data_type,
+                "datetime" | "datetime2" | "smalldatetime"
+            )
+        }
+        DataType::Timestamptz => matches!(
+            sql_server_data_type,
+            "datetimeoffset"
+                | "datetime"
+                | "datetime2"
+                | "smalldatetime"
+                | "bigint"
+                | "int"
+                | "smallint"
+                | "tinyint"
+        ),
+        DataType::Bytea => matches!(sql_server_data_type, "binary" | "varbinary" | "image"),
+        DataType::Interval
+        | DataType::Struct(_)
+        | DataType::List(_)
+        | DataType::Jsonb
+        | DataType::Serial
+        | DataType::Int256
+        | DataType::Map(_)
+        | DataType::Vector(_) => false,
+    }
+}
+
 /// The implementation is copied from tiberius crate.
 fn decimal_to_sql(decimal: &rust_decimal::Decimal) -> Numeric {
     let unpacked = decimal.unpack();
@@ -707,4 +1007,79 @@ fn decimal_to_sql(decimal: &rust_decimal::Decimal) -> Numeric {
     }
 
     Numeric::new_with_scale(value, decimal.scale() as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_sql_server_column_name() {
+        assert_eq!(normalize_sql_server_column_name("EventDate"), "eventdate");
+    }
+
+    #[test]
+    fn test_sql_server_data_type_compatibility() {
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Int16,
+            "smallint"
+        ));
+        assert!(sql_server_data_type_is_compatible(&DataType::Int16, "int"));
+        assert!(!sql_server_data_type_is_compatible(
+            &DataType::Int32,
+            "smallint"
+        ));
+
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamp,
+            "datetime2"
+        ));
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamptz,
+            "datetimeoffset"
+        ));
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamptz,
+            "datetime2"
+        ));
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamptz,
+            "bigint"
+        ));
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Timestamptz,
+            "int"
+        ));
+        assert!(!sql_server_data_type_is_compatible(
+            &DataType::Timestamp,
+            "datetimeoffset"
+        ));
+
+        assert!(sql_server_data_type_is_compatible(
+            &DataType::Varchar,
+            "nvarchar"
+        ));
+        assert!(!sql_server_data_type_is_compatible(
+            &DataType::Varchar,
+            "uniqueidentifier"
+        ));
+    }
+
+    #[test]
+    fn test_missing_sql_server_write_permissions() {
+        assert_eq!(
+            missing_sql_server_write_permissions(true, false, false, false),
+            vec!["INSERT"]
+        );
+        assert!(missing_sql_server_write_permissions(true, true, false, false).is_empty());
+        assert_eq!(
+            missing_sql_server_write_permissions(false, false, false, false),
+            vec!["INSERT", "UPDATE", "DELETE"]
+        );
+        assert_eq!(
+            missing_sql_server_write_permissions(false, true, false, true),
+            vec!["UPDATE"]
+        );
+        assert!(missing_sql_server_write_permissions(false, true, true, true).is_empty());
+    }
 }
