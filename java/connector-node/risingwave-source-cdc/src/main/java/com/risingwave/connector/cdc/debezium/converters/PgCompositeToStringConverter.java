@@ -54,10 +54,9 @@ public class PgCompositeToStringConverter
             return;
         }
 
-        var schemaBuilder = SchemaBuilder.string();
-        if (column.isOptional()) {
-            schemaBuilder.optional();
-        }
+        // Always optional: PG DELETE before-image fills non-PK columns with null
+        // under REPLICA IDENTITY DEFAULT, regardless of upstream NOT NULL.
+        var schemaBuilder = SchemaBuilder.string().optional();
 
         registration.register(schemaBuilder, this::convertValue);
     }

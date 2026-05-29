@@ -57,7 +57,11 @@ impl IcebergCompactionManager {
     async fn perform_gc_operations(&self) -> MetaResult<()> {
         let sink_ids = {
             let guard = self.inner.read();
-            guard.sink_schedules.keys().cloned().collect::<Vec<_>>()
+            guard
+                .snapshot_expiration_sink_ids
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
         };
 
         tracing::info!("Starting GC operations for {} tables", sink_ids.len());
@@ -78,6 +82,8 @@ impl IcebergCompactionManager {
 
         let iceberg_config = self.load_iceberg_config(sink_id).await?;
         if !iceberg_config.enable_snapshot_expiration {
+            let mut guard = self.inner.write();
+            guard.snapshot_expiration_sink_ids.remove(&sink_id);
             return Ok(());
         }
 

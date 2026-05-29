@@ -271,5 +271,17 @@ pub fn validate_compatibility(
         .into());
     }
 
+    // Validate debezium.heartbeat.interval.ms for Postgres CDC: must be a valid integer and not 0
+    if connector == POSTGRES_CDC_CONNECTOR
+        && let Some(interval_value) = props.get("debezium.heartbeat.interval.ms")
+        && !interval_value.parse::<i64>().is_ok_and(|v| v != 0)
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "debezium.heartbeat.interval.ms".to_owned(),
+            config_value: interval_value.to_owned(),
+        }
+        .into());
+    }
+
     Ok(())
 }

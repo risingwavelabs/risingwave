@@ -443,7 +443,7 @@ HttpConfig:
   - name: url
     field_type: String
     comments: The endpoint URL to POST data to.
-    required: true
+    required: false
   - name: content_type
     field_type: String
     comments: |-
@@ -586,16 +586,21 @@ IcebergConfig:
   - name: catalog.header
     field_type: String
     comments: |-
-      The http header to be used in the catalog requests.
+      The HTTP header to be used in catalog requests.
       Example:
       `catalog.header = "key1=value1;key2=value2;key3=value3"`
-      explain the format of the header:
+      For Google Cloud Lakehouse Iceberg REST catalogs, set
+      `catalog.header = "x-goog-user-project=PROJECT_ID"` to specify the billing project.
+      Explain the format of the header:
       - Each header is a key-value pair, separated by an '='.
       - Multiple headers can be specified, separated by a ';'.
     required: false
   - name: vended_credentials
     field_type: bool
-    comments: Enable vended credentials for iceberg REST catalog.
+    comments: |-
+      Enable vended credentials for Iceberg REST catalog.
+      For Google Cloud Lakehouse Iceberg REST catalogs, this sends
+      `X-Iceberg-Access-Delegation: vended-credentials`.
     required: false
     default: Default::default
   - name: catalog.security
@@ -623,6 +628,8 @@ IcebergConfig:
       - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
       - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
       - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
+      Google Cloud Lakehouse Iceberg REST catalogs with credential vending require
+      `org.apache.iceberg.gcp.gcs.GCSFileIO`.
     required: false
   - name: database.name
     field_type: String
@@ -701,13 +708,13 @@ IcebergConfig:
       The maximum age (in milliseconds) for snapshots before they expire
       For example, if set to 3600000, snapshots older than 1 hour will be expired
     required: false
-    default: Some (DEFAULT_SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
+    default: Default::default
     allow_alter_on_fly: true
   - name: snapshot_expiration_retain_last
     field_type: i32
     comments: The number of snapshots to retain
     required: false
-    default: Some (DEFAULT_SNAPSHOT_EXPIRATION_RETAIN_LAST)
+    default: Default::default
     allow_alter_on_fly: true
   - name: snapshot_expiration_clear_expired_files
     field_type: bool
@@ -819,30 +826,37 @@ KafkaConfig:
     field_type: String
     comments: Path to CA certificate file for verifying the broker's key.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.ca.pem
     field_type: String
     comments: CA certificate string (PEM format) for verifying the broker's key.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.certificate.location
     field_type: String
     comments: Path to client's certificate file (PEM).
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.certificate.pem
     field_type: String
     comments: Client's public key string (PEM format) used for authentication.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.key.location
     field_type: String
     comments: Path to client's private key file (PEM).
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.key.pem
     field_type: String
     comments: Client's private key string (PEM format) used for authentication.
     required: false
+    allow_alter_on_fly: true
   - name: properties.ssl.key.password
     field_type: String
     comments: Passphrase of client's private key.
     required: false
+    allow_alter_on_fly: true
   - name: properties.sasl.mechanism
     field_type: String
     comments: SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.

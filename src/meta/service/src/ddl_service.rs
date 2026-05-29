@@ -386,6 +386,7 @@ impl DdlService for DdlServiceImpl {
                         dependencies: HashSet::new(),
                         resource_type: Self::default_streaming_job_resource_type(),
                         if_not_exists: req.if_not_exists,
+                        refresh_interval_sec: None,
                     })
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -458,6 +459,7 @@ impl DdlService for DdlServiceImpl {
             dependencies,
             resource_type: Self::default_streaming_job_resource_type(),
             if_not_exists: req.if_not_exists,
+            refresh_interval_sec: None,
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -486,6 +488,8 @@ impl DdlService for DdlServiceImpl {
         self.sink_manager
             .stop_sink_coordinator(vec![SinkId::from(sink_id)])
             .await;
+        self.iceberg_compaction_manager
+            .clear_iceberg_maintenance_by_sink_id(SinkId::from(sink_id));
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -551,6 +555,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies,
                 resource_type,
                 if_not_exists: req.if_not_exists,
+                refresh_interval_sec: req.refresh_interval_sec,
             })
             .await?;
 
@@ -604,6 +609,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies: HashSet::new(),
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: req.if_not_exists,
+                refresh_interval_sec: None,
             })
             .await?;
 
@@ -694,6 +700,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies,
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: request.if_not_exists,
+                refresh_interval_sec: None,
             })
             .await?;
 
@@ -1672,6 +1679,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies: HashSet::new(),
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
+                refresh_interval_sec: None,
             })
             .await?;
 
@@ -1692,14 +1700,17 @@ impl DdlService for DdlServiceImpl {
         // Mark sink as background creation, so that it won't block source creation.
         sink.create_type = PbCreateType::Background as _;
 
-        // TODO: Iceberg with pk index doesn't support auto schema change
-        if !sink
+        let enable_pk_index = sink
             .properties
             .get(ENABLE_PK_INDEX)
-            .is_some_and(|v| v.eq_ignore_ascii_case("true"))
-        {
-            sink.auto_refresh_schema_from_table = Some(table_catalog.id);
-        }
+            .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+        // The internal iceberg sink is planned before the table catalog exists, so this field
+        // still carries a placeholder table id when the request reaches meta.
+        sink.auto_refresh_schema_from_table = if enable_pk_index {
+            None
+        } else {
+            Some(table_catalog.id)
+        };
 
         let mut fragment_graph = fragment_graph.unwrap();
 
@@ -1753,6 +1764,7 @@ impl DdlService for DdlServiceImpl {
                 dependencies,
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
+                refresh_interval_sec: None,
             })
             .await;
 

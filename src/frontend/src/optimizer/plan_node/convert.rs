@@ -109,26 +109,27 @@ pub fn stream_enforce_eowc_requirement(
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RewriteStreamContext {
     share_rewrite_map: HashMap<PlanNodeId, (LogicalPlanRef, ColIndexMapping)>,
-    backfill_type: Option<BackfillType>,
+    // Snapshot backfill needs upstream table primary-key semantics during logical rewrite
+    // so operators above `LogicalScan` can preserve hidden primary-key columns before
+    // `StreamTableScan` is built. Other backfill types keep logical stream-key semantics.
+    backfill_type: BackfillType,
 }
 
 impl RewriteStreamContext {
     pub fn new_with_backfill_type(backfill_type: BackfillType) -> Self {
         Self {
             share_rewrite_map: HashMap::new(),
-            backfill_type: Some(backfill_type),
+            backfill_type,
         }
     }
 
-    pub fn backfill_type(&self) -> Option<BackfillType> {
+    pub fn backfill_type(&self) -> BackfillType {
         self.backfill_type
     }
-}
 
-impl RewriteStreamContext {
     pub fn add_rewrite_result(
         &mut self,
         plan_node_id: PlanNodeId,

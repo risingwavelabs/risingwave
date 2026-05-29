@@ -166,6 +166,7 @@ pub enum DdlCommand {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     },
     DropStreamingJob {
         job_id: StreamingJobId,
@@ -453,6 +454,7 @@ impl DdlController {
                     dependencies,
                     resource_type,
                     if_not_exists,
+                    refresh_interval_sec,
                 } => {
                     ctrl.create_streaming_job(
                         stream_job,
@@ -460,6 +462,7 @@ impl DdlController {
                         dependencies,
                         resource_type,
                         if_not_exists,
+                        refresh_interval_sec,
                     )
                     .await
                 }
@@ -1048,6 +1051,7 @@ impl DdlController {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
         if let StreamingJob::Sink(sink) = &streaming_job
             && let Some(target_table) = sink.target_table
@@ -1080,6 +1084,7 @@ impl DdlController {
                 &fragment_graph.backfill_parallelism,
                 adaptive_parallelism_strategy,
                 backfill_adaptive_parallelism_strategy,
+                refresh_interval_sec,
             )
             .await
         {
@@ -1421,7 +1426,7 @@ impl DdlController {
 
             for sink_id in iceberg_sink_ids {
                 self.iceberg_compaction_manager
-                    .clear_iceberg_commits_by_sink_id(sink_id);
+                    .clear_iceberg_maintenance_by_sink_id(sink_id);
             }
         }
 
@@ -1948,7 +1953,8 @@ impl DdlController {
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
             is_serverless_backfill,
-            streaming_job_model,
+            streaming_job_model: streaming_job_model.clone(),
+            refresh_interval_sec: streaming_job_model.refresh_interval_sec.map(|s| s as u64),
         };
 
         Ok((

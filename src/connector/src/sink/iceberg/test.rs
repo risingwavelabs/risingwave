@@ -26,11 +26,9 @@ use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};
 use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
 use crate::sink::iceberg::{
     COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
-    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, CompactionType,
-    DEFAULT_SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, DEFAULT_SNAPSHOT_EXPIRATION_RETAIN_LAST,
-    ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig, IcebergOrderKeyField,
-    IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    COMPACTION_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, CompactionType, ENABLE_COMPACTION,
+    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_DEFAULT_WRITE_PARQUET_MAX_ROW_GROUP_BYTES, IcebergConfig,
+    IcebergOrderKeyField, IcebergWriteMode, ORDER_KEY, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
     SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
     SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_order_key_exprs, validate_order_key_columns,
 };
@@ -322,8 +320,8 @@ fn test_parse_iceberg_config() {
             enable_snapshot_expiration: true,
             write_mode: IcebergWriteMode::MergeOnRead,
             format_version: FormatVersion::V2,
-            snapshot_expiration_max_age_millis: Some(DEFAULT_SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS),
-            snapshot_expiration_retain_last: Some(DEFAULT_SNAPSHOT_EXPIRATION_RETAIN_LAST),
+            snapshot_expiration_max_age_millis: None,
+            snapshot_expiration_retain_last: None,
             snapshot_expiration_clear_expired_files: true,
             snapshot_expiration_clear_expired_meta_data: true,
             max_snapshots_num_before_compaction: None,
@@ -457,14 +455,14 @@ async fn test_hive_catalog() {
     test_create_catalog(values).await;
 }
 
-/// Test parsing Google/BigLake authentication configuration.
+/// Test parsing Google Lakehouse Iceberg REST authentication configuration.
 #[test]
 fn test_parse_google_auth_config() {
     let values: BTreeMap<String, String> = [
             ("connector", "iceberg"),
             ("type", "append-only"),
             ("force_append_only", "true"),
-            ("catalog.name", "biglake-catalog"),
+            ("catalog.name", "lakehouse-catalog"),
             ("catalog.type", "rest"),
             ("catalog.uri", "https://biglake.googleapis.com/iceberg/v1/restcatalog"),
             ("warehouse.path", "bq://projects/my-gcp-project"),
@@ -715,14 +713,8 @@ fn test_parse_compaction_config() {
 
     let config = IcebergConfig::from_btreemap(values).unwrap();
     assert!(config.enable_snapshot_expiration);
-    assert_eq!(
-        config.snapshot_expiration_max_age_millis,
-        Some(DEFAULT_SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS)
-    );
-    assert_eq!(
-        config.snapshot_expiration_retain_last,
-        Some(DEFAULT_SNAPSHOT_EXPIRATION_RETAIN_LAST)
-    );
+    assert_eq!(config.snapshot_expiration_max_age_millis, None);
+    assert_eq!(config.snapshot_expiration_retain_last, None);
     assert_eq!(config.target_file_size_mb(), 1024); // Default
     assert_eq!(config.write_parquet_compression(), "zstd"); // Default
     assert_eq!(config.write_parquet_max_row_group_rows(), None); // Default

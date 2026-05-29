@@ -36,7 +36,7 @@ use thiserror_ext::AsReport;
 use crate::hummock::{HummockError, HummockResult};
 use crate::row_serde::value_serde::ValueRowSerdeNew;
 
-/// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
+/// `FilterKeyExtractor` is generally used to extract keys stored in SST filters.
 pub trait FilterKeyExtractor: Send + Sync {
     fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8];
 }
@@ -127,8 +127,8 @@ impl FixedLengthFilterKeyExtractor {
     }
 }
 
-/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and transform a `user_key` to prefix for
-/// `prefix_bloom_filter`
+/// [`SchemaFilterKeyExtractor`] builds from `table_catalog` and transforms a `user_key` to a prefix
+/// for the SST filter.
 pub struct SchemaFilterKeyExtractor {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
     /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
@@ -152,12 +152,12 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
 
-        let bloom_filter_key_len = self
+        let filter_key_len = self
             .deserializer
             .deserialize_prefix_len(pk, self.read_prefix_len)
             .unwrap();
 
-        let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + bloom_filter_key_len;
+        let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + filter_key_len;
         &user_key[TABLE_PREFIX_LEN + VirtualNode::SIZE..end_position]
     }
 }

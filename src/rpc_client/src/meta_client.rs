@@ -428,6 +428,7 @@ impl MetaClient {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
@@ -437,6 +438,7 @@ impl MetaClient {
             }),
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
+            refresh_interval_sec,
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -2088,6 +2090,7 @@ impl HummockMetaClient for MetaClient {
         compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
+        target_level: Option<u32>,
         sst_ids: Vec<HummockSstableId>,
         exclusive: bool,
     ) -> Result<bool> {
@@ -2098,6 +2101,7 @@ impl HummockMetaClient for MetaClient {
             // if table_id not exist, manual_compaction will include all the sst
             // without check internal_table_id
             level,
+            target_level,
             sst_ids,
             exclusive: Some(exclusive),
             ..Default::default()

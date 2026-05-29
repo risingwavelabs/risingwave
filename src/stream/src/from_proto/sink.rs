@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -31,7 +32,7 @@ use risingwave_connector::sink::{
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
-use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
+use risingwave_pb::stream_plan::{PbSinkDesc, SinkLogStoreType, SinkNode};
 use risingwave_storage::store::TryWaitEpochOptions;
 use url::Url;
 
@@ -41,6 +42,95 @@ use crate::common::log_store_impl::kv_log_store::{
     KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
 };
 use crate::executor::{SinkExecutor, StreamExecutorError};
+
+/// Build [`SinkParam`] from a [`PbSinkDesc`], along with the full [`ColumnCatalog`] list for
+/// downstream use. `connector` is the resolved connector name (e.g. `ICEBERG_SINK`), used for
+/// legacy `type = '...'` format/encode fallback and connector-specific backward-compatibility
+/// conversions.
+///
+/// The caller is responsible for preparing `properties_with_secret` (i.e. the result of
+/// [`LocalSecretManager::fill_secrets`] plus any connector-specific rewrites such as the
+/// JDBC-to-native-postgres switch).
+pub(super) fn build_sink_param(
+    sink_desc: &PbSinkDesc,
+    properties_with_secret: BTreeMap<String, String>,
+    connector: &str,
+) -> Result<(SinkParam, Vec<ColumnCatalog>), StreamExecutorError> {
+    let sink_id: SinkId = sink_desc.get_id();
+    let sink_name = sink_desc.get_name().to_owned();
+    let db_name = sink_desc.get_db_name().into();
+    let sink_from_name = sink_desc.get_sink_from_name().into();
+    let downstream_pk = if sink_desc.downstream_pk.is_empty() {
+        None
+    } else {
+        Some(
+            (sink_desc.downstream_pk.iter())
+                .map(|idx| *idx as usize)
+                .collect_vec(),
+        )
+    };
+    let columns = sink_desc
+        .column_catalogs
+        .clone()
+        .into_iter()
+        .map(ColumnCatalog::from)
+        .collect_vec();
+
+    let format_desc = match &sink_desc.format_desc {
+        // Case A: new syntax `format ... encode ...`
+        Some(f) => Some(
+            f.clone()
+                .try_into()
+                .map_err(|e| StreamExecutorError::from((e, sink_id)))?,
+        ),
+        None => match properties_with_secret.get(SINK_TYPE_OPTION) {
+            // Case B: old syntax `type = '...'`
+            Some(t) => SinkFormatDesc::from_legacy_type(connector, t)
+                .map_err(|e| StreamExecutorError::from((e, sink_id)))?,
+            // Case C: no format + encode required
+            None => None,
+        },
+    };
+    let format_desc = SinkParam::fill_secret_for_format_desc(format_desc)
+        .map_err(|e| StreamExecutorError::from((e, sink_id)))?;
+
+    // Backward compatibility: DEBEZIUM format should be treated as `Retract` type instead of `Upsert`.
+    let sink_type = if let Some(format_desc) = &format_desc
+        && format_desc.format == SinkFormat::Debezium
+    {
+        SinkType::Retract
+    } else {
+        let sink_type_from_proto = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+        // For backward compatibility: Iceberg sink with Upsert type should be treated as Retract type.
+        if connector.eq_ignore_ascii_case(ICEBERG_SINK)
+            && matches!(sink_type_from_proto, SinkType::Upsert)
+        {
+            SinkType::Retract
+        } else {
+            sink_type_from_proto
+        }
+    };
+    let ignore_delete = sink_desc.ignore_delete();
+
+    let sink_param = SinkParam {
+        sink_id,
+        sink_name,
+        properties: properties_with_secret,
+        columns: columns
+            .iter()
+            .filter(|col| !col.is_hidden)
+            .map(|col| col.column_desc.clone())
+            .collect(),
+        downstream_pk,
+        sink_type,
+        ignore_delete,
+        format_desc,
+        db_name,
+        sink_from_name,
+    };
+
+    Ok((sink_param, columns))
+}
 
 pub struct SinkExecutorBuilder;
 
@@ -119,25 +209,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_id: SinkId = sink_desc.get_id();
         let sink_name = sink_desc.get_name().to_owned();
-        let db_name = sink_desc.get_db_name().into();
-        let sink_from_name = sink_desc.get_sink_from_name().into();
         let properties = sink_desc.get_properties().clone();
         let secret_refs = sink_desc.get_secret_refs().clone();
-        let downstream_pk = if sink_desc.downstream_pk.is_empty() {
-            None
-        } else {
-            Some(
-                (sink_desc.downstream_pk.iter())
-                    .map(|idx| *idx as usize)
-                    .collect_vec(),
-            )
-        };
-        let columns = sink_desc
-            .column_catalogs
-            .clone()
-            .into_iter()
-            .map(ColumnCatalog::from)
-            .collect_vec();
 
         let mut properties_with_secret =
             LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
@@ -193,59 +266,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 }
             )?
         };
-        let format_desc = match &sink_desc.format_desc {
-            // Case A: new syntax `format ... encode ...`
-            Some(f) => Some(
-                f.clone()
-                    .try_into()
-                    .map_err(|e| StreamExecutorError::from((e, sink_id)))?,
-            ),
-            None => match properties_with_secret.get(SINK_TYPE_OPTION) {
-                // Case B: old syntax `type = '...'`
-                Some(t) => SinkFormatDesc::from_legacy_type(connector, t)
-                    .map_err(|e| StreamExecutorError::from((e, sink_id)))?,
-                // Case C: no format + encode required
-                None => None,
-            },
-        };
 
-        let format_desc = SinkParam::fill_secret_for_format_desc(format_desc)
-            .map_err(|e| StreamExecutorError::from((e, sink_id)))?;
-
-        // Backward compatibility: DEBEZIUM format should be treated as `Retract` type instead of `Upsert`.
-        let sink_type = if let Some(format_desc) = &format_desc
-            && format_desc.format == SinkFormat::Debezium
-        {
-            SinkType::Retract
-        } else {
-            let sink_type_from_proto = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
-            // For backward compatibility: Iceberg sink with Upsert type should be treated as Retract type.
-            if connector.eq_ignore_ascii_case(ICEBERG_SINK)
-                && matches!(sink_type_from_proto, SinkType::Upsert)
-            {
-                SinkType::Retract
-            } else {
-                sink_type_from_proto
-            }
-        };
-        let ignore_delete = sink_desc.ignore_delete();
-
-        let sink_param = SinkParam {
-            sink_id,
-            sink_name: sink_name.clone(),
-            properties: properties_with_secret,
-            columns: columns
-                .iter()
-                .filter(|col| !col.is_hidden)
-                .map(|col| col.column_desc.clone())
-                .collect(),
-            downstream_pk,
-            sink_type,
-            ignore_delete,
-            format_desc,
-            db_name,
-            sink_from_name,
-        };
+        let (sink_param, columns) = build_sink_param(sink_desc, properties_with_secret, connector)?;
 
         let sink_write_param = SinkWriterParam {
             executor_id: params.executor_id,

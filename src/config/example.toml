@@ -108,8 +108,10 @@ emergency_level0_sub_level_partition = 256
 level0_stop_write_threshold_max_sst_count = 5000
 level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = true
-max_kv_count_for_xor16 = 262144
+blocked_xor_filter_kv_count_threshold = 262144
 max_vnode_key_range_bytes = ""
+sstable_filter_kind = ["xor16", "xor16", "xor16", "xor16", "xor16", "xor16", "xor16"]
+sstable_filter_layout = ["auto", "auto", "auto", "auto", "auto", "auto", "auto"]
 
 [meta.developer]
 cached_traces_num = 256
