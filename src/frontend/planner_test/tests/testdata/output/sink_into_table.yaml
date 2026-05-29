@@ -38,6 +38,7 @@
   explain_output: |
     StreamProject { exprs: [t2.a, t2.b] }
     └─StreamSink { type: upsert, columns: [a, b], downstream_pk: [t2.a] }
-      └─StreamSyncLogStore
-        └─StreamExchange { dist: HashShard(t2.a) }
-          └─StreamTableScan { table: t2, columns: [a, b] }
+      └─StreamExchange [no_shuffle] { dist: HashShard(t2.a) }
+        └─StreamSyncLogStore
+          └─StreamExchange { dist: HashShard(t2.a) }
+            └─StreamTableScan { table: t2, columns: [a, b] }

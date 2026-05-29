@@ -76,3 +76,11 @@ query I
 with cte(a) as (select 1,2) select x,y from cte t(x,y);
 ----
 1 2
+
+statement error column reference "col" is ambiguous
+with cte as (
+  select
+    1 as col,
+    2 as col
+)
+select cte.col from cte;

@@ -50,10 +50,11 @@ pub struct InsertExecutor {
     returning: bool,
     txn_id: TxnId,
     session_id: u32,
+    wait_for_persistence: bool,
 }
 
 impl InsertExecutor {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
         table_version_id: TableVersionId,
@@ -66,6 +67,7 @@ impl InsertExecutor {
         row_id_index: Option<usize>,
         returning: bool,
         session_id: u32,
+        wait_for_persistence: bool,
     ) -> Self {
         let table_schema = child.schema().clone();
         let txn_id = dml_manager.gen_txn_id();
@@ -83,6 +85,7 @@ impl InsertExecutor {
             returning,
             txn_id,
             session_id,
+            wait_for_persistence,
         }
     }
 }
@@ -185,7 +188,11 @@ impl InsertExecutor {
             }
         }
 
-        write_handle.end().await?;
+        if self.wait_for_persistence {
+            write_handle.end_wait_persistence()?.await?;
+        } else {
+            write_handle.end().await?;
+        }
 
         // create ret value
         if !self.returning {
@@ -249,6 +256,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
             insert_node.session_id,
+            insert_node.wait_for_persistence,
         )))
     }
 }
@@ -264,6 +272,7 @@ mod tests {
     use risingwave_common::catalog::{
         ColumnDesc, ColumnId, Field, INITIAL_TABLE_VERSION_ID, schema_test_utils,
     };
+    use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::transaction::transaction_message::TxnMsg;
     use risingwave_common::types::{DataType, StructType};
     use risingwave_dml::dml_manager::DmlManager;
@@ -342,6 +351,7 @@ mod tests {
             row_id_index,
             false,
             0,
+            false,
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
@@ -380,7 +390,7 @@ mod tests {
             assert_eq!(*chunk.columns()[2], array);
         });
 
-        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(..));
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, None));
         let epoch = u64::MAX;
         let full_range = (Bound::Unbounded, Bound::Unbounded);
         let store_content = store
@@ -395,6 +405,64 @@ mod tests {
             )
             .await?;
         assert!(store_content.is_empty());
+
+        handle.await.unwrap();
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_insert_executor_wait_for_persistence() -> Result<()> {
+        let dml_manager = Arc::new(DmlManager::for_test());
+
+        let schema = schema_test_utils::ii();
+        let mut mock_executor = MockExecutor::new(schema.clone());
+        mock_executor.add(DataChunk::from_pretty(
+            "i i
+             1 2",
+        ));
+
+        let table_id = TableId::new(0);
+        let column_descs = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
+            .collect_vec();
+        let reader = dml_manager
+            .register_reader(table_id, INITIAL_TABLE_VERSION_ID, &column_descs)
+            .unwrap();
+        let mut reader = reader.stream_reader().into_stream();
+
+        let insert_executor = Box::new(InsertExecutor::new(
+            table_id,
+            INITIAL_TABLE_VERSION_ID,
+            dml_manager,
+            Box::new(mock_executor),
+            1024,
+            "InsertExecutor".to_owned(),
+            vec![0, 1],
+            vec![],
+            None,
+            false,
+            0,
+            true,
+        ));
+        let handle = tokio::spawn(async move {
+            let mut stream = insert_executor.execute();
+            let result = stream.next().await.unwrap().unwrap();
+            assert_eq!(
+                result.column_at(0).as_int64().iter().collect::<Vec<_>>(),
+                vec![Some(1)]
+            );
+        });
+
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Begin(_));
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::Data(_, _));
+        assert_matches!(reader.next().await.unwrap()?, TxnMsg::End(_, Some(persistence_notifier)) => {
+            assert!(!handle.is_finished());
+            persistence_notifier.send(()).unwrap();
+        });
 
         handle.await.unwrap();
 

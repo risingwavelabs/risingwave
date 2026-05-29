@@ -1,0 +1,85 @@
+# Verify migrated parallelism after upgrading to the new cluster.
+#
+# Naming convention: t_{parallelism}{parallelism_for_table}{strategy}{strategy_for_table}
+#   parallelism (streaming_parallelism):                          d=default,      f=fixed(8)
+#   parallelism_for_table (streaming_parallelism_for_table):      d=default,      f=fixed(6)
+#   strategy (streaming_parallelism_strategy):                    d=default,      b=bounded(32),  r=ratio(0.5),  a=auto
+#   strategy_for_table (streaming_parallelism_strategy_for_table): d=default,     b=bounded(16),  r=ratio(0.5),  a=auto
+#
+# System strategy: ALTER SYSTEM SET adaptive_parallelism_strategy = 'BOUNDED(64)'
+#
+# After migration the new version shows the resolved strategy:
+#   - Fixed jobs display as bare numbers (e.g. "6" instead of "fixed(6)")
+#   - Adaptive jobs display the materialized strategy (e.g. "bounded(64)", "ratio(0.5)")
+#   - Auto/Full strategy resolves to "adaptive"
+
+query TT
+SELECT name, lower(parallelism)
+FROM rw_streaming_parallelism
+WHERE name ~ '^t_[df][df][dbra][dbra]$'
+ORDER BY name;
+----
+t_ddaa adaptive
+t_ddab bounded(16)
+t_ddad adaptive
+t_ddar ratio(0.5)
+t_ddba adaptive
+t_ddbb bounded(16)
+t_ddbd bounded(32)
+t_ddbr ratio(0.5)
+t_ddda adaptive
+t_dddb bounded(16)
+t_dddd bounded(64)
+t_dddr ratio(0.5)
+t_ddra adaptive
+t_ddrb bounded(16)
+t_ddrd ratio(0.5)
+t_ddrr ratio(0.5)
+t_dfaa 6
+t_dfab 6
+t_dfad 6
+t_dfar 6
+t_dfba 6
+t_dfbb 6
+t_dfbd 6
+t_dfbr 6
+t_dfda 6
+t_dfdb 6
+t_dfdd 6
+t_dfdr 6
+t_dfra 6
+t_dfrb 6
+t_dfrd 6
+t_dfrr 6
+t_fdaa 8
+t_fdab 8
+t_fdad 8
+t_fdar 8
+t_fdba 8
+t_fdbb 8
+t_fdbd 8
+t_fdbr 8
+t_fdda 8
+t_fddb 8
+t_fddd 8
+t_fddr 8
+t_fdra 8
+t_fdrb 8
+t_fdrd 8
+t_fdrr 8
+t_ffaa 6
+t_ffab 6
+t_ffad 6
+t_ffar 6
+t_ffba 6
+t_ffbb 6
+t_ffbd 6
+t_ffbr 6
+t_ffda 6
+t_ffdb 6
+t_ffdd 6
+t_ffdr 6
+t_ffra 6
+t_ffrb 6
+t_ffrd 6
+t_ffrr 6

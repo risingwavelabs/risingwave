@@ -59,7 +59,6 @@ impl SplitReader for NexmarkSplitReader {
     type Properties = NexmarkProperties;
     type Split = NexmarkSplit;
 
-    #[allow(clippy::unused_async)]
     async fn new(
         properties: NexmarkProperties,
         splits: Vec<NexmarkSplit>,

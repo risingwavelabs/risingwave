@@ -41,29 +41,21 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes, Encode::Csv],
                     Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Debezium => vec![Encode::Json, Encode::Avro],
-                    Format::Maxwell => vec![Encode::Json],
-                    Format::Canal => vec![Encode::Json],
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
                 PULSAR_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
-                    Format::Maxwell => vec![Encode::Json],
-                    Format::Canal => vec![Encode::Json],
                 ),
                 KINESIS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes, Encode::Csv],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
-                    Format::Maxwell => vec![Encode::Json],
-                    Format::Canal => vec![Encode::Json],
                 ),
                 GOOGLE_PUBSUB_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
-                    Format::Maxwell => vec![Encode::Json],
-                    Format::Canal => vec![Encode::Json],
                 ),
                 NEXMARK_CONNECTOR => hashmap!(
                     Format::Native => vec![Encode::Native],
@@ -97,9 +89,6 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Debezium => vec![Encode::Json],
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
-                ),
-                CITUS_CDC_CONNECTOR => hashmap!(
-                    Format::Debezium => vec![Encode::Json],
                 ),
                 MONGODB_CDC_CONNECTOR => hashmap!(
                     Format::DebeziumMongo => vec![Encode::Json],
@@ -278,6 +267,18 @@ pub fn validate_compatibility(
         return Err(ErrorCode::InvalidConfigValue {
             config_entry: "debezium.max.queue.size".to_owned(),
             config_value: queue_size_value.to_owned(),
+        }
+        .into());
+    }
+
+    // Validate debezium.heartbeat.interval.ms for Postgres CDC: must be a valid integer and not 0
+    if connector == POSTGRES_CDC_CONNECTOR
+        && let Some(interval_value) = props.get("debezium.heartbeat.interval.ms")
+        && !interval_value.parse::<i64>().is_ok_and(|v| v != 0)
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "debezium.heartbeat.interval.ms".to_owned(),
+            config_value: interval_value.to_owned(),
         }
         .into());
     }

@@ -885,7 +885,6 @@ mod tests {
         )
     }
 
-    #[allow(clippy::mutable_key_type)]
     async fn chaos_test_case(
         handle: TableHolder,
         start_bound: Bound<UserKey<Bytes>>,
@@ -961,7 +960,7 @@ mod tests {
     ) {
         // We first generate the key value pairs.
         let mut rng = thread_rng();
-        #[allow(clippy::mutable_key_type)]
+
         let mut truth: ChaosTestTruth = BTreeMap::new();
         let mut prev_key_number: usize = 1;
         let number_of_keys = 5000;

@@ -55,7 +55,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> DynamicFilterExecutor<S> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         eval_error_report: ActorEvalErrorReport,

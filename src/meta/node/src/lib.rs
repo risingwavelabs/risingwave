@@ -132,7 +132,7 @@ pub struct MetaNodeOpts {
     #[override_opts(path = system.block_size_kb)]
     pub block_size_kb: Option<u32>,
 
-    /// False positive probability of bloom filter.
+    /// Deprecated: Bloom filter is no longer a supported SST filter implementation.
     #[clap(long, hide = true, env = "RW_BLOOM_FALSE_POSITIVE")]
     #[override_opts(path = system.bloom_false_positive)]
     pub bloom_false_positive: Option<f64>,

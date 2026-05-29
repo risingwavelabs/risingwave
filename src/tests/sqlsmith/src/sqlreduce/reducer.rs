@@ -472,7 +472,7 @@ impl Reducer {
     /// - If it fails, binary search for the largest working subset
     ///
     /// Returns: (AST, SQL, `applied_count`) if any batch succeeds, None otherwise
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn try_batch_with_binary_search(
         &mut self,
         ast_node: &crate::sqlreduce::path::AstNode,
