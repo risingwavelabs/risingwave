@@ -186,7 +186,7 @@ pub struct EquiJoinParams<K> {
 }
 
 impl<K> EquiJoinParams<K> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn new(
         probe_side: BoxedExecutor,
         probe_data_types: Vec<DataType>,
@@ -2402,7 +2402,7 @@ impl HashKeyDispatcher for HashJoinExecutorArgs {
 }
 
 impl<K> HashJoinExecutor<K> {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         join_type: JoinType,
         output_indices: Vec<usize>,
@@ -2440,7 +2440,7 @@ impl<K> HashJoinExecutor<K> {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     fn new_inner(
         join_type: JoinType,
         output_indices: Vec<usize>,

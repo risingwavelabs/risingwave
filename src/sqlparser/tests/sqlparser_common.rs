@@ -1685,6 +1685,57 @@ fn parse_alter_table_drop_column() {
 }
 
 #[test]
+fn parse_alter_table_alter_watermark() {
+    match verified_stmt("ALTER TABLE tab ALTER WATERMARK FOR ts AS ts - INTERVAL '1' MINUTE") {
+        Statement::AlterTable {
+            name,
+            operation:
+                AlterTableOperation::AlterWatermark {
+                    column_name,
+                    expr: _,
+                    with_ttl,
+                },
+        } => {
+            assert_eq!("tab", name.to_string());
+            assert_eq!("ts", column_name.to_string());
+            assert!(!with_ttl);
+        }
+        _ => unreachable!(),
+    }
+
+    match verified_stmt("ALTER TABLE tab ALTER WATERMARK FOR ts AS ts - 10 WITH TTL") {
+        Statement::AlterTable {
+            operation:
+                AlterTableOperation::AlterWatermark {
+                    column_name,
+                    with_ttl,
+                    ..
+                },
+            ..
+        } => {
+            assert_eq!("ts", column_name.to_string());
+            assert!(with_ttl);
+        }
+        _ => unreachable!(),
+    }
+
+    // `WATERMARK` is non-reserved; the new branch must not steal `ALTER <col>`
+    // when `<col>` happens to be named `watermark` (only commit on `WATERMARK FOR`).
+    match one_statement_parses_to(
+        "ALTER TABLE tab ALTER watermark TYPE BIGINT",
+        "ALTER TABLE tab ALTER COLUMN watermark SET DATA TYPE BIGINT",
+    ) {
+        Statement::AlterTable {
+            operation: AlterTableOperation::AlterColumn { column_name, .. },
+            ..
+        } => {
+            assert_eq!("watermark", column_name.to_string());
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn parse_alter_table_alter_column() {
     let alter_stmt = "ALTER TABLE tab";
     match verified_stmt(&format!(
@@ -3549,6 +3600,14 @@ fn parse_create_user() {
 }
 
 #[test]
+fn parse_alter_user_without_with_prefix() {
+    one_statement_parses_to(
+        "ALTER USER WITH PASSWORD 'rw_password_2'",
+        "ALTER USER WITH PASSWORD 'rw_password_2'",
+    );
+}
+
+#[test]
 fn parse_invalid_subquery_without_parens() {
     let res = parse_sql_statements("SELECT SELECT 1 FROM bar WHERE 1=1 FROM baz");
     assert!(format!("{}", res.unwrap_err()).contains("expected end of statement, found: 1"));
@@ -4206,4 +4265,137 @@ fn parse_wait_target() {
     one_statement_parses_to("WAIT MATERIALIZED VIEW mv1", "WAIT MATERIALIZED VIEW mv1");
     one_statement_parses_to("WAIT SINK snk1", "WAIT SINK snk1");
     one_statement_parses_to("WAIT INDEX idx1", "WAIT INDEX idx1");
+}
+
+#[test]
+fn parse_alter_compaction_group() {
+    use risingwave_sqlparser::ast::AlterCompactionGroupOperation;
+
+    // Single group with single config
+    match verified_stmt("ALTER COMPACTION GROUP 2 SET max_bytes_for_level_base = 1073741824") {
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            assert_eq!(group_ids, vec![2]);
+            match operation {
+                AlterCompactionGroupOperation::Set { configs } => {
+                    assert_eq!(configs.len(), 1);
+                    assert_eq!(configs[0].param.real_value(), "max_bytes_for_level_base");
+                    assert_eq!(
+                        configs[0].value,
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Number(
+                            "1073741824".into()
+                        )))
+                    );
+                }
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    // Single group with multiple configs
+    match verified_stmt(
+        "ALTER COMPACTION GROUP 2 SET max_bytes_for_level_base = 1073741824, target_file_size_base = 67108864",
+    ) {
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            assert_eq!(group_ids, vec![2]);
+            match operation {
+                AlterCompactionGroupOperation::Set { configs } => {
+                    assert_eq!(configs.len(), 2);
+                    assert_eq!(configs[0].param.real_value(), "max_bytes_for_level_base");
+                    assert_eq!(configs[1].param.real_value(), "target_file_size_base");
+                }
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    // Multiple groups
+    match verified_stmt("ALTER COMPACTION GROUP 1, 2, 3 SET max_bytes_for_level_base = 1073741824")
+    {
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            assert_eq!(group_ids, vec![1, 2, 3]);
+            match operation {
+                AlterCompactionGroupOperation::Set { configs } => {
+                    assert_eq!(configs.len(), 1);
+                }
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    // Boolean config
+    match verified_stmt("ALTER COMPACTION GROUP 2 SET enable_emergency_picker = true") {
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            assert_eq!(group_ids, vec![2]);
+            match operation {
+                AlterCompactionGroupOperation::Set { configs } => {
+                    assert_eq!(configs.len(), 1);
+                    assert_eq!(configs[0].param.real_value(), "enable_emergency_picker");
+                    assert_eq!(
+                        configs[0].value,
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(Value::Boolean(
+                            true
+                        )))
+                    );
+                }
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    // String config
+    match verified_stmt("ALTER COMPACTION GROUP 2 SET compression_algorithm = '6:lz4'") {
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            assert_eq!(group_ids, vec![2]);
+            match operation {
+                AlterCompactionGroupOperation::Set { configs } => {
+                    assert_eq!(configs.len(), 1);
+                    assert_eq!(configs[0].param.real_value(), "compression_algorithm");
+                    assert_eq!(
+                        configs[0].value,
+                        SetVariableValue::Single(SetVariableValueSingle::Literal(
+                            Value::SingleQuotedString("6:lz4".into())
+                        ))
+                    );
+                }
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
+
+    // Boolean config using unquoted identifier literal
+    match verified_stmt("ALTER COMPACTION GROUP 2 SET enable_emergency_picker = on") {
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            assert_eq!(group_ids, vec![2]);
+            match operation {
+                AlterCompactionGroupOperation::Set { configs } => {
+                    assert_eq!(configs.len(), 1);
+                    assert_eq!(configs[0].param.real_value(), "enable_emergency_picker");
+                    assert!(matches!(
+                        configs[0].value,
+                        SetVariableValue::Single(SetVariableValueSingle::Ident(ref ident))
+                            if ident.real_value() == "on"
+                    ));
+                }
+            }
+        }
+        _ => panic!("unexpected statement kind"),
+    }
 }

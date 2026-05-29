@@ -395,11 +395,11 @@ impl SplitEnumerator for AdbcSnowflakeSplitEnumerator {
 /// Split reader for ADBC Snowflake source.
 pub struct AdbcSnowflakeSplitReader {
     properties: AdbcSnowflakeProperties,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     splits: Vec<AdbcSnowflakeSplit>,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     parser_config: ParserConfig,
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     source_ctx: SourceContextRef,
 }
 

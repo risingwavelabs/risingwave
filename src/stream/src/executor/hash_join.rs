@@ -251,7 +251,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore, E: JoinEncoding> {
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
     HashJoinExecutor<K, S, T, E>
 {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         info: ExecutorInfo,
@@ -299,7 +299,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new_with_cache_size(
         ctx: ActorContextRef,
         info: ExecutorInfo,
@@ -1067,7 +1067,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
     /// 2. Always do cache refill, if the state count is good.
     /// 3. Handle state cleaning.
     /// 4. Handle degree table update.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn handle_match_rows<
         'a,
@@ -1242,7 +1242,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[inline]
     async fn handle_match_row<
         'a,
@@ -1442,7 +1442,7 @@ mod tests {
         .await
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn create_in_memory_state_table_with_watermark(
         mem_state: MemoryStateStore,
         data_types: &[DataType],

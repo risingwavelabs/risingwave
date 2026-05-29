@@ -64,7 +64,6 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
     type Properties = CdcProperties<T>;
     type Split = DebeziumCdcSplit<T>;
 
-    #[allow(clippy::unused_async)]
     async fn new(
         conn_props: CdcProperties<T>,
         splits: Vec<DebeziumCdcSplit<T>>,

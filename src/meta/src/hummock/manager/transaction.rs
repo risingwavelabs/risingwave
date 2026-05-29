@@ -197,7 +197,9 @@ impl<'a> HummockVersionTransaction<'a> {
                 .or_default()
                 .group_deltas;
 
-            group_deltas.push(GroupDelta::TruncateTables(table_ids.into_iter().collect()));
+            group_deltas.push(GroupDelta::PruneTableIdsFromSsts(
+                table_ids.into_iter().collect(),
+            ));
         }
 
         // update state table info

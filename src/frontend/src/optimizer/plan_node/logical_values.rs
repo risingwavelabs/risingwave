@@ -237,7 +237,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_prune_filter() {
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),

@@ -36,7 +36,7 @@ impl<K, V> Default for JoinRowSet<K, V> {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct VecOccupiedError<'a, K, V> {
     key: &'a K,
     old_value: &'a V,

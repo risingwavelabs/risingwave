@@ -99,7 +99,7 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
-use crate::ast::ddl::AlterFragmentOperation;
+use crate::ast::ddl::{AlterCompactionGroupOperation, AlterFragmentOperation};
 
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
@@ -3060,12 +3060,49 @@ impl Parser<'_> {
     // <config_param> { TO | = } { <value> | DEFAULT }
     // <config_param> is not a keyword, but an identifier
     pub fn parse_config_param(&mut self) -> ModalResult<ConfigParam> {
+        self.parse_config_param_inner(Self::parse_set_variable)
+    }
+
+    fn parse_config_param_inner(
+        &mut self,
+        parse_value: fn(&mut Self) -> ModalResult<SetVariableValue>,
+    ) -> ModalResult<ConfigParam> {
         let param = self.parse_identifier()?;
         if !self.consume_token(&Token::Eq) && !self.parse_keyword(Keyword::TO) {
             return self.expected("'=' or 'TO' after config parameter");
         }
-        let value = self.parse_set_variable()?;
+        let value = parse_value(self)?;
         Ok(ConfigParam { param, value })
+    }
+
+    /// Parse a single-value config param.
+    ///
+    /// This differs from [`Self::parse_config_param`] in that it does **not** allow a comma-separated
+    /// list on the RHS, so it can be safely used in constructs where comma separates multiple
+    /// assignments (e.g. `... SET a = 1, b = 2`).
+    fn parse_config_param_no_list(&mut self) -> ModalResult<ConfigParam> {
+        self.parse_config_param_inner(Self::parse_set_variable_no_list)
+    }
+
+    fn parse_set_variable_no_list(&mut self) -> ModalResult<SetVariableValue> {
+        alt((
+            Keyword::DEFAULT.value(SetVariableValue::Default),
+            alt((
+                Self::ensure_parse_value.map(SetVariableValueSingle::Literal),
+                |parser: &mut Self| {
+                    let checkpoint = *parser;
+                    let ident = parser.parse_identifier()?;
+                    if ident.value == "default" {
+                        *parser = checkpoint;
+                        return parser.expected("parameter list value").map_err(|e| e.cut());
+                    }
+                    Ok(SetVariableValueSingle::Ident(ident))
+                },
+                fail.expect("parameter value"),
+            ))
+            .map(|single: SetVariableValueSingle| SetVariableValue::Single(single)),
+        ))
+        .parse_next(self)
     }
 
     pub fn parse_since(&mut self) -> ModalResult<Since> {
@@ -3153,11 +3190,13 @@ impl Parser<'_> {
             self.parse_alter_secret()
         } else if self.parse_word("FRAGMENT") {
             self.parse_alter_fragment()
+        } else if self.parse_keyword(Keyword::COMPACTION) {
+            self.parse_alter_compaction_group()
         } else if self.parse_keywords(&[Keyword::DEFAULT, Keyword::PRIVILEGES]) {
             self.parse_alter_default_privileges()
         } else {
             self.expected(
-                "DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
+                "COMPACTION, DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
             )
         }
     }
@@ -3324,6 +3363,22 @@ impl Parser<'_> {
                 cascade,
             }
         } else if self.parse_keyword(Keyword::ALTER) {
+            // `WATERMARK` is non-reserved; require `FOR` so `ALTER <col>` on a
+            // column named `watermark` still falls through to ALTER COLUMN.
+            if self.parse_keywords(&[Keyword::WATERMARK, Keyword::FOR]) {
+                let column_name = self.parse_identifier_non_reserved()?;
+                self.expect_keyword(Keyword::AS)?;
+                let expr = self.parse_expr()?;
+                let with_ttl = self.parse_keywords(&[Keyword::WITH, Keyword::TTL]);
+                return Ok(Statement::AlterTable {
+                    name: table_name,
+                    operation: AlterTableOperation::AlterWatermark {
+                        column_name,
+                        expr,
+                        with_ttl,
+                    },
+                });
+            }
             let _ = self.parse_keyword(Keyword::COLUMN);
             let column_name = self.parse_identifier_non_reserved()?;
 
@@ -4003,6 +4058,28 @@ impl Parser<'_> {
         };
         Ok(Statement::AlterFragment {
             fragment_ids,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_compaction_group(&mut self) -> ModalResult<Statement> {
+        if !self.parse_keyword(Keyword::GROUP) {
+            return self.expected("GROUP after ALTER COMPACTION");
+        }
+        let mut group_ids = vec![self.parse_literal_u64()?];
+        while self.consume_token(&Token::Comma) {
+            group_ids.push(self.parse_literal_u64()?);
+        }
+        if !self.parse_keyword(Keyword::SET) {
+            return self.expected("SET after ALTER COMPACTION GROUP <id>");
+        }
+        // NOTE: use the `no_list` variant here, because `parse_set_variable` allows comma-separated
+        // lists (e.g., `SET foo = 1,2,3`), which would conflict with our use of comma to separate
+        // multiple config assignments.
+        let configs = self.parse_comma_separated(Parser::parse_config_param_no_list)?;
+        let operation = AlterCompactionGroupOperation::Set { configs };
+        Ok(Statement::AlterCompactionGroup {
+            group_ids,
             operation,
         })
     }
@@ -5473,7 +5550,6 @@ impl Parser<'_> {
             // followed by some joins or (B) another level of nesting.
             let table_and_joins = self.parse_table_and_joins()?;
 
-            #[allow(clippy::if_same_then_else)]
             if !table_and_joins.joins.is_empty() {
                 self.expect_token(&Token::RParen)?;
                 Ok(TableFactor::NestedJoin(Box::new(table_and_joins))) // (A)

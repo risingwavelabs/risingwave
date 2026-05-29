@@ -964,7 +964,7 @@ struct S3ObjectIter {
     prefix: String,
     next_continuation_token: Option<String>,
     is_truncated: Option<bool>,
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     send_future: Option<
         BoxFuture<
             'static,

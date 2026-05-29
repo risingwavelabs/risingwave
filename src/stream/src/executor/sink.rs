@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::mem;
 
 use anyhow::anyhow;
@@ -231,9 +231,8 @@ macro_rules! dispatch_output_kind {
 }
 
 impl<F: LogStoreFactory> SinkExecutor<F> {
-    #[allow(clippy::too_many_arguments)]
-    #[expect(clippy::unused_async)]
-    pub async fn new(
+    #[expect(clippy::too_many_arguments)]
+    pub fn new(
         actor_context: ActorContextRef,
         info: ExecutorInfo,
         input: Executor,
@@ -540,7 +539,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn process_msg(
         input: impl MessageStream,
@@ -819,7 +818,14 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             log_reader.init().await?;
                         },
                         RebuildSinkMessage::UpdateConfig(config) => {
-                            if F::ALLOW_REWIND {
+                            if !sink_config_has_changes(&sink_param.properties, &config) {
+                                info!(
+                                    executor_id = %sink_writer_param.executor_id,
+                                    sink_id = %sink_param.sink_id,
+                                    "skip alter sink config because properties are unchanged"
+                                );
+                                Ok(())
+                            } else if F::ALLOW_REWIND {
                                 match log_reader.rewind().await {
                                     Ok(()) => {
                                         sink_param.properties.extend(config.into_iter());
@@ -858,6 +864,15 @@ enum RebuildSinkMessage {
     UpdateConfig(HashMap<String, String>),
 }
 
+fn sink_config_has_changes(
+    current: &BTreeMap<String, String>,
+    incoming: &HashMap<String, String>,
+) -> bool {
+    incoming
+        .iter()
+        .any(|(key, value)| current.get(key) != Some(value))
+}
+
 impl<F: LogStoreFactory> Execute for SinkExecutor<F> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner()
@@ -873,6 +888,27 @@ mod test {
     use super::*;
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
     use crate::executor::test_utils::*;
+
+    #[test]
+    fn test_sink_config_has_changes() {
+        let current = BTreeMap::from([
+            ("connector".to_owned(), "blackhole".to_owned()),
+            ("commit_checkpoint_interval".to_owned(), "1".to_owned()),
+        ]);
+
+        assert!(!sink_config_has_changes(
+            &current,
+            &HashMap::from([("commit_checkpoint_interval".to_owned(), "1".to_owned())])
+        ));
+        assert!(sink_config_has_changes(
+            &current,
+            &HashMap::from([("commit_checkpoint_interval".to_owned(), "2".to_owned())])
+        ));
+        assert!(sink_config_has_changes(
+            &current,
+            &HashMap::from([("force_append_only".to_owned(), "true".to_owned())])
+        ));
+    }
 
     #[tokio::test]
     async fn test_force_append_only_sink() {
@@ -965,7 +1001,6 @@ mod test {
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
             None,
         )
-        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();
@@ -1104,7 +1139,6 @@ mod test {
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             None,
         )
-        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();
@@ -1212,7 +1246,6 @@ mod test {
             vec![DataType::Int64, DataType::Int64],
             None,
         )
-        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();
@@ -1335,7 +1368,6 @@ mod test {
             vec![DataType::Int64, DataType::Int64, DataType::Int64],
             None,
         )
-        .await
         .unwrap();
 
         let mut executor = sink_executor.boxed().execute();

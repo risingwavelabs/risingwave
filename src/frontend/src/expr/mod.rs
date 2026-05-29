@@ -812,7 +812,7 @@ impl ExprImpl {
     /// the form `InputRef [+- const_expr]`, else returns None.
     ///
     /// Deprecated: Only used by `as_input_comparison_cond`.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn as_input_offset(&self) -> Option<(usize, Option<(ExprType, ExprImpl)>)> {
         match self {
             ExprImpl::InputRef(input_ref) => Some((input_ref.index(), None)),

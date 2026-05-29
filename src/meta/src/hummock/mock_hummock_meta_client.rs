@@ -230,6 +230,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         _compaction_group_id: CompactionGroupId,
         _table_id: JobId,
         _level: u32,
+        _target_level: Option<u32>,
         _sst_ids: Vec<HummockSstableId>,
         _exclusive: bool,
     ) -> Result<bool> {

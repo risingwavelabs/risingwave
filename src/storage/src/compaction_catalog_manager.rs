@@ -36,7 +36,7 @@ use thiserror_ext::AsReport;
 use crate::hummock::{HummockError, HummockResult};
 use crate::row_serde::value_serde::ValueRowSerdeNew;
 
-/// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
+/// `FilterKeyExtractor` is generally used to extract keys stored in SST filters.
 pub trait FilterKeyExtractor: Send + Sync {
     fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8];
 }
@@ -53,7 +53,9 @@ impl FilterKeyExtractorImpl {
     pub fn from_table(table_catalog: &Table) -> Self {
         let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
 
-        if read_prefix_len == 0 || read_prefix_len > table_catalog.get_pk().len() {
+        if read_prefix_len == 0 {
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)
+        } else if read_prefix_len > table_catalog.get_pk().len() {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
             FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)
@@ -125,8 +127,8 @@ impl FixedLengthFilterKeyExtractor {
     }
 }
 
-/// [`SchemaFilterKeyExtractor`] build from `table_catalog` and transform a `user_key` to prefix for
-/// `prefix_bloom_filter`
+/// [`SchemaFilterKeyExtractor`] builds from `table_catalog` and transforms a `user_key` to a prefix
+/// for the SST filter.
 pub struct SchemaFilterKeyExtractor {
     /// Each stateful operator has its own read pattern, partly using prefix scan.
     /// Prefix key length can be decoded through its `DataType` and `OrderType` which obtained from
@@ -150,12 +152,12 @@ impl FilterKeyExtractor for SchemaFilterKeyExtractor {
         // if the key with table_id deserializer fail from schema, that should panic here for early
         // detection.
 
-        let bloom_filter_key_len = self
+        let filter_key_len = self
             .deserializer
             .deserialize_prefix_len(pk, self.read_prefix_len)
             .unwrap();
 
-        let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + bloom_filter_key_len;
+        let end_position = TABLE_PREFIX_LEN + VirtualNode::SIZE + filter_key_len;
         &user_key[TABLE_PREFIX_LEN + VirtualNode::SIZE..end_position]
     }
 }
@@ -846,6 +848,33 @@ mod tests {
             vector_index_info: None,
             cdc_table_type: None,
         }
+    }
+
+    #[test]
+    fn test_zero_read_prefix_len_uses_dummy_extractor() {
+        let mut prost_table = build_table_with_prefix_column_num(1);
+        prost_table.read_prefix_len_hint = 0;
+
+        let extractor = FilterKeyExtractorImpl::from_table(&prost_table);
+        let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
+        let schema = vec![DataType::Int64, DataType::Varchar];
+        let serializer = OrderedRowSerde::new(schema, order_types);
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Int64(100)),
+            Some(ScalarImpl::Utf8("abc".into())),
+        ]);
+        let mut row_bytes = vec![];
+        serializer.serialize(&row, &mut row_bytes);
+
+        let table_prefix = {
+            let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
+            buf.put_u32(1);
+            buf.to_vec()
+        };
+        let vnode_prefix = &dummy_vnode()[..];
+        let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
+
+        assert!(extractor.extract(&full_key).is_empty());
     }
 
     #[test]

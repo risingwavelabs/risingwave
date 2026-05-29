@@ -46,6 +46,7 @@ use crate::optimizer::plan_expr_rewriter::ConstEvalRewriter;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::{
     Explain, LogicalProject, LogicalScan, StreamMaterialize, StreamPlanRef as PlanRef,
+    ensure_sync_log_store_fragment_root,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRoot, OptimizerContext, OptimizerContextRef, PlanRoot};
@@ -397,7 +398,7 @@ pub(crate) fn gen_create_index_plan(
             },
         )?;
         let index_table = vector_index_write.table().clone();
-        let plan: PlanRef = vector_index_write.into();
+        let plan: PlanRef = ensure_sync_log_store_fragment_root(vector_index_write.into());
         (plan, index_table)
     } else {
         // Manually assemble the materialization plan for the index MV.
@@ -418,7 +419,7 @@ pub(crate) fn gen_create_index_plan(
             },
         )?;
         let index_table = materialize.table().clone();
-        let plan: PlanRef = materialize.into();
+        let plan: PlanRef = ensure_sync_log_store_fragment_root(materialize.into());
         (plan, index_table)
     };
 

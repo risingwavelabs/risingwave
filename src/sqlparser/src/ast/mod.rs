@@ -30,10 +30,10 @@ use winnow::ModalResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFragmentOperation,
-    AlterFunctionOperation, AlterSchemaOperation, AlterSecretOperation, AlterTableOperation,
-    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
-    WebhookSourceInfo,
+    AlterColumnOperation, AlterCompactionGroupOperation, AlterConnectionOperation,
+    AlterDatabaseOperation, AlterFragmentOperation, AlterFunctionOperation, AlterSchemaOperation,
+    AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
 };
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
@@ -1256,7 +1256,7 @@ pub enum WaitTarget {
 }
 
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
-#[allow(clippy::large_enum_variant)]
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Statement {
     /// Analyze (Hive)
@@ -1503,6 +1503,11 @@ pub enum Statement {
     AlterFragment {
         fragment_ids: Vec<u32>,
         operation: AlterFragmentOperation,
+    },
+    /// ALTER COMPACTION GROUP
+    AlterCompactionGroup {
+        group_ids: Vec<u64>,
+        operation: AlterCompactionGroupOperation,
     },
     /// DESCRIBE relation
     /// ALTER DEFAULT PRIVILEGES
@@ -1773,7 +1778,7 @@ impl Statement {
     //
     // Clippy thinks this function is too complicated, but it is painful to
     // split up without extracting structs for each `Statement` variant.
-    #[allow(clippy::cognitive_complexity)]
+    #[expect(clippy::cognitive_complexity)]
     fn fmt_unchecked(&self, mut f: impl std::fmt::Write) -> fmt::Result {
         match self {
             Statement::Explain {
@@ -2515,6 +2520,17 @@ impl Statement {
                     f,
                     "ALTER FRAGMENT {} {}",
                     display_comma_separated(fragment_ids),
+                    operation
+                )
+            }
+            Statement::AlterCompactionGroup {
+                group_ids,
+                operation,
+            } => {
+                write!(
+                    f,
+                    "ALTER COMPACTION GROUP {} {}",
+                    display_comma_separated(group_ids),
                     operation
                 )
             }

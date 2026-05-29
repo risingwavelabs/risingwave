@@ -158,7 +158,7 @@ impl<'a, K: Ord, V> CursorWithDelta<'a, K, V> {
         self.r#move::<false /* PREV */>()
     }
 
-    #[allow(clippy::should_implement_trait)]
+    #[expect(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<(&'a K, &'a V)> {
         self.r#move::<true /* NEXT */>()
     }
