@@ -147,6 +147,9 @@ CREATE TABLE timestamptz_table (
 );
 
 statement ok
+SET TIME ZONE 'UTC';
+
+statement ok
 CREATE SINK sink_timestamptz_table
 FROM timestamptz_table
 WITH (

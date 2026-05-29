@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use bytes::Bytes;
+use chrono_tz::Tz;
 use mysql_async::Opts;
 use mysql_async::prelude::Queryable;
 use risingwave_common::array::{Op, StreamChunk};
@@ -266,7 +267,7 @@ impl StarrocksSink {
                 Ok(starrocks_data_type.contains("datetime"))
             }
             risingwave_common::types::DataType::Timestamptz => {
-                // StarRocks JSON encoding writes timestamptz as a UTC timestamp string without a
+                // StarRocks JSON encoding writes timestamptz as a timestamp string without a
                 // timezone suffix, so StarRocks can parse it into DATETIME or store it as text.
                 Ok(Self::starrocks_data_type_contains_any(
                     starrocks_data_type,
@@ -367,6 +368,7 @@ impl Sink for StarrocksSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
+            writer_param.time_zone,
         )?;
 
         let metrics = SinkWriterMetrics::new(&writer_param);
@@ -408,6 +410,7 @@ impl StarrocksSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        time_zone: Tz,
     ) -> Result<Self> {
         let mut field_names = schema.names_str();
         if !is_append_only {
@@ -449,7 +452,7 @@ impl StarrocksSinkWriter {
             is_append_only,
             client: None,
             txn_client: Arc::new(StarrocksTxnClient::new(txn_request_builder)),
-            row_encoder: JsonEncoder::new_with_starrocks(schema, None),
+            row_encoder: JsonEncoder::new_with_starrocks(schema, None, time_zone),
             curr_txn_label: None,
         })
     }

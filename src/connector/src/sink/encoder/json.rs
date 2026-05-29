@@ -19,6 +19,7 @@ use anyhow::Context;
 use base64::Engine as _;
 use base64::engine::general_purpose;
 use chrono::{DateTime, Datelike, Timelike};
+use chrono_tz::Tz;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
@@ -115,12 +116,18 @@ impl JsonEncoder {
         }
     }
 
-    pub fn new_with_starrocks(schema: Schema, col_indices: Option<Vec<usize>>) -> Self {
+    pub fn new_with_starrocks(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        time_zone: Tz,
+    ) -> Self {
         let config = JsonEncoderConfig {
             time_handling_mode: TimeHandlingMode::Milli,
             date_handling_mode: DateHandlingMode::String,
             timestamp_handling_mode: TimestampHandlingMode::String,
-            timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
+            timestamptz_handling_mode: TimestamptzHandlingMode::SpecifiedTimezoneWithoutSuffix(
+                time_zone,
+            ),
             custom_json_type: CustomJsonType::StarRocks,
             jsonb_handling_mode: JsonbHandlingMode::Dynamic,
         };
@@ -252,6 +259,11 @@ fn datum_to_json_object(
                 }
                 TimestamptzHandlingMode::UtcWithoutSuffix => {
                     let parsed = v.to_datetime_utc().naive_utc();
+                    let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
+                    json!(v)
+                }
+                TimestamptzHandlingMode::SpecifiedTimezoneWithoutSuffix(time_zone) => {
+                    let parsed = v.to_datetime_in_zone(time_zone).naive_local();
                     let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
                     json!(v)
                 }
@@ -460,7 +472,7 @@ mod tests {
     #[test]
     fn test_starrocks_timestamptz_encoding() {
         let schema = Schema::new(vec![Field::with_name(DataType::Timestamptz, "ts")]);
-        let encoder = JsonEncoder::new_with_starrocks(schema, None);
+        let encoder = JsonEncoder::new_with_starrocks(schema, None, chrono_tz::Asia::Shanghai);
         let tstz = "2018-01-26T18:30:09.453Z".parse().unwrap();
         let row = OwnedRow::new(vec![Some(ScalarImpl::Timestamptz(tstz))]);
 
@@ -468,7 +480,7 @@ mod tests {
 
         assert_eq!(
             encoded.get("ts"),
-            Some(&json!("2018-01-26 18:30:09.453000"))
+            Some(&json!("2018-01-27 02:30:09.453000"))
         );
     }
 
