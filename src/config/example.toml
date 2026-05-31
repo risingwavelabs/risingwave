@@ -110,7 +110,7 @@ level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = true
 blocked_xor_filter_kv_count_threshold = 262144
 max_vnode_key_range_bytes = ""
-sstable_filter_kind = ["xor16", "xor16", "xor16", "xor16", "xor16", "xor16", "xor16"]
+sstable_filter_kind = ["xor16", "xor16", "xor16", "xor16", "xor16", "xor8", "xor8"]
 sstable_filter_layout = ["auto", "blocked", "blocked", "blocked", "blocked", "blocked", "blocked"]
 
 [meta.developer]
