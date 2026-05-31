@@ -327,6 +327,7 @@ impl EnforceSecret for KafkaConnectionProps {
         "properties.ssl.key.pem",
         "properties.ssl.key.password",
         "properties.sasl.password",
+        "properties.sasl.oauthbearer.client.secret",
     };
 }
 
