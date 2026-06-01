@@ -504,7 +504,6 @@ impl CheckpointControl {
         context: &BatchRefreshJobTriggerContext,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         actor_id_counter: &AtomicU32,
-        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> MetaResult<bool> {
         let database = self
@@ -517,7 +516,6 @@ impl CheckpointControl {
             context,
             worker_nodes,
             actor_id_counter,
-            adaptive_parallelism_strategy,
             partial_graph_manager,
         )
     }
@@ -1397,7 +1395,6 @@ impl DatabaseCheckpointControl {
         context: &BatchRefreshJobTriggerContext,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         actor_id_counter: &AtomicU32,
-        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> MetaResult<bool> {
         let job = self
@@ -1409,7 +1406,6 @@ impl DatabaseCheckpointControl {
                 context,
                 worker_nodes,
                 actor_id_counter,
-                adaptive_parallelism_strategy,
                 partial_graph_manager,
             ),
             _ => panic!("job {} should be a batch refresh job", job_id),

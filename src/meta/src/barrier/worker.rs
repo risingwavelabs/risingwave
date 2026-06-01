@@ -831,7 +831,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             &context,
             self.active_streaming_nodes.current(),
             self.env.actor_id_generator(),
-            self.adaptive_parallelism_strategy,
             &mut self.partial_graph_manager,
         )?;
 

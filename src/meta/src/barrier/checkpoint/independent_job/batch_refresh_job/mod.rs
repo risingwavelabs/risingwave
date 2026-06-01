@@ -1158,7 +1158,6 @@ impl BatchRefreshJobCheckpointControl {
         context: &BatchRefreshJobTriggerContext,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         actor_id_counter: &AtomicU32,
-        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> MetaResult<bool> {
         let last_committed_epoch = match &self.status {
@@ -1199,7 +1198,6 @@ impl BatchRefreshJobCheckpointControl {
             &context.definition,
             actor_id_counter,
             worker_nodes,
-            adaptive_parallelism_strategy,
             &context.database_resource_group,
             &context.streaming_job_model,
             self.partial_graph_id,
@@ -1207,10 +1205,9 @@ impl BatchRefreshJobCheckpointControl {
 
         // Build actors_to_create and initial mutation.
         let added_actors: Vec<ActorId> = render_result
-            .stream_actors
+            .fragment_infos
             .values()
-            .flatten()
-            .map(|actor| actor.actor_id)
+            .flat_map(|fragment| fragment.actors.keys().copied())
             .collect();
 
         let initial_mutation = Mutation::Add(AddMutation {
