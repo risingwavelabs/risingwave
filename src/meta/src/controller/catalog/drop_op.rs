@@ -529,7 +529,6 @@ async fn summarize_drop_preview(
     removed_objects: Vec<PartialObject>,
     txn: &DatabaseTransaction,
 ) -> MetaResult<DropObjectPreview> {
-    let total_count = removed_objects.len() as u64;
     let mut object_counts: BTreeMap<i32, u64> = BTreeMap::new();
     let mut table_ids = Vec::new();
 
@@ -563,15 +562,17 @@ async fn summarize_drop_preview(
             .all(txn)
             .await?;
         for (_, table_type) in table_types {
-            let pb_type = if table_type == TableType::MaterializedView {
-                PbObjectType::Mview
-            } else {
-                PbObjectType::Table
+            // Internal state tables are implementation details invisible to users; skip them.
+            let pb_type = match table_type {
+                TableType::Table => PbObjectType::Table,
+                TableType::MaterializedView => PbObjectType::Mview,
+                TableType::Internal | TableType::Index | TableType::VectorIndex => continue,
             };
             *object_counts.entry(pb_type as i32).or_default() += 1;
         }
     }
 
+    let total_count = object_counts.values().sum();
     Ok(DropObjectPreview {
         total_count,
         object_counts: object_counts
