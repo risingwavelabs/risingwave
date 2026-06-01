@@ -450,7 +450,7 @@ fn versions_are_newer_or_equal(
 /// TOAST column handling for CDC tables with TOAST columns.
 mod toast {
     use risingwave_common::row::Row as _;
-    use risingwave_common::types::DEBEZIUM_UNAVAILABLE_VALUE;
+    use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DEBEZIUM_UNAVAILABLE_VECTOR_ELEM};
 
     use super::*;
 
@@ -486,6 +486,19 @@ mod toast {
                     false
                 }
             }
+            Some(risingwave_common::types::ScalarRefImpl::Vector(vec_ref)) => {
+                // pgvector unchanged-TOAST sentinel: the JSON parser materialises an N-d
+                // vector whose every element equals `DEBEZIUM_UNAVAILABLE_VECTOR_ELEM`
+                // (currently `f32::MAX`). N matches the column's declared dimension so the
+                // value survives `check_datum_type` on its way in; the chance of a real
+                // embedding having every element simultaneously equal to that value is
+                // effectively zero.
+                let slice = vec_ref.as_slice();
+                !slice.is_empty()
+                    && slice
+                        .iter()
+                        .all(|f| f.0 == DEBEZIUM_UNAVAILABLE_VECTOR_ELEM)
+            }
             Some(risingwave_common::types::ScalarRefImpl::List(list_ref)) => {
                 // For list type, check if it contains exactly one element with the unavailable value
                 // This is because when any element in an array triggers TOAST, Debezium treats the entire
@@ -511,6 +524,7 @@ mod toast {
         new_row: &OwnedRow,
         toastable_indices: &[usize],
     ) -> OwnedRow {
+        println!("这里");
         let mut fixed_row_data = new_row.as_inner().to_vec();
 
         for &toast_idx in toastable_indices {
