@@ -83,6 +83,43 @@ select count(*) from rw_iceberg_snapshots where schema_name = 'public' and sourc
 ----
 2
 
+# COW compaction for partitioned tables must publish all partitions atomically.
+statement ok
+create table t_cow_partitioned(p int, id int, v int, primary key(p, id))
+with(
+    commit_checkpoint_interval = 1,
+    partition_by = 'p',
+    write_mode = 'copy-on-write',
+    enable_snapshot_expiration = 'false'
+) engine = iceberg;
+
+statement ok
+insert into t_cow_partitioned values
+    (1, 1, 10), (1, 2, 20),
+    (2, 3, 30), (2, 4, 40),
+    (3, 5, 50), (3, 6, 60);
+
+statement ok
+flush;
+
+sleep 5s
+
+statement ok
+VACUUM FULL t_cow_partitioned;
+
+query ??? rowsort retry 6 backoff 1s
+select p, id, v from t_cow_partitioned order by p, id;
+----
+1 1 10
+1 2 20
+2 3 30
+2 4 40
+3 5 50
+3 6 60
+
+statement ok
+DROP TABLE t_cow_partitioned;
+
 statement ok
 DROP TABLE t_cow;
 
