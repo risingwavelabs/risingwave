@@ -427,6 +427,7 @@ impl StreamActorManager {
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         actor_config: Arc<StreamingConfig>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
+        let expr_context = actor.expr_context.clone().unwrap();
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -437,7 +438,6 @@ impl StreamActorManager {
             self.env.clone(),
         );
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
-        let expr_context = actor.expr_context.clone().unwrap();
 
         let (executor, subtasks) = self
             .create_nodes(

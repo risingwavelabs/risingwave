@@ -258,6 +258,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_name,
             connector: connector.to_owned(),
             streaming_config: params.config.as_ref().clone(),
+            time_zone: params.actor_context.time_zone,
         };
 
         let log_store_identity = format!(

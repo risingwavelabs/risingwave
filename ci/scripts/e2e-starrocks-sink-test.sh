@@ -42,6 +42,12 @@ AGGREGATE KEY(\`id\`)
 DISTRIBUTED BY HASH(\`id\`) properties(\"replication_num\" = \"1\");
 DROP TABLE IF EXISTS demo_reserved_words;
 CREATE TABLE demo_reserved_words(id int, \`order\` string, \`from\` string) ENGINE=OLAP
+PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");
+DROP TABLE IF EXISTS demo_timestamptz_table;
+CREATE TABLE demo_timestamptz_table(id int, ts_datetime datetime, ts_varchar varchar(32), ts_char char(32), ts_string string) ENGINE=OLAP
+PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");
+DROP TABLE IF EXISTS demo_permission_probe;
+CREATE TABLE demo_permission_probe(id int) ENGINE=OLAP
 PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\");"
 
   echo "--- create starrocks table"
@@ -60,7 +66,10 @@ PRIMARY KEY(id) DISTRIBUTED BY HASH (id) properties(\"replication_num\" = \"1\")
 
 create_starrocks_tables
 mysql -uroot -P 9030 -h starrocks-fe-server -e "CREATE USER 'users'@'%' IDENTIFIED BY '123456';
-GRANT ALL ON *.* TO 'users'@'%';"
+GRANT ALL ON *.* TO 'users'@'%';
+DROP USER IF EXISTS 'users_no_bhv_table_priv'@'%';
+CREATE USER 'users_no_bhv_table_priv'@'%' IDENTIFIED BY '123456';
+GRANT SELECT ON demo.demo_permission_probe TO 'users_no_bhv_table_priv'@'%';"
 sleep 2
 
 echo "--- testing sinks"
@@ -68,6 +77,7 @@ sqllogictest -p 4566 -d dev './e2e_test/sink/starrocks_sink.slt'
 sleep 1
 mysql -uroot -P 9030 -h starrocks-fe-server -e "select * from demo.demo_bhv_table" > ./query_result.csv
 mysql -uroot -P 9030 -h starrocks-fe-server -e "select * from demo.demo_agg_table" > ./query_result_agg.csv
+mysql -uroot -P 9030 -h starrocks-fe-server -e "select * from demo.demo_timestamptz_table" > ./query_result_timestamptz.csv
 
 if ! cat ./query_result.csv | sed '1d; s/\t/,/g' | awk -F "," '{
     exit !($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01 01:01:01" && $9 == 0 && $10 = "{"v101": 100}" && $11 == 1.12346); }'
@@ -82,6 +92,14 @@ if ! cat ./query_result_agg.csv | sed '1d; s/\t/,/g' | awk -F "," '{
 then
   cat ./query_result_agg.csv
   echo "The output is not as expected."
+  exit 1
+fi
+
+if ! cat ./query_result_timestamptz.csv | sed '1d; s/\t/,/g' | awk -F "," '{
+    exit !($1 == 1 && $2 ~ /^2018-01-27 02:30:09/ && $3 == "2018-01-27 02:30:09.000000" && $4 ~ /^2018-01-27 02:30:09.000000 *$/ && $5 == "2018-01-27 02:30:09.000000"); }'
+then
+  cat ./query_result_timestamptz.csv
+  echo "The timestamptz output is not as expected."
   exit 1
 fi
 

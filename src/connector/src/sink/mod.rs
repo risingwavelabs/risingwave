@@ -65,6 +65,7 @@ use std::sync::{Arc, LazyLock};
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use chrono_tz::{Tz, UTC};
 use decouple_checkpoint_log_sink::{
     COMMIT_CHECKPOINT_INTERVAL, DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE,
     DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE,
@@ -594,6 +595,7 @@ pub struct SinkWriterParam {
     pub sink_name: String,
     pub connector: String,
     pub streaming_config: StreamingConfig,
+    pub time_zone: Tz,
 }
 
 #[derive(Clone)]
@@ -690,6 +692,7 @@ impl SinkWriterParam {
             sink_name: "test_sink".to_owned(),
             connector: "test_connector".to_owned(),
             streaming_config: StreamingConfig::default(),
+            time_zone: UTC,
         }
     }
 }
