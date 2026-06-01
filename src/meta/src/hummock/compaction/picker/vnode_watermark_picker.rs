@@ -37,47 +37,35 @@ impl VnodeWatermarkCompactionPicker {
         level_handlers: &[LevelHandler],
         table_watermarks: &BTreeMap<TableId, ReadTableWatermark>,
     ) -> Option<CompactionInput> {
-        let mut input_levels = vec![];
-        let mut select_input_size = 0;
-        let mut total_file_count = 0;
-        let mut target_level = None;
-
-        for level in &levels.levels {
-            let table_infos: Vec<_> = level
-                .table_infos
-                .iter()
-                .filter(|sst_info| {
-                    !level_handlers[level.level_idx as usize].is_pending_compact(&sst_info.sst_id)
-                        && should_trivial_reclaim_sst_by_watermark(sst_info, table_watermarks)
-                })
-                .cloned()
-                .collect();
-
-            if table_infos.is_empty() {
-                continue;
+        let level = levels.levels.last()?;
+        let mut select_input_ssts = vec![];
+        for sst_info in &level.table_infos {
+            if !level_handlers[level.level_idx as usize].is_pending_compact(&sst_info.sst_id)
+                && should_trivial_reclaim_sst_by_watermark(sst_info, table_watermarks)
+            {
+                select_input_ssts.push(sst_info.clone());
             }
-
-            select_input_size += table_infos.iter().map(|sst| sst.sst_size).sum::<u64>();
-            total_file_count += table_infos.len() as u64;
-            target_level = Some((level.level_idx, level.sub_level_id));
-            input_levels.push(InputLevel {
-                level_idx: level.level_idx,
-                level_type: level.level_type,
-                table_infos,
-            });
         }
-
-        let (target_level_idx, target_sub_level_id) = target_level?;
-        if total_file_count == 0 {
+        if select_input_ssts.is_empty() {
             return None;
         }
-
         Some(CompactionInput {
-            select_input_size,
-            total_file_count,
-            input_levels,
-            target_level: target_level_idx as usize,
-            target_sub_level_id,
+            select_input_size: select_input_ssts.iter().map(|sst| sst.sst_size).sum(),
+            total_file_count: select_input_ssts.len() as u64,
+            input_levels: vec![
+                InputLevel {
+                    level_idx: level.level_idx,
+                    level_type: level.level_type,
+                    table_infos: select_input_ssts,
+                },
+                InputLevel {
+                    level_idx: level.level_idx,
+                    level_type: level.level_type,
+                    table_infos: vec![],
+                },
+            ],
+            target_level: level.level_idx as usize,
+            target_sub_level_id: level.sub_level_id,
             ..Default::default()
         })
     }
