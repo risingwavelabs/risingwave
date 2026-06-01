@@ -48,8 +48,8 @@ pub const ICEBERG_SINK: &str = "iceberg";
 pub struct IcebergSink {
     pub config: IcebergConfig,
     param: SinkParam,
-    // In upsert mode, it never be None and empty.
-    unique_column_ids: Option<Vec<usize>>,
+    // In upsert mode, it is never None or empty.
+    upsert_primary_key_column_names: Option<Vec<String>>,
 }
 
 impl EnforceSecret for IcebergSink {
@@ -99,29 +99,41 @@ impl IcebergSink {
             .map_err(SinkError::Config)?;
         }
 
-        let unique_column_ids = if config.r#type == SINK_TYPE_UPSERT && !config.force_append_only {
-            // Use the pk indices resolved by the frontend instead of re-matching by name.
-            let pk_indices = param
-                .downstream_pk
-                .as_ref()
-                .filter(|pk| !pk.is_empty())
-                .ok_or_else(|| {
-                    SinkError::Config(anyhow!(
-                        "primary key must be specified for upsert iceberg sink"
-                    ))
-                })?;
-            let unique_column_ids = pk_indices
-                .iter()
-                .map(|&idx| param.columns[idx].column_id.get_id() as usize)
-                .collect();
-            Some(unique_column_ids)
-        } else {
-            None
-        };
+        let upsert_primary_key_column_names =
+            if config.r#type == SINK_TYPE_UPSERT && !config.force_append_only {
+                let pk_indices = param
+                    .downstream_pk
+                    .as_ref()
+                    .filter(|pk| !pk.is_empty())
+                    .ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "primary key must be specified for upsert iceberg sink"
+                        ))
+                    })?;
+                Some(
+                    pk_indices
+                        .iter()
+                        .map(|&idx| {
+                            param
+                                .columns
+                                .get(idx)
+                                .map(|column| column.name.clone())
+                                .ok_or_else(|| {
+                                    SinkError::Config(anyhow!(
+                                        "primary key column index {} out of range in sink schema",
+                                        idx
+                                    ))
+                                })
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                )
+            } else {
+                None
+            };
         Ok(Self {
             config,
             param,
-            unique_column_ids,
+            upsert_primary_key_column_names,
         })
     }
 }
@@ -294,7 +306,7 @@ impl Sink for IcebergSink {
             self.config.clone(),
             self.param.clone(),
             writer_param.clone(),
-            self.unique_column_ids.clone(),
+            self.upsert_primary_key_column_names.clone(),
         );
 
         let commit_checkpoint_interval =

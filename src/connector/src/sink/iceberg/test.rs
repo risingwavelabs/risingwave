@@ -14,7 +14,10 @@
 
 use std::collections::BTreeMap;
 
-use iceberg::spec::{FormatVersion, NullOrder, SortDirection};
+use iceberg::spec::{
+    FormatVersion, NestedField, NullOrder, PrimitiveType, Schema as IcebergSchema, SortDirection,
+    Type,
+};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, FieldRef as ArrowFieldRef,
     Fields as ArrowFields, Schema as ArrowSchema,
@@ -34,6 +37,23 @@ use crate::sink::iceberg::{
 };
 
 pub const DEFAULT_ICEBERG_COMPACTION_INTERVAL: u64 = 3600; // 1 hour
+
+#[test]
+fn test_resolve_equality_delete_field_ids_from_iceberg_schema() {
+    let iceberg_schema = IcebergSchema::builder()
+        .with_fields(vec![
+            NestedField::new(42, "k", Type::Primitive(PrimitiveType::Int), true).into(),
+            NestedField::new(99, "b", Type::Primitive(PrimitiveType::Int), true).into(),
+        ])
+        .build()
+        .unwrap();
+
+    let field_ids =
+        super::writer::resolve_equality_delete_field_ids(&["k".to_owned()], &iceberg_schema)
+            .unwrap();
+
+    assert_eq!(field_ids, vec![42]);
+}
 
 #[test]
 fn test_compatible_arrow_schema() {
@@ -956,6 +976,10 @@ fn test_iceberg_sink_upper_case_primary_key() {
     };
 
     let sink = IcebergSink::new(config, param).unwrap();
-    // `unique_column_ids` is the `ColumnId` of the upper-case "Key" column.
-    assert_eq!(sink.unique_column_ids, Some(vec![1]));
+    // Keep the case-preserving column name selected by the frontend so the writer can
+    // resolve the actual Iceberg field id after loading table metadata.
+    assert_eq!(
+        sink.upsert_primary_key_column_names,
+        Some(vec!["Key".to_owned()])
+    );
 }
