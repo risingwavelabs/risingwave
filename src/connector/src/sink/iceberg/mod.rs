@@ -100,27 +100,21 @@ impl IcebergSink {
         }
 
         let unique_column_ids = if config.r#type == SINK_TYPE_UPSERT && !config.force_append_only {
-            if let Some(pk) = &config.primary_key {
-                let mut unique_column_ids = Vec::with_capacity(pk.len());
-                for col_name in pk {
-                    let id = param
-                        .columns
-                        .iter()
-                        .find(|col| col.name.as_str() == col_name)
-                        .ok_or_else(|| {
-                            SinkError::Config(anyhow!(
-                                "Primary key column {} not found in sink schema",
-                                col_name
-                            ))
-                        })?
-                        .column_id
-                        .get_id() as usize;
-                    unique_column_ids.push(id);
-                }
-                Some(unique_column_ids)
-            } else {
-                unreachable!()
-            }
+            // Use the pk indices resolved by the frontend instead of re-matching by name.
+            let pk_indices = param
+                .downstream_pk
+                .as_ref()
+                .filter(|pk| !pk.is_empty())
+                .ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "primary key must be specified for upsert iceberg sink"
+                    ))
+                })?;
+            let unique_column_ids = pk_indices
+                .iter()
+                .map(|&idx| param.columns[idx].column_id.get_id() as usize)
+                .collect();
+            Some(unique_column_ids)
         } else {
             None
         };
