@@ -24,12 +24,11 @@ use std::ops::{BitXor, Bound, Range};
 pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
-mod bloom;
 mod xor_filter;
-pub use bloom::BloomFilterBuilder;
 use serde::{Deserialize, Serialize};
 pub use xor_filter::{
-    BlockedXor16FilterBuilder, Xor8FilterBuilder, Xor16FilterBuilder, XorFilterReader,
+    BlockedXor8FilterBuilder, BlockedXor16FilterBuilder, Xor8FilterBuilder, Xor16FilterBuilder,
+    XorFilterReader,
 };
 pub mod builder;
 pub use builder::*;
@@ -52,7 +51,7 @@ mod utils;
 pub use filter::FilterBuilder;
 pub use utils::{CompressionAlgorithm, xxhash64_checksum, xxhash64_verify};
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
-use xxhash_rust::{xxh32, xxh64};
+use xxhash_rust::xxh64;
 
 use super::{HummockError, HummockResult};
 use crate::hummock::CachePolicy;
@@ -123,7 +122,7 @@ struct SerdeSstable {
 
 impl From<SerdeSstable> for Sstable {
     fn from(SerdeSstable { id, meta }: SerdeSstable) -> Self {
-        // set skip_bloom_filter_in_serde to false because the behavior
+        // Set skip_bloom_filter_in_serde to false because the behavior
         // is determined by the serializer
         Sstable::new(id, meta, false)
     }
@@ -137,9 +136,9 @@ pub struct Sstable {
     pub meta: SstableMeta,
     #[serde(skip)]
     pub filter_reader: XorFilterReader,
-    /// sst serde happens when a sst meta is written to meta disk cache.
-    /// excluding bloom filter from serde can reduce the meta disk cache entry size
-    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    /// SST serde happens when an SST meta is written to meta disk cache.
+    /// Excluding the SST filter from serde can reduce the meta disk cache entry size
+    /// and reduce disk IO throughput at the cost of making the SST filter useless.
     #[serde(skip)]
     skip_bloom_filter_in_serde: bool,
 }
@@ -186,7 +185,7 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn has_bloom_filter(&self) -> bool {
+    pub fn has_filter(&self) -> bool {
         !self.filter_reader.is_empty()
     }
 
@@ -199,14 +198,7 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn hash_for_bloom_filter_u32(dist_key: &[u8], table_id: u32) -> u32 {
-        let dist_key_hash = xxh32::xxh32(dist_key, 0);
-        // congyi adds this because he aims to dedup keys in different tables
-        table_id.bitxor(dist_key_hash)
-    }
-
-    #[inline(always)]
-    pub fn hash_for_bloom_filter(dist_key: &[u8], table_id: u32) -> u64 {
+    pub fn hash_for_filter(dist_key: &[u8], table_id: u32) -> u64 {
         let dist_key_hash = xxh64::xxh64(dist_key, 0);
         // congyi adds this because he aims to dedup keys in different tables
         (table_id as u64).bitxor(dist_key_hash)
@@ -214,7 +206,8 @@ impl Sstable {
 
     #[inline(always)]
     pub fn may_match_hash(&self, user_key_range: &UserKeyRangeRef<'_>, hash: u64) -> bool {
-        self.filter_reader.may_match(user_key_range, hash)
+        self.filter_reader
+            .may_match(&self.meta.block_metas, user_key_range, hash)
     }
 
     #[inline(always)]
@@ -332,7 +325,7 @@ impl SstableMeta {
     /// ```plain
     /// | N (4B) |
     /// | block meta 0 | ... | block meta N-1 |
-    /// | bloom filter len (4B) | bloom filter |
+    /// | SST filter len (4B) | SST filter |
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
@@ -472,7 +465,7 @@ impl SstableMeta {
             .map(|block_meta| block_meta.encoded_size())
             .sum::<usize>()
             + 4 // monotonic tombstone events len
-            + 4 // bloom filter len
+            + 4 // SST filter len
             + self.bloom_filter.len()
             + 4 // estimated size
             + 4 // key count
@@ -573,7 +566,7 @@ mod tests {
         assert_eq!(s.id, sstable.id);
         assert_eq!(s.meta, sstable.meta);
         assert!(!sstable.filter_reader.is_empty());
-        // the table filter reader is empty because bloom filter is skipped in serde
+        // The table filter reader is empty because the SST filter is skipped in serde.
         assert!(s.filter_reader.is_empty());
 
         // enable sst serde

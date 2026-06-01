@@ -244,7 +244,7 @@ pub(crate) fn bind_all_columns(
             .cloned()
             .collect_vec();
 
-        #[allow(clippy::collapsible_else_if)]
+        #[expect(clippy::collapsible_else_if)]
         match sql_column_strategy {
             // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
             SqlColumnStrategy::FollowUnchecked => {
@@ -758,9 +758,11 @@ pub fn bind_connector_props(
 
     let create_cdc_source_job = with_properties.is_shareable_cdc_connector();
 
-    if !is_create_source && with_properties.is_shareable_only_cdc_connector() {
+    if !is_create_source && with_properties.is_shareable_cdc_connector() {
         return Err(RwError::from(ProtocolError(format!(
-            "connector {} does not support `CREATE TABLE`, please use `CREATE SOURCE` instead",
+            "directly creating a CDC table for connector {} is no longer supported; \
+             please `CREATE SOURCE` to create a shared CDC source first, \
+             then `CREATE TABLE ... FROM <source> TABLE '<database>.<table>'`",
             with_properties.get_connector().unwrap(),
         ))));
     }
@@ -833,7 +835,7 @@ pub enum SqlColumnStrategy {
 
 /// Entrypoint for binding source connector.
 /// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub async fn bind_create_source_or_table_with_connector(
     handler_args: HandlerArgs,
     full_name: ObjectName,

@@ -62,14 +62,14 @@ EOF
      # so we need to specify the meta-backend: sqlite
      cat <<EOF > risedev-profiles.user.yml
 full-without-monitoring:
- steps:
-   - use: minio
-   - use: sqlite
-   - use: meta-node
-     meta-backend: sqlite
-   - use: compute-node
-   - use: frontend
-   - use: compactor
+  steps:
+    - use: minio
+    - use: sqlite
+    - use: meta-node
+      meta-backend: sqlite
+    - use: compute-node
+    - use: frontend
+    - use: compactor
 EOF
   fi
 

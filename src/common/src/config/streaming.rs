@@ -278,6 +278,10 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::sync_log_store_buffer_size")]
     pub sync_log_store_buffer_size: usize,
 
+    /// Disable the optimized dispatcher path for sync log store.
+    #[serde(default = "default::developer::disable_sync_log_store_dispatcher")]
+    pub disable_sync_log_store_dispatcher: bool,
+
     /// Cache policy for partition cache in streaming over window.
     /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.
     #[serde(default)]

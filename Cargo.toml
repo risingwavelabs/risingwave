@@ -79,7 +79,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "2.9.0-alpha"
+version = "3.1.0-alpha"
 edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -109,7 +109,7 @@ libraries = [{ path = "./lints" }]
 apache-avro = { git = "https://github.com/risingwavelabs/avro-rs", rev = "1f2723802d4fb77b97fa084f7bb81e3b60b9e03f" }
 arc-swap = "1"
 arrow-udf-runtime = "0.9.0"
-async-openai = { version = "0.33.0", features = ["embedding"] }
+async-openai = { version = "0.40.2", features = ["embedding"] }
 auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 await-tree = { version = "0.3.2-alpha.2", features = ["serde", "attributes"] }
 aws-config = { version = "1", default-features = false, features = [
@@ -151,7 +151,7 @@ faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 foyer = { version = "0.21.2", features = ["serde", "tracing"] }
 futures-async-stream = "0.2.13"
 governor = { version = "0.10", default-features = false, features = ["std"] }
-hashbrown = { version = "0.16", features = [
+hashbrown = { version = "0.17", features = [
     "default-hasher",
     "inline-more",
 ] }
@@ -161,14 +161,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20251111
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d6bd578d64c396040e707ce2d85c83e64b47d7d6", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fb290e4c9473b1fb4b582e9ac88a8fe08d2265ef" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d6bd578d64c396040e707ce2d85c83e64b47d7d6" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d6bd578d64c396040e707ce2d85c83e64b47d7d6" }
 
 adbc_core = { version = "0.23" }
 adbc_snowflake = { version = "0.23", default-features = false }
@@ -186,7 +186,7 @@ mysql_async = { version = "0.36", features = [
     "rust_decimal",
 ] }
 opendal = "0.55"
-openssl = "0.10.78"
+openssl = "0.10.80"
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
 opentelemetry-semantic-conventions = "0.31"

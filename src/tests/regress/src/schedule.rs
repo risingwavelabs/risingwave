@@ -68,11 +68,11 @@ impl Schedule {
         })
     }
 
-    async fn do_init(self) -> anyhow::Result<Self> {
+    fn do_init(self) -> anyhow::Result<Self> {
         init_env();
 
         self.file_manager.init()?;
-        self.psql.init().await?;
+        self.psql.init()?;
 
         Ok(self)
     }
@@ -109,7 +109,7 @@ impl Schedule {
     /// `Ok` If no error happens and all outputs are expected,
     /// `Err` If any error happens, or some outputs are unexpected. Details are logged in log file.
     pub(crate) async fn run(self) -> anyhow::Result<()> {
-        let s = self.do_init().await?;
+        let s = self.do_init()?;
         s.do_run().await
     }
 

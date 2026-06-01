@@ -1,0 +1,69 @@
+# Regression test for https://github.com/risingwavelabs/risingwave/issues/25430
+#
+# In v2.8.2, a Parquet file source that listed an object the Parquet reader
+# could not decode (e.g. a non-Parquet binary that happened to land in the same
+# bucket/directory because the source had no `match_pattern`) would crash the
+# compute node with an `attempt to subtract with overflow` panic in
+# `src/stream/src/executor/source/fs_fetch_executor.rs`:
+#
+#     thread 'rw-streaming' panicked at .../fs_fetch_executor.rs:440:
+#     attempt to subtract with overflow
+#
+# Root cause: the fetch executor's error branch reset `splits_on_fetch` to 0
+# without removing the bad split from the in-flight chained stream. A later
+# legitimate end-of-file `None` event then tried to decrement the counter from
+# 0, hitting the underflow `debug_assert` and panicking the streaming actor.
+#
+# This was fixed on main by #24718 (refactor(source): skip bad file splits
+# after retry in fs_fetch executor), which:
+#   - binds a split id to each per-file sub-stream via `SetReadingFileOnPoll`,
+#   - retries a bad split up to `MAX_RETRIES_PER_SPLIT` times with backoff,
+#   - then marks it dirty, drops the chained merged stream, and rebuilds the
+#     reader from the state table so `splits_on_fetch` stays consistent.
+#
+# This test exercises the exact mixed-content scenario (one valid Parquet plus
+# one undecodable file in the same `posix_fs.root`) and asserts the source
+# converges to the rows from the valid file instead of panicking the streaming
+# actor. Without the #24718 fix, this query would never converge because the
+# compute node panics before the table can be fully ingested.
+
+system ok
+bash -euo pipefail -c '
+  rm -rf /tmp/rw_parquet_dirty_object
+  mkdir -p /tmp/rw_parquet_dirty_object
+  # Inline minimal Parquet file with two rows: (v1=1, v2=10), (v1=2, v2=20).
+  # The leading "PAR1" magic and the row count are visible in the base64.
+  printf "%s" "UEFSMRUAFRQVGCwVAhUAFQYVBgAACiQCAAAAAgEBAAAAFQAVFBUYLBUCFQAVBhUGAAAKJAIAAAACAQoAAAAVABUUFRgsFQIVABUGFQYAAAokAgAAAAIBAgAAABUAFRQVGCwVAhUAFQYVBgAACiQCAAAAAgEUAAAAFQIZPDUAGA1kdWNrZGJfc2NoZW1hFQQAFQIlAhgCdjElIgAVAiUCGAJ2MiUiABYEGSwZLCYAHBUCGRUAGRgCdjEVAhYCFjYWOiYIPBgEAQAAABgEAQAAABYAKAQBAAAAGAQBAAAAAAAAJgAcFQIZFQAZGAJ2MhUCFgIWNhY6JkI8GAQKAAAAGAQKAAAAFgAoBAoAAAAYBAoAAAAAAAAWgIgCFgImCAAZLCYAHBUCGRUAGRgCdjEVAhYCFjYWOiZ8PBgEAgAAABgEAgAAABYAKAQCAAAAGAQCAAAAAAAAJgAcFQIZFQAZGAJ2MhUCFgIWNhY6JrYBPBgEFAAAABgEFAAAABYAKAQUAAAAGAQUAAAAAAAAFoCIAhYCJnwAKAZEdWNrREIAJgEAAFBBUjE=" \
+    | base64 -d > /tmp/rw_parquet_dirty_object/10_good.parquet
+  # Non-Parquet object that the Parquet reader will fail to decode. This is the
+  # in-tree stand-in for the "Hummock SST that landed in the same bucket"
+  # scenario from issue #25430.
+  printf "not a parquet file\n" > /tmp/rw_parquet_dirty_object/bad_14.bin
+'
+
+statement ok
+CREATE TABLE parquet_dirty_object (
+    v1 int,
+    v2 int
+) WITH (
+    connector = 'posix_fs',
+    posix_fs.root = '/tmp/rw_parquet_dirty_object'
+) FORMAT PLAIN ENCODE PARQUET;
+
+# Allow the fetch executor enough time to:
+#   1. discover both files via the list executor,
+#   2. successfully read the good Parquet file,
+#   3. retry the bad file MAX_RETRIES_PER_SPLIT times with backoff,
+#   4. mark the bad file as dirty and converge.
+# Pre-fix (v2.8.2): the compute node panics before this query can succeed.
+# Post-fix (main):  this query converges to (2, 30).
+query II retry 20 backoff 1s
+SELECT count(*), sum(v2) FROM parquet_dirty_object;
+----
+2 30
+
+statement ok
+DROP TABLE parquet_dirty_object;
+
+system ok
+rm -rf /tmp/rw_parquet_dirty_object

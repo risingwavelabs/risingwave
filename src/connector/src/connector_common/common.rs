@@ -28,7 +28,7 @@ use moka::future::Cache as MokaCache;
 use moka::ops::compute::Op;
 use phf::{Set, phf_set};
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
-use pulsar::{Authentication, Pulsar, TokioExecutor};
+use pulsar::{Authentication, OperationRetryOptions, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::bail;
 use rustls_pki_types::pem::PemObject;
@@ -213,30 +213,37 @@ pub struct KafkaConnectionProps {
     // For the properties below, please refer to [librdkafka](https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md) for more information.
     /// Path to CA certificate file for verifying the broker's key.
     #[serde(rename = "properties.ssl.ca.location")]
+    #[with_option(allow_alter_on_fly)]
     ssl_ca_location: Option<String>,
 
     /// CA certificate string (PEM format) for verifying the broker's key.
     #[serde(rename = "properties.ssl.ca.pem")]
+    #[with_option(allow_alter_on_fly)]
     ssl_ca_pem: Option<String>,
 
     /// Path to client's certificate file (PEM).
     #[serde(rename = "properties.ssl.certificate.location")]
+    #[with_option(allow_alter_on_fly)]
     ssl_certificate_location: Option<String>,
 
     /// Client's public key string (PEM format) used for authentication.
     #[serde(rename = "properties.ssl.certificate.pem")]
+    #[with_option(allow_alter_on_fly)]
     ssl_certificate_pem: Option<String>,
 
     /// Path to client's private key file (PEM).
     #[serde(rename = "properties.ssl.key.location")]
+    #[with_option(allow_alter_on_fly)]
     ssl_key_location: Option<String>,
 
     /// Client's private key string (PEM format) used for authentication.
     #[serde(rename = "properties.ssl.key.pem")]
+    #[with_option(allow_alter_on_fly)]
     ssl_key_pem: Option<String>,
 
     /// Passphrase of client's private key.
     #[serde(rename = "properties.ssl.key.password")]
+    #[with_option(allow_alter_on_fly)]
     ssl_key_password: Option<String>,
 
     /// SASL mechanism if SASL is enabled. Currently support PLAIN, SCRAM, GSSAPI, and `AWS_MSK_IAM`.
@@ -559,6 +566,7 @@ impl PulsarCommon {
         &self,
         oauth: &Option<PulsarOauthCommon>,
         aws_auth_props: &AwsAuthProps,
+        operation_retry_options: Option<OperationRetryOptions>,
     ) -> ConnectorResult<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
         let mut _temp_file = None; // Keep temp file alive
@@ -583,6 +591,15 @@ impl PulsarCommon {
                 name: "token".to_owned(),
                 data: Vec::from(auth_token.as_str()),
             });
+        }
+
+        if let Some(operation_retry_options) = operation_retry_options {
+            tracing::info!(
+                max_retries = ?operation_retry_options.max_retries,
+                retry_delay_ms = operation_retry_options.retry_delay.as_millis(),
+                "applying Pulsar source operation retry override"
+            );
+            pulsar_builder = pulsar_builder.with_operation_retry_options(operation_retry_options);
         }
 
         let res = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;

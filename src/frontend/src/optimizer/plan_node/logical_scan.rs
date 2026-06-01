@@ -25,8 +25,8 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
     BackfillType, BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
-    LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamTableScan, ToBatch,
-    ToStream, generic,
+    LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamFilter,
+    StreamProject, StreamTableScan, ToBatch, ToStream, generic,
 };
 use crate::TableCatalog;
 use crate::binder::BoundBaseTable;
@@ -352,6 +352,7 @@ impl LogicalScan {
             self.base.ctx(),
             predicate,
             self.as_of(),
+            self.core.table_scan_stream_key().map(ToOwned::to_owned),
         )
         .into()
     }
@@ -365,6 +366,7 @@ impl LogicalScan {
             self.base.ctx(),
             self.predicate().clone(),
             self.as_of(),
+            self.core.table_scan_stream_key().map(ToOwned::to_owned),
         )
         .into()
     }
@@ -633,6 +635,30 @@ impl ToStream for LogicalScan {
             )
             .into())
         } else {
+            if ctx.backfill_type() == BackfillType::SnapshotBackfill {
+                let (scan_ranges, _residual) = self.predicate().clone().split_to_scan_ranges(
+                    self.table(),
+                    self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
+                )?;
+
+                if scan_ranges.len() == 1 && !scan_ranges[0].is_full_table_scan() {
+                    let (core, predicate, project_expr) = self.predicate_pull_up();
+                    let scan = StreamTableScan::new_with_scan_range(
+                        core,
+                        ctx.backfill_type().to_stream_scan_type(),
+                        Some(scan_ranges.into_iter().next().unwrap()),
+                    );
+                    LogicalFilter::check_stream_predicate(&predicate)?;
+
+                    let mut plan: crate::optimizer::plan_node::StreamPlanRef =
+                        StreamFilter::new(generic::Filter::new(predicate, scan.into())).into();
+                    if let Some(exprs) = project_expr {
+                        plan = StreamProject::new(generic::Project::new(exprs, plan)).into();
+                    }
+                    return Ok(plan);
+                }
+            }
+
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);
             if let Some(exprs) = project_expr {
@@ -644,37 +670,45 @@ impl ToStream for LogicalScan {
 
     fn logical_rewrite_for_stream(
         &self,
-        _ctx: &mut RewriteStreamContext,
+        ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        match self.base.stream_key().is_none() {
-            true => {
-                let mut output_col_idx = self.output_col_idx().clone();
+        let mut output_col_idx = self.output_col_idx().clone();
+        let original_len = output_col_idx.len();
 
-                // Ensure pk columns are in the output.
-                for i in self.table().pk.iter().map(|c| c.column_index) {
-                    if !output_col_idx.contains(&i) {
-                        output_col_idx.push(i);
-                    }
-                }
-                // Ensure stream key columns are in the output.
-                // For tables with watermark TTL, stream key may contain extra watermark columns.
-                for i in self.table().stream_key() {
-                    if !output_col_idx.contains(&i) {
-                        output_col_idx.push(i);
-                    }
-                }
-
-                let new_len = output_col_idx.len();
-                Ok((
-                    self.clone_with_output_indices(output_col_idx).into(),
-                    ColIndexMapping::identity_or_none(self.schema().len(), new_len),
-                ))
+        // Ensure pk columns are in the output.
+        for idx in self.table().pk.iter().map(|c| c.column_index) {
+            if !output_col_idx.contains(&idx) {
+                output_col_idx.push(idx);
             }
-            false => Ok((
-                self.clone().into(),
-                ColIndexMapping::identity(self.schema().len()),
-            )),
         }
+        // Ensure catalog stream-key columns are in the output for stream planning.
+        for idx in self.table().stream_key() {
+            if !output_col_idx.contains(&idx) {
+                output_col_idx.push(idx);
+            }
+        }
+
+        let (mut scan, col_index_mapping) = if output_col_idx.len() == original_len {
+            (self.clone(), ColIndexMapping::identity(self.schema().len()))
+        } else {
+            let new_len = output_col_idx.len();
+            (
+                self.clone_with_output_indices(output_col_idx),
+                ColIndexMapping::identity_or_none(self.schema().len(), new_len),
+            )
+        };
+
+        if matches!(ctx.backfill_type(), BackfillType::SnapshotBackfill)
+            || self.core.cross_database()
+        {
+            // Snapshot and cross-database backfill must use the upstream table primary key while
+            // planning operators above the scan, before `StreamTableScan` is built. Other scan
+            // types keep the logical stream key here so they preserve the original
+            // normal-backfill behavior.
+            scan.core.extend_table_scan_stream_key_with_primary_key();
+            scan.base = PlanBase::new_logical_with_core(&scan.core);
+        }
+        Ok((scan.into(), col_index_mapping))
     }
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {

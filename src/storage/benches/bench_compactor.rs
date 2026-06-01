@@ -377,7 +377,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         b.to_async(&runtime).iter(|| {
             let sub_iters = vec![
                 ConcatSstableIterator::new(
-                    vec![0.into()],
                     level1.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
@@ -385,7 +384,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     0,
                 ),
                 ConcatSstableIterator::new(
-                    vec![0.into()],
                     level2.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
@@ -508,7 +506,6 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
     let get_iter = || {
         let sub_iters = vec![
             ConcatSstableIterator::new(
-                vec![10.into(), 11.into()],
                 level1.clone(),
                 KeyRange::inf(),
                 sstable_store.clone(),
@@ -516,7 +513,6 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
                 0,
             ),
             ConcatSstableIterator::new(
-                vec![10.into(), 11.into()],
                 level2.clone(),
                 KeyRange::inf(),
                 sstable_store.clone(),

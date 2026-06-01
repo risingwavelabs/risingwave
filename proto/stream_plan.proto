@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package stream_plan;
 
+import "batch_plan.proto";
 import "catalog.proto";
 import "common.proto";
 import "data.proto";
@@ -835,6 +836,9 @@ message StreamScanNode {
   catalog.Table arrangement_table = 10;
 
   optional uint64 snapshot_backfill_epoch = 11;
+
+  // Full scan range pushdown (eq_conds + range bounds on PK).
+  batch_plan.ScanRange pk_scan_range = 13;
 }
 
 // Config options for CDC backfill
@@ -1302,10 +1306,8 @@ message StreamContext {
   string timezone = 1;
   // The partial config of this job to override the global config.
   string config_override = 2;
-  // The adaptive parallelism strategy for this streaming job, if explicitly set.
-  string adaptive_parallelism_strategy = 3;
-  // The adaptive parallelism strategy for the backfill override, if explicitly set.
-  string backfill_adaptive_parallelism_strategy = 4;
+  reserved 3, 4;
+  reserved "adaptive_parallelism_strategy", "backfill_adaptive_parallelism_strategy";
 }
 
 message BackfillOrder {
@@ -1363,6 +1365,10 @@ message StreamFragmentGraph {
   Parallelism parallelism = 6;
   // Parallelism to use during backfill. Falls back to `parallelism` if unset.
   Parallelism backfill_parallelism = 9;
+  // The adaptive parallelism strategy for this streaming job, if explicitly set.
+  string adaptive_parallelism_strategy = 10;
+  // The adaptive parallelism strategy for the backfill override, if explicitly set.
+  string backfill_adaptive_parallelism_strategy = 11;
 
   // Specified max parallelism, i.e., expected vnode count for the graph.
   //

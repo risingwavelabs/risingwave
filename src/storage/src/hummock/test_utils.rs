@@ -276,7 +276,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     let mut b = SstableBuilder::<_, F>::new(
         object_id,
         writer,
-        F::create(opts.bloom_false_positive, opts.capacity / 16),
+        F::create(opts.capacity / 16),
         opts,
         compaction_catalog_agent_ref,
         HashMap::default(),
@@ -553,7 +553,7 @@ pub trait StateStoreReadTestExt: StateStore {
     }
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
-    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// Internally, `prefix_hint` will be used for checking the SST filter and
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
     /// in `key_range`) The returned iterator will iterate data based on a snapshot
     /// corresponding to the given `epoch`.

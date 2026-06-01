@@ -343,11 +343,11 @@ async fn test_watermark_state_cleaning_impl(
     let compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
     // This assertion relies on the fact that storage does not filter out rows older than the watermark; compaction is responsible for removing them.
     if !is_storage_read_filtered_by_watermark {
-        let before_compacion = session
+        let before_compaction = session
             .run("SELECT string_agg(id::varchar, ',' ORDER BY id) FROM t;")
             .await
             .unwrap();
-        assert_eq!(before_compacion, "1,2");
+        assert_eq!(before_compaction, "1,2");
     }
     let storage_key_count = session
         .run(format!(
@@ -367,7 +367,7 @@ async fn test_watermark_state_cleaning_impl(
         .run("SELECT string_agg(id::varchar, ',' ORDER BY id) FROM t;")
         .await
         .unwrap();
-    assert_eq!(after_compacion, "1");
+    assert_eq!(after_compaction, "1");
     let storage_key_count = session
         .run(format!(
             "SELECT total_key_count FROM rw_table_stats WHERE id = {};",

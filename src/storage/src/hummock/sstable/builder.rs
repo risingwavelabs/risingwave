@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeS
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
-use risingwave_pb::hummock::BloomFilterType;
+use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -60,7 +60,7 @@ pub struct SstableBuilderOptions {
     pub block_capacity: usize,
     /// Restart point interval.
     pub restart_interval: usize,
-    /// False positive probability of bloom filter.
+    /// Deprecated and ignored by SST filter builders; kept for backward compatibility.
     pub bloom_false_positive: f64,
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
@@ -422,7 +422,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let filter_key = self
             .compaction_catalog_agent_ref
             .extract(user_key(&self.raw_key));
-        // add bloom_filter check
+        // Add SST filter check.
         if !filter_key.is_empty() {
             self.filter_builder
                 .add_key(filter_key, table_id.as_raw_id());
@@ -506,15 +506,16 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
-        let bloom_filter_kind = if self.filter_builder.support_blocked_raw_data() {
-            BloomFilterType::Blocked
+        let filter_data = self.filter_builder.finish(self.memory_limiter.clone());
+        let (bloom_filter_kind, filter_type) = if filter_data.is_empty() {
+            (
+                BloomFilterType::BloomFilterUnspecified,
+                PbSstableFilterType::SstableFilterNone,
+            )
+        } else if self.filter_builder.support_blocked_raw_data() {
+            (BloomFilterType::Blocked, self.filter_builder.filter_type())
         } else {
-            BloomFilterType::Sstable
-        };
-        let bloom_filter = if self.options.bloom_false_positive > 0.0 {
-            self.filter_builder.finish(self.memory_limiter.clone())
-        } else {
-            vec![]
+            (BloomFilterType::Sstable, self.filter_builder.filter_type())
         };
 
         let total_key_count = self
@@ -536,7 +537,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         #[expect(deprecated)]
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
-            bloom_filter,
+            bloom_filter: filter_data,
             estimated_size: 0,
             key_count: utils::checked_into_u32(total_key_count).unwrap_or_else(|_| {
                 panic!(
@@ -642,13 +643,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             max_epoch,
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
+            filter_type,
             vnode_statistics: vnode_user_key_ranges,
             max_watermark_column_value: self.max_watermark_column_value,
         }
         .into();
 
         tracing::trace!(
-            "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
+            "meta_size {} filter_size {} add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
             meta.encoded_size(),
             meta.bloom_filter.len(),
             total_key_count,
@@ -657,7 +659,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             max_epoch,
             self.epoch_set.len()
         );
-        let bloom_filter_size = meta.bloom_filter.len();
+        let filter_size = meta.bloom_filter.len();
         let sstable_file_size = sst_info.file_size as usize;
 
         if !meta.block_metas.is_empty() {
@@ -692,7 +694,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             sst_info: LocalSstableInfo::new(sst_info, self.table_stats, now),
             writer_output,
             stats: SstableBuilderOutputStats {
-                bloom_filter_size,
+                filter_size,
                 avg_key_size,
                 avg_value_size,
                 epoch_count: self.epoch_set.len(),
@@ -900,7 +902,7 @@ impl VnodeUserKeyRangeCollector {
 }
 
 pub struct SstableBuilderOutputStats {
-    bloom_filter_size: usize,
+    filter_size: usize,
     avg_key_size: usize,
     avg_value_size: usize,
     epoch_count: usize,
@@ -910,10 +912,10 @@ pub struct SstableBuilderOutputStats {
 
 impl SstableBuilderOutputStats {
     pub fn report_stats(&self, metrics: &Arc<CompactorMetrics>) {
-        if self.bloom_filter_size != 0 {
+        if self.filter_size != 0 {
             metrics
                 .sstable_bloom_filter_size
-                .observe(self.bloom_filter_size as _);
+                .observe(self.filter_size as _);
         }
 
         if self.sstable_file_size != 0 {
@@ -1552,14 +1554,17 @@ pub(super) mod tests {
         assert_eq!(meta2, meta);
     }
 
-    async fn test_with_bloom_filter<F: FilterBuilder>(with_blooms: bool) {
+    async fn test_with_xor_filter_builder<F: FilterBuilder>(
+        bloom_false_positive: f64,
+        expected_filter_type: PbSstableFilterType,
+    ) {
         let key_count = 1000;
 
         let opts = SstableBuilderOptions {
             capacity: 0,
             block_capacity: 4096,
             restart_interval: 16,
-            bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
+            bloom_false_positive,
             ..Default::default()
         };
 
@@ -1577,39 +1582,51 @@ pub(super) mod tests {
             table_id_to_watermark_serde,
         )
         .await;
+        assert_eq!(sst_info.filter_type, expected_filter_type);
         let table = sstable_store
             .sstable(&sst_info, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
 
-        assert_eq!(table.has_bloom_filter(), with_blooms);
+        assert!(table.has_filter());
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            if table.has_bloom_filter() {
-                let hash = Sstable::hash_for_bloom_filter(full_key.user_key.encode().as_slice(), 0);
-                let key_ref = full_key.user_key.as_ref();
-                assert!(
-                    table.may_match_hash(
-                        &(Bound::Included(key_ref), Bound::Included(key_ref)),
-                        hash
-                    ),
-                    "failed at {}",
-                    i
-                );
-            }
+            let hash = Sstable::hash_for_filter(full_key.user_key.encode().as_slice(), 0);
+            let key_ref = full_key.user_key.as_ref();
+            assert!(
+                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash),
+                "failed at {}",
+                i
+            );
         }
     }
 
     #[tokio::test]
-    async fn test_bloom_filter() {
-        test_with_bloom_filter::<Xor16FilterBuilder>(false).await;
-        test_with_bloom_filter::<Xor16FilterBuilder>(true).await;
-        test_with_bloom_filter::<Xor8FilterBuilder>(true).await;
-        test_with_bloom_filter::<BlockedXor16FilterBuilder>(true).await;
+    async fn test_xor_filter_builder_output() {
+        test_with_xor_filter_builder::<Xor16FilterBuilder>(
+            0.0,
+            PbSstableFilterType::SstableFilterXor16,
+        )
+        .await;
+        test_with_xor_filter_builder::<Xor16FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterXor16,
+        )
+        .await;
+        test_with_xor_filter_builder::<Xor8FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterXor8,
+        )
+        .await;
+        test_with_xor_filter_builder::<BlockedXor16FilterBuilder>(
+            0.01,
+            PbSstableFilterType::SstableFilterXor16,
+        )
+        .await;
     }
 
     #[tokio::test]
-    async fn test_no_bloom_filter_block() {
+    async fn test_no_xor_filter_block() {
         let opts = SstableBuilderOptions::default();
         // build remote table
         let sstable_store = mock_sstable_store().await;
@@ -1686,7 +1703,7 @@ pub(super) mod tests {
             table_key.resize(VirtualNode::SIZE, 0);
             table_key.extend_from_slice(format!("key_test_{:05}", idx * 2).as_bytes());
             let k = UserKey::for_test(TableId::new(2), table_key.as_slice());
-            let hash = Sstable::hash_for_bloom_filter(&k.encode(), 2);
+            let hash = Sstable::hash_for_filter(&k.encode(), 2);
             let key_ref = k.as_ref();
             assert!(
                 table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
