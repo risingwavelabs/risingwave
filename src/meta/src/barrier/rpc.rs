@@ -197,7 +197,7 @@ impl ControlStreamManager {
         node: WorkerNode,
         partial_graphs: impl Iterator<Item = PartialGraphId>,
         term_id: &String,
-        context: &impl GlobalBarrierWorkerContext,
+        context: Arc<impl GlobalBarrierWorkerContext>,
     ) {
         let node_id = node.id;
         if let Entry::Occupied(entry) = self.workers.entry(node_id) {
@@ -267,6 +267,21 @@ impl ControlStreamManager {
             }
         }
         error!(?node_host, "fail to create worker node after retry");
+        assert!(
+            self.workers
+                .insert(
+                    node_id,
+                    (
+                        node.clone(),
+                        WorkerNodeState::Reconnecting(ControlStreamManager::retry_connect(
+                            node,
+                            term_id.to_owned(),
+                            context,
+                        ))
+                    )
+                )
+                .is_none()
+        );
     }
 
     pub(super) fn remove_worker(&mut self, node: WorkerNode) {
