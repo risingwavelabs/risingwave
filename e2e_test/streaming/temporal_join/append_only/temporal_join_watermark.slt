@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
@@ -63,3 +66,7 @@ drop table stream cascade;
 
 statement ok
 drop table version cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

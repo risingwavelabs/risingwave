@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 create table t(v int);
 
 
@@ -50,3 +53,7 @@ alter system set license_key to default;
 
 statement ok
 drop table t cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

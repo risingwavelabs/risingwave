@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # Test cases for refreshable table functionality using batch_posix_fs connector
 # This test validates the REFRESH TABLE command and covers insert, update, delete scenarios
 
@@ -358,3 +361,7 @@ DROP TABLE refresh_fs_t_on_conflict_ignore;
 
 system ok
 rm -rf ./e2e_test/source_inline/refresh/refresh_table_tmp
+
+statement ok
+set allow_drop_cascade = false;
+

@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # Regression: `ALTER SOURCE source_rate_limit` updates DB and notifies running actors via
 # `Mutation::Throttle`, but historically did not refresh `database_info.fragment(..).nodes`.
 # A subsequent reschedule (e.g. `ALTER SOURCE SET PARALLELISM`) materialized fresh source
@@ -135,3 +138,7 @@ drop table seed;
 
 system ok
 rpk topic delete test_rl_inflight_sync || true
+
+statement ok
+set allow_drop_cascade = false;
+

@@ -1,6 +1,10 @@
 control substitution on
 
 statement ok
+set allow_drop_cascade = true;
+
+
+statement ok
 create schema test_schema;
 
 statement ok
@@ -22,3 +26,7 @@ drop connection conn1;
 
 statement ok
 drop schema test_schema cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

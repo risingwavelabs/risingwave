@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 create schema schema1;
 
 statement ok
@@ -90,3 +93,6 @@ select count(name) FROM rw_sinks WHERE name = 's1' OR name = 's2';
 
 statement ok
 drop schema schema2 cascade;
+
+statement ok
+set allow_drop_cascade = false;

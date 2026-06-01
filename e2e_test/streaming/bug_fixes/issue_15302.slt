@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # https://github.com/risingwavelabs/risingwave/issues/15302
 
 statement ok
@@ -42,3 +45,7 @@ drop materialized view test_last_ingestion_time cascade;
 
 statement ok
 drop materialized view test_records;
+
+statement ok
+set allow_drop_cascade = false;
+

@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 SET RW_IMPLICIT_FLUSH = true;
 
 statement ok
@@ -231,3 +234,7 @@ DROP SOURCE iceberg_t1_source CASCADE;
 
 statement ok
 DROP TABLE s1 cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 SET implicit_flush TO true;
 
 statement ok
@@ -300,3 +303,7 @@ SET streaming_parallelism TO DEFAULT;
 
 statement ok
 SET upsert_dml TO DEFAULT;
+
+statement ok
+set allow_drop_cascade = false;
+

@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # See https://github.com/risingwavelabs/risingwave/issues/24367
 
 control substitution on
@@ -41,3 +44,7 @@ select * from s;
 
 statement ok
 drop table s cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 create view v as select 1;
 
 statement ok
@@ -26,4 +29,7 @@ query T
 SELECT count(name) FROM rw_materialized_views WHERE name = 'mv';
 ----
 0
+
+statement ok
+set allow_drop_cascade = false;
 

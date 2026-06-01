@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
@@ -97,3 +100,7 @@ drop database d2;
 connection other
 statement ok
 drop database d1;
+
+statement ok
+set allow_drop_cascade = false;
+

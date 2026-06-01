@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 create source my_source (a int, b int) with (
     connector = 'datagen',
     datagen.rows.per.second = '15',
@@ -38,4 +41,7 @@ query T
 SELECT count(name) FROM rw_sources WHERE name = 'my_source';
 ----
 0
+
+statement ok
+set allow_drop_cascade = false;
 

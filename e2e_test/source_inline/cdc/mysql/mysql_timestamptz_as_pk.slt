@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # Test MySQL CDC with TIMESTAMPTZ as primary key
 # This test verifies that TIMESTAMPTZ primary key works correctly in CDC backfill
 
@@ -139,3 +142,7 @@ mysql -e "
     USE risedev;
     DROP TABLE IF EXISTS ts_pk_test;
 "
+
+statement ok
+set allow_drop_cascade = false;
+

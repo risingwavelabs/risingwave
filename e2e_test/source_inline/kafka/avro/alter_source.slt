@@ -1,6 +1,10 @@
 control substitution on
 
 statement ok
+set allow_drop_cascade = true;
+
+
+statement ok
 SET streaming_use_shared_source TO false;
 
 # https://github.com/risingwavelabs/risingwave/issues/16486
@@ -77,3 +81,7 @@ drop source s cascade;
 
 statement ok
 SET streaming_use_shared_source TO true;
+
+statement ok
+set allow_drop_cascade = false;
+

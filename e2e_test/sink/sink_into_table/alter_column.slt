@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
@@ -669,3 +672,7 @@ drop table t_multi_c2;
 
 statement ok
 drop table m_multi_c;
+
+statement ok
+set allow_drop_cascade = false;
+

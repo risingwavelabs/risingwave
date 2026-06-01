@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # Deletions in a single commit are posistion delete, deletions across multiple commits are equail delete. sink_decouple = false, so we'll commit every 1s.
 statement ok
 set sink_decouple = false;
@@ -101,3 +104,7 @@ DROP SOURCE iceberg_t1_source;
 
 statement ok
 DROP TABLE s1 cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 drop schema if exists explain_analyze_test cascade;
 
 statement ok
@@ -95,3 +98,7 @@ explain analyze (duration_secs 1) sink explain_analyze_test.s1;
 
 statement ok
 drop schema explain_analyze_test cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

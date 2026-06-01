@@ -1,5 +1,9 @@
 control substitution on
 
+statement ok
+set allow_drop_cascade = true;
+
+
 # test case need to cover all data types
 system ok
 mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
@@ -185,3 +189,7 @@ FROM rw_mysql_types_test order by c_boolean;
 
 statement ok
 drop source mysql_source cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

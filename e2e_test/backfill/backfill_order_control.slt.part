@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 SET RW_IMPLICIT_FLUSH TO TRUE;
 
 statement ok
@@ -140,3 +143,7 @@ drop table if exists car_info cascade;
 
 statement ok
 drop table if exists car_regions cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

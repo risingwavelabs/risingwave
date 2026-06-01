@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # Test that backfill order control maintains order after recovery
 # This test verifies:
 # 1. Backfill order is maintained with t1 -> t2
@@ -136,3 +139,7 @@ drop table t1 cascade;
 
 statement ok
 drop table t2 cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

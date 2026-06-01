@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 set sink_decouple = false;
 
 statement ok
@@ -60,3 +63,7 @@ DROP SOURCE iceberg_t1_source;
 
 statement ok
 DROP TABLE s1 cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

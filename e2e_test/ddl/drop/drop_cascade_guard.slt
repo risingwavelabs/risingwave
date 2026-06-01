@@ -1,0 +1,165 @@
+# Tests for the DROP CASCADE guard controlled by `allow_drop_cascade`.
+#
+# New clusters default to allow_drop_cascade = false (guard enabled).
+# Existing clusters default to allow_drop_cascade = true (backward-compatible).
+
+# Start with the guard explicitly enabled.
+statement ok
+set allow_drop_cascade = false;
+
+# --- Guard blocks CASCADE on table with dependents ---
+
+statement ok
+create table t_guard (a int);
+
+statement ok
+create view v_guard as select * from t_guard;
+
+statement ok
+create materialized view mv_guard as select * from v_guard;
+
+statement error DROP TABLE CASCADE is disabled
+drop table t_guard cascade;
+
+# Nothing should have been dropped.
+query I
+select count(*) from rw_tables where name = 't_guard';
+----
+1
+
+query I
+select count(*) from rw_views where name = 'v_guard';
+----
+1
+
+query I
+select count(*) from rw_materialized_views where name = 'mv_guard';
+----
+1
+
+# --- Guard blocks CASCADE even when the object has no dependents ---
+
+statement ok
+create table t_guard_nodep (a int);
+
+statement error DROP TABLE CASCADE is disabled
+drop table t_guard_nodep cascade;
+
+query I
+select count(*) from rw_tables where name = 't_guard_nodep';
+----
+1
+
+# --- RESTRICT drops are unaffected by the guard ---
+
+# RESTRICT fails when dependents exist (behavior unchanged).
+statement error
+drop table t_guard restrict;
+
+# RESTRICT succeeds when no dependents exist (behavior unchanged).
+statement ok
+drop table t_guard_nodep;
+
+# --- Enable allow_drop_cascade and verify CASCADE works ---
+
+statement ok
+set allow_drop_cascade = true;
+
+statement ok
+drop table t_guard cascade;
+
+query I
+select count(*) from rw_tables where name = 't_guard';
+----
+0
+
+query I
+select count(*) from rw_views where name = 'v_guard';
+----
+0
+
+query I
+select count(*) from rw_materialized_views where name = 'mv_guard';
+----
+0
+
+# --- CASCADE with allow_drop_cascade=true removes all dependents ---
+
+statement ok
+create table t_cascade_multi (a int);
+
+statement ok
+create materialized view mv_cascade_multi as select * from t_cascade_multi;
+
+statement ok
+create view v_cascade_multi as select * from mv_cascade_multi;
+
+statement ok
+create sink s_cascade_multi as select * from mv_cascade_multi with (connector = 'blackhole');
+
+statement ok
+drop table t_cascade_multi cascade;
+
+query I
+select count(*) from rw_tables where name = 't_cascade_multi';
+----
+0
+
+query I
+select count(*) from rw_materialized_views where name = 'mv_cascade_multi';
+----
+0
+
+query I
+select count(*) from rw_views where name = 'v_cascade_multi';
+----
+0
+
+query I
+select count(*) from rw_sinks where name = 's_cascade_multi';
+----
+0
+
+# --- Schema CASCADE with allow_drop_cascade=true ---
+
+statement ok
+create schema s_cascade_guard;
+
+statement ok
+create table s_cascade_guard.t1 (a int);
+
+statement ok
+create materialized view s_cascade_guard.mv1 as select * from s_cascade_guard.t1;
+
+statement ok
+drop schema s_cascade_guard cascade;
+
+query I
+select count(*) from rw_schemas where name = 's_cascade_guard';
+----
+0
+
+# --- Guard can be re-enabled per-session ---
+
+statement ok
+set allow_drop_cascade = false;
+
+statement ok
+create table t_retest (a int);
+
+statement ok
+create view v_retest as select * from t_retest;
+
+statement error DROP TABLE CASCADE is disabled
+drop table t_retest cascade;
+
+# Clean up
+statement ok
+drop view v_retest;
+
+statement ok
+drop table t_retest;
+
+# Reset to default.
+statement ok
+set allow_drop_cascade = false;

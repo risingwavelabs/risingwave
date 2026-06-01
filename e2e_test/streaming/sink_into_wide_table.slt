@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 set implicit_flush = true;
 
 statement ok
@@ -57,3 +60,7 @@ select * from t order by k;
 
 statement ok
 drop table t cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

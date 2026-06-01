@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 
 control substitution on
 
@@ -667,3 +670,7 @@ drop source upper_mssql_source cascade;
 
 statement ok
 drop source mssql_source cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

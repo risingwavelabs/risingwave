@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # Test that after recovery, backfill order control can still allow the job to resume.
 statement ok
 SET RW_IMPLICIT_FLUSH TO TRUE;
@@ -82,3 +85,7 @@ drop table if exists t2 cascade;
 
 statement ok
 drop table if exists t3 cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

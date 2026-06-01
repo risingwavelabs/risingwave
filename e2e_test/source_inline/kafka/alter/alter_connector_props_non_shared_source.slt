@@ -1,6 +1,10 @@
 control substitution on
 
 statement ok
+set allow_drop_cascade = true;
+
+
+statement ok
 create secret s1 with ( backend = 'meta' ) as '1000000000';
 
 
@@ -261,3 +265,7 @@ rpk topic delete test_alter_non_shared_source_conn -X brokers=message_queue_sasl
 
 statement ok
 set streaming_use_shared_source to true;
+
+statement ok
+set allow_drop_cascade = false;
+

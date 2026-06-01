@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # Single phase approx percentile
 
 onlyif can-use-recover
@@ -121,3 +124,7 @@ drop materialized view m1;
 
 statement ok
 drop table t;
+
+statement ok
+set allow_drop_cascade = false;
+

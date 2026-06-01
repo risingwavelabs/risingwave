@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # https://github.com/risingwavelabs/risingwave/issues/23376#issuecomment-3397462966
 
 statement ok
@@ -34,3 +37,7 @@ select * from mv;
 
 statement ok
 drop table t cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

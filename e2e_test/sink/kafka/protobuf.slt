@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 set sink_decouple = false;
 
 system ok
@@ -252,3 +255,7 @@ rpk topic delete test-rw-sink-append-only-protobuf-csr-hi
 
 system ok
 rpk topic delete test-rw-sink-upsert-protobuf
+
+statement ok
+set allow_drop_cascade = false;
+

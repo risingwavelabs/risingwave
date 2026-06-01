@@ -1,5 +1,9 @@
 control substitution on
 
+statement ok
+set allow_drop_cascade = true;
+
+
 system ok
 rpk topic delete test_rate_limit_shared || true
 
@@ -169,3 +173,7 @@ drop table kafka_seed_data cascade;
 
 system ok
 rpk topic delete test_rate_limit_shared || true
+
+statement ok
+set allow_drop_cascade = false;
+

@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 SET implicit_flush TO true;
 
 # Ensure deterministic behavior for watermark.
@@ -126,3 +129,7 @@ SET streaming_parallelism TO DEFAULT;
 
 statement ok
 SET implicit_flush TO DEFAULT;
+
+statement ok
+set allow_drop_cascade = false;
+

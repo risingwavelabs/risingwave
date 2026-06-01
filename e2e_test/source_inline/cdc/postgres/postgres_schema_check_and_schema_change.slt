@@ -1,5 +1,9 @@
 control substitution on
 
+statement ok
+set allow_drop_cascade = true;
+
+
 system ok
 psql -c "
     DROP TABLE IF EXISTS t;
@@ -431,3 +435,7 @@ psql -c "
     DROP EXTENSION IF EXISTS ltree;
     DROP EXTENSION IF EXISTS hstore;
 "
+
+statement ok
+set allow_drop_cascade = false;
+

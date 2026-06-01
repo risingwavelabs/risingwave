@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 CREATE USER john;
 
 statement ok
@@ -159,3 +162,7 @@ DROP SCHEMA test_schema CASCADE;
 
 statement ok
 DROP USER john;
+
+statement ok
+set allow_drop_cascade = false;
+

@@ -1,5 +1,9 @@
 control substitution on
 
+statement ok
+set allow_drop_cascade = true;
+
+
 system ok
 PGDATABASE=postgres psql -c "DROP DATABASE IF EXISTS sink_test WITH (FORCE)"
 
@@ -652,3 +656,7 @@ PGDATABASE=sink_test psql -c "DROP TABLE pg_pk_only_table"
 
 system ok
 PGDATABASE=postgres psql -c "DROP DATABASE sink_test"
+
+statement ok
+set allow_drop_cascade = false;
+

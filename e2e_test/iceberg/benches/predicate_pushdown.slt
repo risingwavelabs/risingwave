@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 CREATE TABLE t_bench (i1 int, i2 varchar, i3 varchar);
 
 statement ok
@@ -63,3 +66,7 @@ DROP SOURCE iceberg_t_bench_source;
 
 statement ok
 DROP TABLE t_bench cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

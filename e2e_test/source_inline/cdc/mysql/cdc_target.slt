@@ -1,5 +1,9 @@
 control substitution on
 
+statement ok
+set allow_drop_cascade = true;
+
+
 # issue 21287
 system ok
 mysql -e "
@@ -65,3 +69,7 @@ drop table s;
 
 statement ok
 drop source mysql_source cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

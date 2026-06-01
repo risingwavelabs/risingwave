@@ -1,3 +1,6 @@
+statement ok
+set allow_drop_cascade = true;
+
 # Test that we can cast row id (both for pk and changelog) from serial type to timestamptz
 # to extract the timestamp from row id.
 
@@ -29,3 +32,7 @@ where abs(date_part('epoch', now() - _changelog_row_id::timestamptz)) < 60;
 
 statement ok
 drop table t cascade;
+
+statement ok
+set allow_drop_cascade = false;
+

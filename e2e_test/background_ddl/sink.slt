@@ -1,4 +1,7 @@
 statement ok
+set allow_drop_cascade = true;
+
+statement ok
 set streaming_parallelism=4;
 
 statement ok
@@ -101,3 +104,7 @@ set background_ddl=false;
 
 statement ok
 set backfill_rate_limit=default;
+
+statement ok
+set allow_drop_cascade = false;
+
