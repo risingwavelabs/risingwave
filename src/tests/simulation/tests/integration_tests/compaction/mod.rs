@@ -363,7 +363,7 @@ async fn test_watermark_state_cleaning_impl(
         .trigger_manual_compaction(compaction_group_id, 0)
         .await
         .unwrap();
-    let after_compacion = session
+    let after_compaction = session
         .run("SELECT string_agg(id::varchar, ',' ORDER BY id) FROM t;")
         .await
         .unwrap();
