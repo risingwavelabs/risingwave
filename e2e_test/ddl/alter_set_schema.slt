@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 # ALTER CONNECTION SET SCHEMA is covered in `e2e_test/source_inline/connection/ddl.slt`
 
 statement ok
@@ -129,7 +126,3 @@ DROP TABLE test_schema.test_table cascade;
 
 statement ok
 DROP SCHEMA test_schema;
-
-statement ok
-set allow_drop_cascade = false;
-

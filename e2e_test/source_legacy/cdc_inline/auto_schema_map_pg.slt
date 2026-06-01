@@ -1,9 +1,5 @@
 control substitution on
 
-statement ok
-set allow_drop_cascade = true;
-
-
 # test case need to cover all data types
 system ok
 psql -c "
@@ -219,7 +215,3 @@ SELECT
 
 statement ok
 drop source pg_source cascade;
-
-statement ok
-set allow_drop_cascade = false;
-

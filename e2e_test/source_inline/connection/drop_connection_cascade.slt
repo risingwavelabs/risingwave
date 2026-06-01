@@ -2,9 +2,6 @@ control substitution on
 
 # Test DROP CONNECTION CASCADE functionality
 
-statement ok
-set allow_drop_cascade = true;
-
 # for non-shared source
 statement ok
 set streaming_use_shared_source to false;
@@ -140,6 +137,3 @@ select count(*) from rw_connections where name = 'conn_no_deps';
 
 statement ok
 set streaming_use_shared_source to true;
-
-statement ok
-set allow_drop_cascade = false;

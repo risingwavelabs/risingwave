@@ -1,9 +1,5 @@
 control substitution on
 
-statement ok
-set allow_drop_cascade = true;
-
-
 system ok
 psql -c "
     DROP TABLE IF EXISTS test_schema_change;
@@ -288,7 +284,3 @@ SELECT id, name, description, new_col from rw_test_include_ts order by id;
 
 statement ok
 drop source pg_source_ts cascade;
-
-statement ok
-set allow_drop_cascade = false;
-

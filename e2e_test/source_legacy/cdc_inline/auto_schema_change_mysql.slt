@@ -1,9 +1,5 @@
 control substitution on
 
-statement ok
-set allow_drop_cascade = true;
-
-
 system ok
 mysql -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
 
@@ -147,7 +143,3 @@ table description rw_customers NULL NULL
 
 statement ok
 drop source mysql_source cascade;
-
-statement ok
-set allow_drop_cascade = false;
-

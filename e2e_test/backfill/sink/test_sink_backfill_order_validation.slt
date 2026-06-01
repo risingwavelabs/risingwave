@@ -1,7 +1,4 @@
 statement ok
-set allow_drop_cascade = true;
-
-statement ok
 SET RW_IMPLICIT_FLUSH TO TRUE;
 
 statement ok
@@ -88,7 +85,3 @@ drop table car_regions cascade;
 
 statement ok
 drop table t cascade;
-
-statement ok
-set allow_drop_cascade = false;
-

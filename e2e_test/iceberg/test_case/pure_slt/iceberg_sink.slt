@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 system ok
 sparksql --e "
 DROP TABLE IF EXISTS demo.demo_db.e2e_demo_table PURGE;
@@ -171,7 +168,3 @@ sparksql --e "SELECT * FROM demo.demo_db.e2e_demo_table ORDER BY v1;" 2>/dev/nul
 
 system ok
 sparksql --e "drop table demo.demo_db.e2e_demo_table;"
-
-statement ok
-set allow_drop_cascade = false;
-

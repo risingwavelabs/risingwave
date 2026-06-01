@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 # Test MySQL CDC support for partitioned tables (both single-level and sub-partitioned tables)
 
 control substitution on
@@ -179,7 +176,3 @@ system ok
 mysql -e "
     SET GLOBAL time_zone = '+00:00';
 "
-
-statement ok
-set allow_drop_cascade = false;
-

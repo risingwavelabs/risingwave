@@ -1,9 +1,5 @@
 control substitution on
 
-statement ok
-set allow_drop_cascade = true;
-
-
 # mysql env vars will be read from the `.risingwave/config/risedev-env` file
 
 system ok
@@ -81,7 +77,3 @@ drop table my_orders;
 
 statement ok
 drop source mysql_source cascade;
-
-statement ok
-set allow_drop_cascade = false;
-

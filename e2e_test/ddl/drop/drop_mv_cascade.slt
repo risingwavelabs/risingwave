@@ -1,7 +1,4 @@
 statement ok
-set allow_drop_cascade = true;
-
-statement ok
 create materialized view mv as select 1 a
 
 statement ok
@@ -37,6 +34,3 @@ query T
 SELECT count(name) FROM rw_sinks WHERE name = 'my_sink';
 ----
 0
-
-statement ok
-set allow_drop_cascade = false;

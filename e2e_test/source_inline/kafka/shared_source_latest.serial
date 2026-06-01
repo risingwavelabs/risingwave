@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 # Demonstrate that multiple MVs created from a shared source with `scan.startup.mode = 'latest'`
 # will use the same start offset resolved at the time when the source is created, no matter when
 # the MV is created.
@@ -88,7 +85,3 @@ rpk topic delete shared_source_latest
 
 statement ok
 SET streaming_use_shared_source TO DEFAULT;
-
-statement ok
-set allow_drop_cascade = false;
-

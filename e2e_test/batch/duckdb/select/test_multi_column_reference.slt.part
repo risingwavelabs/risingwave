@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 # Copied from https://github.com/duckdb/duckdb (MIT licensed).
 # Copyright 2018-2022 Stichting DuckDB Foundation
 
@@ -253,7 +250,3 @@ DROP SCHEMA s1
 
 statement ok
 DROP SCHEMA s2
-
-statement ok
-set allow_drop_cascade = false;
-

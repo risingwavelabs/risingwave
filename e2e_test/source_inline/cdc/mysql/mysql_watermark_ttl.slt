@@ -1,10 +1,6 @@
 control substitution on
 
 statement ok
-set allow_drop_cascade = true;
-
-
-statement ok
 SET streaming_parallelism TO 1;
 
 system ok
@@ -96,7 +92,3 @@ mysql -e "
     USE risedev;
     DROP TABLE IF EXISTS mysql_cdc_watermark_ttl_test;
 "
-
-statement ok
-set allow_drop_cascade = false;
-

@@ -1,7 +1,4 @@
 statement ok
-set allow_drop_cascade = true;
-
-statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
@@ -80,7 +77,3 @@ set backfill_rate_limit=default;
 
 statement ok
 set streaming_parallelism to default;
-
-statement ok
-set allow_drop_cascade = false;
-

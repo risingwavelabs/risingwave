@@ -1,7 +1,4 @@
 statement ok
-set allow_drop_cascade = true;
-
-statement ok
 set rw_implicit_flush to true;
 
 statement ok
@@ -71,7 +68,3 @@ flush;
 
 statement ok
 drop table t cascade;
-
-statement ok
-set allow_drop_cascade = false;
-

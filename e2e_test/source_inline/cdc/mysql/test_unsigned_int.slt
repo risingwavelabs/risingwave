@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 # Test MySQL CDC with UNSIGNED BIGINT handling
 # This test verifies that UNSIGNED BIGINT values are handled correctly in CDC backfill
 # with debezium.bigint.unsigned.handling.mode='precise'
@@ -244,7 +241,3 @@ mysql -e "
     USE risedev;
     DROP TABLE IF EXISTS test_unsigned_int;
 "
-
-statement ok
-set allow_drop_cascade = false;
-

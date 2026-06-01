@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 # Test: Publication reuse causes column mismatch
 # This test requires PostgreSQL 15+ for partial publication support
 control substitution on
@@ -155,7 +152,3 @@ psql -c "
     DROP TABLE IF EXISTS users CASCADE;
     DROP PUBLICATION IF EXISTS rw_test_publication;
     "
-
-statement ok
-set allow_drop_cascade = false;
-

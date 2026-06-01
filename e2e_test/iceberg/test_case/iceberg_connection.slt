@@ -1,7 +1,4 @@
 statement ok
-set allow_drop_cascade = true;
-
-statement ok
 set streaming_parallelism=4;
 
 statement ok
@@ -68,7 +65,3 @@ DROP TABLE s1 cascade;
 
 statement ok
 DROP CONNECTION conn;
-
-statement ok
-set allow_drop_cascade = false;
-

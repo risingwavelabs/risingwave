@@ -1,7 +1,4 @@
 statement ok
-set allow_drop_cascade = true;
-
-statement ok
 DROP TABLE IF EXISTS s1_target cascade;
 
 statement ok
@@ -71,7 +68,3 @@ DROP TABLE fact cascade;
 
 statement ok
 DROP TABLE dim cascade;
-
-statement ok
-set allow_drop_cascade = false;
-

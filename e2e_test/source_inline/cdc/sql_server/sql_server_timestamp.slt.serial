@@ -1,9 +1,5 @@
 control substitution on
 
-statement ok
-set allow_drop_cascade = true;
-
-
 # ------------ data prepare stage ------------
 system ok
 sqlcmd -C -d master -Q 'create database sqlserver_timestamp_db;' -b
@@ -77,7 +73,3 @@ select id, timestamp, time_col from timestamp_test order by id;
 # ------------ drop stage ------------
 statement ok
 drop source mssql_timestamp_source cascade;
-
-statement ok
-set allow_drop_cascade = false;
-

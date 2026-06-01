@@ -1,10 +1,6 @@
 control substitution on
 
 statement ok
-set allow_drop_cascade = true;
-
-
-statement ok
 SET streaming_use_shared_source TO true;
 
 system ok
@@ -326,7 +322,3 @@ drop source s_latest cascade;
 
 system ok
 rpk topic delete shared_source;
-
-statement ok
-set allow_drop_cascade = false;
-

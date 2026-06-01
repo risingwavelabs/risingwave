@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 # Test DROP FUNCTION CASCADE functionality
 # This test verifies that DROP FUNCTION CASCADE properly drops both the function
 # and any dependent objects like materialized views.
@@ -88,7 +85,3 @@ drop function subtract_udf;
 
 statement ok
 drop table t;
-
-statement ok
-set allow_drop_cascade = false;
-

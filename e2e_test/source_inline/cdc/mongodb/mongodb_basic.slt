@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 # CDC source basic test
 control substitution on
 
@@ -227,7 +224,3 @@ DROP TABLE phases;
 
 system ok
 mongosh 'mongodb://mongodb:27017' <<< 'db.all_types.drop();'
-
-statement ok
-set allow_drop_cascade = false;
-

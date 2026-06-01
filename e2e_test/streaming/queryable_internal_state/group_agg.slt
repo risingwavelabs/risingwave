@@ -1,6 +1,3 @@
-statement ok
-set allow_drop_cascade = true;
-
 # See https://github.com/risingwavelabs/risingwave/pull/20435 for the bug.
 
 control substitution on
@@ -62,7 +59,3 @@ count: 1
 
 statement ok
 drop table t cascade;
-
-statement ok
-set allow_drop_cascade = false;
-

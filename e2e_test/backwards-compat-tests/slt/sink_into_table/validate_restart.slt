@@ -1,7 +1,4 @@
 statement ok
-set allow_drop_cascade = true;
-
-statement ok
 SET RW_IMPLICIT_FLUSH=true;
 
 statement ok
@@ -72,7 +69,3 @@ drop table sink_t3;
 
 statement ok
 drop table sink_t4;
-
-statement ok
-set allow_drop_cascade = false;
-

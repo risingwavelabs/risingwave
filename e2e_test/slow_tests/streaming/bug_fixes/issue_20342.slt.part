@@ -1,7 +1,4 @@
 statement ok
-set allow_drop_cascade = true;
-
-statement ok
 set streaming_parallelism=1;
 
 # pk: [v1]
@@ -100,7 +97,3 @@ wait;
 
 statement ok
 drop table t cascade;
-
-statement ok
-set allow_drop_cascade = false;
-
