@@ -2,6 +2,9 @@ statement ok
 set sink_decouple = false;
 
 statement ok
+set streaming_parallelism=4;
+
+statement ok
 DROP SINK IF EXISTS case_sensitive_column_sink;
 
 statement ok
@@ -40,11 +43,15 @@ INSERT INTO case_sensitive_column_t VALUES (1, 500);
 statement ok
 FLUSH;
 
+sleep 10s
+
 statement ok
 INSERT INTO case_sensitive_column_t VALUES (1, 600);
 
 statement ok
 FLUSH;
+
+sleep 10s
 
 query II
 SELECT "Key", "Value" FROM case_sensitive_column_t ORDER BY "Key";
