@@ -579,12 +579,27 @@ fn optimize_by_copy_block_with_input(
             .flat_map(|sst| sst.table_ids.clone()),
     );
     let single_table = input_table_ids.len() == 1;
+    let is_optimization_rejected_by_watermark = if single_table {
+        let single_table_id = input_table_ids.iter().next().unwrap();
+        compact_task
+            .pk_prefix_table_watermarks
+            .contains_key(single_table_id)
+            || compact_task
+                .non_pk_prefix_table_watermarks
+                .contains_key(single_table_id)
+            || compact_task
+                .value_table_watermarks
+                .contains_key(single_table_id)
+    } else {
+        false
+    };
     context.storage_opts.enable_fast_compaction
         && all_ssts_are_blocked_filter
         && !compact_task.contains_range_tombstone()
         && !compact_task.contains_ttl()
         && !compact_task.contains_split_sst()
         && single_table
+        && !is_optimization_rejected_by_watermark
         && compact_task.target_level > 0
         && compact_task.input_ssts.len() == 2
         && task_input.compaction_size < context.storage_opts.compactor_fast_max_compact_task_size
