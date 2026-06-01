@@ -91,3 +91,48 @@ impl SessionInitConfig {
         .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_session_init_entries_distinguishes_omitted_from_default() {
+        let config: RwConfig = toml::from_str(
+            r#"
+            [session_init]
+            streaming_parallelism = "bounded(8)"
+            streaming_parallelism_for_table = "default"
+            "#,
+        )
+        .unwrap();
+
+        // Omitted fields are `None`; an explicit `default` is `Some("default")`.
+        assert_eq!(
+            config.session_init.streaming_parallelism.as_deref(),
+            Some("bounded(8)")
+        );
+        assert_eq!(
+            config
+                .session_init
+                .streaming_parallelism_for_table
+                .as_deref(),
+            Some("default")
+        );
+        assert_eq!(config.session_init.streaming_parallelism_for_sink, None);
+
+        // Only explicitly-configured parameters are reported.
+        assert_eq!(
+            config.session_init.entries(),
+            vec![
+                ("streaming_parallelism", "bounded(8)"),
+                ("streaming_parallelism_for_table", "default"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_session_init_default_is_empty() {
+        assert!(SessionInitConfig::default().entries().is_empty());
+    }
+}
