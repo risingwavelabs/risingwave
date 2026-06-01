@@ -56,6 +56,23 @@ fn test_resolve_equality_delete_field_ids_from_iceberg_schema() {
 }
 
 #[test]
+fn test_resolve_equality_delete_field_ids_case_insensitive() {
+    let iceberg_schema = IcebergSchema::builder()
+        .with_fields(vec![
+            NestedField::new(42, "Key", Type::Primitive(PrimitiveType::Int), true).into(),
+            NestedField::new(99, "Value", Type::Primitive(PrimitiveType::Int), true).into(),
+        ])
+        .build()
+        .unwrap();
+
+    let field_ids =
+        super::writer::resolve_equality_delete_field_ids(&["key".to_owned()], &iceberg_schema)
+            .unwrap();
+
+    assert_eq!(field_ids, vec![42]);
+}
+
+#[test]
 fn test_compatible_arrow_schema() {
     use super::*;
     let risingwave_schema = Schema::new(vec![

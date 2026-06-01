@@ -302,15 +302,37 @@ pub(super) fn resolve_equality_delete_field_ids(
 ) -> Result<Vec<i32>> {
     primary_key_column_names
         .iter()
-        .map(|column_name| {
-            iceberg_schema.field_id_by_name(column_name).ok_or_else(|| {
-                SinkError::Config(anyhow!(
-                    "Primary key column {} not found in Iceberg schema",
-                    column_name
-                ))
-            })
-        })
+        .map(|column_name| resolve_equality_delete_field_id(column_name, iceberg_schema))
         .collect()
+}
+
+fn resolve_equality_delete_field_id(
+    column_name: &str,
+    iceberg_schema: &iceberg::spec::Schema,
+) -> Result<i32> {
+    if let Some(field_id) = iceberg_schema.field_id_by_name(column_name) {
+        return Ok(field_id);
+    }
+
+    let lowercase_column_name = column_name.to_lowercase();
+    let matched_fields = iceberg_schema
+        .as_struct()
+        .fields()
+        .iter()
+        .filter(|field| field.name.to_lowercase() == lowercase_column_name)
+        .collect::<Vec<_>>();
+
+    match matched_fields.as_slice() {
+        [field] => Ok(field.id),
+        [] => Err(SinkError::Config(anyhow!(
+            "Primary key column {} not found in Iceberg schema",
+            column_name
+        ))),
+        _ => Err(SinkError::Config(anyhow!(
+            "Primary key column {} matches multiple columns in Iceberg schema ignoring case",
+            column_name
+        ))),
+    }
 }
 
 impl IcebergSinkWriterInner {
