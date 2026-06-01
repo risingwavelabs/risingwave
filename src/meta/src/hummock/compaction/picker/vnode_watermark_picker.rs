@@ -227,9 +227,9 @@ mod tests {
     }
 
     #[test]
-    fn test_pick_compaction_scans_all_levels() {
+    fn test_pick_compaction_last_level() {
         let level_2_sst = SstableInfoInner {
-            max_watermark_column_value: Some(Bytes::from_static(b"key_8")),
+            max_watermark_column_value: Some(Bytes::from_static(b"key_9")),
             ..generate_table_impl(1, 1, 0, 100, 1)
         }
         .into();
@@ -239,7 +239,7 @@ mod tests {
         }
         .into();
         let level_4_sst = SstableInfoInner {
-            max_watermark_column_value: Some(Bytes::from_static(b"key_9")),
+            max_watermark_column_value: Some(Bytes::from_static(b"key_7")),
             ..generate_table_impl(3, 1, 201, 300, 1)
         }
         .into();
@@ -265,7 +265,7 @@ mod tests {
             ReadTableWatermark {
                 direction: WatermarkDirection::Ascending,
                 vnode_watermarks: maplit::btreemap! {
-                    VirtualNode::from_index(1) => Bytes::from_static(b"key_9"),
+                    VirtualNode::from_index(1) => Bytes::from_static(b"key_8"),
                 },
             },
         )]);
@@ -276,11 +276,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(ret.input_levels.len(), 2);
-        assert_eq!(ret.input_levels[0].level_idx, 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 1);
-        assert_eq!(ret.input_levels[1].level_idx, 3);
-        assert_eq!(ret.input_levels[1].table_infos[0].sst_id, 2);
-        assert_eq!(ret.target_level, 3);
-        assert_eq!(ret.total_file_count, 2);
+        assert_eq!(ret.input_levels[0].level_idx, 4);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 3);
+        assert_eq!(ret.input_levels[1].level_idx, 4);
+        assert!(ret.input_levels[1].table_infos.is_empty());
+        assert_eq!(ret.target_level, 4);
+        assert_eq!(ret.total_file_count, 1);
     }
 }
