@@ -906,3 +906,56 @@ fn test_upsert_accepts_copy_on_write() {
     let config = result.unwrap();
     assert_eq!(config.write_mode, IcebergWriteMode::CopyOnWrite);
 }
+
+// Regression: an upsert sink whose pk column has upper-case letters must resolve.
+// `primary_key` is lower-cased on deserialization, so re-matching it against the
+// (case-sensitive) column names would fail. The connector must instead use the pk
+// indices resolved by the frontend (`SinkParam::downstream_pk`).
+#[test]
+fn test_iceberg_sink_upper_case_primary_key() {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::id::SinkId;
+
+    use crate::sink::SinkParam;
+    use crate::sink::catalog::SinkType;
+    use crate::sink::iceberg::IcebergSink;
+
+    let values = [
+        ("connector", "iceberg"),
+        ("type", "upsert"),
+        ("primary_key", "Key"),
+        ("warehouse.path", "s3://iceberg"),
+        ("s3.endpoint", "http://127.0.0.1:9301"),
+        ("s3.access.key", "hummockadmin"),
+        ("s3.secret.key", "hummockadmin"),
+        ("s3.region", "us-east-1"),
+        ("catalog.type", "storage"),
+        ("catalog.name", "demo"),
+        ("database.name", "demo_db"),
+        ("table.name", "demo_table"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+    let config = IcebergConfig::from_btreemap(values).unwrap();
+
+    let param = SinkParam {
+        sink_id: SinkId::from(1u32),
+        sink_name: "test_sink".to_owned(),
+        properties: BTreeMap::new(),
+        columns: vec![
+            ColumnDesc::named("Key", ColumnId::new(1), DataType::Int32),
+            ColumnDesc::named("Value", ColumnId::new(2), DataType::Int32),
+        ],
+        downstream_pk: Some(vec![0]),
+        sink_type: SinkType::Upsert,
+        ignore_delete: false,
+        format_desc: None,
+        db_name: "demo_db".to_owned(),
+        sink_from_name: "test_sink".to_owned(),
+    };
+
+    let sink = IcebergSink::new(config, param).unwrap();
+    // `unique_column_ids` is the `ColumnId` of the upper-case "Key" column.
+    assert_eq!(sink.unique_column_ids, Some(vec![1]));
+}
