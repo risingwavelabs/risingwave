@@ -266,4 +266,121 @@ mod tests {
             .unwrap();
         assert_eq!(models.value, params.get("rw_implicit_flush").unwrap());
     }
+
+    /// Scenario 1: on a new cluster, `[session_init]` seeds values into the meta store, including
+    /// the `default` placeholder which must be persisted verbatim.
+    #[tokio::test]
+    async fn test_session_init_bootstrap() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref().clone();
+        // Simulate an empty store: drop the rows seeded while constructing the test env.
+        SessionParameter::delete_many()
+            .exec(&meta_store.conn)
+            .await
+            .unwrap();
+
+        let session_init = SessionInitConfig {
+            streaming_parallelism: Some("bounded(8)".to_owned()),
+            streaming_parallelism_for_table: Some("default".to_owned()),
+            ..Default::default()
+        };
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            session_init,
+        )
+        .await
+        .unwrap();
+
+        let params = ctl.get_params().await;
+        assert_eq!(params.get("streaming_parallelism").unwrap(), "bounded(8)");
+        // `default` must be persisted as-is, not materialized into a concrete value.
+        assert_eq!(
+            params.get("streaming_parallelism_for_table").unwrap(),
+            "default"
+        );
+
+        // Values are persisted to the meta store.
+        let persisted = SessionParameter::find_by_id("streaming_parallelism".to_owned())
+            .one(&meta_store.conn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.value, "bounded(8)");
+    }
+
+    /// Scenario 2: on an existing cluster, a persisted value takes precedence over `[session_init]`.
+    #[tokio::test]
+    async fn test_session_init_persisted_takes_precedence() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref().clone();
+
+        // First launch: seed the store and then mimic an `ALTER SYSTEM SET`.
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            SessionInitConfig::default(),
+        )
+        .await
+        .unwrap();
+        ctl.set_param("streaming_parallelism", Some("ratio(0.5)".to_owned()))
+            .await
+            .unwrap();
+
+        // Restart with a conflicting `[session_init]`: the persisted value must win.
+        let session_init = SessionInitConfig {
+            streaming_parallelism: Some("bounded(8)".to_owned()),
+            ..Default::default()
+        };
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            session_init,
+        )
+        .await
+        .unwrap();
+        let params = ctl.get_params().await;
+        assert_eq!(params.get("streaming_parallelism").unwrap(), "ratio(0.5)");
+    }
+
+    /// Scenario 3: a newly supported field missing from the persisted `session_parameter` table is
+    /// seeded from `[session_init]` on restart.
+    #[tokio::test]
+    async fn test_session_init_seeds_missing_field() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref().clone();
+
+        // First launch seeds and persists defaults for all fields.
+        SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            SessionInitConfig::default(),
+        )
+        .await
+        .unwrap();
+        // Simulate an older cluster that has no row for this field.
+        SessionParameter::delete_by_id("streaming_parallelism_for_materialized_view".to_owned())
+            .exec(&meta_store.conn)
+            .await
+            .unwrap();
+
+        let session_init = SessionInitConfig {
+            streaming_parallelism_for_materialized_view: Some("bounded(4)".to_owned()),
+            ..Default::default()
+        };
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            session_init,
+        )
+        .await
+        .unwrap();
+        let params = ctl.get_params().await;
+        assert_eq!(
+            params
+                .get("streaming_parallelism_for_materialized_view")
+                .unwrap(),
+            "bounded(4)"
+        );
+    }
 }
