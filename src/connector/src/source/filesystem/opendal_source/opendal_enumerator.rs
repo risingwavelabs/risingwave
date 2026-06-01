@@ -69,7 +69,7 @@ impl<Src: OpendalSource> SplitEnumerator for OpendalEnumerator<Src> {
             Ok(_) => return Ok(vec![empty_split]),
             Err(e) => {
                 return Err(anyhow!(e)
-                    .context("fail to create source, please check your config.")
+                    .context("failed to create the source; please check your configuration")
                     .into());
             }
         }
@@ -127,7 +127,7 @@ impl<Src: OpendalSource> OpendalEnumerator<Src> {
                     }
                     Some(Err(err)) => Some((Err(err.into()), object_lister)),
                     None => {
-                        tracing::info!("list object completed.");
+                        tracing::info!("finished listing objects");
                         None
                     }
                 }

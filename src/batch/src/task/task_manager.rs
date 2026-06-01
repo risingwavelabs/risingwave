@@ -116,7 +116,7 @@ impl BatchManager {
             Ok(())
         } else {
             bail!(
-                "can not create duplicate task with the same id: {:?}",
+                "cannot create a duplicate task with the same ID: {:?}",
                 task_id,
             );
         };

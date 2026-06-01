@@ -203,7 +203,7 @@ pub async fn rpc_serve_with_store(
                 .run_once(lease_interval_secs as i64, election_shutdown_rx.clone())
                 .await
             {
-                tracing::error!(error = %e.as_report(), "election error happened");
+                tracing::error!(error = %e.as_report(), "an election error occurred");
             }
             // Leader lost, shutdown the service.
             shutdown.cancel();
@@ -234,7 +234,7 @@ pub async fn rpc_serve_with_store(
 
                 res = is_leader_watcher.changed() => {
                     if res.is_err() {
-                        tracing::error!("leader watcher recv failed");
+                        tracing::error!("failed to receive a leader watcher update");
                     }
                 }
             }
@@ -655,7 +655,10 @@ pub async fn start_service_as_election_leader(
                 let barrier_manager = barrier_manager.clone();
                 Box::pin(async move {
                     barrier_manager.may_snapshot_backfilling_job().await.unwrap_or_else(|e| {
-                        tracing::warn!(err = %e.as_report(), "failed to check having snapshot backfilling jobs. pause vacuum time travel");
+                        tracing::warn!(
+                            err = %e.as_report(),
+                            "failed to check whether snapshot backfill jobs exist; pausing time-travel vacuum",
+                        );
                         true
                     })
                 })

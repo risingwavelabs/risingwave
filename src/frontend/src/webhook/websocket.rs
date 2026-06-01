@@ -136,12 +136,14 @@ impl TryFrom<RawDmlRequest> for DmlRequest {
     fn try_from(raw: RawDmlRequest) -> Result<Self, Self::Error> {
         let op = match raw.op.as_deref() {
             None => {
-                return Err("missing op, expected upsert/delete".to_owned());
+                return Err("missing `op`; expected `upsert` or `delete`".to_owned());
             }
             Some("upsert" | "insert" | "update") => DmlOp::Upsert,
             Some("delete") => DmlOp::Delete,
             Some(other) => {
-                return Err(format!("unknown op '{other}', expected upsert/delete"));
+                return Err(format!(
+                    "unknown `op` value `{other}`; expected `upsert` or `delete`"
+                ));
             }
         };
 
@@ -243,7 +245,7 @@ async fn try_handle_connection(
         Ok(Some(Ok(Message::Text(text)))) => text,
         Ok(Some(Ok(Message::Close(_)))) | Ok(None) => return Ok(()),
         Ok(Some(Ok(_))) => {
-            return Err("the first WebSocket frame must be a text init message".to_owned());
+            return Err("the first WebSocket frame must be a text `init` message".to_owned());
         }
         Ok(Some(Err(e))) => {
             return Err(format!(
@@ -317,7 +319,7 @@ async fn try_handle_connection(
                                 || ack.dml_batch_id > last_forwarded_dml_batch_id
                             {
                                 return Err(format!(
-                                    "unexpected ack for dml_batch_id {}",
+                                    "received an unexpected ack for dml_batch_id {}",
                                     ack.dml_batch_id
                                 ));
                             }
@@ -329,7 +331,7 @@ async fn try_handle_connection(
                                 },
                             )
                             .await
-                            .map_err(|_| "websocket connection closed while sending ack".to_owned())?;
+                            .map_err(|_| "WebSocket connection closed while sending an ack".to_owned())?;
                         }
                         Some(ingest_dml_response::Response::Init(_)) => {
                             return Err("unexpected extra init response from ingest stream".to_owned());
@@ -372,7 +374,7 @@ async fn try_handle_connection(
                         },
                     )
                     .await
-                    .map_err(|_| "websocket connection closed while sending ack".to_owned())?;
+                    .map_err(|_| "WebSocket connection closed while sending an ack".to_owned())?;
                     continue;
                 }
 
@@ -422,7 +424,7 @@ fn parse_and_validate_init_request(
 
 fn validate_timestamp_skew(timestamp_ms: i64, max_clock_skew_ms: u64) -> Result<(), String> {
     if timestamp_ms < 0 {
-        return Err("timestamp must be a non-negative epoch millisecond".to_owned());
+        return Err("timestamp must be a non-negative Unix timestamp in milliseconds".to_owned());
     }
 
     let now_ms = SystemTime::now()
@@ -479,7 +481,7 @@ fn prepare_dml_batch_payload(
                     .map(|json_value| OwnedRow::new(vec![Some(JsonbVal::from(json_value).into())]))
                     .map_err(|e| {
                         format!(
-                            "dml_batch_id {dml_batch_id} item {item_index}: Failed to parse body: {}",
+                            "dml_batch_id {dml_batch_id} item {item_index}: failed to parse request body: {}",
                             e.as_report()
                         )
                     })?;
@@ -656,7 +658,7 @@ mod tests {
     #[test]
     fn test_dml_request_requires_op() {
         let err = DmlRequest::try_from(raw_req(None, r#"{"id":1}"#)).unwrap_err();
-        assert_eq!(err, "missing op, expected upsert/delete");
+        assert_eq!(err, "missing `op`; expected `upsert` or `delete`");
     }
 
     #[test]
@@ -929,7 +931,7 @@ mod tests {
             (
                 "x-rw-webhook-json-timestamp-handling-mode",
                 "invalid",
-                "unrecognized `x-rw-webhook-json-timestamp-handling-mode` value",
+                "unrecognized value `invalid` for `x-rw-webhook-json-timestamp-handling-mode`",
             ),
             (
                 "x-rw-webhook-json-timestamptz-handling-mode",
@@ -939,17 +941,17 @@ mod tests {
             (
                 "x-rw-webhook-json-time-handling-mode",
                 "invalid",
-                "unrecognized `x-rw-webhook-json-time-handling-mode` value",
+                "unrecognized value `invalid` for `x-rw-webhook-json-time-handling-mode`",
             ),
             (
                 "x-rw-webhook-json-bigint-unsigned-handling-mode",
                 "invalid",
-                "unrecognized `x-rw-webhook-json-bigint-unsigned-handling-mode` value",
+                "unrecognized value `invalid` for `x-rw-webhook-json-bigint-unsigned-handling-mode`",
             ),
             (
                 "x-rw-webhook-json-handle-toast-columns",
                 "invalid",
-                "unrecognized `x-rw-webhook-json-handle-toast-columns` value",
+                "unrecognized value `invalid` for `x-rw-webhook-json-handle-toast-columns`",
             ),
         ] {
             let mut headers = HeaderMap::new();

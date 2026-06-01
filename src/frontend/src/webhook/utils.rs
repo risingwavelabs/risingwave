@@ -137,7 +137,7 @@ pub(crate) async fn verify_signature(
         .eval_row(&row)
         .await
         .map_err(|e| {
-            tracing::error!(error = %e.as_report(), "Fail to validate for webhook events.");
+            tracing::error!(error = %e.as_report(), "Failed to validate the webhook request.");
             err(e, StatusCode::INTERNAL_SERVER_ERROR)
         })?
         .ok_or_else(|| {

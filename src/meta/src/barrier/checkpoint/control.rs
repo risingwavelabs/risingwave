@@ -350,9 +350,9 @@ impl CheckpointControl {
                                 database_id, command
                             )
                         } else {
-                            warn!(%database_id, ?command, "database not exist when handling command");
+                            warn!(%database_id, ?command, "database does not exist while handling the command");
                             for notifier in notifiers {
-                                notifier.notify_start_failed(anyhow!("database {database_id} not exist when handling command {command:?}").into());
+                                notifier.notify_start_failed(anyhow!("database {database_id} does not exist while handling command {command:?}").into());
                             }
                             return Ok(());
                         }

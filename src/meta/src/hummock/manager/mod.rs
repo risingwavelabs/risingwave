@@ -640,7 +640,7 @@ impl HummockManager {
                 .push(tx);
             Ok((epoch, rx))
         } else {
-            Err(anyhow!("table {} not exist", table_id).into())
+            Err(anyhow!("table {} does not exist", table_id).into())
         }
     }
 }

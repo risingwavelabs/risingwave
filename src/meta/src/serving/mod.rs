@@ -151,12 +151,12 @@ async fn fetch_serving_infos(
         .catalog_controller
         .fragment_parallelisms()
         .await
-        .expect("fail to fetch running parallelisms");
+        .expect("failed to fetch running parallelisms");
     let serving_compute_nodes = metadata_manager
         .cluster_controller
         .list_active_serving_workers()
         .await
-        .expect("fail to list serving compute nodes");
+        .expect("failed to list serving compute nodes");
     (
         serving_compute_nodes,
         parallelisms
