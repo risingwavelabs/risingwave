@@ -32,6 +32,8 @@ pub mod streaming;
 pub use streaming::{AsyncStackTraceOption, StreamingConfig};
 pub mod server;
 pub use server::{HeapProfilingConfig, ServerConfig};
+pub mod session_init;
+pub use session_init::SessionInitConfig;
 pub mod udf;
 pub use udf::UdfConfig;
 pub mod storage;
@@ -108,6 +110,10 @@ pub struct RwConfig {
     #[serde(default)]
     #[config_doc(nested)]
     pub udf: UdfConfig,
+
+    #[serde(default)]
+    #[config_doc(nested)]
+    pub session_init: SessionInitConfig,
 
     #[serde(flatten)]
     #[config_doc(omitted)]

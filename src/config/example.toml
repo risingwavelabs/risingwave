@@ -483,3 +483,12 @@ enforce_secret = false
 enable_embedded_python_udf = false
 enable_embedded_javascript_udf = true
 enable_embedded_wasm_udf = true
+
+[session_init]
+streaming_parallelism = ""
+streaming_parallelism_for_backfill = ""
+streaming_parallelism_for_table = ""
+streaming_parallelism_for_source = ""
+streaming_parallelism_for_sink = ""
+streaming_parallelism_for_index = ""
+streaming_parallelism_for_materialized_view = ""
