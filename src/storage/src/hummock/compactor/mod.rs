@@ -90,8 +90,8 @@ pub use self::compaction_utils::{
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    GetObjectId, HummockResult, ObjectIdManager, SstableBuilderOptions, Xor8FilterBuilder,
-    Xor16FilterBuilder,
+    GetObjectId, HummockErrorInner, HummockResult, ObjectIdManager, SstableBuilderOptions,
+    Xor8FilterBuilder, Xor16FilterBuilder,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgentRef, CompactionCatalogManager, CompactionCatalogManagerRef,
@@ -761,6 +761,13 @@ pub fn start_iceberg_compactor(
                                 // set flag
                                 pull_task_ack = true;
                             },
+                            risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CancelCompactTask(cancel_compact_task) => {
+                                cancel_iceberg_task(
+                                    cancel_compact_task.task_id,
+                                    &mut task_queue,
+                                    &shutdown_map,
+                                );
+                            },
                         }
                     }
                     Some(Err(e)) => {
@@ -1338,6 +1345,12 @@ fn schedule_queued_tasks(
         let executor = compactor_context.compaction_executor.clone();
         let shutdown_map_clone = shutdown_map.clone();
         let completion_tx_clone = task_completion_tx.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        {
+            let mut shutdown_guard = shutdown_map.lock().unwrap();
+            shutdown_guard.insert(task_key, tx);
+        }
 
         tracing::info!(
             task_id = task_id,
@@ -1348,12 +1361,7 @@ fn schedule_queued_tasks(
         );
 
         executor.spawn(async move {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            {
-                let mut shutdown_guard = shutdown_map_clone.lock().unwrap();
-                shutdown_guard.insert(task_key, tx);
-            }
-            let _cleanup_guard = scopeguard::guard(shutdown_map_clone.clone(), move |shutdown_map| {
+            let _cleanup_guard = scopeguard::guard(shutdown_map_clone, move |shutdown_map| {
                 let mut shutdown_guard = shutdown_map.lock().unwrap();
                 shutdown_guard.remove(&task_key);
             });
@@ -1366,7 +1374,20 @@ fn schedule_queued_tasks(
                     error_message: None,
                 },
                 Err(e) => {
-                    tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
+                    if is_cancelled_iceberg_compaction_error(&e) {
+                        tracing::info!(
+                            task_id = task_key.0,
+                            plan_index = task_key.1,
+                            "Iceberg compaction plan cancelled"
+                        );
+                    } else {
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            task_id = task_key.0,
+                            plan_index = task_key.1,
+                            "Failed to compact iceberg runner"
+                        );
+                    }
                     IcebergPlanCompletion {
                         task_key,
                         error_message: Some(e.to_report_string()),
@@ -1375,9 +1396,69 @@ fn schedule_queued_tasks(
             };
 
             if completion_tx_clone.send(completion).is_err() {
-                tracing::warn!(task_id = task_key.0, plan_index = task_key.1, "Failed to notify task completion - main loop may have shut down");
+                tracing::warn!(
+                    task_id = task_key.0,
+                    plan_index = task_key.1,
+                    "Failed to notify task completion - main loop may have shut down"
+                );
             }
         });
+    }
+}
+
+fn is_cancelled_iceberg_compaction_error(error: &crate::hummock::HummockError) -> bool {
+    matches!(
+        error.inner(),
+        HummockErrorInner::CompactionExecutor(message) if message == "Plan cancelled"
+    )
+}
+
+fn cancel_iceberg_task(
+    task_id: u64,
+    task_queue: &mut IcebergTaskQueue,
+    shutdown_map: &Arc<Mutex<HashMap<TaskKey, Sender<()>>>>,
+) {
+    // Meta assigns one task id to an Iceberg compact task, but the compactor
+    // splits it into multiple plan runners tracked by `(task_id, plan_index)`.
+    // A cancel event only carries `task_id`, so it must cancel all waiting and
+    // running plan runners that belong to that task.
+    let cancelled_waiting = task_queue.cancel_waiting_task(task_id);
+
+    let cancelled_running = {
+        let mut shutdown_guard = shutdown_map.lock().unwrap();
+        let task_keys: Vec<_> = shutdown_guard
+            .keys()
+            .filter(|(running_task_id, _)| *running_task_id == task_id)
+            .copied()
+            .collect();
+
+        for task_key in &task_keys {
+            if let Some(tx) = shutdown_guard.remove(task_key)
+                && tx.send(()).is_err()
+            {
+                tracing::debug!(
+                    task_id = task_key.0,
+                    plan_index = task_key.1,
+                    "Iceberg compaction plan shutdown receiver already closed during cancellation"
+                );
+            }
+        }
+
+        task_keys.len()
+    };
+
+    if cancelled_waiting == 0 && cancelled_running == 0 {
+        tracing::warn!(
+            task_id = task_id,
+            "Attempting to cancel non-existent iceberg compaction task"
+        );
+    } else {
+        tracing::info!(
+            task_id = task_id,
+            cancelled_waiting = cancelled_waiting,
+            cancelled_running = cancelled_running,
+            "Cancelled iceberg compaction task"
+        );
     }
 }
 
