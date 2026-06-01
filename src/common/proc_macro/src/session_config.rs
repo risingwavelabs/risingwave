@@ -43,6 +43,10 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
     let mut list_all_list = vec![];
     let mut alias_to_entry_name_branches = vec![];
     let mut entry_name_flags = vec![];
+    // Fields and entries for the generated `SessionInitConfig`, i.e. parameters flagged with
+    // `SESSION_INIT` that can be seeded from `[session_init]` in `risingwave.toml`.
+    let mut session_init_fields = vec![];
+    let mut session_init_entries = vec![];
 
     for field in fields {
         let field_ident = field.ident.expect_or_abort("Field need to be named");
@@ -249,10 +253,58 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 (#entry_name, ParamFlags {no_show_all: #no_show_all_flag, no_alter_sys: #no_alter_sys_flag})
             }
         );
+
+        // Parameters flagged with `SESSION_INIT` become a field in the generated
+        // `SessionInitConfig`. The value is kept as a raw `Option<String>` so that a parameter
+        // omitted from `risingwave.toml` (`None`) can be distinguished from one explicitly set to
+        // its logical default such as `"default"` (`Some("default")`).
+        if flags.contains(&"SESSION_INIT") {
+            let doc_string = doc_list.join(" ");
+            session_init_fields.push(quote! {
+                #[doc = #doc_string]
+                #[serde(default, with = "crate::config::none_as_empty_string")]
+                pub #field_ident: Option<String>,
+            });
+            session_init_entries.push(quote! {
+                (#entry_name, &self.#field_ident),
+            });
+        }
     }
 
     let struct_ident = input.ident;
     quote! {
+        /// The section `[session_init]` in `risingwave.toml`, generated from the `SESSION_INIT`-flagged
+        /// fields of [`SessionConfig`].
+        ///
+        /// It seeds the corresponding persisted session parameters into the meta store during
+        /// **cluster bootstrap only**. The precedence is:
+        ///
+        /// 1. Persisted value in the meta store (`session_parameter`)
+        /// 2. Explicit value in `[session_init]`
+        /// 3. Built-in `SessionConfig::default()`
+        ///
+        /// Editing `[session_init]` after a cluster has been bootstrapped does not change the
+        /// effective value of an already-persisted parameter. See the RFC for details.
+        #[derive(Clone, Debug, Default, Serialize, Deserialize, ConfigDoc, PartialEq)]
+        pub struct SessionInitConfig {
+            #(#session_init_fields)*
+        }
+
+        impl SessionInitConfig {
+            /// Returns the explicitly-configured `(session parameter entry name, value)` pairs.
+            /// Parameters omitted from `[session_init]` are not included.
+            pub fn entries(&self) -> Vec<(&'static str, &str)> {
+                [
+                    #(#session_init_entries)*
+                ]
+                .into_iter()
+                .filter_map(|(name, value): (&'static str, &Option<String>)| {
+                    value.as_deref().map(|value| (name, value))
+                })
+                .collect()
+            }
+        }
+
         use std::collections::HashMap;
         use std::sync::LazyLock;
         static PARAM_NAME_FLAGS: LazyLock<HashMap<&'static str, ParamFlags>> = LazyLock::new(|| HashMap::from([#(#entry_name_flags, )*]));
