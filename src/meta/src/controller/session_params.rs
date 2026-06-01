@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::config::SessionInitConfig;
 use risingwave_common::session_config::{SessionConfig, SessionConfigError};
 use risingwave_meta_model::prelude::SessionParameter;
 use risingwave_meta_model::session_parameter;
@@ -45,11 +47,50 @@ impl SessionParamsController {
     pub async fn new(
         sql_meta_store: SqlMetaStore,
         notification_manager: NotificationManagerRef,
-        mut init_params: SessionConfig,
+        session_init: SessionInitConfig,
     ) -> MetaResult<Self> {
         let db = sql_meta_store.conn;
+
+        // Precedence (high to low):
+        // 1. Persisted value in Meta store (`session_parameter`)
+        // 2. Explicit value in `[session_init]`
+        // 3. Built-in `SessionConfig::default()`
+        let mut init_params = SessionConfig::default();
+
+        // Apply the explicitly-configured `[session_init]` values onto the built-in defaults.
+        // Record the normalized value of each so we can later detect when a persisted value
+        // takes precedence and warn the operator.
+        let mut session_init_values: HashMap<String, String> = HashMap::new();
+        for (name, value) in session_init.entries() {
+            match init_params.set(name, value.to_owned(), &mut ()) {
+                Ok(normalized) => {
+                    session_init_values.insert(name.to_owned(), normalized);
+                }
+                Err(e) => {
+                    tracing::error!(error = %e.as_report(), parameter = name, "invalid [session_init] value, ignoring");
+                }
+            }
+        }
+        if !session_init_values.is_empty() {
+            info!(
+                "[session_init] seeds session parameters during cluster bootstrap only; \
+                 persisted values in the meta store take precedence on existing clusters"
+            );
+        }
+
+        // Persisted values take precedence over `[session_init]`.
         let params = SessionParameter::find().all(&db).await?;
         for param in params {
+            if let Some(configured) = session_init_values.get(&param.name)
+                && *configured != param.value
+            {
+                tracing::warn!(
+                    parameter = %param.name,
+                    session_init_value = %configured,
+                    persisted_value = %param.value,
+                    "session_init value differs from persisted session parameter, using persisted value"
+                );
+            }
             if let Err(e) = init_params.set(&param.name, param.value, &mut ()) {
                 match e {
                     SessionConfigError::InvalidValue { .. } => {
@@ -162,7 +203,7 @@ mod tests {
         let session_param_ctl = SessionParamsController::new(
             meta_store.clone(),
             env.notification_manager_ref(),
-            init_params.clone(),
+            SessionInitConfig::default(),
         )
         .await
         .unwrap();
@@ -190,7 +231,7 @@ mod tests {
         let session_param_ctl = SessionParamsController::new(
             meta_store.clone(),
             env.notification_manager_ref(),
-            init_params.clone(),
+            SessionInitConfig::default(),
         )
         .await
         .unwrap();
