@@ -1,0 +1,204 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+use risingwave_expr::bail;
+use risingwave_sqlparser::ast::{AfterMatchSkip, MatchRecognizePattern, RowsPerMatch};
+
+use super::{
+    ColPrunable, ColumnPruningContext, ExprRewritable, ExprVisitable, Logical, LogicalFilter,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    PredicatePushdownContext, ToBatch, ToStream, ToStreamContext, generic,
+};
+use super::generic::GenericPlanRef;
+use crate::binder::{BoundMeasure, BoundSymbolDefinition};
+use crate::error::Result;
+use crate::expr::ExprImpl;
+use crate::optimizer::plan_node::utils::impl_distill_by_unit;
+use crate::utils::{ColIndexMapping, Condition};
+
+/// `LogicalMatchRecognize` implements [`super::Logical`] for a SQL `MATCH_RECOGNIZE` (row pattern
+/// recognition) operation.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LogicalMatchRecognize {
+    pub base: PlanBase<super::Logical>,
+    core: generic::MatchRecognize<PlanRef>,
+}
+
+impl LogicalMatchRecognize {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        input: PlanRef,
+        partition_by: Vec<ExprImpl>,
+        order_by: Vec<ExprImpl>,
+        measures: Vec<BoundMeasure>,
+        rows_per_match: Option<RowsPerMatch>,
+        after_match_skip: Option<AfterMatchSkip>,
+        pattern: MatchRecognizePattern,
+        defines: Vec<BoundSymbolDefinition>,
+    ) -> Self {
+        let core = generic::MatchRecognize {
+            input,
+            partition_by,
+            order_by,
+            measures,
+            rows_per_match,
+            after_match_skip,
+            pattern,
+            defines,
+        };
+        let base = PlanBase::new_logical_with_core(&core);
+        Self { base, core }
+    }
+
+    /// The set of input columns referenced by any expression in the clause.
+    fn input_required_cols(&self) -> FixedBitSet {
+        let input_col_num = self.core.input.schema().len();
+        let mut required = FixedBitSet::with_capacity(input_col_num);
+        for e in &self.core.partition_by {
+            required.union_with(&e.collect_input_refs(input_col_num));
+        }
+        for e in &self.core.order_by {
+            required.union_with(&e.collect_input_refs(input_col_num));
+        }
+        for m in &self.core.measures {
+            required.union_with(&m.expr.collect_input_refs(input_col_num));
+        }
+        for d in &self.core.defines {
+            required.union_with(&d.definition.collect_input_refs(input_col_num));
+        }
+        required
+    }
+}
+
+impl PlanTreeNodeUnary<Logical> for LogicalMatchRecognize {
+    fn input(&self) -> PlanRef {
+        self.core.input.clone()
+    }
+
+    fn clone_with_input(&self, input: PlanRef) -> Self {
+        Self::new(
+            input,
+            self.core.partition_by.clone(),
+            self.core.order_by.clone(),
+            self.core.measures.clone(),
+            self.core.rows_per_match.clone(),
+            self.core.after_match_skip.clone(),
+            self.core.pattern.clone(),
+            self.core.defines.clone(),
+        )
+    }
+}
+
+impl_plan_tree_node_for_unary! { Logical, LogicalMatchRecognize }
+impl_distill_by_unit!(LogicalMatchRecognize, core, "LogicalMatchRecognize");
+
+impl ColPrunable for LogicalMatchRecognize {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        // Prune the input down to the columns the clause's expressions actually reference.
+        let input_col_num = self.core.input.schema().len();
+        let input_required = self.input_required_cols();
+        let input_required_cols: Vec<_> = input_required.ones().collect();
+
+        let mut col_index_mapping =
+            ColIndexMapping::with_remaining_columns(&input_required_cols, input_col_num);
+
+        let mut new_core = self.core.clone();
+        new_core.input = self.core.input.prune_col(&input_required_cols, ctx);
+        new_core.rewrite_with_col_index_mapping(&mut col_index_mapping);
+
+        let node: PlanRef = Self {
+            base: PlanBase::new_logical_with_core(&new_core),
+            core: new_core,
+        }
+        .into();
+
+        // The node's own output is (partition cols + measures); project if the caller wants a subset.
+        let output_col_num = self.schema().len();
+        if required_cols == (0..output_col_num).collect_vec() {
+            node
+        } else {
+            LogicalProject::with_mapping(
+                node,
+                ColIndexMapping::with_remaining_columns(required_cols, output_col_num),
+            )
+            .into()
+        }
+    }
+}
+
+impl ExprRewritable<Logical> for LogicalMatchRecognize {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> PlanRef {
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self {
+            base: PlanBase::new_logical_with_core(&core),
+            core,
+        }
+        .into()
+    }
+}
+
+impl ExprVisitable for LogicalMatchRecognize {
+    fn visit_exprs(&self, v: &mut dyn crate::expr::ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
+impl PredicatePushdown for LogicalMatchRecognize {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        // Output columns are computed (partition/measures), so do not push predicates through.
+        LogicalFilter::create(self.clone().into(), predicate)
+    }
+}
+
+impl ToBatch for LogicalMatchRecognize {
+    fn to_batch(&self) -> Result<super::BatchPlanRef> {
+        bail!("BatchMatchRecognize is not implemented yet")
+    }
+}
+
+impl ToStream for LogicalMatchRecognize {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<super::StreamPlanRef> {
+        bail!("StreamMatchRecognize is not implemented yet")
+    }
+
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut super::convert::RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.core.input.logical_rewrite_for_stream(ctx)?;
+        let mut new_core = self.core.clone();
+        new_core.input = input;
+        let mut mapping = input_col_change;
+        new_core.rewrite_with_col_index_mapping(&mut mapping);
+        let node = Self {
+            base: PlanBase::new_logical_with_core(&new_core),
+            core: new_core,
+        };
+        // Output columns (partition + measures) are produced fresh by this node, so downstream sees
+        // an identity mapping over this node's own output schema.
+        let out_col_change = ColIndexMapping::identity(node.schema().len());
+        Ok((node.into(), out_col_change))
+    }
+}

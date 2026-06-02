@@ -1050,6 +1050,7 @@ mod logical_except;
 mod logical_expand;
 mod logical_filter;
 mod logical_gap_fill;
+mod logical_match_recognize;
 mod logical_get_channel_delta_stats;
 mod logical_hop_window;
 mod logical_insert;
@@ -1187,6 +1188,7 @@ pub use logical_expand::LogicalExpand;
 pub use logical_file_scan::LogicalFileScan;
 pub use logical_filter::LogicalFilter;
 pub use logical_gap_fill::LogicalGapFill;
+pub use logical_match_recognize::LogicalMatchRecognize;
 pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_intermediate_scan::{HummockRewriteInfo, LogicalIcebergIntermediateScan};
@@ -1331,6 +1333,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
             , { Logical, GapFill }
+            , { Logical, MatchRecognize }
             , { Logical, VectorSearch }
             , { Logical, GetChannelDeltaStats }
             , { Logical, LocalityProvider }

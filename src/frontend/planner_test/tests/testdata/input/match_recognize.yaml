@@ -1,4 +1,4 @@
-- name: MATCH_RECOGNIZE parses but is rejected by the binder (not yet supported)
+- name: MATCH_RECOGNIZE binds; planning is not yet implemented
   sql: |
     create table t(id int, ts timestamp, v int);
     select * from t match_recognize (
@@ -11,4 +11,5 @@
       define a as a.v > 0, b as b.v < 0, c as c.v = 0
     );
   expected_outputs:
-    - binder_error
+    - logical_plan
+    - stream_error
