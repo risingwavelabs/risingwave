@@ -997,6 +997,87 @@ mod tests {
         );
     }
 
+    /// `n` rows that each satisfy both `a` and `b`, so quantifier preference (not the predicates)
+    /// decides how a match is split between variables.
+    fn ab_rows(n: usize) -> Vec<BTreeSet<String>> {
+        vec![BTreeSet::from(["a".to_owned(), "b".to_owned()]); n]
+    }
+
+    fn plus(inner: Pattern, reluctant: bool) -> Pattern {
+        Pattern::Quantified(Box::new(inner), Quantifier::Plus, reluctant)
+    }
+
+    fn star(inner: Pattern, reluctant: bool) -> Pattern {
+        Pattern::Quantified(Box::new(inner), Quantifier::Star, reluctant)
+    }
+
+    #[tokio::test]
+    async fn nested_reluctant_then_greedy_adjacent() {
+        // `a*? a*` over three `a` rows. The reluctant first star takes as few as possible (zero) and
+        // the greedy second star takes the rest, so the whole run is still consumed: [0, 3). This
+        // guards against an empty-match or non-termination bug when two quantifiers over the same
+        // variable sit adjacent with opposite preferences.
+        let r = rows("aaa");
+        let m = SetMatcher { rows: r.clone() };
+        let nfa = Nfa::compile(&Pattern::Concat(vec![
+            star(vars("a"), true),
+            star(vars("a"), false),
+        ]));
+        assert_eq!(
+            nfa.find_matches_dynamic(r.len(), &m, &SkipMode::PastLastRow)
+                .await
+                .unwrap(),
+            vec![LabeledMatch {
+                start: 0,
+                end: 3,
+                labels: lbl("aaa")
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn nested_quantifier_preference_flips_split() {
+        // Four rows that each satisfy both `a` and `b`, matched by `(<a-quant> b+)+`. The inner
+        // first-variable quantifier's preference decides the split; the rest is greedy `b+`.
+        let r = ab_rows(4);
+        let m = SetMatcher { rows: r.clone() };
+
+        // Reluctant `a+?` takes the fewest `a` (one), then greedy `b+` takes the rest -> "abbb".
+        let reluctant = Nfa::compile(&plus(
+            Pattern::Concat(vec![plus(vars("a"), true), plus(vars("b"), false)]),
+            false,
+        ));
+        assert_eq!(
+            reluctant
+                .find_matches_dynamic(r.len(), &m, &SkipMode::PastLastRow)
+                .await
+                .unwrap(),
+            vec![LabeledMatch {
+                start: 0,
+                end: 4,
+                labels: lbl("abbb")
+            }]
+        );
+
+        // Greedy `a+` takes as many `a` as it can while still leaving one row for the mandatory
+        // `b+`, so it backtracks from four to three -> "aaab".
+        let greedy = Nfa::compile(&plus(
+            Pattern::Concat(vec![plus(vars("a"), false), plus(vars("b"), false)]),
+            false,
+        ));
+        assert_eq!(
+            greedy
+                .find_matches_dynamic(r.len(), &m, &SkipMode::PastLastRow)
+                .await
+                .unwrap(),
+            vec![LabeledMatch {
+                start: 0,
+                end: 4,
+                labels: lbl("aaab")
+            }]
+        );
+    }
+
     #[tokio::test]
     async fn dynamic_threads_running_labels() {
         // (a b): `b` sees `a` in the running labels -> matches.
