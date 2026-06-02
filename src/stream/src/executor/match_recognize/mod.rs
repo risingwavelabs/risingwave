@@ -22,5 +22,6 @@
 
 mod executor;
 mod nfa;
+mod parse;
 
 pub use executor::{MatchRecognizeExecutor, MatchRecognizeExecutorArgs};
