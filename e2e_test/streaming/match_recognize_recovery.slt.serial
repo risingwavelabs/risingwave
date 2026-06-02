@@ -1,0 +1,50 @@
+# Recovery test for streaming MATCH_RECOGNIZE: a partial match buffered before recovery must be
+# restored from the state table so it can complete afterwards.
+
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+create table tr (id int, ts int, v int) append only;
+
+statement ok
+create materialized view mvr as
+select * from tr match_recognize (
+  partition by id
+  order by ts
+  measures b.v as dip
+  one row per match
+  after match skip past last row
+  pattern (a b)
+  define a as a.v > 0, b as b.v < 0
+);
+
+# Buffer only the up-row (pattern variable `a`). The match is incomplete, so nothing is emitted yet.
+statement ok
+insert into tr values (1, 1, 10);
+
+query II rowsort
+select * from mvr;
+----
+
+# Trigger recovery: the executor must rebuild its per-partition buffer from the state table.
+statement ok
+recover;
+
+sleep 3s
+
+# Complete the match after recovery with the down-row, plus a trailing up-row to finalise it.
+statement ok
+insert into tr values (1, 2, -5), (1, 3, 8);
+
+# The buffered `a` survived recovery, so the (a b) match completes and emits.
+query II rowsort
+select * from mvr;
+----
+1 -5
+
+statement ok
+drop materialized view mvr;
+
+statement ok
+drop table tr;
