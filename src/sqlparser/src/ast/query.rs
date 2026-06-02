@@ -500,6 +500,8 @@ pub enum TableFactor {
         after_match_skip: Option<AfterMatchSkip>,
         /// `PATTERN ( <pattern> )` — required.
         pattern: MatchRecognizePattern,
+        /// `WITHIN <interval>` — bounds a match's time span; `None` when omitted.
+        within: Option<Expr>,
         /// `SUBSET <name> = (<vars>), ...` — empty when omitted.
         subsets: Vec<SubsetDefinition>,
         /// `DEFINE <symbol> AS <condition>, ...` — required.
@@ -731,6 +733,7 @@ impl fmt::Display for TableFactor {
                 rows_per_match,
                 after_match_skip,
                 pattern,
+                within,
                 subsets,
                 symbols,
                 alias,
@@ -752,6 +755,9 @@ impl fmt::Display for TableFactor {
                     write!(f, "{} ", after_match_skip)?;
                 }
                 write!(f, "PATTERN ({}) ", pattern)?;
+                if let Some(within) = within {
+                    write!(f, "WITHIN {} ", within)?;
+                }
                 if !subsets.is_empty() {
                     write!(f, "SUBSET {} ", display_comma_separated(subsets))?;
                 }

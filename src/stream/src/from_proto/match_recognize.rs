@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::MatchRecognizeNode;
 use risingwave_storage::StateStore;
 
@@ -63,6 +64,12 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             _ => SkipMode::PastLastRow,
         };
 
+        let within = node
+            .within
+            .as_ref()
+            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
+            .transpose()?;
+
         let input_arity = input.schema().len();
 
         let state_table =
@@ -80,6 +87,7 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             order_key_indices,
             measures,
             defines,
+            within,
             nfa,
             skip,
             input_arity,
