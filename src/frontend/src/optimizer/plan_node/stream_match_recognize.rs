@@ -56,14 +56,18 @@ impl StreamMatchRecognize {
     }
 
     /// Per-partition buffered-row state table. Layout:
-    ///   [ partition cols.. , seq (i64) , satisfied (varchar) , measure cols.. ]
-    /// keyed by (partition cols, seq). The executor buffers one row per live input row (its
-    /// satisfied pattern variables + pre-evaluated MEASURES) and restores the buffer from here on
-    /// recovery. `seq` is a per-partition monotonic id; consumed rows are deleted after each drain.
+    ///   `[ partition cols.. , seq (i64) , order_key , satisfied (varchar) , measure cols.. ]`
+    /// keyed by (partition cols, seq). The executor buffers one row per live input row (its order
+    /// key, satisfied pattern variables, and pre-evaluated MEASURES) and restores the buffer from
+    /// here on recovery. `seq` is a per-partition monotonic id; consumed rows are deleted after each
+    /// drain. `order_key` is the leading ORDER BY value, used to sort the buffer and compare against
+    /// the watermark.
     fn infer_state_table(&self) -> TableCatalog {
         let mut tbl_builder = TableCatalogBuilder::default();
         let out_fields = self.core.schema().fields().to_vec();
         let n_part = self.core.partition_by.len();
+        let order_idx = self.core.order_key_indices().expect("validated by to_stream")[0];
+        let order_type = self.core.input.schema().fields()[order_idx].data_type();
 
         // partition columns
         for f in &out_fields[0..n_part] {
@@ -71,6 +75,8 @@ impl StreamMatchRecognize {
         }
         // seq
         tbl_builder.add_column(&Field::with_name(DataType::Int64, "seq"));
+        // order key (leading ORDER BY value)
+        tbl_builder.add_column(&Field::with_name(order_type, "order_key"));
         // satisfied (comma-joined pattern variable names)
         tbl_builder.add_column(&Field::with_name(DataType::Varchar, "satisfied"));
         // measure columns

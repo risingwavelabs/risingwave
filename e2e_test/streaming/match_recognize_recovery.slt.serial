@@ -5,7 +5,7 @@ statement ok
 set rw_implicit_flush to true;
 
 statement ok
-create table tr (id int, ts int, v int) append only;
+create table tr (id int, ts int, v int, watermark for ts as ts - 10) append only;
 
 statement ok
 create materialized view mvr as
@@ -33,9 +33,12 @@ recover;
 
 sleep 3s
 
-# Complete the match after recovery with the down-row, plus a trailing up-row to finalise it.
+# Complete the match after recovery with the down-row, a trailing up-row, and a high-ts sentinel
+# that advances the watermark so the match finalises.
 statement ok
-insert into tr values (1, 2, -5), (1, 3, 8);
+insert into tr values (1, 2, -5), (1, 3, 8), (0, 100, 0);
+
+sleep 3s
 
 # The buffered `a` survived recovery, so the (a b) match completes and emits.
 query II rowsort
