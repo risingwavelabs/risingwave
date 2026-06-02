@@ -212,10 +212,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
 
-    async fn list_role_memberships(
-        &self,
-        member_ids: Vec<UserId>,
-    ) -> Result<Vec<PbRoleMembership>>;
+    async fn list_role_memberships(&self, member_ids: Vec<UserId>)
+    -> Result<Vec<PbRoleMembership>>;
 
     async fn list_all_role_memberships(&self) -> Result<Vec<PbRoleMembership>>;
 

@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model::UserId;
 use risingwave_pb::user::alter_default_privilege_request::Operation;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_server::UserService;
@@ -22,7 +22,7 @@ use risingwave_pb::user::{
     CreateUserResponse, DropUserRequest, DropUserResponse, GrantPrivilegeRequest,
     GrantPrivilegeResponse, GrantRoleRequest, GrantRoleResponse, ListRoleMembershipsRequest,
     ListRoleMembershipsResponse, RevokePrivilegeRequest, RevokePrivilegeResponse,
-    UpdateUserRequest, UpdateUserResponse,
+    RevokeRoleRequest, RevokeRoleResponse, UpdateUserRequest, UpdateUserResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -63,7 +63,7 @@ impl UserService for UserServiceImpl {
         let version = self
             .metadata_manager
             .catalog_controller
-            .drop_user(req.user_id as _)
+            .drop_user(req.user_id, req.dropped_by, req.session_user)
             .await?;
 
         Ok(Response::new(DropUserResponse {
@@ -101,14 +101,14 @@ impl UserService for UserServiceImpl {
         request: Request<GrantPrivilegeRequest>,
     ) -> Result<Response<GrantPrivilegeResponse>, Status> {
         let req = request.into_inner();
-        let user_ids: Vec<_> = req.get_user_ids().iter().map(|id| *id as UserId).collect();
+        let user_ids = req.user_ids.clone();
         let version = self
             .metadata_manager
             .catalog_controller
             .grant_privilege(
                 user_ids,
                 req.get_privileges(),
-                req.granted_by as _,
+                req.granted_by,
                 req.with_grant_option,
             )
             .await?;
@@ -124,15 +124,15 @@ impl UserService for UserServiceImpl {
         request: Request<RevokePrivilegeRequest>,
     ) -> Result<Response<RevokePrivilegeResponse>, Status> {
         let req = request.into_inner();
-        let user_ids: Vec<_> = req.get_user_ids().iter().map(|id| *id as UserId).collect();
+        let user_ids = req.user_ids.clone();
         let version = self
             .metadata_manager
             .catalog_controller
             .revoke_privilege(
                 user_ids,
                 req.get_privileges(),
-                req.granted_by as _,
-                req.revoke_by as _,
+                req.granted_by,
+                req.revoke_by,
                 req.revoke_grant_option,
                 req.cascade,
             )
@@ -141,6 +141,61 @@ impl UserService for UserServiceImpl {
         Ok(Response::new(RevokePrivilegeResponse {
             status: None,
             version,
+        }))
+    }
+
+    async fn grant_role(
+        &self,
+        request: Request<GrantRoleRequest>,
+    ) -> Result<Response<GrantRoleResponse>, Status> {
+        let req = request.into_inner();
+        let (version, memberships) = self
+            .metadata_manager
+            .catalog_controller
+            .grant_role(
+                req.role_ids,
+                req.member_ids,
+                req.granted_by,
+                req.executed_by,
+                req.granted_by_specified,
+                req.admin_option,
+                req.inherit_option,
+                req.set_option,
+            )
+            .await?;
+
+        Ok(Response::new(GrantRoleResponse {
+            status: None,
+            version,
+            memberships,
+        }))
+    }
+
+    async fn revoke_role(
+        &self,
+        request: Request<RevokeRoleRequest>,
+    ) -> Result<Response<RevokeRoleResponse>, Status> {
+        let req = request.into_inner();
+        let (version, memberships) = self
+            .metadata_manager
+            .catalog_controller
+            .revoke_role(
+                req.role_ids,
+                req.member_ids,
+                req.granted_by,
+                req.granted_by_specified,
+                req.revoked_by,
+                req.revoke_admin_option,
+                req.revoke_inherit_option,
+                req.revoke_set_option,
+                req.cascade,
+            )
+            .await?;
+
+        Ok(Response::new(RevokeRoleResponse {
+            status: None,
+            version,
+            memberships,
         }))
     }
 
@@ -159,42 +214,13 @@ impl UserService for UserServiceImpl {
         Ok(Response::new(ListRoleMembershipsResponse { memberships }))
     }
 
-    async fn grant_role(
-        &self,
-        request: Request<GrantRoleRequest>,
-    ) -> Result<Response<GrantRoleResponse>, Status> {
-        let req = request.into_inner();
-        let role_ids = req.role_ids.iter().map(|id| UserId::from(*id)).collect();
-        let member_ids = req.member_ids.iter().map(|id| UserId::from(*id)).collect();
-        let (version, memberships) = self
-            .metadata_manager
-            .catalog_controller
-            .grant_role(
-                role_ids,
-                member_ids,
-                UserId::from(req.granted_by),
-                UserId::from(req.executed_by),
-                req.granted_by_specified,
-                req.admin_option,
-                req.inherit_option,
-                req.set_option,
-            )
-            .await?;
-
-        Ok(Response::new(GrantRoleResponse {
-            status: None,
-            version,
-            memberships,
-        }))
-    }
-
     async fn alter_default_privilege(
         &self,
         request: Request<AlterDefaultPrivilegeRequest>,
     ) -> Result<Response<AlterDefaultPrivilegeResponse>, Status> {
         let req = request.into_inner();
         let operation = req.get_operation()?;
-        let user_ids: Vec<_> = req.get_user_ids().iter().map(|id| *id as UserId).collect();
+        let user_ids = req.user_ids.clone();
         let schema_ids: Vec<_> = req.schema_ids.clone();
         match operation {
             Operation::GrantPrivilege(grant_privilege) => {
@@ -204,14 +230,10 @@ impl UserService for UserServiceImpl {
                         user_ids,
                         req.database_id,
                         schema_ids,
-                        req.granted_by as _,
+                        req.granted_by,
                         grant_privilege.actions().collect(),
                         grant_privilege.get_object_type()?,
-                        grant_privilege
-                            .grantees
-                            .iter()
-                            .map(|id| *id as UserId)
-                            .collect(),
+                        grant_privilege.grantees.clone(),
                         grant_privilege.with_grant_option,
                     )
                     .await?
@@ -225,11 +247,7 @@ impl UserService for UserServiceImpl {
                         schema_ids,
                         revoke_privilege.actions().collect(),
                         revoke_privilege.get_object_type()?,
-                        revoke_privilege
-                            .grantees
-                            .iter()
-                            .map(|id| *id as UserId)
-                            .collect(),
+                        revoke_privilege.grantees.clone(),
                         revoke_privilege.revoke_grant_option,
                     )
                     .await?

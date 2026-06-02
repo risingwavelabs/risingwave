@@ -993,6 +993,8 @@ for_all_wrapped_id_fields! (
         }
         DropUserRequest {
             user_id: UserId,
+            dropped_by: UserId,
+            session_user: UserId,
         }
         GrantPrivilege {
             database_id: DatabaseId,
@@ -1013,6 +1015,12 @@ for_all_wrapped_id_fields! (
             user_ids: UserId,
             granted_by: UserId,
         }
+        GrantRoleRequest {
+            role_ids: UserId,
+            member_ids: UserId,
+            granted_by: UserId,
+            executed_by: UserId,
+        }
         ListRoleMembershipsRequest {
             member_ids: UserId,
         }
@@ -1020,6 +1028,12 @@ for_all_wrapped_id_fields! (
             user_ids: UserId,
             granted_by: UserId,
             revoke_by: UserId,
+        }
+        RevokeRoleRequest {
+            role_ids: UserId,
+            member_ids: UserId,
+            granted_by: UserId,
+            revoked_by: UserId,
         }
         RoleMembership {
             role_id: UserId,

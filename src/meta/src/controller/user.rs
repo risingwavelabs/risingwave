@@ -16,7 +16,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_ID,
+    DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_ADMIN, DEFAULT_SUPER_USER_FOR_PG,
+    DEFAULT_SUPER_USER_ID,
 };
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
@@ -36,8 +37,8 @@ use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbRoleMembership, PbUserIn
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{OnConflict, SimpleExpr, Value};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait, QueryFilter,
-    QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, EntityTrait, IntoActiveModel,
+    PaginatorTrait, QueryFilter, QuerySelect, TransactionTrait,
 };
 
 use crate::controller::catalog::CatalogController;
@@ -56,6 +57,8 @@ enum RoleMembershipGraphKind {
     Admin,
     Inherit,
 }
+
+type RoleMembershipTarget = (UserId, UserId, UserId);
 
 fn build_role_membership_graph(
     memberships: &[user_role_membership::Model],
@@ -111,6 +114,17 @@ fn has_role_membership_path_strict(
     start != target && has_role_membership_path(graph, start, target)
 }
 
+fn role_membership_dependency_is_valid(
+    admin_graph: &HashMap<UserId, Vec<UserId>>,
+    superuser_ids: &HashSet<UserId>,
+    grantor: UserId,
+    role_id: UserId,
+) -> bool {
+    grantor == DEFAULT_SUPER_USER_ID
+        || superuser_ids.contains(&grantor)
+        || has_role_membership_path_strict(admin_graph, grantor, role_id)
+}
+
 fn grantor_has_admin_option_for_grant(
     admin_graph: &HashMap<UserId, Vec<UserId>>,
     grantor: UserId,
@@ -152,6 +166,66 @@ fn closest_reachable_role_ids(graph: &HashMap<UserId, Vec<UserId>>, start: UserI
     reachable
 }
 
+fn matching_role_membership_exists(
+    memberships: &[user_role_membership::Model],
+    role_id: UserId,
+    member_id: UserId,
+    granted_by: UserId,
+) -> bool {
+    memberships.iter().any(|membership| {
+        membership.granted_by == granted_by
+            && membership.role_id == role_id
+            && membership.member_id == member_id
+    })
+}
+
+fn role_membership_target(membership: &user_role_membership::Model) -> RoleMembershipTarget {
+    (
+        membership.role_id,
+        membership.member_id,
+        membership.granted_by,
+    )
+}
+
+fn role_membership_targets_for_grantor(
+    role_ids: &[UserId],
+    member_ids: &[UserId],
+    granted_by: UserId,
+) -> HashSet<RoleMembershipTarget> {
+    role_ids
+        .iter()
+        .copied()
+        .cartesian_product(member_ids.iter().copied())
+        .map(|(role_id, member_id)| (role_id, member_id, granted_by))
+        .collect()
+}
+
+fn select_effective_revoke_grantors_for_membership(
+    memberships: &[user_role_membership::Model],
+    admin_graph: &HashMap<UserId, Vec<UserId>>,
+    possession_graph: &HashMap<UserId, Vec<UserId>>,
+    role_id: UserId,
+    member_id: UserId,
+    revoked_by: UserId,
+) -> Vec<UserId> {
+    let mut grantors = vec![];
+    if has_role_membership_path_strict(admin_graph, revoked_by, role_id)
+        && matching_role_membership_exists(memberships, role_id, member_id, revoked_by)
+    {
+        grantors.push(revoked_by);
+    }
+
+    grantors.extend(
+        closest_reachable_role_ids(possession_graph, revoked_by)
+            .into_iter()
+            .filter(|&candidate| {
+                has_role_membership_path_strict(admin_graph, candidate, role_id)
+                    && matching_role_membership_exists(memberships, role_id, member_id, candidate)
+            }),
+    );
+    grantors
+}
+
 fn select_effective_grantor_for_role(
     admin_graph: &HashMap<UserId, Vec<UserId>>,
     possession_graph: &HashMap<UserId, Vec<UserId>>,
@@ -167,8 +241,102 @@ fn select_effective_grantor_for_role(
         .find(|&candidate| has_role_membership_path_strict(admin_graph, candidate, role_id))
 }
 
+fn apply_revoke_to_memberships(
+    memberships: Vec<user_role_membership::Model>,
+    targets: &HashSet<RoleMembershipTarget>,
+    revoke_admin_option: bool,
+    revoke_inherit_option: bool,
+    revoke_set_option: bool,
+) -> Vec<user_role_membership::Model> {
+    let option_only = revoke_admin_option || revoke_inherit_option || revoke_set_option;
+    memberships
+        .into_iter()
+        .filter_map(|mut membership| {
+            let targeted = targets.contains(&role_membership_target(&membership));
+            if !targeted {
+                return Some(membership);
+            }
+
+            if option_only {
+                if revoke_admin_option {
+                    membership.admin_option = false;
+                }
+                if revoke_inherit_option {
+                    membership.inherit_option = false;
+                }
+                if revoke_set_option {
+                    membership.set_option = false;
+                }
+                Some(membership)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn compute_cascading_role_memberships(
+    memberships: &[user_role_membership::Model],
+    superuser_ids: &HashSet<UserId>,
+    targets: &HashSet<RoleMembershipTarget>,
+    revoke_admin_option: bool,
+    revoke_inherit_option: bool,
+    revoke_set_option: bool,
+    cascade: bool,
+) -> MetaResult<Vec<user_role_membership::Model>> {
+    let option_only = revoke_admin_option || revoke_inherit_option || revoke_set_option;
+    let before_admin = build_role_membership_graph(memberships, RoleMembershipGraphKind::Admin);
+    let mut current = apply_revoke_to_memberships(
+        memberships.to_vec(),
+        targets,
+        revoke_admin_option,
+        revoke_inherit_option,
+        revoke_set_option,
+    );
+
+    loop {
+        let after_admin = build_role_membership_graph(&current, RoleMembershipGraphKind::Admin);
+        let mut dependent_ids = vec![];
+
+        for membership in &current {
+            let lost_admin_path = role_membership_dependency_is_valid(
+                &before_admin,
+                superuser_ids,
+                membership.granted_by,
+                membership.role_id,
+            ) && !role_membership_dependency_is_valid(
+                &after_admin,
+                superuser_ids,
+                membership.granted_by,
+                membership.role_id,
+            );
+            if lost_admin_path {
+                dependent_ids.push(membership.id);
+            }
+        }
+
+        if dependent_ids.is_empty() {
+            return Ok(current);
+        }
+        if !cascade {
+            return Err(MetaError::permission_denied(
+                "dependent role memberships exist; use CASCADE to revoke them".to_owned(),
+            ));
+        }
+
+        let dependent_set: HashSet<_> = dependent_ids.into_iter().collect();
+        current.retain(|membership| !dependent_set.contains(&membership.id));
+
+        // Revoking INHERIT OPTION or SET OPTION alone does not invalidate
+        // grantor dependencies; only ADMIN OPTION revocation can cascade.
+        if option_only && !revoke_admin_option {
+            return Ok(current);
+        }
+    }
+}
+
 impl CatalogController {
-    async fn user_controller_db(&self) -> sea_orm::DatabaseConnection {
+    async fn user_controller_db(&self) -> DatabaseConnection {
         self.inner.read().await.db.clone()
     }
 
@@ -186,8 +354,8 @@ impl CatalogController {
     }
 
     pub async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         check_user_name_duplicate(&pb_user.name, &txn).await?;
 
         let grant_privileges = pb_user.grant_privileges.clone();
@@ -202,7 +370,7 @@ impl CatalogController {
                     privileges.push(user_privilege::ActiveModel {
                         user_id: Set(user.user_id),
                         oid: Set(id),
-                        granted_by: Set(action_with_opt.granted_by as _),
+                        granted_by: Set(action_with_opt.granted_by),
                         action: Set(action_with_opt.get_action()?.into()),
                         with_grant_option: Set(action_with_opt.with_grant_option),
                         ..Default::default()
@@ -230,14 +398,14 @@ impl CatalogController {
         update_user: PbUserInfo,
         update_fields: &[PbUpdateField],
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
+        let db = self.user_controller_db().await;
         let rename_flag = update_fields.contains(&PbUpdateField::Rename);
         if rename_flag {
-            check_user_name_duplicate(&update_user.name, &inner.db).await?;
+            check_user_name_duplicate(&update_user.name, &db).await?;
         }
 
-        let user = User::find_by_id(update_user.id as UserId)
-            .one(&inner.db)
+        let user = User::find_by_id(update_user.id)
+            .one(&db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", update_user.id))?;
         let mut user = user.into_active_model();
@@ -259,9 +427,9 @@ impl CatalogController {
             }
         });
 
-        let user = user.update(&inner.db).await?;
+        let user = user.update(&db).await?;
         let mut user_info: PbUserInfo = user.into();
-        user_info.grant_privileges = get_user_privilege(user_info.id as _, &inner.db).await?;
+        user_info.grant_privileges = get_user_privilege(user_info.id, &db).await?;
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
@@ -281,15 +449,15 @@ impl CatalogController {
             !include_all || member_ids.is_empty(),
             "member_ids must be empty when include_all is true"
         );
-        let inner = self.inner.read().await;
+        let db = self.user_controller_db().await;
         let memberships = if include_all {
-            UserRoleMembership::find().all(&inner.db).await?
+            UserRoleMembership::find().all(&db).await?
         } else if member_ids.is_empty() {
             vec![]
         } else {
             UserRoleMembership::find()
                 .filter(user_role_membership::Column::MemberId.is_in(member_ids.iter().copied()))
-                .all(&inner.db)
+                .all(&db)
                 .await?
         };
         Ok(memberships.into_iter().map(Into::into).collect())
@@ -476,11 +644,156 @@ impl CatalogController {
         Ok((version, memberships))
     }
 
+    pub async fn revoke_role(
+        &self,
+        role_ids: Vec<UserId>,
+        member_ids: Vec<UserId>,
+        granted_by: UserId,
+        granted_by_specified: bool,
+        revoked_by: UserId,
+        revoke_admin_option: bool,
+        revoke_inherit_option: bool,
+        revoke_set_option: bool,
+        cascade: bool,
+    ) -> MetaResult<(NotificationVersion, Vec<PbRoleMembership>)> {
+        if role_ids.is_empty() || member_ids.is_empty() {
+            return Ok((IGNORED_NOTIFICATION_VERSION, vec![]));
+        }
+
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        for role_id in &role_ids {
+            ensure_user_id(*role_id, &txn).await?;
+        }
+        for member_id in &member_ids {
+            ensure_user_id(*member_id, &txn).await?;
+        }
+        let revoker = User::find_by_id(revoked_by)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", revoked_by))?;
+
+        let existing_memberships = UserRoleMembership::find().all(&txn).await?;
+        let superuser_ids: HashSet<UserId> = User::find()
+            .select_only()
+            .column(user::Column::UserId)
+            .filter(user::Column::IsSuper.eq(true))
+            .into_tuple()
+            .all(&txn)
+            .await?
+            .into_iter()
+            .collect();
+        let admin_graph =
+            build_role_membership_graph(&existing_memberships, RoleMembershipGraphKind::Admin);
+        let possession_graph =
+            build_role_membership_graph(&existing_memberships, RoleMembershipGraphKind::Inherit);
+        let targets: HashSet<_> = if granted_by_specified {
+            ensure_user_id(granted_by, &txn).await?;
+            if !revoker.is_super
+                && !role_possesses_grantor(&possession_graph, revoked_by, granted_by)
+            {
+                return Err(MetaError::permission_denied(format!(
+                    "user {} does not possess grantor role {}",
+                    revoked_by, granted_by
+                )));
+            }
+            role_membership_targets_for_grantor(&role_ids, &member_ids, granted_by)
+        } else if revoker.is_super {
+            let targets: HashSet<_> = existing_memberships
+                .iter()
+                .filter(|membership| {
+                    role_ids.contains(&membership.role_id)
+                        && member_ids.contains(&membership.member_id)
+                })
+                .map(role_membership_target)
+                .collect();
+            if targets.is_empty() {
+                return Ok((IGNORED_NOTIFICATION_VERSION, vec![]));
+            }
+            targets
+        } else {
+            let targets: HashSet<_> = role_ids
+                .iter()
+                .copied()
+                .cartesian_product(member_ids.iter().copied())
+                .flat_map(|(role_id, member_id)| {
+                    select_effective_revoke_grantors_for_membership(
+                        &existing_memberships,
+                        &admin_graph,
+                        &possession_graph,
+                        role_id,
+                        member_id,
+                        revoked_by,
+                    )
+                    .into_iter()
+                    .map(move |granted_by| (role_id, member_id, granted_by))
+                })
+                .collect();
+            if targets.is_empty() {
+                return Ok((IGNORED_NOTIFICATION_VERSION, vec![]));
+            }
+            targets
+        };
+        let final_memberships = compute_cascading_role_memberships(
+            &existing_memberships,
+            &superuser_ids,
+            &targets,
+            revoke_admin_option,
+            revoke_inherit_option,
+            revoke_set_option,
+            cascade,
+        )?;
+        let final_by_id: HashMap<_, _> = final_memberships
+            .into_iter()
+            .map(|membership| (membership.id, membership))
+            .collect();
+        for membership in existing_memberships {
+            if let Some(updated) = final_by_id.get(&membership.id) {
+                if &membership != updated {
+                    let mut model = membership.into_active_model();
+                    model.admin_option = Set(updated.admin_option);
+                    model.inherit_option = Set(updated.inherit_option);
+                    model.set_option = Set(updated.set_option);
+                    model.update(&txn).await?;
+                }
+            } else {
+                UserRoleMembership::delete_by_id(membership.id)
+                    .exec(&txn)
+                    .await?;
+            }
+        }
+
+        let memberships = UserRoleMembership::find()
+            .filter(user_role_membership::Column::RoleId.is_in(role_ids.iter().copied()))
+            .filter(user_role_membership::Column::MemberId.is_in(member_ids.iter().copied()))
+            .all(&txn)
+            .await?
+            .into_iter()
+            .filter(|membership| targets.contains(&role_membership_target(membership)))
+            .map(Into::into)
+            .collect();
+        let affected_user_infos = list_user_info_by_ids(
+            role_ids
+                .iter()
+                .chain(member_ids.iter())
+                .copied()
+                .unique()
+                .collect_vec(),
+            &txn,
+        )
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let version = self.notify_users_update(affected_user_infos).await;
+        Ok((version, memberships))
+    }
+
     #[cfg(test)]
     pub async fn get_user(&self, id: UserId) -> MetaResult<user::Model> {
-        let inner = self.inner.read().await;
+        let db = self.user_controller_db().await;
         let user = User::find_by_id(id)
-            .one(&inner.db)
+            .one(&db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", id))?;
         Ok(user)
@@ -488,27 +801,70 @@ impl CatalogController {
 
     #[cfg(test)]
     pub async fn get_user_by_name(&self, name: &str) -> MetaResult<user::Model> {
-        let inner = self.inner.read().await;
+        let db = self.user_controller_db().await;
         let user = User::find()
             .filter(user::Column::Name.eq(name))
-            .one(&inner.db)
+            .one(&db)
             .await?
             .ok_or_else(|| anyhow::anyhow!("user {name} not found"))?;
         Ok(user)
     }
 
-    pub async fn drop_user(&self, user_id: UserId) -> MetaResult<NotificationVersion> {
+    pub async fn drop_user(
+        &self,
+        user_id: UserId,
+        dropped_by: UserId,
+        session_user: UserId,
+    ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let user = User::find_by_id(user_id)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
-        if user.name == DEFAULT_SUPER_USER || user.name == DEFAULT_SUPER_USER_FOR_PG {
+        let actor = User::find_by_id(dropped_by)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", dropped_by))?;
+        if dropped_by == user_id || session_user == user_id {
+            return Err(MetaError::permission_denied(
+                "current user cannot be dropped".to_owned(),
+            ));
+        }
+        if user.name == DEFAULT_SUPER_USER
+            || user.name == DEFAULT_SUPER_USER_FOR_PG
+            || user.name == DEFAULT_SUPER_USER_FOR_ADMIN
+        {
             return Err(MetaError::permission_denied(format!(
                 "drop default super user {} is not allowed",
                 user.name
             )));
+        }
+        if !actor.is_super {
+            if user.is_super {
+                return Err(MetaError::permission_denied(
+                    "must be superuser to drop superusers".to_owned(),
+                ));
+            }
+            if !actor.can_create_user {
+                return Err(MetaError::permission_denied(
+                    "permission denied to drop user".to_owned(),
+                ));
+            }
+            let existing_memberships = UserRoleMembership::find().all(&txn).await?;
+            let admin_graph =
+                build_role_membership_graph(&existing_memberships, RoleMembershipGraphKind::Admin);
+            if !has_role_membership_path(&admin_graph, dropped_by, user_id) {
+                return Err(MetaError::permission_denied(format!(
+                    "user {} does not have ADMIN OPTION for role {}",
+                    dropped_by, user_id
+                )));
+            }
+        }
+        if user.is_admin && !actor.is_admin {
+            return Err(MetaError::permission_denied(
+                "only admin users can drop admin users".to_owned(),
+            ));
         }
 
         // check if the user is the owner of any objects.
@@ -535,17 +891,43 @@ impl CatalogController {
             )));
         }
 
+        // PostgreSQL keeps role-membership grantor dependencies for surviving memberships.
+        // Memberships where the dropped role is the role or member are removed, but a role
+        // that only granted a surviving membership still blocks DROP ROLE.
+        let count = UserRoleMembership::find()
+            .filter(user_role_membership::Column::GrantedBy.eq(user_id))
+            .filter(user_role_membership::Column::RoleId.ne(user_id))
+            .filter(user_role_membership::Column::MemberId.ne(user_id))
+            .count(&txn)
+            .await?;
+        if count != 0 {
+            return Err(MetaError::permission_denied(format!(
+                "drop user {} is not allowed, because it granted {} role memberships to others",
+                user.name, count
+            )));
+        }
+
+        UserRoleMembership::delete_many()
+            .filter(
+                Condition::any()
+                    .add(user_role_membership::Column::RoleId.eq(user_id))
+                    .add(user_role_membership::Column::MemberId.eq(user_id)),
+            )
+            .exec(&txn)
+            .await?;
+
         let res = User::delete_by_id(user_id).exec(&txn).await?;
         if res.rows_affected != 1 {
             return Err(MetaError::catalog_id_not_found("user", user_id));
         }
         txn.commit().await?;
+        drop(inner);
 
         let version = self
             .notify_frontend(
                 NotificationOperation::Delete,
                 NotificationInfo::User(PbUserInfo {
-                    id: user_id as _,
+                    id: user_id,
                     ..Default::default()
                 }),
             )
@@ -561,8 +943,8 @@ impl CatalogController {
         grantor: UserId,
         with_grant_option: bool,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -698,8 +1080,8 @@ impl CatalogController {
         revoke_grant_option: bool,
         cascade: bool,
     ) -> MetaResult<NotificationVersion> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -890,8 +1272,8 @@ impl CatalogController {
             with_grant_option,
             "grant default privileges",
         );
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -945,7 +1327,7 @@ impl CatalogController {
                             UserDefaultPrivilege::update(user_default_privilege::ActiveModel {
                                 id: Set(*existing_id),
                                 with_grant_option: Set(true),
-                                granted_by: Set(grantor as _),
+                                granted_by: Set(grantor),
                                 ..Default::default()
                             })
                             .exec(&txn)
@@ -959,7 +1341,7 @@ impl CatalogController {
                                 for_materialized_view: Set(false),
                                 user_id: Set(user_id),
                                 grantee: Set(*grantee),
-                                granted_by: Set(grantor as _),
+                                granted_by: Set(grantor),
                                 action: Set(*action),
                                 with_grant_option: Set(with_grant_option),
                             })
@@ -983,7 +1365,7 @@ impl CatalogController {
                                 for_materialized_view: Set(object_type == PbObjectType::Mview),
                                 user_id: Set(user_id),
                                 grantee: Set(*grantee),
-                                granted_by: Set(grantor as _),
+                                granted_by: Set(grantor),
                                 action: Set((*action).into()),
                                 with_grant_option: Set(with_grant_option),
                             });
@@ -998,7 +1380,7 @@ impl CatalogController {
                                 for_materialized_view: Set(object_type == PbObjectType::Mview),
                                 user_id: Set(user_id),
                                 grantee: Set(*grantee),
-                                granted_by: Set(grantor as _),
+                                granted_by: Set(grantor),
                                 action: Set((*action).into()),
                                 with_grant_option: Set(with_grant_option),
                             });
@@ -1043,8 +1425,8 @@ impl CatalogController {
         grantees: Vec<UserId>,
         revoke_grant_option: bool,
     ) -> MetaResult<()> {
-        let inner = self.inner.write().await;
-        let txn = inner.db.begin().await?;
+        let db = self.user_controller_db().await;
+        let txn = db.begin().await?;
         for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
@@ -1176,7 +1558,7 @@ mod tests {
         );
         mgr.update_user(
             PbUserInfo {
-                id: user_1.user_id as _,
+                id: user_1.user_id,
                 name: "test_user_1_new".to_owned(),
                 ..Default::default()
             },
@@ -1226,7 +1608,9 @@ mod tests {
         );
 
         assert!(
-            mgr.drop_user(user_1.user_id).await.is_err(),
+            mgr.drop_user(user_1.user_id, TEST_ROOT_USER_ID, TEST_ROOT_USER_ID)
+                .await
+                .is_err(),
             "user_1 can't be dropped"
         );
 
@@ -1358,8 +1742,10 @@ mod tests {
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert!(privilege_2.is_empty());
 
-        mgr.drop_user(user_1.user_id).await?;
-        mgr.drop_user(user_2.user_id).await?;
+        mgr.drop_user(user_1.user_id, TEST_ROOT_USER_ID, TEST_ROOT_USER_ID)
+            .await?;
+        mgr.drop_user(user_2.user_id, TEST_ROOT_USER_ID, TEST_ROOT_USER_ID)
+            .await?;
         Ok(())
     }
 
