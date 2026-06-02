@@ -31,8 +31,8 @@ use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
-    FlushCurrentEpochOptions, LogReader, LogReaderExt, LogReaderMetrics, LogStoreFactory,
-    LogWriter, LogWriterExt, LogWriterMetrics,
+    FlushCurrentEpochOptions, FlushCurrentEpochResult, LogReader, LogReaderExt, LogReaderMetrics,
+    LogStoreFactory, LogWriter, LogWriterExt, LogWriterMetrics,
 };
 use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam,
@@ -464,7 +464,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if let Some(schema_change) = &schema_change {
                         info!(?schema_change, %sink_id, "sink receive schema change");
                     }
-                    let post_flush = log_writer
+                    let FlushCurrentEpochResult {
+                        post_flush,
+                        reported_error_rows,
+                    } = log_writer
                         .flush_current_epoch(
                             barrier.epoch.curr,
                             FlushCurrentEpochOptions {
@@ -475,6 +478,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             },
                         )
                         .await?;
+                    assert!(
+                        reported_error_rows.is_empty(),
+                        "sink error rows are not handled in this branch"
+                    );
 
                     let mutation = barrier.mutation.clone();
                     yield Message::Barrier(barrier);

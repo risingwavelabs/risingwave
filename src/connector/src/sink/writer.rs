@@ -187,7 +187,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                         metrics
                             .sink_commit_duration
                             .observe(start_time.elapsed().as_secs_f64());
-                        log_reader.truncate(TruncateOffset::Barrier { epoch })?;
+                        log_reader.truncate(TruncateOffset::Barrier { epoch }, vec![])?;
                     } else {
                         assert!(new_vnode_bitmap.is_none());
                         sink_writer.barrier(false).await?;
@@ -254,7 +254,7 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                 }
                 Either::Right(offset_result) => {
                     let offset = offset_result?;
-                    log_reader.truncate(offset)?;
+                    log_reader.truncate(offset, vec![])?;
                 }
             }
         }

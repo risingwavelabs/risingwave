@@ -131,7 +131,11 @@ impl LogReader for MockRangeLogReader {
         }
     }
 
-    fn truncate(&mut self, _offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(
+        &mut self,
+        _offset: TruncateOffset,
+        _error_rows: Vec<risingwave_connector::sink::log_store::ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
         Ok(())
     }
 
