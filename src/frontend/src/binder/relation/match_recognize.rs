@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
+use risingwave_expr::aggregate::{AggType, PbAggKind};
 use risingwave_sqlparser::ast::{
     AfterMatchSkip, Expr as AstExpr, FunctionArg, FunctionArgExpr, MatchRecognizePattern,
     MatchRecognizeSymbol, Measure, OrderByExpr, RowsPerMatch, SymbolDefinition, TableAlias,
@@ -25,7 +26,9 @@ use risingwave_sqlparser::ast::{
 
 use super::{Binder, Relation};
 use crate::error::Result as RwResult;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, OrderBy};
+use crate::optimizer::plan_node::generic::PlanAggCall;
+use crate::utils::Condition;
 
 /// How a [`MeasureSlot`] resolves against the rows of a match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -45,6 +48,10 @@ pub enum MeasureSlotKind {
     Min,
     /// Maximum `col` over rows labeled `var` (`MAX(var.col)`).
     Max,
+    /// Sum of `col` over rows labeled `var` (`SUM(var.col)`); evaluated by the slot's `agg`.
+    Sum,
+    /// Average of `col` over rows labeled `var` (`AVG(var.col)`); evaluated by the slot's `agg`.
+    Avg,
 }
 
 /// One navigation input that a measure expression reads. A measure is lowered to an expression over
@@ -60,6 +67,9 @@ pub struct MeasureSlot {
     pub col_idx: usize,
     /// The slot's output type: the input column type for navigation, varchar for classifier.
     pub data_type: DataType,
+    /// The aggregate to run for [`MeasureSlotKind::Sum`] / [`MeasureSlotKind::Avg`], over a single
+    /// input column (the projected `col_idx`) of the rows labeled `var`. `None` for other kinds.
+    pub agg: Option<PlanAggCall>,
 }
 
 /// A bound `MEASURES` item: an expression over the per-match synthetic row, its navigation slots,
@@ -234,11 +244,12 @@ impl Binder {
                     var: String::new(),
                     col_idx: 0,
                     data_type: DataType::Varchar,
+                    agg: None,
                 }],
             });
         }
 
-        // Top-level aggregates over the matched rows: COUNT(*), COUNT(var.col), MIN/MAX(var.col).
+        // Top-level aggregates over the matched rows: COUNT(*), COUNT/MIN/MAX/SUM/AVG(var.col).
         if let AstExpr::Function(func) = &m.expr
             && func.name.0.len() == 1
             && matches!(
@@ -247,9 +258,6 @@ impl Binder {
             )
         {
             let agg = func.name.0[0].real_value().to_ascii_lowercase();
-            if matches!(agg.as_str(), "sum" | "avg") {
-                bail_not_implemented!("{}() in MATCH_RECOGNIZE MEASURES", agg.to_uppercase());
-            }
             if func.arg_list.args.len() != 1 {
                 bail_not_implemented!("{}() expects exactly one argument", agg.to_uppercase());
             }
@@ -268,6 +276,7 @@ impl Binder {
                         var: String::new(),
                         col_idx: 0,
                         data_type: DataType::Int64,
+                        agg: None,
                     }],
                 });
             }
@@ -279,20 +288,66 @@ impl Binder {
                 bail_not_implemented!("{}() argument must be a pattern-variable column", agg.to_uppercase());
             };
             let (var, col_idx) = decode_var_col(r.index(), input_col_num, variables)?;
-            let (kind, data_type) = match agg.as_str() {
-                "count" => (MeasureSlotKind::Count, DataType::Int64),
-                "min" => (MeasureSlotKind::Min, r.data_type.clone()),
-                "max" => (MeasureSlotKind::Max, r.data_type.clone()),
-                _ => unreachable!("agg kind filtered above"),
+            let col_type = r.data_type.clone();
+
+            // COUNT / MIN / MAX fold directly over the matched rows in the executor.
+            if let Some((kind, data_type)) = match agg.as_str() {
+                "count" => Some((MeasureSlotKind::Count, DataType::Int64)),
+                "min" => Some((MeasureSlotKind::Min, col_type.clone())),
+                "max" => Some((MeasureSlotKind::Max, col_type.clone())),
+                _ => None,
+            } {
+                return Ok(BoundMeasure {
+                    expr: InputRef::new(0, data_type.clone()).into(),
+                    name,
+                    slots: vec![MeasureSlot {
+                        kind,
+                        var,
+                        col_idx,
+                        data_type,
+                        agg: None,
+                    }],
+                });
+            }
+
+            // AVG decomposes into SUM/COUNT in RisingWave (no standalone append-only kernel); wiring
+            // that decomposition is a follow-up.
+            if agg == "avg" {
+                bail_not_implemented!(
+                    "AVG() in MATCH_RECOGNIZE MEASURES (decomposes to SUM/COUNT; not yet supported)"
+                );
+            }
+            // SUM reuses RisingWave's aggregate kernel so the numeric return type stays faithful. The
+            // runtime feeds the kernel a single-column chunk (the projected col), so the call's
+            // argument is an InputRef to column 0.
+            let agg_type: AggType = PbAggKind::Sum.into();
+            let inferred = AggCall::new(
+                agg_type.clone(),
+                vec![InputRef::new(0, col_type.clone()).into()],
+                false,
+                OrderBy::any(),
+                Condition::true_cond(),
+                vec![],
+            )?;
+            let return_type = inferred.return_type;
+            let plan_agg = PlanAggCall {
+                agg_type,
+                return_type: return_type.clone(),
+                inputs: vec![InputRef::new(0, col_type)],
+                distinct: false,
+                order_by: vec![],
+                filter: Condition::true_cond(),
+                direct_args: vec![],
             };
             return Ok(BoundMeasure {
-                expr: InputRef::new(0, data_type.clone()).into(),
+                expr: InputRef::new(0, return_type.clone()).into(),
                 name,
                 slots: vec![MeasureSlot {
-                    kind,
+                    kind: MeasureSlotKind::Sum,
                     var,
                     col_idx,
-                    data_type,
+                    data_type: return_type,
+                    agg: Some(plan_agg),
                 }],
             });
         }
@@ -329,6 +384,7 @@ impl Binder {
                     var,
                     col_idx,
                     data_type,
+                    agg: None,
                 }],
             });
         }
@@ -474,6 +530,7 @@ impl ExprRewriter for SlotLoweringRewriter<'_> {
                     var,
                     col_idx,
                     data_type: data_type.clone(),
+                    agg: None,
                 });
                 self.slots.len() - 1
             });

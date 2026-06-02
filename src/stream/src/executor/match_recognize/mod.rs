@@ -20,9 +20,6 @@ mod executor;
 mod nfa;
 mod parse;
 
-pub use executor::{
-    CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, MeasureSlot,
-    MeasureSlotKind,
-};
+pub use executor::{CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs};
 pub use nfa::{Nfa, SkipMode};
 pub use parse::parse_pattern;
