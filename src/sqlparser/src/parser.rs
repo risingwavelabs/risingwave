@@ -5899,13 +5899,24 @@ impl Parser<'_> {
     /// A pattern primary with an optional trailing quantifier.
     fn parse_pattern_repetition(&mut self) -> ModalResult<MatchRecognizePattern> {
         let primary = self.parse_pattern_primary()?;
-        if let Some(quantifier) = self.parse_optional_pattern_quantifier()? {
+        if let Some((quantifier, reluctant)) = self.parse_optional_pattern_quantifier()? {
             Ok(MatchRecognizePattern::Repetition(
                 Box::new(primary),
                 quantifier,
+                reluctant,
             ))
         } else {
             Ok(primary)
+        }
+    }
+
+    /// Consume a trailing reluctant marker `?` (it may be a standalone `?` token).
+    fn consume_pattern_reluctant_mark(&mut self) -> bool {
+        if matches!(&self.peek_token().token, Token::Op(op) if op == "?") {
+            self.next_token();
+            true
+        } else {
+            false
         }
     }
 
@@ -5932,7 +5943,7 @@ impl Parser<'_> {
     /// Parse an optional pattern quantifier: `*`, `+`, `?`, or a `{...}` range.
     fn parse_optional_pattern_quantifier(
         &mut self,
-    ) -> ModalResult<Option<RepetitionQuantifier>> {
+    ) -> ModalResult<Option<(RepetitionQuantifier, bool)>> {
         if self.consume_token(&Token::LBrace) {
             let lower = if matches!(self.peek_token().token, Token::Comma) {
                 None
@@ -5960,20 +5971,26 @@ impl Parser<'_> {
                 }
             };
             self.expect_token(&Token::RBrace)?;
-            return Ok(Some(quantifier));
+            let reluctant = self.consume_pattern_reluctant_mark();
+            return Ok(Some((quantifier, reluctant)));
         }
-        // `*`, `+`, `?` may arrive as dedicated tokens or as `Token::Op(_)` depending on
-        // surrounding operator characters, so accept both spellings.
-        let quantifier = match &self.peek_token().token {
-            Token::Mul => RepetitionQuantifier::ZeroOrMore,
-            Token::Plus => RepetitionQuantifier::OneOrMore,
-            Token::Op(op) if op == "*" => RepetitionQuantifier::ZeroOrMore,
-            Token::Op(op) if op == "+" => RepetitionQuantifier::OneOrMore,
-            Token::Op(op) if op == "?" => RepetitionQuantifier::AtMostOne,
+        // `*`, `+`, `?` may arrive as dedicated tokens or as `Token::Op(_)` depending on surrounding
+        // operator characters, so accept both spellings. A trailing `?` makes the quantifier
+        // reluctant, and may be fused into the operator token (e.g. `+?` as `Token::Op("+?")`).
+        let (quantifier, fused_reluctant) = match &self.peek_token().token {
+            Token::Mul => (RepetitionQuantifier::ZeroOrMore, false),
+            Token::Plus => (RepetitionQuantifier::OneOrMore, false),
+            Token::Op(op) if op == "*" => (RepetitionQuantifier::ZeroOrMore, false),
+            Token::Op(op) if op == "+" => (RepetitionQuantifier::OneOrMore, false),
+            Token::Op(op) if op == "?" => (RepetitionQuantifier::AtMostOne, false),
+            Token::Op(op) if op == "*?" => (RepetitionQuantifier::ZeroOrMore, true),
+            Token::Op(op) if op == "+?" => (RepetitionQuantifier::OneOrMore, true),
+            Token::Op(op) if op == "??" => (RepetitionQuantifier::AtMostOne, true),
             _ => return Ok(None),
         };
         self.next_token();
-        Ok(Some(quantifier))
+        let reluctant = fused_reluctant || self.consume_pattern_reluctant_mark();
+        Ok(Some((quantifier, reluctant)))
     }
 
     fn peek_is_pattern_pipe(&mut self) -> bool {

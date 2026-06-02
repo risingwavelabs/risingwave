@@ -168,7 +168,7 @@ impl PParser {
         })
     }
 
-    /// repetition := primary quantifier?
+    /// repetition := primary quantifier? '?'?  (a trailing '?' after a quantifier means reluctant)
     fn parse_repetition(&mut self) -> Result<Pattern, String> {
         let primary = self.parse_primary()?;
         let q = match self.peek() {
@@ -187,8 +187,13 @@ impl PParser {
             Some(Tok::LBrace) => Some(self.parse_range()?),
             _ => None,
         };
+        // A quantifier followed by another `?` is reluctant (`a*?`, `a+?`, `a??`, `a{1,2}?`).
+        let reluctant = q.is_some() && matches!(self.peek(), Some(Tok::Question)) && {
+            self.pos += 1;
+            true
+        };
         Ok(match q {
-            Some(q) => Pattern::Quantified(Box::new(primary), q),
+            Some(q) => Pattern::Quantified(Box::new(primary), q, reluctant),
             None => primary,
         })
     }
@@ -293,13 +298,13 @@ mod tests {
             parse_pattern("a b+ c?").unwrap(),
             Pattern::Concat(vec![
                 var("a"),
-                Pattern::Quantified(Box::new(var("b")), Quantifier::Plus),
-                Pattern::Quantified(Box::new(var("c")), Quantifier::Question),
+                Pattern::Quantified(Box::new(var("b")), Quantifier::Plus, false),
+                Pattern::Quantified(Box::new(var("c")), Quantifier::Question, false),
             ])
         );
         assert_eq!(
             parse_pattern("a*").unwrap(),
-            Pattern::Quantified(Box::new(var("a")), Quantifier::Star)
+            Pattern::Quantified(Box::new(var("a")), Quantifier::Star, false)
         );
     }
 
@@ -309,7 +314,7 @@ mod tests {
             parse_pattern("(a | b) c*").unwrap(),
             Pattern::Concat(vec![
                 Pattern::Alt(vec![var("a"), var("b")]),
-                Pattern::Quantified(Box::new(var("c")), Quantifier::Star),
+                Pattern::Quantified(Box::new(var("c")), Quantifier::Star, false),
             ])
         );
     }
@@ -320,28 +325,32 @@ mod tests {
             parse_pattern("a{2}").unwrap(),
             Pattern::Quantified(
                 Box::new(var("a")),
-                Quantifier::Range { min: 2, max: Some(2) }
+                Quantifier::Range { min: 2, max: Some(2) },
+                false,
             )
         );
         assert_eq!(
             parse_pattern("a{1,3}").unwrap(),
             Pattern::Quantified(
                 Box::new(var("a")),
-                Quantifier::Range { min: 1, max: Some(3) }
+                Quantifier::Range { min: 1, max: Some(3) },
+                false,
             )
         );
         assert_eq!(
             parse_pattern("a{2,}").unwrap(),
             Pattern::Quantified(
                 Box::new(var("a")),
-                Quantifier::Range { min: 2, max: None }
+                Quantifier::Range { min: 2, max: None },
+                false,
             )
         );
         assert_eq!(
             parse_pattern("a{,4}").unwrap(),
             Pattern::Quantified(
                 Box::new(var("a")),
-                Quantifier::Range { min: 0, max: Some(4) }
+                Quantifier::Range { min: 0, max: Some(4) },
+                false,
             )
         );
     }

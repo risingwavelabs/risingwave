@@ -68,8 +68,8 @@ pub enum Pattern {
     Concat(Vec<Pattern>),
     /// Alternation, e.g. `A | B`.
     Alt(Vec<Pattern>),
-    /// A quantified sub-pattern, e.g. `A+`.
-    Quantified(Box<Pattern>, Quantifier),
+    /// A quantified sub-pattern, e.g. `A+`. The bool is `reluctant` (`A+?` prefers fewer matches).
+    Quantified(Box<Pattern>, Quantifier, bool),
     /// `PERMUTE(a, b, ...)` — expanded to the alternation of all orderings.
     Permute(Vec<String>),
 }
@@ -325,7 +325,7 @@ impl Nfa {
             let mut path: Vec<String> = Vec::new();
             let mut visited: HashSet<StateId> = HashSet::new();
             let found = self
-                .longest_from_dynamic(n_rows, self.start, i, &mut path, matcher, &mut visited)
+                .preferred_from_dynamic(n_rows, self.start, i, &mut path, matcher, &mut visited)
                 .await?;
             if let Some((end, labels)) = found
                 && end > i
@@ -346,8 +346,13 @@ impl Nfa {
     /// against ε-cycles *at the current position* — ε-transitions keep `pos`/`path`, so a fresh set
     /// is used once a row is consumed (which lets distinct variable assignments reach the same state
     /// at the next position).
+    /// Returns the *first* accepting path in transition order, not the longest. Transitions are
+    /// emitted by the builder in preference order — for a greedy quantifier the consume/loop edge
+    /// precedes the exit edge (so the first accepting path is the longest match), and for a reluctant
+    /// quantifier the exit edge precedes it (so the first accepting path is the shortest). This also
+    /// gives alternation its standard ordered semantics (the first listed alternative that matches).
     #[async_recursion]
-    async fn longest_from_dynamic(
+    async fn preferred_from_dynamic(
         &self,
         n_rows: usize,
         state: StateId,
@@ -356,15 +361,17 @@ impl Nfa {
         matcher: &(impl CandidateMatcher + Sync),
         visited: &mut HashSet<StateId>,
     ) -> StreamExecutorResult<Option<(usize, Vec<String>)>> {
+        // The single accept state is terminal: reaching it completes the match here.
+        if state == self.accept {
+            return Ok(Some((pos, path.clone())));
+        }
         if !visited.insert(state) {
             return Ok(None);
         }
-        let mut best: Option<(usize, Vec<String>)> =
-            (state == self.accept).then(|| (pos, path.clone()));
         for t in &self.states[state] {
             let candidate = match t {
                 Transition::Epsilon(next) => {
-                    self.longest_from_dynamic(n_rows, *next, pos, path, matcher, visited)
+                    self.preferred_from_dynamic(n_rows, *next, pos, path, matcher, visited)
                         .await?
                 }
                 Transition::OnVar { var, target } => {
@@ -372,7 +379,7 @@ impl Nfa {
                         path.push(var.clone());
                         let mut next_visited = HashSet::new();
                         let r = self
-                            .longest_from_dynamic(
+                            .preferred_from_dynamic(
                                 n_rows,
                                 *target,
                                 pos + 1,
@@ -388,14 +395,13 @@ impl Nfa {
                     }
                 }
             };
-            if let Some((end, labels)) = candidate
-                && best.as_ref().is_none_or(|(b, _)| end > *b)
-            {
-                best = Some((end, labels));
+            if candidate.is_some() {
+                visited.remove(&state);
+                return Ok(candidate);
             }
         }
         visited.remove(&state);
-        Ok(best)
+        Ok(None)
     }
 }
 
@@ -461,7 +467,7 @@ impl NfaBuilder {
                 }
                 Fragment { start, accept }
             }
-            Pattern::Quantified(inner, q) => self.build_quantified(inner, q),
+            Pattern::Quantified(inner, q, reluctant) => self.build_quantified(inner, q, *reluctant),
             Pattern::Permute(vars) => {
                 // PERMUTE expands to the alternation of every ordering of the variables.
                 let alts: Vec<Pattern> = permutations(vars)
@@ -475,13 +481,13 @@ impl NfaBuilder {
         }
     }
 
-    fn build_quantified(&mut self, inner: &Pattern, q: &Quantifier) -> Fragment {
+    fn build_quantified(&mut self, inner: &Pattern, q: &Quantifier, reluctant: bool) -> Fragment {
         match q {
-            Quantifier::Star => self.build_star(inner),
+            Quantifier::Star => self.build_star(inner, reluctant),
             Quantifier::Plus => {
-                // inner followed by inner*
+                // inner followed by inner* (the repetition carries the reluctant preference)
                 let first = self.build(inner);
-                let star = self.build_star(inner);
+                let star = self.build_star(inner, reluctant);
                 self.add_epsilon(first.accept, star.start);
                 Fragment {
                     start: first.start,
@@ -492,27 +498,43 @@ impl NfaBuilder {
                 let start = self.new_state();
                 let accept = self.new_state();
                 let frag = self.build(inner);
-                self.add_epsilon(start, frag.start);
+                // Greedy orders take-the-inner before skip; reluctant orders skip first.
+                if reluctant {
+                    self.add_epsilon(start, accept); // skip first
+                    self.add_epsilon(start, frag.start);
+                } else {
+                    self.add_epsilon(start, frag.start);
+                    self.add_epsilon(start, accept); // skip
+                }
                 self.add_epsilon(frag.accept, accept);
-                self.add_epsilon(start, accept); // skip
                 Fragment { start, accept }
             }
-            Quantifier::Range { min, max } => self.build_range(inner, *min, *max),
+            Quantifier::Range { min, max } => self.build_range(inner, *min, *max, reluctant),
         }
     }
 
-    fn build_star(&mut self, inner: &Pattern) -> Fragment {
+    fn build_star(&mut self, inner: &Pattern, reluctant: bool) -> Fragment {
         let start = self.new_state();
         let accept = self.new_state();
         let frag = self.build(inner);
-        self.add_epsilon(start, frag.start);
-        self.add_epsilon(start, accept); // zero occurrences
-        self.add_epsilon(frag.accept, frag.start); // loop
-        self.add_epsilon(frag.accept, accept);
+        // The matcher takes the first accepting path in edge order. Greedy emits the consume/loop
+        // edge before the exit edge (longest match first); reluctant emits the exit edge first
+        // (shortest match first).
+        if reluctant {
+            self.add_epsilon(start, accept); // zero occurrences first
+            self.add_epsilon(start, frag.start);
+            self.add_epsilon(frag.accept, accept); // exit before loop
+            self.add_epsilon(frag.accept, frag.start);
+        } else {
+            self.add_epsilon(start, frag.start);
+            self.add_epsilon(start, accept); // zero occurrences
+            self.add_epsilon(frag.accept, frag.start); // loop
+            self.add_epsilon(frag.accept, accept);
+        }
         Fragment { start, accept }
     }
 
-    fn build_range(&mut self, inner: &Pattern, min: u32, max: Option<u32>) -> Fragment {
+    fn build_range(&mut self, inner: &Pattern, min: u32, max: Option<u32>, reluctant: bool) -> Fragment {
         // Expand to `min` mandatory copies followed by either `*` (unbounded) or `max-min`
         // optional copies.
         let mut parts: Vec<Pattern> = Vec::new();
@@ -523,12 +545,14 @@ impl NfaBuilder {
             None => parts.push(Pattern::Quantified(
                 Box::new(inner.clone()),
                 Quantifier::Star,
+                reluctant,
             )),
             Some(max) => {
                 for _ in min..max {
                     parts.push(Pattern::Quantified(
                         Box::new(inner.clone()),
                         Quantifier::Question,
+                        reluctant,
                     ));
                 }
             }
@@ -585,7 +609,7 @@ mod tests {
         // A B+ C  on  a b b b c
         let p = Pattern::Concat(vec![
             vars("a"),
-            Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus),
+            Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus, false),
             vars("c"),
         ]);
         let nfa = Nfa::compile(&p);
@@ -599,7 +623,7 @@ mod tests {
         // A B? C  matches both "abc" and "ac"
         let p = Pattern::Concat(vec![
             vars("a"),
-            Pattern::Quantified(Box::new(vars("b")), Quantifier::Question),
+            Pattern::Quantified(Box::new(vars("b")), Quantifier::Question, false),
             vars("c"),
         ]);
         let nfa = Nfa::compile(&p);
@@ -610,7 +634,7 @@ mod tests {
     #[test]
     fn star_greedy_longest() {
         // A*  on  a a a  -> greedy longest is 3
-        let p = Pattern::Quantified(Box::new(vars("a")), Quantifier::Star);
+        let p = Pattern::Quantified(Box::new(vars("a")), Quantifier::Star, false);
         let nfa = Nfa::compile(&p);
         assert_eq!(nfa.longest_match(&rows("aaa"), 0), Some(3));
         // zero occurrences still matches (empty match).
@@ -639,6 +663,7 @@ mod tests {
                 min: 2,
                 max: Some(3),
             },
+            false,
         );
         let nfa = Nfa::compile(&p);
         assert_eq!(nfa.longest_match(&rows("a"), 0), None); // need >= 2
@@ -686,7 +711,7 @@ mod tests {
     #[test]
     fn find_matches_skip_to_next_row_overlaps() {
         // A+ with SKIP TO NEXT ROW: matches may overlap (resume at start+1).
-        let p = Pattern::Quantified(Box::new(vars("a")), Quantifier::Plus);
+        let p = Pattern::Quantified(Box::new(vars("a")), Quantifier::Plus, false);
         let nfa = Nfa::compile(&p);
         // "aaa": greedy A+ at 0->(0,3); to-next resumes at 1->(1,3); 2->(2,3).
         assert_eq!(
@@ -705,7 +730,7 @@ mod tests {
         // A B+ : greedy consumes all b's, then resumes past the match.
         let p = Pattern::Concat(vec![
             vars("a"),
-            Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus),
+            Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus, false),
         ]);
         let nfa = Nfa::compile(&p);
         // a b b | a b  -> (0,3) then (3,5)
@@ -730,7 +755,7 @@ mod tests {
     #[test]
     fn find_matches_empty_pattern_terminates() {
         // A* matches empty everywhere; empty matches are not emitted and the scan terminates.
-        let p = Pattern::Quantified(Box::new(vars("a")), Quantifier::Star);
+        let p = Pattern::Quantified(Box::new(vars("a")), Quantifier::Star, false);
         let nfa = Nfa::compile(&p);
         // "aa b aa" -> greedy A* consumes runs of a, emits non-empty ones.
         assert_eq!(
@@ -758,7 +783,7 @@ mod tests {
         // A B+ on a b b -> labels a, b, b (greedy consumes both b's).
         let p = Pattern::Concat(vec![
             vars("a"),
-            Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus),
+            Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus, false),
         ]);
         let nfa = Nfa::compile(&p);
         assert_eq!(
@@ -876,6 +901,39 @@ mod tests {
                 _ => false,
             })
         }
+    }
+
+    #[tokio::test]
+    async fn reluctant_quantifier_prefers_fewer() {
+        // Three rows that each satisfy both `a` and `b`, so `a+ b` can stop early.
+        let rows = vec![BTreeSet::from(["a".to_owned(), "b".to_owned()]); 3];
+        let m = SetMatcher { rows: rows.clone() };
+
+        // Greedy `a+ b`: consume as many `a` as possible -> [0, 3) (a a b).
+        let greedy = Nfa::compile(&Pattern::Concat(vec![
+            Pattern::Quantified(Box::new(vars("a")), Quantifier::Plus, false),
+            vars("b"),
+        ]));
+        assert_eq!(
+            greedy
+                .find_matches_dynamic(rows.len(), &m, &SkipMode::PastLastRow)
+                .await
+                .unwrap(),
+            vec![LabeledMatch { start: 0, end: 3, labels: lbl("aab") }]
+        );
+
+        // Reluctant `a+? b`: take the fewest `a` -> [0, 2) (a b), then [2, ...) finds nothing more.
+        let reluctant = Nfa::compile(&Pattern::Concat(vec![
+            Pattern::Quantified(Box::new(vars("a")), Quantifier::Plus, true),
+            vars("b"),
+        ]));
+        assert_eq!(
+            reluctant
+                .find_matches_dynamic(rows.len(), &m, &SkipMode::PastLastRow)
+                .await
+                .unwrap(),
+            vec![LabeledMatch { start: 0, end: 2, labels: lbl("ab") }]
+        );
     }
 
     #[tokio::test]

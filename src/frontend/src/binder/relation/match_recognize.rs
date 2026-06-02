@@ -825,7 +825,7 @@ fn collect_from_pattern(pattern: &MatchRecognizePattern, out: &mut BTreeSet<Stri
             }
         }
         MatchRecognizePattern::Group(inner) => collect_from_pattern(inner, out),
-        MatchRecognizePattern::Repetition(inner, _) => collect_from_pattern(inner, out),
+        MatchRecognizePattern::Repetition(inner, _, _) => collect_from_pattern(inner, out),
     }
 }
 
