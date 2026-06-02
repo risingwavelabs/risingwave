@@ -692,7 +692,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         self.checkpoint_control.on_partial_graph_reset(partial_graph_id, reset_resps);
                                     }
                                     PartialGraphEvent::Initialized => {
-                                        self.checkpoint_control.on_partial_graph_initialized(partial_graph_id);
+                                        self.checkpoint_control.on_partial_graph_initialized(
+                                            partial_graph_id,
+                                            &mut self.partial_graph_manager,
+                                        )?;
                                     }
                                 }
                             }

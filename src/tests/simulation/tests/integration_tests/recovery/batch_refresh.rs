@@ -15,6 +15,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use risingwave_common::error::AsReport;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use tokio::time::sleep;
 
@@ -241,7 +242,7 @@ async fn wait_for_batch_mv_count(
                 }
             }
             Err(e) => {
-                last = format!("<query error: {}>", e);
+                last = format!("<query error: {}>", e.as_report());
             }
         }
         sleep(Duration::from_secs(1)).await;

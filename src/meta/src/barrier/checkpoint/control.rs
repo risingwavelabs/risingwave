@@ -598,14 +598,33 @@ impl CheckpointControl {
         }
     }
 
-    pub(crate) fn on_partial_graph_initialized(&mut self, partial_graph_id: PartialGraphId) {
-        let (database_id, _) = from_partial_graph_id(partial_graph_id);
+    pub(crate) fn on_partial_graph_initialized(
+        &mut self,
+        partial_graph_id: PartialGraphId,
+        partial_graph_manager: &mut PartialGraphManager,
+    ) -> MetaResult<()> {
+        let (database_id, independent_job_id) = from_partial_graph_id(partial_graph_id);
         match self.databases.get_mut(&database_id).expect("should exist") {
-            DatabaseCheckpointControlStatus::Running(_) => {
-                unreachable!("should not have partial graph initialized when running")
+            DatabaseCheckpointControlStatus::Running(database) => {
+                let Some(independent_job_id) = independent_job_id else {
+                    unreachable!("database partial graph should not initialize when running")
+                };
+                let job = database
+                    .independent_checkpoint_job_controls
+                    .get_mut(&independent_job_id)
+                    .expect("independent job should exist");
+                match job {
+                    IndependentCheckpointJobControl::BatchRefresh(job) => {
+                        job.on_log_store_initialized(partial_graph_manager)
+                    }
+                    IndependentCheckpointJobControl::CreatingStreamingJob(_) => {
+                        unreachable!("creating streaming job should not initialize when running")
+                    }
+                }
             }
             DatabaseCheckpointControlStatus::Recovering(state) => {
                 state.partial_graph_initialized(partial_graph_id);
+                Ok(())
             }
         }
     }

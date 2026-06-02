@@ -1142,7 +1142,7 @@ impl PartialGraphRecoverer<'_> {
             let refresh_interval_sec = job_extra_info
                 .get(&job_id)
                 .and_then(|info| info.refresh_interval_sec)
-                .unwrap_or(0);
+                .expect("batch refresh job should have refresh_interval_sec in job extra info");
 
             let job = BatchRefreshJobCheckpointControl::recover(
                 database_id,
