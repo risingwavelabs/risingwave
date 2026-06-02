@@ -1,0 +1,18 @@
+init_sqls = [
+    'CREATE SCHEMA IF NOT EXISTS demo_db',
+    'DROP TABLE IF EXISTS demo_db.column_order_validation_table PURGE',
+    '''
+    CREATE TABLE demo_db.column_order_validation_table (
+    col_a int,
+    col_b int
+    ) USING iceberg
+    TBLPROPERTIES ('format-version'='2');
+    '''
+]
+
+slt = 'test_case/iceberg_sink_column_order_validation.slt'
+
+drop_sqls = [
+ 'DROP TABLE IF EXISTS demo_db.column_order_validation_table PURGE',
+ 'DROP SCHEMA IF EXISTS demo_db'
+]
