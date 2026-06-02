@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
 use itertools::{EitherOrBoth, Itertools};
-use risingwave_common::bail;
+use risingwave_common::{bail, bail_not_implemented};
 use risingwave_common::catalog::{Field, TableId};
 use risingwave_sqlparser::ast::{
     AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
@@ -622,6 +622,9 @@ impl Binder {
                 let bound_join = self.bind_table_with_joins(table_with_joins)?;
                 self.pop_and_merge_lateral_context()?;
                 Ok(bound_join)
+            }
+            TableFactor::MatchRecognize { .. } => {
+                bail_not_implemented!("MATCH_RECOGNIZE is not yet supported");
             }
         }
     }

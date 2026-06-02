@@ -5585,6 +5585,15 @@ impl Parser<'_> {
 
     /// A table name or a parenthesized subquery, followed by optional `[AS] alias`
     pub fn parse_table_factor(&mut self) -> ModalResult<TableFactor> {
+        let relation = self.parse_table_factor_inner()?;
+        if self.parse_keyword(Keyword::MATCH_RECOGNIZE) {
+            self.parse_match_recognize(relation)
+        } else {
+            Ok(relation)
+        }
+    }
+
+    fn parse_table_factor_inner(&mut self) -> ModalResult<TableFactor> {
         if self.parse_keyword(Keyword::LATERAL) {
             // LATERAL must always be followed by a subquery.
             if !self.consume_token(&Token::LParen) {
@@ -5698,6 +5707,265 @@ impl Parser<'_> {
             subquery,
             alias,
         })
+    }
+
+    /// Parse the body of a `MATCH_RECOGNIZE (...)` clause applied to the already-parsed
+    /// input `table`. Assumes the `MATCH_RECOGNIZE` keyword has just been consumed.
+    ///
+    /// Supported in this version: `PARTITION BY`, `ORDER BY`, `MEASURES`, rows-per-match,
+    /// `AFTER MATCH SKIP`, `PATTERN` (named symbols, grouping, concatenation, alternation,
+    /// `PERMUTE`, and the quantifiers `*` `+` `?` `{n}` `{n,}` `{,m}` `{n,m}`), and `DEFINE`.
+    /// Row-pattern anchors (`^`, `$`) and exclusions (`{- -}`) are not yet parsed.
+    fn parse_match_recognize(&mut self, table: TableFactor) -> ModalResult<TableFactor> {
+        self.expect_token(&Token::LParen)?;
+
+        let partition_by = if self.parse_keywords(&[Keyword::PARTITION, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_expr)?
+        } else {
+            vec![]
+        };
+
+        let order_by = if self.parse_keywords(&[Keyword::ORDER, Keyword::BY]) {
+            self.parse_comma_separated(Parser::parse_match_recognize_order_by_expr)?
+        } else {
+            vec![]
+        };
+
+        let measures = if self.parse_keyword(Keyword::MEASURES) {
+            self.parse_comma_separated(Parser::parse_measure)?
+        } else {
+            vec![]
+        };
+
+        let rows_per_match =
+            if self.parse_keywords(&[Keyword::ONE, Keyword::ROW, Keyword::PER, Keyword::MATCH]) {
+                Some(RowsPerMatch::OneRow)
+            } else if self.parse_keywords(&[
+                Keyword::ALL,
+                Keyword::ROWS,
+                Keyword::PER,
+                Keyword::MATCH,
+            ]) {
+                Some(RowsPerMatch::AllRows)
+            } else {
+                None
+            };
+
+        let after_match_skip =
+            if self.parse_keywords(&[Keyword::AFTER, Keyword::MATCH, Keyword::SKIP]) {
+                Some(self.parse_after_match_skip()?)
+            } else {
+                None
+            };
+
+        self.expect_keyword(Keyword::PATTERN)?;
+        self.expect_token(&Token::LParen)?;
+        let pattern = self.parse_pattern()?;
+        self.expect_token(&Token::RParen)?;
+
+        self.expect_keyword(Keyword::DEFINE)?;
+        let symbols = self.parse_comma_separated(Parser::parse_symbol_definition)?;
+
+        self.expect_token(&Token::RParen)?;
+
+        let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
+
+        Ok(TableFactor::MatchRecognize {
+            table: Box::new(table),
+            partition_by,
+            order_by,
+            measures,
+            rows_per_match,
+            after_match_skip,
+            pattern,
+            symbols,
+            alias,
+        })
+    }
+
+    fn parse_after_match_skip(&mut self) -> ModalResult<AfterMatchSkip> {
+        if self.parse_keywords(&[Keyword::PAST, Keyword::LAST, Keyword::ROW]) {
+            Ok(AfterMatchSkip::PastLastRow)
+        } else if self.parse_keywords(&[Keyword::TO, Keyword::NEXT, Keyword::ROW]) {
+            Ok(AfterMatchSkip::ToNextRow)
+        } else if self.parse_keywords(&[Keyword::TO, Keyword::FIRST]) {
+            Ok(AfterMatchSkip::ToFirst(self.parse_identifier()?))
+        } else if self.parse_keywords(&[Keyword::TO, Keyword::LAST]) {
+            Ok(AfterMatchSkip::ToLast(self.parse_identifier()?))
+        } else {
+            self.expected(
+                "PAST LAST ROW, TO NEXT ROW, TO FIRST <symbol>, or TO LAST <symbol> after AFTER MATCH SKIP",
+            )
+        }
+    }
+
+    /// Parse an `ORDER BY` item inside `MATCH_RECOGNIZE`. The sort key is parsed with a
+    /// `Precedence::Other` floor so a trailing `ALL` (as in `ALL ROWS PER MATCH`) is not
+    /// swallowed by the `<expr> ALL (...)` quantified-comparison grammar. Arithmetic still
+    /// binds; a comparison/logical sort key must be parenthesized.
+    fn parse_match_recognize_order_by_expr(&mut self) -> ModalResult<OrderByExpr> {
+        let expr = self.parse_subexpr(Precedence::Other)?;
+
+        let asc = if self.parse_keyword(Keyword::ASC) {
+            Some(true)
+        } else if self.parse_keyword(Keyword::DESC) {
+            Some(false)
+        } else {
+            None
+        };
+
+        let nulls_first = if self.parse_keywords(&[Keyword::NULLS, Keyword::FIRST]) {
+            Some(true)
+        } else if self.parse_keywords(&[Keyword::NULLS, Keyword::LAST]) {
+            Some(false)
+        } else {
+            None
+        };
+
+        Ok(OrderByExpr {
+            expr,
+            asc,
+            nulls_first,
+        })
+    }
+
+    fn parse_measure(&mut self) -> ModalResult<Measure> {
+        let expr = self.parse_expr()?;
+        self.expect_keyword(Keyword::AS)?;
+        let alias = self.parse_identifier()?;
+        Ok(Measure { expr, alias })
+    }
+
+    fn parse_symbol_definition(&mut self) -> ModalResult<SymbolDefinition> {
+        let symbol = self.parse_identifier()?;
+        self.expect_keyword(Keyword::AS)?;
+        let definition = self.parse_expr()?;
+        Ok(SymbolDefinition { symbol, definition })
+    }
+
+    /// A row pattern: alternation of concatenations (alternation has the lowest precedence).
+    fn parse_pattern(&mut self) -> ModalResult<MatchRecognizePattern> {
+        let mut alternatives = vec![self.parse_pattern_concat()?];
+        while self.consume_pattern_pipe() {
+            alternatives.push(self.parse_pattern_concat()?);
+        }
+        if alternatives.len() == 1 {
+            Ok(alternatives.pop().unwrap())
+        } else {
+            Ok(MatchRecognizePattern::Alternation(alternatives))
+        }
+    }
+
+    /// A concatenation of quantified primaries, terminated by `)`, `|`, or end of input.
+    fn parse_pattern_concat(&mut self) -> ModalResult<MatchRecognizePattern> {
+        let mut terms = vec![self.parse_pattern_repetition()?];
+        while !matches!(self.peek_token().token, Token::RParen | Token::EOF)
+            && !self.peek_is_pattern_pipe()
+        {
+            terms.push(self.parse_pattern_repetition()?);
+        }
+        if terms.len() == 1 {
+            Ok(terms.pop().unwrap())
+        } else {
+            Ok(MatchRecognizePattern::Concat(terms))
+        }
+    }
+
+    /// A pattern primary with an optional trailing quantifier.
+    fn parse_pattern_repetition(&mut self) -> ModalResult<MatchRecognizePattern> {
+        let primary = self.parse_pattern_primary()?;
+        if let Some(quantifier) = self.parse_optional_pattern_quantifier()? {
+            Ok(MatchRecognizePattern::Repetition(
+                Box::new(primary),
+                quantifier,
+            ))
+        } else {
+            Ok(primary)
+        }
+    }
+
+    /// A pattern primary: a parenthesized sub-pattern, `PERMUTE(...)`, or a named symbol.
+    fn parse_pattern_primary(&mut self) -> ModalResult<MatchRecognizePattern> {
+        if self.consume_token(&Token::LParen) {
+            let inner = self.parse_pattern()?;
+            self.expect_token(&Token::RParen)?;
+            Ok(MatchRecognizePattern::Group(Box::new(inner)))
+        } else if self.parse_keyword(Keyword::PERMUTE) {
+            self.expect_token(&Token::LParen)?;
+            let symbols = self.parse_comma_separated(Parser::parse_pattern_symbol)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(MatchRecognizePattern::Permute(symbols))
+        } else {
+            Ok(MatchRecognizePattern::Symbol(self.parse_pattern_symbol()?))
+        }
+    }
+
+    fn parse_pattern_symbol(&mut self) -> ModalResult<MatchRecognizeSymbol> {
+        Ok(MatchRecognizeSymbol::Named(self.parse_identifier()?))
+    }
+
+    /// Parse an optional pattern quantifier: `*`, `+`, `?`, or a `{...}` range.
+    fn parse_optional_pattern_quantifier(
+        &mut self,
+    ) -> ModalResult<Option<RepetitionQuantifier>> {
+        if self.consume_token(&Token::LBrace) {
+            let lower = if matches!(self.peek_token().token, Token::Comma) {
+                None
+            } else {
+                Some(self.parse_literal_u64()? as u32)
+            };
+            let quantifier = if self.consume_token(&Token::Comma) {
+                let upper = if matches!(self.peek_token().token, Token::RBrace) {
+                    None
+                } else {
+                    Some(self.parse_literal_u64()? as u32)
+                };
+                match (lower, upper) {
+                    (Some(n), None) => RepetitionQuantifier::AtLeast(n),
+                    (None, Some(m)) => RepetitionQuantifier::AtMost(m),
+                    (Some(n), Some(m)) => RepetitionQuantifier::Range(n, m),
+                    (None, None) => {
+                        return self.expected("at least one bound in a {min,max} quantifier");
+                    }
+                }
+            } else {
+                match lower {
+                    Some(n) => RepetitionQuantifier::Exactly(n),
+                    None => return self.expected("a number in a {n} quantifier"),
+                }
+            };
+            self.expect_token(&Token::RBrace)?;
+            return Ok(Some(quantifier));
+        }
+        // `*`, `+`, `?` may arrive as dedicated tokens or as `Token::Op(_)` depending on
+        // surrounding operator characters, so accept both spellings.
+        let quantifier = match &self.peek_token().token {
+            Token::Mul => RepetitionQuantifier::ZeroOrMore,
+            Token::Plus => RepetitionQuantifier::OneOrMore,
+            Token::Op(op) if op == "*" => RepetitionQuantifier::ZeroOrMore,
+            Token::Op(op) if op == "+" => RepetitionQuantifier::OneOrMore,
+            Token::Op(op) if op == "?" => RepetitionQuantifier::AtMostOne,
+            _ => return Ok(None),
+        };
+        self.next_token();
+        Ok(Some(quantifier))
+    }
+
+    fn peek_is_pattern_pipe(&mut self) -> bool {
+        match &self.peek_token().token {
+            Token::Pipe => true,
+            Token::Op(op) if op == "|" => true,
+            _ => false,
+        }
+    }
+
+    fn consume_pattern_pipe(&mut self) -> bool {
+        if self.peek_is_pattern_pipe() {
+            self.next_token();
+            true
+        } else {
+            false
+        }
     }
 
     fn parse_join_constraint(&mut self, natural: bool) -> ModalResult<JoinConstraint> {
