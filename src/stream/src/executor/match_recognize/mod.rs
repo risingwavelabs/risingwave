@@ -18,10 +18,10 @@
 
 mod executor;
 mod nfa;
-mod parse;
+mod proto;
 
 pub use executor::{
     CompiledDefine, CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs,
 };
 pub use nfa::{Nfa, SkipMode};
-pub use parse::parse_pattern;
+pub use proto::pattern_from_protobuf;

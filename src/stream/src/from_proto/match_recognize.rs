@@ -21,7 +21,7 @@ use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::{
     CompiledDefine, CompiledMeasure, Executor, MatchRecognizeExecutor, MatchRecognizeExecutorArgs,
-    Nfa, SkipMode, parse_pattern,
+    Nfa, SkipMode, pattern_from_protobuf,
 };
 use crate::task::ExecutorParams;
 
@@ -53,7 +53,11 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             .map(|m| CompiledMeasure::from_protobuf(m, params.eval_error_report.clone()))
             .collect::<crate::executor::StreamExecutorResult<Vec<_>>>()?;
 
-        let pattern = parse_pattern(&node.pattern)
+        let pattern_node = node
+            .pattern_node
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MATCH_RECOGNIZE node missing pattern"))?;
+        let pattern = pattern_from_protobuf(pattern_node)
             .map_err(|e| anyhow::anyhow!("invalid MATCH_RECOGNIZE pattern: {e}"))?;
         let nfa = Nfa::compile(&pattern);
 

@@ -212,7 +212,7 @@ impl TryToStreamPb for StreamMatchRecognize {
             order_by,
             measures,
             defines,
-            pattern: format!("{}", self.core.pattern),
+            pattern_node: Some(lower_pattern(&self.core.pattern)?),
             state_table: Some(state_table),
             after_match_skip: {
                 use risingwave_sqlparser::ast::AfterMatchSkip;
@@ -252,5 +252,94 @@ impl ExprRewritable<Stream> for StreamMatchRecognize {
 impl ExprVisitable for StreamMatchRecognize {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.core.visit_exprs(v)
+    }
+}
+
+/// Lower a bound [`MatchRecognizePattern`] (the `sqlparser` AST) into the structured pattern proto
+/// consumed by the executor. Parenthesized groups are flattened (the executor pattern has no group
+/// node); anchors (`^`, `$`) and exclusions (`{- ... -}`) are rejected here as they are not yet
+/// supported. This replaces the previous text round-trip (`Display` ↔ a hand-rolled parser).
+fn lower_pattern(
+    pattern: &risingwave_sqlparser::ast::MatchRecognizePattern,
+) -> crate::error::Result<risingwave_pb::stream_plan::MatchRecognizePatternNode> {
+    use risingwave_common::bail_not_implemented;
+    use risingwave_pb::stream_plan::match_recognize_pattern_node::Node;
+    use risingwave_pb::stream_plan::{
+        MatchRecognizePatternNode, MatchRecognizePatternSeq, MatchRecognizePermutePattern,
+        MatchRecognizeQuantifiedPattern,
+    };
+    use risingwave_sqlparser::ast::{MatchRecognizePattern as Pat, MatchRecognizeSymbol as Sym};
+
+    fn named(symbol: &Sym) -> crate::error::Result<String> {
+        match symbol {
+            Sym::Named(ident) => Ok(ident.real_value()),
+            Sym::Start | Sym::End => {
+                bail_not_implemented!("row pattern anchors (^, $) in MATCH_RECOGNIZE")
+            }
+        }
+    }
+
+    fn node(n: Node) -> risingwave_pb::stream_plan::MatchRecognizePatternNode {
+        MatchRecognizePatternNode { node: Some(n) }
+    }
+
+    fn lower_seq(
+        patterns: &[Pat],
+    ) -> crate::error::Result<risingwave_pb::stream_plan::MatchRecognizePatternSeq> {
+        Ok(MatchRecognizePatternSeq {
+            patterns: patterns
+                .iter()
+                .map(lower_pattern)
+                .collect::<crate::error::Result<Vec<_>>>()?,
+        })
+    }
+
+    match pattern {
+        Pat::Symbol(symbol) => Ok(node(Node::Var(named(symbol)?))),
+        Pat::Exclude(_) => {
+            bail_not_implemented!("row pattern exclusions ({{- ... -}}) in MATCH_RECOGNIZE")
+        }
+        Pat::Permute(symbols) => Ok(node(Node::Permute(MatchRecognizePermutePattern {
+            vars: symbols
+                .iter()
+                .map(named)
+                .collect::<crate::error::Result<Vec<_>>>()?,
+        }))),
+        Pat::Concat(patterns) => Ok(node(Node::Concat(lower_seq(patterns)?))),
+        Pat::Alternation(patterns) => Ok(node(Node::Alternation(lower_seq(patterns)?))),
+        // A parenthesized group is purely syntactic grouping; flatten it away.
+        Pat::Group(inner) => lower_pattern(inner),
+        Pat::Repetition(inner, quantifier, reluctant) => {
+            Ok(node(Node::Quantified(Box::new(MatchRecognizeQuantifiedPattern {
+                inner: Some(Box::new(lower_pattern(inner)?)),
+                quantifier: Some(lower_quantifier(quantifier)),
+                reluctant: *reluctant,
+            }))))
+        }
+    }
+}
+
+/// Map a [`RepetitionQuantifier`] to the proto quantifier. `*`, `+`, `?` map to their dedicated
+/// kinds; the `{...}` forms all map to `RANGE` with an explicit `min` and an optional `max`.
+fn lower_quantifier(
+    quantifier: &risingwave_sqlparser::ast::RepetitionQuantifier,
+) -> risingwave_pb::stream_plan::MatchRecognizeQuantifier {
+    use risingwave_pb::stream_plan::MatchRecognizeQuantifier;
+    use risingwave_pb::stream_plan::match_recognize_quantifier::Kind;
+    use risingwave_sqlparser::ast::RepetitionQuantifier as Q;
+
+    let (kind, min, max) = match quantifier {
+        Q::ZeroOrMore => (Kind::Star, 0, None),
+        Q::OneOrMore => (Kind::Plus, 0, None),
+        Q::AtMostOne => (Kind::Question, 0, None),
+        Q::Exactly(n) => (Kind::Range, *n, Some(*n)),
+        Q::AtLeast(n) => (Kind::Range, *n, None),
+        Q::AtMost(m) => (Kind::Range, 0, Some(*m)),
+        Q::Range(n, m) => (Kind::Range, *n, Some(*m)),
+    };
+    MatchRecognizeQuantifier {
+        kind: kind as i32,
+        min,
+        max,
     }
 }
