@@ -282,6 +282,11 @@ struct DefineMatcher<'a> {
     rows: &'a [BufferedRow],
     safe_len: usize,
     defines: &'a HashMap<String, CompiledDefine>,
+    /// `WITHIN` span predicate over `[last_order_key, first_order_key]`. Applied as a candidate is
+    /// bound so the NFA prunes any extension that would push the match's span past the bound,
+    /// yielding the longest match that fits the window rather than rejecting an overshooting greedy
+    /// match after the fact.
+    within: Option<&'a NonStrictExpression>,
 }
 
 impl DefineMatcher<'_> {
@@ -322,21 +327,34 @@ impl CandidateMatcher for DefineMatcher<'_> {
         pos: usize,
         labels: &[String],
     ) -> StreamExecutorResult<bool> {
-        // A pattern variable with no DEFINE matches every row.
-        let Some(def) = self.defines.get(var) else {
-            return Ok(true);
-        };
         let match_start = pos - labels.len();
-        let synthetic: Vec<Datum> = def
-            .slots
-            .iter()
-            .map(|slot| self.slot_value(slot, pos, match_start, labels))
-            .collect();
-        let value = def
-            .condition
-            .eval_row_infallible(&OwnedRow::new(synthetic))
-            .await;
-        Ok(value.is_some_and(|s| s.into_bool()))
+        // A pattern variable with no DEFINE matches every row; one with a DEFINE must satisfy it.
+        if let Some(def) = self.defines.get(var) {
+            let synthetic: Vec<Datum> = def
+                .slots
+                .iter()
+                .map(|slot| self.slot_value(slot, pos, match_start, labels))
+                .collect();
+            let value = def
+                .condition
+                .eval_row_infallible(&OwnedRow::new(synthetic))
+                .await;
+            if !value.is_some_and(|s| s.into_bool()) {
+                return Ok(false);
+            }
+        }
+        // WITHIN: binding `pos` extends the match to span `[match_start, pos]`. Reject the candidate
+        // if that span exceeds the bound, so the NFA backtracks to a shorter match that fits.
+        if let Some(within) = self.within {
+            let first_key = self.rows[match_start].order_key.clone();
+            let last_key = self.rows[pos].order_key.clone();
+            let span_row = OwnedRow::new(vec![last_key, first_key]);
+            let value = within.eval_row_infallible(&span_row).await;
+            if !value.is_some_and(|s| s.into_bool()) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -567,6 +585,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 rows: &state.rows,
                                 safe_len,
                                 defines: &defines,
+                                within: within.as_ref(),
                             };
                             let found = nfa.find_matches_dynamic(safe_len, &matcher, &skip).await?;
 
@@ -579,17 +598,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 if m.end >= safe_len {
                                     break;
                                 }
-                                // WITHIN: reject a match whose span (last - first order key) exceeds the
-                                // bound. The check is over a synthetic [last, first] row.
-                                if let Some(within) = &within {
-                                    let first_key = state.rows[m.start].order_key.clone();
-                                    let last_key = state.rows[m.end - 1].order_key.clone();
-                                    let span_row = OwnedRow::new(vec![last_key, first_key]);
-                                    let ok = within.eval_row_infallible(&span_row).await;
-                                    if !ok.is_some_and(|s| s.into_bool()) {
-                                        continue;
-                                    }
-                                }
+                                // WITHIN is enforced inside the matcher (it prunes overshooting
+                                // candidates during traversal), so no post-hoc span check is needed.
                                 // Evaluate each measure over the synthetic row its slots produce from
                                 // the matched rows and their per-row labels.
                                 let mut measure_datums: Vec<Datum> =
