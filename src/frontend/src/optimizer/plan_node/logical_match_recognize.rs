@@ -28,6 +28,7 @@ use crate::binder::{BoundMeasure, BoundSymbolDefinition, MeasureSlotKind};
 use crate::error::Result;
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalMatchRecognize` implements [`super::Logical`] for a SQL `MATCH_RECOGNIZE` (row pattern
@@ -214,6 +215,7 @@ impl ToStream for LogicalMatchRecognize {
         let Some(&time_col) = order_indices.first() else {
             bail!("MATCH_RECOGNIZE requires an ORDER BY clause");
         };
+        let partition_key_indices = self.core.partition_key_indices().expect("checked above");
 
         let stream_input = self.input().to_stream(ctx)?;
         // Event-time contract: the executor buffers rows and finalises matches as the watermark on
@@ -224,6 +226,10 @@ impl ToStream for LogicalMatchRecognize {
                 "MATCH_RECOGNIZE requires a watermark on the leading ORDER BY column for streaming"
             );
         }
+        // Shard by the PARTITION BY key so partitions are processed in parallel across actors, each
+        // owning its partitions' state (matching is independent per partition).
+        let stream_input = RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
+            .streaming_enforce_if_not_satisfies(stream_input)?;
         let core = generic::MatchRecognize {
             input: stream_input,
             partition_by: self.core.partition_by.clone(),

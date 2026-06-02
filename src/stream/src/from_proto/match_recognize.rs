@@ -73,7 +73,11 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
         let input_arity = input.schema().len();
 
         let state_table =
-            StateTableBuilder::new(node.get_state_table().as_ref().unwrap(), store, None)
+            StateTableBuilder::new(
+                node.get_state_table().as_ref().unwrap(),
+                store,
+                params.vnode_bitmap.clone().map(std::sync::Arc::new),
+            )
                 .forbid_preload_all_rows()
                 .build()
                 .await;

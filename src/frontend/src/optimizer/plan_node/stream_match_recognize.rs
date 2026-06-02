@@ -42,11 +42,14 @@ pub struct StreamMatchRecognize {
 impl StreamMatchRecognize {
     pub fn new(core: generic::MatchRecognize<PlanRef<Stream>>) -> Self {
         // ONE ROW PER MATCH emits one row per completed match over append-only input, so the output
-        // is append-only. The output schema (partition cols + measures) differs from the input, so
-        // start with empty watermark columns / monotonicity.
+        // is append-only. The output schema is the partition-by columns followed by the measures, so
+        // the partition key occupies the leading `n_part` output columns; the input was sharded by
+        // the partition key (see `to_stream`), so the output is hash-sharded on those columns.
+        let n_part = core.partition_by.len();
+        let dist = Distribution::HashShard((0..n_part).collect());
         let base = PlanBase::new_stream_with_core(
             &core,
-            Distribution::Single,
+            dist,
             StreamKind::AppendOnly,
             false,
             WatermarkColumns::new(),
@@ -79,13 +82,15 @@ impl StreamMatchRecognize {
         }
 
         // pk: partition columns (within the stored input row, offset 1) then seq.
-        for i in &partition_indices {
-            tbl_builder.add_order_column(1 + i, OrderType::ascending());
+        let partition_positions: Vec<usize> = partition_indices.iter().map(|i| 1 + i).collect();
+        for &p in &partition_positions {
+            tbl_builder.add_order_column(p, OrderType::ascending());
         }
         tbl_builder.add_order_column(0, OrderType::ascending());
-        // read_prefix_len_hint = 0: recovery does a full (empty-prefix) scan to discover partitions,
+        // Distribute the state by the partition columns so each actor owns its partitions' state.
+        // read_prefix_len_hint = 0: recovery does a full (empty-prefix) scan over the actor's vnodes,
         // so we must not assert a partition-length prefix on iteration.
-        tbl_builder.build(vec![], 0)
+        tbl_builder.build(partition_positions, 0)
     }
 }
 
