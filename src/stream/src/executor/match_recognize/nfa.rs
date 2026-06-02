@@ -138,6 +138,37 @@ impl Nfa {
     }
 }
 
+/// A single match span over the row sequence: `start..end` (end exclusive) are the matched rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MatchSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Nfa {
+    /// Find all matches over `rows` under `ONE ROW PER MATCH` + `AFTER MATCH SKIP PAST LAST ROW`:
+    /// scan left to right; at each position take the greedy longest match; on a non-empty match,
+    /// record it and resume scanning *past its last row*; otherwise advance by one row.
+    ///
+    /// Empty matches (a pattern that accepts zero rows, e.g. `A*` on a non-matching row) are not
+    /// emitted and advance the scan by one, so the scan always terminates.
+    pub fn find_matches(&self, rows: &[BTreeSet<String>]) -> Vec<MatchSpan> {
+        let mut matches = Vec::new();
+        let mut i = 0;
+        while i < rows.len() {
+            if let Some(end) = self.longest_match(rows, i)
+                && end > i
+            {
+                matches.push(MatchSpan { start: i, end });
+                i = end; // SKIP PAST LAST ROW
+            } else {
+                i += 1;
+            }
+        }
+        matches
+    }
+}
+
 /// A sub-NFA fragment with one entry and one exit state.
 struct Fragment {
     start: StateId,
@@ -403,6 +434,55 @@ mod tests {
         let nfa = Nfa::compile(&p);
         assert_eq!(nfa.longest_match(&rows("xab"), 1), Some(3));
         assert_eq!(nfa.longest_match(&rows("xab"), 0), None);
+    }
+
+    fn spans(v: &[(usize, usize)]) -> Vec<MatchSpan> {
+        v.iter()
+            .map(|&(start, end)| MatchSpan { start, end })
+            .collect()
+    }
+
+    #[test]
+    fn find_matches_skip_past_last_row() {
+        // A B, repeated, with SKIP PAST LAST ROW -> non-overlapping matches.
+        let p = Pattern::Concat(vec![vars("a"), vars("b")]);
+        let nfa = Nfa::compile(&p);
+        assert_eq!(
+            nfa.find_matches(&rows("ababab")),
+            spans(&[(0, 2), (2, 4), (4, 6)])
+        );
+    }
+
+    #[test]
+    fn find_matches_greedy_then_resume() {
+        // A B+ : greedy consumes all b's, then resumes past the match.
+        let p = Pattern::Concat(vec![
+            vars("a"),
+            Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus),
+        ]);
+        let nfa = Nfa::compile(&p);
+        // a b b | a b  -> (0,3) then (3,5)
+        assert_eq!(nfa.find_matches(&rows("abbab")), spans(&[(0, 3), (3, 5)]));
+    }
+
+    #[test]
+    fn find_matches_skips_non_matching_rows() {
+        // A B with junk rows between matches.
+        let p = Pattern::Concat(vec![vars("a"), vars("b")]);
+        let nfa = Nfa::compile(&p);
+        // x a b x x a b -> (1,3),(5,7)
+        assert_eq!(nfa.find_matches(&rows("xabxxab")), spans(&[(1, 3), (5, 7)]));
+    }
+
+    #[test]
+    fn find_matches_empty_pattern_terminates() {
+        // A* matches empty everywhere; empty matches are not emitted and the scan terminates.
+        let p = Pattern::Quantified(Box::new(vars("a")), Quantifier::Star);
+        let nfa = Nfa::compile(&p);
+        // "aa b aa" -> greedy A* consumes runs of a, emits non-empty ones.
+        assert_eq!(nfa.find_matches(&rows("aabaa")), spans(&[(0, 2), (3, 5)]));
+        // all-non-matching -> no matches, terminates.
+        assert_eq!(nfa.find_matches(&rows("xxx")), spans(&[]));
     }
 
     #[test]
