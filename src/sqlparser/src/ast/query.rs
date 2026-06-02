@@ -629,8 +629,9 @@ pub enum MatchRecognizePattern {
     Group(Box<MatchRecognizePattern>),
     /// Alternation, e.g. `A | B | C`.
     Alternation(Vec<MatchRecognizePattern>),
-    /// A quantified sub-pattern, e.g. `A*`, `A+`, `A?`, `A{1,3}`.
-    Repetition(Box<MatchRecognizePattern>, RepetitionQuantifier),
+    /// A quantified sub-pattern, e.g. `A*`, `A+`, `A?`, `A{1,3}`. The bool is `reluctant` (a trailing
+    /// `?`, e.g. `A*?`, which prefers the fewest matches).
+    Repetition(Box<MatchRecognizePattern>, RepetitionQuantifier, bool),
 }
 
 impl fmt::Display for MatchRecognizePattern {
@@ -643,7 +644,9 @@ impl fmt::Display for MatchRecognizePattern {
             Concat(patterns) => write!(f, "{}", display_separated(patterns, " ")),
             Group(pattern) => write!(f, "({})", pattern),
             Alternation(patterns) => write!(f, "{}", display_separated(patterns, " | ")),
-            Repetition(pattern, quantifier) => write!(f, "{}{}", pattern, quantifier),
+            Repetition(pattern, quantifier, reluctant) => {
+                write!(f, "{}{}{}", pattern, quantifier, if *reluctant { "?" } else { "" })
+            }
         }
     }
 }
