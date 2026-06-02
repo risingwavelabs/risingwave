@@ -299,12 +299,28 @@ fn lower_pattern(
         Pat::Exclude(_) => {
             bail_not_implemented!("row pattern exclusions ({{- ... -}}) in MATCH_RECOGNIZE")
         }
-        Pat::Permute(symbols) => Ok(node(Node::Permute(MatchRecognizePermutePattern {
-            vars: symbols
-                .iter()
-                .map(named)
-                .collect::<crate::error::Result<Vec<_>>>()?,
-        }))),
+        Pat::Permute(symbols) => {
+            // PERMUTE expands to the alternation of all n! orderings of its variables, so the NFA
+            // grows factorially. Cap the variable count to keep that bounded.
+            const MAX_PERMUTE_VARS: usize = 6;
+            if symbols.len() > MAX_PERMUTE_VARS {
+                return Err(crate::error::ErrorCode::NotSupported(
+                    format!(
+                        "PERMUTE over {} variables (expands to {}! orderings)",
+                        symbols.len(),
+                        symbols.len()
+                    ),
+                    format!("PERMUTE supports at most {MAX_PERMUTE_VARS} variables"),
+                )
+                .into());
+            }
+            Ok(node(Node::Permute(MatchRecognizePermutePattern {
+                vars: symbols
+                    .iter()
+                    .map(named)
+                    .collect::<crate::error::Result<Vec<_>>>()?,
+            })))
+        }
         Pat::Concat(patterns) => Ok(node(Node::Concat(lower_seq(patterns)?))),
         Pat::Alternation(patterns) => Ok(node(Node::Alternation(lower_seq(patterns)?))),
         // A parenthesized group is purely syntactic grouping; flatten it away.
