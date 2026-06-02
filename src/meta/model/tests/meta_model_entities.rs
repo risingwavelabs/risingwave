@@ -13,66 +13,89 @@
 // limitations under the License.
 
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
-fn parse_pub_mods(lib_rs: &str) -> BTreeSet<String> {
-    let mut mods = BTreeSet::new();
-    for line in lib_rs.lines() {
-        let line = line.trim();
-        let Some(rest) = line.strip_prefix("pub mod ") else {
-            continue;
-        };
-        let rest = rest.trim();
-        let Some(name) = rest.strip_suffix(';') else {
-            continue;
-        };
-        let name = name.trim();
-        if name.is_empty() {
-            continue;
-        }
-        if name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            mods.insert(name.to_owned());
-        }
-    }
-    mods
+fn parse_pub_mods_with_syn(lib_rs: &str) -> BTreeSet<String> {
+    syn::parse_file(lib_rs)
+        .expect("failed to parse src/lib.rs")
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            syn::Item::Mod(module) if matches!(module.vis, syn::Visibility::Public(_)) => {
+                Some(module.ident.to_string())
+            }
+            _ => None,
+        })
+        .collect()
 }
 
-fn parse_models_in_for_all_meta_model_entities(lib_rs: &str) -> BTreeSet<String> {
-    let Some((_, after_macro_start)) =
-        lib_rs.split_once("macro_rules! for_all_meta_model_entities")
-    else {
-        panic!("for_all_meta_model_entities macro not found");
-    };
-    let Some((macro_body, _)) = after_macro_start.split_once("};\n}\n") else {
-        panic!("for_all_meta_model_entities macro end not found");
-    };
+macro_rules! collect_modules_in_for_all_meta_model_entities {
+    ($($module:ident),* $(,)?) => {{
+        [$(stringify!($module)),*]
+            .into_iter()
+            .map(ToOwned::to_owned)
+            .collect::<BTreeSet<String>>()
+    }};
+}
 
-    macro_body
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .filter_map(|line| line.strip_suffix(','))
-        .filter(|line| line.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
-        .map(ToOwned::to_owned)
+fn parse_table_names_with_syn(source: &str) -> BTreeSet<String> {
+    let mut table_names = BTreeSet::new();
+    let parsed = syn::parse_file(source).expect("failed to parse source file");
+    for item in parsed.items {
+        let syn::Item::Struct(item_struct) = item else {
+            continue;
+        };
+        for attr in item_struct.attrs {
+            if !attr.path().is_ident("sea_orm") {
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("table_name") {
+                    let value = meta.value()?;
+                    table_names.insert(value.parse::<syn::LitStr>()?.value());
+                }
+                Ok(())
+            })
+            .expect("failed to parse #[sea_orm(...)] attribute");
+        }
+    }
+    table_names
+}
+
+fn parse_table_names_in_modules(modules: impl IntoIterator<Item = String>) -> BTreeSet<String> {
+    let model_src_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    modules
+        .into_iter()
+        .flat_map(|module| {
+            let source = std::fs::read_to_string(model_src_dir.join(format!("{module}.rs")))
+                .unwrap_or_else(|err| panic!("failed to read {module}.rs: {err}"));
+            parse_table_names_with_syn(&source)
+        })
         .collect()
 }
 
 #[test]
-fn for_all_meta_model_entities_should_cover_all_entity_modules() {
+fn for_all_meta_model_entities_should_cover_all_entity_table_names() {
     let lib_rs = include_str!("../src/lib.rs");
 
-    let all_meta_model_modules = parse_pub_mods(lib_rs);
-    let expected: BTreeSet<String> = all_meta_model_modules
+    let expected = parse_table_names_in_modules(
+        parse_pub_mods_with_syn(lib_rs)
         .into_iter()
         .filter(|m| m != "prelude")
-        .collect();
-    let actual = parse_models_in_for_all_meta_model_entities(lib_rs);
+        .collect::<BTreeSet<_>>(),
+    );
+    let actual = parse_table_names_in_modules(
+        risingwave_meta_model::for_all_meta_model_entities!(
+            collect_modules_in_for_all_meta_model_entities
+        ),
+    );
 
     let missing: Vec<_> = expected.difference(&actual).cloned().collect();
     let unexpected: Vec<_> = actual.difference(&expected).cloned().collect();
 
     assert!(
         missing.is_empty() && unexpected.is_empty(),
-        "for_all_meta_model_entities is out of sync with risingwave_meta_model::lib.\n\
+        "for_all_meta_model_entities is out of sync with meta model sea_orm table_name definitions.\n\
 Missing in for_all_meta_model_entities: {missing:?}\n\
 Unexpected in for_all_meta_model_entities: {unexpected:?}"
     );
