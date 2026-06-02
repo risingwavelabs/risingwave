@@ -22,8 +22,8 @@ use risingwave_common::array::{Finite32, ListValue, StructValue};
 use risingwave_common::cast::{i64_to_timestamp, i64_to_timestamptz, str_to_bytea};
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
-    ToOwnedDatum, VectorVal,
+    DEBEZIUM_UNAVAILABLE_VALUE, DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl,
+    Time, Timestamp, Timestamptz, ToOwnedDatum, VectorVal, debezium_unavailable_vector,
 };
 use risingwave_connector_codec::decoder::utils::scaled_bigint_to_rust_decimal;
 use simd_json::base::ValueAsObject;
@@ -715,6 +715,29 @@ impl JsonParseOptions {
                     elems.push(finite);
                 }
                 VectorVal::from(elems).into()
+            }
+            // Vector emitted as a string. Reached via the Java `PgVectorToStringConverter`,
+            // which downgrades the pgvector column from `DoubleVector` (ARRAY) to STRING so
+            // that the Debezium unchanged-TOAST placeholder can flow through without tripping
+            // Connect's schema validation. The value is either the pgvector text form
+            // `"[a,b,...]"` or the placeholder; the latter is mapped to a sentinel `VectorVal`
+            // that the materialize executor recognises and replaces with the old row value.
+            (DataType::Vector(size), ValueType::String) => {
+                let s = value.as_str().unwrap();
+                if self.handle_toast_columns
+                    && s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len()
+                    && s == DEBEZIUM_UNAVAILABLE_VALUE
+                {
+                    // Build the sentinel at the declared dimension so it passes
+                    // `check_datum_type` in the chunk builder; the materialize
+                    // executor recognises it by checking that every element
+                    // equals `DEBEZIUM_UNAVAILABLE_VECTOR_ELEM`.
+                    debezium_unavailable_vector(*size).into()
+                } else {
+                    VectorVal::from_text(s, *size)
+                        .map_err(|_| create_error())?
+                        .into()
+                }
             }
 
             // ---- Bytea -----
