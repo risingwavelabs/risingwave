@@ -66,6 +66,11 @@ impl StreamMatchRecognize {
     /// time from the stored input rows, so neither is persisted. The partition columns and the order
     /// key are columns of the stored input row, so they are not stored separately; the partition
     /// columns serve as the key prefix.
+    ///
+    /// The whole input row is stored for simplicity. A future optimization could project to only the
+    /// columns actually referenced (partition / order keys plus the columns read by DEFINE and
+    /// MEASURES), shrinking per-row state at the cost of a column-remapping layer between the stored
+    /// row and the slot indices. Deferred until state size warrants it.
     fn infer_state_table(&self) -> TableCatalog {
         let mut tbl_builder = TableCatalogBuilder::default();
         let input_fields = self.core.input.schema().fields().to_vec();
@@ -325,13 +330,13 @@ fn lower_pattern(
         Pat::Alternation(patterns) => Ok(node(Node::Alternation(lower_seq(patterns)?))),
         // A parenthesized group is purely syntactic grouping; flatten it away.
         Pat::Group(inner) => lower_pattern(inner),
-        Pat::Repetition(inner, quantifier, reluctant) => {
-            Ok(node(Node::Quantified(Box::new(MatchRecognizeQuantifiedPattern {
+        Pat::Repetition(inner, quantifier, reluctant) => Ok(node(Node::Quantified(Box::new(
+            MatchRecognizeQuantifiedPattern {
                 inner: Some(Box::new(lower_pattern(inner)?)),
                 quantifier: Some(lower_quantifier(quantifier)),
                 reluctant: *reluctant,
-            }))))
-        }
+            },
+        )))),
     }
 }
 
