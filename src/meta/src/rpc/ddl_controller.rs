@@ -1541,7 +1541,7 @@ impl DdlController {
                     let sink_ctx = sink_job_fragments.ctx;
                     let original_sink_fragment =
                         sink_job_fragments.fragments.into_values().next().unwrap();
-                    let (new_sink_fragment, new_schema, new_log_store_table) =
+                    let (new_sink_fragment, new_schema, new_log_store_table, new_error_table) =
                         rewrite_refresh_schema_sink_fragment(
                             &original_sink_fragment,
                             &sink,
@@ -1579,6 +1579,7 @@ impl DdlController {
                             .collect(),
                         new_fragment: new_sink_fragment,
                         new_log_store_table: new_log_store_table.map(Box::new),
+                        new_error_table,
                         ctx: sink_ctx,
                     });
                 }
@@ -1634,6 +1635,7 @@ impl DdlController {
                             original_sink_id: sink.original_sink.id,
                             columns: sink.new_schema.clone(),
                             new_log_store_table: sink.new_log_store_table.clone(),
+                            new_error_table: sink.new_error_table.clone(),
                         })
                         .collect()
                 });
