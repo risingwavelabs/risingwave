@@ -19,8 +19,9 @@ use futures::future::BoxFuture;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
-    FlushCurrentEpochOptions, LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult,
-    LogWriter, LogWriterPostFlushCurrentEpoch, TruncateBarrierLogReader, TruncateOffset,
+    FlushCurrentEpochOptions, FlushCurrentEpochResult, LogReader, LogStoreFactory,
+    LogStoreReadItem, LogStoreResult, LogWriter, LogWriterPostFlushCurrentEpoch,
+    ReportedSinkErrorRow, TruncateBarrierLogReader, TruncateOffset,
 };
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -29,6 +30,11 @@ use tokio::sync::oneshot;
 
 use crate::common::log_store_impl::in_mem::LogReaderEpochProgress::{AwaitingTruncate, Consuming};
 use crate::executor::StreamExecutorResult;
+
+enum TruncateNotification {
+    ReportedRows(Vec<ReportedSinkErrorRow>),
+    BarrierTruncated { epoch: u64 },
+}
 
 enum InMemLogStoreItem {
     StreamChunk(StreamChunk),
@@ -53,8 +59,8 @@ pub struct BoundedInMemLogStoreWriter {
     /// Sending log store item to log reader
     item_tx: Sender<InMemLogStoreItem>,
 
-    /// Receiver for the epoch consumed by log reader.
-    truncated_epoch_rx: UnboundedReceiver<u64>,
+    /// Receiver for truncate notifications from the log reader.
+    truncate_notification_rx: UnboundedReceiver<TruncateNotification>,
 
     wait_init_epoch: Option<WaitInitEpochFn>,
 }
@@ -80,8 +86,8 @@ pub struct BoundedInMemLogStoreReader {
     /// Receiver to fetch log store item
     item_rx: Receiver<InMemLogStoreItem>,
 
-    /// Sender of consumed epoch to the log writer
-    truncated_epoch_tx: UnboundedSender<u64>,
+    /// Sender of truncate notifications to the log writer.
+    truncate_notification_tx: UnboundedSender<TruncateNotification>,
 
     /// Offset of the latest emitted item
     latest_offset: TruncateOffset,
@@ -130,12 +136,12 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
         let (item_tx, item_rx) = channel(self.bound);
-        let (truncated_epoch_tx, truncated_epoch_rx) = unbounded_channel();
+        let (truncate_notification_tx, truncate_notification_rx) = unbounded_channel();
         let reader = BoundedInMemLogStoreReader {
             epoch_progress: UNINITIALIZED,
             init_epoch_rx: Some(init_epoch_rx),
             item_rx,
-            truncated_epoch_tx,
+            truncate_notification_tx,
             latest_offset: TruncateOffset::Barrier { epoch: 0 },
             truncate_offset: TruncateOffset::Barrier { epoch: 0 },
         };
@@ -143,7 +149,7 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
             curr_epoch: None,
             init_epoch_tx: Some(init_epoch_tx),
             item_tx,
-            truncated_epoch_rx,
+            truncate_notification_rx,
             wait_init_epoch: Some(self.wait_init_epoch),
         };
         (TruncateBarrierLogReader::new(reader), writer)
@@ -229,7 +235,11 @@ impl LogReader for BoundedInMemLogStoreReader {
         }
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
         // check the truncate offset is higher than prev truncate offset
         if self.truncate_offset >= offset {
             return Err(anyhow!(
@@ -248,6 +258,12 @@ impl LogReader for BoundedInMemLogStoreReader {
             ));
         }
 
+        if !error_rows.is_empty() {
+            self.truncate_notification_tx
+                .send(TruncateNotification::ReportedRows(error_rows))
+                .map_err(|_| anyhow!("unable to send reported error rows"))?;
+        }
+
         if let AwaitingTruncate {
             sealed_epoch,
             next_epoch,
@@ -255,11 +271,13 @@ impl LogReader for BoundedInMemLogStoreReader {
             && let TruncateOffset::Barrier { epoch } = offset
             && epoch == *sealed_epoch
         {
-            let sealed_epoch = *sealed_epoch;
             self.epoch_progress = Consuming(*next_epoch);
-            self.truncated_epoch_tx
-                .send(sealed_epoch)
-                .map_err(|_| anyhow!("unable to send sealed epoch"))?;
+        }
+
+        if let TruncateOffset::Barrier { epoch } = offset {
+            self.truncate_notification_tx
+                .send(TruncateNotification::BarrierTruncated { epoch })
+                .map_err(|_| anyhow!("unable to send truncated barrier"))?;
         }
         self.truncate_offset = offset;
         Ok(())
@@ -305,8 +323,9 @@ impl LogWriter for BoundedInMemLogStoreWriter {
         &mut self,
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
-    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
+    ) -> LogStoreResult<FlushCurrentEpochResult<'_>> {
         let is_checkpoint = options.is_checkpoint;
+        let mut reported_error_rows = vec![];
         self.item_tx
             .send(InMemLogStoreItem::Barrier {
                 next_epoch,
@@ -322,18 +341,34 @@ impl LogWriter for BoundedInMemLogStoreWriter {
             .expect("should have epoch");
 
         if is_checkpoint {
-            let truncated_epoch = self
-                .truncated_epoch_rx
-                .recv()
-                .instrument_await("in_mem_recv_truncated_epoch")
-                .await
-                .ok_or_else(|| anyhow!("cannot get truncated epoch"))?;
-            assert_eq!(truncated_epoch, prev_epoch);
+            let mut rows = vec![];
+            loop {
+                match self
+                    .truncate_notification_rx
+                    .recv()
+                    .instrument_await("in_mem_recv_truncate_notification")
+                    .await
+                    .ok_or_else(|| anyhow!("cannot get truncate notification"))?
+                {
+                    TruncateNotification::ReportedRows(new_rows) => {
+                        assert!(new_rows.iter().all(|row| row.epoch <= prev_epoch));
+                        rows.extend(new_rows);
+                    }
+                    TruncateNotification::BarrierTruncated { epoch } => {
+                        assert!(epoch <= prev_epoch);
+                        if epoch == prev_epoch {
+                            break;
+                        }
+                    }
+                }
+            }
+            reported_error_rows = rows;
         }
 
-        Ok(LogWriterPostFlushCurrentEpoch::new(move || {
-            async move { Ok(()) }.boxed()
-        }))
+        Ok(FlushCurrentEpochResult {
+            post_flush: LogWriterPostFlushCurrentEpoch::new(move || async move { Ok(()) }.boxed()),
+            reported_error_rows,
+        })
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {
@@ -353,11 +388,13 @@ mod tests {
     use std::task::Poll;
 
     use futures::FutureExt;
-    use risingwave_common::array::{Op, StreamChunkBuilder};
+    use risingwave_common::array::{Op, StreamChunk, StreamChunkBuilder};
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_connector::sink::log_store::{
-        LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, TruncateOffset,
+        LogReader, LogStoreFactory, LogStoreReadItem, LogWriter, ReportedSinkErrorRow,
+        TruncateOffset,
     };
 
     use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
@@ -460,10 +497,13 @@ mod tests {
         }
 
         reader
-            .truncate(TruncateOffset::Chunk {
-                epoch: init_epoch,
-                chunk_id: chunk_id1_2,
-            })
+            .truncate(
+                TruncateOffset::Chunk {
+                    epoch: init_epoch,
+                    chunk_id: chunk_id1_2,
+                },
+                vec![],
+            )
             .unwrap();
         assert!(
             poll_fn(|cx| Poll::Ready(join_handle.poll_unpin(cx)))
@@ -471,10 +511,13 @@ mod tests {
                 .is_pending()
         );
         reader
-            .truncate(TruncateOffset::Chunk {
-                epoch: epoch1,
-                chunk_id: chunk_id2_1,
-            })
+            .truncate(
+                TruncateOffset::Chunk {
+                    epoch: epoch1,
+                    chunk_id: chunk_id2_1,
+                },
+                vec![],
+            )
             .unwrap();
         assert!(
             poll_fn(|cx| Poll::Ready(join_handle.poll_unpin(cx)))
@@ -482,8 +525,194 @@ mod tests {
                 .is_pending()
         );
         reader
-            .truncate(TruncateOffset::Barrier { epoch: epoch1 })
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 }, vec![])
             .unwrap();
         join_handle.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_in_memory_log_store_reported_error_rows() {
+        let factory = BoundedInMemLogStoreFactory::for_test(4);
+        let (mut reader, mut writer) = factory.build().await;
+
+        let init_epoch = test_epoch(1);
+        let epoch1 = test_epoch(2);
+
+        writer
+            .init(EpochPair::new_test_epoch(init_epoch), false)
+            .await
+            .unwrap();
+        reader.init().await.unwrap();
+
+        let mut flush_future = Box::pin(writer.flush_current_epoch(
+            epoch1,
+            risingwave_connector::sink::log_store::FlushCurrentEpochOptions {
+                is_checkpoint: true,
+                new_vnode_bitmap: None,
+                is_stop: false,
+                schema_change: None,
+            },
+        ));
+        assert!(
+            poll_fn(|cx| Poll::Ready(flush_future.as_mut().poll_unpin(cx)))
+                .await
+                .is_pending()
+        );
+
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
+                assert_eq!(epoch, init_epoch);
+                assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+
+        reader
+            .truncate(
+                TruncateOffset::Barrier { epoch: init_epoch },
+                vec![ReportedSinkErrorRow {
+                    epoch: init_epoch,
+                    op: Op::Delete,
+                    row: OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8("alice".into())),
+                        Some(ScalarImpl::Int32(7)),
+                    ]),
+                    extra_info: None,
+                }],
+            )
+            .unwrap();
+
+        let flush_result = flush_future.await.unwrap();
+        flush_result.post_flush.post_yield_barrier().await.unwrap();
+        assert_eq!(flush_result.reported_error_rows.len(), 1);
+        assert_eq!(flush_result.reported_error_rows[0].epoch, init_epoch);
+        assert_eq!(flush_result.reported_error_rows[0].op, Op::Delete);
+        assert_eq!(
+            flush_result.reported_error_rows[0].row,
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Utf8("alice".into())),
+                Some(ScalarImpl::Int32(7)),
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_in_memory_log_store_reported_error_rows_across_non_checkpoint_barrier() {
+        let factory = BoundedInMemLogStoreFactory::for_test(4);
+        let (mut reader, mut writer) = factory.build().await;
+
+        let init_epoch = test_epoch(1);
+        let epoch1 = test_epoch(2);
+        let epoch2 = test_epoch(3);
+
+        writer
+            .init(EpochPair::new_test_epoch(init_epoch), false)
+            .await
+            .unwrap();
+        reader.init().await.unwrap();
+
+        let chunk = StreamChunk::from_rows(
+            &[(Op::Insert, OwnedRow::new(vec![Some(ScalarImpl::Int32(1))]))],
+            &[DataType::Int32],
+        );
+        writer.write_chunk(chunk.clone()).await.unwrap();
+        writer
+            .flush_current_epoch_for_test(epoch1, false)
+            .await
+            .unwrap();
+        writer.write_chunk(chunk).await.unwrap();
+
+        let mut flush_future = Box::pin(writer.flush_current_epoch(
+            epoch2,
+            risingwave_connector::sink::log_store::FlushCurrentEpochOptions {
+                is_checkpoint: true,
+                new_vnode_bitmap: None,
+                is_stop: false,
+                schema_change: None,
+            },
+        ));
+        assert!(
+            poll_fn(|cx| Poll::Ready(flush_future.as_mut().poll_unpin(cx)))
+                .await
+                .is_pending()
+        );
+
+        let init_chunk_id = match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk: _, chunk_id }) => {
+                assert_eq!(epoch, init_epoch);
+                chunk_id
+            }
+            _ => unreachable!(),
+        };
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
+                assert_eq!(epoch, init_epoch);
+                assert!(!is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+        let epoch1_chunk_id = match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::StreamChunk { chunk: _, chunk_id }) => {
+                assert_eq!(epoch, epoch1);
+                chunk_id
+            }
+            _ => unreachable!(),
+        };
+        match reader.next_item().await.unwrap() {
+            (epoch, LogStoreReadItem::Barrier { is_checkpoint, .. }) => {
+                assert_eq!(epoch, epoch1);
+                assert!(is_checkpoint);
+            }
+            _ => unreachable!(),
+        }
+
+        reader
+            .truncate(
+                TruncateOffset::Chunk {
+                    epoch: init_epoch,
+                    chunk_id: init_chunk_id,
+                },
+                vec![ReportedSinkErrorRow {
+                    epoch: init_epoch,
+                    op: Op::Insert,
+                    row: OwnedRow::new(vec![Some(ScalarImpl::Int32(1))]),
+                    extra_info: None,
+                }],
+            )
+            .unwrap();
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: init_epoch }, vec![])
+            .unwrap();
+        reader
+            .truncate(
+                TruncateOffset::Chunk {
+                    epoch: epoch1,
+                    chunk_id: epoch1_chunk_id,
+                },
+                vec![ReportedSinkErrorRow {
+                    epoch: epoch1,
+                    op: Op::Insert,
+                    row: OwnedRow::new(vec![Some(ScalarImpl::Int32(2))]),
+                    extra_info: None,
+                }],
+            )
+            .unwrap();
+        reader
+            .truncate(TruncateOffset::Barrier { epoch: epoch1 }, vec![])
+            .unwrap();
+
+        let flush_result = flush_future.await.unwrap();
+        flush_result.post_flush.post_yield_barrier().await.unwrap();
+        assert_eq!(flush_result.reported_error_rows.len(), 2);
+        assert_eq!(flush_result.reported_error_rows[0].epoch, init_epoch);
+        assert_eq!(
+            flush_result.reported_error_rows[0].row,
+            OwnedRow::new(vec![Some(ScalarImpl::Int32(1))])
+        );
+        assert_eq!(flush_result.reported_error_rows[1].epoch, epoch1);
+        assert_eq!(
+            flush_result.reported_error_rows[1].row,
+            OwnedRow::new(vec![Some(ScalarImpl::Int32(2))])
+        );
     }
 }

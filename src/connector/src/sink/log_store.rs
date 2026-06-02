@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::fmt::Debug;
 use std::future::{Future, pending, poll_fn};
 use std::pin::pin;
 use std::sync::Arc;
@@ -24,10 +23,12 @@ use std::time::Instant;
 use await_tree::InstrumentAwait;
 use futures::future::BoxFuture;
 use futures::{TryFuture, TryFutureExt};
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_rate_limit::{RateLimit, RateLimiter};
@@ -154,6 +155,19 @@ pub struct FlushCurrentEpochOptions {
     pub schema_change: Option<PbSinkSchemaChange>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReportedSinkErrorRow {
+    pub epoch: u64,
+    pub op: Op,
+    pub row: OwnedRow,
+    pub extra_info: Option<JsonbVal>,
+}
+
+pub struct FlushCurrentEpochResult<'a> {
+    pub post_flush: LogWriterPostFlushCurrentEpoch<'a>,
+    pub reported_error_rows: Vec<ReportedSinkErrorRow>,
+}
+
 pub trait LogWriter: Send {
     /// Initialize the log writer with an epoch
     fn init(
@@ -173,7 +187,7 @@ pub trait LogWriter: Send {
         &mut self,
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
-    ) -> impl Future<Output = LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>>> + Send + '_;
+    ) -> impl Future<Output = LogStoreResult<FlushCurrentEpochResult<'_>>> + Send + '_;
 
     fn pause(&mut self) -> LogStoreResult<()>;
 
@@ -199,7 +213,11 @@ pub trait LogReader: Send + Sized + 'static {
 
     /// Mark that all items emitted so far have been consumed and it is safe to truncate the log
     /// from the current offset.
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()>;
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()>;
 
     /// Reset the log reader to after the latest truncate offset
     ///
@@ -254,8 +272,12 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
         Ok((epoch, item))
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        self.inner.truncate(offset)
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
+        self.inner.truncate(offset, error_rows)
     }
 
     fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
@@ -284,26 +306,42 @@ impl<R: LogReader> LogReader for TruncateBarrierLogReader<R> {
         Ok((epoch, item))
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        mut error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
         while let Some(front_epoch) = self.pending_barriers.front().copied() {
             match (TruncateOffset::Barrier { epoch: front_epoch }).cmp(&offset) {
                 Ordering::Less => {
-                    self.inner
-                        .truncate(TruncateOffset::Barrier { epoch: front_epoch })?;
+                    let mut remaining_error_rows = Vec::with_capacity(error_rows.len());
+                    let mut barrier_error_rows = vec![];
+                    for error_row in error_rows {
+                        if error_row.epoch <= front_epoch {
+                            barrier_error_rows.push(error_row);
+                        } else {
+                            remaining_error_rows.push(error_row);
+                        }
+                    }
+                    error_rows = remaining_error_rows;
+                    self.inner.truncate(
+                        TruncateOffset::Barrier { epoch: front_epoch },
+                        barrier_error_rows,
+                    )?;
                     self.pending_barriers.pop_front();
                 }
                 Ordering::Equal => {
-                    self.inner.truncate(offset)?;
+                    self.inner.truncate(offset, error_rows)?;
                     self.pending_barriers.pop_front();
                     return Ok(());
                 }
                 Ordering::Greater => {
-                    self.inner.truncate(offset)?;
+                    self.inner.truncate(offset, error_rows)?;
                     return Ok(());
                 }
             }
         }
-        self.inner.truncate(offset)?;
+        self.inner.truncate(offset, error_rows)?;
         Ok(())
     }
 
@@ -354,8 +392,12 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
         })
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        self.inner.truncate(offset)
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
+        self.inner.truncate(offset, error_rows)
     }
 
     fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
@@ -421,8 +463,12 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
             })
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-        self.inner.truncate(offset)
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
+        self.inner.truncate(offset, error_rows)
     }
 
     fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
@@ -442,16 +488,26 @@ struct UpstreamChunkOffset(TruncateOffset);
 #[derive(Copy, Clone, PartialOrd, PartialEq)]
 struct DownstreamChunkOffset(TruncateOffset);
 
+struct ConsumedOffsets {
+    upstream_offset: UpstreamChunkOffset,
+    // Newer items at the front, push_front, pop_back
+    downstream_offsets: VecDeque<DownstreamChunkOffset>,
+    reported_error_rows: Vec<ReportedSinkErrorRow>,
+}
+
+struct ConsumingChunk {
+    upstream_offset: UpstreamChunkOffset,
+    // Newer items at the front, push_front, pop_back
+    downstream_offsets: VecDeque<DownstreamChunkOffset>,
+    pending_chunks: Vec<StreamChunk>,
+    reported_error_rows: Vec<ReportedSinkErrorRow>,
+}
+
 struct RateLimitedLogReaderCore<R: LogReader> {
     inner: R,
-    consuming_chunk: Option<(
-        UpstreamChunkOffset,
-        // Newer items at the front, push_front, pop_back
-        VecDeque<DownstreamChunkOffset>,
-        Vec<StreamChunk>, // split chunks
-    )>,
+    consuming_chunk: Option<ConsumingChunk>,
     // Newer items at the front, push_front, pop_back
-    consumed_offset_queue: VecDeque<(UpstreamChunkOffset, VecDeque<DownstreamChunkOffset>)>,
+    consumed_offset_queue: VecDeque<ConsumedOffsets>,
     next_chunk_id: usize,
     rate_limiter: RateLimiter,
 }
@@ -480,30 +536,38 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
     fn peek_next_pending_chunk(&self) -> Option<&StreamChunk> {
         self.consuming_chunk
             .as_ref()
-            .and_then(|(_, _, chunk)| chunk.last())
+            .and_then(|chunk| chunk.pending_chunks.last())
     }
 
     fn consume_next_pending_chunk(&mut self) -> Option<(u64, StreamChunk, ChunkId)> {
-        let Some((upstream_offset, consumed_offsets, pending_chunk)) = &mut self.consuming_chunk
-        else {
+        let Some(consuming_chunk) = &mut self.consuming_chunk else {
             return None;
         };
-        let epoch = upstream_offset.0.epoch();
+        let epoch = consuming_chunk.upstream_offset.0.epoch();
 
-        let item = pending_chunk.pop().map(|chunk| {
+        let item = consuming_chunk.pending_chunks.pop().map(|chunk| {
             let chunk_id = self.next_chunk_id;
             self.next_chunk_id += 1;
-            consumed_offsets.push_front(DownstreamChunkOffset(TruncateOffset::Chunk {
-                epoch,
-                chunk_id,
-            }));
+            consuming_chunk
+                .downstream_offsets
+                .push_front(DownstreamChunkOffset(TruncateOffset::Chunk {
+                    epoch,
+                    chunk_id,
+                }));
             (epoch, chunk, chunk_id)
         });
-        if pending_chunk.is_empty() {
-            let (upstream_offset, consumed_offsets, _) =
-                self.consuming_chunk.take().expect("checked some");
-            self.consumed_offset_queue
-                .push_front((upstream_offset, consumed_offsets));
+        if consuming_chunk.pending_chunks.is_empty() {
+            let ConsumingChunk {
+                upstream_offset,
+                downstream_offsets,
+                pending_chunks: _,
+                reported_error_rows,
+            } = self.consuming_chunk.take().expect("checked some");
+            self.consumed_offset_queue.push_front(ConsumedOffsets {
+                upstream_offset,
+                downstream_offsets,
+                reported_error_rows,
+            });
         }
         item
     }
@@ -536,8 +600,11 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
                 DownstreamChunkOffset(TruncateOffset::Barrier { epoch }),
             ),
         };
-        self.consumed_offset_queue
-            .push_front((upstream_offset, VecDeque::from_iter([downstream_offset])));
+        self.consumed_offset_queue.push_front(ConsumedOffsets {
+            upstream_offset,
+            downstream_offsets: VecDeque::from_iter([downstream_offset]),
+            reported_error_rows: vec![],
+        });
         (epoch, item)
     }
 
@@ -569,14 +636,14 @@ impl<R: LogReader> RateLimitedLogReaderCore<R> {
 
                             assert!(
                                 self.consuming_chunk
-                                    .replace((
-                                        UpstreamChunkOffset(TruncateOffset::Chunk {
-                                            epoch,
-                                            chunk_id
-                                        }),
-                                        VecDeque::new(),
-                                        chunks,
-                                    ))
+                                    .replace(ConsumingChunk {
+                                        upstream_offset: UpstreamChunkOffset(
+                                            TruncateOffset::Chunk { epoch, chunk_id },
+                                        ),
+                                        downstream_offsets: VecDeque::new(),
+                                        pending_chunks: chunks,
+                                        reported_error_rows: vec![],
+                                    })
                                     .is_none()
                             );
                         }
@@ -620,32 +687,68 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
         }
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
         let downstream_offset = DownstreamChunkOffset(offset);
         let mut truncate_offset = None;
+        let mut pending_error_rows = error_rows;
+        let mut truncate_error_rows = vec![];
         let mut stop = false;
-        'outer: while let Some((upstream_offset, downstream_offsets)) =
-            self.core.consumed_offset_queue.back_mut()
-        {
-            while let Some(prev_downstream_offset) = downstream_offsets.back() {
+        'outer: while let Some(consumed_offsets) = self.core.consumed_offset_queue.back_mut() {
+            while let Some(prev_downstream_offset) = consumed_offsets.downstream_offsets.back() {
                 if *prev_downstream_offset <= downstream_offset {
-                    downstream_offsets.pop_back();
+                    consumed_offsets.downstream_offsets.pop_back();
+                    if !pending_error_rows.is_empty() {
+                        consumed_offsets
+                            .reported_error_rows
+                            .append(&mut pending_error_rows);
+                    }
                 } else {
                     stop = true;
                     break 'outer;
                 }
             }
-            truncate_offset = Some(*upstream_offset);
-            self.core.consumed_offset_queue.pop_back();
+            if consumed_offsets.downstream_offsets.is_empty() {
+                let consumed_offsets = self
+                    .core
+                    .consumed_offset_queue
+                    .pop_back()
+                    .expect("checked some");
+                truncate_offset = Some(consumed_offsets.upstream_offset);
+                truncate_error_rows.extend(consumed_offsets.reported_error_rows);
+            } else {
+                break;
+            }
         }
-        if !stop && let Some((_, downstream_offsets, _)) = &mut self.core.consuming_chunk {
+        if !stop
+            && let Some(ConsumingChunk {
+                downstream_offsets,
+                reported_error_rows,
+                ..
+            }) = &mut self.core.consuming_chunk
+        {
             while let Some(prev_downstream_offset) = downstream_offsets.back() {
                 if *prev_downstream_offset <= downstream_offset {
                     downstream_offsets.pop_back();
+                    if !pending_error_rows.is_empty() {
+                        reported_error_rows.append(&mut pending_error_rows);
+                    }
                 } else {
-                    // stop = true;
                     break;
                 }
+            }
+            if downstream_offsets.is_empty() {
+                let ConsumingChunk {
+                    upstream_offset,
+                    downstream_offsets: _,
+                    pending_chunks: _,
+                    reported_error_rows,
+                } = self.core.consuming_chunk.take().expect("checked some");
+                truncate_offset = Some(upstream_offset);
+                truncate_error_rows.extend(reported_error_rows);
             }
         }
         tracing::trace!(
@@ -654,7 +757,7 @@ impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
             offset
         );
         if let Some(offset) = truncate_offset {
-            self.core.inner.truncate(offset.0)
+            self.core.inner.truncate(offset.0, truncate_error_rows)
         } else {
             Ok(())
         }
@@ -739,12 +842,15 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
         &mut self,
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
-    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
-        let post_flush = self.inner.flush_current_epoch(next_epoch, options).await?;
+    ) -> LogStoreResult<FlushCurrentEpochResult<'_>> {
+        let mut result = self.inner.flush_current_epoch(next_epoch, options).await?;
         self.metrics
             .log_store_latest_write_epoch
             .set(next_epoch as _);
-        Ok(post_flush)
+        Ok(FlushCurrentEpochResult {
+            post_flush: result.post_flush,
+            reported_error_rows: std::mem::take(&mut result.reported_error_rows),
+        })
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {
@@ -958,17 +1064,19 @@ mod tests {
     use std::task::Poll;
 
     use futures::{FutureExt, TryFuture};
-    use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::epoch::test_epoch;
     use tokio::sync::oneshot;
     use tokio::sync::oneshot::Receiver;
 
     use super::{LogReader, LogStoreReadItem, LogStoreResult, TruncateBarrierLogReader};
-    use crate::sink::log_store::{DeliveryFutureManager, TruncateOffset};
+    use crate::sink::log_store::{DeliveryFutureManager, ReportedSinkErrorRow, TruncateOffset};
 
     struct MockLogReader {
         items: VecDeque<(u64, LogStoreReadItem)>,
-        truncate_calls: Vec<TruncateOffset>,
+        truncate_calls: Vec<(TruncateOffset, Vec<ReportedSinkErrorRow>)>,
     }
 
     impl MockLogReader {
@@ -995,8 +1103,12 @@ mod tests {
                 .ok_or_else(|| anyhow::anyhow!("no item"))
         }
 
-        fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
-            self.truncate_calls.push(offset);
+        fn truncate(
+            &mut self,
+            offset: TruncateOffset,
+            error_rows: Vec<ReportedSinkErrorRow>,
+        ) -> LogStoreResult<()> {
+            self.truncate_calls.push((offset, error_rows));
             Ok(())
         }
 
@@ -1060,6 +1172,15 @@ mod tests {
     #[define_opaque(TestFuture)]
     fn to_test_future(rx: Receiver<LogStoreResult<()>>) -> TestFuture {
         async move { rx.await.unwrap() }.boxed()
+    }
+
+    fn test_error_row(epoch: u64, value: i64) -> ReportedSinkErrorRow {
+        ReportedSinkErrorRow {
+            epoch,
+            op: Op::Insert,
+            row: OwnedRow::new(vec![Some(ScalarImpl::Int64(value))]),
+            extra_info: None,
+        }
     }
 
     #[tokio::test]
@@ -1326,14 +1447,23 @@ mod tests {
         reader.next_item().await.unwrap();
         reader.next_item().await.unwrap();
         reader
-            .truncate(TruncateOffset::Barrier { epoch: 2 })
+            .truncate(
+                TruncateOffset::Barrier { epoch: 2 },
+                vec![test_error_row(1, 1), test_error_row(2, 2)],
+            )
             .unwrap();
 
         assert_eq!(
             reader.inner.truncate_calls,
             vec![
-                TruncateOffset::Barrier { epoch: 1 },
-                TruncateOffset::Barrier { epoch: 2 },
+                (
+                    TruncateOffset::Barrier { epoch: 1 },
+                    vec![test_error_row(1, 1)],
+                ),
+                (
+                    TruncateOffset::Barrier { epoch: 2 },
+                    vec![test_error_row(2, 2)],
+                ),
             ]
         );
     }
@@ -1375,35 +1505,44 @@ mod tests {
         reader.next_item().await.unwrap();
         reader.next_item().await.unwrap();
         reader
-            .truncate(TruncateOffset::Chunk {
-                epoch: 2,
-                chunk_id: 0,
-            })
+            .truncate(
+                TruncateOffset::Chunk {
+                    epoch: 2,
+                    chunk_id: 0,
+                },
+                vec![],
+            )
             .unwrap();
 
         assert_eq!(
             reader.inner.truncate_calls,
             vec![
-                TruncateOffset::Barrier { epoch: 1 },
-                TruncateOffset::Chunk {
-                    epoch: 2,
-                    chunk_id: 0,
-                },
+                (TruncateOffset::Barrier { epoch: 1 }, vec![]),
+                (
+                    TruncateOffset::Chunk {
+                        epoch: 2,
+                        chunk_id: 0,
+                    },
+                    vec![],
+                ),
             ]
         );
 
         reader
-            .truncate(TruncateOffset::Barrier { epoch: 2 })
+            .truncate(TruncateOffset::Barrier { epoch: 2 }, vec![])
             .unwrap();
         assert_eq!(
             reader.inner.truncate_calls,
             vec![
-                TruncateOffset::Barrier { epoch: 1 },
-                TruncateOffset::Chunk {
-                    epoch: 2,
-                    chunk_id: 0,
-                },
-                TruncateOffset::Barrier { epoch: 2 },
+                (TruncateOffset::Barrier { epoch: 1 }, vec![]),
+                (
+                    TruncateOffset::Chunk {
+                        epoch: 2,
+                        chunk_id: 0,
+                    },
+                    vec![],
+                ),
+                (TruncateOffset::Barrier { epoch: 2 }, vec![]),
             ]
         );
     }

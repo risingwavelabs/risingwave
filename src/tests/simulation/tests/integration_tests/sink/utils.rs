@@ -771,8 +771,10 @@ impl SimulationTestSink {
                                                 store.inc_checkpoint();
                                             }
                                             if schema_change.is_some() {
-                                                log_reader
-                                                    .truncate(TruncateOffset::Barrier { epoch })?;
+                                                log_reader.truncate(
+                                                    TruncateOffset::Barrier { epoch },
+                                                    vec![],
+                                                )?;
                                             }
                                         }
                                     }
