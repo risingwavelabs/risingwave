@@ -37,13 +37,14 @@ use std::ops::Bound;
 
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
 use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
 use risingwave_pb::stream_plan::{
-    MatchRecognizeDefine as PbMatchRecognizeDefine, MatchRecognizeMeasure as PbMatchRecognizeMeasure,
+    MatchRecognizeDefine as PbMatchRecognizeDefine,
+    MatchRecognizeMeasure as PbMatchRecognizeMeasure,
 };
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
@@ -245,7 +246,9 @@ impl CompiledDefine {
         error_report: impl EvalErrorReport + 'static,
     ) -> StreamExecutorResult<Self> {
         let condition = build_non_strict_from_prost(
-            pb.condition.as_ref().expect("match_recognize define condition"),
+            pb.condition
+                .as_ref()
+                .expect("match_recognize define condition"),
             error_report,
         )?;
         let slots = pb
@@ -464,7 +467,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         // compute a vnode).
         let mut partitions: HashMap<OwnedRow, PartitionState> = HashMap::new();
         {
-            let sub_range: (Bound<&[Datum]>, Bound<&[Datum]>) = (Bound::Unbounded, Bound::Unbounded);
+            let sub_range: (Bound<&[Datum]>, Bound<&[Datum]>) =
+                (Bound::Unbounded, Bound::Unbounded);
             let vnodes = state_table.vnodes().clone();
             for vnode in vnodes.iter_vnodes() {
                 let iter = state_table
@@ -528,66 +532,89 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     let mut out_rows: Vec<OwnedRow> = Vec::new();
                     for (partition_key, state) in &mut partitions {
                         // Sort by order key; the prefix with order_key <= w is final.
-                        state.rows.sort_by(|a, b| a.order_key.default_cmp(&b.order_key));
+                        state
+                            .rows
+                            .sort_by(|a, b| a.order_key.default_cmp(&b.order_key));
                         let safe_len = state
                             .rows
                             .iter()
-                            .take_while(|r| matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_le()))
+                            .take_while(
+                                |r| matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_le()),
+                            )
                             .count();
 
                         // Evaluate DEFINE predicates against the in-progress match while matching.
-                        // Scope the matcher so its borrow of `state.rows` ends before the drain below.
-                        let found = {
+                        // The matcher borrows `state.rows`; it is scoped so the borrow ends before
+                        // the drain below.
+                        let retain_from = {
                             let matcher = DefineMatcher {
                                 rows: &state.rows,
                                 safe_len,
                                 defines: &defines,
                             };
-                            nfa.find_matches_dynamic(safe_len, &matcher, &skip).await?
-                        };
+                            let found = nfa.find_matches_dynamic(safe_len, &matcher, &skip).await?;
 
-                        let mut cursor = 0usize;
-                        for m in found {
-                            if m.start < cursor {
-                                continue;
-                            }
-                            // Final only if another safe row follows (greedy match is maximal).
-                            if m.end >= safe_len {
-                                break;
-                            }
-                            // WITHIN: reject a match whose span (last - first order key) exceeds the
-                            // bound. The check is over a synthetic [last, first] row.
-                            if let Some(within) = &within {
-                                let first_key = state.rows[m.start].order_key.clone();
-                                let last_key = state.rows[m.end - 1].order_key.clone();
-                                let span_row = OwnedRow::new(vec![last_key, first_key]);
-                                let ok = within.eval_row_infallible(&span_row).await;
-                                if !ok.is_some_and(|s| s.into_bool()) {
+                            let mut cursor = 0usize;
+                            for m in found {
+                                if m.start < cursor {
                                     continue;
                                 }
-                            }
-                            // Evaluate each measure over the synthetic row its slots produce from
-                            // the matched rows and their per-row labels.
-                            let mut measure_datums: Vec<Datum> = Vec::with_capacity(measures.len());
-                            for measure in &measures {
-                                let mut synthetic = Vec::with_capacity(measure.slots.len());
-                                for slot in &measure.slots {
-                                    synthetic
-                                        .push(slot.resolve(&state.rows, m.start, &m.labels).await?);
+                                // Final only if another safe row follows (greedy match is maximal).
+                                if m.end >= safe_len {
+                                    break;
                                 }
-                                let synthetic = OwnedRow::new(synthetic);
-                                let value = measure.expr.eval_row_infallible(&synthetic).await;
-                                measure_datums.push(value);
+                                // WITHIN: reject a match whose span (last - first order key) exceeds the
+                                // bound. The check is over a synthetic [last, first] row.
+                                if let Some(within) = &within {
+                                    let first_key = state.rows[m.start].order_key.clone();
+                                    let last_key = state.rows[m.end - 1].order_key.clone();
+                                    let span_row = OwnedRow::new(vec![last_key, first_key]);
+                                    let ok = within.eval_row_infallible(&span_row).await;
+                                    if !ok.is_some_and(|s| s.into_bool()) {
+                                        continue;
+                                    }
+                                }
+                                // Evaluate each measure over the synthetic row its slots produce from
+                                // the matched rows and their per-row labels.
+                                let mut measure_datums: Vec<Datum> =
+                                    Vec::with_capacity(measures.len());
+                                for measure in &measures {
+                                    let mut synthetic = Vec::with_capacity(measure.slots.len());
+                                    for slot in &measure.slots {
+                                        synthetic.push(
+                                            slot.resolve(&state.rows, m.start, &m.labels).await?,
+                                        );
+                                    }
+                                    let synthetic = OwnedRow::new(synthetic);
+                                    let value = measure.expr.eval_row_infallible(&synthetic).await;
+                                    measure_datums.push(value);
+                                }
+                                out_rows.push(
+                                    partition_key
+                                        .clone()
+                                        .chain(OwnedRow::new(measure_datums))
+                                        .into_owned_row(),
+                                );
+                                cursor = skip.next_pos(m.start, m.end, &m.labels);
                             }
-                            out_rows.push(
-                                partition_key
-                                    .clone()
-                                    .chain(OwnedRow::new(measure_datums))
-                                    .into_owned_row(),
-                            );
-                            cursor = skip.next_pos(m.start, m.end, &m.labels);
-                        }
-                        for consumed in state.rows.drain(0..cursor) {
+
+                            // Evict finalized rows that can no longer be part of any match: everything
+                            // before the earliest safe row that could still *begin* a match. Rows the
+                            // scan consumed sit before `cursor`; rows after it that cannot start the
+                            // pattern are dead (a match is contiguous from its start), so they are
+                            // dropped instead of lingering and being re-scanned every watermark. A live
+                            // partial match (a row that begins the pattern but needs future rows) is
+                            // retained.
+                            let mut retain_from = safe_len;
+                            for p in cursor..safe_len {
+                                if nfa.can_begin_at(p, &matcher).await? {
+                                    retain_from = p;
+                                    break;
+                                }
+                            }
+                            retain_from
+                        };
+                        for consumed in state.rows.drain(0..retain_from) {
                             state_table.delete(Self::state_row(&consumed));
                         }
                     }
