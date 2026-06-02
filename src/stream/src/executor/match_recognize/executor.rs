@@ -36,10 +36,12 @@ use std::collections::{BTreeSet, HashMap};
 use std::ops::Bound;
 
 use futures::{StreamExt, pin_mut};
-use risingwave_common::array::Op;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
-use risingwave_expr::expr::NonStrictExpression;
+use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
+use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
+use risingwave_pb::stream_plan::MatchRecognizeMeasure as PbMatchRecognizeMeasure;
 use risingwave_storage::StateStore;
 
 use super::nfa::{Nfa, SkipMode};
@@ -47,8 +49,8 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::prelude::*;
 
 /// How a [`MeasureSlot`] resolves against the rows of a match (mirrors the planner's slot kinds).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MeasureSlotKind {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MeasureSlotKind {
     /// Column value of the first row labeled `var` within the match.
     First,
     /// Column value of the last row labeled `var` (also a bare `var.col` under FINAL semantics).
@@ -63,33 +65,97 @@ pub enum MeasureSlotKind {
     Min,
     /// Maximum `col` over rows labeled `var` (`MAX(var.col)`).
     Max,
+    /// `SUM(var.col)` / `AVG(var.col)`, evaluated by the slot's [`AggSlot`] aggregate kernel.
+    Sum,
+    /// See [`MeasureSlotKind::Sum`].
+    Avg,
+}
+
+/// A `SUM`/`AVG` aggregate kernel for a slot, plus the input column type used to feed it.
+struct AggSlot {
+    func: BoxedAggregateFunction,
+    col_type: DataType,
 }
 
 /// One navigation input that a measure expression reads. The executor materializes one value per
 /// slot from a match's rows and labels, forming the synthetic row the measure is evaluated over.
-#[derive(Debug, Clone)]
-pub struct MeasureSlot {
-    pub kind: MeasureSlotKind,
+struct MeasureSlot {
+    kind: MeasureSlotKind,
     /// Pattern variable to navigate to. Unused for [`MeasureSlotKind::Classifier`].
-    pub var: String,
+    var: String,
     /// Input column index to read. Unused for [`MeasureSlotKind::Classifier`].
-    pub col_idx: usize,
+    col_idx: usize,
+    /// The aggregate kernel for [`MeasureSlotKind::Sum`] / [`MeasureSlotKind::Avg`].
+    agg: Option<AggSlot>,
 }
 
 /// A `MEASURES` item compiled for execution.
 pub struct CompiledMeasure {
     /// Expression over the synthetic per-match row: `InputRef(i)` reads `slots[i]`.
-    pub expr: NonStrictExpression,
-    pub slots: Vec<MeasureSlot>,
+    expr: NonStrictExpression,
+    slots: Vec<MeasureSlot>,
+}
+
+impl CompiledMeasure {
+    /// Builds a compiled measure from its protobuf, building any aggregate kernels its slots need.
+    pub fn from_protobuf(
+        pb: &PbMatchRecognizeMeasure,
+        error_report: impl EvalErrorReport + 'static,
+    ) -> StreamExecutorResult<Self> {
+        let expr = build_non_strict_from_prost(
+            pb.expr.as_ref().expect("match_recognize measure expr"),
+            error_report,
+        )?;
+        let slots = pb
+            .slots
+            .iter()
+            .map(|s| {
+                let kind = match s.kind {
+                    1 => MeasureSlotKind::First,
+                    2 => MeasureSlotKind::Classifier,
+                    3 => MeasureSlotKind::CountStar,
+                    4 => MeasureSlotKind::Count,
+                    5 => MeasureSlotKind::Min,
+                    6 => MeasureSlotKind::Max,
+                    7 => MeasureSlotKind::Sum,
+                    8 => MeasureSlotKind::Avg,
+                    _ => MeasureSlotKind::Last,
+                };
+                let agg = match kind {
+                    MeasureSlotKind::Sum | MeasureSlotKind::Avg => {
+                        let call = AggCall::from_protobuf(
+                            s.agg_call.as_ref().expect("sum/avg slot needs agg_call"),
+                        )?;
+                        let col_type = call.args.arg_types()[0].clone();
+                        let func = build_append_only(&call)?;
+                        Some(AggSlot { func, col_type })
+                    }
+                    _ => None,
+                };
+                Ok(MeasureSlot {
+                    kind,
+                    var: s.var.clone(),
+                    col_idx: s.col_idx as usize,
+                    agg,
+                })
+            })
+            .collect::<StreamExecutorResult<Vec<_>>>()?;
+        Ok(CompiledMeasure { expr, slots })
+    }
 }
 
 impl MeasureSlot {
     /// Resolves this slot against a match: `rows[start..]` are the matched rows and `labels[i]` is
     /// the pattern variable bound to `rows[start + i]`.
-    fn resolve(&self, rows: &[BufferedRow], start: usize, labels: &[String]) -> Datum {
+    async fn resolve(
+        &self,
+        rows: &[BufferedRow],
+        start: usize,
+        labels: &[String],
+    ) -> StreamExecutorResult<Datum> {
         // The column value of the row at match-relative index `j`.
         let col_at = |j: usize| rows[start + j].row.datum_at(self.col_idx).to_owned_datum();
-        match self.kind {
+        Ok(match self.kind {
             MeasureSlotKind::Classifier => {
                 labels.last().map(|s| ScalarImpl::Utf8(s.as_str().into()))
             }
@@ -116,7 +182,25 @@ impl MeasureSlot {
                 .filter(|(_, l)| *l == &self.var)
                 .filter_map(|(j, _)| col_at(j))
                 .max_by(|a, b| a.default_cmp(b)),
-        }
+            MeasureSlotKind::Sum | MeasureSlotKind::Avg => {
+                let agg = self.agg.as_ref().expect("sum/avg slot has an aggregate kernel");
+                // Feed the kernel a single-column chunk of the col values over rows labeled `var`.
+                let input: Vec<(Op, OwnedRow)> = labels
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, l)| *l == &self.var)
+                    .map(|(j, _)| (Op::Insert, OwnedRow::new(vec![col_at(j)])))
+                    .collect();
+                if input.is_empty() {
+                    None
+                } else {
+                    let chunk = StreamChunk::from_rows(&input, std::slice::from_ref(&agg.col_type));
+                    let mut state = agg.func.create_state()?;
+                    agg.func.update(&mut state, &chunk).await?;
+                    agg.func.get_result(&state).await?
+                }
+            }
+        })
     }
 }
 
@@ -355,13 +439,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             // the matched rows and their per-row labels.
                             let mut measure_datums: Vec<Datum> = Vec::with_capacity(measures.len());
                             for measure in &measures {
-                                let synthetic = OwnedRow::new(
-                                    measure
-                                        .slots
-                                        .iter()
-                                        .map(|s| s.resolve(&state.rows, m.start, &m.labels))
-                                        .collect(),
-                                );
+                                let mut synthetic = Vec::with_capacity(measure.slots.len());
+                                for slot in &measure.slots {
+                                    synthetic
+                                        .push(slot.resolve(&state.rows, m.start, &m.labels).await?);
+                                }
+                                let synthetic = OwnedRow::new(synthetic);
                                 let value = measure.expr.eval_row_infallible(&synthetic).await;
                                 measure_datums.push(value);
                             }

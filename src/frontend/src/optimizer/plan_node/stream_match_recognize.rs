@@ -151,10 +151,13 @@ impl TryToStreamPb for StreamMatchRecognize {
                             MeasureSlotKind::Count => 4,
                             MeasureSlotKind::Min => 5,
                             MeasureSlotKind::Max => 6,
+                            MeasureSlotKind::Sum => 7,
+                            MeasureSlotKind::Avg => 8,
                         },
                         var: s.var.clone(),
                         col_idx: s.col_idx as u32,
                         data_type: Some(s.data_type.to_protobuf()),
+                        agg_call: s.agg.as_ref().map(|a| a.to_protobuf()),
                     })
                     .collect();
                 Ok(MatchRecognizeMeasure {
