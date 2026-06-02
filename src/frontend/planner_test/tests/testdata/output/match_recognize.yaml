@@ -39,6 +39,26 @@
     StreamMaterialize { columns: [partition_0, cls, dip], stream_key: [partition_0, cls, dip], pk_columns: [partition_0, cls, dip], pk_conflict: NoCheck }
     └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["cls", "dip"], pattern: a b }
       └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: MATCH_RECOGNIZE with aggregate MEASURES over matched rows
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n, min(a.v) as lo, max(a.v) as hi
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  logical_plan: |-
+    LogicalProject { exprs: [partition_0, n, lo, hi] }
+    └─LogicalMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["n", "lo", "hi"], pattern: a b }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.v, t._row_id, t._rw_timestamp] }
+  stream_plan: |-
+    StreamMaterialize { columns: [partition_0, n, lo, hi], stream_key: [partition_0, n, lo, hi], pk_columns: [partition_0, n, lo, hi], pk_conflict: NoCheck }
+    └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["n", "lo", "hi"], pattern: a b }
+      └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: MATCH_RECOGNIZE stream planning requires a watermark on the leading ORDER BY column
   sql: |
     create table t(id int, ts int, v int) append only;

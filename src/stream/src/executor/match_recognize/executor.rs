@@ -55,6 +55,14 @@ pub enum MeasureSlotKind {
     Last,
     /// The pattern variable bound to the match's last row.
     Classifier,
+    /// Number of rows in the whole match (`COUNT(*)`).
+    CountStar,
+    /// Number of rows labeled `var` with a non-null `col` (`COUNT(var.col)`).
+    Count,
+    /// Minimum `col` over rows labeled `var` (`MIN(var.col)`).
+    Min,
+    /// Maximum `col` over rows labeled `var` (`MAX(var.col)`).
+    Max,
 }
 
 /// One navigation input that a measure expression reads. The executor materializes one value per
@@ -79,18 +87,35 @@ impl MeasureSlot {
     /// Resolves this slot against a match: `rows[start..]` are the matched rows and `labels[i]` is
     /// the pattern variable bound to `rows[start + i]`.
     fn resolve(&self, rows: &[BufferedRow], start: usize, labels: &[String]) -> Datum {
+        // The column value of the row at match-relative index `j`.
+        let col_at = |j: usize| rows[start + j].row.datum_at(self.col_idx).to_owned_datum();
         match self.kind {
             MeasureSlotKind::Classifier => {
                 labels.last().map(|s| ScalarImpl::Utf8(s.as_str().into()))
             }
-            MeasureSlotKind::First => labels
+            MeasureSlotKind::First => labels.iter().position(|l| l == &self.var).and_then(col_at),
+            MeasureSlotKind::Last => labels.iter().rposition(|l| l == &self.var).and_then(col_at),
+            MeasureSlotKind::CountStar => Some(ScalarImpl::Int64(labels.len() as i64)),
+            MeasureSlotKind::Count => {
+                let n = labels
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, l)| *l == &self.var && col_at(*j).is_some())
+                    .count();
+                Some(ScalarImpl::Int64(n as i64))
+            }
+            MeasureSlotKind::Min => labels
                 .iter()
-                .position(|l| l == &self.var)
-                .and_then(|j| rows[start + j].row.datum_at(self.col_idx).to_owned_datum()),
-            MeasureSlotKind::Last => labels
+                .enumerate()
+                .filter(|(_, l)| *l == &self.var)
+                .filter_map(|(j, _)| col_at(j))
+                .min_by(|a, b| a.default_cmp(b)),
+            MeasureSlotKind::Max => labels
                 .iter()
-                .rposition(|l| l == &self.var)
-                .and_then(|j| rows[start + j].row.datum_at(self.col_idx).to_owned_datum()),
+                .enumerate()
+                .filter(|(_, l)| *l == &self.var)
+                .filter_map(|(j, _)| col_at(j))
+                .max_by(|a, b| a.default_cmp(b)),
         }
     }
 }
