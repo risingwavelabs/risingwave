@@ -23,7 +23,7 @@
 //! Variable→predicate evaluation and the streaming/state layer live elsewhere; this module is pure
 //! and deterministic so it can be unit-tested without a cluster.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 /// A quantifier applied to a sub-pattern. Greedy semantics only (v1).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,6 +166,101 @@ impl Nfa {
                 && end > i
             {
                 matches.push(MatchSpan { start: i, end });
+                i = match skip {
+                    SkipMode::PastLastRow => end,
+                    SkipMode::ToNextRow => i + 1,
+                };
+            } else {
+                i += 1;
+            }
+        }
+        matches
+    }
+}
+
+/// A match span together with the pattern variable assigned to each matched row.
+/// `labels[i]` is the variable that `rows[start + i]` was matched as.
+// TODO: remove allow(dead_code) once MEASURES navigation / CLASSIFIER consume the labels.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LabeledMatch {
+    pub start: usize,
+    pub end: usize,
+    pub labels: Vec<String>,
+}
+
+#[allow(dead_code)]
+impl Nfa {
+    /// Greedy longest match starting at `rows[start]`, returning the per-row variable assignment
+    /// along the chosen accepting path (the variable each consumed row was matched as). This is
+    /// what `MEASURES` navigation (FIRST/LAST), CLASSIFIER(), and aggregates over matched rows
+    /// consume. Returns `(end, labels)` where `labels.len() == end - start`, or `None`.
+    pub fn longest_match_labeled(
+        &self,
+        rows: &[BTreeSet<String>],
+        start: usize,
+    ) -> Option<(usize, Vec<String>)> {
+        let mut visited: HashSet<(StateId, usize)> = HashSet::new();
+        self.longest_from(rows, self.start, start, &mut visited)
+    }
+
+    /// Recursive longest-accepting-path search. `visited` guards against ε-cycles on the current
+    /// path (it tracks `(state, pos)` and is unwound on backtrack). Among continuations the one
+    /// reaching the furthest `end` wins; ties keep the first in transition order, making the label
+    /// assignment deterministic.
+    fn longest_from(
+        &self,
+        rows: &[BTreeSet<String>],
+        state: StateId,
+        pos: usize,
+        visited: &mut HashSet<(StateId, usize)>,
+    ) -> Option<(usize, Vec<String>)> {
+        if !visited.insert((state, pos)) {
+            return None;
+        }
+        let mut best: Option<(usize, Vec<String>)> = (state == self.accept).then(|| (pos, Vec::new()));
+        for t in &self.states[state] {
+            let candidate = match t {
+                Transition::Epsilon(next) => self.longest_from(rows, *next, pos, visited),
+                Transition::OnVar { var, target } => {
+                    if pos < rows.len() && rows[pos].contains(var) {
+                        self.longest_from(rows, *target, pos + 1, visited)
+                            .map(|(end, mut labels)| {
+                                labels.insert(0, var.clone());
+                                (end, labels)
+                            })
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some((end, labels)) = candidate
+                && best.as_ref().is_none_or(|(b, _)| end > *b)
+            {
+                best = Some((end, labels));
+            }
+        }
+        visited.remove(&(state, pos));
+        best
+    }
+
+    /// Like [`Nfa::find_matches`] but returns each match with its per-row variable labels.
+    pub fn find_matches_labeled(
+        &self,
+        rows: &[BTreeSet<String>],
+        skip: SkipMode,
+    ) -> Vec<LabeledMatch> {
+        let mut matches = Vec::new();
+        let mut i = 0;
+        while i < rows.len() {
+            if let Some((end, labels)) = self.longest_match_labeled(rows, i)
+                && end > i
+            {
+                matches.push(LabeledMatch {
+                    start: i,
+                    end,
+                    labels,
+                });
                 i = match skip {
                     SkipMode::PastLastRow => end,
                     SkipMode::ToNextRow => i + 1,
@@ -518,6 +613,62 @@ mod tests {
         );
         // all-non-matching -> no matches, terminates.
         assert_eq!(nfa.find_matches(&rows("xxx"), SkipMode::PastLastRow), spans(&[]));
+    }
+
+    fn lbl(s: &str) -> Vec<String> {
+        s.chars().map(|c| c.to_string()).collect()
+    }
+
+    #[test]
+    fn labeled_concat() {
+        // A B -> rows labelled a, b.
+        let p = Pattern::Concat(vec![vars("a"), vars("b")]);
+        let nfa = Nfa::compile(&p);
+        assert_eq!(nfa.longest_match_labeled(&rows("ab"), 0), Some((2, lbl("ab"))));
+    }
+
+    #[test]
+    fn labeled_plus_greedy() {
+        // A B+ on a b b -> labels a, b, b (greedy consumes both b's).
+        let p = Pattern::Concat(vec![
+            vars("a"),
+            Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus),
+        ]);
+        let nfa = Nfa::compile(&p);
+        assert_eq!(
+            nfa.longest_match_labeled(&rows("abb"), 0),
+            Some((3, lbl("abb")))
+        );
+    }
+
+    #[test]
+    fn labeled_alternation() {
+        // (A | B) C on b c -> labels b, c.
+        let p = Pattern::Concat(vec![Pattern::Alt(vec![vars("a"), vars("b")]), vars("c")]);
+        let nfa = Nfa::compile(&p);
+        assert_eq!(nfa.longest_match_labeled(&rows("bc"), 0), Some((2, lbl("bc"))));
+    }
+
+    #[test]
+    fn labeled_permute() {
+        // PERMUTE(a, b) on b a -> labels b, a.
+        let p = Pattern::Permute(vec!["a".to_owned(), "b".to_owned()]);
+        let nfa = Nfa::compile(&p);
+        assert_eq!(nfa.longest_match_labeled(&rows("ba"), 0), Some((2, lbl("ba"))));
+    }
+
+    #[test]
+    fn find_matches_labeled_carries_labels() {
+        // A B repeated -> two labelled matches.
+        let p = Pattern::Concat(vec![vars("a"), vars("b")]);
+        let nfa = Nfa::compile(&p);
+        assert_eq!(
+            nfa.find_matches_labeled(&rows("abab"), SkipMode::PastLastRow),
+            vec![
+                LabeledMatch { start: 0, end: 2, labels: lbl("ab") },
+                LabeledMatch { start: 2, end: 4, labels: lbl("ab") },
+            ]
+        );
     }
 
     #[test]
