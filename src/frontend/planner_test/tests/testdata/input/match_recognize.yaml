@@ -57,3 +57,16 @@
     );
   expected_outputs:
     - stream_error
+- name: MATCH_RECOGNIZE rejects ALL ROWS PER MATCH (not yet supported)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      all rows per match
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error

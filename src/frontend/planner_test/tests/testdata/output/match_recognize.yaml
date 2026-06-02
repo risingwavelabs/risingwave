@@ -75,3 +75,17 @@
       define a as a.v > 0, b as b.v < 0
     );
   stream_error: MATCH_RECOGNIZE requires a watermark on the leading ORDER BY column for streaming
+- name: MATCH_RECOGNIZE rejects ALL ROWS PER MATCH (not yet supported)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      all rows per match
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Feature is not yet implemented: ALL ROWS PER MATCH
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
