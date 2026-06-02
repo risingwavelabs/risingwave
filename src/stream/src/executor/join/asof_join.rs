@@ -150,6 +150,12 @@ impl<V: EstimateSize + Clone> AsOfJoinCacheEntry<V> {
             .flat_map(|(_, pk_map)| pk_map.values())
     }
 
+    /// Total number of encoded rows in the entry, summed across all inequality keys.
+    /// Represents the initial equi-join match count for the entry's join key.
+    fn total_row_count(&self) -> usize {
+        self.inner.values().map(|pk_map| pk_map.len()).sum()
+    }
+
     /// Find the first encoded row (by pk order) with exact inequality key match.
     fn first_by_inequality(&self, ineq_key_bytes: &[u8]) -> Option<&V> {
         self.inner
@@ -689,6 +695,25 @@ impl<S: StateStore, E: AsOfRowEncoding> AsOfJoinHashMap<S, E> {
             .iter_with_prefix(join_key, inequality_key_range, PrefetchOptions::default())
             .await?;
         Ok(futures::future::Either::Right(table_iter))
+    }
+
+    /// Return the number of rows matched by the initial equi-join on `join_key`
+    /// (i.e. before the inequality predicate is applied).
+    ///
+    /// Returns `None` when the cache is disabled — computing the count without a
+    /// cache would require an extra full state-table scan per row. When the cache
+    /// is enabled, this populates the entry if needed and reports its size.
+    pub async fn cached_equi_match_count_with_jk_prefix(
+        &mut self,
+        join_key: &impl Row,
+    ) -> StreamExecutorResult<Option<usize>> {
+        if self.cache.is_none() {
+            return Ok(None);
+        }
+        let join_key_owned = join_key.to_owned_row();
+        self.ensure_cache_populated(&join_key_owned).await?;
+        let cache = self.cache.as_mut().unwrap();
+        Ok(cache.get(&join_key_owned).map(|entry| entry.total_row_count()))
     }
 
     /// Return true if the inequality key is null.

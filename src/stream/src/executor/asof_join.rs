@@ -751,6 +751,15 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                 &side_update.ht.table_id().to_string(),
             ]);
 
+        let asof_join_equi_matched_keys = ctx
+            .streaming_metrics
+            .asof_join_equi_matched_keys
+            .with_guarded_label_values(&[
+                &ctx.id.to_string(),
+                &ctx.fragment_id.to_string(),
+                &side_update.ht.table_id().to_string(),
+            ]);
+
         // The inequality key is always a single column; wrap in an array for `project()`.
         let inequal_key_idx_update = [side_update.inequal_key_idx];
 
@@ -782,8 +791,13 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             let inequal_key = row.project(&inequal_key_idx_update);
 
             let mut join_matched_rows_cnt = 0;
+            let mut asof_equi_matched_rows_cnt: Option<usize> = None;
 
             if !inequal_key_is_null {
+                asof_equi_matched_rows_cnt = side_match
+                    .ht
+                    .cached_equi_match_count_with_jk_prefix(&join_key)
+                    .await?;
                 let (row_to_delete_r, row_to_insert_r) = {
                     let (first_row, second_row) = side_update
                         .ht
@@ -949,6 +963,9 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                 // so we skip storing. No action needed on the right side.
             }
             join_matched_join_keys.observe(join_matched_rows_cnt as _);
+            if let Some(cnt) = asof_equi_matched_rows_cnt {
+                asof_join_equi_matched_keys.observe(cnt as _);
+            }
             if join_matched_rows_cnt > high_join_amplification_threshold {
                 let join_key = row.project(&side_update.join_key_indices);
                 tracing::warn!(target: "high_join_amplification",

@@ -98,6 +98,7 @@ pub struct StreamingMetrics {
     pub join_match_duration_ns: LabelGuardedIntCounterVec,
     pub join_cached_entry_count: LabelGuardedIntGaugeVec,
     pub join_matched_join_keys: RelabeledGuardedHistogramVec,
+    pub asof_join_equi_matched_keys: RelabeledGuardedHistogramVec,
 
     // Streaming Join, Streaming Dynamic Filter and Streaming Union
     pub barrier_align_duration: RelabeledGuardedIntCounterVec,
@@ -582,6 +583,20 @@ impl StreamingMetrics {
 
         let join_matched_join_keys = register_guarded_histogram_vec_with_registry!(
             join_matched_join_keys_opts,
+            &["actor_id", "fragment_id", "table_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
+
+        let asof_join_equi_matched_keys_opts = histogram_opts!(
+            "stream_asof_join_equi_matched_keys",
+            "The number of rows matched by the initial equi-join in ASOF join, before the inequality predicate is applied. Emitted when streaming_asof_join_use_cache is enabled.",
+            exponential_buckets(16.0, 2.0, 28).unwrap() // max 2^31
+        );
+
+        let asof_join_equi_matched_keys = register_guarded_histogram_vec_with_registry!(
+            asof_join_equi_matched_keys_opts,
             &["actor_id", "fragment_id", "table_id"],
             registry
         )
@@ -1339,6 +1354,7 @@ impl StreamingMetrics {
             join_match_duration_ns,
             join_cached_entry_count,
             join_matched_join_keys,
+            asof_join_equi_matched_keys,
             barrier_align_duration,
             agg_lookup_miss_count,
             agg_total_lookup_count,
