@@ -15,7 +15,7 @@
 //! Streaming `MATCH_RECOGNIZE` executor (v1, event-time).
 //!
 //! Scope: append-only input, `ONE ROW PER MATCH`, `AFTER MATCH SKIP {PAST LAST ROW | TO NEXT ROW}`,
-//! scalar `MEASURES` evaluated on the match's last row.
+//! `MEASURES` with per-variable navigation (`FIRST`/`LAST`/bare `var.col`) and `CLASSIFIER()`.
 //!
 //! Event-time model: rows are buffered per partition (in any arrival order). Matching is driven by
 //! the watermark on the leading `ORDER BY` column: when the watermark advances to `w`, every row
@@ -24,9 +24,13 @@
 //! safe row (so the greedy match is known maximal); consumed rows are evicted. This handles
 //! out-of-order arrival within the watermark's lateness and bounds state.
 //!
-//! State: the buffered rows (order key, satisfied pattern variables, pre-evaluated MEASURES) are
-//! persisted to a state table — written through on arrival, deleted on consumption — and restored
-//! on recovery.
+//! Measures are evaluated at match time, not at arrival: a measure references specific matched rows
+//! (e.g. `FIRST(a.ts)`, `LAST(b.v)`), which are only known once the match and its per-row pattern
+//! variable labels are found. Each measure is an expression over a synthetic row whose columns are
+//! produced by its [`MeasureSlot`]s from the matched rows.
+//!
+//! State: the buffered rows (the raw input row plus its satisfied pattern variables) are persisted
+//! to a state table — written through on arrival, deleted on consumption — and restored on recovery.
 
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Bound;
@@ -42,6 +46,55 @@ use super::nfa::{Nfa, SkipMode};
 use crate::common::table::state_table::StateTable;
 use crate::executor::prelude::*;
 
+/// How a [`MeasureSlot`] resolves against the rows of a match (mirrors the planner's slot kinds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeasureSlotKind {
+    /// Column value of the first row labeled `var` within the match.
+    First,
+    /// Column value of the last row labeled `var` (also a bare `var.col` under FINAL semantics).
+    Last,
+    /// The pattern variable bound to the match's last row.
+    Classifier,
+}
+
+/// One navigation input that a measure expression reads. The executor materializes one value per
+/// slot from a match's rows and labels, forming the synthetic row the measure is evaluated over.
+#[derive(Debug, Clone)]
+pub struct MeasureSlot {
+    pub kind: MeasureSlotKind,
+    /// Pattern variable to navigate to. Unused for [`MeasureSlotKind::Classifier`].
+    pub var: String,
+    /// Input column index to read. Unused for [`MeasureSlotKind::Classifier`].
+    pub col_idx: usize,
+}
+
+/// A `MEASURES` item compiled for execution.
+pub struct CompiledMeasure {
+    /// Expression over the synthetic per-match row: `InputRef(i)` reads `slots[i]`.
+    pub expr: NonStrictExpression,
+    pub slots: Vec<MeasureSlot>,
+}
+
+impl MeasureSlot {
+    /// Resolves this slot against a match: `rows[start..]` are the matched rows and `labels[i]` is
+    /// the pattern variable bound to `rows[start + i]`.
+    fn resolve(&self, rows: &[BufferedRow], start: usize, labels: &[String]) -> Datum {
+        match self.kind {
+            MeasureSlotKind::Classifier => {
+                labels.last().map(|s| ScalarImpl::Utf8(s.as_str().into()))
+            }
+            MeasureSlotKind::First => labels
+                .iter()
+                .position(|l| l == &self.var)
+                .and_then(|j| rows[start + j].row.datum_at(self.col_idx).to_owned_datum()),
+            MeasureSlotKind::Last => labels
+                .iter()
+                .rposition(|l| l == &self.var)
+                .and_then(|j| rows[start + j].row.datum_at(self.col_idx).to_owned_datum()),
+        }
+    }
+}
+
 pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub ctx: ActorContextRef,
     pub input: Executor,
@@ -50,14 +103,13 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub chunk_size: usize,
     pub partition_key_indices: Vec<usize>,
     pub order_key_indices: Vec<usize>,
-    pub measures: Vec<NonStrictExpression>,
+    pub measures: Vec<CompiledMeasure>,
     pub define_symbols: Vec<String>,
     pub define_exprs: Vec<NonStrictExpression>,
     pub nfa: Nfa,
     pub skip: SkipMode,
-    /// Indices into `measures` that are `CLASSIFIER()`: filled at emit with the pattern variable
-    /// bound to the match's last row rather than the (placeholder) pre-evaluated measure value.
-    pub classifier_measure_indices: Vec<usize>,
+    /// Number of input columns; the buffered raw input row stored per row in the state table.
+    pub input_arity: usize,
     pub state_table: StateTable<S>,
 }
 
@@ -69,12 +121,12 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     partition_key_indices: Vec<usize>,
     /// Input column index of the leading ORDER BY column (the watermark column).
     time_col: usize,
-    measures: Vec<NonStrictExpression>,
+    measures: Vec<CompiledMeasure>,
     define_symbols: Vec<String>,
     define_exprs: Vec<NonStrictExpression>,
     nfa: Nfa,
     skip: SkipMode,
-    classifier_measure_indices: Vec<usize>,
+    input_arity: usize,
     state_table: StateTable<S>,
 }
 
@@ -82,12 +134,13 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
 struct BufferedRow {
     /// Per-partition monotonic id; the state-table key suffix.
     seq: i64,
-    /// Leading ORDER BY value, used to sort the buffer and compare against the watermark.
+    /// Leading ORDER BY value (a copy of `row[time_col]`), used to sort the buffer and compare
+    /// against the watermark.
     order_key: Datum,
     /// The pattern variables whose `DEFINE` predicate this row satisfies.
     satisfied: BTreeSet<String>,
-    /// Pre-evaluated `MEASURES` values for this row (used when it is a match's last row).
-    measures: OwnedRow,
+    /// The raw input row, read by measure navigation slots at match time.
+    row: OwnedRow,
 }
 
 /// Per-partition match state: buffered rows and the next seq to assign.
@@ -120,18 +173,19 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             define_exprs: args.define_exprs,
             nfa: args.nfa,
             skip: args.skip,
-            classifier_measure_indices: args.classifier_measure_indices,
+            input_arity: args.input_arity,
             state_table: args.state_table,
         }
     }
 
-    /// Build a state-table row: `[ partition cols.. , seq , order_key , satisfied , measure cols.. ]`.
-    fn state_row(partition_key: &OwnedRow, row: &BufferedRow) -> OwnedRow {
-        let mut datums: Vec<Datum> = partition_key.iter().map(|d| d.to_owned_datum()).collect();
+    /// Build a state-table row: `[ seq , satisfied , <input cols..> ]`. The partition columns and
+    /// order key are columns of the stored input row (the state-table key is the partition columns
+    /// plus `seq`), so they are not stored separately.
+    fn state_row(row: &BufferedRow) -> OwnedRow {
+        let mut datums: Vec<Datum> = Vec::with_capacity(2 + row.row.len());
         datums.push(Some(ScalarImpl::Int64(row.seq)));
-        datums.push(row.order_key.clone());
         datums.push(Some(ScalarImpl::Utf8(join_satisfied(&row.satisfied).into())));
-        datums.extend(row.measures.iter().map(|d| d.to_owned_datum()));
+        datums.extend(row.row.iter().map(|d| d.to_owned_datum()));
         OwnedRow::new(datums)
     }
 }
@@ -157,12 +211,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             define_exprs,
             nfa,
             skip,
-            classifier_measure_indices,
+            input_arity,
             mut state_table,
         } = *self;
-
-        let n_part = partition_key_indices.len();
-        let n_measure = measures.len();
 
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
@@ -180,25 +231,24 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             pin_mut!(iter);
             while let Some(item) = iter.next().await {
                 let row = item?.into_owned_row();
-                let partition_key =
-                    OwnedRow::new((0..n_part).map(|i| row.datum_at(i).to_owned_datum()).collect());
-                let seq = row.datum_at(n_part).expect("seq not null").into_int64();
-                let order_key = row.datum_at(n_part + 1).to_owned_datum();
+                let seq = row.datum_at(0).expect("seq not null").into_int64();
                 let satisfied = row
-                    .datum_at(n_part + 2)
+                    .datum_at(1)
                     .map(|d| split_satisfied(d.into_utf8()))
                     .unwrap_or_default();
-                let measures_row = OwnedRow::new(
-                    (n_part + 3..n_part + 3 + n_measure)
+                let input_row = OwnedRow::new(
+                    (2..2 + input_arity)
                         .map(|i| row.datum_at(i).to_owned_datum())
                         .collect(),
                 );
+                let order_key = input_row.datum_at(time_col).to_owned_datum();
+                let partition_key = (&input_row).project(&partition_key_indices).to_owned_row();
                 let state = partitions.entry(partition_key).or_default();
                 state.rows.push(BufferedRow {
                     seq,
                     order_key,
                     satisfied,
-                    measures: measures_row,
+                    row: input_row,
                 });
                 state.next_seq = state.next_seq.max(seq + 1);
             }
@@ -208,17 +258,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         for msg in input {
             match msg? {
                 Message::Chunk(chunk) => {
-                    // Append-only input: buffer rows; matching happens on watermark.
+                    // Append-only input: buffer rows; matching happens on watermark. DEFINE
+                    // predicates are current-row, so they are evaluated here; MEASURES reference
+                    // specific matched rows and are deferred to match time.
                     let chunk = chunk.compact_vis();
                     let data_chunk = chunk.data_chunk();
 
                     let mut define_cols = Vec::with_capacity(define_exprs.len());
                     for e in &define_exprs {
                         define_cols.push(e.eval_infallible(data_chunk).await);
-                    }
-                    let mut measure_cols = Vec::with_capacity(measures.len());
-                    for e in &measures {
-                        measure_cols.push(e.eval_infallible(data_chunk).await);
                     }
 
                     for (idx, (op, row_ref)) in chunk.rows().enumerate() {
@@ -234,21 +282,17 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 satisfied.insert(sym.clone());
                             }
                         }
-                        let measure_datums: Vec<Datum> = measure_cols
-                            .iter()
-                            .map(|c| c.value_at(idx).to_owned_datum())
-                            .collect();
 
-                        let state = partitions.entry(partition_key.clone()).or_default();
+                        let state = partitions.entry(partition_key).or_default();
                         let seq = state.next_seq;
                         state.next_seq += 1;
                         let buffered = BufferedRow {
                             seq,
                             order_key,
                             satisfied,
-                            measures: OwnedRow::new(measure_datums),
+                            row: row_ref.to_owned_row(),
                         };
-                        state_table.insert(Self::state_row(&partition_key, &buffered));
+                        state_table.insert(Self::state_row(&buffered));
                         state.rows.push(buffered);
                     }
                 }
@@ -282,29 +326,24 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             if m.end >= safe_len {
                                 break;
                             }
-                            let last_row = &state.rows[m.end - 1];
-                            let measures_row: Vec<Datum> = if classifier_measure_indices.is_empty() {
-                                last_row.measures.iter().map(|d| d.to_owned_datum()).collect()
-                            } else {
-                                // CLASSIFIER() = the pattern variable bound to the match's last row.
-                                let last_label = m.labels.last().cloned();
-                                last_row
-                                    .measures
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, d)| {
-                                        if classifier_measure_indices.contains(&i) {
-                                            last_label.clone().map(|s| ScalarImpl::Utf8(s.into()))
-                                        } else {
-                                            d.to_owned_datum()
-                                        }
-                                    })
-                                    .collect()
-                            };
+                            // Evaluate each measure over the synthetic row its slots produce from
+                            // the matched rows and their per-row labels.
+                            let mut measure_datums: Vec<Datum> = Vec::with_capacity(measures.len());
+                            for measure in &measures {
+                                let synthetic = OwnedRow::new(
+                                    measure
+                                        .slots
+                                        .iter()
+                                        .map(|s| s.resolve(&state.rows, m.start, &m.labels))
+                                        .collect(),
+                                );
+                                let value = measure.expr.eval_row_infallible(&synthetic).await;
+                                measure_datums.push(value);
+                            }
                             out_rows.push(
                                 partition_key
                                     .clone()
-                                    .chain(OwnedRow::new(measures_row))
+                                    .chain(OwnedRow::new(measure_datums))
                                     .into_owned_row(),
                             );
                             cursor = match skip {
@@ -313,7 +352,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             };
                         }
                         for consumed in state.rows.drain(0..cursor) {
-                            state_table.delete(Self::state_row(partition_key, &consumed));
+                            state_table.delete(Self::state_row(&consumed));
                         }
                     }
 

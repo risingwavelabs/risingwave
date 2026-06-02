@@ -1142,8 +1142,7 @@ message GapFillNode {
 message MatchRecognizeNode {
   repeated uint32 partition_by = 1;
   repeated uint32 order_by = 2;
-  repeated expr.ExprNode measures = 3;
-  repeated string measure_names = 4;
+  repeated MatchRecognizeMeasure measures = 3;
   repeated string define_symbols = 5;
   repeated expr.ExprNode define_conditions = 6;
   // PATTERN encoded as its textual form for v1.
@@ -1152,9 +1151,28 @@ message MatchRecognizeNode {
   catalog.Table state_table = 8;
   // AFTER MATCH SKIP strategy: "past_last_row" (default) or "to_next_row".
   string after_match_skip = 9;
-  // Indices into `measures` that are CLASSIFIER(): the executor fills these with the pattern
-  // variable bound to the match's last row instead of evaluating the (placeholder) measure expr.
-  repeated uint32 classifier_measure_indices = 10;
+}
+
+// One MEASURES item. The expression is evaluated over a synthetic per-match row whose i-th column is
+// produced by `slots[i]`; the executor materializes that row once the match and its per-row pattern
+// variable labels are known.
+message MatchRecognizeMeasure {
+  // Expression over the synthetic row: an InputRef(i) reads slots[i].
+  expr.ExprNode expr = 1;
+  string name = 2;
+  repeated MatchRecognizeMeasureSlot slots = 3;
+}
+
+// One navigation input of a measure expression.
+message MatchRecognizeMeasureSlot {
+  // 0 = LAST(var.col): column value of the last row labeled `var` in the match (also the meaning of
+  //     a bare `var.col` under ONE ROW PER MATCH FINAL semantics).
+  // 1 = FIRST(var.col): column value of the first such row.
+  // 2 = CLASSIFIER(): the pattern variable bound to the match's last row (`var` / `col_idx` unused).
+  uint32 kind = 1;
+  string var = 2;
+  uint32 col_idx = 3;
+  data.DataType data_type = 4;
 }
 
 message StreamNode {

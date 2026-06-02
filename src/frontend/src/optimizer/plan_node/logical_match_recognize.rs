@@ -24,7 +24,7 @@ use super::{
 };
 use super::generic::GenericPlanRef;
 use super::stream::StreamPlanNodeMetadata;
-use crate::binder::{BoundMeasure, BoundSymbolDefinition};
+use crate::binder::{BoundMeasure, BoundSymbolDefinition, MeasureSlotKind};
 use crate::error::Result;
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
@@ -74,8 +74,14 @@ impl LogicalMatchRecognize {
         for e in &self.core.order_by {
             required.union_with(&e.collect_input_refs(input_col_num));
         }
+        // Measure expressions are over the synthetic per-match row; the real input columns they read
+        // are recorded in the slots.
         for m in &self.core.measures {
-            required.union_with(&m.expr.collect_input_refs(input_col_num));
+            for slot in &m.slots {
+                if !matches!(slot.kind, MeasureSlotKind::Classifier) {
+                    required.insert(slot.col_idx);
+                }
+            }
         }
         for d in &self.core.defines {
             required.union_with(&d.definition.collect_input_refs(input_col_num));
