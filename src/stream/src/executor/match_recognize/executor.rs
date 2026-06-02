@@ -669,6 +669,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         }
                     }
 
+                    // Drop partitions whose buffer is now empty so the map is bounded by the number
+                    // of *live* partitions, not every partition key ever seen. A later row for such a
+                    // key simply recreates the entry (its state-table rows were already deleted, so
+                    // the fresh seq counter starts clean).
+                    partitions.retain(|_, state| !state.rows.is_empty());
+
                     let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
                     for row in out_rows {
                         if let Some(c) = builder.append_row(Op::Insert, row) {
