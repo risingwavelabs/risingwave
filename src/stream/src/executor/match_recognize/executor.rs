@@ -65,10 +65,9 @@ enum MeasureSlotKind {
     Min,
     /// Maximum `col` over rows labeled `var` (`MAX(var.col)`).
     Max,
-    /// `SUM(var.col)` / `AVG(var.col)`, evaluated by the slot's [`AggSlot`] aggregate kernel.
+    /// `SUM(var.col)`, evaluated by the slot's [`AggSlot`] aggregate kernel. `AVG` is lowered to a
+    /// `Sum` slot plus a `Count` slot and a division expression, so it has no kind of its own.
     Sum,
-    /// See [`MeasureSlotKind::Sum`].
-    Avg,
 }
 
 /// A `SUM`/`AVG` aggregate kernel for a slot, plus the input column type used to feed it.
@@ -118,11 +117,10 @@ impl CompiledMeasure {
                     5 => MeasureSlotKind::Min,
                     6 => MeasureSlotKind::Max,
                     7 => MeasureSlotKind::Sum,
-                    8 => MeasureSlotKind::Avg,
                     _ => MeasureSlotKind::Last,
                 };
                 let agg = match kind {
-                    MeasureSlotKind::Sum | MeasureSlotKind::Avg => {
+                    MeasureSlotKind::Sum => {
                         let call = AggCall::from_protobuf(
                             s.agg_call.as_ref().expect("sum/avg slot needs agg_call"),
                         )?;
@@ -182,8 +180,8 @@ impl MeasureSlot {
                 .filter(|(_, l)| *l == &self.var)
                 .filter_map(|(j, _)| col_at(j))
                 .max_by(|a, b| a.default_cmp(b)),
-            MeasureSlotKind::Sum | MeasureSlotKind::Avg => {
-                let agg = self.agg.as_ref().expect("sum/avg slot has an aggregate kernel");
+            MeasureSlotKind::Sum => {
+                let agg = self.agg.as_ref().expect("sum slot has an aggregate kernel");
                 // Feed the kernel a single-column chunk of the col values over rows labeled `var`.
                 let input: Vec<(Op, OwnedRow)> = labels
                     .iter()

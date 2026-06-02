@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::{AggType, PbAggKind};
+use risingwave_expr::aggregate::PbAggKind;
 use risingwave_sqlparser::ast::{
     AfterMatchSkip, Expr as AstExpr, FunctionArg, FunctionArgExpr, MatchRecognizePattern,
     MatchRecognizeSymbol, Measure, OrderByExpr, RowsPerMatch, SymbolDefinition, TableAlias,
@@ -26,7 +26,10 @@ use risingwave_sqlparser::ast::{
 
 use super::{Binder, Relation};
 use crate::error::Result as RwResult;
-use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef, OrderBy};
+use crate::expr::{
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    OrderBy,
+};
 use crate::optimizer::plan_node::generic::PlanAggCall;
 use crate::utils::Condition;
 
@@ -49,9 +52,8 @@ pub enum MeasureSlotKind {
     /// Maximum `col` over rows labeled `var` (`MAX(var.col)`).
     Max,
     /// Sum of `col` over rows labeled `var` (`SUM(var.col)`); evaluated by the slot's `agg`.
+    /// `AVG` reuses this (plus a `Count` slot) rather than having its own kind.
     Sum,
-    /// Average of `col` over rows labeled `var` (`AVG(var.col)`); evaluated by the slot's `agg`.
-    Avg,
 }
 
 /// One navigation input that a measure expression reads. A measure is lowered to an expression over
@@ -310,45 +312,71 @@ impl Binder {
                 });
             }
 
-            // AVG decomposes into SUM/COUNT in RisingWave (no standalone append-only kernel); wiring
-            // that decomposition is a follow-up.
-            if agg == "avg" {
-                bail_not_implemented!(
-                    "AVG() in MATCH_RECOGNIZE MEASURES (decomposes to SUM/COUNT; not yet supported)"
-                );
-            }
             // SUM reuses RisingWave's aggregate kernel so the numeric return type stays faithful. The
             // runtime feeds the kernel a single-column chunk (the projected col), so the call's
-            // argument is an InputRef to column 0.
-            let agg_type: AggType = PbAggKind::Sum.into();
-            let inferred = AggCall::new(
-                agg_type.clone(),
-                vec![InputRef::new(0, col_type.clone()).into()],
-                false,
-                OrderBy::any(),
-                Condition::true_cond(),
-                vec![],
-            )?;
-            let return_type = inferred.return_type;
-            let plan_agg = PlanAggCall {
-                agg_type,
-                return_type: return_type.clone(),
-                inputs: vec![InputRef::new(0, col_type)],
-                distinct: false,
-                order_by: vec![],
-                filter: Condition::true_cond(),
-                direct_args: vec![],
+            // argument is an InputRef to column 0. AVG is built on top as cast(sum / count).
+            let infer = |kind: PbAggKind| -> RwResult<DataType> {
+                Ok(AggCall::new(
+                    kind.into(),
+                    vec![InputRef::new(0, col_type.clone()).into()],
+                    false,
+                    OrderBy::any(),
+                    Condition::true_cond(),
+                    vec![],
+                )?
+                .return_type)
             };
+            let sum_type = infer(PbAggKind::Sum)?;
+            let sum_slot = MeasureSlot {
+                kind: MeasureSlotKind::Sum,
+                var: var.clone(),
+                col_idx,
+                data_type: sum_type.clone(),
+                agg: Some(PlanAggCall {
+                    agg_type: PbAggKind::Sum.into(),
+                    return_type: sum_type.clone(),
+                    inputs: vec![InputRef::new(0, col_type.clone())],
+                    distinct: false,
+                    order_by: vec![],
+                    filter: Condition::true_cond(),
+                    direct_args: vec![],
+                }),
+            };
+
+            if agg == "sum" {
+                return Ok(BoundMeasure {
+                    expr: InputRef::new(0, sum_type).into(),
+                    name,
+                    slots: vec![sum_slot],
+                });
+            }
+
+            // AVG = CASE WHEN count = 0 THEN NULL ELSE cast(sum AS avg_type) / count END, mirroring
+            // how RisingWave's planner rewrites avg. Slot 0 is the sum, slot 1 the (non-null) count.
+            let avg_type = infer(PbAggKind::Avg)?;
+            let count_slot = MeasureSlot {
+                kind: MeasureSlotKind::Count,
+                var,
+                col_idx,
+                data_type: DataType::Int64,
+                agg: None,
+            };
+            let sum_ref: ExprImpl = InputRef::new(0, sum_type).into();
+            let count_ref: ExprImpl = InputRef::new(1, DataType::Int64).into();
+            let quotient: ExprImpl = FunctionCall::new(
+                ExprType::Divide,
+                vec![sum_ref.cast_explicit(&avg_type)?, count_ref.clone()],
+            )?
+            .into();
+            let count_is_zero: ExprImpl =
+                FunctionCall::new(ExprType::Equal, vec![count_ref, ExprImpl::literal_int(0)])?.into();
+            let null: ExprImpl = Literal::new(None, avg_type).into();
+            let expr: ExprImpl =
+                FunctionCall::new(ExprType::Case, vec![count_is_zero, null, quotient])?.into();
             return Ok(BoundMeasure {
-                expr: InputRef::new(0, return_type.clone()).into(),
+                expr,
                 name,
-                slots: vec![MeasureSlot {
-                    kind: MeasureSlotKind::Sum,
-                    var,
-                    col_idx,
-                    data_type: return_type,
-                    agg: Some(plan_agg),
-                }],
+                slots: vec![sum_slot, count_slot],
             });
         }
 
