@@ -419,6 +419,11 @@ struct BufferedRow {
 struct PartitionState {
     rows: Vec<BufferedRow>,
     next_seq: i64,
+    /// Whether `rows` needs (re)sorting by order key before the next match. Set when rows are
+    /// appended (inserts, recovery) since they land out of order at the tail; cleared after a sort.
+    /// Draining the sorted front keeps the remainder sorted, so a watermark that adds no new rows
+    /// can skip the sort entirely.
+    needs_sort: bool,
 }
 
 impl<S: StateStore> MatchRecognizeExecutor<S> {
@@ -493,6 +498,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     row: input_row,
                 });
                 state.next_seq = state.next_seq.max(seq + 1);
+                // Recovered rows arrive in state-table (seq) order, not order-key order.
+                state.needs_sort = true;
             }
         }
         Ok(partitions)
@@ -567,6 +574,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         };
                         state_table.insert(Self::state_row(&buffered));
                         state.rows.push(buffered);
+                        state.needs_sort = true;
                     }
                 }
                 Message::Watermark(watermark) => {
@@ -581,18 +589,23 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // Total sort by all ORDER BY columns (lexicographically), so rows with equal
                         // leading keys are still deterministically ordered. The leading column also
                         // drives the watermark: the prefix with leading order_key <= w is final.
-                        state.rows.sort_by(|a, b| {
-                            order_key_indices
-                                .iter()
-                                .map(|&oc| {
-                                    a.row
-                                        .datum_at(oc)
-                                        .to_owned_datum()
-                                        .default_cmp(&b.row.datum_at(oc).to_owned_datum())
-                                })
-                                .find(|o| o.is_ne())
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        });
+                        // Skip when no rows were appended since the last sort (the buffer is still
+                        // ordered — draining the sorted front preserves order).
+                        if state.needs_sort {
+                            state.rows.sort_by(|a, b| {
+                                order_key_indices
+                                    .iter()
+                                    .map(|&oc| {
+                                        a.row
+                                            .datum_at(oc)
+                                            .to_owned_datum()
+                                            .default_cmp(&b.row.datum_at(oc).to_owned_datum())
+                                    })
+                                    .find(|o| o.is_ne())
+                                    .unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                            state.needs_sort = false;
+                        }
                         let safe_len = state
                             .rows
                             .iter()
