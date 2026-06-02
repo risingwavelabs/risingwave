@@ -1175,7 +1175,9 @@ message MatchRecognizeMeasureSlot {
   // 7 = SUM(var.col): evaluated by `agg_call` over the rows labeled `var`. (AVG is lowered by the
   //     planner into a SUM slot plus a COUNT slot and a division expression.)
   uint32 kind = 1;
-  string var = 2;
+  // The pattern variables this slot navigates over: one for a plain variable, several for a SUBSET
+  // union variable. Empty for CLASSIFIER. A row matches if its label is any of these.
+  repeated string vars = 2;
   uint32 col_idx = 3;
   data.DataType data_type = 4;
   // The aggregate to run for kinds 7/8, over a single input column (the projected `col_idx`) of the

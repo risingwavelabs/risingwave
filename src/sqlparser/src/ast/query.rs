@@ -500,6 +500,8 @@ pub enum TableFactor {
         after_match_skip: Option<AfterMatchSkip>,
         /// `PATTERN ( <pattern> )` — required.
         pattern: MatchRecognizePattern,
+        /// `SUBSET <name> = (<vars>), ...` — empty when omitted.
+        subsets: Vec<SubsetDefinition>,
         /// `DEFINE <symbol> AS <condition>, ...` — required.
         symbols: Vec<SymbolDefinition>,
         /// Optional alias for the row-pattern output.
@@ -573,6 +575,19 @@ pub struct SymbolDefinition {
 impl fmt::Display for SymbolDefinition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} AS {}", self.symbol, self.definition)
+    }
+}
+
+/// A single `SUBSET` item: `<name> = (<pattern variable>, ...)` — a union variable.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SubsetDefinition {
+    pub name: Ident,
+    pub members: Vec<Ident>,
+}
+
+impl fmt::Display for SubsetDefinition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} = ({})", self.name, display_comma_separated(&self.members))
     }
 }
 
@@ -716,6 +731,7 @@ impl fmt::Display for TableFactor {
                 rows_per_match,
                 after_match_skip,
                 pattern,
+                subsets,
                 symbols,
                 alias,
             } => {
@@ -736,6 +752,9 @@ impl fmt::Display for TableFactor {
                     write!(f, "{} ", after_match_skip)?;
                 }
                 write!(f, "PATTERN ({}) ", pattern)?;
+                if !subsets.is_empty() {
+                    write!(f, "SUBSET {} ", display_comma_separated(subsets))?;
+                }
                 write!(f, "DEFINE {})", display_comma_separated(symbols))?;
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
