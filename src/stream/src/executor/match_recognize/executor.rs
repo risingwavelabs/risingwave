@@ -12,18 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Streaming `MATCH_RECOGNIZE` executor (v1).
+//! Streaming `MATCH_RECOGNIZE` executor (v1, event-time).
 //!
 //! Scope: append-only input, `ONE ROW PER MATCH`, `AFTER MATCH SKIP {PAST LAST ROW | TO NEXT ROW}`,
-//! scalar `MEASURES` evaluated on the match's last row. Assumes input arrives in `ORDER BY` order
-//! per partition (no re-sort yet). A match is emitted once a following row exists, so the greedy
-//! match is known maximal.
+//! scalar `MEASURES` evaluated on the match's last row.
 //!
-//! State: the per-partition live row window (each row's satisfied pattern variables + pre-evaluated
-//! MEASURES) is persisted to a state table — written through on arrival, deleted on consumption,
-//! and restored on recovery — so match state survives failover. The cursor is not persisted:
-//! consumed rows are compacted away after each drain, so the persisted window is exactly the live
-//! set and scanning resumes from its start.
+//! Event-time model: rows are buffered per partition (in any arrival order). Matching is driven by
+//! the watermark on the leading `ORDER BY` column: when the watermark advances to `w`, every row
+//! with `order_key <= w` is final (no earlier row can still arrive), so the buffer is sorted by
+//! order key and the `<= w` prefix is matched. A match is emitted once it is followed by another
+//! safe row (so the greedy match is known maximal); consumed rows are evicted. This handles
+//! out-of-order arrival within the watermark's lateness and bounds state.
+//!
+//! State: the buffered rows (order key, satisfied pattern variables, pre-evaluated MEASURES) are
+//! persisted to a state table — written through on arrival, deleted on consumption — and restored
+//! on recovery.
 
 use std::collections::{BTreeSet, HashMap};
 use std::ops::Bound;
@@ -31,7 +34,7 @@ use std::ops::Bound;
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::Op;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, ScalarImpl, ToOwnedDatum};
+use risingwave_common::types::{Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_storage::StateStore;
 
@@ -61,6 +64,8 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     schema: Schema,
     chunk_size: usize,
     partition_key_indices: Vec<usize>,
+    /// Input column index of the leading ORDER BY column (the watermark column).
+    time_col: usize,
     measures: Vec<NonStrictExpression>,
     define_symbols: Vec<String>,
     define_exprs: Vec<NonStrictExpression>,
@@ -73,37 +78,39 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
 struct BufferedRow {
     /// Per-partition monotonic id; the state-table key suffix.
     seq: i64,
+    /// Leading ORDER BY value, used to sort the buffer and compare against the watermark.
+    order_key: Datum,
     /// The pattern variables whose `DEFINE` predicate this row satisfies.
     satisfied: BTreeSet<String>,
     /// Pre-evaluated `MEASURES` values for this row (used when it is a match's last row).
     measures: OwnedRow,
 }
 
-/// Per-partition match state: the live (un-consumed) buffered rows and the next seq to assign.
+/// Per-partition match state: buffered rows and the next seq to assign.
 #[derive(Default)]
 struct PartitionState {
     rows: Vec<BufferedRow>,
     next_seq: i64,
 }
 
-/// Join a satisfied-variable set into the stored varchar form.
 fn join_satisfied(satisfied: &BTreeSet<String>) -> String {
     satisfied.iter().cloned().collect::<Vec<_>>().join(",")
 }
 
-/// Split the stored varchar form back into a satisfied-variable set.
 fn split_satisfied(s: &str) -> BTreeSet<String> {
     s.split(',').filter(|p| !p.is_empty()).map(|p| p.to_owned()).collect()
 }
 
 impl<S: StateStore> MatchRecognizeExecutor<S> {
     pub fn new(args: MatchRecognizeExecutorArgs<S>) -> Self {
+        let time_col = args.order_key_indices[0];
         Self {
             ctx: args.ctx,
             input: args.input,
             schema: args.schema,
             chunk_size: args.chunk_size,
             partition_key_indices: args.partition_key_indices,
+            time_col,
             measures: args.measures,
             define_symbols: args.define_symbols,
             define_exprs: args.define_exprs,
@@ -113,10 +120,11 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         }
     }
 
-    /// Build a state-table row: `[ partition cols.. , seq , satisfied , measure cols.. ]`.
+    /// Build a state-table row: `[ partition cols.. , seq , order_key , satisfied , measure cols.. ]`.
     fn state_row(partition_key: &OwnedRow, row: &BufferedRow) -> OwnedRow {
         let mut datums: Vec<Datum> = partition_key.iter().map(|d| d.to_owned_datum()).collect();
         datums.push(Some(ScalarImpl::Int64(row.seq)));
+        datums.push(row.order_key.clone());
         datums.push(Some(ScalarImpl::Utf8(join_satisfied(&row.satisfied).into())));
         datums.extend(row.measures.iter().map(|d| d.to_owned_datum()));
         OwnedRow::new(datums)
@@ -138,6 +146,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             schema,
             chunk_size,
             partition_key_indices,
+            time_col,
             measures,
             define_symbols,
             define_exprs,
@@ -155,7 +164,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         yield Message::Barrier(barrier);
         state_table.init_epoch(first_epoch).await?;
 
-        // Recovery: rebuild the per-partition live windows from the state table.
+        // Recovery: rebuild the per-partition buffers from the state table.
         let mut partitions: HashMap<OwnedRow, PartitionState> = HashMap::new();
         {
             let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
@@ -168,18 +177,20 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 let partition_key =
                     OwnedRow::new((0..n_part).map(|i| row.datum_at(i).to_owned_datum()).collect());
                 let seq = row.datum_at(n_part).expect("seq not null").into_int64();
+                let order_key = row.datum_at(n_part + 1).to_owned_datum();
                 let satisfied = row
-                    .datum_at(n_part + 1)
+                    .datum_at(n_part + 2)
                     .map(|d| split_satisfied(d.into_utf8()))
                     .unwrap_or_default();
                 let measures_row = OwnedRow::new(
-                    (n_part + 2..n_part + 2 + n_measure)
+                    (n_part + 3..n_part + 3 + n_measure)
                         .map(|i| row.datum_at(i).to_owned_datum())
                         .collect(),
                 );
                 let state = partitions.entry(partition_key).or_default();
                 state.rows.push(BufferedRow {
                     seq,
+                    order_key,
                     satisfied,
                     measures: measures_row,
                 });
@@ -191,10 +202,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         for msg in input {
             match msg? {
                 Message::Chunk(chunk) => {
+                    // Append-only input: buffer rows; matching happens on watermark.
                     let chunk = chunk.compact_vis();
                     let data_chunk = chunk.data_chunk();
 
-                    // Vectorized evaluation of DEFINE predicates and MEASURES over the chunk.
                     let mut define_cols = Vec::with_capacity(define_exprs.len());
                     for e in &define_exprs {
                         define_cols.push(e.eval_infallible(data_chunk).await);
@@ -204,15 +215,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         measure_cols.push(e.eval_infallible(data_chunk).await);
                     }
 
-                    let mut touched: Vec<OwnedRow> = Vec::new();
-
                     for (idx, (op, row_ref)) in chunk.rows().enumerate() {
-                        // Append-only input: only inserts contribute to matches.
                         if !matches!(op, Op::Insert) {
                             continue;
                         }
-
                         let partition_key = row_ref.project(&partition_key_indices).to_owned_row();
+                        let order_key = row_ref.datum_at(time_col).to_owned_datum();
 
                         let mut satisfied = BTreeSet::new();
                         for (d, sym) in define_symbols.iter().enumerate() {
@@ -230,50 +238,65 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         state.next_seq += 1;
                         let buffered = BufferedRow {
                             seq,
+                            order_key,
                             satisfied,
                             measures: OwnedRow::new(measure_datums),
                         };
                         state_table.insert(Self::state_row(&partition_key, &buffered));
                         state.rows.push(buffered);
-                        if !touched.contains(&partition_key) {
-                            touched.push(partition_key);
-                        }
                     }
+                }
+                Message::Watermark(watermark) => {
+                    // Only the leading ORDER BY column drives matching.
+                    if watermark.col_idx != time_col {
+                        continue;
+                    }
+                    let w = watermark.val;
 
-                    // Drain newly-complete matches from each touched partition, then compact away
-                    // the consumed prefix (both in memory and in the state table).
-                    let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
-                    for partition_key in touched {
-                        let state = partitions.get_mut(&partition_key).unwrap();
-                        let satisfied: Vec<BTreeSet<String>> =
-                            state.rows.iter().map(|r| r.satisfied.clone()).collect();
+                    let mut out_rows: Vec<OwnedRow> = Vec::new();
+                    for (partition_key, state) in partitions.iter_mut() {
+                        // Sort by order key; the prefix with order_key <= w is final.
+                        state.rows.sort_by(|a, b| a.order_key.default_cmp(&b.order_key));
+                        let safe_len = state
+                            .rows
+                            .iter()
+                            .take_while(|r| matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_le()))
+                            .count();
+                        let satisfied: Vec<BTreeSet<String>> = state.rows[..safe_len]
+                            .iter()
+                            .map(|r| r.satisfied.clone())
+                            .collect();
 
                         let mut cursor = 0usize;
                         for m in nfa.find_matches(&satisfied, skip) {
                             if m.start < cursor {
                                 continue;
                             }
-                            // Only emit once the greedy match is known maximal: a following row exists.
-                            if m.end >= state.rows.len() {
+                            // Final only if another safe row follows (greedy match is maximal).
+                            if m.end >= safe_len {
                                 break;
                             }
                             let last_row = &state.rows[m.end - 1];
-                            let out = partition_key
-                                .clone()
-                                .chain(last_row.measures.clone())
-                                .into_owned_row();
-                            if let Some(c) = builder.append_row(Op::Insert, out) {
-                                yield Message::Chunk(c);
-                            }
+                            out_rows.push(
+                                partition_key
+                                    .clone()
+                                    .chain(last_row.measures.clone())
+                                    .into_owned_row(),
+                            );
                             cursor = match skip {
                                 SkipMode::PastLastRow => m.end,
                                 SkipMode::ToNextRow => m.start + 1,
                             };
                         }
-
-                        // Compact: rows before `cursor` are consumed and can no longer start a match.
                         for consumed in state.rows.drain(0..cursor) {
-                            state_table.delete(Self::state_row(&partition_key, &consumed));
+                            state_table.delete(Self::state_row(partition_key, &consumed));
+                        }
+                    }
+
+                    let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
+                    for row in out_rows {
+                        if let Some(c) = builder.append_row(Op::Insert, row) {
+                            yield Message::Chunk(c);
                         }
                     }
                     if let Some(c) = builder.take() {
@@ -285,9 +308,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
                     yield Message::Barrier(barrier);
                     post_commit.post_yield_barrier(update_vnode_bitmap).await?;
-                }
-                Message::Watermark(_) => {
-                    // Watermark-driven finalization / state eviction is a later piece.
                 }
             }
         }

@@ -23,6 +23,7 @@ use super::{
     PredicatePushdownContext, ToBatch, ToStream, ToStreamContext, generic,
 };
 use super::generic::GenericPlanRef;
+use super::stream::StreamPlanNodeMetadata;
 use crate::binder::{BoundMeasure, BoundSymbolDefinition};
 use crate::error::Result;
 use crate::expr::ExprImpl;
@@ -196,20 +197,20 @@ impl ToStream for LogicalMatchRecognize {
         {
             bail!("MATCH_RECOGNIZE currently requires a non-empty PARTITION BY");
         }
-        if self
-            .core
-            .order_key_indices()
-            .expect("checked above")
-            .is_empty()
-        {
+        let order_indices = self.core.order_key_indices().expect("checked above");
+        let Some(&time_col) = order_indices.first() else {
             bail!("MATCH_RECOGNIZE requires an ORDER BY clause");
-        }
+        };
 
-        // NOTE (v1): the executor assumes input arrives in ORDER BY order per partition and
-        // finalises a match once a later row arrives. Full event-time correctness — buffering per
-        // partition ordered by the watermark column, processing as the watermark advances, and
-        // evicting stale state — is a dedicated follow-up.
         let stream_input = self.input().to_stream(ctx)?;
+        // Event-time contract: the executor buffers rows and finalises matches as the watermark on
+        // the leading ORDER BY column advances, so that column must carry a watermark. This mirrors
+        // Flink requiring a rowtime attribute on ORDER BY.
+        if !stream_input.watermark_columns().contains(time_col) {
+            bail!(
+                "MATCH_RECOGNIZE requires a watermark on the leading ORDER BY column for streaming"
+            );
+        }
         let core = generic::MatchRecognize {
             input: stream_input,
             partition_by: self.core.partition_by.clone(),
