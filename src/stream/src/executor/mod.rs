@@ -153,6 +153,7 @@ pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::{FilterExecutor, UpsertFilterExecutor};
 pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
+pub use match_recognize::{MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa, parse_pattern};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use iceberg_with_pk_index::{
