@@ -55,6 +55,9 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub define_exprs: Vec<NonStrictExpression>,
     pub nfa: Nfa,
     pub skip: SkipMode,
+    /// Indices into `measures` that are `CLASSIFIER()`: filled at emit with the pattern variable
+    /// bound to the match's last row rather than the (placeholder) pre-evaluated measure value.
+    pub classifier_measure_indices: Vec<usize>,
     pub state_table: StateTable<S>,
 }
 
@@ -71,6 +74,7 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     define_exprs: Vec<NonStrictExpression>,
     nfa: Nfa,
     skip: SkipMode,
+    classifier_measure_indices: Vec<usize>,
     state_table: StateTable<S>,
 }
 
@@ -116,6 +120,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             define_exprs: args.define_exprs,
             nfa: args.nfa,
             skip: args.skip,
+            classifier_measure_indices: args.classifier_measure_indices,
             state_table: args.state_table,
         }
     }
@@ -152,6 +157,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             define_exprs,
             nfa,
             skip,
+            classifier_measure_indices,
             mut state_table,
         } = *self;
 
@@ -254,7 +260,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     let w = watermark.val;
 
                     let mut out_rows: Vec<OwnedRow> = Vec::new();
-                    for (partition_key, state) in partitions.iter_mut() {
+                    for (partition_key, state) in &mut partitions {
                         // Sort by order key; the prefix with order_key <= w is final.
                         state.rows.sort_by(|a, b| a.order_key.default_cmp(&b.order_key));
                         let safe_len = state
@@ -268,7 +274,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             .collect();
 
                         let mut cursor = 0usize;
-                        for m in nfa.find_matches(&satisfied, skip) {
+                        for m in nfa.find_matches_labeled(&satisfied, skip) {
                             if m.start < cursor {
                                 continue;
                             }
@@ -277,10 +283,28 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 break;
                             }
                             let last_row = &state.rows[m.end - 1];
+                            let measures_row: Vec<Datum> = if classifier_measure_indices.is_empty() {
+                                last_row.measures.iter().map(|d| d.to_owned_datum()).collect()
+                            } else {
+                                // CLASSIFIER() = the pattern variable bound to the match's last row.
+                                let last_label = m.labels.last().cloned();
+                                last_row
+                                    .measures
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, d)| {
+                                        if classifier_measure_indices.contains(&i) {
+                                            last_label.clone().map(|s| ScalarImpl::Utf8(s.into()))
+                                        } else {
+                                            d.to_owned_datum()
+                                        }
+                                    })
+                                    .collect()
+                            };
                             out_rows.push(
                                 partition_key
                                     .clone()
-                                    .chain(last_row.measures.clone())
+                                    .chain(OwnedRow::new(measures_row))
                                     .into_owned_row(),
                             );
                             cursor = match skip {

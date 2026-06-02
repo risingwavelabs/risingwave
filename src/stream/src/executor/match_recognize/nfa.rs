@@ -180,8 +180,6 @@ impl Nfa {
 
 /// A match span together with the pattern variable assigned to each matched row.
 /// `labels[i]` is the variable that `rows[start + i]` was matched as.
-// TODO: remove allow(dead_code) once MEASURES navigation / CLASSIFIER consume the labels.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabeledMatch {
     pub start: usize,
@@ -189,12 +187,11 @@ pub struct LabeledMatch {
     pub labels: Vec<String>,
 }
 
-#[allow(dead_code)]
 impl Nfa {
     /// Greedy longest match starting at `rows[start]`, returning the per-row variable assignment
     /// along the chosen accepting path (the variable each consumed row was matched as). This is
-    /// what `MEASURES` navigation (FIRST/LAST), CLASSIFIER(), and aggregates over matched rows
-    /// consume. Returns `(end, labels)` where `labels.len() == end - start`, or `None`.
+    /// what `MEASURES` navigation (`FIRST`/`LAST`), `CLASSIFIER()`, and aggregates over matched
+    /// rows consume. Returns `(end, labels)` where `labels.len() == end - start`, or `None`.
     pub fn longest_match_labeled(
         &self,
         rows: &[BTreeSet<String>],

@@ -1152,6 +1152,9 @@ message MatchRecognizeNode {
   catalog.Table state_table = 8;
   // AFTER MATCH SKIP strategy: "past_last_row" (default) or "to_next_row".
   string after_match_skip = 9;
+  // Indices into `measures` that are CLASSIFIER(): the executor fills these with the pattern
+  // variable bound to the match's last row instead of evaluating the (placeholder) measure expr.
+  repeated uint32 classifier_measure_indices = 10;
 }
 
 message StreamNode {
