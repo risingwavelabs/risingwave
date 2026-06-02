@@ -31,6 +31,12 @@
 //!
 //! State: the buffered rows (the raw input row plus its satisfied pattern variables) are persisted
 //! to a state table — written through on arrival, deleted on consumption — and restored on recovery.
+//!
+//! Matching is not incremental: each advancing watermark re-runs the matcher from the start of the
+//! buffer rather than resuming partial NFA state. Eviction and empty-partition removal keep the
+//! buffer bounded to the live (unfinalized) window, so the work per watermark is bounded by that
+//! window rather than the partition's history; carrying incremental NFA state across watermarks is a
+//! possible future optimization.
 
 use std::collections::HashMap;
 use std::ops::Bound;
@@ -194,7 +200,10 @@ impl MeasureSlot {
                 .filter_map(|(j, _)| col_at(j))
                 .max_by(|a, b| a.default_cmp(b)),
             MeasureSlotKind::Sum => {
-                let agg = self.agg.as_ref().expect("sum slot has an aggregate kernel");
+                let agg = self
+                    .agg
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("MATCH_RECOGNIZE SUM measure slot has no kernel"))?;
                 // Feed the kernel a single-column chunk of the col values over the matching rows.
                 let input: Vec<(Op, OwnedRow)> = labels
                     .iter()
