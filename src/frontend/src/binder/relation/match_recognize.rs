@@ -282,6 +282,11 @@ impl Binder {
                 Field::with_name(m.expr.return_type(), m.name.clone()),
             ));
         }
+        // A partition can contain many matches, and two matches may produce byte-identical
+        // (partition + measures) output, so those columns are not a unique key. Append a hidden
+        // per-match id column (filled by the executor) to serve as the unique stream key. It is
+        // hidden, so `SELECT *` still returns only the partition and measure columns.
+        output_columns.push((true, Field::with_name(DataType::Int64, "_match_id")));
 
         let table_name = match alias {
             Some(TableAlias { name, .. }) => name.real_value(),

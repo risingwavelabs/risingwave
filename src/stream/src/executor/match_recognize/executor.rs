@@ -538,6 +538,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         yield Message::Barrier(barrier);
         state_table.init_epoch(first_epoch).await?;
 
+        // Monotonic per-match id, the hidden unique stream key. Seeded from the (meta-guaranteed
+        // monotonic) epoch and re-seeded up to each barrier's epoch, so ids strictly increase within
+        // a run and across restarts (a recovered run starts from an epoch greater than any before
+        // it). Combined with the partition columns this uniquely identifies every emitted match.
+        let mut next_match_id: i64 = first_epoch.curr as i64;
+
         // Recovery: rebuild the per-partition buffers from the state table.
         let mut partitions =
             Self::load_partitions(&state_table, input_arity, time_col, &partition_key_indices)
@@ -659,10 +665,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     let value = measure.expr.eval_row_infallible(&synthetic).await;
                                     measure_datums.push(value);
                                 }
+                                let match_id = next_match_id;
+                                next_match_id += 1;
                                 out_rows.push(
                                     partition_key
                                         .clone()
                                         .chain(OwnedRow::new(measure_datums))
+                                        .chain(OwnedRow::new(vec![Some(ScalarImpl::Int64(
+                                            match_id,
+                                        ))]))
                                         .into_owned_row(),
                                 );
                                 cursor = skip.next_pos(m.start, m.end, &m.labels);
@@ -706,6 +717,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     }
                 }
                 Message::Barrier(barrier) => {
+                    // Keep match ids ahead of the epoch clock so they stay unique across restarts.
+                    next_match_id = next_match_id.max(barrier.epoch.curr as i64);
                     let post_commit = state_table.commit(barrier.epoch).await?;
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
                     yield Message::Barrier(barrier);
