@@ -662,7 +662,7 @@ mod tests {
                 let block = sstable_store
                     .get_by_block_meta(
                         sstable.id,
-                        sstable.meta.estimated_size,
+                        sstable.estimated_size(),
                         desc.first_block_idx as usize + idx,
                         block_meta,
                         CachePolicy::Fill(Hint::Normal),

@@ -1384,15 +1384,9 @@ mod tests {
         let mut opt = default_builder_opt_for_test();
         opt.block_capacity = 128;
         opt.partitioned_meta_block_count = 2;
-        let (sstable, table_info) =
+        let (_sstable, table_info) =
             gen_test_sstable_with_table_ids(opt, 11, kv_pairs, sstable_store.clone(), vec![1])
                 .await;
-        assert_eq!(
-            sstable.meta.version,
-            crate::hummock::PARTITIONED_META_VERSION
-        );
-        assert!(sstable.meta.block_metas.is_empty());
-
         let mut iter =
             ConcatSstableIterator::for_test(vec![table_info], KeyRange::default(), sstable_store);
         iter.rewind().await.unwrap();

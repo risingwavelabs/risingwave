@@ -259,7 +259,7 @@ impl SstableWriter for BatchUploadWriter {
 
     async fn finish_partitioned_meta(
         mut self,
-        meta: SstableMeta,
+        _meta: SstableMeta,
         partitioned_index: MetaPartitionIndex,
         meta_shards: Vec<MetaShard>,
         encoded_meta: Vec<u8>,
@@ -282,7 +282,6 @@ impl SstableWriter for BatchUploadWriter {
                 .await?;
             self.sstable_store.insert_partitioned_meta_cache(
                 self.object_id,
-                meta,
                 partitioned_index,
                 meta_shards,
             )?;
@@ -418,7 +417,7 @@ impl SstableWriter for StreamingUploadWriter {
 
     async fn finish_partitioned_meta(
         mut self,
-        meta: SstableMeta,
+        _meta: SstableMeta,
         partitioned_index: MetaPartitionIndex,
         meta_shards: Vec<MetaShard>,
         encoded_meta: Vec<u8>,
@@ -439,7 +438,6 @@ impl SstableWriter for StreamingUploadWriter {
             self.object_uploader.finish().await?;
             self.sstable_store.insert_partitioned_meta_cache(
                 self.object_id,
-                meta,
                 partitioned_index,
                 meta_shards,
             )?;

@@ -270,7 +270,7 @@ impl BlockStreamIterator {
             largest_key.epoch_with_gap = EpochWithGap::new_max_epoch();
             largest_key.encode()
         } else {
-            self.sstable.meta.largest_key.clone()
+            self.sstable.largest_key().to_vec()
         }
     }
 
@@ -796,7 +796,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         if rest_data.is_valid() {
             // compact rest keys of the current block.
             let sstable_iter = rest_data.sstable_iter.as_mut().unwrap();
-            let target_key = FullKey::decode(&sstable_iter.sstable.meta.largest_key);
+            let target_key = FullKey::decode(sstable_iter.sstable.largest_key());
             if let Some(iter) = sstable_iter.iter.as_mut() {
                 self.executor.reset_watermark();
                 self.executor.run(iter, target_key).await?;
@@ -835,7 +835,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                 }
 
                 let (block, block_meta) = sstable_iter.download_next_block().await?.unwrap();
-                let largest_key = sstable_iter.sstable.meta.largest_key.clone();
+                let largest_key = sstable_iter.sstable.largest_key().to_vec();
                 let target_key = FullKey::decode(&largest_key);
                 sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
                 let mut iter = sstable_iter.iter.take().unwrap();
@@ -1345,10 +1345,6 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
-            output_sst.meta.version,
-            crate::hummock::PARTITIONED_META_VERSION
-        );
         let output_shards = sstable_store
             .get_partitioned_meta_shards(&output_sst, &mut StoreLocalStatistic::default())
             .await

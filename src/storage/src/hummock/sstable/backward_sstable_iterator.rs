@@ -131,7 +131,7 @@ impl BackwardSstableIterator {
                 .sstable_store
                 .get_by_block_meta(
                     self.sst.id,
-                    self.sst.meta.estimated_size,
+                    self.sst.estimated_size(),
                     idx,
                     &block_meta,
                     CachePolicy::Fill(Hint::Normal),

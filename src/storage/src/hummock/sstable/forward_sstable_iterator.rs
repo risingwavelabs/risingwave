@@ -370,7 +370,7 @@ impl SstableIterator {
         self.sstable_store
             .prefetch_blocks_by_block_metas(
                 self.sst.id,
-                self.sst.meta.estimated_size,
+                self.sst.estimated_size(),
                 idx,
                 &block_metas,
                 self.options.cache_policy,
@@ -397,7 +397,7 @@ impl SstableIterator {
             .sstable_store
             .get_by_block_meta(
                 self.sst.id,
-                self.sst.meta.estimated_size,
+                self.sst.estimated_size(),
                 idx,
                 &block_meta,
                 self.options.cache_policy,

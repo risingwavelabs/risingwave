@@ -47,7 +47,7 @@ use tokio::time::Instant;
 use super::{
     BatchUploadWriter, Block, BlockMeta, BlockResponse, MetaPartitionIndex, MetaShard,
     MetaShardDesc, PARTITIONED_META_VERSION, PartitionedSstableMeta, RecentFilter, Sstable,
-    SstableMeta, SstableWriterOptions, XorFilterReader, decode_meta_footer_version,
+    SstableWriterOptions, XorFilterReader, decode_meta_footer_version,
 };
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
@@ -1263,7 +1263,6 @@ impl SstableStore {
         let meta_path = self.get_sst_data_path(object_id);
         let stats_ptr = stats.remote_io_time.clone();
         let range = sstable_info_ref.meta_offset as usize..;
-        let meta_offset = sstable_info_ref.meta_offset;
         let read_recorder = ObjectReadRecorder::default();
         let read_recorder_for_fetch = read_recorder.clone();
 
@@ -1280,19 +1279,7 @@ impl SstableStore {
                 return Err(HummockError::invalid_format_version(version).into());
             }
             let index = MetaPartitionIndex::decode(&buf[..])?;
-            #[expect(deprecated)]
-            let meta = SstableMeta {
-                block_metas: vec![],
-                bloom_filter: vec![],
-                estimated_size: index.estimated_size,
-                key_count: index.key_count,
-                smallest_key: index.smallest_key.clone(),
-                largest_key: index.largest_key.clone(),
-                meta_offset,
-                monotonic_tombstone_events: vec![],
-                version: PARTITIONED_META_VERSION,
-            };
-            let meta_index = PartitionedSstableMeta::new(object_id, meta, index);
+            let meta_index = PartitionedSstableMeta::new(object_id, index);
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
             Ok::<_, anyhow::Error>((
@@ -1356,13 +1343,12 @@ impl SstableStore {
     pub fn insert_partitioned_meta_cache(
         &self,
         object_id: HummockSstableObjectId,
-        meta: SstableMeta,
         partitioned_index: MetaPartitionIndex,
         meta_shards: Vec<MetaShard>,
     ) -> HummockResult<()> {
         let encoded_index = partitioned_index.encode_to_bytes();
         let partitioned_index = MetaPartitionIndex::decode(&encoded_index)?;
-        let meta_index = PartitionedSstableMeta::new(object_id, meta, partitioned_index.clone());
+        let meta_index = PartitionedSstableMeta::new(object_id, partitioned_index.clone());
         self.meta_cache.insert_with_properties(
             HummockMetaCacheKey::MetaIndex(object_id),
             HummockMetaCacheEntry::MetaIndex(Box::new(meta_index)),
@@ -1640,15 +1626,22 @@ mod tests {
     async fn validate_sst(
         sstable_store: SstableStoreRef,
         info: &SstableInfo,
-        mut meta: SstableMeta,
+        meta: SstableMeta,
         x_range: Range<usize>,
     ) {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.meta_index(info, &mut stats).await.unwrap();
-        std::mem::take(&mut meta.bloom_filter);
-        assert_eq!(holder.meta, meta);
+        assert_eq!(holder.index.estimated_size, meta.estimated_size);
+        assert_eq!(holder.index.key_count, meta.key_count);
+        assert_eq!(holder.index.smallest_key, meta.smallest_key);
+        assert_eq!(holder.index.largest_key, meta.largest_key);
+        assert_eq!(holder.index.block_count as usize, meta.block_metas.len());
         let holder = sstable_store.meta_index(info, &mut stats).await.unwrap();
-        assert_eq!(holder.meta, meta);
+        assert_eq!(holder.index.estimated_size, meta.estimated_size);
+        assert_eq!(holder.index.key_count, meta.key_count);
+        assert_eq!(holder.index.smallest_key, meta.smallest_key);
+        assert_eq!(holder.index.largest_key, meta.largest_key);
+        assert_eq!(holder.index.block_count as usize, meta.block_metas.len());
         let mut iter = SstableIterator::new(
             holder,
             sstable_store,

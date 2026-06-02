@@ -228,13 +228,12 @@ impl Sstable {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PartitionedSstableMeta {
     pub id: HummockSstableObjectId,
-    pub meta: SstableMeta,
     pub index: MetaPartitionIndex,
 }
 
 impl PartitionedSstableMeta {
-    pub fn new(id: HummockSstableObjectId, meta: SstableMeta, index: MetaPartitionIndex) -> Self {
-        Self { id, meta, index }
+    pub fn new(id: HummockSstableObjectId, index: MetaPartitionIndex) -> Self {
+        Self { id, index }
     }
 
     #[inline(always)]
@@ -244,7 +243,22 @@ impl PartitionedSstableMeta {
 
     #[inline(always)]
     pub fn estimate_size(&self) -> usize {
-        8 /* id */ + self.meta.encoded_size() + self.index.encoded_size()
+        8 /* id */ + self.index.encoded_size()
+    }
+
+    #[inline(always)]
+    pub fn estimated_size(&self) -> u32 {
+        self.index.estimated_size
+    }
+
+    #[inline(always)]
+    pub fn smallest_key(&self) -> &[u8] {
+        &self.index.smallest_key
+    }
+
+    #[inline(always)]
+    pub fn largest_key(&self) -> &[u8] {
+        &self.index.largest_key
     }
 }
 
@@ -1149,14 +1163,13 @@ mod tests {
         assert!(s.filter_reader.is_empty());
 
         // Partitioned SST meta serde.
-        let partitioned_meta = PartitionedSstableMeta::new(42.into(), meta, index);
+        let partitioned_meta = PartitionedSstableMeta::new(42.into(), index);
 
         let buffer = bincode::serialize(&partitioned_meta).unwrap();
 
         let s: PartitionedSstableMeta = bincode::deserialize(&buffer).unwrap();
 
         assert_eq!(s.id, partitioned_meta.id);
-        assert_eq!(s.meta, partitioned_meta.meta);
         assert_eq!(s.index, partitioned_meta.index);
     }
 }

@@ -546,7 +546,7 @@ impl CacheRefillTask {
                 let pleft = &psst.block_metas[pblk].smallest_key;
                 let pright = if pblk + 1 == psst.block_count() {
                     // `largest_key` can be included or excluded, both are treated as included here
-                    &psst.sst.meta.largest_key
+                    psst.sst.largest_key()
                 } else {
                     &psst.block_metas[pblk + 1].smallest_key
                 };
@@ -903,14 +903,14 @@ impl<'a> Unit<'a> {
         Self { sst, blks }
     }
 
-    fn smallest_key(&self) -> &Vec<u8> {
+    fn smallest_key(&self) -> &[u8] {
         &self.sst.block_metas[self.blks.start].smallest_key
     }
 
     // `largest_key` can be included or excluded, both are treated as included here
-    fn largest_key(&self) -> &Vec<u8> {
+    fn largest_key(&self) -> &[u8] {
         if self.blks.end == self.sst.block_count() {
-            &self.sst.sst.meta.largest_key
+            self.sst.sst.largest_key()
         } else {
             &self.sst.block_metas[self.blks.end].smallest_key
         }
@@ -963,10 +963,6 @@ mod tests {
             .meta_index(&sst_info, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        assert_eq!(
-            holder.meta.version,
-            crate::hummock::PARTITIONED_META_VERSION
-        );
 
         let context = CacheRefillContext {
             config: Arc::new(CacheRefillConfig {
