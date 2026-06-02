@@ -365,6 +365,9 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     schema: Schema,
     chunk_size: usize,
     partition_key_indices: Vec<usize>,
+    /// Input column indices of all ORDER BY columns, used for a total sort of the buffer. The first
+    /// is the leading (watermark) column; the rest break ties so the row order is total.
+    order_key_indices: Vec<usize>,
     /// Input column index of the leading ORDER BY column (the watermark column).
     time_col: usize,
     measures: Vec<CompiledMeasure>,
@@ -409,6 +412,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             schema: args.schema,
             chunk_size: args.chunk_size,
             partition_key_indices: args.partition_key_indices,
+            order_key_indices: args.order_key_indices,
             time_col,
             measures: args.measures,
             defines,
@@ -446,6 +450,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             schema,
             chunk_size,
             partition_key_indices,
+            order_key_indices,
             time_col,
             measures,
             defines,
@@ -531,10 +536,21 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
 
                     let mut out_rows: Vec<OwnedRow> = Vec::new();
                     for (partition_key, state) in &mut partitions {
-                        // Sort by order key; the prefix with order_key <= w is final.
-                        state
-                            .rows
-                            .sort_by(|a, b| a.order_key.default_cmp(&b.order_key));
+                        // Total sort by all ORDER BY columns (lexicographically), so rows with equal
+                        // leading keys are still deterministically ordered. The leading column also
+                        // drives the watermark: the prefix with leading order_key <= w is final.
+                        state.rows.sort_by(|a, b| {
+                            order_key_indices
+                                .iter()
+                                .map(|&oc| {
+                                    a.row
+                                        .datum_at(oc)
+                                        .to_owned_datum()
+                                        .default_cmp(&b.row.datum_at(oc).to_owned_datum())
+                                })
+                                .find(|o| o.is_ne())
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        });
                         let safe_len = state
                             .rows
                             .iter()
