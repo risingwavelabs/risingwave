@@ -128,7 +128,7 @@ async fn test_failpoints_vacuum_and_metadata() {
     let mut stats = StoreLocalStatistic::default();
 
     let mut sstable_iter = SstableIterator::create(
-        sstable_store.sstable(&info, &mut stats).await.unwrap(),
+        sstable_store.meta_index(&info, &mut stats).await.unwrap(),
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
         &info,

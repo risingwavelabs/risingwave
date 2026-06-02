@@ -326,7 +326,7 @@ mod tests {
         mock_sstable_store,
     };
     use crate::hummock::test_utils::gen_test_sstable;
-    use crate::hummock::{BackwardSstableIterator, SstableStoreRef, TableHolder};
+    use crate::hummock::{BackwardSstableIterator, PartitionedSstableMetaHolder, SstableStoreRef};
 
     #[tokio::test]
     async fn test_backward_user_basic() {
@@ -886,7 +886,7 @@ mod tests {
     }
 
     async fn chaos_test_case(
-        handle: TableHolder,
+        handle: PartitionedSstableMetaHolder,
         start_bound: Bound<UserKey<Bytes>>,
         end_bound: Bound<UserKey<Bytes>>,
         truth: &ChaosTestTruth,
@@ -953,7 +953,7 @@ mod tests {
 
     async fn generate_chaos_test_data() -> (
         usize,
-        TableHolder,
+        PartitionedSstableMetaHolder,
         ChaosTestTruth,
         SstableStoreRef,
         SstableInfo,

@@ -20,7 +20,6 @@ use prometheus::core::Collector;
 use prometheus::proto::Metric;
 use risingwave_common::config::{MetricLevel, ServerConfig};
 use risingwave_common_heap_profiling::ProfileServiceImpl;
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_jni_core::jvm_runtime::dump_jvm_stack_traces;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
@@ -32,14 +31,16 @@ use risingwave_pb::monitor_service::{
     StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
-use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
+use risingwave_storage::hummock::{
+    Block, HummockMetaCacheEntry, HummockMetaCacheKey, SstableBlockIndex,
+};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
 use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
 use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
-type MetaCache = HybridCache<HummockSstableObjectId, Box<Sstable>>;
+type MetaCache = HybridCache<HummockMetaCacheKey, HummockMetaCacheEntry>;
 type BlockCache = HybridCache<SstableBlockIndex, Box<Block>>;
 
 #[derive(Clone)]

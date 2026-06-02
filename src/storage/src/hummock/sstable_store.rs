@@ -17,7 +17,7 @@ use std::collections::VecDeque;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
@@ -28,6 +28,7 @@ use foyer::{
 };
 use futures::{FutureExt, StreamExt, future};
 use prost::Message;
+use risingwave_hummock_sdk::key::UserKeyRangeRef;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::vector_index::{HnswGraphFileInfo, VectorFileInfo};
 use risingwave_hummock_sdk::{
@@ -44,8 +45,9 @@ use thiserror_ext::AsReport;
 use tokio::time::Instant;
 
 use super::{
-    BatchUploadWriter, Block, BlockMeta, BlockResponse, RecentFilter, Sstable, SstableMeta,
-    SstableWriterOptions,
+    BatchUploadWriter, Block, BlockMeta, BlockResponse, MetaPartitionIndex, MetaShard,
+    MetaShardDesc, PARTITIONED_META_VERSION, PartitionedSstableMeta, RecentFilter, Sstable,
+    SstableMeta, SstableWriterOptions, XorFilterReader, decode_meta_footer_version,
 };
 use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
@@ -112,7 +114,214 @@ impl<T> Deref for VectorMetaFileHolder<T> {
     }
 }
 
-pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MetaShardCacheKey {
+    sst_id: HummockSstableObjectId,
+    shard_idx: u32,
+    first_block_idx: u32,
+    offset: u64,
+    len: u32,
+    checksum: u64,
+    filter_type: u32,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HummockMetaCacheKey {
+    MetaIndex(HummockSstableObjectId),
+    MetaShard(MetaShardCacheKey),
+}
+
+#[derive(Serialize, Deserialize)]
+enum SerdeHummockMetaCacheEntry {
+    MetaIndex(Box<PartitionedSstableMeta>),
+    MetaShard(Box<MetaShard>),
+}
+
+#[derive(Clone)]
+pub enum HummockMetaCacheEntry {
+    MetaIndex(Box<PartitionedSstableMeta>),
+    MetaShard {
+        shard: Box<MetaShard>,
+        filter_reader: Box<XorFilterReader>,
+        skip_filter_in_serde: bool,
+    },
+}
+
+impl Serialize for HummockMetaCacheEntry {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::MetaIndex(meta_index) => {
+                SerdeHummockMetaCacheEntry::MetaIndex(meta_index.clone()).serialize(serializer)
+            }
+            Self::MetaShard {
+                shard,
+                filter_reader,
+                skip_filter_in_serde,
+            } => {
+                let mut shard = shard.clone();
+                if !*skip_filter_in_serde {
+                    shard.filter = filter_reader.encode_to_bytes();
+                }
+                SerdeHummockMetaCacheEntry::MetaShard(shard).serialize(serializer)
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for HummockMetaCacheEntry {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(
+            match SerdeHummockMetaCacheEntry::deserialize(deserializer)? {
+                SerdeHummockMetaCacheEntry::MetaIndex(meta_index) => Self::MetaIndex(meta_index),
+                SerdeHummockMetaCacheEntry::MetaShard(mut shard) => {
+                    let filter_reader = XorFilterReader::new(&shard.filter, &shard.block_metas);
+                    shard.filter.clear();
+                    Self::MetaShard {
+                        filter_reader: Box::new(filter_reader),
+                        shard,
+                        skip_filter_in_serde: false,
+                    }
+                }
+            },
+        )
+    }
+}
+
+impl HummockMetaCacheEntry {
+    pub fn estimate_size(&self) -> usize {
+        match self {
+            Self::MetaIndex(meta_index) => meta_index.estimate_size(),
+            Self::MetaShard {
+                shard,
+                filter_reader,
+                ..
+            } => {
+                std::mem::size_of::<MetaShard>()
+                    + shard.encoded_body_size()
+                    + filter_reader.estimate_size()
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct PartitionedSstableMetaHolder {
+    entry: HybridCacheEntry<HummockMetaCacheKey, HummockMetaCacheEntry>,
+}
+
+impl PartitionedSstableMetaHolder {
+    fn try_from_entry(
+        entry: HybridCacheEntry<HummockMetaCacheKey, HummockMetaCacheEntry>,
+        object_id: HummockSstableObjectId,
+    ) -> HummockResult<Self> {
+        let HummockMetaCacheEntry::MetaIndex(_) = &*entry else {
+            return Err(HummockError::decode_error(format!(
+                "expect partitioned meta index cache entry for object {}",
+                object_id
+            )));
+        };
+        Ok(Self { entry })
+    }
+
+    fn source(&self) -> foyer::Source {
+        self.entry.source()
+    }
+}
+
+impl Deref for PartitionedSstableMetaHolder {
+    type Target = PartitionedSstableMeta;
+
+    fn deref(&self) -> &Self::Target {
+        let HummockMetaCacheEntry::MetaIndex(meta_index) = &*self.entry else {
+            unreachable!("PartitionedSstableMetaHolder always stores meta index entries");
+        };
+        meta_index
+    }
+}
+
+impl AsRef<PartitionedSstableMeta> for PartitionedSstableMetaHolder {
+    fn as_ref(&self) -> &PartitionedSstableMeta {
+        self
+    }
+}
+
+impl std::fmt::Debug for PartitionedSstableMetaHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.deref().fmt(f)
+    }
+}
+
+#[derive(Clone)]
+pub struct MetaShardHolder {
+    entry: HybridCacheEntry<HummockMetaCacheKey, HummockMetaCacheEntry>,
+}
+
+impl MetaShardHolder {
+    fn try_from_entry(
+        entry: HybridCacheEntry<HummockMetaCacheKey, HummockMetaCacheEntry>,
+        object_id: HummockSstableObjectId,
+        shard_idx: u32,
+    ) -> HummockResult<Self> {
+        let HummockMetaCacheEntry::MetaShard { .. } = &*entry else {
+            return Err(HummockError::decode_error(format!(
+                "expect meta shard cache entry for object {} shard {}",
+                object_id, shard_idx
+            )));
+        };
+        Ok(Self { entry })
+    }
+}
+
+impl Deref for MetaShardHolder {
+    type Target = MetaShard;
+
+    fn deref(&self) -> &Self::Target {
+        let HummockMetaCacheEntry::MetaShard { shard, .. } = &*self.entry else {
+            unreachable!("MetaShardHolder always stores meta shard entries");
+        };
+        shard
+    }
+}
+
+impl MetaShardHolder {
+    pub fn to_meta_shard(&self) -> MetaShard {
+        let HummockMetaCacheEntry::MetaShard {
+            shard,
+            filter_reader,
+            ..
+        } = &*self.entry
+        else {
+            unreachable!("MetaShardHolder always stores meta shard entries");
+        };
+        let mut shard = (**shard).clone();
+        shard.filter = filter_reader.encode_to_bytes();
+        shard
+    }
+
+    pub fn may_match(&self, user_key_range: &UserKeyRangeRef<'_>, hash: u64) -> bool {
+        let HummockMetaCacheEntry::MetaShard {
+            shard,
+            filter_reader,
+            ..
+        } = &*self.entry
+        else {
+            unreachable!("MetaShardHolder always stores meta shard entries");
+        };
+        filter_reader.may_match(&shard.block_metas, user_key_range, hash)
+    }
+}
+
+impl std::fmt::Debug for MetaShardHolder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.deref().fmt(f)
+    }
+}
 
 pub type VectorBlockHolder = CacheEntry<(HummockVectorFileId, usize), Box<VectorBlock>>;
 
@@ -187,6 +396,51 @@ impl From<CachePolicy> for TracedCachePolicy {
     }
 }
 
+fn record_data_block_object_read(
+    stats: &mut StoreLocalStatistic,
+    policy: CachePolicy,
+    read_count: u64,
+    read_bytes: u64,
+) {
+    if read_count == 0 {
+        return;
+    }
+    match policy {
+        CachePolicy::Fill(_) => {
+            stats.sst_store_data_block_fill_read_count += read_count;
+            stats.sst_store_data_block_fill_read_bytes += read_bytes;
+        }
+        CachePolicy::NotFill => {
+            stats.sst_store_data_block_not_fill_read_count += read_count;
+            stats.sst_store_data_block_not_fill_read_bytes += read_bytes;
+        }
+        CachePolicy::Disable => {
+            stats.sst_store_data_block_disable_read_count += read_count;
+            stats.sst_store_data_block_disable_read_bytes += read_bytes;
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct ObjectReadRecorder {
+    count: Arc<AtomicU64>,
+    bytes: Arc<AtomicU64>,
+}
+
+impl ObjectReadRecorder {
+    fn record(&self, bytes: u64) {
+        self.count.fetch_add(1, Ordering::Relaxed);
+        self.bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    fn snapshot(&self) -> (u64, u64) {
+        (
+            self.count.load(Ordering::Relaxed),
+            self.bytes.load(Ordering::Relaxed),
+        )
+    }
+}
+
 pub struct SstableStoreConfig {
     pub store: ObjectStoreRef,
     pub path: String,
@@ -198,7 +452,7 @@ pub struct SstableStoreConfig {
     pub use_new_object_prefix_strategy: bool,
     pub skip_bloom_filter_in_serde: bool,
 
-    pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    pub meta_cache: HybridCache<HummockMetaCacheKey, HummockMetaCacheEntry>,
     pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
 
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
@@ -209,7 +463,7 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
 
-    meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
+    meta_cache: HybridCache<HummockMetaCacheKey, HummockMetaCacheEntry>,
     block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
@@ -273,7 +527,7 @@ impl SstableStore {
         let meta_cache = HybridCacheBuilder::new()
             .memory(meta_cache_capacity)
             .with_shards(1)
-            .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
+            .with_weighter(|_: &HummockMetaCacheKey, value: &HummockMetaCacheEntry| {
                 u64::BITS as usize / 8 + value.estimate_size()
             })
             .storage()
@@ -315,13 +569,19 @@ impl SstableStore {
         self.store
             .delete(self.get_sst_data_path(object_id).as_str())
             .await?;
-        self.meta_cache.remove(&object_id);
+        self.meta_cache
+            .clear()
+            .await
+            .map_err(HummockError::foyer_error)?;
         // TODO(MrCroxx): support group remove in foyer.
         Ok(())
     }
 
-    pub fn delete_cache(&self, object_id: HummockSstableObjectId) -> HummockResult<()> {
-        self.meta_cache.remove(&object_id);
+    pub async fn delete_cache(&self, _object_id: HummockSstableObjectId) -> HummockResult<()> {
+        self.meta_cache
+            .clear()
+            .await
+            .map_err(HummockError::foyer_error)?;
         Ok(())
     }
 
@@ -429,6 +689,8 @@ impl SstableStore {
                 return Err(HummockError::other("cancel by other thread"));
             }
         };
+        stats.sst_store_data_prefetch_read_count += 1;
+        stats.sst_store_data_prefetch_read_bytes += (end_offset - start_offset) as u64;
         let mut offset = 0;
         let mut blocks = VecDeque::default();
         for idx in block_index..end_index {
@@ -472,6 +734,17 @@ impl SstableStore {
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
+    ) -> HummockResult<BlockResponse> {
+        self.get_block_response_inner(sst, block_index, policy, None)
+            .await
+    }
+
+    async fn get_block_response_inner(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        policy: CachePolicy,
+        read_recorder: Option<ObjectReadRecorder>,
     ) -> HummockResult<BlockResponse> {
         let object_id = sst.id;
         let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
@@ -517,6 +790,9 @@ impl SstableStore {
                     return Err(HummockError::from(e));
                 }
             };
+            if let Some(read_recorder) = &read_recorder {
+                read_recorder.record(block_data.len() as u64);
+            }
             let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
             Ok(block)
         };
@@ -559,8 +835,13 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        let block_response = self.get_block_response(sst, block_index, policy).await?;
+        let read_recorder = ObjectReadRecorder::default();
+        let block_response = self
+            .get_block_response_inner(sst, block_index, policy, Some(read_recorder.clone()))
+            .await?;
         let block_holder = block_response.wait().await?;
+        let (read_count, read_bytes) = read_recorder.snapshot();
+        record_data_block_object_read(stats, policy, read_count, read_bytes);
         stats.cache_data_block_total += 1;
         if let BlockEntry::HybridCache(entry) = block_holder.entry()
             && entry.source() == foyer::Source::Outer
@@ -568,6 +849,220 @@ impl SstableStore {
             stats.cache_data_block_miss += 1;
         }
         Ok(block_holder)
+    }
+
+    pub async fn get_by_block_meta(
+        &self,
+        object_id: HummockSstableObjectId,
+        file_size: u32,
+        block_index: usize,
+        block_meta: &BlockMeta,
+        policy: CachePolicy,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<BlockHolder> {
+        let range =
+            block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
+        let uncompressed_capacity = block_meta.uncompressed_size as usize;
+        let store = self.store.clone();
+        let data_path = Arc::new(self.get_sst_data_path(object_id));
+
+        let disable_cache: fn() -> bool = || {
+            fail_point!("disable_block_cache", |_| true);
+            false
+        };
+
+        let policy = if disable_cache() {
+            CachePolicy::Disable
+        } else {
+            policy
+        };
+
+        let idx = SstableBlockIndex {
+            sst_id: object_id,
+            block_idx: block_index as _,
+        };
+
+        self.recent_filter
+            .extend([(object_id, usize::MAX), (object_id, block_index)]);
+
+        let read_recorder = ObjectReadRecorder::default();
+        let read_recorder_for_fetch = read_recorder.clone();
+        let fetch_block = async move {
+            let block_data = match store
+                .read(&data_path, range.clone())
+                .instrument_await("get_block_response".verbose())
+                .await
+            {
+                Ok(data) => data,
+                Err(e) => {
+                    tracing::error!(
+                        "get_block_response meet error when read {:?} from sst-{}, total length: {}",
+                        range,
+                        object_id,
+                        file_size
+                    );
+                    return Err(HummockError::from(e));
+                }
+            };
+            read_recorder_for_fetch.record(block_data.len() as u64);
+            let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
+            Ok(block)
+        };
+
+        let block_holder = match policy {
+            CachePolicy::Fill(hint) => {
+                let properties = HybridCacheProperties::default().with_hint(hint);
+                let fetch = self.block_cache.get_or_fetch(&idx, || {
+                    fetch_block.map(|res| res.map(|block| (block, properties)))
+                });
+                BlockResponse::Fetch(fetch).wait().await?
+            }
+            CachePolicy::NotFill => {
+                match self
+                    .block_cache
+                    .get(&idx)
+                    .await
+                    .map_err(HummockError::foyer_error)?
+                {
+                    Some(entry) => BlockHolder::from_hybrid_cache_entry(entry),
+                    _ => BlockHolder::from_owned_block(fetch_block.await?),
+                }
+            }
+            CachePolicy::Disable => BlockHolder::from_owned_block(fetch_block.await?),
+        };
+
+        let (read_count, read_bytes) = read_recorder.snapshot();
+        record_data_block_object_read(stats, policy, read_count, read_bytes);
+        stats.cache_data_block_total += 1;
+        if let BlockEntry::HybridCache(entry) = block_holder.entry()
+            && entry.source() == foyer::Source::Outer
+        {
+            stats.cache_data_block_miss += 1;
+        }
+        Ok(block_holder)
+    }
+
+    pub async fn get_meta_shard(
+        &self,
+        object_id: HummockSstableObjectId,
+        filter_type: u32,
+        desc: &MetaShardDesc,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<MetaShard> {
+        Ok(self
+            .get_meta_shard_holder(object_id, filter_type, desc, stats)
+            .await?
+            .to_meta_shard())
+    }
+
+    pub async fn get_meta_shard_holder(
+        &self,
+        object_id: HummockSstableObjectId,
+        filter_type: u32,
+        desc: &MetaShardDesc,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<MetaShardHolder> {
+        let cache_key = HummockMetaCacheKey::MetaShard(MetaShardCacheKey {
+            sst_id: object_id,
+            shard_idx: desc.shard_idx,
+            first_block_idx: desc.first_block_idx,
+            offset: desc.offset,
+            len: desc.len,
+            checksum: desc.checksum,
+            filter_type,
+        });
+        stats.cache_meta_block_total += 1;
+        stats.partitioned_meta_shard_cache_total += 1;
+
+        let store = self.store.clone();
+        let data_path = self.get_sst_data_path(object_id);
+        let range = desc.offset as usize..desc.offset as usize + desc.len as usize;
+        let checksum = desc.checksum;
+        let shard_idx = desc.shard_idx;
+        let first_block_idx = desc.first_block_idx;
+        let expected_block_count = desc.block_count;
+        let expected_smallest_key = desc.smallest_key.clone();
+        let stats_ptr = stats.remote_io_time.clone();
+        let read_recorder = ObjectReadRecorder::default();
+        let read_recorder_for_fetch = read_recorder.clone();
+        let skip_filter_in_serde = self.skip_bloom_filter_in_serde;
+
+        let entry = self
+            .meta_cache
+            .get_or_fetch(&cache_key, || async move {
+                let now = Instant::now();
+                let buf = store
+                    .read(&data_path, range)
+                    .instrument_await("get_meta_shard_response".verbose())
+                    .await?;
+                read_recorder_for_fetch.record(buf.len() as u64);
+                super::xxhash64_verify(&buf[..], checksum)?;
+                let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+                stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
+                let shard = MetaShard::decode_body(
+                    shard_idx,
+                    first_block_idx,
+                    expected_block_count,
+                    &expected_smallest_key,
+                    filter_type,
+                    &buf[..],
+                )?;
+                let mut shard = shard;
+                let filter_reader = XorFilterReader::new(&shard.filter, &shard.block_metas);
+                shard.filter.clear();
+                Ok::<_, anyhow::Error>((
+                    HummockMetaCacheEntry::MetaShard {
+                        filter_reader: Box::new(filter_reader),
+                        shard: Box::new(shard),
+                        skip_filter_in_serde,
+                    },
+                    HybridCacheProperties::default().with_hint(Hint::Normal),
+                ))
+            })
+            .await
+            .map_err(HummockError::foyer_error)?;
+
+        if entry.source() == foyer::Source::Outer {
+            stats.cache_meta_block_miss += 1;
+            stats.partitioned_meta_shard_cache_miss += 1;
+        }
+        let (read_count, read_bytes) = read_recorder.snapshot();
+        if read_count > 0 {
+            stats.sst_store_meta_shard_read_count += read_count;
+            stats.sst_store_meta_shard_read_bytes += read_bytes;
+            stats.partitioned_meta_shard_read_bytes += read_bytes;
+        }
+        MetaShardHolder::try_from_entry(entry, object_id, shard_idx)
+    }
+
+    pub async fn get_partitioned_block_metas(
+        &self,
+        sstable: &PartitionedSstableMeta,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<Vec<BlockMeta>> {
+        Ok(self
+            .get_partitioned_meta_shards(sstable, stats)
+            .await?
+            .into_iter()
+            .flat_map(|shard| shard.block_metas)
+            .collect())
+    }
+
+    pub async fn get_partitioned_meta_shards(
+        &self,
+        sstable: &PartitionedSstableMeta,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<Vec<MetaShard>> {
+        let index = &sstable.index;
+
+        let mut shards = Vec::with_capacity(index.shard_count as usize);
+        for desc in &index.shards {
+            let shard = self
+                .get_meta_shard(sstable.id, index.filter_type, desc, stats)
+                .await?;
+            shards.push(shard);
+        }
+        Ok(shards)
     }
 
     pub async fn get_vector_file_meta(
@@ -700,41 +1195,66 @@ impl SstableStore {
             .map_err(HummockError::foyer_error)
     }
 
-    pub async fn sstable_cached(
+    pub async fn meta_index_cached(
         &self,
         sst_obj_id: HummockSstableObjectId,
-    ) -> HummockResult<Option<HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>>> {
-        self.meta_cache
-            .get(&sst_obj_id)
+    ) -> HummockResult<Option<PartitionedSstableMetaHolder>> {
+        let entry = self
+            .meta_cache
+            .get(&HummockMetaCacheKey::MetaIndex(sst_obj_id))
             .await
-            .map_err(HummockError::foyer_error)
+            .map_err(HummockError::foyer_error)?;
+        entry
+            .map(|entry| PartitionedSstableMetaHolder::try_from_entry(entry, sst_obj_id))
+            .transpose()
     }
 
-    /// Returns `table_holder`
-    pub async fn sstable(
+    pub async fn meta_index(
         &self,
         sstable_info_ref: &SstableInfo,
         stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<TableHolder> {
+    ) -> HummockResult<PartitionedSstableMetaHolder> {
         let object_id = sstable_info_ref.object_id;
         let store = self.store.clone();
         let meta_path = self.get_sst_data_path(object_id);
         let stats_ptr = stats.remote_io_time.clone();
         let range = sstable_info_ref.meta_offset as usize..;
-        let skip_bloom_filter_in_serde = self.skip_bloom_filter_in_serde;
+        let meta_offset = sstable_info_ref.meta_offset;
+        let read_recorder = ObjectReadRecorder::default();
+        let read_recorder_for_fetch = read_recorder.clone();
 
-        let fetch = self.meta_cache.get_or_fetch(&object_id, || async move {
+        let cache_key = HummockMetaCacheKey::MetaIndex(object_id);
+        let fetch = self.meta_cache.get_or_fetch(&cache_key, || async move {
             let now = Instant::now();
             let buf = store
                 .read(&meta_path, range)
                 .instrument_await("get_meta_response".verbose())
                 .await?;
-            let meta = SstableMeta::decode(&buf[..])?;
-
-            let sst = Sstable::new(object_id, meta, skip_bloom_filter_in_serde);
+            read_recorder_for_fetch.record(buf.len() as u64);
+            let version = decode_meta_footer_version(&buf[..])?;
+            if version != PARTITIONED_META_VERSION {
+                return Err(HummockError::invalid_format_version(version).into());
+            }
+            let index = MetaPartitionIndex::decode(&buf[..])?;
+            #[expect(deprecated)]
+            let meta = SstableMeta {
+                block_metas: vec![],
+                bloom_filter: vec![],
+                estimated_size: index.estimated_size,
+                key_count: index.key_count,
+                smallest_key: index.smallest_key.clone(),
+                largest_key: index.largest_key.clone(),
+                meta_offset,
+                monotonic_tombstone_events: vec![],
+                version: PARTITIONED_META_VERSION,
+            };
+            let meta_index = PartitionedSstableMeta::new(object_id, meta, index);
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-            Ok::<_, anyhow::Error>(Box::new(sst))
+            Ok::<_, anyhow::Error>((
+                HummockMetaCacheEntry::MetaIndex(Box::new(meta_index)),
+                HybridCacheProperties::default().with_hint(Hint::Normal),
+            ))
         });
 
         stats.cache_meta_block_total += 1;
@@ -746,6 +1266,22 @@ impl SstableStore {
             && entry.source() == foyer::Source::Outer
         {
             stats.cache_meta_block_miss += 1;
+        }
+        let (meta_read_count, meta_read_bytes) = read_recorder.snapshot();
+        let entry =
+            entry.and_then(|entry| PartitionedSstableMetaHolder::try_from_entry(entry, object_id));
+        if meta_read_count > 0 && entry.is_ok() {
+            stats.sst_store_meta_index_read_count += meta_read_count;
+            stats.sst_store_meta_index_read_bytes += meta_read_bytes;
+        }
+        if let Ok(ref entry) = entry {
+            stats.partitioned_meta_index_cache_total += 1;
+            if entry.source() == foyer::Source::Outer {
+                stats.partitioned_meta_index_cache_miss += 1;
+            }
+            if meta_read_count > 0 {
+                stats.partitioned_meta_index_read_bytes += meta_read_bytes;
+            }
         }
         entry
     }
@@ -773,9 +1309,75 @@ impl SstableStore {
         BatchUploadWriter::new(object_id, self, options)
     }
 
-    pub fn insert_meta_cache(&self, object_id: HummockSstableObjectId, meta: SstableMeta) {
-        let sst = Sstable::new(object_id, meta, self.skip_bloom_filter_in_serde);
-        self.meta_cache.insert(object_id, Box::new(sst));
+    pub fn insert_partitioned_meta_cache(
+        &self,
+        object_id: HummockSstableObjectId,
+        meta: SstableMeta,
+        partitioned_index: MetaPartitionIndex,
+        meta_shards: Vec<MetaShard>,
+    ) -> HummockResult<()> {
+        let encoded_index = partitioned_index.encode_to_bytes();
+        let partitioned_index = MetaPartitionIndex::decode(&encoded_index)?;
+        let meta_index = PartitionedSstableMeta::new(object_id, meta, partitioned_index.clone());
+        self.meta_cache.insert_with_properties(
+            HummockMetaCacheKey::MetaIndex(object_id),
+            HummockMetaCacheEntry::MetaIndex(Box::new(meta_index)),
+            HybridCacheProperties::default().with_hint(Hint::Normal),
+        );
+        for desc in &partitioned_index.shards {
+            let Some(shard) = meta_shards.get(desc.shard_idx as usize) else {
+                return Err(HummockError::decode_error(format!(
+                    "missing partitioned meta shard {} for object {}",
+                    desc.shard_idx, object_id
+                )));
+            };
+            if shard.shard_idx != desc.shard_idx {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard order mismatch for object {}: desc {} shard {}",
+                    object_id, desc.shard_idx, shard.shard_idx
+                )));
+            }
+            let shard_body = shard.encode_body_to_bytes();
+            if shard_body.len() != desc.len as usize {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard {} length mismatch for object {}: desc {} body {}",
+                    desc.shard_idx,
+                    object_id,
+                    desc.len,
+                    shard_body.len()
+                )));
+            }
+            super::xxhash64_verify(&shard_body, desc.checksum)?;
+            let shard = MetaShard::decode_body(
+                desc.shard_idx,
+                desc.first_block_idx,
+                desc.block_count,
+                &desc.smallest_key,
+                partitioned_index.filter_type,
+                &shard_body,
+            )?;
+            let mut shard = shard;
+            let filter_reader = XorFilterReader::new(&shard.filter, &shard.block_metas);
+            shard.filter.clear();
+            self.meta_cache.insert_with_properties(
+                HummockMetaCacheKey::MetaShard(MetaShardCacheKey {
+                    sst_id: object_id,
+                    shard_idx: desc.shard_idx,
+                    first_block_idx: desc.first_block_idx,
+                    offset: desc.offset,
+                    len: desc.len,
+                    checksum: desc.checksum,
+                    filter_type: partitioned_index.filter_type,
+                }),
+                HummockMetaCacheEntry::MetaShard {
+                    filter_reader: Box::new(filter_reader),
+                    shard: Box::new(shard),
+                    skip_filter_in_serde: self.skip_bloom_filter_in_serde,
+                },
+                HybridCacheProperties::default().with_hint(Hint::Normal),
+            );
+        }
+        Ok(())
     }
 
     pub fn insert_block_cache(
@@ -825,7 +1427,7 @@ impl SstableStore {
         Ok(BlockDataStream::new(reader, metas.to_vec()))
     }
 
-    pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, Box<Sstable>> {
+    pub fn meta_cache(&self) -> &HybridCache<HummockMetaCacheKey, HummockMetaCacheEntry> {
         &self.meta_cache
     }
 
@@ -854,7 +1456,7 @@ mod tests {
     use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
-    use super::{SstableStoreRef, SstableWriterOptions};
+    use super::{HummockMetaCacheEntry, SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
     use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -862,13 +1464,84 @@ mod tests {
         default_builder_opt_for_test, gen_test_sstable_data, put_sst,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStore};
+    use crate::hummock::{
+        BlockMeta, CachePolicy, FilterBuilder, MetaShard, SstableIterator, SstableMeta,
+        SstableStore, Xor16FilterBuilder, XorFilterReader,
+    };
     use crate::monitor::StoreLocalStatistic;
 
     const SST_ID: u64 = 1;
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
         HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec())
+    }
+
+    fn test_meta_shard_cache_entry(skip_filter_in_serde: bool) -> HummockMetaCacheEntry {
+        let mut filter_builder = Xor16FilterBuilder::new(1);
+        filter_builder.add_key(b"test-key", 1);
+        let filter = filter_builder.finish(None);
+        assert!(!filter.is_empty());
+
+        let mut shard = MetaShard {
+            shard_idx: 0,
+            first_block_idx: 0,
+            block_metas: vec![BlockMeta::default()],
+            filter_type: 1,
+            filter,
+        };
+        let filter_reader = XorFilterReader::new(&shard.filter, &shard.block_metas);
+        shard.filter.clear();
+        HummockMetaCacheEntry::MetaShard {
+            shard: Box::new(shard),
+            filter_reader: Box::new(filter_reader),
+            skip_filter_in_serde,
+        }
+    }
+
+    #[test]
+    fn test_meta_shard_cache_entry_serde_aligns_sstable_filter_cache() {
+        let entry = test_meta_shard_cache_entry(false);
+        let HummockMetaCacheEntry::MetaShard {
+            shard,
+            filter_reader,
+            ..
+        } = &entry
+        else {
+            unreachable!();
+        };
+        assert!(shard.filter.is_empty());
+        let expected_filter = filter_reader.encode_to_bytes();
+        assert!(!expected_filter.is_empty());
+
+        let buf = bincode::serialize(&entry).unwrap();
+        let decoded: HummockMetaCacheEntry = bincode::deserialize(&buf).unwrap();
+        let HummockMetaCacheEntry::MetaShard {
+            shard,
+            filter_reader,
+            ..
+        } = decoded
+        else {
+            unreachable!();
+        };
+        assert!(shard.filter.is_empty());
+        assert_eq!(filter_reader.encode_to_bytes(), expected_filter);
+    }
+
+    #[test]
+    fn test_meta_shard_cache_entry_skip_filter_serde() {
+        let entry = test_meta_shard_cache_entry(true);
+        let buf = bincode::serialize(&entry).unwrap();
+        let decoded: HummockMetaCacheEntry = bincode::deserialize(&buf).unwrap();
+        let HummockMetaCacheEntry::MetaShard {
+            shard,
+            filter_reader,
+            ..
+        } = decoded
+        else {
+            unreachable!();
+        };
+        assert!(shard.filter.is_empty());
+        assert!(filter_reader.is_empty());
     }
 
     async fn validate_sst(
@@ -878,10 +1551,10 @@ mod tests {
         x_range: Range<usize>,
     ) {
         let mut stats = StoreLocalStatistic::default();
-        let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
+        let holder = sstable_store.meta_index(info, &mut stats).await.unwrap();
         std::mem::take(&mut meta.bloom_filter);
         assert_eq!(holder.meta, meta);
-        let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
+        let holder = sstable_store.meta_index(info, &mut stats).await.unwrap();
         assert_eq!(holder.meta, meta);
         let mut iter = SstableIterator::new(
             holder,

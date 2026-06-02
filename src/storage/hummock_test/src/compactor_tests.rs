@@ -313,7 +313,7 @@ pub(crate) mod tests {
         for output_table in &output_tables {
             let table = storage
                 .sstable_store()
-                .sstable(output_table, &mut StoreLocalStatistic::default())
+                .meta_index(output_table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap();
             let target_table_size = storage.storage_opts().sstable_size_mb * (1 << 20);
@@ -631,7 +631,7 @@ pub(crate) mod tests {
         for table in tables_from_version {
             key_count += global_storage
                 .sstable_store()
-                .sstable(&table, &mut StoreLocalStatistic::default())
+                .meta_index(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
                 .meta
@@ -833,7 +833,7 @@ pub(crate) mod tests {
         for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(&table, &mut StoreLocalStatistic::default())
+                .meta_index(&table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
                 .meta
@@ -1040,7 +1040,7 @@ pub(crate) mod tests {
         for table in tables_from_version {
             key_count += storage
                 .sstable_store()
-                .sstable(table, &mut StoreLocalStatistic::default())
+                .meta_index(table, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap()
                 .meta
@@ -1229,11 +1229,21 @@ pub(crate) mod tests {
         let mut normal_tables = Vec::with_capacity(ret.len());
         let mut stats = StoreLocalStatistic::default();
         for sst_info in &fast_ret {
-            fast_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
+            fast_tables.push(
+                sstable_store
+                    .meta_index(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
         }
 
         for sst_info in &ret {
-            normal_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
+            normal_tables.push(
+                sstable_store
+                    .meta_index(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
         }
         assert!(fast_ret.iter().all(|f| f.file_size < capacity * 6 / 5));
         assert!(can_concat(&ret));
@@ -1858,11 +1868,21 @@ pub(crate) mod tests {
         let mut normal_tables = Vec::with_capacity(ret.len());
         let mut stats = StoreLocalStatistic::default();
         for sst_info in &fast_ret {
-            fast_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
+            fast_tables.push(
+                sstable_store
+                    .meta_index(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
         }
 
         for sst_info in &ret {
-            normal_tables.push(sstable_store.sstable(sst_info, &mut stats).await.unwrap());
+            normal_tables.push(
+                sstable_store
+                    .meta_index(sst_info, &mut stats)
+                    .await
+                    .unwrap(),
+            );
         }
         assert!(can_concat(&ret));
         assert!(can_concat(&fast_ret));

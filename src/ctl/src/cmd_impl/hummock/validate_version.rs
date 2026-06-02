@@ -123,11 +123,14 @@ async fn print_user_key_in_sst(
 ) -> anyhow::Result<()> {
     // The implementation is mostly the same as `sst_dump`, with additional filter by `user_key`.
     let mut dummy = StoreLocalStatistic::default();
-    let sst_metadata = sstable_store.sstable(sst, &mut dummy).await?;
+    let sst_metadata = sstable_store.meta_index(sst, &mut dummy).await?;
+    let block_metas = sstable_store
+        .get_partitioned_block_metas(&sst_metadata, &mut dummy)
+        .await?;
     dummy.ignore();
     let data_path = sstable_store.get_sst_data_path(sst_metadata.id);
     let mut is_first = true;
-    for block_meta in &sst_metadata.meta.block_metas {
+    for block_meta in &block_metas {
         let range =
             block_meta.offset as usize..block_meta.offset as usize + block_meta.len as usize;
         let block_data = sstable_store.store().read(&data_path, range).await?;

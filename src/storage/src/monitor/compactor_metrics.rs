@@ -45,6 +45,8 @@ pub struct CompactorMetrics {
     pub sstable_file_size: Histogram,
     pub sstable_avg_key_size: Histogram,
     pub sstable_avg_value_size: Histogram,
+    pub sst_store_read_counts: GenericCounterVec<AtomicU64>,
+    pub sst_store_read_bytes: GenericCounterVec<AtomicU64>,
     pub iter_scan_key_counts: GenericCounterVec<AtomicU64>,
     pub write_build_l0_bytes: GenericCounter<AtomicU64>,
     pub sstable_distinct_epoch_count: Histogram,
@@ -216,6 +218,22 @@ impl CompactorMetrics {
         )
         .unwrap();
 
+        let sst_store_read_counts = register_int_counter_vec_with_registry!(
+            "compactor_sst_store_read_counts",
+            "Total number of object reads issued by SST store during compaction",
+            &["type"],
+            registry
+        )
+        .unwrap();
+
+        let sst_store_read_bytes = register_int_counter_vec_with_registry!(
+            "compactor_sst_store_read_bytes",
+            "Total bytes read from object store by SST store during compaction",
+            &["type"],
+            registry
+        )
+        .unwrap();
+
         let write_build_l0_bytes = register_int_counter_with_registry!(
             "compactor_write_build_l0_bytes",
             "Total size of compaction files size that have been written to object store from shared buffer",
@@ -281,6 +299,8 @@ impl CompactorMetrics {
             sstable_file_size,
             sstable_avg_key_size,
             sstable_avg_value_size,
+            sst_store_read_counts,
+            sst_store_read_bytes,
             iter_scan_key_counts,
             write_build_l0_bytes,
             sstable_distinct_epoch_count,

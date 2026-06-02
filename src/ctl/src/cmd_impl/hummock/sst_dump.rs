@@ -36,7 +36,7 @@ use risingwave_pb::id::TableId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    Block, BlockHolder, BlockIterator, CompressionAlgorithm, Sstable, SstableStore,
+    Block, BlockHolder, BlockIterator, BlockMeta, CompressionAlgorithm, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -239,11 +239,12 @@ pub async fn sst_dump_via_sstable_store(
         vnode_statistics: None,
     }
     .into();
-    let sstable_cache = sstable_store
-        .sstable(&sstable_info, &mut StoreLocalStatistic::default())
-        .await?;
-    let sstable = sstable_cache.as_ref();
+    let mut stats = StoreLocalStatistic::default();
+    let sstable = sstable_store.meta_index(&sstable_info, &mut stats).await?;
     let sstable_meta = &sstable.meta;
+    let block_metas = sstable_store
+        .get_partitioned_block_metas(&sstable, &mut stats)
+        .await?;
     let smallest_key = FullKey::decode(&sstable_meta.smallest_key);
     let largest_key = FullKey::decode(&sstable_meta.largest_key);
 
@@ -262,15 +263,15 @@ pub async fn sst_dump_via_sstable_store(
     println!("Key Count: {}", sstable_meta.key_count);
     println!("Version: {}", sstable_meta.version);
 
-    println!("Block Count: {}", sstable.block_count());
-    for i in 0..sstable.block_count() {
+    println!("Block Count: {}", block_metas.len());
+    for (i, block_meta) in block_metas.iter().enumerate() {
         if let Some(block_id) = &args.block_id {
             if *block_id == i as u64 {
-                print_block(i, table_data, sstable_store, sstable, args).await?;
+                print_block(i, table_data, sstable_store, object_id, block_meta, args).await?;
                 return Ok(());
             }
         } else {
-            print_block(i, table_data, sstable_store, sstable, args).await?;
+            print_block(i, table_data, sstable_store, object_id, block_meta, args).await?;
         }
     }
     Ok(())
@@ -294,15 +295,15 @@ async fn print_block(
     block_idx: usize,
     table_data: &TableData,
     sstable_store: &SstableStore,
-    sst: &Sstable,
+    object_id: HummockSstableObjectId,
+    block_meta: &BlockMeta,
     args: &SstDumpArgs,
 ) -> anyhow::Result<()> {
     println!("\tBlock {}", block_idx);
     println!("\t-----------");
 
-    let block_meta = &sst.meta.block_metas[block_idx];
     let smallest_key = FullKey::decode(&block_meta.smallest_key);
-    let data_path = sstable_store.get_sst_data_path(sst.id);
+    let data_path = sstable_store.get_sst_data_path(object_id);
 
     // Retrieve encoded block data in bytes
     let store = sstable_store.store();

@@ -44,6 +44,26 @@ pub struct StoreLocalStatistic {
     pub cache_data_block_total: u64,
     pub cache_meta_block_miss: u64,
     pub cache_meta_block_total: u64,
+    pub sst_store_data_block_fill_read_count: u64,
+    pub sst_store_data_block_fill_read_bytes: u64,
+    pub sst_store_data_block_not_fill_read_count: u64,
+    pub sst_store_data_block_not_fill_read_bytes: u64,
+    pub sst_store_data_block_disable_read_count: u64,
+    pub sst_store_data_block_disable_read_bytes: u64,
+    pub sst_store_data_prefetch_read_count: u64,
+    pub sst_store_data_prefetch_read_bytes: u64,
+    pub sst_store_meta_index_read_count: u64,
+    pub sst_store_meta_index_read_bytes: u64,
+    pub sst_store_meta_shard_read_count: u64,
+    pub sst_store_meta_shard_read_bytes: u64,
+    pub partitioned_meta_index_cache_miss: u64,
+    pub partitioned_meta_index_cache_total: u64,
+    pub partitioned_meta_index_read_bytes: u64,
+    pub partitioned_meta_shard_cache_miss: u64,
+    pub partitioned_meta_shard_cache_total: u64,
+    pub partitioned_meta_shard_read_bytes: u64,
+    pub partitioned_meta_shard_filter_positive_counts: u64,
+    pub partitioned_meta_shard_filter_negative_counts: u64,
     pub cache_data_prefetch_count: u64,
     pub cache_data_prefetch_block_count: u64,
 
@@ -158,6 +178,50 @@ impl StoreLocalStatistic {
                 .inc_by(self.total_key_count);
         }
 
+        let report_sst_store_read = |metric_type: &str, count: u64, bytes: u64| {
+            if count > 0 {
+                metrics
+                    .sst_store_read_counts
+                    .with_label_values(&[metric_type])
+                    .inc_by(count);
+            }
+            if bytes > 0 {
+                metrics
+                    .sst_store_read_bytes
+                    .with_label_values(&[metric_type])
+                    .inc_by(bytes);
+            }
+        };
+        report_sst_store_read(
+            "data_block_fill",
+            self.sst_store_data_block_fill_read_count,
+            self.sst_store_data_block_fill_read_bytes,
+        );
+        report_sst_store_read(
+            "data_block_not_fill",
+            self.sst_store_data_block_not_fill_read_count,
+            self.sst_store_data_block_not_fill_read_bytes,
+        );
+        report_sst_store_read(
+            "data_block_disable",
+            self.sst_store_data_block_disable_read_count,
+            self.sst_store_data_block_disable_read_bytes,
+        );
+        report_sst_store_read(
+            "data_prefetch",
+            self.sst_store_data_prefetch_read_count,
+            self.sst_store_data_prefetch_read_bytes,
+        );
+        report_sst_store_read(
+            "meta_index",
+            self.sst_store_meta_index_read_count,
+            self.sst_store_meta_index_read_bytes,
+        );
+        report_sst_store_read(
+            "meta_shard",
+            self.sst_store_meta_shard_read_count,
+            self.sst_store_meta_shard_read_bytes,
+        );
         #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
         if self.reported.fetch_or(true, Ordering::Relaxed) || self.added.load(Ordering::Relaxed) {
             tracing::error!("double reported\n{:#?}", self);
@@ -212,6 +276,26 @@ impl StoreLocalStatistic {
             || self.cache_data_block_total != 0
             || self.cache_meta_block_miss != 0
             || self.cache_meta_block_total != 0
+            || self.sst_store_data_block_fill_read_count != 0
+            || self.sst_store_data_block_fill_read_bytes != 0
+            || self.sst_store_data_block_not_fill_read_count != 0
+            || self.sst_store_data_block_not_fill_read_bytes != 0
+            || self.sst_store_data_block_disable_read_count != 0
+            || self.sst_store_data_block_disable_read_bytes != 0
+            || self.sst_store_data_prefetch_read_count != 0
+            || self.sst_store_data_prefetch_read_bytes != 0
+            || self.sst_store_meta_index_read_count != 0
+            || self.sst_store_meta_index_read_bytes != 0
+            || self.sst_store_meta_shard_read_count != 0
+            || self.sst_store_meta_shard_read_bytes != 0
+            || self.partitioned_meta_index_cache_miss != 0
+            || self.partitioned_meta_index_cache_total != 0
+            || self.partitioned_meta_index_read_bytes != 0
+            || self.partitioned_meta_shard_cache_miss != 0
+            || self.partitioned_meta_shard_cache_total != 0
+            || self.partitioned_meta_shard_read_bytes != 0
+            || self.partitioned_meta_shard_filter_positive_counts != 0
+            || self.partitioned_meta_shard_filter_negative_counts != 0
             || self.cache_data_prefetch_count != 0
             || self.skip_multi_version_key_count != 0
             || self.skip_delete_key_count != 0
@@ -241,6 +325,26 @@ struct LocalStoreMetrics {
     cache_data_block_miss: LabelGuardedLocalIntCounter,
     cache_meta_block_total: LabelGuardedLocalIntCounter,
     cache_meta_block_miss: LabelGuardedLocalIntCounter,
+    sst_store_data_block_fill_read_count: LabelGuardedLocalIntCounter,
+    sst_store_data_block_fill_read_bytes: LabelGuardedLocalIntCounter,
+    sst_store_data_block_not_fill_read_count: LabelGuardedLocalIntCounter,
+    sst_store_data_block_not_fill_read_bytes: LabelGuardedLocalIntCounter,
+    sst_store_data_block_disable_read_count: LabelGuardedLocalIntCounter,
+    sst_store_data_block_disable_read_bytes: LabelGuardedLocalIntCounter,
+    sst_store_data_prefetch_read_count: LabelGuardedLocalIntCounter,
+    sst_store_data_prefetch_read_bytes: LabelGuardedLocalIntCounter,
+    sst_store_meta_index_read_count: LabelGuardedLocalIntCounter,
+    sst_store_meta_index_read_bytes: LabelGuardedLocalIntCounter,
+    sst_store_meta_shard_read_count: LabelGuardedLocalIntCounter,
+    sst_store_meta_shard_read_bytes: LabelGuardedLocalIntCounter,
+    partitioned_meta_index_cache_total: LabelGuardedLocalIntCounter,
+    partitioned_meta_index_cache_miss: LabelGuardedLocalIntCounter,
+    partitioned_meta_index_read_bytes: LabelGuardedLocalIntCounter,
+    partitioned_meta_shard_cache_total: LabelGuardedLocalIntCounter,
+    partitioned_meta_shard_cache_miss: LabelGuardedLocalIntCounter,
+    partitioned_meta_shard_read_bytes: LabelGuardedLocalIntCounter,
+    partitioned_meta_shard_filter_positive_counts: LabelGuardedLocalIntCounter,
+    partitioned_meta_shard_filter_negative_counts: LabelGuardedLocalIntCounter,
     cache_data_prefetch_count: LabelGuardedLocalIntCounter,
     cache_data_prefetch_block_count: LabelGuardedLocalIntCounter,
     remote_io_time: LocalHistogram,
@@ -297,6 +401,88 @@ impl LocalStoreMetrics {
         let cache_meta_block_miss = metrics
             .sst_store_block_request_counts
             .with_guarded_label_values(&[table_id_label, "meta_miss"])
+            .local();
+
+        let sst_store_data_block_fill_read_count = metrics
+            .sst_store_read_counts
+            .with_guarded_label_values(&[table_id_label, "data_block_fill"])
+            .local();
+        let sst_store_data_block_fill_read_bytes = metrics
+            .sst_store_read_bytes
+            .with_guarded_label_values(&[table_id_label, "data_block_fill"])
+            .local();
+        let sst_store_data_block_not_fill_read_count = metrics
+            .sst_store_read_counts
+            .with_guarded_label_values(&[table_id_label, "data_block_not_fill"])
+            .local();
+        let sst_store_data_block_not_fill_read_bytes = metrics
+            .sst_store_read_bytes
+            .with_guarded_label_values(&[table_id_label, "data_block_not_fill"])
+            .local();
+        let sst_store_data_block_disable_read_count = metrics
+            .sst_store_read_counts
+            .with_guarded_label_values(&[table_id_label, "data_block_disable"])
+            .local();
+        let sst_store_data_block_disable_read_bytes = metrics
+            .sst_store_read_bytes
+            .with_guarded_label_values(&[table_id_label, "data_block_disable"])
+            .local();
+        let sst_store_data_prefetch_read_count = metrics
+            .sst_store_read_counts
+            .with_guarded_label_values(&[table_id_label, "data_prefetch"])
+            .local();
+        let sst_store_data_prefetch_read_bytes = metrics
+            .sst_store_read_bytes
+            .with_guarded_label_values(&[table_id_label, "data_prefetch"])
+            .local();
+        let sst_store_meta_index_read_count = metrics
+            .sst_store_read_counts
+            .with_guarded_label_values(&[table_id_label, "meta_index"])
+            .local();
+        let sst_store_meta_index_read_bytes = metrics
+            .sst_store_read_bytes
+            .with_guarded_label_values(&[table_id_label, "meta_index"])
+            .local();
+        let sst_store_meta_shard_read_count = metrics
+            .sst_store_read_counts
+            .with_guarded_label_values(&[table_id_label, "meta_shard"])
+            .local();
+        let sst_store_meta_shard_read_bytes = metrics
+            .sst_store_read_bytes
+            .with_guarded_label_values(&[table_id_label, "meta_shard"])
+            .local();
+
+        let partitioned_meta_index_cache_total = metrics
+            .partitioned_meta_counts
+            .with_guarded_label_values(&[table_id_label, "index_cache_total"])
+            .local();
+        let partitioned_meta_index_cache_miss = metrics
+            .partitioned_meta_counts
+            .with_guarded_label_values(&[table_id_label, "index_cache_miss"])
+            .local();
+        let partitioned_meta_index_read_bytes = metrics
+            .partitioned_meta_counts
+            .with_guarded_label_values(&[table_id_label, "index_read_bytes"])
+            .local();
+        let partitioned_meta_shard_cache_total = metrics
+            .partitioned_meta_counts
+            .with_guarded_label_values(&[table_id_label, "shard_cache_total"])
+            .local();
+        let partitioned_meta_shard_cache_miss = metrics
+            .partitioned_meta_counts
+            .with_guarded_label_values(&[table_id_label, "shard_cache_miss"])
+            .local();
+        let partitioned_meta_shard_read_bytes = metrics
+            .partitioned_meta_counts
+            .with_guarded_label_values(&[table_id_label, "shard_read_bytes"])
+            .local();
+        let partitioned_meta_shard_filter_positive_counts = metrics
+            .partitioned_meta_counts
+            .with_guarded_label_values(&[table_id_label, "shard_filter_positive"])
+            .local();
+        let partitioned_meta_shard_filter_negative_counts = metrics
+            .partitioned_meta_counts
+            .with_guarded_label_values(&[table_id_label, "shard_filter_negative"])
             .local();
 
         let remote_io_time = metrics
@@ -383,6 +569,26 @@ impl LocalStoreMetrics {
             cache_data_block_miss,
             cache_meta_block_total,
             cache_meta_block_miss,
+            sst_store_data_block_fill_read_count,
+            sst_store_data_block_fill_read_bytes,
+            sst_store_data_block_not_fill_read_count,
+            sst_store_data_block_not_fill_read_bytes,
+            sst_store_data_block_disable_read_count,
+            sst_store_data_block_disable_read_bytes,
+            sst_store_data_prefetch_read_count,
+            sst_store_data_prefetch_read_bytes,
+            sst_store_meta_index_read_count,
+            sst_store_meta_index_read_bytes,
+            sst_store_meta_shard_read_count,
+            sst_store_meta_shard_read_bytes,
+            partitioned_meta_index_cache_total,
+            partitioned_meta_index_cache_miss,
+            partitioned_meta_index_read_bytes,
+            partitioned_meta_shard_cache_total,
+            partitioned_meta_shard_cache_miss,
+            partitioned_meta_shard_read_bytes,
+            partitioned_meta_shard_filter_positive_counts,
+            partitioned_meta_shard_filter_negative_counts,
             cache_data_prefetch_count,
             cache_data_prefetch_block_count,
             remote_io_time,
@@ -486,6 +692,26 @@ add_local_metrics_count!(
     cache_data_block_miss,
     cache_meta_block_total,
     cache_meta_block_miss,
+    sst_store_data_block_fill_read_count,
+    sst_store_data_block_fill_read_bytes,
+    sst_store_data_block_not_fill_read_count,
+    sst_store_data_block_not_fill_read_bytes,
+    sst_store_data_block_disable_read_count,
+    sst_store_data_block_disable_read_bytes,
+    sst_store_data_prefetch_read_count,
+    sst_store_data_prefetch_read_bytes,
+    sst_store_meta_index_read_count,
+    sst_store_meta_index_read_bytes,
+    sst_store_meta_shard_read_count,
+    sst_store_meta_shard_read_bytes,
+    partitioned_meta_index_cache_total,
+    partitioned_meta_index_cache_miss,
+    partitioned_meta_index_read_bytes,
+    partitioned_meta_shard_cache_total,
+    partitioned_meta_shard_cache_miss,
+    partitioned_meta_shard_read_bytes,
+    partitioned_meta_shard_filter_positive_counts,
+    partitioned_meta_shard_filter_negative_counts,
     cache_data_prefetch_count,
     cache_data_prefetch_block_count,
     skip_multi_version_key_count,

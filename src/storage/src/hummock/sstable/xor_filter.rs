@@ -511,25 +511,6 @@ impl XorFilterReader {
         }
     }
 
-    pub fn get_block_raw_filter(&self, block_index: usize) -> Vec<u8> {
-        match &self.filter {
-            XorFilter::BlockXor8(reader) => {
-                Xor8FilterBuilder::build_from_xor8(&reader.filters[block_index])
-            }
-            XorFilter::BlockXor16(reader) => {
-                Xor16FilterBuilder::build_from_xor16(&reader.filters[block_index])
-            }
-            _ => unreachable!("get_block_raw_filter requires a blocked xor filter"),
-        }
-    }
-
-    pub fn is_block_based_filter(&self) -> bool {
-        matches!(
-            self.filter,
-            XorFilter::BlockXor8(_) | XorFilter::BlockXor16(_)
-        )
-    }
-
     pub fn encode_to_bytes(&self) -> Vec<u8> {
         match &self.filter {
             XorFilter::Xor8(filter) => Xor8FilterBuilder::build_from_xor8(filter),
@@ -663,27 +644,45 @@ mod tests {
         let sst = ret.sst_info.sst_info.clone();
         ret.writer_output.await.unwrap().unwrap();
         let sstable = sstable_store
-            .sstable(&sst, &mut StoreLocalStatistic::default())
+            .meta_index(&sst, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        if let XorFilter::BlockXor16(reader) = &sstable.filter_reader.filter {
-            for idx in 0..sstable.meta.block_metas.len() {
-                let resp = sstable_store
-                    .get_block_response(&sstable, idx, CachePolicy::Fill(Hint::Normal))
+        let index = &sstable.index;
+        for desc in &index.shards {
+            let shard = sstable_store
+                .get_meta_shard_holder(
+                    sstable.id,
+                    index.filter_type,
+                    desc,
+                    &mut StoreLocalStatistic::default(),
+                )
+                .await
+                .unwrap();
+            for (idx, block_meta) in shard.block_metas.iter().enumerate() {
+                let block = sstable_store
+                    .get_by_block_meta(
+                        sstable.id,
+                        sstable.meta.estimated_size,
+                        desc.first_block_idx as usize + idx,
+                        block_meta,
+                        CachePolicy::Fill(Hint::Normal),
+                        &mut StoreLocalStatistic::default(),
+                    )
                     .await
                     .unwrap();
-                let block = resp.wait().await.unwrap();
                 let mut iter = BlockIterator::new(block);
                 iter.seek_to_first();
                 while iter.is_valid() {
-                    let k = iter.key().user_key.encode();
-                    let h = Sstable::hash_for_filter(&k, iter.key().user_key.table_id.as_raw_id());
-                    assert!(reader.filters[idx].contains(&h));
+                    let key_ref = iter.key().user_key;
+                    let encoded_key = key_ref.encode();
+                    let hash = Sstable::hash_for_filter(&encoded_key, key_ref.table_id.as_raw_id());
+                    assert!(
+                        shard
+                            .may_match(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+                    );
                     iter.next();
                 }
             }
-        } else {
-            panic!();
         }
     }
 

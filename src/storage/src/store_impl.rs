@@ -29,7 +29,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SyncResult};
+use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use risingwave_object_store::object::build_remote_object_store;
 use thiserror_ext::AsReport;
 
@@ -42,8 +42,8 @@ use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::sharded::ShardedRecentFilter;
 use crate::hummock::simple::SimpleRecentFilter;
 use crate::hummock::{
-    Block, BlockCacheEventListener, HummockError, HummockStorage, Sstable, SstableBlockIndex,
-    SstableStore, SstableStoreConfig,
+    Block, BlockCacheEventListener, HummockError, HummockMetaCacheEntry, HummockMetaCacheKey,
+    HummockStorage, SstableBlockIndex, SstableStore, SstableStoreConfig,
 };
 use crate::memory::MemoryStateStore;
 use crate::memory::sled::SledStateStore;
@@ -703,7 +703,7 @@ impl StateStoreImpl {
                 .memory(opts.meta_cache_capacity_mb * MB)
                 .with_shards(opts.meta_cache_shard_num)
                 .with_eviction_config(opts.meta_cache_eviction_config.clone())
-                .with_weighter(|_: &HummockSstableObjectId, value: &Box<Sstable>| {
+                .with_weighter(|_: &HummockMetaCacheKey, value: &HummockMetaCacheEntry| {
                     u64::BITS as usize / 8 + value.estimate_size()
                 })
                 .storage();

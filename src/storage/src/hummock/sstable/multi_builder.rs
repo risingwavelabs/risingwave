@@ -46,6 +46,8 @@ pub trait TableBuilderFactory {
     type Writer: SstableWriter<Output = UploadJoinHandle>;
     type Filter: FilterBuilder;
     async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>>;
+
+    fn partitioned_meta_block_count(&self) -> usize;
 }
 
 /// A wrapper for [`SstableBuilder`] which automatically split key-value pairs into multiple tables,
@@ -178,6 +180,33 @@ where
         let builder = self.current_builder.as_mut().unwrap();
         builder
             .add_raw_block(buf, filter_data, smallest_key, largest_key, block_meta)
+            .await
+    }
+
+    pub fn can_add_raw_meta_shard(&self, block_count: usize) -> bool {
+        self.current_builder
+            .as_ref()
+            .map(|builder| builder.can_add_raw_meta_shard(block_count))
+            .unwrap_or_else(|| self.builder_factory.partitioned_meta_block_count() == block_count)
+    }
+
+    pub async fn add_raw_meta_shard(
+        &mut self,
+        blocks: Vec<(Bytes, BlockMeta)>,
+        filter_data: Vec<u8>,
+        largest_key: Vec<u8>,
+    ) -> HummockResult<bool> {
+        if self.current_builder.is_none() {
+            if let Some(progress) = &self.task_progress {
+                progress.inc_num_pending_write_io()
+            }
+            let builder = self.builder_factory.open_builder().await?;
+            self.current_builder = Some(builder);
+        }
+
+        let builder = self.current_builder.as_mut().unwrap();
+        builder
+            .add_raw_meta_shard(blocks, filter_data, largest_key)
             .await
     }
 
@@ -406,6 +435,10 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
         );
 
         Ok(builder)
+    }
+
+    fn partitioned_meta_block_count(&self) -> usize {
+        self.options.partitioned_meta_block_count
     }
 }
 

@@ -33,6 +33,7 @@ use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::{
     EpochWithGap, HummockEpoch, HummockReadEpoch, HummockSstableObjectId,
 };
+use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
@@ -48,8 +49,8 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, FilterBuilder, LruCache, Sstable, SstableBuilder,
-    SstableBuilderOptions, SstableStoreRef, SstableWriter, TableHolder, Xor16FilterBuilder,
+    CachePolicy, FilterBuilder, LruCache, PartitionedSstableMetaHolder, Sstable, SstableBuilder,
+    SstableBuilderOptions, SstableStoreRef, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -189,38 +190,15 @@ pub async fn gen_test_sstable_data(
 pub async fn put_sst(
     sst_object_id: u64,
     data: Bytes,
-    mut meta: SstableMeta,
+    meta: SstableMeta,
     sstable_store: SstableStoreRef,
-    mut options: SstableWriterOptions,
+    _options: SstableWriterOptions,
     table_ids: Vec<u32>,
 ) -> HummockResult<SstableInfo> {
-    options.policy = CachePolicy::NotFill;
-    let mut writer = sstable_store
-        .clone()
-        .create_sst_writer(sst_object_id, options);
-    for block_meta in &meta.block_metas {
-        let offset = block_meta.offset as usize;
-        let end_offset = offset + block_meta.len as usize;
-        writer
-            .write_block(&data[offset..end_offset], block_meta)
-            .await?;
-    }
-
-    // dummy
-    let bloom_filter = {
-        let mut filter_builder = BlockedXor16FilterBuilder::new(100);
-        for _ in &meta.block_metas {
-            filter_builder.switch_block(None);
-        }
-
-        filter_builder.finish(None)
-    };
-
-    meta.meta_offset = writer.data_len() as u64;
-    meta.bloom_filter = bloom_filter;
     let sst = SstableInfoInner {
         object_id: sst_object_id.into(),
         sst_id: sst_object_id.into(),
+        bloom_filter_kind: BloomFilterType::Sstable,
         key_range: KeyRange {
             left: Bytes::from(meta.smallest_key.clone()),
             right: Bytes::from(meta.largest_key.clone()),
@@ -230,11 +208,13 @@ pub async fn put_sst(
         meta_offset: meta.meta_offset,
         uncompressed_file_size: meta.estimated_size as u64,
         table_ids: table_ids.into_iter().map(Into::into).collect(),
+        filter_type: PbSstableFilterType::SstableFilterXor16,
         ..Default::default()
     }
     .into();
-    let writer_output = writer.finish(meta).await?;
-    writer_output.await.unwrap()?;
+    sstable_store
+        .put_sst_data(sst_object_id.into(), data)
+        .await?;
     Ok(sst)
 }
 
@@ -300,7 +280,7 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     object_id: u64,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
-) -> (TableHolder, SstableInfo) {
+) -> (PartitionedSstableMetaHolder, SstableInfo) {
     let table_id_to_vnode = HashMap::from_iter(vec![(
         TableId::default().as_raw_id(),
         VirtualNode::COUNT_FOR_TEST,
@@ -322,7 +302,7 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
 
     (
         sstable_store
-            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .meta_index(&sst_info, &mut StoreLocalStatistic::default())
             .await
             .unwrap(),
         sst_info,
@@ -335,7 +315,7 @@ pub async fn gen_test_sstable_with_table_ids<B: AsRef<[u8]> + Clone + Default + 
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
     table_ids: Vec<u32>,
-) -> (TableHolder, SstableInfo) {
+) -> (PartitionedSstableMetaHolder, SstableInfo) {
     let table_id_to_vnode = table_ids
         .iter()
         .map(|table_id| (*table_id, VirtualNode::COUNT_FOR_TEST))
@@ -355,7 +335,7 @@ pub async fn gen_test_sstable_with_table_ids<B: AsRef<[u8]> + Clone + Default + 
 
     (
         sstable_store
-            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .meta_index(&sst_info, &mut StoreLocalStatistic::default())
             .await
             .unwrap(),
         sst_info,
@@ -377,7 +357,7 @@ pub async fn gen_test_sstable_info<B: AsRef<[u8]> + Clone + Default + Eq>(
     let table_id_to_watermark_serde =
         HashMap::from_iter(vec![(TableId::default().as_raw_id(), None)]);
 
-    gen_test_sstable_impl::<_, BlockedXor16FilterBuilder>(
+    gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
@@ -454,7 +434,7 @@ pub async fn gen_default_test_sstable(
     opts: SstableBuilderOptions,
     object_id: u64,
     sstable_store: SstableStoreRef,
-) -> (TableHolder, SstableInfo) {
+) -> (PartitionedSstableMetaHolder, SstableInfo) {
     gen_test_sstable(
         opts,
         object_id,

@@ -12,24 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::*;
 use std::sync::Arc;
 
-use await_tree::{InstrumentAwait, SpanExt};
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::EpochWithGap;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
-use crate::hummock::block_stream::BlockStream;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
-use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::sstable::{BlockMeta, MetaShardDesc, SstableIteratorReadOptions};
+use crate::hummock::{
+    BlockIterator, MetaShardHolder, PartitionedSstableMetaHolder, SstableStoreRef,
+};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
     fn create(
-        sstable: TableHolder,
+        sstable: PartitionedSstableMetaHolder,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
@@ -44,11 +44,8 @@ pub struct SstableIterator {
     /// Current block index.
     cur_idx: usize,
 
-    preload_stream: Option<Box<dyn BlockStream>>,
     /// Reference to the sst
-    pub sst: TableHolder,
-    preload_end_block_idx: usize,
-    preload_retry_times: usize,
+    pub sst: PartitionedSstableMetaHolder,
 
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
@@ -57,17 +54,19 @@ pub struct SstableIterator {
     // used for checking if the block is valid, filter out the block that is not in the table-id range
     block_start_idx_inclusive: usize,
     block_end_idx_inclusive: usize,
+    read_table_id_range: (TableId, TableId),
+
+    partitioned_shard_idx: Option<u32>,
+    partitioned_shard: Option<MetaShardHolder>,
 }
 
 impl SstableIterator {
     pub fn new(
-        sstable: TableHolder,
+        sstable: PartitionedSstableMetaHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
-        let mut block_start_idx_inclusive = 0;
-        let mut block_end_idx_inclusive = sstable.meta.block_metas.len() - 1;
         assert!(
             !sstable_info_ref.table_ids.is_empty(),
             "SstableIterator: SST {} (object {}) has empty table_ids",
@@ -84,120 +83,31 @@ impl SstableIterator {
             read_table_id_range.0,
             read_table_id_range.1
         );
-        let block_meta_count = sstable.meta.block_metas.len();
+
+        let index = &sstable.index;
+        let block_meta_count = index.block_count as usize;
         assert!(block_meta_count > 0);
-        assert!(
-            sstable.meta.block_metas[0].table_id() <= read_table_id_range.0,
-            "table id {} not found table_ids in block_meta {:?}",
-            read_table_id_range.0,
-            sstable
-                .meta
-                .block_metas
-                .iter()
-                .map(|meta| meta.table_id())
-                .collect::<Vec<_>>()
-        );
-        assert!(
-            sstable.meta.block_metas[block_meta_count - 1].table_id() >= read_table_id_range.1,
-            "table id {} not found table_ids in block_meta {:?}",
-            read_table_id_range.1,
-            sstable
-                .meta
-                .block_metas
-                .iter()
-                .map(|meta| meta.table_id())
-                .collect::<Vec<_>>()
-        );
-
-        while block_start_idx_inclusive < block_meta_count
-            && sstable.meta.block_metas[block_start_idx_inclusive].table_id()
-                < read_table_id_range.0
-        {
-            block_start_idx_inclusive += 1;
-        }
-        // We assume that the table id read must exist in the sstable, otherwise it is a fatal error.
-        assert!(
-            block_start_idx_inclusive < block_meta_count,
-            "table id {} not found table_ids in block_meta {:?}",
-            read_table_id_range.0,
-            sstable
-                .meta
-                .block_metas
-                .iter()
-                .map(|meta| meta.table_id())
-                .collect::<Vec<_>>()
-        );
-
-        while block_end_idx_inclusive > block_start_idx_inclusive
-            && sstable.meta.block_metas[block_end_idx_inclusive].table_id() > read_table_id_range.1
-        {
-            block_end_idx_inclusive -= 1;
-        }
-        assert!(
-            block_end_idx_inclusive >= block_start_idx_inclusive,
-            "block_end_idx_inclusive {} < block_start_idx_inclusive {} block_meta_count {}",
-            block_end_idx_inclusive,
-            block_start_idx_inclusive,
-            block_meta_count
-        );
+        let (block_start_idx_inclusive, block_end_idx_inclusive) = index
+            .block_range_for_table_id_range(read_table_id_range)
+            .unwrap_or_else(|| {
+                panic!(
+                    "table id range {} - {} not found in partitioned meta shard descs",
+                    read_table_id_range.0, read_table_id_range.1
+                )
+            });
 
         Self {
             block_iter: None,
             cur_idx: 0,
-            preload_stream: None,
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
             options,
-            preload_end_block_idx: 0,
-            preload_retry_times: 0,
             block_start_idx_inclusive,
             block_end_idx_inclusive,
-        }
-    }
-
-    fn init_block_prefetch_range(&mut self, start_idx: usize) {
-        assert!(
-            start_idx >= self.block_start_idx_inclusive
-                && start_idx <= self.block_end_idx_inclusive
-        );
-
-        self.preload_end_block_idx = 0;
-        if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
-            let block_metas = &self.sst.meta.block_metas
-                [self.block_start_idx_inclusive..=self.block_end_idx_inclusive];
-            let next_to_start_idx = start_idx + 1;
-            if next_to_start_idx <= self.block_end_idx_inclusive {
-                let end_idx = match bound {
-                    Unbounded => self.block_end_idx_inclusive + 1,
-                    Included(dest_key) => {
-                        let dest_key = dest_key.as_ref();
-                        self.block_start_idx_inclusive
-                            + block_metas.partition_point(|block_meta| {
-                                FullKey::decode(&block_meta.smallest_key).user_key <= dest_key
-                            })
-                    }
-                    Excluded(end_key) => {
-                        let end_key = end_key.as_ref();
-                        self.block_start_idx_inclusive
-                            + block_metas.partition_point(|block_meta| {
-                                FullKey::decode(&block_meta.smallest_key).user_key < end_key
-                            })
-                    }
-                };
-
-                // `preload_end_block_idx` is exclusive
-                if next_to_start_idx < end_idx {
-                    assert!(
-                        end_idx <= self.block_end_idx_inclusive + 1,
-                        "end_idx {} > block_end_idx_inclusive {} next_to_start_idx {}",
-                        end_idx,
-                        self.block_end_idx_inclusive,
-                        next_to_start_idx
-                    );
-                    self.preload_end_block_idx = end_idx;
-                }
-            }
+            read_table_id_range,
+            partitioned_shard_idx: None,
+            partitioned_shard: None,
         }
     }
 
@@ -219,127 +129,120 @@ impl SstableIterator {
         // do cooperative scheduling.
         tokio::task::consume_budget().await;
 
-        let mut hit_cache = false;
         if idx > self.block_end_idx_inclusive {
             self.block_iter = None;
             return Ok(());
         }
-        // Maybe the previous preload stream breaks on some cached block, so here we can try to preload some data again
-        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
-            match self
-                .sstable_store
-                .prefetch_blocks(
-                    &self.sst,
-                    idx,
-                    self.preload_end_block_idx,
-                    self.options.cache_policy,
-                    &mut self.stats,
-                )
-                .instrument_await("prefetch_blocks".verbose())
-                .await
-            {
-                Ok(preload_stream) => self.preload_stream = Some(preload_stream),
-                Err(e) => {
-                    tracing::warn!(error = %e.as_report(), "failed to create stream for prefetch data, fall back to block get")
-                }
-            }
+        self.seek_partitioned_idx(idx, seek_key).await
+    }
+
+    fn partitioned_desc_by_block_idx(&self, idx: usize) -> Option<MetaShardDesc> {
+        let index = &self.sst.index;
+        let shard_idx = index
+            .shards
+            .partition_point(|shard| shard.first_block_idx as usize <= idx)
+            .saturating_sub(1);
+        let desc = index.shards.get(shard_idx)?;
+        if idx < desc.first_block_idx as usize + desc.block_count as usize {
+            Some(desc.clone())
+        } else {
+            None
+        }
+    }
+
+    async fn ensure_partitioned_shard_loaded(&mut self, desc: &MetaShardDesc) -> HummockResult<()> {
+        if self.partitioned_shard_idx == Some(desc.shard_idx) {
+            return Ok(());
         }
 
-        if self
-            .preload_stream
-            .as_ref()
-            .map(|preload_stream| preload_stream.next_block_index() <= idx)
-            .unwrap_or(false)
-        {
-            while let Some(preload_stream) = self.preload_stream.as_mut() {
-                let mut ret = Ok(());
-                while preload_stream.next_block_index() < idx {
-                    if let Err(e) = preload_stream.next_block().await {
-                        ret = Err(e);
-                        break;
-                    }
-                }
-                assert_eq!(preload_stream.next_block_index(), idx);
-                if ret.is_ok() {
-                    match preload_stream.next_block().await {
-                        Ok(Some(block)) => {
-                            hit_cache = true;
-                            self.block_iter = Some(BlockIterator::new(block));
-                            break;
-                        }
-                        Ok(None) => {
-                            self.preload_stream.take();
-                        }
-                        Err(e) => {
-                            self.preload_stream.take();
-                            ret = Err(e);
-                        }
-                    }
-                } else {
-                    self.preload_stream.take();
-                }
-                if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
-                    if let Err(e) = ret {
-                        tracing::warn!(error = %e.as_report(), "recreate stream because the connection to remote storage has closed");
-                        if self.preload_retry_times >= self.options.max_preload_retry_times {
-                            break;
-                        }
-                        self.preload_retry_times += 1;
-                    }
+        let filter_type = self.sst.index.filter_type;
+        let shard = self
+            .sstable_store
+            .get_meta_shard_holder(self.sst.id, filter_type, desc, &mut self.stats)
+            .await?;
+        self.partitioned_shard_idx = Some(desc.shard_idx);
+        self.partitioned_shard = Some(shard);
+        Ok(())
+    }
 
-                    match self
-                        .sstable_store
-                        .prefetch_blocks(
-                            &self.sst,
-                            idx,
-                            self.preload_end_block_idx,
-                            self.options.cache_policy,
-                            &mut self.stats,
-                        )
-                        .instrument_await("prefetch_blocks".verbose())
-                        .await
-                    {
-                        Ok(stream) => {
-                            self.preload_stream = Some(stream);
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e.as_report(), "failed to recreate stream meet IO error");
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if !hit_cache {
-            let block = self
-                .sstable_store
-                .get(&self.sst, idx, self.options.cache_policy, &mut self.stats)
-                .await?;
-            self.block_iter = Some(BlockIterator::new(block));
+    async fn partitioned_block_meta(&mut self, idx: usize) -> HummockResult<Option<BlockMeta>> {
+        let Some(desc) = self.partitioned_desc_by_block_idx(idx) else {
+            return Ok(None);
         };
-        let block_iter = self.block_iter.as_mut().unwrap();
+        self.ensure_partitioned_shard_loaded(&desc).await?;
+        let shard = self
+            .partitioned_shard
+            .as_ref()
+            .expect("partitioned shard should be loaded");
+        let local_idx = idx.saturating_sub(shard.first_block_idx as usize);
+        Ok(shard.block_metas.get(local_idx).cloned())
+    }
+
+    async fn seek_partitioned_idx(
+        &mut self,
+        idx: usize,
+        seek_key: Option<FullKey<&[u8]>>,
+    ) -> HummockResult<()> {
+        if idx > self.block_end_idx_inclusive {
+            self.block_iter = None;
+            return Ok(());
+        }
+
+        let Some(block_meta) = self.partitioned_block_meta(idx).await? else {
+            self.block_iter = None;
+            return Ok(());
+        };
+        let block = self
+            .sstable_store
+            .get_by_block_meta(
+                self.sst.id,
+                self.sst.meta.estimated_size,
+                idx,
+                &block_meta,
+                self.options.cache_policy,
+                &mut self.stats,
+            )
+            .await?;
+        let mut block_iter = BlockIterator::new(block);
         if let Some(key) = seek_key {
             block_iter.seek(key);
         } else {
             block_iter.seek_to_first();
         }
-
+        self.block_iter = Some(block_iter);
         self.cur_idx = idx;
-
         Ok(())
     }
 
-    fn calculate_block_idx_by_key(&self, key: FullKey<&[u8]>) -> usize {
-        self.block_start_idx_inclusive
-            + self.sst.meta.block_metas
-                [self.block_start_idx_inclusive..=self.block_end_idx_inclusive]
-                .partition_point(|block_meta| {
-                    // compare by version comparator
-                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                    // partition point should be `prev(<=)` instead of `<`.
-                    FullKey::decode(&block_meta.smallest_key).le(&key)
-                })
-                .saturating_sub(1) // considering the boundary of 0
+    async fn skip_partitioned_table_ids_outside_range(&mut self) -> HummockResult<()> {
+        while self.is_valid() {
+            let table_id = self.key().user_key.table_id;
+            if table_id < self.read_table_id_range.0 {
+                self.seek_idx(self.cur_idx + 1, None).await?;
+            } else if table_id > self.read_table_id_range.1 {
+                self.block_iter = None;
+                break;
+            } else {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    async fn calculate_partitioned_block_idx_by_key(
+        &mut self,
+        key: FullKey<&[u8]>,
+    ) -> HummockResult<usize> {
+        let Some(desc) = self.sst.index.locate_shard_by_key(key).cloned() else {
+            return Ok(self.block_start_idx_inclusive);
+        };
+        self.ensure_partitioned_shard_loaded(&desc).await?;
+        let shard = self
+            .partitioned_shard
+            .as_ref()
+            .expect("partitioned shard should be loaded");
+        let local_idx = shard.locate_block_by_key(key);
+        Ok(shard.first_block_idx as usize + local_idx)
     }
 }
 
@@ -353,6 +256,7 @@ impl HummockIterator for SstableIterator {
             // seek to next block
             self.seek_idx(self.cur_idx + 1, None).await?;
         }
+        self.skip_partitioned_table_ids_outside_range().await?;
 
         Ok(())
     }
@@ -372,21 +276,38 @@ impl HummockIterator for SstableIterator {
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.init_block_prefetch_range(self.block_start_idx_inclusive);
-        // seek_idx will update the current block iter state
-        self.seek_idx(self.block_start_idx_inclusive, None).await?;
+        let start_key = FullKey {
+            user_key: UserKey::new(self.read_table_id_range.0, TableKey(Vec::new())),
+            epoch_with_gap: EpochWithGap::new_max_epoch(),
+        };
+        self.seek(start_key.to_ref()).await?;
         Ok(())
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
-        let block_idx = self.calculate_block_idx_by_key(key);
-        self.init_block_prefetch_range(block_idx);
+        if key.user_key.table_id > self.read_table_id_range.1 {
+            self.block_iter = None;
+            return Ok(());
+        }
+
+        let partitioned_start_key;
+        let key = if key.user_key.table_id < self.read_table_id_range.0 {
+            partitioned_start_key = FullKey {
+                user_key: UserKey::new(self.read_table_id_range.0, TableKey(Vec::new())),
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
+            };
+            partitioned_start_key.to_ref()
+        } else {
+            key
+        };
+
+        let block_idx = self.calculate_partitioned_block_idx_by_key(key).await?;
 
         self.seek_idx(block_idx, Some(key)).await?;
-        if !self.is_valid() {
-            // seek to next block
-            self.seek_idx(block_idx + 1, None).await?;
+        while !self.is_valid() && self.cur_idx < self.block_end_idx_inclusive {
+            self.seek_idx(self.cur_idx + 1, None).await?;
         }
+        self.skip_partitioned_table_ids_outside_range().await?;
         Ok(())
     }
 
@@ -404,7 +325,7 @@ impl HummockIterator for SstableIterator {
 
 impl SstableIteratorType for SstableIterator {
     fn create(
-        sstable: TableHolder,
+        sstable: PartitionedSstableMetaHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
@@ -440,7 +361,7 @@ mod tests {
 
     async fn inner_test_forward_iterator(
         sstable_store: SstableStoreRef,
-        handle: TableHolder,
+        handle: PartitionedSstableMetaHolder,
         sstable_info: SstableInfo,
     ) {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
@@ -475,7 +396,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.meta.block_metas.len() > 10);
+        assert!(sstable.block_count() > 10);
 
         inner_test_forward_iterator(sstable_store.clone(), sstable, sstable_info).await;
     }
@@ -488,7 +409,7 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.meta.block_metas.len() > 10);
+        assert!(sstable.block_count() > 10);
         let mut sstable_iter = SstableIterator::create(
             sstable,
             sstable_store,
@@ -599,7 +520,10 @@ mod tests {
         });
         let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
-            sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
+            sstable_store
+                .meta_index(&sst_info, &mut stats)
+                .await
+                .unwrap(),
             sstable_store.clone(),
             options.clone(),
             &sst_info,
@@ -622,7 +546,10 @@ mod tests {
         }
         assert_eq!(cnt, TEST_KEYS_COUNT);
         let mut sstable_iter = SstableIterator::create(
-            sstable_store.sstable(&sst_info, &mut stats).await.unwrap(),
+            sstable_store
+                .meta_index(&sst_info, &mut stats)
+                .await
+                .unwrap(),
             sstable_store,
             options.clone(),
             &sst_info,
@@ -822,6 +749,49 @@ mod tests {
 
                 let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
                     default_builder_opt_for_test(),
+                    10,
+                    kv_pairs.into_iter(),
+                    sstable_store.clone(),
+                    vec![1, 2, 3],
+                )
+                .await;
+
+                let mut sstable_iter = SstableIterator::create(
+                    sstable,
+                    sstable_store.clone(),
+                    Arc::new(SstableIteratorReadOptions::default()),
+                    &SstableInfo::from(SstableInfoInner {
+                        table_ids: vec![2.into()],
+                        ..Default::default()
+                    }),
+                );
+                sstable_iter.rewind().await.unwrap();
+                assert!(sstable_iter.is_valid());
+                assert!(sstable_iter.key().eq(&k2.to_ref()));
+
+                let mut cnt = 0;
+                let mut last_key = k1.clone();
+                while sstable_iter.is_valid() {
+                    last_key = sstable_iter.key().to_vec();
+                    cnt += 1;
+                    sstable_iter.next().await.unwrap();
+                }
+
+                assert_eq!(1, cnt);
+                assert_eq!(last_key, k2.clone());
+            }
+
+            {
+                let kv_pairs = vec![
+                    (k1.clone(), HummockValue::put(test_value_of(1))),
+                    (k2.clone(), HummockValue::put(test_value_of(2))),
+                    (k3.clone(), HummockValue::put(test_value_of(3))),
+                ];
+                let mut opt = default_builder_opt_for_test();
+                opt.partitioned_meta_block_count = 8;
+
+                let (sstable, _sstable_info) = gen_test_sstable_with_table_ids(
+                    opt,
                     10,
                     kv_pairs.into_iter(),
                     sstable_store.clone(),

@@ -23,7 +23,9 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::none::NoneRecentFilter;
-use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
+use risingwave_storage::hummock::{
+    HummockMetaCacheEntry, HummockMetaCacheKey, HummockStorage, SstableStore, SstableStoreConfig,
+};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics, global_hummock_state_store_metrics,
@@ -180,6 +182,9 @@ impl HummockServiceOpts {
         let meta_cache = HybridCacheBuilder::new()
             .memory(opts.meta_cache_capacity_mb * (1 << 20))
             .with_shards(opts.meta_cache_shard_num)
+            .with_weighter(|_: &HummockMetaCacheKey, value: &HummockMetaCacheEntry| {
+                u64::BITS as usize / 8 + value.estimate_size()
+            })
             .storage()
             .build()
             .await?;

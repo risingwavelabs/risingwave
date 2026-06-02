@@ -31,7 +31,8 @@ use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
 use super::utils::CompressionAlgorithm;
 use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE,
-    DEFAULT_RESTART_INTERVAL, SstableMeta, SstableWriter, VERSION,
+    DEFAULT_RESTART_INTERVAL, META_SHARD_POLICY_FIXED_BLOCK_COUNT, MetaPartitionIndex, MetaShard,
+    MetaShardDesc, PARTITIONED_META_VERSION, SstableMeta, SstableWriter,
 };
 use crate::compaction_catalog_manager::{
     CompactionCatalogAgent, CompactionCatalogAgentRef, FilterKeyExtractorImpl,
@@ -49,7 +50,6 @@ use crate::opts::StorageOpts;
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
 pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
 pub const DEFAULT_MAX_SST_SIZE: u64 = 512 * 1024 * 1024;
-pub const MIN_BLOCK_SIZE: usize = 8 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
@@ -68,6 +68,8 @@ pub struct SstableBuilderOptions {
     pub shorten_block_meta_key_threshold: Option<usize>,
     /// Max bytes for vnode key-range hints in SST metadata. None disables collection.
     pub max_vnode_key_range_bytes: Option<usize>,
+    /// Number of data blocks per v3 metadata shard.
+    pub partitioned_meta_block_count: usize,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
@@ -82,6 +84,11 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             max_sst_size: options.compactor_max_sst_size,
             shorten_block_meta_key_threshold: options.shorten_block_meta_key_threshold,
             max_vnode_key_range_bytes: None,
+            partitioned_meta_block_count: std::env::var("RW_SSTABLE_META_SHARD_BLOCK_COUNT")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(8),
         }
     }
 }
@@ -97,7 +104,74 @@ impl Default for SstableBuilderOptions {
             max_sst_size: DEFAULT_MAX_SST_SIZE,
             shorten_block_meta_key_threshold: None,
             max_vnode_key_range_bytes: None,
+            partitioned_meta_block_count: 8,
         }
+    }
+}
+
+struct PartitionedMetaBuilder {
+    shard_block_count: usize,
+    filter_capacity: usize,
+    current_first_block_idx: usize,
+    current_filter_builder: Xor16FilterBuilder,
+    shard_filters: Vec<Vec<u8>>,
+    shard_block_counts: Vec<usize>,
+}
+
+impl PartitionedMetaBuilder {
+    fn new(shard_block_count: usize, capacity: usize) -> Self {
+        let filter_capacity = capacity / DEFAULT_ENTRY_SIZE / shard_block_count.max(1) + 1;
+        Self {
+            shard_block_count,
+            filter_capacity,
+            current_first_block_idx: 0,
+            current_filter_builder: Xor16FilterBuilder::new(filter_capacity),
+            shard_filters: Vec::new(),
+            shard_block_counts: Vec::new(),
+        }
+    }
+
+    fn add_key(&mut self, dist_key: &[u8], table_id: u32) {
+        self.current_filter_builder.add_key(dist_key, table_id);
+    }
+
+    fn maybe_finish_shard(
+        &mut self,
+        total_block_count: usize,
+        force: bool,
+        memory_limiter: Option<Arc<MemoryLimiter>>,
+    ) {
+        let block_count = total_block_count.saturating_sub(self.current_first_block_idx);
+        if block_count == 0 {
+            return;
+        }
+
+        if force || block_count >= self.shard_block_count {
+            self.shard_filters
+                .push(self.current_filter_builder.finish(memory_limiter));
+            self.shard_block_counts.push(block_count);
+            self.current_first_block_idx = total_block_count;
+            self.current_filter_builder = Xor16FilterBuilder::new(self.filter_capacity);
+        }
+    }
+
+    fn approximate_len(&self) -> usize {
+        self.current_filter_builder.approximate_len()
+            + self.shard_filters.iter().map(Vec::len).sum::<usize>()
+    }
+
+    fn can_add_raw_shard(&self, total_block_count: usize, block_count: usize) -> bool {
+        self.current_first_block_idx == total_block_count
+            && block_count == self.shard_block_count
+            && block_count > 0
+    }
+
+    fn add_raw_shard(&mut self, total_block_count: usize, block_count: usize, filter: Vec<u8>) {
+        assert!(self.can_add_raw_shard(total_block_count - block_count, block_count));
+        self.shard_filters.push(filter);
+        self.shard_block_counts.push(block_count);
+        self.current_first_block_idx = total_block_count;
+        self.current_filter_builder = Xor16FilterBuilder::new(self.filter_capacity);
     }
 }
 
@@ -135,6 +209,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     last_table_stats: TableStats,
 
     filter_builder: F,
+    partitioned_meta_builder: PartitionedMetaBuilder,
 
     epoch_set: BTreeSet<u64>,
     memory_limiter: Option<Arc<MemoryLimiter>>,
@@ -210,6 +285,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             compaction_catalog_agent_ref,
             table_stats: Default::default(),
             last_table_stats: Default::default(),
+            partitioned_meta_builder: PartitionedMetaBuilder::new(
+                options.partitioned_meta_block_count,
+                options.capacity,
+            ),
             epoch_set: BTreeSet::default(),
             memory_limiter,
             block_size_vec: Vec::new(),
@@ -229,64 +308,105 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.block_builder.approximate_len()
     }
 
+    async fn add_decoded_raw_block(
+        &mut self,
+        buf: Bytes,
+        uncompressed_size: u32,
+    ) -> HummockResult<()> {
+        let block = Block::decode(buf, uncompressed_size as usize)?;
+        let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
+        iter.seek_to_first();
+        while iter.is_valid() {
+            let value = HummockValue::from_slice(iter.value()).unwrap_or_else(|_| {
+                panic!(
+                    "decode failed for partitioned-meta fallback sst_id {} block_idx {} last_table_id {:?}",
+                    self.sst_object_id,
+                    self.block_metas.len(),
+                    self.last_table_id
+                )
+            });
+            self.add(iter.key(), value).await?;
+            iter.next();
+        }
+        Ok(())
+    }
+
     /// Add raw data of block to sstable. return false means fallback
     pub async fn add_raw_block(
         &mut self,
         buf: Bytes,
-        filter_data: Vec<u8>,
-        smallest_key: FullKey<Vec<u8>>,
-        largest_key: Vec<u8>,
-        mut meta: BlockMeta,
+        _filter_data: Vec<u8>,
+        _smallest_key: FullKey<Vec<u8>>,
+        _largest_key: Vec<u8>,
+        meta: BlockMeta,
     ) -> HummockResult<bool> {
-        let table_id = smallest_key.user_key.table_id;
-        if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
-            if !self.block_builder.is_empty() {
-                // Try to finish the previous `Block`` when the `table_id` is switched, making sure that the data in the `Block` doesn't span two `table_ids`.
-                self.build_block().await?;
-            }
+        self.add_decoded_raw_block(buf, meta.uncompressed_size)
+            .await?;
+        Ok(false)
+    }
 
+    pub fn can_add_raw_meta_shard(&self, block_count: usize) -> bool {
+        self.block_builder.is_empty()
+            && self
+                .partitioned_meta_builder
+                .can_add_raw_shard(self.block_metas.len(), block_count)
+    }
+
+    fn record_raw_block_stats(&mut self, block_meta: &BlockMeta, block_len: usize) {
+        self.last_table_stats.total_key_count += block_meta.total_key_count as i64;
+        self.epoch_set.insert(
+            FullKey::decode(&block_meta.smallest_key)
+                .epoch_with_gap
+                .pure_epoch(),
+        );
+        self.block_size_vec.push(block_len);
+    }
+
+    pub async fn add_raw_meta_shard(
+        &mut self,
+        blocks: Vec<(Bytes, BlockMeta)>,
+        filter_data: Vec<u8>,
+        largest_key: Vec<u8>,
+    ) -> HummockResult<bool> {
+        let block_count = blocks.len();
+        if !self.can_add_raw_meta_shard(block_count) {
+            return Ok(false);
+        }
+
+        let table_id = blocks
+            .first()
+            .expect("raw meta shard should not be empty")
+            .1
+            .table_id();
+        if blocks.iter().any(|(_, meta)| meta.table_id() != table_id) {
+            return Ok(false);
+        }
+
+        if self.last_table_id != Some(table_id) {
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
         }
 
-        if !self.block_builder.is_empty() {
-            let min_block_size = std::cmp::min(MIN_BLOCK_SIZE, self.options.block_capacity / 4);
-
-            // If the previous block is too small, we should merge it into the previous block.
-            if self.block_builder.approximate_len() < min_block_size {
-                let block = Block::decode(buf, meta.uncompressed_size as usize)?;
-                let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
-                iter.seek_to_first();
-                while iter.is_valid() {
-                    let value = HummockValue::from_slice(iter.value()).unwrap_or_else(|_| {
-                        panic!(
-                            "decode failed for fast compact sst_id {} block_idx {} last_table_id {:?}",
-                            self.sst_object_id, self.block_metas.len(), self.last_table_id
-                        )
-                    });
-                    self.add_impl(iter.key(), value, false).await?;
-                    iter.next();
-                }
-                return Ok(false);
-            }
-
-            self.build_block().await?;
-        }
         self.last_full_key = largest_key;
-        assert_eq!(
-            meta.len as usize,
-            buf.len(),
-            "meta {} buf {} last_table_id {:?}",
-            meta.len,
-            buf.len(),
-            self.last_table_id
+        for (block, mut meta) in blocks {
+            self.record_raw_block_stats(&meta, block.len());
+            meta.offset = self.writer.data_len() as u32;
+            meta.len = block.len() as u32;
+            self.block_metas.push(meta);
+            let block_meta = self.block_metas.last_mut().unwrap();
+            self.writer.write_block_bytes(block, block_meta).await?;
+        }
+        self.epoch_set.insert(
+            FullKey::decode(&self.last_full_key)
+                .epoch_with_gap
+                .pure_epoch(),
         );
-        meta.offset = self.writer.data_len() as u32;
-        self.block_metas.push(meta);
-        self.filter_builder.add_raw_data(filter_data);
-        let block_meta = self.block_metas.last_mut().unwrap();
-        self.writer.write_block_bytes(buf, block_meta).await?;
+        self.partitioned_meta_builder.add_raw_shard(
+            self.block_metas.len(),
+            block_count,
+            filter_data,
+        );
 
         Ok(true)
     }
@@ -361,6 +481,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
             }
+            self.partitioned_meta_builder.maybe_finish_shard(
+                self.block_metas.len(),
+                true,
+                self.memory_limiter.clone(),
+            );
         } else if is_block_full && could_switch_block {
             self.build_block().await?;
         }
@@ -407,7 +532,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .extract(user_key(&self.raw_key));
         // Add SST filter check.
         if !filter_key.is_empty() {
-            self.filter_builder
+            self.partitioned_meta_builder
                 .add_key(filter_key, table_id.as_raw_id());
         }
         // Use pre-encoded key to avoid redundant encoding
@@ -466,20 +591,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         );
 
         self.build_block().await?;
+        self.partitioned_meta_builder.maybe_finish_shard(
+            self.block_metas.len(),
+            true,
+            self.memory_limiter.clone(),
+        );
         let right_exclusive = false;
-        let meta_offset = self.writer.data_len() as u64;
-
-        let filter_data = self.filter_builder.finish(self.memory_limiter.clone());
-        let (bloom_filter_kind, filter_type) = if filter_data.is_empty() {
-            (
-                BloomFilterType::BloomFilterUnspecified,
-                PbSstableFilterType::SstableFilterNone,
-            )
-        } else if self.filter_builder.support_blocked_raw_data() {
-            (BloomFilterType::Blocked, self.filter_builder.filter_type())
-        } else {
-            (BloomFilterType::Sstable, self.filter_builder.filter_type())
-        };
+        let data_end_offset = self.writer.data_len() as u64;
 
         let total_key_count = self
             .block_metas
@@ -496,46 +614,120 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .iter()
             .map(|block_meta| block_meta.uncompressed_size as u64)
             .sum::<u64>();
-
-        #[expect(deprecated)]
-        let mut meta = SstableMeta {
-            block_metas: self.block_metas,
-            bloom_filter: filter_data,
-            estimated_size: 0,
-            key_count: utils::checked_into_u32(total_key_count).unwrap_or_else(|_| {
-                panic!(
-                    "WARN overflow can't convert total_key_count {} into u32 tables {:?}",
-                    total_key_count, self.table_ids,
-                )
-            }),
-            smallest_key,
-            largest_key,
-            version: VERSION,
-            meta_offset,
-            monotonic_tombstone_events: vec![],
-        };
-
-        let meta_encode_size = meta.encoded_size();
-        let encoded_size_u32 = utils::checked_into_u32(meta_encode_size).unwrap_or_else(|_| {
+        let key_count = utils::checked_into_u32(total_key_count).unwrap_or_else(|_| {
             panic!(
-                "WARN overflow can't convert meta_encoded_size {} into u32 tables {:?}",
-                meta_encode_size, self.table_ids,
+                "WARN overflow can't convert total_key_count {} into u32 tables {:?}",
+                total_key_count, self.table_ids,
             )
         });
-        let meta_offset_u32 = utils::checked_into_u32(meta_offset).unwrap_or_else(|_| {
-            panic!(
-                "WARN overflow can't convert meta_offset {} into u32 tables {:?}",
-                meta_offset, self.table_ids,
-            )
-        });
-        meta.estimated_size = encoded_size_u32
-            .checked_add(meta_offset_u32)
-            .unwrap_or_else(|| {
+
+        let partitioned_meta_builder = self.partitioned_meta_builder;
+        let (
+            meta,
+            partitioned_index,
+            partitioned_meta_shards,
+            partitioned_encoded_meta,
+            filter_size,
+            metadata_encoded_size,
+        ) = {
+            assert_eq!(
+                partitioned_meta_builder.shard_filters.len(),
+                partitioned_meta_builder.shard_block_counts.len()
+            );
+            let mut shard_payload = Vec::new();
+            let mut shards = Vec::with_capacity(partitioned_meta_builder.shard_filters.len());
+            let mut meta_shards = Vec::with_capacity(partitioned_meta_builder.shard_filters.len());
+            let mut first_block_idx = 0;
+            let mut total_filter_size = 0;
+
+            for (shard_idx, (filter, block_count)) in partitioned_meta_builder
+                .shard_filters
+                .into_iter()
+                .zip(partitioned_meta_builder.shard_block_counts.into_iter())
+                .enumerate()
+            {
+                let end_block_idx = first_block_idx + block_count;
+                let shard = MetaShard {
+                    shard_idx: shard_idx as u32,
+                    first_block_idx: first_block_idx as u32,
+                    block_metas: self.block_metas[first_block_idx..end_block_idx].to_vec(),
+                    filter_type: PbSstableFilterType::SstableFilterXor16 as u32,
+                    filter,
+                };
+                total_filter_size += shard.filter.len();
+                let shard_body = shard.encode_body_to_bytes();
+                let offset = data_end_offset + shard_payload.len() as u64;
+                let checksum = super::xxhash64_checksum(&shard_body);
+                let len = match utils::checked_into_u32(shard_body.len()) {
+                    Ok(len) => len,
+                    Err(_) => panic!(
+                        "WARN overflow can't convert meta_shard_body_len {} into u32 tables {:?}",
+                        shard_body.len(),
+                        self.table_ids,
+                    ),
+                };
+                shard_payload.extend_from_slice(&shard_body);
+                shards.push(MetaShardDesc {
+                    shard_idx: shard_idx as u32,
+                    first_block_idx: first_block_idx as u32,
+                    block_count: block_count as u32,
+                    smallest_key: self.block_metas[first_block_idx].smallest_key.clone(),
+                    offset,
+                    len,
+                    checksum,
+                });
+                meta_shards.push(shard);
+                first_block_idx = end_block_idx;
+            }
+            assert_eq!(first_block_idx, self.block_metas.len());
+
+            let meta_offset = data_end_offset + shard_payload.len() as u64;
+            let mut index = MetaPartitionIndex {
+                estimated_size: 0,
+                key_count,
+                smallest_key: smallest_key.clone(),
+                largest_key: largest_key.clone(),
+                block_count: self.block_metas.len() as u32,
+                shard_count: shards.len() as u32,
+                filter_type: PbSstableFilterType::SstableFilterXor16 as u32,
+                shard_policy: META_SHARD_POLICY_FIXED_BLOCK_COUNT as u32,
+                shards,
+            };
+            let index_encoded_size = index.encoded_size();
+            let file_size =
+                data_end_offset + shard_payload.len() as u64 + index_encoded_size as u64;
+            index.estimated_size = utils::checked_into_u32(file_size).unwrap_or_else(|_| {
                 panic!(
-                    "WARN overflow encoded_size_u32 {} meta_offset_u32 {} table_id {:?} table_ids {:?}",
-                    encoded_size_u32, meta_offset_u32, self.last_table_id, self.table_ids
+                    "WARN overflow can't convert partitioned file_size {} into u32 tables {:?}",
+                    file_size, self.table_ids,
                 )
             });
+            let mut encoded_meta = shard_payload;
+            index.encode_to(&mut encoded_meta);
+            let metadata_encoded_size = encoded_meta.len();
+
+            #[expect(deprecated)]
+            let meta = SstableMeta {
+                block_metas: vec![],
+                bloom_filter: vec![],
+                estimated_size: index.estimated_size,
+                key_count,
+                smallest_key,
+                largest_key,
+                version: PARTITIONED_META_VERSION,
+                meta_offset,
+                monotonic_tombstone_events: vec![],
+            };
+
+            (
+                meta,
+                index,
+                meta_shards,
+                encoded_meta,
+                total_filter_size,
+                metadata_encoded_size,
+            )
+        };
 
         let (avg_key_size, avg_value_size) = if self.table_stats.is_empty() {
             (0, 0)
@@ -588,7 +780,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
             sst_id: self.sst_object_id.as_raw_id().into(),
-            bloom_filter_kind,
+            bloom_filter_kind: BloomFilterType::Sstable,
             key_range: KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),
                 right: Bytes::from(meta.largest_key.clone()),
@@ -599,34 +791,33 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             meta_offset: meta.meta_offset,
             stale_key_count,
             total_key_count,
-            uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
+            uncompressed_file_size: uncompressed_file_size + metadata_encoded_size as u64,
             min_epoch,
             max_epoch,
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
-            filter_type,
+            filter_type: PbSstableFilterType::SstableFilterXor16,
             vnode_statistics: vnode_user_key_ranges,
         }
         .into();
 
         tracing::trace!(
             "meta_size {} filter_size {} add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
-            meta.encoded_size(),
-            meta.bloom_filter.len(),
+            metadata_encoded_size,
+            filter_size,
             total_key_count,
             stale_key_count,
             min_epoch,
             max_epoch,
             self.epoch_set.len()
         );
-        let filter_size = meta.bloom_filter.len();
         let sstable_file_size = sst_info.file_size as usize;
 
-        if !meta.block_metas.is_empty() {
+        if !self.block_metas.is_empty() {
             // fill total_compressed_size
-            let mut last_table_id = meta.block_metas[0].table_id();
+            let mut last_table_id = self.block_metas[0].table_id();
             let mut last_table_stats = self.table_stats.get_mut(&last_table_id).unwrap();
-            for block_meta in &meta.block_metas {
+            for block_meta in &self.block_metas {
                 let block_table_id = block_meta.table_id();
                 if last_table_id != block_table_id {
                     last_table_id = block_table_id;
@@ -637,7 +828,15 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         }
 
-        let writer_output = self.writer.finish(meta).await?;
+        let writer_output = self
+            .writer
+            .finish_partitioned_meta(
+                meta,
+                partitioned_index,
+                partitioned_meta_shards,
+                partitioned_encoded_meta,
+            )
+            .await?;
         // The timestamp is only used during full GC.
         //
         // Ideally object store object's last_modified should be used.
@@ -668,6 +867,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.writer.data_len()
             + self.block_builder.approximate_len()
             + self.filter_builder.approximate_len()
+            + self.partitioned_meta_builder.approximate_len()
     }
 
     pub async fn build_block(&mut self) -> HummockResult<()> {
@@ -714,6 +914,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
 
         self.block_builder.clear();
+        self.partitioned_meta_builder.maybe_finish_shard(
+            self.block_metas.len(),
+            false,
+            self.memory_limiter.clone(),
+        );
         Ok(())
     }
 
@@ -912,24 +1117,87 @@ impl SstableBuilderOutputStats {
 pub(super) mod tests {
     use std::collections::{Bound, HashMap};
 
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::catalog::{ColumnDesc, TableId};
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::row_serde::OrderedRowSerde;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_hummock_sdk::EpochWithGap;
     use risingwave_hummock_sdk::key::UserKey;
+    use risingwave_pb::catalog::table::{PbEngine, TableType};
+    use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
+    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
+    use risingwave_pb::plan_common::ColumnCatalog as PbColumnCatalog;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::compaction_catalog_manager::{
-        CompactionCatalogAgent, DummyFilterKeyExtractor, MultiFilterKeyExtractor,
+        CompactionCatalogAgent, DummyFilterKeyExtractor, FilterKeyExtractorImpl,
+        MultiFilterKeyExtractor,
     };
+    use crate::hummock::iterator::HummockIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::sstable::xor_filter::BlockedXor16FilterBuilder;
     use crate::hummock::test_utils::{
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_test_sstable_impl, mock_sst_writer,
         test_key_of, test_value_of,
     };
-    use crate::hummock::{CachePolicy, Sstable, SstableWriterOptions, Xor8FilterBuilder};
+    use crate::hummock::{
+        CachePolicy, PartitionedSstableMetaHolder, ReadOptions, Sstable, SstableStoreRef,
+        SstableWriterOptions, Xor8FilterBuilder, get_from_sstable_info,
+        hit_sstable_filter_with_partitioned_meta,
+    };
     use crate::monitor::StoreLocalStatistic;
+
+    fn partitioned_meta_schema_filter_test_table(table_id: TableId) -> PbTable {
+        PbTable {
+            id: table_id,
+            schema_id: 0.into(),
+            database_id: 0.into(),
+            name: "test".to_owned(),
+            table_type: TableType::Table as i32,
+            columns: vec![
+                PbColumnCatalog {
+                    column_desc: Some(
+                        (&ColumnDesc::named("pk_0", 0.into(), DataType::Int64)).into(),
+                    ),
+                    is_hidden: false,
+                },
+                PbColumnCatalog {
+                    column_desc: Some(
+                        (&ColumnDesc::named("pk_1", 1.into(), DataType::Int64)).into(),
+                    ),
+                    is_hidden: false,
+                },
+            ],
+            pk: vec![
+                PbColumnOrder {
+                    column_index: 0,
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
+                    }),
+                },
+                PbColumnOrder {
+                    column_index: 1,
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
+                    }),
+                },
+            ],
+            stream_key: vec![0],
+            distribution_key: vec![0],
+            value_indices: vec![0, 1],
+            read_prefix_len_hint: 1,
+            stream_job_status: PbStreamJobStatus::Created.into(),
+            create_type: PbCreateType::Foreground.into(),
+            engine: Some(PbEngine::Hummock as i32),
+            ..Default::default()
+        }
+    }
 
     #[tokio::test]
     async fn test_empty() {
@@ -1223,8 +1491,440 @@ pub(super) mod tests {
         let (data, meta) = output.writer_output;
         assert_eq!(info.file_size, meta.estimated_size as u64);
         let offset = info.meta_offset as usize;
-        let meta2 = SstableMeta::decode(&data[offset..]).unwrap();
-        assert_eq!(meta2, meta);
+        let index = MetaPartitionIndex::decode(&data[offset..]).unwrap();
+        assert_eq!(index.estimated_size, meta.estimated_size);
+        assert_eq!(index.key_count, meta.key_count);
+        assert_bytes_eq!(index.smallest_key, meta.smallest_key);
+        assert_bytes_eq!(index.largest_key, meta.largest_key);
+    }
+
+    #[tokio::test]
+    async fn test_partitioned_meta_builder_output() {
+        let mut opt = default_builder_opt_for_test();
+        opt.block_capacity = 128;
+        opt.partitioned_meta_block_count = 2;
+
+        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+        let mut builder = SstableBuilder::for_test(
+            0,
+            mock_sst_writer(&opt),
+            opt,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        );
+
+        for i in 0..100 {
+            builder
+                .add_for_test(
+                    test_key_of(i).to_ref(),
+                    HummockValue::put(&test_value_of(i)),
+                )
+                .await
+                .unwrap();
+        }
+
+        let output = builder.finish().await.unwrap();
+        let info = output.sst_info.sst_info;
+        let (data, meta) = output.writer_output;
+        assert_eq!(meta.version, PARTITIONED_META_VERSION);
+        assert!(meta.block_metas.is_empty());
+        assert_eq!(info.meta_offset, meta.meta_offset);
+        assert_eq!(info.file_size, meta.estimated_size as u64);
+
+        let index = MetaPartitionIndex::decode(&data[info.meta_offset as usize..]).unwrap();
+        assert_eq!(index.estimated_size as u64, info.file_size);
+        assert_eq!(index.shard_count as usize, index.shards.len());
+        assert!(index.shard_count > 1);
+
+        let first_desc = &index.shards[0];
+        let shard_body =
+            &data[first_desc.offset as usize..first_desc.offset as usize + first_desc.len as usize];
+        crate::hummock::sstable::xxhash64_verify(shard_body, first_desc.checksum).unwrap();
+        let shard = MetaShard::decode_body(
+            first_desc.shard_idx,
+            first_desc.first_block_idx,
+            first_desc.block_count,
+            &first_desc.smallest_key,
+            index.filter_type,
+            shard_body,
+        )
+        .unwrap();
+        assert_eq!(shard.block_metas.len(), first_desc.block_count as usize);
+        assert_eq!(shard.block_metas.len(), 2);
+        assert!(!shard.filter.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_partitioned_meta_point_get() {
+        let mut opts = default_builder_opt_for_test();
+        opts.block_capacity = 128;
+        opts.partitioned_meta_block_count = 2;
+
+        let sstable_store = mock_sstable_store().await;
+        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+        let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+            opts,
+            1,
+            (0..100).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        )
+        .await;
+
+        let key = test_key_of(42);
+        let encoded_key = key.encode();
+        let dist_key_hash =
+            Sstable::hash_for_filter(user_key(&encoded_key), key.user_key.table_id.as_raw_id());
+        let table_holder = sstable_store
+            .meta_index(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap();
+        let user_key_range = (
+            Bound::Included(key.to_ref().user_key),
+            Bound::Included(key.to_ref().user_key),
+        );
+        let mut stats = StoreLocalStatistic::default();
+        let read_options = ReadOptions::default();
+        {
+            let iter = get_from_sstable_info(
+                sstable_store.clone(),
+                &sst_info,
+                key.to_ref(),
+                &read_options,
+                Some(dist_key_hash),
+                &mut stats,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+            assert_eq!(iter.key(), key.to_ref());
+            assert_bytes_eq!(iter.value().into_user_value().unwrap(), test_value_of(42));
+        }
+        assert!(stats.cache_meta_block_total >= 2);
+        assert!(stats.bloom_filter_check_counts >= 1);
+        assert_eq!(stats.partitioned_meta_index_cache_total, 1);
+        assert_eq!(stats.partitioned_meta_index_cache_miss, 0);
+        assert!(stats.partitioned_meta_shard_cache_total >= 1);
+        assert_eq!(stats.partitioned_meta_shard_cache_miss, 0);
+        assert_eq!(stats.partitioned_meta_shard_read_bytes, 0);
+        assert_eq!(stats.partitioned_meta_shard_filter_positive_counts, 1);
+
+        sstable_store.clear_meta_cache().await.unwrap();
+        let mut cold_stats = StoreLocalStatistic::default();
+        {
+            let iter = get_from_sstable_info(
+                sstable_store.clone(),
+                &sst_info,
+                key.to_ref(),
+                &read_options,
+                Some(dist_key_hash),
+                &mut cold_stats,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+            assert_eq!(iter.key(), key.to_ref());
+        }
+        assert_eq!(cold_stats.partitioned_meta_index_cache_total, 1);
+        assert_eq!(cold_stats.partitioned_meta_index_cache_miss, 1);
+        assert!(cold_stats.partitioned_meta_shard_cache_total >= 1);
+        assert!(cold_stats.partitioned_meta_shard_cache_miss >= 1);
+        assert!(cold_stats.partitioned_meta_shard_read_bytes > 0);
+
+        let mut hit_stats = StoreLocalStatistic::default();
+        {
+            let iter = get_from_sstable_info(
+                sstable_store.clone(),
+                &sst_info,
+                key.to_ref(),
+                &read_options,
+                Some(dist_key_hash),
+                &mut hit_stats,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+            assert_eq!(iter.key(), key.to_ref());
+        }
+        assert!(hit_stats.partitioned_meta_shard_cache_total >= 1);
+        assert_eq!(hit_stats.partitioned_meta_shard_cache_miss, 0);
+        assert_eq!(hit_stats.partitioned_meta_shard_read_bytes, 0);
+
+        let mut negative_filter_stats = StoreLocalStatistic::default();
+        assert!(
+            !hit_sstable_filter_with_partitioned_meta(
+                &sstable_store,
+                &table_holder,
+                &user_key_range,
+                u64::MAX,
+                &mut negative_filter_stats
+            )
+            .await
+            .unwrap()
+        );
+        assert_eq!(negative_filter_stats.bloom_filter_true_negative_counts, 1);
+        assert_eq!(
+            negative_filter_stats.partitioned_meta_shard_filter_positive_counts,
+            0
+        );
+        assert!(negative_filter_stats.partitioned_meta_shard_filter_negative_counts >= 1);
+
+        let mut positive_filter_stats = StoreLocalStatistic::default();
+        assert!(
+            hit_sstable_filter_with_partitioned_meta(
+                &sstable_store,
+                &table_holder,
+                &user_key_range,
+                dist_key_hash,
+                &mut positive_filter_stats
+            )
+            .await
+            .unwrap()
+        );
+        assert_eq!(
+            positive_filter_stats.partitioned_meta_shard_filter_positive_counts,
+            1
+        );
+
+        for i in 0..100 {
+            let data_key = test_key_of(i);
+            let read_key = FullKey::from_user_key(data_key.user_key.clone(), test_epoch(2));
+            let encoded_key = read_key.encode();
+            let dist_key_hash = Sstable::hash_for_filter(
+                user_key(&encoded_key),
+                read_key.user_key.table_id.as_raw_id(),
+            );
+            let mut read_stats = StoreLocalStatistic::default();
+            let iter = get_from_sstable_info(
+                sstable_store.clone(),
+                &sst_info,
+                read_key.to_ref(),
+                &read_options,
+                Some(dist_key_hash),
+                &mut read_stats,
+            )
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("partitioned meta point get missed key {i}"));
+
+            assert_eq!(iter.key().user_key, read_key.to_ref().user_key);
+            assert_bytes_eq!(iter.value().into_user_value().unwrap(), test_value_of(i));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_partitioned_meta_schema_prefix_filter_across_shards() {
+        let table_id = TableId::new(233);
+        let table = partitioned_meta_schema_filter_test_table(table_id);
+        let mut opts = default_builder_opt_for_test();
+        opts.block_capacity = 128;
+        opts.partitioned_meta_block_count = 2;
+
+        let sstable_store = mock_sstable_store().await;
+        let writer = sstable_store
+            .clone()
+            .create_sst_writer(10, SstableWriterOptions::default());
+        let mut multi_filter = MultiFilterKeyExtractor::default();
+        multi_filter.register(table_id, FilterKeyExtractorImpl::from_table(&table));
+        let compaction_catalog_agent_ref = Arc::new(CompactionCatalogAgent::new(
+            FilterKeyExtractorImpl::Multi(multi_filter),
+            HashMap::from_iter([(table_id, VirtualNode::COUNT_FOR_TEST)]),
+            HashMap::from_iter([(table_id, None)]),
+            HashMap::default(),
+        ));
+        let mut builder = SstableBuilder::new(
+            10,
+            writer,
+            Xor16FilterBuilder::new(1024),
+            opts,
+            compaction_catalog_agent_ref,
+            None,
+        );
+
+        let pk_serde = OrderedRowSerde::new(
+            vec![DataType::Int64, DataType::Int64],
+            vec![OrderType::ascending(), OrderType::ascending()],
+        );
+        let mut prefix_hint = vec![];
+        OrderedRowSerde::new(vec![DataType::Int64], vec![OrderType::ascending()]).serialize(
+            &OwnedRow::new(vec![Some(ScalarImpl::Int64(7))]),
+            &mut prefix_hint,
+        );
+
+        let make_key = |prefix: i64, suffix: i64| {
+            let mut pk = vec![];
+            pk_serde.serialize(
+                &OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(prefix)),
+                    Some(ScalarImpl::Int64(suffix)),
+                ]),
+                &mut pk,
+            );
+            let table_key = [VirtualNode::ZERO.to_be_bytes().as_slice(), pk.as_slice()].concat();
+            FullKey::from_user_key(UserKey::for_test(table_id, table_key), test_epoch(1))
+        };
+
+        for suffix in 0..200 {
+            builder
+                .add(
+                    make_key(7, suffix).to_ref(),
+                    HummockValue::put(format!("value-{suffix}").as_bytes()),
+                )
+                .await
+                .unwrap();
+        }
+        for suffix in 0..200 {
+            builder
+                .add(
+                    make_key(8, suffix).to_ref(),
+                    HummockValue::put(format!("other-{suffix}").as_bytes()),
+                )
+                .await
+                .unwrap();
+        }
+
+        let output = builder.finish().await.unwrap();
+        output.writer_output.await.unwrap().unwrap();
+        let sst_info = output.sst_info.sst_info;
+        let sstable = sstable_store
+            .meta_index(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap();
+        assert!(sstable.index.shard_count > 1);
+
+        let prefix_hash = Sstable::hash_for_filter(&prefix_hint, table_id.as_raw_id());
+        let mut stats = StoreLocalStatistic::default();
+        assert!(
+            hit_sstable_filter_with_partitioned_meta(
+                &sstable_store,
+                &sstable,
+                &(Bound::Unbounded, Bound::Unbounded),
+                prefix_hash,
+                &mut stats,
+            )
+            .await
+            .unwrap(),
+            "schema prefix filter missed prefix across partitioned meta shards; stats={stats:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partitioned_meta_point_get_multi_version_across_shards() {
+        let mut opts = default_builder_opt_for_test();
+        opts.block_capacity = 128;
+        opts.partitioned_meta_block_count = 2;
+
+        let table_key = [
+            VirtualNode::ZERO.to_be_bytes().as_slice(),
+            b"multi_version_key".as_slice(),
+        ]
+        .concat();
+        let value_of_epoch = |epoch| format!("value_epoch_{epoch}").into_bytes();
+        let kv_iter = (1..=5).rev().map(|epoch| {
+            (
+                FullKey::for_test(TableId::default(), table_key.clone(), test_epoch(epoch)),
+                HummockValue::put(value_of_epoch(epoch)),
+            )
+        });
+
+        let sstable_store = mock_sstable_store().await;
+        let table_id_to_vnode = HashMap::from_iter(vec![(0, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+        let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+            opts,
+            2,
+            kv_iter,
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        )
+        .await;
+
+        let read_options = ReadOptions::default();
+        for (read_epoch, expected_epoch) in [(6, 5), (4, 4), (2, 2)] {
+            let read_key = FullKey::for_test(
+                TableId::default(),
+                table_key.clone(),
+                test_epoch(read_epoch),
+            );
+            let encoded_key = read_key.encode();
+            let dist_key_hash = Sstable::hash_for_filter(
+                user_key(&encoded_key),
+                read_key.user_key.table_id.as_raw_id(),
+            );
+            let mut stats = StoreLocalStatistic::default();
+            let iter = get_from_sstable_info(
+                sstable_store.clone(),
+                &sst_info,
+                read_key.to_ref(),
+                &read_options,
+                Some(dist_key_hash),
+                &mut stats,
+            )
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("missed read_epoch {read_epoch}"));
+
+            assert_eq!(
+                iter.key().epoch_with_gap.pure_epoch(),
+                test_epoch(expected_epoch)
+            );
+            assert_bytes_eq!(
+                iter.value().into_user_value().unwrap(),
+                value_of_epoch(expected_epoch)
+            );
+        }
+
+        let read_key = FullKey::for_test(TableId::default(), table_key, test_epoch(0));
+        let encoded_key = read_key.encode();
+        let dist_key_hash = Sstable::hash_for_filter(
+            user_key(&encoded_key),
+            read_key.user_key.table_id.as_raw_id(),
+        );
+        let mut stats = StoreLocalStatistic::default();
+        let iter = get_from_sstable_info(
+            sstable_store,
+            &sst_info,
+            read_key.to_ref(),
+            &read_options,
+            Some(dist_key_hash),
+            &mut stats,
+        )
+        .await
+        .unwrap();
+        assert!(iter.is_none());
+    }
+
+    async fn may_match_partitioned_filter(
+        sstable_store: &SstableStoreRef,
+        table: &PartitionedSstableMetaHolder,
+        key: UserKey<&[u8]>,
+        hash: u64,
+    ) -> bool {
+        let user_key_range = (Bound::Included(key), Bound::Included(key));
+        let full_key = FullKey {
+            user_key: key,
+            epoch_with_gap: EpochWithGap::new_from_epoch(HummockEpoch::MAX),
+        };
+        let mut stats = StoreLocalStatistic::default();
+        for desc in table.index.filter_candidate_shards_by_user_key(full_key) {
+            let shard = sstable_store
+                .get_meta_shard_holder(table.id, table.index.filter_type, desc, &mut stats)
+                .await
+                .unwrap();
+            if shard.may_match(&user_key_range, hash) {
+                return true;
+            }
+        }
+        false
     }
 
     async fn test_with_xor_filter_builder<F: FilterBuilder>(
@@ -1257,17 +1957,16 @@ pub(super) mod tests {
         .await;
         assert_eq!(sst_info.filter_type, expected_filter_type);
         let table = sstable_store
-            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .meta_index(&sst_info, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
 
-        assert!(table.has_filter());
         for i in 0..key_count {
             let full_key = test_key_of(i);
             let hash = Sstable::hash_for_filter(full_key.user_key.encode().as_slice(), 0);
             let key_ref = full_key.user_key.as_ref();
             assert!(
-                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash),
+                may_match_partitioned_filter(&sstable_store, &table, key_ref, hash).await,
                 "failed at {}",
                 i
             );
@@ -1288,7 +1987,7 @@ pub(super) mod tests {
         .await;
         test_with_xor_filter_builder::<Xor8FilterBuilder>(
             0.01,
-            PbSstableFilterType::SstableFilterXor8,
+            PbSstableFilterType::SstableFilterXor16,
         )
         .await;
         test_with_xor_filter_builder::<BlockedXor16FilterBuilder>(
@@ -1367,7 +2066,7 @@ pub(super) mod tests {
         let sst_info = ret.sst_info.sst_info.clone();
         ret.writer_output.await.unwrap().unwrap();
         let table = sstable_store
-            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .meta_index(&sst_info, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
         let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
@@ -1377,9 +2076,7 @@ pub(super) mod tests {
             let k = UserKey::for_test(TableId::new(2), table_key.as_slice());
             let hash = Sstable::hash_for_filter(&k.encode(), 2);
             let key_ref = k.as_ref();
-            assert!(
-                table.may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
-            );
+            assert!(may_match_partitioned_filter(&sstable_store, &table, key_ref, hash).await);
         }
     }
 }

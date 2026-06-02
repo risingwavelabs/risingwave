@@ -277,7 +277,7 @@ mod tests {
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::*;
-    use crate::hummock::TableHolder;
+    use crate::hummock::PartitionedSstableMetaHolder;
     use crate::hummock::iterator::MergeIterator;
     use crate::hummock::iterator::test_utils::{
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_iterator_test_sstable_base,
@@ -485,7 +485,9 @@ mod tests {
         assert!(!ui.is_valid());
     }
 
-    async fn generate_test_data(sstable_store: SstableStoreRef) -> (TableHolder, SstableInfo) {
+    async fn generate_test_data(
+        sstable_store: SstableStoreRef,
+    ) -> (PartitionedSstableMetaHolder, SstableInfo) {
         let kv_pairs = vec![
             (0, 200, HummockValue::delete()),
             (0, 100, HummockValue::put(iterator_test_value_of(0))),
@@ -507,7 +509,7 @@ mod tests {
                 .await;
         (
             sstable_store
-                .sstable(&sst_info, &mut StoreLocalStatistic::default())
+                .meta_index(&sst_info, &mut StoreLocalStatistic::default())
                 .await
                 .unwrap(),
             sst_info,

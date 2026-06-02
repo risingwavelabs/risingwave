@@ -37,13 +37,15 @@ use risingwave_common::catalog::TableId;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
+
 use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
+use itertools::Itertools;
 use tracing::warn;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
 use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, UserKey, UserKeyRangeRef};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, KeyComparator};
 
 mod filter;
 mod utils;
@@ -60,6 +62,8 @@ use crate::store::ReadOptions;
 const MAGIC: u32 = 0x5785ab73;
 const OLD_VERSION: u32 = 1;
 const VERSION: u32 = 2;
+pub const PARTITIONED_META_VERSION: u32 = 3;
+pub const META_SHARD_POLICY_FIXED_BLOCK_COUNT: u32 = 1;
 
 /// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
 /// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
@@ -221,6 +225,29 @@ impl Sstable {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PartitionedSstableMeta {
+    pub id: HummockSstableObjectId,
+    pub meta: SstableMeta,
+    pub index: MetaPartitionIndex,
+}
+
+impl PartitionedSstableMeta {
+    pub fn new(id: HummockSstableObjectId, meta: SstableMeta, index: MetaPartitionIndex) -> Self {
+        Self { id, meta, index }
+    }
+
+    #[inline(always)]
+    pub fn block_count(&self) -> usize {
+        self.index.block_count as usize
+    }
+
+    #[inline(always)]
+    pub fn estimate_size(&self) -> usize {
+        8 /* id */ + self.meta.encoded_size() + self.index.encoded_size()
+    }
+}
+
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct BlockMeta {
     pub smallest_key: Vec<u8>,
@@ -229,6 +256,510 @@ pub struct BlockMeta {
     pub uncompressed_size: u32,
     pub total_key_count: u32,
     pub stale_key_count: u32,
+}
+
+#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MetaShardDesc {
+    pub shard_idx: u32,
+    pub first_block_idx: u32,
+    pub block_count: u32,
+    pub smallest_key: Vec<u8>,
+    pub offset: u64,
+    pub len: u32,
+    pub checksum: u64,
+}
+
+impl MetaShardDesc {
+    pub fn table_id(&self) -> TableId {
+        FullKey::decode(&self.smallest_key).user_key.table_id
+    }
+
+    fn encode(&self, mut buf: impl BufMut) {
+        buf.put_u32_le(self.first_block_idx);
+        buf.put_u32_le(self.block_count);
+        put_length_prefixed_slice(&mut buf, &self.smallest_key);
+        buf.put_u64_le(self.offset);
+        buf.put_u32_le(self.len);
+        buf.put_u64_le(self.checksum);
+    }
+
+    fn decode(shard_idx: u32, buf: &mut &[u8]) -> Self {
+        let first_block_idx = buf.get_u32_le();
+        let block_count = buf.get_u32_le();
+        let smallest_key = get_length_prefixed_slice(buf);
+        let offset = buf.get_u64_le();
+        let len = buf.get_u32_le();
+        let checksum = buf.get_u64_le();
+        Self {
+            shard_idx,
+            first_block_idx,
+            block_count,
+            smallest_key,
+            offset,
+            len,
+            checksum,
+        }
+    }
+
+    fn encoded_size(&self) -> usize {
+        4 // first_block_idx
+            + 4 // block_count
+            + 4 // smallest_key len
+            + self.smallest_key.len()
+            + 8 // offset
+            + 4 // len
+            + 8 // checksum
+    }
+}
+
+#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MetaPartitionIndex {
+    pub estimated_size: u32,
+    pub key_count: u32,
+    pub smallest_key: Vec<u8>,
+    pub largest_key: Vec<u8>,
+    pub block_count: u32,
+    pub shard_count: u32,
+    pub filter_type: u32,
+    pub shard_policy: u32,
+    pub shards: Vec<MetaShardDesc>,
+}
+
+impl MetaPartitionIndex {
+    fn validate(&self, encoded_len: usize) -> HummockResult<()> {
+        if self.shard_count as usize != self.shards.len() {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard_count mismatch: header {} actual {}",
+                self.shard_count,
+                self.shards.len()
+            )));
+        }
+        if self.block_count == 0 {
+            return Err(HummockError::decode_error(
+                "partitioned meta index has no data block",
+            ));
+        }
+        if self.shards.is_empty() {
+            return Err(HummockError::decode_error(
+                "partitioned meta index has no shard",
+            ));
+        }
+        if self.smallest_key.is_empty() || self.largest_key.is_empty() {
+            return Err(HummockError::decode_error(
+                "partitioned meta index has empty boundary key",
+            ));
+        }
+        if KeyComparator::compare_encoded_full_key(&self.smallest_key, &self.largest_key)
+            == std::cmp::Ordering::Greater
+        {
+            return Err(HummockError::decode_error(
+                "partitioned meta index has inverted boundary keys",
+            ));
+        }
+        if self.shards[0].smallest_key != self.smallest_key {
+            return Err(HummockError::decode_error(
+                "partitioned meta first shard smallest key mismatch",
+            ));
+        }
+        if self.estimated_size as usize <= encoded_len {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta estimated size {} too small for index {}",
+                self.estimated_size, encoded_len
+            )));
+        }
+
+        let index_offset = self.estimated_size as usize - encoded_len;
+        let mut expected_first_block_idx = 0u32;
+        let mut expected_shard_offset = None;
+        let mut last_smallest_key: Option<&[u8]> = None;
+        for (shard_idx, shard) in self.shards.iter().enumerate() {
+            if shard.shard_idx as usize != shard_idx {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard idx mismatch: expected {} actual {}",
+                    shard_idx, shard.shard_idx
+                )));
+            }
+            if shard.block_count == 0 {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard {} has no block",
+                    shard_idx
+                )));
+            }
+            if shard.first_block_idx != expected_first_block_idx {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard {} first block mismatch: expected {} actual {}",
+                    shard_idx, expected_first_block_idx, shard.first_block_idx
+                )));
+            }
+            if shard.smallest_key.is_empty() {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard {} has empty smallest key",
+                    shard_idx
+                )));
+            }
+            if let Some(last_smallest_key) = last_smallest_key
+                && KeyComparator::compare_encoded_full_key(last_smallest_key, &shard.smallest_key)
+                    != std::cmp::Ordering::Less
+            {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard {} smallest key is not strictly increasing",
+                    shard_idx
+                )));
+            }
+
+            let shard_offset = shard.offset as usize;
+            let shard_end = shard_offset
+                .checked_add(shard.len as usize)
+                .ok_or_else(|| {
+                    HummockError::decode_error(format!(
+                        "partitioned meta shard {} offset overflow",
+                        shard_idx
+                    ))
+                })?;
+            if shard_end > index_offset {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard {} range {}..{} crosses index offset {}",
+                    shard_idx, shard_offset, shard_end, index_offset
+                )));
+            }
+            if let Some(expected_shard_offset) = expected_shard_offset
+                && shard_offset != expected_shard_offset
+            {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard {} offset mismatch: expected {} actual {}",
+                    shard_idx, expected_shard_offset, shard_offset
+                )));
+            }
+            expected_shard_offset = Some(shard_end);
+            last_smallest_key = Some(&shard.smallest_key);
+            expected_first_block_idx = expected_first_block_idx
+                .checked_add(shard.block_count)
+                .ok_or_else(|| {
+                    HummockError::decode_error("partitioned meta block count overflow")
+                })?;
+        }
+        if expected_first_block_idx != self.block_count {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta block count mismatch: header {} actual {}",
+                self.block_count, expected_first_block_idx
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn encode_to_bytes(&self) -> Vec<u8> {
+        let encoded_size = self.encoded_size();
+        let mut buf = Vec::with_capacity(encoded_size);
+        self.encode_to(&mut buf);
+        buf
+    }
+
+    pub fn encode_to(&self, mut buf: impl BufMut + AsRef<[u8]>) {
+        let start = buf.as_ref().len();
+        self.encode_body(&mut buf);
+        let end = buf.as_ref().len();
+
+        let checksum = xxhash64_checksum(&buf.as_ref()[start..end]);
+        buf.put_u64_le(checksum);
+        buf.put_u32_le(PARTITIONED_META_VERSION);
+        buf.put_u32_le(MAGIC);
+    }
+
+    pub fn encode_body(&self, mut buf: impl BufMut) {
+        buf.put_u32_le(self.estimated_size);
+        buf.put_u32_le(self.key_count);
+        put_length_prefixed_slice(&mut buf, &self.smallest_key);
+        put_length_prefixed_slice(&mut buf, &self.largest_key);
+        buf.put_u32_le(self.block_count);
+        buf.put_u32_le(self.shard_count);
+        buf.put_u32_le(self.filter_type);
+        buf.put_u32_le(self.shard_policy);
+        assert_eq!(self.shard_count as usize, self.shards.len());
+        for shard in &self.shards {
+            shard.encode(&mut buf);
+        }
+    }
+
+    pub fn decode(buf: &[u8]) -> HummockResult<Self> {
+        let version = decode_meta_footer_version(buf)?;
+        if version != PARTITIONED_META_VERSION {
+            return Err(HummockError::invalid_format_version(version));
+        }
+
+        let cursor = buf.len() - 16;
+        let checksum = (&buf[cursor..cursor + 8]).get_u64_le();
+        let buf = &mut &buf[..cursor];
+        xxhash64_verify(buf, checksum)?;
+
+        let estimated_size = buf.get_u32_le();
+        let key_count = buf.get_u32_le();
+        let smallest_key = get_length_prefixed_slice(buf);
+        let largest_key = get_length_prefixed_slice(buf);
+        let block_count = buf.get_u32_le();
+        let shard_count = buf.get_u32_le();
+        let filter_type = buf.get_u32_le();
+        let shard_policy = buf.get_u32_le();
+        let mut shards = Vec::with_capacity(shard_count as usize);
+        for shard_idx in 0..shard_count {
+            shards.push(MetaShardDesc::decode(shard_idx, buf));
+        }
+        if !buf.is_empty() {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta index has {} trailing bytes",
+                buf.len()
+            )));
+        }
+
+        let index = Self {
+            estimated_size,
+            key_count,
+            smallest_key,
+            largest_key,
+            block_count,
+            shard_count,
+            filter_type,
+            shard_policy,
+            shards,
+        };
+        index.validate(cursor + 16)?;
+        Ok(index)
+    }
+
+    pub fn encoded_size(&self) -> usize {
+        4 // estimated_size
+            + 4 // key_count
+            + 4 // smallest_key len
+            + self.smallest_key.len()
+            + 4 // largest_key len
+            + self.largest_key.len()
+            + 4 // block_count
+            + 4 // shard_count
+            + 4 // filter_type
+            + 4 // shard_policy
+            + self
+                .shards
+                .iter()
+                .map(MetaShardDesc::encoded_size)
+                .sum::<usize>()
+            + 8 // checksum
+            + 4 // version
+            + 4 // magic
+    }
+
+    pub fn locate_shard_by_key(&self, key: FullKey<&[u8]>) -> Option<&MetaShardDesc> {
+        if self.shards.is_empty() {
+            return None;
+        }
+
+        let shard_idx = self
+            .shards
+            .partition_point(|shard| FullKey::decode(&shard.smallest_key).le(&key))
+            .saturating_sub(1);
+        self.shards.get(shard_idx)
+    }
+
+    pub fn filter_candidate_shards_by_user_key(&self, key: FullKey<&[u8]>) -> Vec<&MetaShardDesc> {
+        if self.shards.is_empty() {
+            return vec![];
+        }
+
+        let first_not_less = self
+            .shards
+            .partition_point(|shard| FullKey::decode(&shard.smallest_key).user_key < key.user_key);
+        let mut candidates = Vec::new();
+
+        if first_not_less > 0 {
+            candidates.push(&self.shards[first_not_less - 1]);
+        }
+
+        let mut shard_idx = first_not_less;
+        while shard_idx < self.shards.len() {
+            let shard_user_key = FullKey::decode(&self.shards[shard_idx].smallest_key).user_key;
+            if shard_user_key != key.user_key {
+                break;
+            }
+            candidates.push(&self.shards[shard_idx]);
+            shard_idx += 1;
+        }
+
+        candidates
+    }
+
+    pub fn filter_candidate_shards_by_user_key_range(
+        &self,
+        user_key_range: &UserKeyRangeRef<'_>,
+    ) -> Vec<&MetaShardDesc> {
+        if self.shards.is_empty() {
+            return vec![];
+        }
+
+        let start_idx = match user_key_range.0 {
+            Bound::Unbounded => 0,
+            Bound::Included(left) | Bound::Excluded(left) => self
+                .shards
+                .partition_point(|shard| FullKey::decode(&shard.smallest_key).user_key < left)
+                .saturating_sub(1),
+        };
+        let end_idx_exclusive = match user_key_range.1 {
+            Bound::Unbounded => self.shards.len(),
+            Bound::Included(right) => self
+                .shards
+                .partition_point(|shard| FullKey::decode(&shard.smallest_key).user_key <= right),
+            Bound::Excluded(right) => self
+                .shards
+                .partition_point(|shard| FullKey::decode(&shard.smallest_key).user_key < right),
+        };
+
+        if end_idx_exclusive <= start_idx {
+            return vec![];
+        }
+
+        self.shards[start_idx..end_idx_exclusive].iter().collect()
+    }
+
+    pub fn block_range_for_table_id_range(
+        &self,
+        table_id_range: (TableId, TableId),
+    ) -> Option<(usize, usize)> {
+        if self.shards.is_empty() {
+            return None;
+        }
+
+        let start_shard_idx = self
+            .shards
+            .partition_point(|shard| shard.table_id() < table_id_range.0)
+            .saturating_sub(1);
+        let end_shard_idx_exclusive = self
+            .shards
+            .partition_point(|shard| shard.table_id() <= table_id_range.1);
+        if end_shard_idx_exclusive <= start_shard_idx {
+            return None;
+        }
+
+        let start_shard = &self.shards[start_shard_idx];
+        let end_shard = &self.shards[end_shard_idx_exclusive - 1];
+        Some((
+            start_shard.first_block_idx as usize,
+            end_shard.first_block_idx as usize + end_shard.block_count as usize - 1,
+        ))
+    }
+}
+
+#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MetaShard {
+    pub shard_idx: u32,
+    pub first_block_idx: u32,
+    pub block_metas: Vec<BlockMeta>,
+    pub filter_type: u32,
+    pub filter: Vec<u8>,
+}
+
+impl MetaShard {
+    pub fn locate_block_by_key(&self, key: FullKey<&[u8]>) -> usize {
+        self.block_metas
+            .partition_point(|block_meta| FullKey::decode(&block_meta.smallest_key).le(&key))
+            .saturating_sub(1)
+    }
+
+    pub fn encode_body(&self, mut buf: impl BufMut) {
+        buf.put_u32_le(self.block_metas.len() as u32);
+        for block_meta in &self.block_metas {
+            block_meta.encode(&mut buf);
+        }
+        put_length_prefixed_slice(&mut buf, &self.filter);
+    }
+
+    pub fn encode_body_to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(self.encoded_body_size());
+        self.encode_body(&mut buf);
+        buf
+    }
+
+    pub fn decode_body(
+        shard_idx: u32,
+        first_block_idx: u32,
+        expected_block_count: u32,
+        expected_smallest_key: &[u8],
+        filter_type: u32,
+        mut buf: &[u8],
+    ) -> HummockResult<Self> {
+        let block_meta_count = buf.get_u32_le() as usize;
+        if block_meta_count != expected_block_count as usize {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard {} block count mismatch: desc {} body {}",
+                shard_idx, expected_block_count, block_meta_count
+            )));
+        }
+        let mut block_metas = Vec::with_capacity(block_meta_count);
+        for _ in 0..block_meta_count {
+            block_metas.push(BlockMeta::decode(&mut buf));
+        }
+        let filter = get_length_prefixed_slice(&mut buf);
+        if !buf.is_empty() {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard {} has {} trailing bytes",
+                shard_idx,
+                buf.len()
+            )));
+        }
+        if block_metas.is_empty() {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard {} has no block meta",
+                shard_idx
+            )));
+        }
+        if block_metas[0].smallest_key != expected_smallest_key {
+            return Err(HummockError::decode_error(format!(
+                "partitioned meta shard {} smallest key mismatch",
+                shard_idx
+            )));
+        }
+        for (idx, (left, right)) in block_metas.iter().tuple_windows().enumerate() {
+            if KeyComparator::compare_encoded_full_key(&left.smallest_key, &right.smallest_key)
+                != std::cmp::Ordering::Less
+            {
+                return Err(HummockError::decode_error(format!(
+                    "partitioned meta shard {} block meta {} smallest key is not strictly increasing",
+                    shard_idx,
+                    idx + 1
+                )));
+            }
+        }
+        Ok(Self {
+            shard_idx,
+            first_block_idx,
+            block_metas,
+            filter_type,
+            filter,
+        })
+    }
+
+    pub fn encoded_body_size(&self) -> usize {
+        4 // block meta count
+            + self
+                .block_metas
+                .iter()
+                .map(BlockMeta::encoded_size)
+                .sum::<usize>()
+            + 4 // filter len
+            + self.filter.len()
+    }
+}
+
+pub fn decode_meta_footer_version(buf: &[u8]) -> HummockResult<u32> {
+    if buf.len() < 16 {
+        return Err(HummockError::decode_error(format!(
+            "sst meta footer too short: {}",
+            buf.len()
+        )));
+    }
+
+    let magic = (&buf[buf.len() - 4..]).get_u32_le();
+    if magic != MAGIC {
+        return Err(HummockError::magic_mismatch(MAGIC, magic));
+    }
+
+    Ok((&buf[buf.len() - 8..buf.len() - 4]).get_u32_le())
 }
 
 impl BlockMeta {
@@ -480,7 +1011,7 @@ impl SstableMeta {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
@@ -543,9 +1074,58 @@ mod tests {
         println!("buf: {}", buf.len());
     }
 
+    #[test]
+    fn test_partitioned_meta_enc_dec() {
+        let smallest_key = iterator_test_key_of(0).encode();
+        let largest_key = iterator_test_key_of(9).encode();
+        let shard = MetaShard {
+            shard_idx: 0,
+            first_block_idx: 0,
+            block_metas: vec![BlockMeta {
+                smallest_key: smallest_key.clone(),
+                offset: 0,
+                len: 100,
+                uncompressed_size: 200,
+                total_key_count: 10,
+                stale_key_count: 1,
+            }],
+            filter_type: 1,
+            filter: b"filter".to_vec(),
+        };
+        let shard_body = shard.encode_body_to_bytes();
+        let decoded_shard = MetaShard::decode_body(0, 0, 1, &smallest_key, 1, &shard_body).unwrap();
+        assert_eq!(decoded_shard, shard);
+
+        let index = MetaPartitionIndex {
+            estimated_size: 1234,
+            key_count: 10,
+            smallest_key: smallest_key.clone(),
+            largest_key,
+            block_count: 1,
+            shard_count: 1,
+            filter_type: 1,
+            shard_policy: META_SHARD_POLICY_FIXED_BLOCK_COUNT,
+            shards: vec![MetaShardDesc {
+                shard_idx: 0,
+                first_block_idx: 0,
+                block_count: 1,
+                smallest_key,
+                offset: 100,
+                len: shard_body.len() as u32,
+                checksum: xxhash64_checksum(&shard_body),
+            }],
+        };
+        let encoded_index = index.encode_to_bytes();
+        assert_eq!(
+            decode_meta_footer_version(&encoded_index).unwrap(),
+            PARTITIONED_META_VERSION
+        );
+        assert_eq!(MetaPartitionIndex::decode(&encoded_index).unwrap(), index);
+    }
+
     #[tokio::test]
     async fn test_sstable_serde() {
-        let (_, meta) = gen_test_sstable_data(
+        let (data, meta) = gen_test_sstable_data(
             default_builder_opt_for_test(),
             (0..100).clone().map(|x| {
                 (
@@ -555,8 +1135,9 @@ mod tests {
             }),
         )
         .await;
+        let index = MetaPartitionIndex::decode(&data[meta.meta_offset as usize..]).unwrap();
 
-        // skip sst serde
+        // Legacy SST serde.
         let sstable = Sstable::new(42.into(), meta.clone(), true);
 
         let buffer = bincode::serialize(&sstable).unwrap();
@@ -565,22 +1146,17 @@ mod tests {
 
         assert_eq!(s.id, sstable.id);
         assert_eq!(s.meta, sstable.meta);
-        assert!(!sstable.filter_reader.is_empty());
-        // The table filter reader is empty because the SST filter is skipped in serde.
         assert!(s.filter_reader.is_empty());
 
-        // enable sst serde
-        let sstable = Sstable::new(42.into(), meta, false);
+        // Partitioned SST meta serde.
+        let partitioned_meta = PartitionedSstableMeta::new(42.into(), meta, index);
 
-        let buffer = bincode::serialize(&sstable).unwrap();
+        let buffer = bincode::serialize(&partitioned_meta).unwrap();
 
-        let s: Sstable = bincode::deserialize(&buffer).unwrap();
+        let s: PartitionedSstableMeta = bincode::deserialize(&buffer).unwrap();
 
-        assert_eq!(s.id, sstable.id);
-        assert_eq!(s.meta, sstable.meta);
-        assert_eq!(
-            s.filter_reader.encode_to_bytes(),
-            sstable.filter_reader.encode_to_bytes()
-        );
+        assert_eq!(s.id, partitioned_meta.id);
+        assert_eq!(s.meta, partitioned_meta.meta);
+        assert_eq!(s.index, partitioned_meta.index);
     }
 }

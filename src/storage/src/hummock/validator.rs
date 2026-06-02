@@ -45,7 +45,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             worker_id,
         );
         let holder = match sstable_store
-            .sstable(&sstable_info, unused.borrow_mut())
+            .meta_index(&sstable_info, unused.borrow_mut())
             .await
         {
             Ok(holder) => holder,

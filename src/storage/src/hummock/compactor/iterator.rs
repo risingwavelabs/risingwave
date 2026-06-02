@@ -32,7 +32,7 @@ use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult, TableHolder};
+use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 const PROGRESS_KEY_INTERVAL: usize = 100;
@@ -42,7 +42,7 @@ const PROGRESS_KEY_INTERVAL: usize = 100;
 ///  Note that a `block_meta` does not necessarily correspond to the entire sstable, but rather to a subset, which is documented via the `block_idx`.
 pub struct SstableStreamIterator {
     sstable_store: SstableStoreRef,
-    sstable: TableHolder,
+    block_metas: Vec<BlockMeta>,
     /// The range of block metas to iterate over
     block_metas_range: Range<usize>,
     /// The downloading stream.
@@ -88,7 +88,7 @@ impl SstableStreamIterator {
     /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockDataStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
-        sstable: TableHolder,
+        block_metas: Vec<BlockMeta>,
         block_metas_range: Range<usize>,
         sstable_info: SstableInfo,
         stats: &StoreLocalStatistic,
@@ -100,9 +100,12 @@ impl SstableStreamIterator {
         // Further filter the block_metas_range with sstable_info.key_range
         // This is necessary when the SST is split into multiple SstableInfo with different key ranges
         let block_metas_range = {
-            let block_metas = &sstable.meta.block_metas[block_metas_range.clone()];
-            let inner_range =
-                filter_block_metas(block_metas, &read_table_ids, sstable_info.key_range.clone());
+            let block_metas_to_filter = &block_metas[block_metas_range.clone()];
+            let inner_range = filter_block_metas(
+                block_metas_to_filter,
+                &read_table_ids,
+                sstable_info.key_range.clone(),
+            );
             // Adjust the range to be relative to the original block_metas
             (block_metas_range.start + inner_range.start)
                 ..(block_metas_range.start + inner_range.end)
@@ -115,7 +118,7 @@ impl SstableStreamIterator {
         Self {
             block_stream: None,
             block_iter: None,
-            sstable,
+            block_metas,
             block_metas_range,
             block_idx: 0,
             stats_ptr: stats.remote_io_time.clone(),
@@ -134,7 +137,7 @@ impl SstableStreamIterator {
     /// Returns the block metas slice for this iterator.
     #[inline]
     fn block_metas(&self) -> &[BlockMeta] {
-        &self.sstable.meta.block_metas[self.block_metas_range.clone()]
+        &self.block_metas[self.block_metas_range.clone()]
     }
 
     /// Returns the number of blocks in this iterator.
@@ -454,8 +457,12 @@ impl ConcatSstableIterator {
             }
             let sstable = self
                 .sstable_store
-                .sstable(table_info, &mut self.stats)
+                .meta_index(table_info, &mut self.stats)
                 .instrument_await("stream_iter_sstable".verbose())
+                .await?;
+            let block_metas = self
+                .sstable_store
+                .get_partitioned_block_metas(&sstable, &mut self.stats)
                 .await?;
 
             let filter_key_range = match seek_key {
@@ -466,7 +473,7 @@ impl ConcatSstableIterator {
             };
 
             let block_metas_range =
-                filter_block_metas(&sstable.meta.block_metas, &read_table_ids, filter_key_range);
+                filter_block_metas(&block_metas, &read_table_ids, filter_key_range);
 
             let mut found = true;
             if block_metas_range.is_empty() {
@@ -474,7 +481,7 @@ impl ConcatSstableIterator {
             } else {
                 self.task_progress.inc_num_pending_read_io();
                 let mut sstable_iter = SstableStreamIterator::new(
-                    sstable,
+                    block_metas,
                     block_metas_range,
                     table_info.clone(),
                     &self.stats,
@@ -874,10 +881,13 @@ mod tests {
         let mut iter =
             ConcatSstableIterator::for_test(table_infos.clone(), kr.clone(), sstable_store.clone());
         let sst = sstable_store
-            .sstable(&iter.sstables[0], &mut iter.stats)
+            .meta_index(&iter.sstables[0], &mut iter.stats)
             .await
             .unwrap();
-        let block_metas = &sst.meta.block_metas;
+        let block_metas = sstable_store
+            .get_partitioned_block_metas(&sst, &mut iter.stats)
+            .await
+            .unwrap();
         let block_1_smallest_key = block_metas[1].smallest_key.clone();
         let block_2_smallest_key = block_metas[2].smallest_key.clone();
         // Use block_1_smallest_key as seek key and result in the first KV of block 1.
@@ -1354,5 +1364,44 @@ mod tests {
         iter.seek(key_2.to_ref()).await.unwrap();
         assert!(iter.is_valid());
         assert_eq!(iter.key(), key_3.to_ref());
+    }
+
+    #[tokio::test]
+    async fn test_concat_iterator_reads_partitioned_meta_sst() {
+        let sstable_store = mock_sstable_store().await;
+
+        let keys = [
+            FullKey::for_test(TableId::new(1), b"a".to_vec(), test_epoch(1)),
+            FullKey::for_test(TableId::new(1), b"b".to_vec(), test_epoch(1)),
+            FullKey::for_test(TableId::new(1), b"c".to_vec(), test_epoch(1)),
+        ];
+        let kv_pairs = keys
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(idx, key)| (key, HummockValue::put(format!("value-{idx}").into_bytes())));
+
+        let mut opt = default_builder_opt_for_test();
+        opt.block_capacity = 128;
+        opt.partitioned_meta_block_count = 2;
+        let (sstable, table_info) =
+            gen_test_sstable_with_table_ids(opt, 11, kv_pairs, sstable_store.clone(), vec![1])
+                .await;
+        assert_eq!(
+            sstable.meta.version,
+            crate::hummock::PARTITIONED_META_VERSION
+        );
+        assert!(sstable.meta.block_metas.is_empty());
+
+        let mut iter =
+            ConcatSstableIterator::for_test(vec![table_info], KeyRange::default(), sstable_store);
+        iter.rewind().await.unwrap();
+
+        for expected_key in keys {
+            assert!(iter.is_valid());
+            assert_eq!(iter.key(), expected_key.to_ref());
+            iter.next().await.unwrap();
+        }
+        assert!(!iter.is_valid());
     }
 }
