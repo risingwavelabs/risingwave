@@ -146,6 +146,11 @@ impl TryToStreamPb for StreamMatchRecognize {
             define_conditions,
             pattern: format!("{}", self.core.pattern),
             state_table: Some(state_table),
+            after_match_skip: match &self.core.after_match_skip {
+                Some(risingwave_sqlparser::ast::AfterMatchSkip::ToNextRow) => "to_next_row",
+                _ => "past_last_row",
+            }
+            .to_owned(),
         }))
     }
 }

@@ -21,5 +21,5 @@ mod nfa;
 mod parse;
 
 pub use executor::{MatchRecognizeExecutor, MatchRecognizeExecutorArgs};
-pub use nfa::Nfa;
+pub use nfa::{Nfa, SkipMode};
 pub use parse::parse_pattern;
