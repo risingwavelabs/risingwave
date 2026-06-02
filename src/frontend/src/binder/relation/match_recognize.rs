@@ -186,7 +186,8 @@ impl Binder {
                 let ts_type = order_key.return_type();
                 let last = ExprImpl::from(InputRef::new(0, ts_type.clone()));
                 let first = ExprImpl::from(InputRef::new(1, ts_type));
-                let diff = ExprImpl::from(FunctionCall::new(ExprType::Subtract, vec![last, first])?);
+                let diff =
+                    ExprImpl::from(FunctionCall::new(ExprType::Subtract, vec![last, first])?);
                 Some(ExprImpl::from(FunctionCall::new(
                     ExprType::LessThanOrEqual,
                     vec![diff, bound],
@@ -270,10 +271,16 @@ impl Binder {
         // Output schema (ONE ROW PER MATCH): the partition-by columns followed by the measures.
         let mut output_columns: Vec<(bool, Field)> = Vec::new();
         for (i, e) in partition_by.iter().enumerate() {
-            output_columns.push((false, Field::with_name(e.return_type(), format!("partition_{i}"))));
+            output_columns.push((
+                false,
+                Field::with_name(e.return_type(), format!("partition_{i}")),
+            ));
         }
         for m in &measures {
-            output_columns.push((false, Field::with_name(m.expr.return_type(), m.name.clone())));
+            output_columns.push((
+                false,
+                Field::with_name(m.expr.return_type(), m.name.clone()),
+            ));
         }
 
         let table_name = match alias {
@@ -307,7 +314,9 @@ impl Binder {
         // CLASSIFIER(): the pattern variable bound to the match's last row.
         if let AstExpr::Function(func) = &m.expr
             && func.name.0.len() == 1
-            && func.name.0[0].real_value().eq_ignore_ascii_case("classifier")
+            && func.name.0[0]
+                .real_value()
+                .eq_ignore_ascii_case("classifier")
         {
             if !func.arg_list.args.is_empty() {
                 bail_not_implemented!("CLASSIFIER() with arguments in MATCH_RECOGNIZE");
@@ -358,10 +367,16 @@ impl Binder {
             }
             // agg(var.col): over the rows labeled `var`.
             let FunctionArg::Unnamed(FunctionArgExpr::Expr(inner)) = &func.arg_list.args[0] else {
-                bail_not_implemented!("{}() argument must be a pattern-variable column", agg.to_uppercase());
+                bail_not_implemented!(
+                    "{}() argument must be a pattern-variable column",
+                    agg.to_uppercase()
+                );
             };
             let ExprImpl::InputRef(r) = self.bind_expr(inner)? else {
-                bail_not_implemented!("{}() argument must be a pattern-variable column", agg.to_uppercase());
+                bail_not_implemented!(
+                    "{}() argument must be a pattern-variable column",
+                    agg.to_uppercase()
+                );
             };
             let (vars, col_idx) = resolver.resolve(r.index())?;
             let col_type = r.data_type.clone();
@@ -443,7 +458,8 @@ impl Binder {
             )?
             .into();
             let count_is_zero: ExprImpl =
-                FunctionCall::new(ExprType::Equal, vec![count_ref, ExprImpl::literal_int(0)])?.into();
+                FunctionCall::new(ExprType::Equal, vec![count_ref, ExprImpl::literal_int(0)])?
+                    .into();
             let null: ExprImpl = Literal::new(None, avg_type).into();
             let expr: ExprImpl =
                 FunctionCall::new(ExprType::Case, vec![count_is_zero, null, quotient])?.into();
@@ -549,10 +565,17 @@ impl Binder {
 
         // Bring the navigation placeholders into scope as a synthetic relation so the predicate
         // type-checks. They are appended to the current context, so capture the base index first.
+        //
+        // Why a synthetic relation rather than a bespoke binder: after extraction each navigation
+        // expression is a fresh column of a known type, and the rest of the predicate is ordinary
+        // SQL over the input/variable columns. Registering the placeholders as a relation lets the
+        // normal `bind_expr` resolve everything in one pass (name resolution, coercion, operator
+        // type-checking) and hand back `InputRef`s we then remap to slots. Building a separate typed
+        // binder for the predicate would duplicate that machinery for no behavioural gain. The
+        // relation name is internal (`__mr_nav_*`) and never escapes binding.
         let nav_base = self.context.columns.len();
         if !nav_fields.is_empty() {
-            let cols: Vec<(bool, Field)> =
-                nav_fields.iter().map(|f| (false, f.clone())).collect();
+            let cols: Vec<(bool, Field)> = nav_fields.iter().map(|f| (false, f.clone())).collect();
             self.bind_table_to_context(cols, prefix.clone(), None, None)?;
         }
 
@@ -651,7 +674,10 @@ impl NavExtractor<'_> {
         let name = func.name.0[0].real_value().to_ascii_lowercase();
         let args = &func.arg_list.args;
         let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(inner))) = args.first() else {
-            bail_not_implemented!("{}() argument must be a column in DEFINE", name.to_uppercase());
+            bail_not_implemented!(
+                "{}() argument must be a column in DEFINE",
+                name.to_uppercase()
+            );
         };
         match name.as_str() {
             "prev" | "next" => {
@@ -706,16 +732,26 @@ impl NavExtractor<'_> {
     /// Resolves a logical-navigation argument (`var.col`) to its variable(s) and input column index.
     fn var_col(&self, expr: &AstExpr) -> RwResult<(Vec<String>, usize)> {
         let AstExpr::CompoundIdentifier(parts) = expr else {
-            bail_not_implemented!("FIRST/LAST argument must be a pattern-variable column in DEFINE");
+            bail_not_implemented!(
+                "FIRST/LAST argument must be a pattern-variable column in DEFINE"
+            );
         };
         if parts.len() != 2 {
-            bail_not_implemented!("FIRST/LAST argument must be a pattern-variable column in DEFINE");
+            bail_not_implemented!(
+                "FIRST/LAST argument must be a pattern-variable column in DEFINE"
+            );
         }
         let var = parts[0].real_value();
         if !self.resolver.alias_names.iter().any(|n| n == &var) {
-            bail_not_implemented!("FIRST/LAST references unknown pattern variable {} in DEFINE", var);
+            bail_not_implemented!(
+                "FIRST/LAST references unknown pattern variable {} in DEFINE",
+                var
+            );
         }
-        Ok((self.resolver.members_of(&var), self.col_idx(&parts[1].real_value())?))
+        Ok((
+            self.resolver.members_of(&var),
+            self.col_idx(&parts[1].real_value())?,
+        ))
     }
 
     fn col_idx(&self, name: &str) -> RwResult<usize> {
@@ -726,12 +762,16 @@ impl NavExtractor<'_> {
     }
 
     fn parse_offset(&self, arg: &FunctionArg, name: &str) -> RwResult<usize> {
-        if let FunctionArg::Unnamed(FunctionArgExpr::Expr(AstExpr::Value(AstValue::Number(s)))) = arg
+        if let FunctionArg::Unnamed(FunctionArgExpr::Expr(AstExpr::Value(AstValue::Number(s)))) =
+            arg
             && let Ok(n) = s.parse::<usize>()
         {
             Ok(n)
         } else {
-            bail_not_implemented!("{}() offset must be a non-negative integer literal", name.to_uppercase());
+            bail_not_implemented!(
+                "{}() offset must be a non-negative integer literal",
+                name.to_uppercase()
+            );
         }
     }
 }
@@ -915,4 +955,3 @@ impl ExprRewriter for SlotLoweringRewriter<'_, '_> {
         InputRef::new(slot_idx, data_type).into()
     }
 }
-
