@@ -126,6 +126,11 @@ impl Nfa {
     /// match (so `start..end` are the matched rows), or `None` if no match starts at `start`.
     ///
     /// An empty match (the pattern accepts zero rows, e.g. `A*`) returns `Some(start)`.
+    ///
+    /// Test-only: the streaming executor matches via [`Nfa::find_matches_dynamic`]. This precomputed
+    /// satisfied-set variant is kept as the simple reference the dynamic matcher is checked against,
+    /// and to unit-test NFA construction directly. Gated out of the release binary.
+    #[cfg(test)]
     pub fn longest_match(&self, rows: &[BTreeSet<String>], start: usize) -> Option<usize> {
         let mut current = self.epsilon_closure([self.start]);
         let mut longest = current.contains(&self.accept).then_some(start);
@@ -157,6 +162,8 @@ impl Nfa {
 }
 
 /// A single match span over the row sequence: `start..end` (end exclusive) are the matched rows.
+/// Test-only: produced by the reference matcher [`Nfa::find_matches`].
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MatchSpan {
     pub start: usize,
@@ -205,6 +212,9 @@ impl Nfa {
     ///
     /// Empty matches (a pattern that accepts zero rows, e.g. `A*` on a non-matching row) are not
     /// emitted and advance the scan by one, so the scan always terminates.
+    ///
+    /// Test-only reference matcher (see [`Nfa::longest_match`]); gated out of the release binary.
+    #[cfg(test)]
     pub fn find_matches(&self, rows: &[BTreeSet<String>], skip: &SkipMode) -> Vec<MatchSpan> {
         let mut matches = Vec::new();
         let mut i = 0;
@@ -241,6 +251,7 @@ impl Nfa {
     /// along the chosen accepting path (the variable each consumed row was matched as). This is
     /// what `MEASURES` navigation (`FIRST`/`LAST`), `CLASSIFIER()`, and aggregates over matched
     /// rows consume. Returns `(end, labels)` where `labels.len() == end - start`, or `None`.
+    #[cfg(test)]
     pub fn longest_match_labeled(
         &self,
         rows: &[BTreeSet<String>],
@@ -254,6 +265,7 @@ impl Nfa {
     /// path (it tracks `(state, pos)` and is unwound on backtrack). Among continuations the one
     /// reaching the furthest `end` wins; ties keep the first in transition order, making the label
     /// assignment deterministic.
+    #[cfg(test)]
     fn longest_from(
         &self,
         rows: &[BTreeSet<String>],
@@ -293,6 +305,8 @@ impl Nfa {
     }
 
     /// Like [`Nfa::find_matches`] but returns each match with its per-row variable labels.
+    /// Test-only reference matcher; the streaming executor uses [`Nfa::find_matches_dynamic`].
+    #[cfg(test)]
     pub fn find_matches_labeled(
         &self,
         rows: &[BTreeSet<String>],
@@ -314,9 +328,10 @@ impl Nfa {
         matches
     }
 
-    /// Like [`Nfa::find_matches_labeled`], but membership is decided by an async [`CandidateMatcher`]
+    /// Like `find_matches_labeled`, but membership is decided by an async [`CandidateMatcher`]
     /// instead of precomputed satisfied-sets, so `DEFINE` predicates with row-pattern navigation can
-    /// be evaluated against the running match. `n_rows` is the number of (sorted) rows to scan.
+    /// be evaluated against the running match. `n_rows` is the number of (sorted) rows to scan. This
+    /// is the only matcher the streaming executor uses.
     pub async fn find_matches_dynamic(
         &self,
         n_rows: usize,
