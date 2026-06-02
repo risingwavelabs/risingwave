@@ -37,6 +37,14 @@ pub enum MeasureSlotKind {
     Last,
     /// The pattern variable bound to the match's last row (`CLASSIFIER()`).
     Classifier,
+    /// Number of rows in the whole match (`COUNT(*)`). `var` / `col_idx` unused.
+    CountStar,
+    /// Number of rows labeled `var` whose `col` is non-null (`COUNT(var.col)`).
+    Count,
+    /// Minimum `col` over rows labeled `var` (`MIN(var.col)`).
+    Min,
+    /// Maximum `col` over rows labeled `var` (`MAX(var.col)`).
+    Max,
 }
 
 /// One navigation input that a measure expression reads. A measure is lowered to an expression over
@@ -226,6 +234,65 @@ impl Binder {
                     var: String::new(),
                     col_idx: 0,
                     data_type: DataType::Varchar,
+                }],
+            });
+        }
+
+        // Top-level aggregates over the matched rows: COUNT(*), COUNT(var.col), MIN/MAX(var.col).
+        if let AstExpr::Function(func) = &m.expr
+            && func.name.0.len() == 1
+            && matches!(
+                func.name.0[0].real_value().to_ascii_lowercase().as_str(),
+                "count" | "min" | "max" | "sum" | "avg"
+            )
+        {
+            let agg = func.name.0[0].real_value().to_ascii_lowercase();
+            if matches!(agg.as_str(), "sum" | "avg") {
+                bail_not_implemented!("{}() in MATCH_RECOGNIZE MEASURES", agg.to_uppercase());
+            }
+            if func.arg_list.args.len() != 1 {
+                bail_not_implemented!("{}() expects exactly one argument", agg.to_uppercase());
+            }
+            // COUNT(*): every row of the match.
+            if agg == "count"
+                && matches!(
+                    &func.arg_list.args[0],
+                    FunctionArg::Unnamed(FunctionArgExpr::Wildcard(_))
+                )
+            {
+                return Ok(BoundMeasure {
+                    expr: InputRef::new(0, DataType::Int64).into(),
+                    name,
+                    slots: vec![MeasureSlot {
+                        kind: MeasureSlotKind::CountStar,
+                        var: String::new(),
+                        col_idx: 0,
+                        data_type: DataType::Int64,
+                    }],
+                });
+            }
+            // agg(var.col): over the rows labeled `var`.
+            let FunctionArg::Unnamed(FunctionArgExpr::Expr(inner)) = &func.arg_list.args[0] else {
+                bail_not_implemented!("{}() argument must be a pattern-variable column", agg.to_uppercase());
+            };
+            let ExprImpl::InputRef(r) = self.bind_expr(inner)? else {
+                bail_not_implemented!("{}() argument must be a pattern-variable column", agg.to_uppercase());
+            };
+            let (var, col_idx) = decode_var_col(r.index(), input_col_num, variables)?;
+            let (kind, data_type) = match agg.as_str() {
+                "count" => (MeasureSlotKind::Count, DataType::Int64),
+                "min" => (MeasureSlotKind::Min, r.data_type.clone()),
+                "max" => (MeasureSlotKind::Max, r.data_type.clone()),
+                _ => unreachable!("agg kind filtered above"),
+            };
+            return Ok(BoundMeasure {
+                expr: InputRef::new(0, data_type.clone()).into(),
+                name,
+                slots: vec![MeasureSlot {
+                    kind,
+                    var,
+                    col_idx,
+                    data_type,
                 }],
             });
         }

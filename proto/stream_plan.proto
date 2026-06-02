@@ -1169,6 +1169,9 @@ message MatchRecognizeMeasureSlot {
   //     a bare `var.col` under ONE ROW PER MATCH FINAL semantics).
   // 1 = FIRST(var.col): column value of the first such row.
   // 2 = CLASSIFIER(): the pattern variable bound to the match's last row (`var` / `col_idx` unused).
+  // 3 = COUNT(*): number of rows in the match (`var` / `col_idx` unused).
+  // 4 = COUNT(var.col): number of rows labeled `var` whose `col` is non-null.
+  // 5 = MIN(var.col) / 6 = MAX(var.col): min / max of `col` over rows labeled `var`.
   uint32 kind = 1;
   string var = 2;
   uint32 col_idx = 3;

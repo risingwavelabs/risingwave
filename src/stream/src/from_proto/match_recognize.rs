@@ -63,6 +63,10 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
                         kind: match s.kind {
                             1 => MeasureSlotKind::First,
                             2 => MeasureSlotKind::Classifier,
+                            3 => MeasureSlotKind::CountStar,
+                            4 => MeasureSlotKind::Count,
+                            5 => MeasureSlotKind::Min,
+                            6 => MeasureSlotKind::Max,
                             _ => MeasureSlotKind::Last,
                         },
                         var: s.var.clone(),
