@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 fn parse_pub_mods_with_syn(lib_rs: &str) -> BTreeSet<String> {
     syn::parse_file(lib_rs)
-        .expect("failed to parse src/lib.rs")
+        .expect("failed to parse lib.rs content")
         .items
         .into_iter()
         .filter_map(|item| match item {
@@ -38,26 +38,41 @@ macro_rules! collect_modules_in_for_all_meta_model_entities {
     }};
 }
 
-fn parse_table_names_with_syn(source: &str) -> BTreeSet<String> {
+fn parse_table_names_with_syn(source: &str, source_name: &str) -> BTreeSet<String> {
     let mut table_names = BTreeSet::new();
-    let parsed = syn::parse_file(source).expect("failed to parse source file");
+    let parsed = syn::parse_file(source)
+        .unwrap_or_else(|err| panic!("failed to parse {source_name}: {err}"));
     for item in parsed.items {
         let syn::Item::Struct(item_struct) = item else {
             continue;
         };
+        let mut saw_sea_orm_attr = false;
+        let mut saw_table_name = false;
         for attr in item_struct.attrs {
             if !attr.path().is_ident("sea_orm") {
                 continue;
             }
+            saw_sea_orm_attr = true;
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("table_name") {
                     let value = meta.value()?;
                     table_names.insert(value.parse::<syn::LitStr>()?.value());
+                    saw_table_name = true;
                 }
                 Ok(())
             })
-            .expect("failed to parse #[sea_orm(...)] attribute");
+            .unwrap_or_else(|err| {
+                panic!(
+                    "failed to parse #[sea_orm(...)] attribute on struct `{}` in {source_name}: {err}",
+                    item_struct.ident
+                )
+            });
         }
+        assert!(
+            !saw_sea_orm_attr || saw_table_name,
+            "struct `{}` has #[sea_orm(...)] but no table_name",
+            item_struct.ident
+        );
     }
     table_names
 }
@@ -67,9 +82,10 @@ fn parse_table_names_in_modules(modules: impl IntoIterator<Item = String>) -> BT
     modules
         .into_iter()
         .flat_map(|module| {
-            let source = std::fs::read_to_string(model_src_dir.join(format!("{module}.rs")))
-                .unwrap_or_else(|err| panic!("failed to read {module}.rs: {err}"));
-            parse_table_names_with_syn(&source)
+            let module_path = model_src_dir.join(format!("{module}.rs"));
+            let source = std::fs::read_to_string(&module_path)
+                .unwrap_or_else(|err| panic!("failed to read {}: {err}", module_path.display()));
+            parse_table_names_with_syn(&source, &module_path.display().to_string())
         })
         .collect()
 }
