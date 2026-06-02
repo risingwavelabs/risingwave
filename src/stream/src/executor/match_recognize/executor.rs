@@ -456,6 +456,47 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         datums.extend(row.row.iter().map(|d| d.to_owned_datum()));
         OwnedRow::new(datums)
     }
+
+    /// (Re)build the per-partition buffers from the state table by scanning every vnode this actor
+    /// owns. Used both on recovery and after a vnode-bitmap change (rescaling), where ownership of
+    /// partitions shifts: a full reload drops partitions no longer owned and picks up newly-owned
+    /// ones. The state is distributed by the partition key, so an empty-prefix scan must go vnode by
+    /// vnode (a vnode cannot be computed from an empty prefix).
+    async fn load_partitions(
+        state_table: &StateTable<S>,
+        input_arity: usize,
+        time_col: usize,
+        partition_key_indices: &[usize],
+    ) -> StreamExecutorResult<HashMap<OwnedRow, PartitionState>> {
+        let mut partitions: HashMap<OwnedRow, PartitionState> = HashMap::new();
+        let sub_range: (Bound<&[Datum]>, Bound<&[Datum]>) = (Bound::Unbounded, Bound::Unbounded);
+        let vnodes = state_table.vnodes().clone();
+        for vnode in vnodes.iter_vnodes() {
+            let iter = state_table
+                .iter_with_vnode(vnode, &sub_range, PrefetchOptions::default())
+                .await?;
+            pin_mut!(iter);
+            while let Some(item) = iter.next().await {
+                let row = item?.into_owned_row();
+                let seq = row.datum_at(0).expect("seq not null").into_int64();
+                let input_row = OwnedRow::new(
+                    (1..1 + input_arity)
+                        .map(|i| row.datum_at(i).to_owned_datum())
+                        .collect(),
+                );
+                let order_key = input_row.datum_at(time_col).to_owned_datum();
+                let partition_key = (&input_row).project(partition_key_indices).to_owned_row();
+                let state = partitions.entry(partition_key).or_default();
+                state.rows.push(BufferedRow {
+                    seq,
+                    order_key,
+                    row: input_row,
+                });
+                state.next_seq = state.next_seq.max(seq + 1);
+            }
+        }
+        Ok(partitions)
+    }
 }
 
 impl<S: StateStore> Execute for MatchRecognizeExecutor<S> {
@@ -490,39 +531,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         yield Message::Barrier(barrier);
         state_table.init_epoch(first_epoch).await?;
 
-        // Recovery: rebuild the per-partition buffers from the state table. The state is distributed
-        // by the partition key, so scan each vnode this actor owns (an empty-prefix scan cannot
-        // compute a vnode).
-        let mut partitions: HashMap<OwnedRow, PartitionState> = HashMap::new();
-        {
-            let sub_range: (Bound<&[Datum]>, Bound<&[Datum]>) =
-                (Bound::Unbounded, Bound::Unbounded);
-            let vnodes = state_table.vnodes().clone();
-            for vnode in vnodes.iter_vnodes() {
-                let iter = state_table
-                    .iter_with_vnode(vnode, &sub_range, PrefetchOptions::default())
-                    .await?;
-                pin_mut!(iter);
-                while let Some(item) = iter.next().await {
-                    let row = item?.into_owned_row();
-                    let seq = row.datum_at(0).expect("seq not null").into_int64();
-                    let input_row = OwnedRow::new(
-                        (1..1 + input_arity)
-                            .map(|i| row.datum_at(i).to_owned_datum())
-                            .collect(),
-                    );
-                    let order_key = input_row.datum_at(time_col).to_owned_datum();
-                    let partition_key = (&input_row).project(&partition_key_indices).to_owned_row();
-                    let state = partitions.entry(partition_key).or_default();
-                    state.rows.push(BufferedRow {
-                        seq,
-                        order_key,
-                        row: input_row,
-                    });
-                    state.next_seq = state.next_seq.max(seq + 1);
-                }
-            }
-        }
+        // Recovery: rebuild the per-partition buffers from the state table.
+        let mut partitions =
+            Self::load_partitions(&state_table, input_arity, time_col, &partition_key_indices)
+                .await?;
 
         #[for_await]
         for msg in input {
@@ -664,7 +676,22 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     let post_commit = state_table.commit(barrier.epoch).await?;
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
                     yield Message::Barrier(barrier);
-                    post_commit.post_yield_barrier(update_vnode_bitmap).await?;
+                    // On a vnode-bitmap change (rescaling) the set of partitions this actor owns
+                    // shifts. The in-memory buffer is authoritative, not read-through, so reload it
+                    // from the (now-migrated) state table: this drops partitions no longer owned and
+                    // picks up newly-owned ones. Without it the buffer desyncs from the state table.
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                        && cache_may_stale
+                    {
+                        partitions = Self::load_partitions(
+                            &state_table,
+                            input_arity,
+                            time_col,
+                            &partition_key_indices,
+                        )
+                        .await?;
+                    }
                 }
             }
         }
