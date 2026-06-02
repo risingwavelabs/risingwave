@@ -15,7 +15,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::Context;
-use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, UserId, WorkerId};
+use risingwave_common::id::{ConnectionId, JobId, SourceId, TableId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
@@ -52,6 +52,7 @@ use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
 use crate::catalog::{DatabaseId, FragmentId, SinkId};
+use crate::user::UserId;
 
 /// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
 /// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,

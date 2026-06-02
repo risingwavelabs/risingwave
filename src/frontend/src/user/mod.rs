@@ -15,6 +15,7 @@
 use risingwave_common::id::{ObjectId, SchemaId};
 use user_catalog::UserCatalog;
 
+pub(crate) mod effective_privilege;
 pub(crate) mod user_authentication;
 pub(crate) mod user_catalog;
 pub(crate) mod user_manager;

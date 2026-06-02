@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::is_default_super_user;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -20,6 +21,7 @@ use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
+use crate::user::effective_privilege::{can_admin_role, role_memberships_snapshot};
 
 pub async fn handle_drop_user(
     handler_args: HandlerArgs,
@@ -42,6 +44,13 @@ pub async fn handle_drop_user(
                 )
                 .into());
             }
+            if is_default_super_user(&user_name) {
+                return Err(ErrorCode::PermissionDenied(format!(
+                    "drop default super user {} is not allowed",
+                    user_name
+                ))
+                .into());
+            }
             if let Some(current_user) = user_info_reader
                 .read_guard()
                 .get_user_by_name(&session.user_name())
@@ -57,6 +66,15 @@ pub async fn handle_drop_user(
                         return Err(ErrorCode::PermissionDenied(
                             "permission denied to drop user".to_owned(),
                         )
+                        .into());
+                    }
+                    let role_memberships =
+                        role_memberships_snapshot(session.env().role_membership_info_reader());
+                    if !can_admin_role(session.user_id(), user_id, &role_memberships) {
+                        return Err(ErrorCode::PermissionDenied(format!(
+                            "user {} does not have ADMIN OPTION for role {}",
+                            current_user.name, user_name
+                        ))
                         .into());
                     }
                 }

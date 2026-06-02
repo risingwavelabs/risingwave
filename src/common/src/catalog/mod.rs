@@ -89,6 +89,13 @@ pub fn is_reserved_admin_user(user_name: &str) -> bool {
     user_name == DEFAULT_SUPER_USER_FOR_ADMIN
 }
 
+pub fn is_default_super_user(user_name: &str) -> bool {
+    matches!(
+        user_name,
+        DEFAULT_SUPER_USER | DEFAULT_SUPER_USER_FOR_PG | DEFAULT_SUPER_USER_FOR_ADMIN
+    )
+}
+
 pub const RW_RESERVED_COLUMN_NAME_PREFIX: &str = "_rw_";
 
 /// When there is no primary key specified while creating source, will use

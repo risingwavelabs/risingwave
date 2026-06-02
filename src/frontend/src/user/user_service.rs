@@ -122,7 +122,6 @@ pub trait UserInfoWriter: Send + Sync {
 pub struct UserInfoWriterImpl {
     meta_client: MetaClient,
     user_updated_rx: Receiver<UserInfoVersion>,
-    role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
 }
 
 #[async_trait::async_trait]
@@ -137,8 +136,7 @@ impl UserInfoWriter for UserInfoWriterImpl {
             .meta_client
             .drop_user(id, dropped_by, session_user)
             .await?;
-        self.wait_version(version).await?;
-        self.refresh_role_memberships().await
+        self.wait_version(version).await
     }
 
     async fn update_user(&self, user: UserInfo, update_fields: Vec<UpdateField>) -> Result<()> {
@@ -207,8 +205,7 @@ impl UserInfoWriter for UserInfoWriterImpl {
                 set_option,
             )
             .await?;
-        self.wait_version(version).await?;
-        self.refresh_role_memberships().await
+        self.wait_version(version).await
     }
 
     async fn revoke_role(
@@ -237,8 +234,7 @@ impl UserInfoWriter for UserInfoWriterImpl {
                 cascade,
             )
             .await?;
-        self.wait_version(version).await?;
-        self.refresh_role_memberships().await
+        self.wait_version(version).await
     }
 
     async fn alter_default_privilege(
@@ -257,15 +253,10 @@ impl UserInfoWriter for UserInfoWriterImpl {
 }
 
 impl UserInfoWriterImpl {
-    pub fn new(
-        meta_client: MetaClient,
-        user_updated_rx: Receiver<UserInfoVersion>,
-        role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
-    ) -> Self {
+    pub fn new(meta_client: MetaClient, user_updated_rx: Receiver<UserInfoVersion>) -> Self {
         UserInfoWriterImpl {
             meta_client,
             user_updated_rx,
-            role_memberships,
         }
     }
 
@@ -274,11 +265,6 @@ impl UserInfoWriterImpl {
         while *rx.borrow_and_update() < version {
             rx.changed().await.map_err(|e| anyhow!(e))?;
         }
-        Ok(())
-    }
-
-    async fn refresh_role_memberships(&self) -> Result<()> {
-        *self.role_memberships.write() = self.meta_client.list_all_role_memberships().await?;
         Ok(())
     }
 }

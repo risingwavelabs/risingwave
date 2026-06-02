@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -31,13 +33,44 @@ use risingwave_pb::hummock::{HummockVersionDeltas, HummockVersionStats};
 use risingwave_pb::meta::object::{ObjectInfo, PbObjectInfo};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{FragmentWorkerSlotMapping, MetaSnapshot, SubscribeResponse};
+use risingwave_pb::user::RoleMembership;
 use risingwave_rpc_client::ComputeClientPoolRef;
+use thiserror_ext::AsReport;
 use tokio::sync::watch::Sender;
+use tokio::time::sleep;
+use tracing::warn;
 
 use crate::catalog::FragmentId;
 use crate::catalog::root_catalog::Catalog;
+use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
+
+fn publish_catalog_version_if_newer(
+    catalog_updated_tx: &Sender<CatalogVersion>,
+    version: CatalogVersion,
+) {
+    if *catalog_updated_tx.borrow() < version
+        && let Err(error) = catalog_updated_tx.send(version)
+    {
+        warn!(error = %error.as_report(), version, "failed to publish catalog version");
+    }
+}
+
+const ROLE_MEMBERSHIP_REFRESH_RETRY_DELAY: Duration = Duration::from_millis(100);
+const ROLE_MEMBERSHIP_REFRESH_RETRY_MAX_DELAY: Duration = Duration::from_secs(1);
+
+fn publish_catalog_version_if_current(
+    catalog_updated_tx: &Sender<CatalogVersion>,
+    latest_role_membership_refresh_version: &AtomicU64,
+    version: CatalogVersion,
+) -> bool {
+    if latest_role_membership_refresh_version.load(Ordering::Acquire) != version {
+        return false;
+    }
+    publish_catalog_version_if_newer(catalog_updated_tx, version);
+    true
+}
 
 pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
@@ -45,6 +78,9 @@ pub struct FrontendObserverNode {
     catalog_updated_tx: Sender<CatalogVersion>,
     catalog: Arc<RwLock<Catalog>>,
     user_info_manager: Arc<RwLock<UserInfoManager>>,
+    role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
+    latest_role_membership_refresh_version: Arc<AtomicU64>,
+    meta_client: Arc<dyn FrontendMetaClient>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
     system_params_manager: LocalSystemParamsManagerRef,
     session_params: Arc<RwLock<SessionConfig>>,
@@ -204,22 +240,74 @@ impl ObserverState for FrontendObserverNode {
 
         let snapshot_version = version.unwrap();
         self.version = snapshot_version.catalog_version;
-        self.catalog_updated_tx
-            .send(snapshot_version.catalog_version)
-            .unwrap();
         *self.session_params.write() =
             serde_json::from_str(&session_params.unwrap().params).unwrap();
         LocalSecretManager::global().init_secrets(secrets);
         LicenseManager::get().update_cluster_resource(cluster_resource.unwrap());
+        self.refresh_role_memberships_cache_and_publish(
+            snapshot_version.catalog_version,
+            "failed to refresh cached role memberships after observer initialization",
+        );
     }
 }
 
 impl FrontendObserverNode {
+    fn refresh_role_memberships_cache_and_publish(
+        &self,
+        version: CatalogVersion,
+        failure_context: &'static str,
+    ) {
+        self.latest_role_membership_refresh_version
+            .fetch_max(version, Ordering::AcqRel);
+        let role_memberships = self.role_memberships.clone();
+        let meta_client = self.meta_client.clone();
+        let catalog_updated_tx = self.catalog_updated_tx.clone();
+        let latest_role_membership_refresh_version =
+            self.latest_role_membership_refresh_version.clone();
+        tokio::spawn(async move {
+            let mut retry_delay = ROLE_MEMBERSHIP_REFRESH_RETRY_DELAY;
+            loop {
+                if latest_role_membership_refresh_version.load(Ordering::Acquire) != version {
+                    return;
+                }
+                match meta_client.list_all_role_memberships().await {
+                    Ok(memberships) => {
+                        let mut role_memberships = role_memberships.write();
+                        if latest_role_membership_refresh_version.load(Ordering::Acquire) != version
+                        {
+                            return;
+                        }
+                        *role_memberships = memberships;
+                        drop(role_memberships);
+                        publish_catalog_version_if_current(
+                            &catalog_updated_tx,
+                            &latest_role_membership_refresh_version,
+                            version,
+                        );
+                        return;
+                    }
+                    Err(error) => {
+                        warn!(error = %error.as_report(), failure_context, "failed to refresh cached role memberships");
+                        if latest_role_membership_refresh_version.load(Ordering::Acquire) != version
+                        {
+                            return;
+                        }
+                    }
+                }
+                sleep(retry_delay).await;
+                retry_delay =
+                    std::cmp::min(retry_delay * 2, ROLE_MEMBERSHIP_REFRESH_RETRY_MAX_DELAY);
+            }
+        });
+    }
+
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
         user_info_manager: Arc<RwLock<UserInfoManager>>,
+        role_memberships: Arc<RwLock<Vec<RoleMembership>>>,
+        meta_client: Arc<dyn FrontendMetaClient>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
         system_params_manager: LocalSystemParamsManagerRef,
         session_params: Arc<RwLock<SessionConfig>>,
@@ -231,6 +319,9 @@ impl FrontendObserverNode {
             catalog,
             catalog_updated_tx,
             user_info_manager,
+            role_memberships,
+            latest_role_membership_refresh_version: Arc::new(AtomicU64::new(0)),
+            meta_client,
             hummock_snapshot_manager,
             system_params_manager,
             session_params,
@@ -460,7 +551,10 @@ impl FrontendObserverNode {
             self.version
         );
         self.version = resp.version;
-        self.catalog_updated_tx.send(resp.version).unwrap();
+        self.refresh_role_memberships_cache_and_publish(
+            resp.version,
+            "failed to refresh cached role memberships after user notification",
+        );
     }
 
     fn handle_fragment_mapping_notification(&mut self, resp: SubscribeResponse) {
@@ -579,4 +673,47 @@ fn convert_worker_slot_mapping(
             },
         )
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::watch;
+
+    use super::*;
+
+    #[test]
+    fn publish_catalog_version_if_newer_is_monotonic() {
+        let (tx, rx) = watch::channel(10);
+
+        publish_catalog_version_if_newer(&tx, 9);
+        assert_eq!(*rx.borrow(), 10);
+
+        publish_catalog_version_if_newer(&tx, 11);
+        assert_eq!(*rx.borrow(), 11);
+
+        publish_catalog_version_if_newer(&tx, 10);
+        assert_eq!(*rx.borrow(), 11);
+    }
+
+    #[test]
+    fn publish_catalog_version_if_current_requires_latest_role_membership_refresh() {
+        let (tx, rx) = watch::channel(1);
+        let latest_role_membership_refresh_version = AtomicU64::new(7);
+
+        assert!(publish_catalog_version_if_current(
+            &tx,
+            &latest_role_membership_refresh_version,
+            7,
+        ));
+        assert_eq!(*rx.borrow(), 7);
+
+        latest_role_membership_refresh_version.store(8, Ordering::Release);
+
+        assert!(!publish_catalog_version_if_current(
+            &tx,
+            &latest_role_membership_refresh_version,
+            7,
+        ));
+        assert_eq!(*rx.borrow(), 7);
+    }
 }

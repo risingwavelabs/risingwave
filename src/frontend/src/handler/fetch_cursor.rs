@@ -120,6 +120,7 @@ pub async fn handle_parse(
             param_types: binder.export_param_types()?,
             parsed_params: None,
             dependent_relations: binder.included_relations().clone(),
+            dependent_privilege_checks: binder.included_privilege_checks_snapshot(),
             dependent_udfs: binder.included_udfs().clone(),
             dependent_secrets: binder.included_secrets().clone(),
         };

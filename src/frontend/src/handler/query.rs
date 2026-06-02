@@ -36,6 +36,7 @@ use crate::datafusion::DfBatchQueryPlanResult;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::flush::do_flush;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
@@ -157,6 +158,7 @@ pub async fn handle_execute(
         result_formats,
         statement,
     } = portal;
+    bound_result.recheck_privileges(&handler_args.session)?;
     match statement {
         Statement::Query(_)
         | Statement::Insert { .. }
@@ -204,7 +206,7 @@ pub async fn handle_execute(
                 bail_not_implemented!("CREATE OR REPLACE VIEW");
             }
 
-            // Hack: replace the `with_options` with the bounded ones.
+            // Use the options captured during binding so execution sees normalized options.
             let handler_args = HandlerArgs {
                 session: handler_args.session.clone(),
                 sql: handler_args.sql.clone(),
@@ -273,6 +275,7 @@ pub struct BoundResult {
     pub(crate) param_types: Vec<DataType>,
     pub(crate) parsed_params: Option<Vec<Datum>>,
     pub(crate) dependent_relations: HashSet<ObjectId>,
+    pub(crate) dependent_privilege_checks: Vec<ObjectCheckItem>,
     /// TODO(rc): merge with `dependent_relations`
     pub(crate) dependent_udfs: HashSet<FunctionId>,
     pub(crate) dependent_secrets: HashSet<SecretId>,
@@ -292,9 +295,16 @@ fn gen_bound(mut binder: Binder, stmt: Statement) -> Result<BoundResult> {
         param_types: binder.export_param_types()?,
         parsed_params: None,
         dependent_relations: binder.included_relations().clone(),
+        dependent_privilege_checks: binder.included_privilege_checks_snapshot(),
         dependent_udfs: binder.included_udfs().clone(),
         dependent_secrets: binder.included_secrets().clone(),
     })
+}
+
+impl BoundResult {
+    pub(crate) fn recheck_privileges(&self, session: &SessionImpl) -> Result<()> {
+        session.check_privileges(&self.dependent_privilege_checks)
+    }
 }
 
 pub struct RwBatchQueryPlanResult {

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
+use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
 use risingwave_pb::user::grant_privilege::ActionWithGrantOption;
 use risingwave_pb::user::{Action, GrantPrivilege, UserInfo};
 use risingwave_sqlparser::ast::{CreateUserStatement, UserOption};
@@ -49,6 +50,7 @@ pub async fn handle_create_user(
         ..Default::default()
     };
     let mut notices = vec![];
+    let mut auto_admin_grant_member = None;
     {
         let user_reader = session.env().user_info_reader().read_guard();
         if user_reader.get_user_by_name(&user_name).is_some() {
@@ -74,6 +76,7 @@ pub async fn handle_create_user(
             if !session_user.can_create_user {
                 return Err(PermissionDenied("permission denied to create user".to_owned()).into());
             }
+            auto_admin_grant_member = Some(session_user.id);
         }
 
         // Admin users can only be created by other admin users
@@ -105,21 +108,16 @@ pub async fn handle_create_user(
                 UserOption::NoSuperUser => user_info.is_super = false,
                 UserOption::CreateDB => user_info.can_create_db = true,
                 UserOption::NoCreateDB => user_info.can_create_db = false,
-                UserOption::CreateUser => user_info.can_create_user = true,
-                UserOption::NoCreateUser => user_info.can_create_user = false,
+                UserOption::CreateRole | UserOption::CreateUser => user_info.can_create_user = true,
+                UserOption::NoCreateRole | UserOption::NoCreateUser => {
+                    user_info.can_create_user = false
+                }
+                UserOption::Inherit => user_info.can_inherit = Some(true),
+                UserOption::NoInherit => user_info.can_inherit = Some(false),
                 UserOption::Login => user_info.can_login = true,
                 UserOption::NoLogin => user_info.can_login = false,
                 UserOption::Admin => user_info.is_admin = true,
                 UserOption::NoAdmin => user_info.is_admin = false,
-                UserOption::CreateRole
-                | UserOption::NoCreateRole
-                | UserOption::Inherit
-                | UserOption::NoInherit => {
-                    return Err(ErrorCode::InvalidParameterValue(
-                        "role options are not supported yet".to_owned(),
-                    )
-                    .into());
-                }
                 UserOption::EncryptedPassword(password) => {
                     if !password.0.is_empty() {
                         user_info.auth_info = encrypted_password(&user_info.name, &password.0);
@@ -161,11 +159,49 @@ pub async fn handle_create_user(
 
     let user_info_writer = session.user_info_writer()?;
     user_info_writer.create_user(user_info).await?;
+    if let Some(member_id) = auto_admin_grant_member {
+        // Match PostgreSQL's CREATEROLE behavior: a non-superuser creator receives an
+        // automatic bootstrap-superuser grant with ADMIN TRUE, INHERIT FALSE and SET FALSE.
+        let created_user_id = session
+            .env()
+            .user_info_reader()
+            .read_guard()
+            .get_user_by_name(&user_name)
+            .ok_or_else(|| CatalogError::not_found("user", user_name.clone()))?
+            .id;
+        user_info_writer
+            .grant_role(
+                vec![created_user_id],
+                vec![member_id],
+                DEFAULT_SUPER_USER_ID,
+                DEFAULT_SUPER_USER_ID,
+                false,
+                Some(true),
+                Some(false),
+                Some(false),
+            )
+            .await?;
+    }
     let mut response_builder = RwPgResponse::builder(StatementType::CREATE_USER);
     for notice in notices {
         response_builder = response_builder.notice(notice);
     }
     Ok(response_builder.into())
+}
+
+pub async fn handle_create_role(
+    handler_args: HandlerArgs,
+    mut stmt: CreateUserStatement,
+) -> Result<RwPgResponse> {
+    let has_explicit_login = stmt
+        .with_options
+        .0
+        .iter()
+        .any(|option| matches!(option, UserOption::Login | UserOption::NoLogin));
+    if !has_explicit_login {
+        stmt.with_options.0.push(UserOption::NoLogin);
+    }
+    handle_create_user(handler_args, stmt).await
 }
 
 #[cfg(test)]
@@ -246,20 +282,36 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_user_rejects_role_options() {
+    async fn test_create_user_accepts_role_options() {
         let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let user_info_reader = session.env().user_info_reader();
 
-        for (idx, option) in ["CREATEROLE", "NOCREATEROLE", "INHERIT", "NOINHERIT"]
-            .into_iter()
-            .enumerate()
-        {
-            let err = frontend
-                .run_sql(&format!("CREATE USER role_option_user_{idx} WITH {option}"))
-                .await
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("role options are not supported yet"), "{err}");
-        }
+        frontend
+            .run_sql("CREATE USER role_option_user WITH CREATEROLE NOINHERIT")
+            .await
+            .unwrap();
+
+        let user = user_info_reader
+            .read_guard()
+            .get_user_by_name("role_option_user")
+            .cloned()
+            .unwrap();
+        assert!(user.can_create_user);
+        assert!(!user.can_inherit);
+
+        frontend
+            .run_sql("CREATE USER role_option_user_default WITH NOCREATEROLE INHERIT")
+            .await
+            .unwrap();
+
+        let user = user_info_reader
+            .read_guard()
+            .get_user_by_name("role_option_user_default")
+            .cloned()
+            .unwrap();
+        assert!(!user.can_create_user);
+        assert!(user.can_inherit);
     }
 
     #[tokio::test]

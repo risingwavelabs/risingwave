@@ -992,44 +992,68 @@ impl CatalogController {
             }
         }
 
-        // check whether grantor has the privilege to grant the privilege.
+        // Check whether the grantor can grant each privilege. Inherited roles can supply
+        // object ownership or WITH GRANT OPTION, matching PostgreSQL's effective privilege
+        // checks. Record the effective role as the grantor so dependency tracking remains
+        // attached to the privilege source.
         let user = User::find_by_id(grantor)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", grantor))?;
-        let mut filtered_privileges = vec![];
-        if !user.is_super {
+        let filtered_privileges = if user.is_super {
+            privileges
+        } else {
+            let existing_memberships = UserRoleMembership::find().all(&txn).await?;
+            let inherit_graph = build_role_membership_graph(
+                &existing_memberships,
+                RoleMembershipGraphKind::Inherit,
+            );
+            let mut principals = vec![grantor];
+            principals.extend(closest_reachable_role_ids(&inherit_graph, grantor));
+
+            let mut filtered_privileges = vec![];
             for mut privilege in privileges {
-                if grantor == get_object_owner(*privilege.oid.as_ref(), &txn).await? {
+                let oid = *privilege.oid.as_ref();
+                let action = *privilege.action.as_ref();
+                let owner = get_object_owner(oid, &txn).await?;
+                if principals.contains(&owner) {
+                    privilege.granted_by = Set(owner);
                     filtered_privileges.push(privilege);
                     continue;
                 }
-                let filter = user_privilege::Column::UserId
-                    .eq(grantor)
-                    .and(user_privilege::Column::Oid.eq(*privilege.oid.as_ref()))
-                    .and(user_privilege::Column::Action.eq(*privilege.action.as_ref()))
-                    .and(user_privilege::Column::WithGrantOption.eq(true));
-                let privilege_id: Option<PrivilegeId> = UserPrivilege::find()
-                    .select_only()
-                    .column(user_privilege::Column::Id)
-                    .filter(filter)
-                    .into_tuple()
-                    .one(&txn)
-                    .await?;
-                let Some(privilege_id) = privilege_id else {
-                    tracing::warn!(
-                        "user {} don't have privilege {:?} or grant option",
-                        grantor,
-                        privilege.action
-                    );
-                    continue;
+
+                let mut grant_option = None;
+                for principal in &principals {
+                    let filter = user_privilege::Column::UserId
+                        .eq(*principal)
+                        .and(user_privilege::Column::Oid.eq(oid))
+                        .and(user_privilege::Column::Action.eq(action))
+                        .and(user_privilege::Column::WithGrantOption.eq(true));
+                    let privilege_id: Option<PrivilegeId> = UserPrivilege::find()
+                        .select_only()
+                        .column(user_privilege::Column::Id)
+                        .filter(filter)
+                        .into_tuple()
+                        .one(&txn)
+                        .await?;
+                    if let Some(privilege_id) = privilege_id {
+                        grant_option = Some((*principal, privilege_id));
+                        break;
+                    }
+                }
+
+                let Some((effective_grantor, privilege_id)) = grant_option else {
+                    return Err(MetaError::permission_denied(format!(
+                        "user {} does not have privilege {:?} with grant option on object {}",
+                        grantor, action, oid
+                    )));
                 };
+                privilege.granted_by = Set(effective_grantor);
                 privilege.dependent_id = Set(Some(privilege_id));
                 filtered_privileges.push(privilege);
             }
-        } else {
-            filtered_privileges = privileges;
-        }
+            filtered_privileges
+        };
 
         // insert privileges
         let user_privileges = user_ids
@@ -1144,55 +1168,75 @@ impl CatalogController {
             }
         }
 
-        let filter = if !revoke_user.is_super {
-            // ensure user have grant options or is owner of the object.
-            for (obj, actions) in &revoke_items {
-                if revoke_by == get_object_owner(*obj, &txn).await? {
-                    continue;
-                }
-                let owned_actions: HashSet<Action> = UserPrivilege::find()
-                    .select_only()
-                    .column(user_privilege::Column::Action)
-                    .filter(
-                        user_privilege::Column::UserId
-                            .eq(granted_by)
-                            .and(user_privilege::Column::Oid.eq(*obj))
-                            .and(user_privilege::Column::WithGrantOption.eq(true)),
-                    )
-                    .into_tuple::<Action>()
-                    .all(&txn)
-                    .await?
-                    .into_iter()
-                    .collect();
-                if actions.iter().any(|ac| !owned_actions.contains(ac)) {
-                    return Err(MetaError::permission_denied(format!(
-                        "user {} don't have privileges {:?} or grant option",
-                        revoke_user.name, actions,
-                    )));
+        let mut root_user_privileges: Vec<PartialUserPrivilege> = vec![];
+        if revoke_user.is_super {
+            let user_filter = user_privilege::Column::UserId.is_in(user_ids.clone());
+            for (obj, actions) in revoke_items {
+                root_user_privileges.extend(
+                    UserPrivilege::find()
+                        .select_only()
+                        .columns([user_privilege::Column::Id, user_privilege::Column::UserId])
+                        .filter(
+                            user_filter
+                                .clone()
+                                .and(user_privilege::Column::Oid.eq(obj))
+                                .and(user_privilege::Column::Action.is_in(actions)),
+                        )
+                        .into_partial_model()
+                        .all(&txn)
+                        .await?,
+                );
+            }
+        } else {
+            let existing_memberships = UserRoleMembership::find().all(&txn).await?;
+            let inherit_graph = build_role_membership_graph(
+                &existing_memberships,
+                RoleMembershipGraphKind::Inherit,
+            );
+            let mut principals = vec![revoke_by];
+            principals.extend(closest_reachable_role_ids(&inherit_graph, revoke_by));
+
+            for (obj, actions) in revoke_items {
+                let owner = get_object_owner(obj, &txn).await?;
+                for action in actions {
+                    let mut effective_grantors = HashSet::new();
+                    if principals.contains(&owner) {
+                        effective_grantors.insert(owner);
+                    }
+                    for principal in &principals {
+                        let exists = UserPrivilege::find()
+                            .filter(user_privilege::Column::UserId.eq(*principal))
+                            .filter(user_privilege::Column::Oid.eq(obj))
+                            .filter(user_privilege::Column::Action.eq(action))
+                            .filter(user_privilege::Column::WithGrantOption.eq(true))
+                            .one(&txn)
+                            .await?
+                            .is_some();
+                        if exists {
+                            effective_grantors.insert(*principal);
+                        }
+                    }
+                    if effective_grantors.is_empty() {
+                        return Err(MetaError::permission_denied(format!(
+                            "user {} does not have privilege {:?} with grant option on object {}",
+                            revoke_by, action, obj
+                        )));
+                    }
+
+                    root_user_privileges.extend(
+                        UserPrivilege::find()
+                            .select_only()
+                            .columns([user_privilege::Column::Id, user_privilege::Column::UserId])
+                            .filter(user_privilege::Column::GrantedBy.is_in(effective_grantors))
+                            .filter(user_privilege::Column::UserId.is_in(user_ids.clone()))
+                            .filter(user_privilege::Column::Oid.eq(obj))
+                            .filter(user_privilege::Column::Action.eq(action))
+                            .into_partial_model()
+                            .all(&txn)
+                            .await?,
+                    );
                 }
             }
-
-            user_privilege::Column::GrantedBy
-                .eq(granted_by)
-                .and(user_privilege::Column::UserId.is_in(user_ids.clone()))
-        } else {
-            user_privilege::Column::UserId.is_in(user_ids.clone())
-        };
-        let mut root_user_privileges: Vec<PartialUserPrivilege> = vec![];
-        for (obj, actions) in revoke_items {
-            let filter = filter
-                .clone()
-                .and(user_privilege::Column::Oid.eq(obj))
-                .and(user_privilege::Column::Action.is_in(actions));
-            root_user_privileges.extend(
-                UserPrivilege::find()
-                    .select_only()
-                    .columns([user_privilege::Column::Id, user_privilege::Column::UserId])
-                    .filter(filter)
-                    .into_partial_model()
-                    .all(&txn)
-                    .await?,
-            );
         }
         if root_user_privileges.is_empty() {
             tracing::warn!("no privilege to revoke, ignore it");

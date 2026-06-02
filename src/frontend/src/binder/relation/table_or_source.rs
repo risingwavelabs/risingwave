@@ -320,6 +320,7 @@ impl Binder {
                 } else {
                     return Err(PermissionDenied("Session user is invalid".to_owned()).into());
                 }
+                self.included_privilege_checks.borrow_mut().push(item);
             }
             BindFor::Ddl | BindFor::System => {
                 // do nothing.

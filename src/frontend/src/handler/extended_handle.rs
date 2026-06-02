@@ -173,6 +173,7 @@ pub fn handle_bind(
                 bound,
                 param_types,
                 dependent_relations,
+                dependent_privilege_checks,
                 dependent_udfs,
                 dependent_secrets,
                 ..
@@ -185,6 +186,7 @@ pub fn handle_bind(
                 param_types,
                 parsed_params: Some(parsed_params),
                 dependent_relations,
+                dependent_privilege_checks,
                 dependent_udfs,
                 dependent_secrets,
                 bound: new_bound,

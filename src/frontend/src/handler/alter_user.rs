@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::catalog::{DEFAULT_SUPER_USER_FOR_ADMIN, is_reserved_admin_user};
+use risingwave_common::catalog::{is_default_super_user, is_reserved_admin_user};
 use risingwave_pb::user::UserInfo;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_sqlparser::ast::{AlterUserStatement, ObjectName, UserOption, UserOptions};
@@ -26,6 +26,7 @@ use crate::catalog::CatalogError;
 use crate::error::ErrorCode::{self, InternalError, PermissionDenied};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
+use crate::user::effective_privilege::{can_admin_role, role_memberships_snapshot};
 use crate::user::user_authentication::{
     OAUTH_ISSUER_KEY, OAUTH_JWKS_URL_KEY, build_oauth_info, encrypted_password,
 };
@@ -35,6 +36,7 @@ fn alter_prost_user_info(
     mut user_info: UserInfo,
     options: &UserOptions,
     session_user: &UserCatalog,
+    has_admin_option_on_target: bool,
 ) -> Result<(UserInfo, Vec<UpdateField>, Vec<String>)> {
     let change_self_password_only = session_user.id == user_info.id
         && options.0.len() == 1
@@ -42,6 +44,21 @@ fn alter_prost_user_info(
             &options.0[0],
             UserOption::EncryptedPassword(_) | UserOption::Password(_) | UserOption::OAuth(_)
         );
+    if !change_self_password_only && is_reserved_admin_user(&user_info.name) {
+        return Err(PermissionDenied(format!("{} cannot be altered", user_info.name)).into());
+    }
+    if is_default_super_user(&user_info.name)
+        && options
+            .0
+            .iter()
+            .any(|option| matches!(option, UserOption::NoSuperUser))
+    {
+        return Err(PermissionDenied(format!(
+            "{} cannot be downgraded from superuser",
+            user_info.name
+        ))
+        .into());
+    }
     let require_admin = user_info.is_admin
         || options
             .0
@@ -72,6 +89,14 @@ fn alter_prost_user_info(
         if !session_user.can_create_user && !change_self_password_only {
             return Err(PermissionDenied("permission denied to alter user".to_owned()).into());
         }
+
+        if !change_self_password_only && !has_admin_option_on_target {
+            return Err(PermissionDenied(format!(
+                "user {} does not have ADMIN OPTION for role {}",
+                session_user.name, user_info.name
+            ))
+            .into());
+        }
     }
 
     let mut update_fields = HashSet::new();
@@ -95,13 +120,21 @@ fn alter_prost_user_info(
                 user_info.can_create_db = false;
                 update_fields.insert(UpdateField::CreateDb);
             }
-            UserOption::CreateUser => {
+            UserOption::CreateRole | UserOption::CreateUser => {
                 user_info.can_create_user = true;
                 update_fields.insert(UpdateField::CreateUser);
             }
-            UserOption::NoCreateUser => {
+            UserOption::NoCreateRole | UserOption::NoCreateUser => {
                 user_info.can_create_user = false;
                 update_fields.insert(UpdateField::CreateUser);
+            }
+            UserOption::Inherit => {
+                user_info.can_inherit = Some(true);
+                update_fields.insert(UpdateField::Inherit);
+            }
+            UserOption::NoInherit => {
+                user_info.can_inherit = Some(false);
+                update_fields.insert(UpdateField::Inherit);
             }
             UserOption::Login => {
                 user_info.can_login = true;
@@ -118,15 +151,6 @@ fn alter_prost_user_info(
             UserOption::NoAdmin => {
                 user_info.is_admin = false;
                 update_fields.insert(UpdateField::Admin);
-            }
-            UserOption::CreateRole
-            | UserOption::NoCreateRole
-            | UserOption::Inherit
-            | UserOption::NoInherit => {
-                return Err(ErrorCode::InvalidParameterValue(
-                    "role options are not supported yet".to_owned(),
-                )
-                .into());
             }
             UserOption::EncryptedPassword(p) => {
                 if !p.0.is_empty() {
@@ -192,19 +216,11 @@ fn alter_rename_prost_user_info(
     }
 
     let new_name = Binder::resolve_user_name(new_name)?;
-    if is_reserved_admin_user(&new_name) {
-        return Err(PermissionDenied(format!(
-            "{} is reserved for admin",
-            DEFAULT_SUPER_USER_FOR_ADMIN
-        ))
-        .into());
+    if is_default_super_user(&new_name) {
+        return Err(PermissionDenied(format!("{} is a reserved default user", new_name)).into());
     }
-    if is_reserved_admin_user(&user_info.name) {
-        return Err(PermissionDenied(format!(
-            "{} cannot be renamed",
-            DEFAULT_SUPER_USER_FOR_ADMIN
-        ))
-        .into());
+    if is_default_super_user(&user_info.name) {
+        return Err(PermissionDenied(format!("{} cannot be renamed", user_info.name)).into());
     }
 
     user_info.name = new_name;
@@ -232,7 +248,11 @@ pub async fn handle_alter_user(
 
         match stmt.mode {
             risingwave_sqlparser::ast::AlterUserMode::Options(options) => {
-                alter_prost_user_info(old_info, &options, session_user)?
+                let role_memberships =
+                    role_memberships_snapshot(session.env().role_membership_info_reader());
+                let has_admin_option_on_target =
+                    can_admin_role(session_user.id, old_info.id, &role_memberships);
+                alter_prost_user_info(old_info, &options, session_user, has_admin_option_on_target)?
             }
             risingwave_sqlparser::ast::AlterUserMode::Rename(new_name) => {
                 let (user_info, fields) =
@@ -251,6 +271,13 @@ pub async fn handle_alter_user(
         response_builder = response_builder.notice(notice);
     }
     Ok(response_builder.into())
+}
+
+pub async fn handle_alter_role(
+    handler_args: HandlerArgs,
+    stmt: AlterUserStatement,
+) -> Result<RwPgResponse> {
+    handle_alter_user(handler_args, stmt).await
 }
 
 #[cfg(test)]
@@ -309,21 +336,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_alter_user_rejects_role_options() {
+    async fn test_alter_user_accepts_role_options() {
         let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let user_info_reader = session.env().user_info_reader();
+
         frontend
             .run_sql("CREATE USER role_option_user")
             .await
             .unwrap();
 
-        for option in ["CREATEROLE", "NOCREATEROLE", "INHERIT", "NOINHERIT"] {
-            let err = frontend
-                .run_sql(&format!("ALTER USER role_option_user WITH {option}"))
-                .await
-                .unwrap_err()
-                .to_string();
-            assert!(err.contains("role options are not supported yet"), "{err}");
-        }
+        frontend
+            .run_sql("ALTER USER role_option_user WITH CREATEROLE NOINHERIT")
+            .await
+            .unwrap();
+
+        let user = user_info_reader
+            .read_guard()
+            .get_user_by_name("role_option_user")
+            .cloned()
+            .unwrap();
+        assert!(user.can_create_user);
+        assert!(!user.can_inherit);
+
+        frontend
+            .run_sql("ALTER USER role_option_user WITH NOCREATEROLE INHERIT")
+            .await
+            .unwrap();
+
+        let user = user_info_reader
+            .read_guard()
+            .get_user_by_name("role_option_user")
+            .cloned()
+            .unwrap();
+        assert!(!user.can_create_user);
+        assert!(user.can_inherit);
     }
 
     #[tokio::test]

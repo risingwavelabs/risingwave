@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -72,6 +73,7 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, DatabaseId, SecretId, ViewId};
 use crate::error::ErrorCode;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
 
@@ -129,6 +131,9 @@ pub struct Binder {
 
     /// The included relations while binding a query.
     included_relations: HashSet<ObjectId>,
+    /// The privilege checks performed during binding. Prepared statements re-run them at execute
+    /// time so revokes after parse/bind are not bypassed by stale bound plans.
+    included_privilege_checks: RefCell<Vec<ObjectCheckItem>>,
 
     /// The included user-defined functions while binding a query.
     included_udfs: HashSet<FunctionId>,
@@ -262,6 +267,7 @@ impl Binder {
             bind_for,
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
+            included_privilege_checks: RefCell::new(vec![]),
             included_udfs: HashSet::new(),
             included_secrets: HashSet::new(),
             param_types: ParameterTypes::new(vec![]),
@@ -328,6 +334,10 @@ impl Binder {
     /// optimised away.
     pub fn included_relations(&self) -> &HashSet<ObjectId> {
         &self.included_relations
+    }
+
+    pub fn included_privilege_checks_snapshot(&self) -> Vec<ObjectCheckItem> {
+        self.included_privilege_checks.borrow().clone()
     }
 
     /// Get included user-defined functions in the query after binding.
