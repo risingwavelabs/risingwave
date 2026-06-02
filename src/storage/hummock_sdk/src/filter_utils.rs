@@ -47,7 +47,7 @@ pub fn parse_sstable_filter_layout(layout: &str) -> Result<PbSstableFilterLayout
         "plain" | "normal" | "nonblocked" | "non_blocked" | "non-blocked" => {
             Ok(PbSstableFilterLayout::Plain)
         }
-        "blocked" | "block" | "block_based" | "block-based" => Ok(PbSstableFilterLayout::Blocked),
+        "blocked" => Ok(PbSstableFilterLayout::Blocked),
         _ => Err(format!("unsupported sstable filter layout: {layout}")),
     }
 }
@@ -150,10 +150,6 @@ mod tests {
             parse_sstable_filter_layout("blocked").unwrap(),
             PbSstableFilterLayout::Blocked
         );
-        assert_eq!(
-            parse_sstable_filter_layout("block-based").unwrap(),
-            PbSstableFilterLayout::Blocked
-        );
         assert!(parse_sstable_filter_layout("unknown").is_err());
     }
 
@@ -200,6 +196,7 @@ mod tests {
             sstable_filter_layout: vec![
                 "plain".to_owned(),
                 "auto".to_owned(),
+                "normal".to_owned(),
                 "blocked".to_owned(),
             ],
             ..Default::default()
@@ -214,9 +211,13 @@ mod tests {
         );
         assert_eq!(
             get_sstable_filter_layout(&config, 2, 2).unwrap(),
+            PbSstableFilterLayout::Plain
+        );
+        assert_eq!(
+            get_sstable_filter_layout(&config, 2, 3).unwrap(),
             PbSstableFilterLayout::Blocked
         );
-        assert!(get_sstable_filter_layout(&config, 2, 3).is_err());
+        assert!(get_sstable_filter_layout(&config, 2, 4).is_err());
     }
 
     #[test]
