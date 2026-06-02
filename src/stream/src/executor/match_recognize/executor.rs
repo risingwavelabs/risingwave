@@ -202,7 +202,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             if let Some(c) = builder.append_row(Op::Insert, out) {
                                 yield Message::Chunk(c);
                             }
-                            state.cursor = m.end;
+                            // Resume per the skip strategy (matches find_matches' own resume):
+                            // PAST LAST ROW is non-overlapping (past the last row); TO NEXT ROW
+                            // allows overlap (one row past the match's first row).
+                            state.cursor = match skip {
+                                SkipMode::PastLastRow => m.end,
+                                SkipMode::ToNextRow => m.start + 1,
+                            };
                         }
                     }
                     if let Some(c) = builder.take() {

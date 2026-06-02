@@ -56,8 +56,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for MatchRecognize<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        // For ONE ROW PER MATCH the partition columns (output indices 0..n) identify a match group.
-        Some((0..self.partition_by.len()).collect())
+        // ONE ROW PER MATCH emits one append-only row per match; a partition can contain many
+        // matches, so the partition columns alone are not a key. v1 keys on all output columns
+        // (partition + measures), which keeps distinct matches distinct. Limitation: two matches
+        // in the same partition with byte-identical output dedupe; a hidden match-id key (carried
+        // through the executor) is the proper fix and a follow-up.
+        let n = self.partition_by.len() + self.measures.len();
+        Some((0..n).collect())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
