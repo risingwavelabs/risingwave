@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::MatchRecognizeNode;
 use risingwave_storage::StateStore;
 
@@ -20,8 +19,8 @@ use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::{
-    CompiledMeasure, Executor, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa, SkipMode,
-    parse_pattern,
+    CompiledDefine, CompiledMeasure, Executor, MatchRecognizeExecutor, MatchRecognizeExecutorArgs,
+    Nfa, SkipMode, parse_pattern,
 };
 use crate::task::ExecutorParams;
 
@@ -42,12 +41,11 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
         let partition_key_indices = node.partition_by.iter().map(|&i| i as usize).collect();
         let order_key_indices = node.order_by.iter().map(|&i| i as usize).collect();
 
-        let define_symbols = node.define_symbols.clone();
-        let define_exprs = node
-            .define_conditions
+        let defines = node
+            .defines
             .iter()
-            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|d| CompiledDefine::from_protobuf(d, params.eval_error_report.clone()))
+            .collect::<crate::executor::StreamExecutorResult<Vec<_>>>()?;
         let measures = node
             .measures
             .iter()
@@ -81,8 +79,7 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             partition_key_indices,
             order_key_indices,
             measures,
-            define_symbols,
-            define_exprs,
+            defines,
             nfa,
             skip,
             input_arity,

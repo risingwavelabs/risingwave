@@ -1143,14 +1143,34 @@ message MatchRecognizeNode {
   repeated uint32 partition_by = 1;
   repeated uint32 order_by = 2;
   repeated MatchRecognizeMeasure measures = 3;
-  repeated string define_symbols = 5;
-  repeated expr.ExprNode define_conditions = 6;
+  repeated MatchRecognizeDefine defines = 5;
   // PATTERN encoded as its textual form for v1.
   string pattern = 7;
   // Per-partition NFA / partial-match state.
   catalog.Table state_table = 8;
   // AFTER MATCH SKIP strategy: "past_last_row" (default) or "to_next_row".
   string after_match_skip = 9;
+}
+
+// A DEFINE predicate. The condition is evaluated, per candidate row during matching, over a
+// synthetic row whose i-th column is produced by slots[i] from the candidate row, its physical
+// neighbours, and the in-progress match's labels.
+message MatchRecognizeDefine {
+  string symbol = 1;
+  // Predicate over the synthetic slot row: an InputRef(i) reads slots[i].
+  expr.ExprNode condition = 2;
+  repeated MatchRecognizeDefineSlot slots = 3;
+}
+
+// One input a DEFINE predicate reads.
+message MatchRecognizeDefineSlot {
+  // 0 = SELF: the candidate row's own column.
+  // 1 = PREV(col, offset) / 2 = NEXT(col, offset): a physical-offset row's column.
+  // 3 = FIRST(var.col) / 4 = LAST(var.col): the first / last row labeled `vars` in the match so far.
+  uint32 kind = 1;
+  repeated string vars = 2;
+  uint32 col_idx = 3;
+  uint32 offset = 4;
 }
 
 // One MEASURES item. The expression is evaluated over a synthetic per-match row whose i-th column is

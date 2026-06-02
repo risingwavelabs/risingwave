@@ -24,7 +24,7 @@ use super::{
     generic,
 };
 use crate::TableCatalog;
-use crate::binder::MeasureSlotKind;
+use crate::binder::{DefineSlotKind, MeasureSlotKind};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
@@ -56,13 +56,13 @@ impl StreamMatchRecognize {
     }
 
     /// Per-partition buffered-row state table. Layout:
-    ///   `[ seq (i64) , satisfied (varchar) , <input columns..> ]`
-    /// keyed by (partition columns, seq). The executor buffers one row per live input row (its
-    /// satisfied pattern variables and the raw input row) and restores the buffer from here on
-    /// recovery. `seq` is a per-partition monotonic id; consumed rows are deleted after each drain.
-    /// MEASURES are evaluated at match time from the stored input rows, so they are not persisted.
-    /// The partition columns and the order key are columns of the stored input row, so they are not
-    /// stored separately; the partition columns serve as the key prefix.
+    ///   `[ seq (i64) , <input columns..> ]`
+    /// keyed by (partition columns, seq). The executor buffers the raw input row per live row and
+    /// restores the buffer from here on recovery. `seq` is a per-partition monotonic id; consumed
+    /// rows are deleted after each drain. DEFINE predicates and MEASURES are both evaluated at match
+    /// time from the stored input rows, so neither is persisted. The partition columns and the order
+    /// key are columns of the stored input row, so they are not stored separately; the partition
+    /// columns serve as the key prefix.
     fn infer_state_table(&self) -> TableCatalog {
         let mut tbl_builder = TableCatalogBuilder::default();
         let input_fields = self.core.input.schema().fields().to_vec();
@@ -73,16 +73,14 @@ impl StreamMatchRecognize {
 
         // seq
         tbl_builder.add_column(&Field::with_name(DataType::Int64, "seq"));
-        // satisfied (comma-joined pattern variable names)
-        tbl_builder.add_column(&Field::with_name(DataType::Varchar, "satisfied"));
-        // raw input columns (offset 2)
+        // raw input columns (offset 1)
         for f in &input_fields {
             tbl_builder.add_column(f);
         }
 
-        // pk: partition columns (within the stored input row, offset 2) then seq.
+        // pk: partition columns (within the stored input row, offset 1) then seq.
         for i in &partition_indices {
-            tbl_builder.add_order_column(2 + i, OrderType::ascending());
+            tbl_builder.add_order_column(1 + i, OrderType::ascending());
         }
         tbl_builder.add_order_column(0, OrderType::ascending());
         // read_prefix_len_hint = 0: recovery does a full (empty-prefix) scan to discover partitions,
@@ -167,14 +165,35 @@ impl TryToStreamPb for StreamMatchRecognize {
             })
             .collect::<crate::error::Result<Vec<_>>>()?;
 
-        let define_symbols = self.core.defines.iter().map(|d| d.symbol.clone()).collect();
-        let define_conditions = self
+        let defines = self
             .core
             .defines
             .iter()
             .map(|d| {
-                d.definition
-                    .to_expr_proto_checked_pure(retract, "match_recognize define")
+                let condition = d
+                    .definition
+                    .to_expr_proto_checked_pure(retract, "match_recognize define")?;
+                let slots = d
+                    .slots
+                    .iter()
+                    .map(|s| MatchRecognizeDefineSlot {
+                        kind: match s.kind {
+                            DefineSlotKind::SelfCol => 0,
+                            DefineSlotKind::Prev => 1,
+                            DefineSlotKind::Next => 2,
+                            DefineSlotKind::RunningFirst => 3,
+                            DefineSlotKind::RunningLast => 4,
+                        },
+                        vars: s.vars.clone(),
+                        col_idx: s.col_idx as u32,
+                        offset: s.offset as u32,
+                    })
+                    .collect();
+                Ok(MatchRecognizeDefine {
+                    symbol: d.symbol.clone(),
+                    condition: Some(condition),
+                    slots,
+                })
             })
             .collect::<crate::error::Result<Vec<_>>>()?;
 
@@ -187,8 +206,7 @@ impl TryToStreamPb for StreamMatchRecognize {
             partition_by,
             order_by,
             measures,
-            define_symbols,
-            define_conditions,
+            defines,
             pattern: format!("{}", self.core.pattern),
             state_table: Some(state_table),
             after_match_skip: {

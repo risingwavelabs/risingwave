@@ -32,7 +32,7 @@
 //! State: the buffered rows (the raw input row plus its satisfied pattern variables) are persisted
 //! to a state table — written through on arrival, deleted on consumption — and restored on recovery.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::ops::Bound;
 
 use futures::{StreamExt, pin_mut};
@@ -41,10 +41,12 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
 use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
-use risingwave_pb::stream_plan::MatchRecognizeMeasure as PbMatchRecognizeMeasure;
+use risingwave_pb::stream_plan::{
+    MatchRecognizeDefine as PbMatchRecognizeDefine, MatchRecognizeMeasure as PbMatchRecognizeMeasure,
+};
 use risingwave_storage::StateStore;
 
-use super::nfa::{Nfa, SkipMode};
+use super::nfa::{CandidateMatcher, Nfa, SkipMode};
 use crate::common::table::state_table::StateTable;
 use crate::executor::prelude::*;
 
@@ -205,6 +207,134 @@ impl MeasureSlot {
     }
 }
 
+/// How a [`DefineSlot`] resolves against the candidate row (mirrors the planner's slot kinds).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DefineSlotKind {
+    /// The candidate row's own column.
+    SelfCol,
+    /// `PREV(col, offset)`: a row `offset` positions earlier in the ordered partition.
+    Prev,
+    /// `NEXT(col, offset)`: `offset` positions later.
+    Next,
+    /// `FIRST(var.col)`: the first row labeled `vars` in the in-progress match.
+    RunningFirst,
+    /// `LAST(var.col)` / bare other-variable reference: the last such row (running).
+    RunningLast,
+}
+
+/// One input a `DEFINE` predicate reads (mirrors the planner's [`DefineSlot`]).
+struct DefineSlot {
+    kind: DefineSlotKind,
+    vars: Vec<String>,
+    col_idx: usize,
+    offset: usize,
+}
+
+/// A `DEFINE` predicate compiled for execution: a boolean condition over a synthetic slot row.
+pub struct CompiledDefine {
+    symbol: String,
+    condition: NonStrictExpression,
+    slots: Vec<DefineSlot>,
+}
+
+impl CompiledDefine {
+    pub fn from_protobuf(
+        pb: &PbMatchRecognizeDefine,
+        error_report: impl EvalErrorReport + 'static,
+    ) -> StreamExecutorResult<Self> {
+        let condition = build_non_strict_from_prost(
+            pb.condition.as_ref().expect("match_recognize define condition"),
+            error_report,
+        )?;
+        let slots = pb
+            .slots
+            .iter()
+            .map(|s| DefineSlot {
+                kind: match s.kind {
+                    1 => DefineSlotKind::Prev,
+                    2 => DefineSlotKind::Next,
+                    3 => DefineSlotKind::RunningFirst,
+                    4 => DefineSlotKind::RunningLast,
+                    _ => DefineSlotKind::SelfCol,
+                },
+                vars: s.vars.clone(),
+                col_idx: s.col_idx as usize,
+                offset: s.offset as usize,
+            })
+            .collect();
+        Ok(CompiledDefine {
+            symbol: pb.symbol.clone(),
+            condition,
+            slots,
+        })
+    }
+}
+
+/// Evaluates `DEFINE` predicates against the in-progress match, driving the NFA. Holds the sorted
+/// safe-prefix rows of one partition and the compiled `DEFINE`s; a variable with no `DEFINE` is
+/// universally true.
+struct DefineMatcher<'a> {
+    rows: &'a [BufferedRow],
+    safe_len: usize,
+    defines: &'a HashMap<String, CompiledDefine>,
+}
+
+impl DefineMatcher<'_> {
+    /// The value a slot reads for a candidate at `pos`, where `match_start` is the match's first row
+    /// and `labels[k]` is the variable bound to `rows[match_start + k]`.
+    fn slot_value(
+        &self,
+        slot: &DefineSlot,
+        pos: usize,
+        match_start: usize,
+        labels: &[String],
+    ) -> Datum {
+        let col_at = |i: usize| self.rows[i].row.datum_at(slot.col_idx).to_owned_datum();
+        let in_var = |l: &String| slot.vars.iter().any(|v| v == l);
+        match slot.kind {
+            DefineSlotKind::SelfCol => col_at(pos),
+            DefineSlotKind::Prev => pos.checked_sub(slot.offset).and_then(col_at),
+            DefineSlotKind::Next => {
+                let i = pos + slot.offset;
+                if i < self.safe_len { col_at(i) } else { None }
+            }
+            DefineSlotKind::RunningFirst => labels
+                .iter()
+                .position(in_var)
+                .and_then(|k| col_at(match_start + k)),
+            DefineSlotKind::RunningLast => labels
+                .iter()
+                .rposition(in_var)
+                .and_then(|k| col_at(match_start + k)),
+        }
+    }
+}
+
+impl CandidateMatcher for DefineMatcher<'_> {
+    async fn matches(
+        &self,
+        var: &str,
+        pos: usize,
+        labels: &[String],
+    ) -> StreamExecutorResult<bool> {
+        // A pattern variable with no DEFINE matches every row.
+        let Some(def) = self.defines.get(var) else {
+            return Ok(true);
+        };
+        let match_start = pos - labels.len();
+        let synthetic: Vec<Datum> = def
+            .slots
+            .iter()
+            .map(|slot| self.slot_value(slot, pos, match_start, labels))
+            .collect();
+        let value = def
+            .condition
+            .eval_row_infallible(&OwnedRow::new(synthetic))
+            .await;
+        Ok(value.is_some_and(|s| s.into_bool()))
+    }
+}
+
 pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub ctx: ActorContextRef,
     pub input: Executor,
@@ -214,8 +344,7 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub partition_key_indices: Vec<usize>,
     pub order_key_indices: Vec<usize>,
     pub measures: Vec<CompiledMeasure>,
-    pub define_symbols: Vec<String>,
-    pub define_exprs: Vec<NonStrictExpression>,
+    pub defines: Vec<CompiledDefine>,
     pub nfa: Nfa,
     pub skip: SkipMode,
     /// Number of input columns; the buffered raw input row stored per row in the state table.
@@ -232,8 +361,8 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     /// Input column index of the leading ORDER BY column (the watermark column).
     time_col: usize,
     measures: Vec<CompiledMeasure>,
-    define_symbols: Vec<String>,
-    define_exprs: Vec<NonStrictExpression>,
+    /// Compiled `DEFINE` predicates keyed by their pattern variable.
+    defines: HashMap<String, CompiledDefine>,
     nfa: Nfa,
     skip: SkipMode,
     input_arity: usize,
@@ -247,9 +376,7 @@ struct BufferedRow {
     /// Leading ORDER BY value (a copy of `row[time_col]`), used to sort the buffer and compare
     /// against the watermark.
     order_key: Datum,
-    /// The pattern variables whose `DEFINE` predicate this row satisfies.
-    satisfied: BTreeSet<String>,
-    /// The raw input row, read by measure navigation slots at match time.
+    /// The raw input row, read by DEFINE and MEASURES navigation slots at match time.
     row: OwnedRow,
 }
 
@@ -260,17 +387,14 @@ struct PartitionState {
     next_seq: i64,
 }
 
-fn join_satisfied(satisfied: &BTreeSet<String>) -> String {
-    satisfied.iter().cloned().collect::<Vec<_>>().join(",")
-}
-
-fn split_satisfied(s: &str) -> BTreeSet<String> {
-    s.split(',').filter(|p| !p.is_empty()).map(|p| p.to_owned()).collect()
-}
-
 impl<S: StateStore> MatchRecognizeExecutor<S> {
     pub fn new(args: MatchRecognizeExecutorArgs<S>) -> Self {
         let time_col = args.order_key_indices[0];
+        let defines = args
+            .defines
+            .into_iter()
+            .map(|d| (d.symbol.clone(), d))
+            .collect();
         Self {
             ctx: args.ctx,
             input: args.input,
@@ -279,8 +403,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             partition_key_indices: args.partition_key_indices,
             time_col,
             measures: args.measures,
-            define_symbols: args.define_symbols,
-            define_exprs: args.define_exprs,
+            defines,
             nfa: args.nfa,
             skip: args.skip,
             input_arity: args.input_arity,
@@ -288,13 +411,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         }
     }
 
-    /// Build a state-table row: `[ seq , satisfied , <input cols..> ]`. The partition columns and
-    /// order key are columns of the stored input row (the state-table key is the partition columns
-    /// plus `seq`), so they are not stored separately.
+    /// Build a state-table row: `[ seq , <input cols..> ]`. The partition columns and order key are
+    /// columns of the stored input row (the key is the partition columns plus `seq`), so they are
+    /// not stored separately.
     fn state_row(row: &BufferedRow) -> OwnedRow {
-        let mut datums: Vec<Datum> = Vec::with_capacity(2 + row.row.len());
+        let mut datums: Vec<Datum> = Vec::with_capacity(1 + row.row.len());
         datums.push(Some(ScalarImpl::Int64(row.seq)));
-        datums.push(Some(ScalarImpl::Utf8(join_satisfied(&row.satisfied).into())));
         datums.extend(row.row.iter().map(|d| d.to_owned_datum()));
         OwnedRow::new(datums)
     }
@@ -317,8 +439,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             partition_key_indices,
             time_col,
             measures,
-            define_symbols,
-            define_exprs,
+            defines,
             nfa,
             skip,
             input_arity,
@@ -342,12 +463,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             while let Some(item) = iter.next().await {
                 let row = item?.into_owned_row();
                 let seq = row.datum_at(0).expect("seq not null").into_int64();
-                let satisfied = row
-                    .datum_at(1)
-                    .map(|d| split_satisfied(d.into_utf8()))
-                    .unwrap_or_default();
                 let input_row = OwnedRow::new(
-                    (2..2 + input_arity)
+                    (1..1 + input_arity)
                         .map(|i| row.datum_at(i).to_owned_datum())
                         .collect(),
                 );
@@ -357,7 +474,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 state.rows.push(BufferedRow {
                     seq,
                     order_key,
-                    satisfied,
                     row: input_row,
                 });
                 state.next_seq = state.next_seq.max(seq + 1);
@@ -368,30 +484,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         for msg in input {
             match msg? {
                 Message::Chunk(chunk) => {
-                    // Append-only input: buffer rows; matching happens on watermark. DEFINE
-                    // predicates are current-row, so they are evaluated here; MEASURES reference
-                    // specific matched rows and are deferred to match time.
+                    // Append-only input: buffer the raw rows; DEFINE and MEASURES are both evaluated
+                    // on the watermark, against the in-progress match.
                     let chunk = chunk.compact_vis();
-                    let data_chunk = chunk.data_chunk();
-
-                    let mut define_cols = Vec::with_capacity(define_exprs.len());
-                    for e in &define_exprs {
-                        define_cols.push(e.eval_infallible(data_chunk).await);
-                    }
-
-                    for (idx, (op, row_ref)) in chunk.rows().enumerate() {
+                    for (op, row_ref) in chunk.rows() {
                         if !matches!(op, Op::Insert) {
                             continue;
                         }
                         let partition_key = row_ref.project(&partition_key_indices).to_owned_row();
                         let order_key = row_ref.datum_at(time_col).to_owned_datum();
-
-                        let mut satisfied = BTreeSet::new();
-                        for (d, sym) in define_symbols.iter().enumerate() {
-                            if matches!(define_cols[d].value_at(idx), Some(s) if s.into_bool()) {
-                                satisfied.insert(sym.clone());
-                            }
-                        }
 
                         let state = partitions.entry(partition_key).or_default();
                         let seq = state.next_seq;
@@ -399,7 +500,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         let buffered = BufferedRow {
                             seq,
                             order_key,
-                            satisfied,
                             row: row_ref.to_owned_row(),
                         };
                         state_table.insert(Self::state_row(&buffered));
@@ -422,13 +522,20 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             .iter()
                             .take_while(|r| matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_le()))
                             .count();
-                        let satisfied: Vec<BTreeSet<String>> = state.rows[..safe_len]
-                            .iter()
-                            .map(|r| r.satisfied.clone())
-                            .collect();
+
+                        // Evaluate DEFINE predicates against the in-progress match while matching.
+                        // Scope the matcher so its borrow of `state.rows` ends before the drain below.
+                        let found = {
+                            let matcher = DefineMatcher {
+                                rows: &state.rows,
+                                safe_len,
+                                defines: &defines,
+                            };
+                            nfa.find_matches_dynamic(safe_len, &matcher, &skip).await?
+                        };
 
                         let mut cursor = 0usize;
-                        for m in nfa.find_matches_labeled(&satisfied, &skip) {
+                        for m in found {
                             if m.start < cursor {
                                 continue;
                             }

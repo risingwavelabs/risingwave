@@ -36,13 +36,14 @@ use crate::executor::error::StreamExecutorResult;
 /// so membership cannot be precomputed independently of the match path.
 pub trait CandidateMatcher {
     /// `labels[k]` is the variable bound to the match's `k`-th row; the candidate is the row at
-    /// `pos = match_start + labels.len()`.
-    async fn matches(
+    /// `pos = match_start + labels.len()`. The returned future is `Send` so the matcher composes
+    /// with the (boxed, `Send`) executor stream.
+    fn matches(
         &self,
         var: &str,
         pos: usize,
         labels: &[String],
-    ) -> StreamExecutorResult<bool>;
+    ) -> impl std::future::Future<Output = StreamExecutorResult<bool>> + Send;
 }
 
 /// A quantifier applied to a sub-pattern. Greedy semantics only (v1).
@@ -315,7 +316,7 @@ impl Nfa {
     pub async fn find_matches_dynamic(
         &self,
         n_rows: usize,
-        matcher: &impl CandidateMatcher,
+        matcher: &(impl CandidateMatcher + Sync),
         skip: &SkipMode,
     ) -> StreamExecutorResult<Vec<LabeledMatch>> {
         let mut matches = Vec::new();
@@ -345,14 +346,14 @@ impl Nfa {
     /// against ε-cycles *at the current position* — ε-transitions keep `pos`/`path`, so a fresh set
     /// is used once a row is consumed (which lets distinct variable assignments reach the same state
     /// at the next position).
-    #[async_recursion(?Send)]
+    #[async_recursion]
     async fn longest_from_dynamic(
         &self,
         n_rows: usize,
         state: StateId,
         pos: usize,
         path: &mut Vec<String>,
-        matcher: &impl CandidateMatcher,
+        matcher: &(impl CandidateMatcher + Sync),
         visited: &mut HashSet<StateId>,
     ) -> StreamExecutorResult<Option<(usize, Vec<String>)>> {
         if !visited.insert(state) {
