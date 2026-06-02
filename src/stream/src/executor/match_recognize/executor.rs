@@ -38,6 +38,7 @@ use std::ops::Bound;
 use futures::{StreamExt, pin_mut};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
 use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
@@ -45,6 +46,7 @@ use risingwave_pb::stream_plan::{
     MatchRecognizeDefine as PbMatchRecognizeDefine, MatchRecognizeMeasure as PbMatchRecognizeMeasure,
 };
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 
 use super::nfa::{CandidateMatcher, Nfa, SkipMode};
 use crate::common::table::state_table::StateTable;
@@ -457,31 +459,36 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         yield Message::Barrier(barrier);
         state_table.init_epoch(first_epoch).await?;
 
-        // Recovery: rebuild the per-partition buffers from the state table.
+        // Recovery: rebuild the per-partition buffers from the state table. The state is distributed
+        // by the partition key, so scan each vnode this actor owns (an empty-prefix scan cannot
+        // compute a vnode).
         let mut partitions: HashMap<OwnedRow, PartitionState> = HashMap::new();
         {
-            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
-            let iter = state_table
-                .iter_with_prefix(None::<OwnedRow>, sub_range, Default::default())
-                .await?;
-            pin_mut!(iter);
-            while let Some(item) = iter.next().await {
-                let row = item?.into_owned_row();
-                let seq = row.datum_at(0).expect("seq not null").into_int64();
-                let input_row = OwnedRow::new(
-                    (1..1 + input_arity)
-                        .map(|i| row.datum_at(i).to_owned_datum())
-                        .collect(),
-                );
-                let order_key = input_row.datum_at(time_col).to_owned_datum();
-                let partition_key = (&input_row).project(&partition_key_indices).to_owned_row();
-                let state = partitions.entry(partition_key).or_default();
-                state.rows.push(BufferedRow {
-                    seq,
-                    order_key,
-                    row: input_row,
-                });
-                state.next_seq = state.next_seq.max(seq + 1);
+            let sub_range: (Bound<&[Datum]>, Bound<&[Datum]>) = (Bound::Unbounded, Bound::Unbounded);
+            let vnodes = state_table.vnodes().clone();
+            for vnode in vnodes.iter_vnodes() {
+                let iter = state_table
+                    .iter_with_vnode(vnode, &sub_range, PrefetchOptions::default())
+                    .await?;
+                pin_mut!(iter);
+                while let Some(item) = iter.next().await {
+                    let row = item?.into_owned_row();
+                    let seq = row.datum_at(0).expect("seq not null").into_int64();
+                    let input_row = OwnedRow::new(
+                        (1..1 + input_arity)
+                            .map(|i| row.datum_at(i).to_owned_datum())
+                            .collect(),
+                    );
+                    let order_key = input_row.datum_at(time_col).to_owned_datum();
+                    let partition_key = (&input_row).project(&partition_key_indices).to_owned_row();
+                    let state = partitions.entry(partition_key).or_default();
+                    state.rows.push(BufferedRow {
+                        seq,
+                        order_key,
+                        row: input_row,
+                    });
+                    state.next_seq = state.next_seq.max(seq + 1);
+                }
             }
         }
 
