@@ -20,7 +20,7 @@ use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::{
-    Executor, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa, parse_pattern,
+    Executor, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa, SkipMode, parse_pattern,
 };
 use crate::task::ExecutorParams;
 
@@ -57,6 +57,11 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             .map_err(|e| anyhow::anyhow!("invalid MATCH_RECOGNIZE pattern: {e}"))?;
         let nfa = Nfa::compile(&pattern);
 
+        let skip = match node.after_match_skip.as_str() {
+            "to_next_row" => SkipMode::ToNextRow,
+            _ => SkipMode::PastLastRow,
+        };
+
         let state_table =
             StateTableBuilder::new(node.get_state_table().as_ref().unwrap(), store, None)
                 .forbid_preload_all_rows()
@@ -74,6 +79,7 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             define_symbols,
             define_exprs,
             nfa,
+            skip,
             state_table,
         });
 

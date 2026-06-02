@@ -30,7 +30,7 @@ use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_storage::StateStore;
 
-use super::nfa::Nfa;
+use super::nfa::{Nfa, SkipMode};
 use crate::common::table::state_table::StateTable;
 use crate::executor::prelude::*;
 
@@ -46,6 +46,7 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub define_symbols: Vec<String>,
     pub define_exprs: Vec<NonStrictExpression>,
     pub nfa: Nfa,
+    pub skip: SkipMode,
     /// State table for partial-match / buffer persistence. Not yet used (in-memory v1).
     pub state_table: StateTable<S>,
 }
@@ -60,6 +61,7 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     define_symbols: Vec<String>,
     define_exprs: Vec<NonStrictExpression>,
     nfa: Nfa,
+    skip: SkipMode,
     state_table: StateTable<S>,
 }
 
@@ -90,6 +92,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             define_symbols: args.define_symbols,
             define_exprs: args.define_exprs,
             nfa: args.nfa,
+            skip: args.skip,
             state_table: args.state_table,
         }
     }
@@ -114,6 +117,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             define_symbols,
             define_exprs,
             nfa,
+            skip,
             mut state_table,
         } = *self;
 
@@ -182,7 +186,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         let satisfied: Vec<BTreeSet<String>> =
                             state.rows.iter().map(|r| r.satisfied.clone()).collect();
 
-                        for m in nfa.find_matches(&satisfied) {
+                        for m in nfa.find_matches(&satisfied, skip) {
                             if m.start < state.cursor {
                                 continue; // already emitted
                             }

@@ -142,14 +142,23 @@ pub struct MatchSpan {
     pub end: usize,
 }
 
+/// Where the scan resumes after a match (the `AFTER MATCH SKIP` strategy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipMode {
+    /// `AFTER MATCH SKIP PAST LAST ROW`: resume past the match's last row (non-overlapping).
+    PastLastRow,
+    /// `AFTER MATCH SKIP TO NEXT ROW`: resume at the row after the match's first row (overlapping).
+    ToNextRow,
+}
+
 impl Nfa {
-    /// Find all matches over `rows` under `ONE ROW PER MATCH` + `AFTER MATCH SKIP PAST LAST ROW`:
-    /// scan left to right; at each position take the greedy longest match; on a non-empty match,
-    /// record it and resume scanning *past its last row*; otherwise advance by one row.
+    /// Find all matches over `rows` under `ONE ROW PER MATCH` with the given `AFTER MATCH SKIP`
+    /// strategy: scan left to right; at each position take the greedy longest match; on a non-empty
+    /// match, record it and resume per `skip`; otherwise advance by one row.
     ///
     /// Empty matches (a pattern that accepts zero rows, e.g. `A*` on a non-matching row) are not
     /// emitted and advance the scan by one, so the scan always terminates.
-    pub fn find_matches(&self, rows: &[BTreeSet<String>]) -> Vec<MatchSpan> {
+    pub fn find_matches(&self, rows: &[BTreeSet<String>], skip: SkipMode) -> Vec<MatchSpan> {
         let mut matches = Vec::new();
         let mut i = 0;
         while i < rows.len() {
@@ -157,7 +166,10 @@ impl Nfa {
                 && end > i
             {
                 matches.push(MatchSpan { start: i, end });
-                i = end; // SKIP PAST LAST ROW
+                i = match skip {
+                    SkipMode::PastLastRow => end,
+                    SkipMode::ToNextRow => i + 1,
+                };
             } else {
                 i += 1;
             }
@@ -445,8 +457,25 @@ mod tests {
         let p = Pattern::Concat(vec![vars("a"), vars("b")]);
         let nfa = Nfa::compile(&p);
         assert_eq!(
-            nfa.find_matches(&rows("ababab")),
+            nfa.find_matches(&rows("ababab"), SkipMode::PastLastRow),
             spans(&[(0, 2), (2, 4), (4, 6)])
+        );
+    }
+
+    #[test]
+    fn find_matches_skip_to_next_row_overlaps() {
+        // A+ with SKIP TO NEXT ROW: matches may overlap (resume at start+1).
+        let p = Pattern::Quantified(Box::new(vars("a")), Quantifier::Plus);
+        let nfa = Nfa::compile(&p);
+        // "aaa": greedy A+ at 0->(0,3); to-next resumes at 1->(1,3); 2->(2,3).
+        assert_eq!(
+            nfa.find_matches(&rows("aaa"), SkipMode::ToNextRow),
+            spans(&[(0, 3), (1, 3), (2, 3)])
+        );
+        // PAST LAST ROW on the same input: single match.
+        assert_eq!(
+            nfa.find_matches(&rows("aaa"), SkipMode::PastLastRow),
+            spans(&[(0, 3)])
         );
     }
 
@@ -459,7 +488,10 @@ mod tests {
         ]);
         let nfa = Nfa::compile(&p);
         // a b b | a b  -> (0,3) then (3,5)
-        assert_eq!(nfa.find_matches(&rows("abbab")), spans(&[(0, 3), (3, 5)]));
+        assert_eq!(
+            nfa.find_matches(&rows("abbab"), SkipMode::PastLastRow),
+            spans(&[(0, 3), (3, 5)])
+        );
     }
 
     #[test]
@@ -468,7 +500,10 @@ mod tests {
         let p = Pattern::Concat(vec![vars("a"), vars("b")]);
         let nfa = Nfa::compile(&p);
         // x a b x x a b -> (1,3),(5,7)
-        assert_eq!(nfa.find_matches(&rows("xabxxab")), spans(&[(1, 3), (5, 7)]));
+        assert_eq!(
+            nfa.find_matches(&rows("xabxxab"), SkipMode::PastLastRow),
+            spans(&[(1, 3), (5, 7)])
+        );
     }
 
     #[test]
@@ -477,9 +512,12 @@ mod tests {
         let p = Pattern::Quantified(Box::new(vars("a")), Quantifier::Star);
         let nfa = Nfa::compile(&p);
         // "aa b aa" -> greedy A* consumes runs of a, emits non-empty ones.
-        assert_eq!(nfa.find_matches(&rows("aabaa")), spans(&[(0, 2), (3, 5)]));
+        assert_eq!(
+            nfa.find_matches(&rows("aabaa"), SkipMode::PastLastRow),
+            spans(&[(0, 2), (3, 5)])
+        );
         // all-non-matching -> no matches, terminates.
-        assert_eq!(nfa.find_matches(&rows("xxx")), spans(&[]));
+        assert_eq!(nfa.find_matches(&rows("xxx"), SkipMode::PastLastRow), spans(&[]));
     }
 
     #[test]
