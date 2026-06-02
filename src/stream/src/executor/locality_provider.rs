@@ -15,9 +15,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use either::Either;
-use futures::stream::select_with_strategy;
-use futures::{TryStreamExt, pin_mut, stream};
+use futures::future::{Either as FutureEither, select};
+use futures::stream::BoxStream;
+use futures::{StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
@@ -28,15 +28,22 @@ use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::cmp_datum_iter;
 use risingwave_common_rate_limit::RateLimit;
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{CommittedStateTableReader, StateTable};
 use crate::executor::backfill::utils::create_builder;
 use crate::executor::prelude::*;
 use crate::task::{CreateMviewProgressReporter, FragmentId};
 
 type Builders = HashMap<VirtualNode, DataChunkBuilder>;
+type SnapshotStream = BoxStream<'static, StreamExecutorResult<Option<(VirtualNode, OwnedRow)>>>;
+
+enum BackfillInput {
+    Upstream(Option<StreamExecutorResult<Message>>),
+    Snapshot(Option<StreamExecutorResult<Option<(VirtualNode, OwnedRow)>>>),
+}
 
 /// Progress state for tracking backfill per vnode
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -220,12 +227,16 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
     /// Creates a snapshot stream that reads from state table in locality order
     #[try_stream(ok = Option<(VirtualNode, OwnedRow)>, error = StreamExecutorError)]
-    async fn make_snapshot_stream<'a>(
-        state_table: &'a StateTable<S>,
+    async fn make_snapshot_stream(
+        reader: CommittedStateTableReader<S>,
+        read_epoch: HummockReadEpoch,
         backfill_state: LocalityBackfillState,
-    ) {
+    ) where
+        S: 'static,
+    {
         // Read from state table per vnode in locality order
-        for vnode in state_table.vnodes().iter_vnodes() {
+        let vnodes = reader.vnodes().iter_vnodes().collect_vec();
+        for vnode in vnodes {
             let progress = backfill_state.get_progress(&vnode);
 
             let current_pos = match progress {
@@ -251,8 +262,9 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             };
 
             // Iterate over rows for this vnode
-            let iter = state_table
+            let iter = reader
                 .iter_with_vnode(
+                    read_epoch,
                     vnode,
                     &range_bounds,
                     PrefetchOptions::prefetch_for_small_range_scan(),
@@ -429,13 +441,13 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
     }
 }
 
-impl<S: StateStore> Execute for LocalityProviderExecutor<S> {
+impl<S: StateStore + 'static> Execute for LocalityProviderExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
 }
 
-impl<S: StateStore> LocalityProviderExecutor<S> {
+impl<S: StateStore + 'static> LocalityProviderExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         let mut upstream = self.upstream.execute();
@@ -453,6 +465,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         // Initialize state tables
         state_table.init_epoch(first_epoch).await?;
         progress_table.init_epoch(first_epoch).await?;
+        let mut state_table_read_epoch = first_epoch.curr;
 
         // Load backfill state from progress table
         let mut backfill_state = Self::load_backfill_state(&progress_table).await?;
@@ -504,6 +517,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                         // Commit state tables
                         let post_commit1 = state_table.commit(epoch).await?;
                         let post_commit2 = progress_table.commit(epoch).await?;
+                        state_table_read_epoch = epoch.curr;
 
                         yield Message::Barrier(barrier);
                         post_commit1.post_yield_barrier(None).await?;
@@ -533,7 +547,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         //    locality key <= `current_pos`, otherwise ignore it.
         //  - Flush all buffered upstream_chunks to state table.
         //  - Persist backfill progress to progress table.
-        //  - Reconstruct the whole backfill stream with upstream and new snapshot read stream.
+        //  - Reconstruct the snapshot read stream only if buffered upstream chunks changed the
+        //    state table. Otherwise, continue the same snapshot read stream across the barrier.
         //
         // When a chunk comes from snapshot, we forward it to the downstream and raise
         // `current_pos`.
@@ -545,7 +560,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
         if need_backfill {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
-            let mut pending_barrier: Option<Barrier> = None;
 
             let metrics = self
                 .metrics
@@ -566,106 +580,103 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 })
                 .collect();
 
+            let snapshot_reader = state_table.committed_reader();
+            let mut snapshot_stream: SnapshotStream = Self::make_snapshot_stream(
+                snapshot_reader.clone(),
+                HummockReadEpoch::NoWait(state_table_read_epoch),
+                backfill_state.clone(),
+            )
+            .boxed();
+            let mut upstream_finished = false;
+
             'backfill_loop: loop {
                 let mut cur_barrier_snapshot_processed_rows: u64 = 0;
                 let mut cur_barrier_upstream_processed_rows: u64 = 0;
 
-                // Create the backfill stream with upstream and snapshot
-                {
-                    let left_upstream = upstream.by_ref().map(Either::Left);
-                    let right_snapshot = pin!(
-                        Self::make_snapshot_stream(&state_table, backfill_state.clone(),)
-                            .map(Either::Right)
-                    );
+                // Prefer upstream so a ready barrier can pause snapshot output promptly, while
+                // keeping the snapshot stream itself alive across barriers with no upstream data.
+                let barrier = loop {
+                    let input = if upstream_finished {
+                        BackfillInput::Snapshot(snapshot_stream.next().await)
+                    } else {
+                        let upstream_next = upstream.next();
+                        let snapshot_next = snapshot_stream.next();
+                        pin_mut!(upstream_next);
+                        pin_mut!(snapshot_next);
 
-                    // Prefer to select upstream, so we can stop snapshot stream as soon as the
-                    // barrier comes.
-                    let mut backfill_stream =
-                        select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
-                            stream::PollNext::Left
-                        });
-
-                    #[for_await]
-                    for either in &mut backfill_stream {
-                        match either {
-                            // Upstream
-                            Either::Left(msg) => {
-                                match msg? {
-                                    Message::Barrier(barrier) => {
-                                        // We have to process the barrier outside of the loop.
-                                        pending_barrier = Some(barrier);
-                                        break;
-                                    }
-                                    Message::Chunk(chunk) => {
-                                        // Buffer the upstream chunk.
-                                        upstream_chunk_buffer.push(chunk.compact_vis());
-                                    }
-                                    Message::Watermark(_) => {
-                                        // Ignore watermark during backfill.
-                                    }
-                                }
-                            }
-                            // Snapshot read
-                            Either::Right(msg) => {
-                                match msg? {
-                                    None => {
-                                        // End of the snapshot read stream.
-                                        // Consume remaining rows in the builders.
-                                        for (vnode, builder) in &mut builders {
-                                            if let Some(data_chunk) = builder.consume_all() {
-                                                let chunk = Self::handle_snapshot_chunk(
-                                                    data_chunk,
-                                                    *vnode,
-                                                    &pk_indices,
-                                                    &mut backfill_state,
-                                                    &mut cur_barrier_snapshot_processed_rows,
-                                                )?;
-                                                yield Message::Chunk(chunk);
-                                            }
-                                        }
-
-                                        // Consume remaining rows in the upstream buffer.
-                                        for chunk in upstream_chunk_buffer.drain(..) {
-                                            let chunk_cardinality = chunk.cardinality() as u64;
-                                            cur_barrier_upstream_processed_rows +=
-                                                chunk_cardinality;
-                                            yield Message::Chunk(chunk);
-                                        }
-                                        metrics
-                                            .backfill_snapshot_read_row_count
-                                            .inc_by(cur_barrier_snapshot_processed_rows);
-                                        metrics
-                                            .backfill_upstream_output_row_count
-                                            .inc_by(cur_barrier_upstream_processed_rows);
-                                        break 'backfill_loop;
-                                    }
-                                    Some((vnode, row)) => {
-                                        // Use builder to batch rows efficiently
-                                        let builder = builders.get_mut(&vnode).unwrap();
-                                        if let Some(data_chunk) = builder.append_one_row(row) {
-                                            // Builder is full, handle the chunk
-                                            let chunk = Self::handle_snapshot_chunk(
-                                                data_chunk,
-                                                vnode,
-                                                &pk_indices,
-                                                &mut backfill_state,
-                                                &mut cur_barrier_snapshot_processed_rows,
-                                            )?;
-                                            yield Message::Chunk(chunk);
-                                        }
-                                        // If append_one_row returns None, row is buffered but no chunk is produced yet
-                                        // Progress will be updated when the builder is consumed later
-                                    }
-                                }
-                            }
+                        match select(upstream_next, snapshot_next).await {
+                            FutureEither::Left((msg, _)) => BackfillInput::Upstream(msg),
+                            FutureEither::Right((msg, _)) => BackfillInput::Snapshot(msg),
                         }
-                    }
-                }
+                    };
 
-                // Process barrier
-                let barrier = match pending_barrier.take() {
-                    Some(barrier) => barrier,
-                    None => break 'backfill_loop, // Reached end of backfill
+                    match input {
+                        BackfillInput::Upstream(msg) => match msg.transpose()? {
+                            Some(Message::Barrier(barrier)) => {
+                                // Process the barrier after draining the snapshot builders.
+                                break barrier;
+                            }
+                            Some(Message::Chunk(chunk)) => {
+                                // Buffer the upstream chunk.
+                                upstream_chunk_buffer.push(chunk.compact_vis());
+                            }
+                            Some(Message::Watermark(_)) => {
+                                // Ignore watermark during backfill.
+                            }
+                            None => {
+                                upstream_finished = true;
+                            }
+                        },
+                        BackfillInput::Snapshot(msg) => match msg.transpose()? {
+                            Some(Some((vnode, row))) => {
+                                // Use builder to batch rows efficiently
+                                let builder = builders.get_mut(&vnode).unwrap();
+                                if let Some(data_chunk) = builder.append_one_row(row) {
+                                    // Builder is full, handle the chunk
+                                    let chunk = Self::handle_snapshot_chunk(
+                                        data_chunk,
+                                        vnode,
+                                        &pk_indices,
+                                        &mut backfill_state,
+                                        &mut cur_barrier_snapshot_processed_rows,
+                                    )?;
+                                    yield Message::Chunk(chunk);
+                                }
+                                // If append_one_row returns None, row is buffered but no chunk is produced yet
+                                // Progress will be updated when the builder is consumed later
+                            }
+                            Some(None) | None => {
+                                // End of the snapshot read stream.
+                                // Consume remaining rows in the builders.
+                                for (vnode, builder) in &mut builders {
+                                    if let Some(data_chunk) = builder.consume_all() {
+                                        let chunk = Self::handle_snapshot_chunk(
+                                            data_chunk,
+                                            *vnode,
+                                            &pk_indices,
+                                            &mut backfill_state,
+                                            &mut cur_barrier_snapshot_processed_rows,
+                                        )?;
+                                        yield Message::Chunk(chunk);
+                                    }
+                                }
+
+                                // Consume remaining rows in the upstream buffer.
+                                for chunk in upstream_chunk_buffer.drain(..) {
+                                    let chunk_cardinality = chunk.cardinality() as u64;
+                                    cur_barrier_upstream_processed_rows += chunk_cardinality;
+                                    yield Message::Chunk(chunk);
+                                }
+                                metrics
+                                    .backfill_snapshot_read_row_count
+                                    .inc_by(cur_barrier_snapshot_processed_rows);
+                                metrics
+                                    .backfill_upstream_output_row_count
+                                    .inc_by(cur_barrier_upstream_processed_rows);
+                                break 'backfill_loop;
+                            }
+                        },
+                    }
                 };
 
                 // Consume remaining rows from builders at barrier
@@ -683,6 +694,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 }
 
                 // Process upstream buffer chunks with marking
+                let should_refresh_snapshot = !upstream_chunk_buffer.is_empty();
                 for chunk in upstream_chunk_buffer.drain(..) {
                     cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
 
@@ -698,7 +710,9 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     state_table.write_chunk(chunk);
                 }
 
-                let post_commit1 = state_table.commit(barrier.epoch).await?;
+                let barrier_epoch = barrier.epoch;
+                let post_commit1 = state_table.commit(barrier_epoch).await?;
+                state_table_read_epoch = barrier_epoch.curr;
 
                 // Update progress with current epoch and snapshot read count
                 // Report both consumed rows and buffered rows separately for precise progress
@@ -722,7 +736,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
                 // Persist backfill progress
                 Self::persist_backfill_state(&mut progress_table, &backfill_state).await?;
-                let barrier_epoch = barrier.epoch;
                 let post_commit2 = progress_table.commit(barrier_epoch).await?;
 
                 metrics
@@ -735,6 +748,15 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 yield Message::Barrier(barrier);
                 post_commit1.post_yield_barrier(None).await?;
                 post_commit2.post_yield_barrier(None).await?;
+
+                if should_refresh_snapshot {
+                    snapshot_stream = Self::make_snapshot_stream(
+                        snapshot_reader.clone(),
+                        HummockReadEpoch::NoWait(state_table_read_epoch),
+                        backfill_state.clone(),
+                    )
+                    .boxed();
+                }
             }
         }
 

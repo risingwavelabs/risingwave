@@ -197,6 +197,8 @@ where
     /// State store for accessing snapshot data
     store: S,
 
+    table_option: TableOption,
+
     /// Current epoch
     epoch: Option<EpochPair>,
 
@@ -257,6 +259,21 @@ pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// `ReplicatedStateTable` is meant to replicate upstream shared buffer.
 /// Used for `ArrangementBackfill` executor.
 pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
+
+#[derive(Clone)]
+pub struct CommittedStateTableReader<S, SD = BasicSerde>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    table_id: TableId,
+    store: S,
+    table_option: TableOption,
+    pk_serde: OrderedRowSerde,
+    vnodes: Arc<Bitmap>,
+    row_serde: Arc<SD>,
+    metrics: Option<StateTableMetrics>,
+}
 
 // initialize
 impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
@@ -1039,6 +1056,7 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
                 metrics,
             },
             store: self.store,
+            table_option,
             epoch: None,
             pk_serde,
             pk_indices,
@@ -1170,6 +1188,18 @@ where
 
     pub fn vnodes(&self) -> &Arc<Bitmap> {
         self.distribution.vnodes()
+    }
+
+    pub fn committed_reader(&self) -> CommittedStateTableReader<S, SD> {
+        CommittedStateTableReader {
+            table_id: self.table_id,
+            store: self.store.clone(),
+            table_option: self.table_option,
+            pk_serde: self.pk_serde.clone(),
+            vnodes: self.distribution.vnodes().clone(),
+            row_serde: self.row_store.row_serde.clone(),
+            metrics: self.row_store.metrics.clone(),
+        }
     }
 
     pub fn value_indices(&self) -> &Option<Vec<usize>> {
@@ -1820,6 +1850,59 @@ impl FromVnodeBytes for () {
     fn from_vnode_bytes(_vnode: VirtualNode, _bytes: &Bytes) -> Self {}
 }
 
+impl<S, SD> CommittedStateTableReader<S, SD>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
+    pub fn vnodes(&self) -> &Arc<Bitmap> {
+        &self.vnodes
+    }
+
+    /// Scans committed state without borrowing the mutable [`StateTableInner`].
+    ///
+    /// This is useful for long-running snapshot scans that need to survive executor barrier
+    /// commits on the write-side state table.
+    pub async fn iter_with_vnode(
+        &self,
+        read_epoch: HummockReadEpoch,
+        vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<BoxedRowStream<'static>> {
+        if let Some(m) = &self.metrics {
+            m.iter_count.inc();
+        }
+
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        let read_snapshot = self
+            .store
+            .new_read_snapshot(
+                read_epoch,
+                NewReadSnapshotOptions {
+                    table_id: self.table_id,
+                    table_option: self.table_option,
+                },
+            )
+            .await?;
+        let iter = read_snapshot
+            .iter(
+                prefixed_range_with_vnode(memcomparable_range, vnode),
+                ReadOptions {
+                    prefix_hint: None,
+                    prefetch_options,
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
+                },
+            )
+            .await?;
+        Ok(
+            deserialize_keyed_row_stream_owned::<(), _>(iter, self.row_serde.clone())
+                .map_ok(|(_, row)| row)
+                .boxed(),
+        )
+    }
+}
+
 // Iterator functions
 impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
@@ -2338,6 +2421,23 @@ fn deserialize_keyed_row_stream<'a, K: CopyFromSlice>(
     iter: impl StateStoreIter + 'a,
     deserializer: &'a impl ValueRowSerde,
 ) -> impl PkRowStream<'a, K> {
+    iter.into_stream(move |(key, value)| {
+        Ok((
+            K::copy_from_slice(key.user_key.table_key.as_ref()),
+            deserializer.deserialize(value).map(OwnedRow::new)?,
+        ))
+    })
+    .map_err(Into::into)
+}
+
+fn deserialize_keyed_row_stream_owned<K, SD>(
+    iter: impl StateStoreIter + 'static,
+    deserializer: Arc<SD>,
+) -> impl PkRowStream<'static, K> + Send
+where
+    K: CopyFromSlice + Send + 'static,
+    SD: ValueRowSerde,
+{
     iter.into_stream(move |(key, value)| {
         Ok((
             K::copy_from_slice(key.user_key.table_key.as_ref()),

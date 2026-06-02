@@ -1919,6 +1919,7 @@ pub struct OverWindowMetrics {
     pub over_window_same_output_count: LabelGuardedIntCounter,
 }
 
+#[derive(Clone)]
 pub struct StateTableMetrics {
     pub iter_count: LabelGuardedIntCounter,
     pub get_count: LabelGuardedIntCounter,
