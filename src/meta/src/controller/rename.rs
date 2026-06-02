@@ -212,6 +212,9 @@ impl QueryRewriter<'_> {
             TableFactor::NestedJoin(table_with_joins) => {
                 self.visit_table_with_joins(table_with_joins);
             }
+            TableFactor::MatchRecognize { table, .. } => {
+                self.visit_table_factor(table);
+            }
         }
     }
 
