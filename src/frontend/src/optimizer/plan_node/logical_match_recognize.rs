@@ -49,6 +49,7 @@ impl LogicalMatchRecognize {
         after_match_skip: Option<AfterMatchSkip>,
         pattern: MatchRecognizePattern,
         defines: Vec<BoundSymbolDefinition>,
+        within: Option<ExprImpl>,
     ) -> Self {
         let core = generic::MatchRecognize {
             input,
@@ -59,6 +60,7 @@ impl LogicalMatchRecognize {
             after_match_skip,
             pattern,
             defines,
+            within,
         };
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
@@ -109,6 +111,7 @@ impl PlanTreeNodeUnary<Logical> for LogicalMatchRecognize {
             self.core.after_match_skip.clone(),
             self.core.pattern.clone(),
             self.core.defines.clone(),
+            self.core.within.clone(),
         )
     }
 }
@@ -230,6 +233,7 @@ impl ToStream for LogicalMatchRecognize {
             after_match_skip: self.core.after_match_skip.clone(),
             pattern: self.core.pattern.clone(),
             defines: self.core.defines.clone(),
+            within: self.core.within.clone(),
         };
         Ok(StreamMatchRecognize::new(core).into())
     }

@@ -37,6 +37,8 @@ pub struct MatchRecognize<PlanRef> {
     pub after_match_skip: Option<AfterMatchSkip>,
     pub pattern: MatchRecognizePattern,
     pub defines: Vec<BoundSymbolDefinition>,
+    /// `WITHIN` span check over a synthetic `[last_order_key, first_order_key]` row; `None` if absent.
+    pub within: Option<ExprImpl>,
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for MatchRecognize<PlanRef> {
@@ -78,6 +80,9 @@ impl<PlanRef: GenericPlanRef> crate::optimizer::plan_node::expr_visitable::ExprV
         self.order_by.iter().for_each(|e| v.visit_expr(e));
         self.measures.iter().for_each(|m| v.visit_expr(&m.expr));
         self.defines.iter().for_each(|d| v.visit_expr(&d.definition));
+        if let Some(within) = &self.within {
+            v.visit_expr(within);
+        }
     }
 }
 
@@ -111,6 +116,9 @@ impl<PlanRef> MatchRecognize<PlanRef> {
         self.defines
             .iter_mut()
             .for_each(|d| d.definition = r.rewrite_expr(d.definition.clone()));
+        if let Some(within) = &mut self.within {
+            *within = r.rewrite_expr(within.clone());
+        }
     }
 
     pub fn rewrite_with_col_index_mapping(&mut self, mapping: &mut ColIndexMapping) {

@@ -218,6 +218,12 @@ impl TryToStreamPb for StreamMatchRecognize {
                     _ => "past_last_row".to_owned(),
                 }
             },
+            within: self
+                .core
+                .within
+                .as_ref()
+                .map(|w| w.to_expr_proto_checked_pure(retract, "match_recognize within"))
+                .transpose()?,
         }))
     }
 }

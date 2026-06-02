@@ -345,6 +345,8 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub order_key_indices: Vec<usize>,
     pub measures: Vec<CompiledMeasure>,
     pub defines: Vec<CompiledDefine>,
+    /// `WITHIN` span check over `[last_order_key, first_order_key]`; rejects matches that exceed it.
+    pub within: Option<NonStrictExpression>,
     pub nfa: Nfa,
     pub skip: SkipMode,
     /// Number of input columns; the buffered raw input row stored per row in the state table.
@@ -363,6 +365,7 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     measures: Vec<CompiledMeasure>,
     /// Compiled `DEFINE` predicates keyed by their pattern variable.
     defines: HashMap<String, CompiledDefine>,
+    within: Option<NonStrictExpression>,
     nfa: Nfa,
     skip: SkipMode,
     input_arity: usize,
@@ -404,6 +407,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             time_col,
             measures: args.measures,
             defines,
+            within: args.within,
             nfa: args.nfa,
             skip: args.skip,
             input_arity: args.input_arity,
@@ -440,6 +444,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             time_col,
             measures,
             defines,
+            within,
             nfa,
             skip,
             input_arity,
@@ -542,6 +547,17 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             // Final only if another safe row follows (greedy match is maximal).
                             if m.end >= safe_len {
                                 break;
+                            }
+                            // WITHIN: reject a match whose span (last - first order key) exceeds the
+                            // bound. The check is over a synthetic [last, first] row.
+                            if let Some(within) = &within {
+                                let first_key = state.rows[m.start].order_key.clone();
+                                let last_key = state.rows[m.end - 1].order_key.clone();
+                                let span_row = OwnedRow::new(vec![last_key, first_key]);
+                                let ok = within.eval_row_infallible(&span_row).await;
+                                if !ok.is_some_and(|s| s.into_bool()) {
+                                    continue;
+                                }
                             }
                             // Evaluate each measure over the synthetic row its slots produce from
                             // the matched rows and their per-row labels.

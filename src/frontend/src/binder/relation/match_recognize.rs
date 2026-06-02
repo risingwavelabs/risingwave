@@ -133,6 +133,9 @@ pub struct BoundMatchRecognize {
     pub after_match_skip: Option<AfterMatchSkip>,
     pub pattern: MatchRecognizePattern,
     pub defines: Vec<BoundSymbolDefinition>,
+    /// `WITHIN` span check, lowered to a predicate over a synthetic `[last_order_key,
+    /// first_order_key]` row: `InputRef(0) - InputRef(1) <= <interval>`. `None` when omitted.
+    pub within: Option<ExprImpl>,
 }
 
 impl Binder {
@@ -146,6 +149,7 @@ impl Binder {
         rows_per_match: &Option<RowsPerMatch>,
         after_match_skip: &Option<AfterMatchSkip>,
         pattern: &MatchRecognizePattern,
+        within: &Option<AstExpr>,
         subsets: &[SubsetDefinition],
         symbols: &[SymbolDefinition],
         alias: Option<&TableAlias>,
@@ -169,6 +173,27 @@ impl Binder {
             .iter()
             .map(|o| self.bind_expr(&o.expr))
             .collect::<RwResult<Vec<_>>>()?;
+
+        // WITHIN: lower `WITHIN <interval>` to a span check over a synthetic [last, first] row, i.e.
+        // `InputRef(0) - InputRef(1) <= <interval>`, against the leading ORDER BY column's type. The
+        // expression machinery handles the typed arithmetic (timestamp − timestamp → interval, etc).
+        let within = match within {
+            Some(e) => {
+                let bound = self.bind_expr(e)?;
+                let Some(order_key) = order_by.first() else {
+                    bail_not_implemented!("WITHIN requires an ORDER BY column");
+                };
+                let ts_type = order_key.return_type();
+                let last = ExprImpl::from(InputRef::new(0, ts_type.clone()));
+                let first = ExprImpl::from(InputRef::new(1, ts_type));
+                let diff = ExprImpl::from(FunctionCall::new(ExprType::Subtract, vec![last, first])?);
+                Some(ExprImpl::from(FunctionCall::new(
+                    ExprType::LessThanOrEqual,
+                    vec![diff, bound],
+                )?))
+            }
+            None => None,
+        };
 
         // Snapshot the input columns so each pattern variable can be registered as an alias over
         // them. After this, `A.col` (a pattern-variable-qualified reference) resolves to the input
@@ -266,6 +291,7 @@ impl Binder {
             after_match_skip: after_match_skip.clone(),
             pattern: pattern.clone(),
             defines,
+            within,
         })
     }
 

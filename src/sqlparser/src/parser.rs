@@ -5749,6 +5749,13 @@ impl Parser<'_> {
         let pattern = self.parse_pattern()?;
         self.expect_token(&Token::RParen)?;
 
+        // `WITHIN <interval>` bounds the time span of a match (streaming extension).
+        let within = if self.parse_keyword(Keyword::WITHIN) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
         let subsets = if self.parse_keyword(Keyword::SUBSET) {
             self.parse_comma_separated(Parser::parse_subset_definition)?
         } else {
@@ -5770,6 +5777,7 @@ impl Parser<'_> {
             rows_per_match,
             after_match_skip,
             pattern,
+            within,
             subsets,
             symbols,
             alias,

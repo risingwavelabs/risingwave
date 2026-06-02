@@ -1145,6 +1145,9 @@ message MatchRecognizeNode {
   catalog.Table state_table = 8;
   // AFTER MATCH SKIP strategy: "past_last_row" (default) or "to_next_row".
   string after_match_skip = 9;
+  // WITHIN span check: a predicate over a synthetic [last_order_key, first_order_key] row
+  // (InputRef(0) - InputRef(1) <= <interval>). Absent when there is no WITHIN clause.
+  optional expr.ExprNode within = 11;
 }
 
 // A DEFINE predicate. The condition is evaluated, per candidate row during matching, over a
