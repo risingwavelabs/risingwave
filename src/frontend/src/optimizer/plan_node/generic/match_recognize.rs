@@ -77,6 +77,22 @@ impl<PlanRef: GenericPlanRef> crate::optimizer::plan_node::expr_visitable::ExprV
 }
 
 impl<PlanRef> MatchRecognize<PlanRef> {
+    /// Input column indices of `PARTITION BY`, or `None` if any key is not a plain column.
+    pub fn partition_key_indices(&self) -> Option<Vec<usize>> {
+        self.partition_by
+            .iter()
+            .map(|e| e.as_input_ref().map(|r| r.index()))
+            .collect()
+    }
+
+    /// Input column indices of `ORDER BY`, or `None` if any key is not a plain column.
+    pub fn order_key_indices(&self) -> Option<Vec<usize>> {
+        self.order_by
+            .iter()
+            .map(|e| e.as_input_ref().map(|r| r.index()))
+            .collect()
+    }
+
     pub fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.partition_by
             .iter_mut()
