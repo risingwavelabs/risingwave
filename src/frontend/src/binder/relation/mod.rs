@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::ops::Deref;
 
 use itertools::{EitherOrBoth, Itertools};
-use risingwave_common::{bail, bail_not_implemented};
+use risingwave_common::bail;
 use risingwave_common::catalog::{Field, TableId};
 use risingwave_sqlparser::ast::{
     AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
@@ -34,6 +34,7 @@ use crate::expr::{ExprImpl, InputRef};
 
 mod gap_fill;
 mod join;
+mod match_recognize;
 mod share;
 mod subquery;
 mod table_function;
@@ -43,6 +44,7 @@ mod window_table_function;
 
 pub use gap_fill::BoundGapFill;
 pub use join::BoundJoin;
+pub use match_recognize::{BoundMatchRecognize, BoundMeasure, BoundSymbolDefinition};
 pub use share::{BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
@@ -70,6 +72,7 @@ pub enum Relation {
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
     GapFill(Box<BoundGapFill>),
+    MatchRecognize(Box<BoundMatchRecognize>),
 }
 
 impl RewriteExprsRecursive for Relation {
@@ -623,9 +626,29 @@ impl Binder {
                 self.pop_and_merge_lateral_context()?;
                 Ok(bound_join)
             }
-            TableFactor::MatchRecognize { .. } => {
-                bail_not_implemented!("MATCH_RECOGNIZE is not yet supported");
-            }
+            TableFactor::MatchRecognize {
+                table,
+                partition_by,
+                order_by,
+                measures,
+                rows_per_match,
+                after_match_skip,
+                pattern,
+                symbols,
+                alias,
+            } => Ok(Relation::MatchRecognize(Box::new(
+                self.bind_match_recognize(
+                    table,
+                    partition_by,
+                    order_by,
+                    measures,
+                    rows_per_match,
+                    after_match_skip,
+                    pattern,
+                    symbols,
+                    alias.as_ref(),
+                )?,
+            ))),
         }
     }
 }
