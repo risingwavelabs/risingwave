@@ -1808,9 +1808,10 @@ StarrocksConfig:
   - name: starrocks.max_batch_size_mb
     field_type: u64
     comments: |-
-      The maximum size in MB for each StarRocks stream load request payload.
+      The maximum size in MB for each `StarRocks` stream load request payload.
       If unset, RisingWave does not split the request by payload size.
     required: false
+    default: Default::default
     allow_alter_on_fly: true
   - name: r#type
     field_type: String
