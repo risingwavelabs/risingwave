@@ -1139,8 +1139,9 @@ message MatchRecognizeNode {
   repeated uint32 order_by = 2;
   repeated MatchRecognizeMeasure measures = 3;
   repeated MatchRecognizeDefine defines = 5;
-  // PATTERN encoded as its textual form for v1.
-  string pattern = 7;
+  // The PATTERN clause as a structured tree (the v1 subset: variables, concatenation, alternation,
+  // quantification and PERMUTE). Field 7 previously carried the pattern as text; it is now reserved.
+  MatchRecognizePatternNode pattern_node = 12;
   // Per-partition NFA / partial-match state.
   catalog.Table state_table = 8;
   // AFTER MATCH SKIP strategy: "past_last_row" (default) or "to_next_row".
@@ -1148,6 +1149,65 @@ message MatchRecognizeNode {
   // WITHIN span check: a predicate over a synthetic [last_order_key, first_order_key] row
   // (InputRef(0) - InputRef(1) <= <interval>). Absent when there is no WITHIN clause.
   optional expr.ExprNode within = 11;
+
+  reserved 7;
+  reserved "pattern";
+}
+
+// A node in the structured row pattern tree, mirroring the executor-side pattern AST. Groups and
+// anchors are not represented: parenthesized groups are flattened during lowering, and anchors /
+// exclusions are rejected at planning time (not supported in v1).
+message MatchRecognizePatternNode {
+  oneof node {
+    // A pattern variable, e.g. `A`.
+    string var = 1;
+    // Concatenation, e.g. `A B C`.
+    MatchRecognizePatternSeq concat = 2;
+    // Alternation, e.g. `A | B | C`.
+    MatchRecognizePatternSeq alternation = 3;
+    // A quantified sub-pattern, e.g. `A+`.
+    MatchRecognizeQuantifiedPattern quantified = 4;
+    // `PERMUTE(a, b, ...)`.
+    MatchRecognizePermutePattern permute = 5;
+  }
+}
+
+// An ordered list of sub-patterns (the operands of a concatenation or alternation).
+message MatchRecognizePatternSeq {
+  repeated MatchRecognizePatternNode patterns = 1;
+}
+
+// `PERMUTE(a, b, ...)` over the listed pattern variables.
+message MatchRecognizePermutePattern {
+  repeated string vars = 1;
+}
+
+// A sub-pattern with a quantifier, e.g. `A+`, `A*?`, `A{1,3}`.
+message MatchRecognizeQuantifiedPattern {
+  MatchRecognizePatternNode inner = 1;
+  MatchRecognizeQuantifier quantifier = 2;
+  // A trailing `?` (e.g. `A*?`) — prefer the fewest repetitions.
+  bool reluctant = 3;
+}
+
+// A row-pattern quantifier.
+message MatchRecognizeQuantifier {
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    // `*`
+    STAR = 1;
+    // `+`
+    PLUS = 2;
+    // `?`
+    QUESTION = 3;
+    // `{min,max}` (and its `{n}`, `{n,}`, `{,m}` forms).
+    RANGE = 4;
+  }
+  Kind kind = 1;
+  // For RANGE: minimum repetitions (defaults to 0).
+  uint32 min = 2;
+  // For RANGE: maximum repetitions; absent means unbounded.
+  optional uint32 max = 3;
 }
 
 // A DEFINE predicate. The condition is evaluated, per candidate row during matching, over a

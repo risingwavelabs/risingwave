@@ -165,7 +165,7 @@ pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use match_recognize::{
     CompiledDefine, CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa,
-    SkipMode, parse_pattern,
+    SkipMode, pattern_from_protobuf,
 };
 pub use merge::MergeExecutor;
 pub(crate) use merge::{MergeExecutorInput, MergeExecutorUpstream};
