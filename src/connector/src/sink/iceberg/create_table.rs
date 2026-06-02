@@ -33,6 +33,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
 use super::{IcebergConfig, PARTITION_DATA_ID_START, SinkError};
@@ -381,6 +382,29 @@ pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) 
     });
 
     check_compatibility(schema_fields, &arrow_schema.fields)?;
+
+    // The sink writes columns to the Iceberg table by position, so the column order
+    // must match. The check above only validates the name set and types.
+    for (idx, (rw_field, arrow_field)) in rw_schema
+        .fields
+        .iter()
+        .zip_eq_fast(arrow_schema.fields().iter())
+        .enumerate()
+    {
+        if rw_field.name.as_str() != arrow_field.name().as_str() {
+            bail!(
+                "Column order mismatch at position {}: the sink has column `{}` but the \
+                 Iceberg table has column `{}`. The Iceberg sink maps columns to the table \
+                 by position, so the sink's column order must match the Iceberg table \
+                 columns [{}].",
+                idx,
+                rw_field.name,
+                arrow_field.name(),
+                arrow_schema.fields().iter().map(|f| f.name()).join(", "),
+            );
+        }
+    }
+
     Ok(())
 }
 
