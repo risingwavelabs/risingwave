@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::mem::replace;
 use std::ops::Bound::{Excluded, Included, Unbounded};
@@ -30,7 +31,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::util::epoch::{EpochExt, EpochPair};
 use risingwave_connector::sink::log_store::{
-    ChunkId, LogReader, LogStoreReadItem, LogStoreResult, TruncateOffset,
+    ChunkId, LogReader, LogStoreReadItem, LogStoreResult, ReportedSinkErrorRow, TruncateOffset,
 };
 use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_storage::hummock::CachePolicy;
@@ -77,8 +78,6 @@ mod rewind_backoff_policy {
 }
 
 use rewind_backoff_policy::*;
-use risingwave_common::must_match;
-
 struct RewindDelay {
     last_rewind_truncate_offset: Option<TruncateOffset>,
     backoff_policy: RewindBackoffPolicy,
@@ -123,12 +122,16 @@ impl RewindDelay {
 
 enum KvLogStoreReaderFutureState<S: StateStoreRead> {
     /// consuming historical log data
-    ReadStateStoreStream(
-        Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>,
+    ReadStateStoreStream {
+        stream: Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>,
         /// Held permit limiting concurrent historical reads. Automatically released
         /// when this variant is replaced (i.e. stream fully consumed or reset).
-        Option<OwnedSemaphorePermit>,
-    ),
+        _permit: Option<OwnedSemaphorePermit>,
+        pending_reported_error_rows: VecDeque<ReportedSinkErrorRow>,
+    },
+    HistoricalStreamDrained {
+        pending_reported_error_rows: VecDeque<ReportedSinkErrorRow>,
+    },
     ReadFlushedChunk(BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, u64)>>),
     Reset,
     Empty,
@@ -142,8 +145,16 @@ impl<S: StateStoreRead> KvLogStoreReaderFutureState<S> {
     ) -> F::Output {
         // Store the future in case that in the subsequent pending await point,
         // the future is cancelled, and we lose an item.
-        must_match!(replace(self, future_state),
-                    KvLogStoreReaderFutureState::Empty => {});
+        let pending_reported_error_rows = match replace(self, future_state) {
+            KvLogStoreReaderFutureState::Empty => None,
+            KvLogStoreReaderFutureState::HistoricalStreamDrained {
+                pending_reported_error_rows,
+            } => Some(pending_reported_error_rows),
+            state => {
+                *self = state;
+                unreachable!("future state should be Empty or drained historical state")
+            }
+        };
 
         // for cancellation test
         #[cfg(test)]
@@ -152,8 +163,60 @@ impl<S: StateStoreRead> KvLogStoreReaderFutureState<S> {
         }
 
         let output = get_future(self).await;
-        *self = KvLogStoreReaderFutureState::Empty;
+        *self = if let Some(pending_reported_error_rows) = pending_reported_error_rows {
+            KvLogStoreReaderFutureState::HistoricalStreamDrained {
+                pending_reported_error_rows,
+            }
+        } else {
+            KvLogStoreReaderFutureState::Empty
+        };
         output
+    }
+
+    fn buffer_historical_truncate_rows(&mut self, rows: Vec<ReportedSinkErrorRow>) {
+        if rows.is_empty() {
+            return;
+        }
+        match self {
+            KvLogStoreReaderFutureState::ReadStateStoreStream {
+                pending_reported_error_rows,
+                ..
+            }
+            | KvLogStoreReaderFutureState::HistoricalStreamDrained {
+                pending_reported_error_rows,
+            } => {
+                pending_reported_error_rows.extend(rows);
+            }
+            _ => unreachable!(
+                "historical truncate rows should only exist while historical progress is active"
+            ),
+        }
+    }
+
+    fn take_historical_truncate_rows(&mut self, epoch: u64) -> Vec<ReportedSinkErrorRow> {
+        let pending_reported_error_rows = match self {
+            KvLogStoreReaderFutureState::ReadStateStoreStream {
+                pending_reported_error_rows,
+                ..
+            }
+            | KvLogStoreReaderFutureState::HistoricalStreamDrained {
+                pending_reported_error_rows,
+            } => pending_reported_error_rows,
+            _ => unreachable!(
+                "historical truncate rows should only exist while historical progress is active"
+            ),
+        };
+        let mut rows = vec![];
+        while pending_reported_error_rows
+            .front()
+            .is_some_and(|pending_row| pending_row.epoch <= epoch)
+        {
+            let pending_row = pending_reported_error_rows
+                .pop_front()
+                .expect("checked some");
+            rows.push(pending_row);
+        }
+        rows
     }
 }
 
@@ -308,10 +371,11 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 } else {
                     None
                 };
-                KvLogStoreReaderFutureState::ReadStateStoreStream(
-                    self.read_persisted_log_store(range_start).await?,
-                    permit,
-                )
+                KvLogStoreReaderFutureState::ReadStateStoreStream {
+                    stream: self.read_persisted_log_store(range_start).await?,
+                    _permit: permit,
+                    pending_reported_error_rows: VecDeque::new(),
+                }
             };
         self.rx.rewind(start_offset);
         Ok(())
@@ -357,8 +421,8 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                 .map_err(|_| anyhow!("unable to subscribe resume"))?;
         }
         match &mut self.future_state {
-            KvLogStoreReaderFutureState::ReadStateStoreStream(state_store_stream, _permit) => {
-                match state_store_stream
+            KvLogStoreReaderFutureState::ReadStateStoreStream { stream, .. } => {
+                match stream
                     .try_next()
                     .instrument_await("Try Next for Historical Stream")
                     .await?
@@ -391,11 +455,26 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                         return Ok((epoch, item));
                     }
                     None => {
-                        // Historical stream fully consumed. Permit is dropped with the variant.
-                        self.future_state = KvLogStoreReaderFutureState::Empty;
+                        let pending_reported_error_rows = match replace(
+                            &mut self.future_state,
+                            KvLogStoreReaderFutureState::Empty,
+                        ) {
+                            KvLogStoreReaderFutureState::ReadStateStoreStream {
+                                pending_reported_error_rows,
+                                ..
+                            } => pending_reported_error_rows,
+                            _ => unreachable!("matched ReadStateStoreStream above"),
+                        };
+                        // Historical stream fully consumed. Permit is dropped with the replaced
+                        // variant, while pending historical rows stay attached to the historical
+                        // state until they are truncated.
+                        self.future_state = KvLogStoreReaderFutureState::HistoricalStreamDrained {
+                            pending_reported_error_rows,
+                        };
                     }
                 }
             }
+            KvLogStoreReaderFutureState::HistoricalStreamDrained { .. } => {}
             KvLogStoreReaderFutureState::ReadFlushedChunk(future) => {
                 let (chunk_id, chunk, item_epoch) = future.await?;
                 self.future_state = KvLogStoreReaderFutureState::Empty;
@@ -510,7 +589,11 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
         })
     }
 
-    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+        error_rows: Vec<ReportedSinkErrorRow>,
+    ) -> LogStoreResult<()> {
         if offset > self.latest_offset.expect("should exist before truncation") {
             return Err(anyhow!(
                 "truncate at a later offset {:?} than the current latest offset {:?}",
@@ -528,22 +611,33 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     truncate_offset
                 ));
             }
-            self.rx.truncate_buffer(offset);
+            self.rx.truncate_buffer(offset, error_rows);
             self.truncate_offset = Some(offset);
         } else {
-            // For historical data, no need to truncate at seq id level. Only truncate at barrier.
-            if let TruncateOffset::Barrier { epoch } = &offset {
-                if let Some(truncate_offset) = &self.truncate_offset
-                    && offset <= *truncate_offset
-                {
-                    return Err(anyhow!(
-                        "truncate offset {:?} earlier than prev truncate offset {:?}",
-                        offset,
-                        truncate_offset
-                    ));
+            // Historical replay does not surface seq-id-level truncate progress to the writer.
+            // Chunk truncation can still report error rows, which stay pending until the barrier
+            // for that epoch is truncated.
+            match offset {
+                TruncateOffset::Chunk { .. } => {
+                    self.future_state
+                        .buffer_historical_truncate_rows(error_rows);
                 }
-                self.rx.truncate_historical(*epoch);
-                self.truncate_offset = Some(offset);
+                TruncateOffset::Barrier { epoch } => {
+                    if let Some(truncate_offset) = &self.truncate_offset
+                        && offset <= *truncate_offset
+                    {
+                        return Err(anyhow!(
+                            "truncate offset {:?} earlier than prev truncate offset {:?}",
+                            offset,
+                            truncate_offset
+                        ));
+                    }
+                    let mut merged_error_rows =
+                        self.future_state.take_historical_truncate_rows(epoch);
+                    merged_error_rows.extend(error_rows);
+                    self.rx.truncate_historical(epoch, merged_error_rows);
+                    self.truncate_offset = Some(offset);
+                }
             }
         }
         Ok(())

@@ -336,7 +336,7 @@ impl TurbopufferLogSinker {
             .observe(start_time.elapsed().as_secs_f64());
         linger_timer.as_mut().set(None);
         if let Some(offset) = latest_truncate_offset.take() {
-            log_reader.truncate(offset)?;
+            log_reader.truncate(offset, vec![])?;
         }
         Ok(())
     }
@@ -397,7 +397,7 @@ impl LogSinker for TurbopufferLogSinker {
                         schema_change.is_some(),
                     );
                     if self.writer.is_empty() {
-                        log_reader.truncate(offset)?;
+                        log_reader.truncate(offset, vec![])?;
                     } else if should_flush {
                         latest_truncate_offset = Some(offset);
                         self.flush_all_and_truncate(
@@ -901,7 +901,7 @@ mod tests {
 
     use super::*;
     #[cfg(not(madsim))]
-    use crate::sink::log_store::LogStoreResult;
+    use crate::sink::log_store::{LogStoreResult, ReportedSinkErrorRow};
 
     #[test]
     fn test_build_schema_flags() {
@@ -1624,7 +1624,11 @@ mod tests {
             }
         }
 
-        fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        fn truncate(
+            &mut self,
+            offset: TruncateOffset,
+            _error_rows: Vec<ReportedSinkErrorRow>,
+        ) -> LogStoreResult<()> {
             self.truncates.lock().unwrap().push(offset);
             Ok(())
         }
