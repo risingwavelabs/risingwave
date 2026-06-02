@@ -14,6 +14,7 @@
 
 use std::ops::Bound;
 
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
@@ -193,7 +194,6 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
         Self {
             ctx,
             chunk_data_types,
-            last_barrier: None,
             stream_executor: Some(stream),
             arrangement_executor: Some(arrangement),
             stream: StreamJoinSide {
@@ -224,18 +224,22 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
     /// If we can use `async_stream` to write this part, things could be easier.
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self: Box<Self>) {
+        let mut stream_input = self.stream_executor.take().unwrap().execute();
+        let mut arrangement_input = self.arrangement_executor.take().unwrap().execute();
+
+        let first_barrier = expect_first_barrier(&mut stream_input).await?;
+        let arrangement_first_barrier = expect_first_barrier(&mut arrangement_input).await?;
+        if first_barrier.epoch != arrangement_first_barrier.epoch {
+            return Err(StreamExecutorError::align_barrier(
+                first_barrier.clone(),
+                arrangement_first_barrier,
+            ));
+        }
+
         let input = if self.arrangement.use_current_epoch {
-            stream_lookup_arrange_this_epoch(
-                self.stream_executor.take().unwrap(),
-                self.arrangement_executor.take().unwrap(),
-            )
-            .boxed()
+            stream_lookup_arrange_this_epoch(stream_input, arrangement_input).boxed()
         } else {
-            stream_lookup_arrange_prev_epoch(
-                self.stream_executor.take().unwrap(),
-                self.arrangement_executor.take().unwrap(),
-            )
-            .boxed()
+            stream_lookup_arrange_prev_epoch(stream_input, arrangement_input).boxed()
         };
 
         let metrics = self.ctx.streaming_metrics.new_lookup_executor_metrics(
@@ -256,8 +260,14 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
             .map(|x| self.chunk_data_types[*x].clone())
             .collect_vec();
 
-        let mut wait_first_barrier = true;
-        let mut wait_first_arrange_ready = false;
+        // Yield the barrier before init_epoch: init_epoch calls wait_for_epoch(epoch.prev)
+        // which blocks until the previous epoch is committed, and that requires all actors
+        // to have already forwarded this barrier downstream.
+        yield Message::Barrier(first_barrier.clone());
+        self.arrangement
+            .state_table
+            .init_epoch(first_barrier.epoch)
+            .await?;
 
         #[for_await]
         for msg in input {
@@ -265,56 +275,24 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
             self.lookup_cache.evict();
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
-                    if wait_first_barrier {
-                        wait_first_barrier = false;
-                        // Must yield the barrier BEFORE calling init_epoch, because
-                        // init_epoch calls wait_for_epoch(epoch.prev) which blocks
-                        // until the previous epoch is committed — and that can only
-                        // happen after all actors yield the barrier.
+                    barrier.assume_no_update_vnode_bitmap(self.ctx.id)?;
+                    self.arrangement
+                        .state_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                        .await?;
+
+                    if self.arrangement.use_current_epoch {
+                        // When lookup this epoch, stream side barrier always come after arrangement
+                        // ready, so we can forward barrier now.
                         yield Message::Barrier(barrier.clone());
-                        self.arrangement
-                            .state_table
-                            .init_epoch(barrier.epoch)
-                            .await?;
-                        self.last_barrier = Some(barrier);
-
-                        if !self.arrangement.use_current_epoch {
-                            // For !use_current_epoch, the barrier would normally be
-                            // yielded in the ArrangeReady handler. Since we already
-                            // yielded it here, skip the first ArrangeReady yield.
-                            wait_first_arrange_ready = true;
-                        }
-                    } else {
-                        let post_commit =
-                            self.arrangement.state_table.commit(barrier.epoch).await?;
-
-                        if self.arrangement.use_current_epoch {
-                            yield Message::Barrier(barrier.clone());
-                        }
-
-                        let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
-                        if let Some((_, true)) =
-                            post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                        {
-                            self.lookup_cache.clear();
-                        }
-
-                        self.last_barrier = Some(barrier);
                     }
                 }
                 ArrangeMessage::ArrangeReady(arrangement_chunks, barrier) => {
+                    // The arrangement is ready, and we will receive a bunch of stream messages for
+                    // the next poll.
+                    // TODO: apply chunk as soon as we receive them, instead of batching.
                     for chunk in &arrangement_chunks {
                         self.arrangement.state_table.write_chunk(chunk.clone());
-                    }
-
-                    // For `!use_current_epoch`, the cache was populated during
-                    // Stream processing by reading from the shared state store,
-                    // which already contains data committed by the upstream
-                    // MaterializeExecutor. `apply_batch` would attempt to insert
-                    // the same rows, causing inconsistency. Clear the cache to
-                    // avoid this — it will be repopulated on the next lookup.
-                    if !self.arrangement.use_current_epoch {
-                        self.lookup_cache.clear();
                     }
 
                     for chunk in arrangement_chunks {
@@ -323,13 +301,9 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
                     }
 
                     if !self.arrangement.use_current_epoch {
-                        if wait_first_arrange_ready {
-                            // First ArrangeReady after init: barrier was already
-                            // yielded in the first-barrier handler above.
-                            wait_first_arrange_ready = false;
-                        } else {
-                            yield Message::Barrier(barrier);
-                        }
+                        // When look prev epoch, arrange ready will always come after stream
+                        // barrier. So we yield barrier now.
+                        yield Message::Barrier(barrier);
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {
@@ -396,12 +370,9 @@ impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
                 )
                 .await?;
 
-            let output_indices = &self.arrangement.state_table.output_indices;
             pin_mut!(all_data_iter);
-            while let Some(row) = all_data_iter.next().await {
-                // iter_with_prefix returns all value columns from the serde;
-                // project to output_indices to match arrangement_col_descs.
-                all_rows.push(row?.project(output_indices).into_owned_row());
+            while let Some(row) = all_data_iter.try_next().await? {
+                all_rows.push(row);
             }
         }
 

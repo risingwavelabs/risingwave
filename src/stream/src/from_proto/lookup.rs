@@ -76,7 +76,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
                         table_desc,
                         store.clone(),
                         vnodes.clone(),
-                        params.fragment_id.as_raw_id(),
+                        params.fragment_id,
                     )
                     .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
                     .with_output_column_ids(column_ids.clone())

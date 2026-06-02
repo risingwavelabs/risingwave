@@ -52,9 +52,6 @@ pub struct LookupExecutor<S: StateStore, SD: ValueRowSerde> {
     /// The executor for stream.
     stream_executor: Option<Executor>,
 
-    /// The last received barrier.
-    last_barrier: Option<Barrier>,
-
     /// Information of column reordering
     column_mapping: Vec<usize>,
 

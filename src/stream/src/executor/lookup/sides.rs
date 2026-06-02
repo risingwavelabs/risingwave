@@ -29,7 +29,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 
 use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{Barrier, BoxedMessageStream, Executor, Message, MessageStream};
+use crate::executor::{Barrier, BoxedMessageStream, Message, MessageStream};
 
 /// Join side of Lookup Executor's stream
 pub(crate) struct StreamJoinSide {
@@ -212,8 +212,11 @@ pub async fn align_barrier(mut left: BoxedMessageStream, mut right: BoxedMessage
 /// * Barrier (prev = `[2`], current = `[3`])
 /// * `[Msg`] Arrangement (batch)
 #[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
-pub async fn stream_lookup_arrange_prev_epoch(stream: Executor, arrangement: Executor) {
-    let mut input = pin!(align_barrier(stream.execute(), arrangement.execute()));
+pub async fn stream_lookup_arrange_prev_epoch(
+    stream: BoxedMessageStream,
+    arrangement: BoxedMessageStream,
+) {
+    let mut input = pin!(align_barrier(stream, arrangement));
     let mut arrange_buf = vec![];
     let mut stream_side_end = false;
 
@@ -293,8 +296,11 @@ pub async fn stream_lookup_arrange_prev_epoch(stream: Executor, arrangement: Exe
 /// * `[Do`] lookup `a` in arrangement of epoch `[2`] (current epoch)
 /// * Barrier (prev = `[2`], current = `[3`])
 #[try_stream(ok = ArrangeMessage, error = StreamExecutorError)]
-pub async fn stream_lookup_arrange_this_epoch(stream: Executor, arrangement: Executor) {
-    let mut input = pin!(align_barrier(stream.execute(), arrangement.execute()));
+pub async fn stream_lookup_arrange_this_epoch(
+    stream: BoxedMessageStream,
+    arrangement: BoxedMessageStream,
+) {
+    let mut input = pin!(align_barrier(stream, arrangement));
     let mut stream_buf = vec![];
     let mut arrange_buf = vec![];
 
@@ -437,7 +443,8 @@ mod tests {
             .stop_on_finish(false)
             .into_executor(schema, vec![1]);
 
-        let mut stream = stream_lookup_arrange_this_epoch(source_l, source_r).boxed();
+        let mut stream =
+            stream_lookup_arrange_this_epoch(source_l.execute(), source_r.execute()).boxed();
 
         // Simulate recovery test
         drop(tx_r);
