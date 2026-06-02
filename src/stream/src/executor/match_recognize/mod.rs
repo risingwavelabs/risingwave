@@ -16,12 +16,10 @@
 //!
 //! Contains the pure row-pattern NFA ([`nfa`]) and the streaming executor built on top of it.
 
-// TODO: remove once `from_proto` wires `MatchRecognizeExecutor` (held back pending e2e/SLT verification
-// so deployed MATCH_RECOGNIZE keeps the explicit not-implemented error rather than running unverified).
-#![allow(dead_code, unused_imports)]
-
 mod executor;
 mod nfa;
 mod parse;
 
 pub use executor::{MatchRecognizeExecutor, MatchRecognizeExecutorArgs};
+pub use nfa::Nfa;
+pub use parse::parse_pattern;

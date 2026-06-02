@@ -1,0 +1,47 @@
+# Streaming MATCH_RECOGNIZE (v1): append-only input, ONE ROW PER MATCH,
+# AFTER MATCH SKIP PAST LAST ROW, scalar MEASURES.
+#
+# Pattern: an up-row (a: v > 0) immediately followed by a down-row (b: v < 0).
+# MEASURES returns the down-row's value. A match is finalised once a following
+# row exists, so each input partition ends with a trailing up-row.
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+create table t (id int, ts int, v int) append only;
+
+statement ok
+create materialized view mv as
+select * from t match_recognize (
+  partition by id
+  order by ts
+  measures b.v as dip
+  one row per match
+  after match skip past last row
+  pattern (a b)
+  define a as a.v > 0, b as b.v < 0
+);
+
+# id=1: up(10) down(-5) -> match dip=-5 ; trailing up(8) finalises it.
+# id=2: up(3) up(7) down(-2) -> first up has no immediate down (next is up), so
+#       the match is up(7) down(-2) -> dip=-2 ; trailing up(1) finalises it.
+statement ok
+insert into t values
+  (1, 1, 10), (1, 2, -5), (1, 3, 8),
+  (2, 1, 3),  (2, 2, 7),  (2, 3, -2), (2, 4, 1);
+
+statement ok
+flush;
+
+query II rowsort
+select * from mv;
+----
+1 -5
+2 -2
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
