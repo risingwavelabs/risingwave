@@ -524,7 +524,6 @@ mod toast {
         new_row: &OwnedRow,
         toastable_indices: &[usize],
     ) -> OwnedRow {
-        println!("这里");
         let mut fixed_row_data = new_row.as_inner().to_vec();
 
         for &toast_idx in toastable_indices {
