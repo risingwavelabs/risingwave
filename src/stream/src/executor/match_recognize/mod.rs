@@ -14,7 +14,13 @@
 
 //! Streaming `MATCH_RECOGNIZE` (row pattern recognition) executor.
 //!
-//! Currently contains the pure row-pattern NFA ([`nfa`]); the streaming/state layer is being built
-//! on top of it.
+//! Contains the pure row-pattern NFA ([`nfa`]) and the streaming executor built on top of it.
 
+// TODO: remove once `from_proto` wires `MatchRecognizeExecutor` (held back pending e2e/SLT verification
+// so deployed MATCH_RECOGNIZE keeps the explicit not-implemented error rather than running unverified).
+#![allow(dead_code, unused_imports)]
+
+mod executor;
 mod nfa;
+
+pub use executor::{MatchRecognizeExecutor, MatchRecognizeExecutorArgs};
