@@ -223,6 +223,8 @@ pub struct MetaMetrics {
     pub database_info: IntGaugeVec,
     /// Backfill progress per fragment
     pub backfill_fragment_progress: IntGaugeVec,
+    /// Max subscription retention configured for the table's changelog.
+    pub streaming_table_change_log_retention_seconds: IntGaugeVec,
 
     // ********************************** System Params ************************************
     /// A dummy gauge metric with labels carrying system parameter info.
@@ -749,6 +751,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let streaming_table_change_log_retention_seconds = register_int_gauge_vec_with_registry!(
+            "streaming_table_change_log_retention_seconds",
+            "Max subscription retention configured for the table change log in seconds",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
         let database_info = register_int_gauge_vec_with_registry!(
             "database_info",
             "Mapping from database id to database name",
@@ -1013,6 +1023,7 @@ impl MetaMetrics {
             relation_info,
             database_info,
             backfill_fragment_progress,
+            streaming_table_change_log_retention_seconds,
             system_param_info,
             l0_compact_level_count,
             compact_task_size,
@@ -1274,8 +1285,18 @@ pub async fn refresh_relation_info_metrics(
             return;
         }
     };
+    let subscriptions = match catalog_controller.list_subscriptions().await {
+        Ok(subscriptions) => subscriptions,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get subscription objects");
+            return;
+        }
+    };
 
     meta_metrics.relation_info.reset();
+    meta_metrics
+        .streaming_table_change_log_retention_seconds
+        .reset();
 
     for (id, db, schema, name, resource_group, table_type) in table_objects {
         let relation_type = match table_type {
@@ -1323,6 +1344,22 @@ pub async fn refresh_relation_info_metrics(
                 &"sink".to_owned(),
             ])
             .set(1);
+    }
+
+    let mut max_retention_by_table = HashMap::new();
+    for subscription in subscriptions {
+        max_retention_by_table
+            .entry(subscription.dependent_table_id)
+            .and_modify(|retention: &mut u64| {
+                *retention = (*retention).max(subscription.retention_seconds);
+            })
+            .or_insert(subscription.retention_seconds);
+    }
+    for (table_id, retention_seconds) in max_retention_by_table {
+        meta_metrics
+            .streaming_table_change_log_retention_seconds
+            .with_label_values(&[&table_id.to_string()])
+            .set(retention_seconds as _);
     }
 }
 
