@@ -18,23 +18,50 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    AfterMatchSkip, Expr as AstExpr, MatchRecognizePattern, MatchRecognizeSymbol, Measure,
-    OrderByExpr, RowsPerMatch, SymbolDefinition, TableAlias, TableFactor,
+    AfterMatchSkip, Expr as AstExpr, FunctionArg, FunctionArgExpr, MatchRecognizePattern,
+    MatchRecognizeSymbol, Measure, OrderByExpr, RowsPerMatch, SymbolDefinition, TableAlias,
+    TableFactor,
 };
 
 use super::{Binder, Relation};
 use crate::error::Result as RwResult;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 
-/// A bound `MEASURES` item: an expression over the matched rows and its output name.
+/// How a [`MeasureSlot`] resolves against the rows of a match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MeasureSlotKind {
+    /// The column value of the first row labeled `var` within the match (`FIRST(var.col)`).
+    First,
+    /// The column value of the last row labeled `var` (`LAST(var.col)`, and the meaning of a bare
+    /// `var.col` under ONE ROW PER MATCH FINAL semantics).
+    Last,
+    /// The pattern variable bound to the match's last row (`CLASSIFIER()`).
+    Classifier,
+}
+
+/// One navigation input that a measure expression reads. A measure is lowered to an expression over
+/// a synthetic row whose `i`-th column is produced by `slots[i]`; the executor materializes that row
+/// per match (the column values are only knowable once the match and its per-row labels are found)
+/// and then evaluates the expression.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MeasureSlot {
+    pub kind: MeasureSlotKind,
+    /// Pattern variable to navigate to. Empty for [`MeasureSlotKind::Classifier`].
+    pub var: String,
+    /// Input column index to read. Ignored for [`MeasureSlotKind::Classifier`].
+    pub col_idx: usize,
+    /// The slot's output type: the input column type for navigation, varchar for classifier.
+    pub data_type: DataType,
+}
+
+/// A bound `MEASURES` item: an expression over the per-match synthetic row, its navigation slots,
+/// and the output name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoundMeasure {
+    /// Expression over the synthetic row: `InputRef(i)` reads `slots[i]`.
     pub expr: ExprImpl,
     pub name: String,
-    /// True when this measure is `CLASSIFIER()`: it has no column expression to evaluate; the
-    /// executor fills it with the pattern variable bound to the match's last row. `expr` then holds
-    /// a varchar null placeholder so the output schema and proto encoding stay uniform.
-    pub is_classifier: bool,
+    pub slots: Vec<MeasureSlot>,
 }
 
 /// A bound `DEFINE` item: a pattern variable and the predicate that defines membership.
@@ -137,31 +164,7 @@ impl Binder {
         // MEASURES: <expr> AS <alias>.
         let measures = measures
             .iter()
-            .map(|m| {
-                // CLASSIFIER() reports the pattern variable bound to the row a measure is evaluated
-                // on. Under ONE ROW PER MATCH that is the match's last row (FINAL semantics). It is
-                // resolved at execution time from the match's labels rather than from row columns,
-                // so bind a varchar null placeholder and flag the measure. Only a top-level
-                // CLASSIFIER() is supported in the v1 subset; nested uses (e.g. `lower(CLASSIFIER())`)
-                // fall through to ordinary binding and are rejected as an unknown function.
-                if let Some(arity) = classifier_call_arity(&m.expr) {
-                    if arity != 0 {
-                        bail_not_implemented!("CLASSIFIER() with arguments in MATCH_RECOGNIZE");
-                    }
-                    return Ok(BoundMeasure {
-                        expr: ExprImpl::literal_null(DataType::Varchar),
-                        name: m.alias.real_value(),
-                        is_classifier: true,
-                    });
-                }
-                reject_navigation(&m.expr)?;
-                let expr = self.bind_expr(&m.expr)?;
-                Ok(BoundMeasure {
-                    expr: remap.rewrite_expr(expr),
-                    name: m.alias.real_value(),
-                    is_classifier: false,
-                })
-            })
+            .map(|m| self.lower_measure(m, &variables, input_col_num))
             .collect::<RwResult<Vec<_>>>()?;
 
         self.pop_context()?;
@@ -190,6 +193,103 @@ impl Binder {
             after_match_skip: after_match_skip.clone(),
             pattern: pattern.clone(),
             defines,
+        })
+    }
+
+    /// Lowers one `MEASURES` item to an expression over a synthetic per-match row plus the slots
+    /// that produce that row. Pattern-variable column references become navigation slots: bare
+    /// `var.col` and arithmetic over such references resolve to `LAST(var.col)` (FINAL semantics
+    /// under ONE ROW PER MATCH); top-level `FIRST(var.col)` / `LAST(var.col)` and `CLASSIFIER()` are
+    /// supported. Nesting `FIRST`/`LAST`/`CLASSIFIER` inside a larger expression is not yet
+    /// supported (it falls through to ordinary binding and is rejected as an unknown function).
+    fn lower_measure(
+        &mut self,
+        m: &Measure,
+        variables: &[String],
+        input_col_num: usize,
+    ) -> RwResult<BoundMeasure> {
+        let name = m.alias.real_value();
+
+        // CLASSIFIER(): the pattern variable bound to the match's last row.
+        if let AstExpr::Function(func) = &m.expr
+            && func.name.0.len() == 1
+            && func.name.0[0].real_value().eq_ignore_ascii_case("classifier")
+        {
+            if !func.arg_list.args.is_empty() {
+                bail_not_implemented!("CLASSIFIER() with arguments in MATCH_RECOGNIZE");
+            }
+            return Ok(BoundMeasure {
+                expr: InputRef::new(0, DataType::Varchar).into(),
+                name,
+                slots: vec![MeasureSlot {
+                    kind: MeasureSlotKind::Classifier,
+                    var: String::new(),
+                    col_idx: 0,
+                    data_type: DataType::Varchar,
+                }],
+            });
+        }
+
+        // Top-level FIRST(var.col) / LAST(var.col).
+        if let AstExpr::Function(func) = &m.expr
+            && func.name.0.len() == 1
+            && matches!(
+                func.name.0[0].real_value().to_ascii_lowercase().as_str(),
+                "first" | "last"
+            )
+        {
+            let kind = if func.name.0[0].real_value().eq_ignore_ascii_case("first") {
+                MeasureSlotKind::First
+            } else {
+                MeasureSlotKind::Last
+            };
+            if func.arg_list.args.len() != 1 {
+                bail_not_implemented!("FIRST/LAST with an offset argument in MATCH_RECOGNIZE");
+            }
+            let FunctionArg::Unnamed(FunctionArgExpr::Expr(inner)) = &func.arg_list.args[0] else {
+                bail_not_implemented!("FIRST/LAST argument must be a pattern-variable column");
+            };
+            let ExprImpl::InputRef(r) = self.bind_expr(inner)? else {
+                bail_not_implemented!("FIRST/LAST argument must be a pattern-variable column");
+            };
+            let (var, col_idx) = decode_var_col(r.index(), input_col_num, variables)?;
+            let data_type = r.data_type.clone();
+            return Ok(BoundMeasure {
+                expr: InputRef::new(0, data_type.clone()).into(),
+                name,
+                slots: vec![MeasureSlot {
+                    kind,
+                    var,
+                    col_idx,
+                    data_type,
+                }],
+            });
+        }
+
+        // General case: bare `var.col` and arithmetic over such references. Binding succeeds via the
+        // per-variable alias blocks; each resulting InputRef is then rewritten to a synthetic
+        // LAST(var.col) slot.
+        let expr = self.bind_expr(&m.expr)?;
+        let mut check = InputRefBlockCheck {
+            input_col_num,
+            unqualified: false,
+        };
+        check.visit_expr(&expr);
+        if check.unqualified {
+            bail_not_implemented!(
+                "unqualified or non-pattern-variable column reference in MATCH_RECOGNIZE MEASURES"
+            );
+        }
+        let mut rewriter = SlotLoweringRewriter {
+            input_col_num,
+            variables,
+            slots: Vec::new(),
+        };
+        let expr = rewriter.rewrite_expr(expr);
+        Ok(BoundMeasure {
+            expr,
+            name,
+            slots: rewriter.slots,
         })
     }
 }
@@ -246,15 +346,71 @@ fn collect_from_pattern(pattern: &MatchRecognizePattern, out: &mut BTreeSet<Stri
     }
 }
 
-/// Returns the argument count if `expr` is a top-level `CLASSIFIER(...)` call, else `None`.
-fn classifier_call_arity(expr: &AstExpr) -> Option<usize> {
-    if let AstExpr::Function(func) = expr
-        && func.name.0.len() == 1
-        && func.name.0[0].real_value().eq_ignore_ascii_case("classifier")
-    {
-        Some(func.arg_list.args.len())
-    } else {
-        None
+/// Decodes the pattern variable and input column behind a measure `InputRef`. Each variable was
+/// registered as an alias block of width `input_col_num` after the input columns, so block 0 is the
+/// raw input (an unqualified reference, unsupported here) and block `k + 1` is `variables[k]`.
+fn decode_var_col(
+    index: usize,
+    input_col_num: usize,
+    variables: &[String],
+) -> RwResult<(String, usize)> {
+    let block = index / input_col_num;
+    if block == 0 {
+        bail_not_implemented!(
+            "unqualified or non-pattern-variable column reference in MATCH_RECOGNIZE MEASURES"
+        );
+    }
+    let var = variables
+        .get(block - 1)
+        .expect("pattern variable block within range of registered variables")
+        .clone();
+    Ok((var, index % input_col_num))
+}
+
+/// Checks that every measure `InputRef` is pattern-variable-qualified (alias block >= 1). A
+/// reference into block 0 is the raw input — an unqualified or table-qualified column with no
+/// pattern-variable navigation meaning.
+struct InputRefBlockCheck {
+    input_col_num: usize,
+    unqualified: bool,
+}
+
+impl ExprVisitor for InputRefBlockCheck {
+    fn visit_input_ref(&mut self, input_ref: &InputRef) {
+        if input_ref.index() < self.input_col_num {
+            self.unqualified = true;
+        }
+    }
+}
+
+/// Rewrites each pattern-variable-qualified `InputRef` in a measure expression to an `InputRef` into
+/// the synthetic per-match row, recording a deduplicated `LAST(var.col)` slot for it.
+struct SlotLoweringRewriter<'a> {
+    input_col_num: usize,
+    variables: &'a [String],
+    slots: Vec<MeasureSlot>,
+}
+
+impl ExprRewriter for SlotLoweringRewriter<'_> {
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        let block = input_ref.index() / self.input_col_num;
+        let col_idx = input_ref.index() % self.input_col_num;
+        let var = self.variables[block - 1].clone();
+        let data_type = input_ref.data_type;
+        let slot_idx = self
+            .slots
+            .iter()
+            .position(|s| s.kind == MeasureSlotKind::Last && s.var == var && s.col_idx == col_idx)
+            .unwrap_or_else(|| {
+                self.slots.push(MeasureSlot {
+                    kind: MeasureSlotKind::Last,
+                    var,
+                    col_idx,
+                    data_type: data_type.clone(),
+                });
+                self.slots.len() - 1
+            });
+        InputRef::new(slot_idx, data_type).into()
     }
 }
 

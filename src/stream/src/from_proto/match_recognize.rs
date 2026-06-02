@@ -20,7 +20,8 @@ use super::ExecutorBuilder;
 use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::{
-    Executor, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa, SkipMode, parse_pattern,
+    CompiledMeasure, Executor, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, MeasureSlot,
+    MeasureSlotKind, Nfa, SkipMode, parse_pattern,
 };
 use crate::task::ExecutorParams;
 
@@ -50,7 +51,26 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
         let measures = node
             .measures
             .iter()
-            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
+            .map(|m| {
+                let expr = build_non_strict_from_prost(
+                    m.expr.as_ref().expect("match_recognize measure expr"),
+                    params.eval_error_report.clone(),
+                )?;
+                let slots = m
+                    .slots
+                    .iter()
+                    .map(|s| MeasureSlot {
+                        kind: match s.kind {
+                            1 => MeasureSlotKind::First,
+                            2 => MeasureSlotKind::Classifier,
+                            _ => MeasureSlotKind::Last,
+                        },
+                        var: s.var.clone(),
+                        col_idx: s.col_idx as usize,
+                    })
+                    .collect();
+                Ok::<_, anyhow::Error>(CompiledMeasure { expr, slots })
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         let pattern = parse_pattern(&node.pattern)
@@ -62,11 +82,7 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             _ => SkipMode::PastLastRow,
         };
 
-        let classifier_measure_indices = node
-            .classifier_measure_indices
-            .iter()
-            .map(|&i| i as usize)
-            .collect();
+        let input_arity = input.schema().len();
 
         let state_table =
             StateTableBuilder::new(node.get_state_table().as_ref().unwrap(), store, None)
@@ -86,7 +102,7 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             define_exprs,
             nfa,
             skip,
-            classifier_measure_indices,
+            input_arity,
             state_table,
         });
 

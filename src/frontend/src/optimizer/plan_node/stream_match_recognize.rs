@@ -17,7 +17,6 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
-use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
 use super::utils::TableCatalogBuilder;
 use super::{
@@ -25,6 +24,7 @@ use super::{
     generic,
 };
 use crate::TableCatalog;
+use crate::binder::MeasureSlotKind;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
@@ -56,39 +56,35 @@ impl StreamMatchRecognize {
     }
 
     /// Per-partition buffered-row state table. Layout:
-    ///   `[ partition cols.. , seq (i64) , order_key , satisfied (varchar) , measure cols.. ]`
-    /// keyed by (partition cols, seq). The executor buffers one row per live input row (its order
-    /// key, satisfied pattern variables, and pre-evaluated MEASURES) and restores the buffer from
-    /// here on recovery. `seq` is a per-partition monotonic id; consumed rows are deleted after each
-    /// drain. `order_key` is the leading ORDER BY value, used to sort the buffer and compare against
-    /// the watermark.
+    ///   `[ seq (i64) , satisfied (varchar) , <input columns..> ]`
+    /// keyed by (partition columns, seq). The executor buffers one row per live input row (its
+    /// satisfied pattern variables and the raw input row) and restores the buffer from here on
+    /// recovery. `seq` is a per-partition monotonic id; consumed rows are deleted after each drain.
+    /// MEASURES are evaluated at match time from the stored input rows, so they are not persisted.
+    /// The partition columns and the order key are columns of the stored input row, so they are not
+    /// stored separately; the partition columns serve as the key prefix.
     fn infer_state_table(&self) -> TableCatalog {
         let mut tbl_builder = TableCatalogBuilder::default();
-        let out_fields = self.core.schema().fields().to_vec();
-        let n_part = self.core.partition_by.len();
-        let order_idx = self.core.order_key_indices().expect("validated by to_stream")[0];
-        let order_type = self.core.input.schema().fields()[order_idx].data_type();
+        let input_fields = self.core.input.schema().fields().to_vec();
+        let partition_indices = self
+            .core
+            .partition_key_indices()
+            .expect("partition keys validated to be columns");
 
-        // partition columns
-        for f in &out_fields[0..n_part] {
-            tbl_builder.add_column(f);
-        }
         // seq
         tbl_builder.add_column(&Field::with_name(DataType::Int64, "seq"));
-        // order key (leading ORDER BY value)
-        tbl_builder.add_column(&Field::with_name(order_type, "order_key"));
         // satisfied (comma-joined pattern variable names)
         tbl_builder.add_column(&Field::with_name(DataType::Varchar, "satisfied"));
-        // measure columns
-        for f in &out_fields[n_part..] {
+        // raw input columns (offset 2)
+        for f in &input_fields {
             tbl_builder.add_column(f);
         }
 
-        // pk: partition columns then seq
-        for i in 0..n_part {
-            tbl_builder.add_order_column(i, OrderType::ascending());
+        // pk: partition columns (within the stored input row, offset 2) then seq.
+        for i in &partition_indices {
+            tbl_builder.add_order_column(2 + i, OrderType::ascending());
         }
-        tbl_builder.add_order_column(n_part, OrderType::ascending());
+        tbl_builder.add_order_column(0, OrderType::ascending());
         // read_prefix_len_hint = 0: recovery does a full (empty-prefix) scan to discover partitions,
         // so we must not assert a partition-length prefix on iteration.
         tbl_builder.build(vec![], 0)
@@ -139,17 +135,31 @@ impl TryToStreamPb for StreamMatchRecognize {
             .core
             .measures
             .iter()
-            .map(|m| m.expr.to_expr_proto_checked_pure(retract, "match_recognize measure"))
+            .map(|m| {
+                let expr = m
+                    .expr
+                    .to_expr_proto_checked_pure(retract, "match_recognize measure")?;
+                let slots = m
+                    .slots
+                    .iter()
+                    .map(|s| MatchRecognizeMeasureSlot {
+                        kind: match s.kind {
+                            MeasureSlotKind::Last => 0,
+                            MeasureSlotKind::First => 1,
+                            MeasureSlotKind::Classifier => 2,
+                        },
+                        var: s.var.clone(),
+                        col_idx: s.col_idx as u32,
+                        data_type: Some(s.data_type.to_protobuf()),
+                    })
+                    .collect();
+                Ok(MatchRecognizeMeasure {
+                    expr: Some(expr),
+                    name: m.name.clone(),
+                    slots,
+                })
+            })
             .collect::<crate::error::Result<Vec<_>>>()?;
-        let measure_names = self.core.measures.iter().map(|m| m.name.clone()).collect();
-        let classifier_measure_indices = self
-            .core
-            .measures
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| m.is_classifier)
-            .map(|(i, _)| i as u32)
-            .collect();
 
         let define_symbols = self.core.defines.iter().map(|d| d.symbol.clone()).collect();
         let define_conditions = self
@@ -171,7 +181,6 @@ impl TryToStreamPb for StreamMatchRecognize {
             partition_by,
             order_by,
             measures,
-            measure_names,
             define_symbols,
             define_conditions,
             pattern: format!("{}", self.core.pattern),
@@ -181,7 +190,6 @@ impl TryToStreamPb for StreamMatchRecognize {
                 _ => "past_last_row",
             }
             .to_owned(),
-            classifier_measure_indices,
         }))
     }
 }

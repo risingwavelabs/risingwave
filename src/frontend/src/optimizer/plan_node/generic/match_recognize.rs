@@ -18,7 +18,7 @@ use risingwave_sqlparser::ast::{AfterMatchSkip, MatchRecognizePattern, RowsPerMa
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::OptimizerContextRef;
-use crate::binder::{BoundMeasure, BoundSymbolDefinition};
+use crate::binder::{BoundMeasure, BoundSymbolDefinition, MeasureSlotKind};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::ColIndexMapping;
 use crate::optimizer::plan_node::utils::childless_record;
@@ -120,9 +120,15 @@ impl<PlanRef> MatchRecognize<PlanRef> {
         self.order_by
             .iter_mut()
             .for_each(|e| *e = mapping.rewrite_expr(e.clone()));
-        self.measures
-            .iter_mut()
-            .for_each(|m| m.expr = mapping.rewrite_expr(m.expr.clone()));
+        // Measure expressions are over the synthetic per-match row, not the plan input, so the
+        // input-column remapping applies to the slots' input column indices instead.
+        for m in &mut self.measures {
+            for slot in &mut m.slots {
+                if !matches!(slot.kind, MeasureSlotKind::Classifier) {
+                    slot.col_idx = mapping.map(slot.col_idx);
+                }
+            }
+        }
         self.defines
             .iter_mut()
             .for_each(|d| d.definition = mapping.rewrite_expr(d.definition.clone()));
