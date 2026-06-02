@@ -255,13 +255,16 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // - jsonb (DataType::Jsonb)
                     // - varchar (DataType::Varchar)
                     // - bytea (DataType::Bytea)
+                    // - pgvector (DataType::Vector)
                     // - One-dimensional arrays of the above types (DataType::List)
                     //   Note: Some array types may not be fully supported yet, see issue  https://github.com/risingwavelabs/risingwave/issues/22916 for details.
 
                     // For details on how TOAST values are handled, see comments in `is_debezium_unavailable_value`.
-                    DataType::Varchar | DataType::List(_) | DataType::Bytea | DataType::Jsonb => {
-                        Some(index)
-                    }
+                    DataType::Varchar
+                    | DataType::List(_)
+                    | DataType::Bytea
+                    | DataType::Jsonb
+                    | DataType::Vector(_) => Some(index),
                     _ => None,
                 })
                 .collect();
