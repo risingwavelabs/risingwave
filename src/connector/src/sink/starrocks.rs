@@ -129,7 +129,7 @@ pub struct StarrocksConfig {
     #[serde(rename = "starrocks.partial_update")]
     pub partial_update: Option<String>,
 
-    /// The maximum size in MB for each StarRocks stream load request payload.
+    /// The maximum size in MB for each `StarRocks` stream load request payload.
     /// If unset, RisingWave does not split the request by payload size.
     #[serde(rename = "starrocks.max_batch_size_mb", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
