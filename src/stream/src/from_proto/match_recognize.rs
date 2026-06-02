@@ -60,6 +60,8 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
 
         let skip = match node.after_match_skip.as_str() {
             "to_next_row" => SkipMode::ToNextRow,
+            s if s.starts_with("to_first:") => SkipMode::ToFirst(s["to_first:".len()..].to_owned()),
+            s if s.starts_with("to_last:") => SkipMode::ToLast(s["to_last:".len()..].to_owned()),
             _ => SkipMode::PastLastRow,
         };
 

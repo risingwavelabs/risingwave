@@ -143,12 +143,36 @@ pub struct MatchSpan {
 }
 
 /// Where the scan resumes after a match (the `AFTER MATCH SKIP` strategy).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkipMode {
     /// `AFTER MATCH SKIP PAST LAST ROW`: resume past the match's last row (non-overlapping).
     PastLastRow,
     /// `AFTER MATCH SKIP TO NEXT ROW`: resume at the row after the match's first row (overlapping).
     ToNextRow,
+    /// `AFTER MATCH SKIP TO FIRST <var>`: resume at the first row labeled `var`.
+    ToFirst(String),
+    /// `AFTER MATCH SKIP TO LAST <var>`: resume at the last row labeled `var`.
+    ToLast(String),
+}
+
+impl SkipMode {
+    /// The position the scan resumes at after a match spanning `[start, end)` with per-row `labels`
+    /// (`labels[i]` is the variable bound to `rows[start + i]`). Always returns `> start` so the scan
+    /// makes progress: `SKIP TO FIRST` of the match's leading variable would not advance, which the
+    /// SQL standard reports as an error; here it degrades to advancing one row instead of looping.
+    pub fn next_pos(&self, start: usize, end: usize, labels: &[String]) -> usize {
+        let target = match self {
+            SkipMode::PastLastRow => end,
+            SkipMode::ToNextRow => start + 1,
+            SkipMode::ToFirst(var) => {
+                labels.iter().position(|l| l == var).map_or(end, |j| start + j)
+            }
+            SkipMode::ToLast(var) => {
+                labels.iter().rposition(|l| l == var).map_or(end, |j| start + j)
+            }
+        };
+        target.max(start + 1)
+    }
 }
 
 impl Nfa {
@@ -158,7 +182,7 @@ impl Nfa {
     ///
     /// Empty matches (a pattern that accepts zero rows, e.g. `A*` on a non-matching row) are not
     /// emitted and advance the scan by one, so the scan always terminates.
-    pub fn find_matches(&self, rows: &[BTreeSet<String>], skip: SkipMode) -> Vec<MatchSpan> {
+    pub fn find_matches(&self, rows: &[BTreeSet<String>], skip: &SkipMode) -> Vec<MatchSpan> {
         let mut matches = Vec::new();
         let mut i = 0;
         while i < rows.len() {
@@ -166,9 +190,11 @@ impl Nfa {
                 && end > i
             {
                 matches.push(MatchSpan { start: i, end });
+                // `find_matches` is label-less; the variable-targeted skips resolve like
+                // `PAST LAST ROW` here. `find_matches_labeled` applies them precisely.
                 i = match skip {
-                    SkipMode::PastLastRow => end,
                     SkipMode::ToNextRow => i + 1,
+                    _ => end,
                 };
             } else {
                 i += 1;
@@ -245,7 +271,7 @@ impl Nfa {
     pub fn find_matches_labeled(
         &self,
         rows: &[BTreeSet<String>],
-        skip: SkipMode,
+        skip: &SkipMode,
     ) -> Vec<LabeledMatch> {
         let mut matches = Vec::new();
         let mut i = 0;
@@ -253,15 +279,9 @@ impl Nfa {
             if let Some((end, labels)) = self.longest_match_labeled(rows, i)
                 && end > i
             {
-                matches.push(LabeledMatch {
-                    start: i,
-                    end,
-                    labels,
-                });
-                i = match skip {
-                    SkipMode::PastLastRow => end,
-                    SkipMode::ToNextRow => i + 1,
-                };
+                let start = i;
+                i = skip.next_pos(start, end, &labels);
+                matches.push(LabeledMatch { start, end, labels });
             } else {
                 i += 1;
             }
@@ -549,7 +569,7 @@ mod tests {
         let p = Pattern::Concat(vec![vars("a"), vars("b")]);
         let nfa = Nfa::compile(&p);
         assert_eq!(
-            nfa.find_matches(&rows("ababab"), SkipMode::PastLastRow),
+            nfa.find_matches(&rows("ababab"), &SkipMode::PastLastRow),
             spans(&[(0, 2), (2, 4), (4, 6)])
         );
     }
@@ -561,12 +581,12 @@ mod tests {
         let nfa = Nfa::compile(&p);
         // "aaa": greedy A+ at 0->(0,3); to-next resumes at 1->(1,3); 2->(2,3).
         assert_eq!(
-            nfa.find_matches(&rows("aaa"), SkipMode::ToNextRow),
+            nfa.find_matches(&rows("aaa"), &SkipMode::ToNextRow),
             spans(&[(0, 3), (1, 3), (2, 3)])
         );
         // PAST LAST ROW on the same input: single match.
         assert_eq!(
-            nfa.find_matches(&rows("aaa"), SkipMode::PastLastRow),
+            nfa.find_matches(&rows("aaa"), &SkipMode::PastLastRow),
             spans(&[(0, 3)])
         );
     }
@@ -581,7 +601,7 @@ mod tests {
         let nfa = Nfa::compile(&p);
         // a b b | a b  -> (0,3) then (3,5)
         assert_eq!(
-            nfa.find_matches(&rows("abbab"), SkipMode::PastLastRow),
+            nfa.find_matches(&rows("abbab"), &SkipMode::PastLastRow),
             spans(&[(0, 3), (3, 5)])
         );
     }
@@ -593,7 +613,7 @@ mod tests {
         let nfa = Nfa::compile(&p);
         // x a b x x a b -> (1,3),(5,7)
         assert_eq!(
-            nfa.find_matches(&rows("xabxxab"), SkipMode::PastLastRow),
+            nfa.find_matches(&rows("xabxxab"), &SkipMode::PastLastRow),
             spans(&[(1, 3), (5, 7)])
         );
     }
@@ -605,11 +625,11 @@ mod tests {
         let nfa = Nfa::compile(&p);
         // "aa b aa" -> greedy A* consumes runs of a, emits non-empty ones.
         assert_eq!(
-            nfa.find_matches(&rows("aabaa"), SkipMode::PastLastRow),
+            nfa.find_matches(&rows("aabaa"), &SkipMode::PastLastRow),
             spans(&[(0, 2), (3, 5)])
         );
         // all-non-matching -> no matches, terminates.
-        assert_eq!(nfa.find_matches(&rows("xxx"), SkipMode::PastLastRow), spans(&[]));
+        assert_eq!(nfa.find_matches(&rows("xxx"), &SkipMode::PastLastRow), spans(&[]));
     }
 
     fn lbl(s: &str) -> Vec<String> {
@@ -660,12 +680,34 @@ mod tests {
         let p = Pattern::Concat(vec![vars("a"), vars("b")]);
         let nfa = Nfa::compile(&p);
         assert_eq!(
-            nfa.find_matches_labeled(&rows("abab"), SkipMode::PastLastRow),
+            nfa.find_matches_labeled(&rows("abab"), &SkipMode::PastLastRow),
             vec![
                 LabeledMatch { start: 0, end: 2, labels: lbl("ab") },
                 LabeledMatch { start: 2, end: 4, labels: lbl("ab") },
             ]
         );
+    }
+
+    #[test]
+    fn skip_to_first_last_var() {
+        // Pattern (a b b) over five rows that each satisfy both `a` and `b`, so matches can overlap.
+        // The skip strategy decides where each next match starts:
+        //   PAST LAST ROW -> one match [0,3)
+        //   SKIP TO LAST b -> [0,3), [2,5)      (resume at the match's last `b`)
+        //   SKIP TO FIRST b -> [0,3), [1,4), [2,5)  (resume at the match's first `b`)
+        let p = Pattern::Concat(vec![vars("a"), vars("b"), vars("b")]);
+        let nfa = Nfa::compile(&p);
+        let rows = vec![BTreeSet::from(["a".to_owned(), "b".to_owned()]); 5];
+
+        let starts = |skip: &SkipMode| {
+            nfa.find_matches_labeled(&rows, skip)
+                .into_iter()
+                .map(|m| m.start)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(starts(&SkipMode::PastLastRow), vec![0]);
+        assert_eq!(starts(&SkipMode::ToLast("b".to_owned())), vec![0, 2]);
+        assert_eq!(starts(&SkipMode::ToFirst("b".to_owned())), vec![0, 1, 2]);
     }
 
     #[test]

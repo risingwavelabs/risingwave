@@ -120,14 +120,6 @@ impl Binder {
         if matches!(rows_per_match, Some(RowsPerMatch::AllRows)) {
             bail_not_implemented!("ALL ROWS PER MATCH");
         }
-        // AFTER MATCH SKIP TO FIRST/LAST <symbol> is not in the v1 subset.
-        if matches!(
-            after_match_skip,
-            Some(AfterMatchSkip::ToFirst(_) | AfterMatchSkip::ToLast(_))
-        ) {
-            bail_not_implemented!("AFTER MATCH SKIP TO FIRST/LAST <symbol>");
-        }
-
         self.push_context();
 
         // Bind the input. This registers the input's columns in the current context.
@@ -159,6 +151,16 @@ impl Binder {
         let variables = collect_pattern_variables(pattern, symbols);
         for var in &variables {
             self.bind_table_to_context(input_columns.clone(), var.clone(), None, None)?;
+        }
+
+        // AFTER MATCH SKIP TO FIRST/LAST <var> must name a pattern variable.
+        if let Some(AfterMatchSkip::ToFirst(sym) | AfterMatchSkip::ToLast(sym)) = after_match_skip
+            && !variables.contains(&sym.real_value())
+        {
+            bail_not_implemented!(
+                "AFTER MATCH SKIP TO FIRST/LAST references unknown pattern variable {}",
+                sym.real_value()
+            );
         }
 
         // Each pattern variable was registered as an identical alias block over the input columns,

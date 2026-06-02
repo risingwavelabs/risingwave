@@ -425,7 +425,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             .collect();
 
                         let mut cursor = 0usize;
-                        for m in nfa.find_matches_labeled(&satisfied, skip) {
+                        for m in nfa.find_matches_labeled(&satisfied, &skip) {
                             if m.start < cursor {
                                 continue;
                             }
@@ -452,10 +452,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     .chain(OwnedRow::new(measure_datums))
                                     .into_owned_row(),
                             );
-                            cursor = match skip {
-                                SkipMode::PastLastRow => m.end,
-                                SkipMode::ToNextRow => m.start + 1,
-                            };
+                            cursor = skip.next_pos(m.start, m.end, &m.labels);
                         }
                         for consumed in state.rows.drain(0..cursor) {
                             state_table.delete(Self::state_row(&consumed));
