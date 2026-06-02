@@ -23,9 +23,6 @@
 //! Variable→predicate evaluation and the streaming/state layer live elsewhere; this module is pure
 //! and deterministic so it can be unit-tested without a cluster.
 
-// TODO: remove once the MatchRecognize executor wires this up; currently exercised only by tests.
-#![allow(dead_code)]
-
 use std::collections::BTreeSet;
 
 /// A quantifier applied to a sub-pattern. Greedy semantics only (v1).
