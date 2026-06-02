@@ -19,9 +19,9 @@ use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_sqlparser::ast::{
-    AfterMatchSkip, Expr as AstExpr, FunctionArg, FunctionArgExpr, MatchRecognizePattern,
-    MatchRecognizeSymbol, Measure, OrderByExpr, RowsPerMatch, SubsetDefinition, SymbolDefinition,
-    TableAlias, TableFactor,
+    AfterMatchSkip, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident,
+    MatchRecognizePattern, MatchRecognizeSymbol, Measure, OrderByExpr, RowsPerMatch,
+    SubsetDefinition, SymbolDefinition, TableAlias, TableFactor, Value as AstValue,
 };
 
 use super::{Binder, Relation};
@@ -85,11 +85,42 @@ pub struct BoundMeasure {
     pub slots: Vec<MeasureSlot>,
 }
 
-/// A bound `DEFINE` item: a pattern variable and the predicate that defines membership.
+/// How a [`DefineSlot`] resolves against the row being tested for membership in a pattern variable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DefineSlotKind {
+    /// The candidate row's own column (`var.col` for the variable being defined, or unqualified).
+    SelfCol,
+    /// A physical-offset column: `PREV(col, n)` reads `offset` rows earlier in the ordered partition.
+    Prev,
+    /// `NEXT(col, n)`: `offset` rows later.
+    Next,
+    /// `FIRST(var.col)`: the first row labeled `var` in the in-progress match.
+    RunningFirst,
+    /// `LAST(var.col)` / bare `var.col` of another variable: the last such row (running).
+    RunningLast,
+}
+
+/// One input a `DEFINE` predicate reads. A predicate is lowered to an expression over a synthetic
+/// row whose `i`-th column is produced by `slots[i]`; the executor materializes that row for each
+/// candidate row from the sorted partition and the in-progress match's labels.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DefineSlot {
+    pub kind: DefineSlotKind,
+    /// Pattern variables for `RunningFirst`/`RunningLast` (several for a `SUBSET`); empty otherwise.
+    pub vars: Vec<String>,
+    /// Input column index to read.
+    pub col_idx: usize,
+    /// Physical offset for `Prev`/`Next` (>= 1); `0` for the other kinds.
+    pub offset: usize,
+}
+
+/// A bound `DEFINE` item: a pattern variable, the predicate over its [`DefineSlot`]s, and the slots.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BoundSymbolDefinition {
     pub symbol: String,
+    /// Predicate over the synthetic row: `InputRef(i)` reads `slots[i]`.
     pub definition: ExprImpl,
+    pub slots: Vec<DefineSlot>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,23 +225,13 @@ impl Binder {
         }
 
         // Each pattern variable was registered as an identical alias block over the input columns,
-        // so a variable-qualified reference `A.col` binds to an InputRef into the extended context.
-        // Collapse those back onto the real input columns (`i % input_col_num`): in the v1 subset a
-        // DEFINE/MEASURES reference resolves to the current row's column. The variable label is kept
-        // separately in `symbol`; cross-variable navigation is rejected above.
-        let mut remap = PatternVarColRemap { input_col_num };
-
-        // DEFINE predicates: <symbol> AS <condition>.
+        // DEFINE predicates: <symbol> AS <condition>. Each is lowered to an expression over a
+        // synthetic row of navigation slots (the candidate row's columns, physical PREV/NEXT, and
+        // running references to other variables), evaluated per candidate during matching.
+        let input_fields: Vec<Field> = input_columns.iter().map(|(_, f)| f.clone()).collect();
         let defines = symbols
             .iter()
-            .map(|s| {
-                reject_navigation(&s.definition)?;
-                let definition = self.bind_expr(&s.definition)?;
-                Ok(BoundSymbolDefinition {
-                    symbol: s.symbol.real_value(),
-                    definition: remap.rewrite_expr(definition),
-                })
-            })
+            .map(|s| self.lower_define(s, &resolver, &input_fields))
             .collect::<RwResult<Vec<_>>>()?;
 
         // MEASURES: <expr> AS <alias>.
@@ -469,19 +490,278 @@ impl Binder {
             slots: rewriter.slots,
         })
     }
+
+    /// Lowers one `DEFINE` predicate to an expression over a synthetic row of [`DefineSlot`]s.
+    /// `PREV`/`NEXT`/`FIRST`/`LAST(...)` navigation functions are extracted into slots first (they do
+    /// not bind as ordinary functions); the remaining variable-qualified columns bind via the alias
+    /// blocks and are mapped to self slots (the defined variable / unqualified) or running slots.
+    fn lower_define(
+        &mut self,
+        s: &SymbolDefinition,
+        resolver: &VarResolver<'_>,
+        input_fields: &[Field],
+    ) -> RwResult<BoundSymbolDefinition> {
+        let symbol = s.symbol.real_value();
+        // A per-symbol prefix keeps the placeholder relation and columns unique across DEFINEs, which
+        // all bind in the same context.
+        let prefix = format!("{NAV_TABLE}_{symbol}");
+
+        let mut cond = s.definition.clone();
+        let mut extractor = NavExtractor {
+            input_fields,
+            resolver,
+            prefix: &prefix,
+            nav_slots: Vec::new(),
+            nav_fields: Vec::new(),
+        };
+        extractor.rewrite(&mut cond)?;
+        let NavExtractor {
+            nav_slots,
+            nav_fields,
+            ..
+        } = extractor;
+
+        // Bring the navigation placeholders into scope as a synthetic relation so the predicate
+        // type-checks. They are appended to the current context, so capture the base index first.
+        let nav_base = self.context.columns.len();
+        if !nav_fields.is_empty() {
+            let cols: Vec<(bool, Field)> =
+                nav_fields.iter().map(|f| (false, f.clone())).collect();
+            self.bind_table_to_context(cols, prefix.clone(), None, None)?;
+        }
+
+        let expr = self.bind_expr(&cond)?;
+
+        let (definition, slots) = {
+            let mut rewriter = DefineSlotRewriter {
+                resolver,
+                defined_var: &symbol,
+                nav_base,
+                nav_slots: &nav_slots,
+                slots: Vec::new(),
+            };
+            let definition = rewriter.rewrite_expr(expr);
+            (definition, rewriter.slots)
+        };
+        Ok(BoundSymbolDefinition {
+            symbol,
+            definition,
+            slots,
+        })
+    }
 }
 
-/// Collapses pattern-variable-qualified column references onto the real input columns. Each
-/// variable was registered as an identical alias block of width `input_col_num`, so `InputRef(i)`
-/// maps to input column `i % input_col_num`.
-struct PatternVarColRemap {
-    input_col_num: usize,
+/// Name of the synthetic relation that backs a `DEFINE`'s navigation placeholders.
+const NAV_TABLE: &str = "__mr_nav";
+
+/// Extracts row-pattern navigation functions (`PREV`/`NEXT`/`FIRST`/`LAST`) from a `DEFINE`
+/// predicate AST, replacing each with a synthetic placeholder column and recording the corresponding
+/// [`DefineSlot`]. Functions are handled because they do not bind as ordinary scalar functions;
+/// plain variable-qualified columns are left to bind normally and are mapped later.
+struct NavExtractor<'a> {
+    input_fields: &'a [Field],
+    resolver: &'a VarResolver<'a>,
+    /// Per-DEFINE prefix for the synthetic placeholder column names (kept unique across DEFINEs).
+    prefix: &'a str,
+    nav_slots: Vec<DefineSlot>,
+    nav_fields: Vec<Field>,
 }
 
-impl ExprRewriter for PatternVarColRemap {
+impl NavExtractor<'_> {
+    fn rewrite(&mut self, node: &mut AstExpr) -> RwResult<()> {
+        if let AstExpr::Function(func) = node
+            && func.name.0.len() == 1
+            && matches!(
+                func.name.0[0].real_value().to_ascii_lowercase().as_str(),
+                "prev" | "next" | "first" | "last"
+            )
+        {
+            let k = self.nav_slots.len();
+            let slot = self.nav_slot(func)?;
+            let data_type = self.input_fields[slot.col_idx].data_type();
+            let col_name = format!("{}_{k}", self.prefix);
+            self.nav_fields
+                .push(Field::with_name(data_type, col_name.clone()));
+            *node = AstExpr::Identifier(Ident::new_unchecked(col_name));
+            self.nav_slots.push(slot);
+            return Ok(());
+        }
+        match node {
+            AstExpr::BinaryOp { left, right, .. } => {
+                self.rewrite(left)?;
+                self.rewrite(right)?;
+            }
+            AstExpr::UnaryOp { expr, .. }
+            | AstExpr::Nested(expr)
+            | AstExpr::IsNull(expr)
+            | AstExpr::IsNotNull(expr)
+            | AstExpr::IsTrue(expr)
+            | AstExpr::IsNotTrue(expr)
+            | AstExpr::IsFalse(expr)
+            | AstExpr::IsNotFalse(expr)
+            | AstExpr::Cast { expr, .. }
+            | AstExpr::TryCast { expr, .. } => self.rewrite(expr)?,
+            AstExpr::Between {
+                expr, low, high, ..
+            } => {
+                self.rewrite(expr)?;
+                self.rewrite(low)?;
+                self.rewrite(high)?;
+            }
+            AstExpr::Function(func) => {
+                for arg in &mut func.arg_list.args {
+                    if let FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) = arg {
+                        self.rewrite(e)?;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Builds the [`DefineSlot`] for a navigation function call.
+    fn nav_slot(&self, func: &Function) -> RwResult<DefineSlot> {
+        let name = func.name.0[0].real_value().to_ascii_lowercase();
+        let args = &func.arg_list.args;
+        let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(inner))) = args.first() else {
+            bail_not_implemented!("{}() argument must be a column in DEFINE", name.to_uppercase());
+        };
+        match name.as_str() {
+            "prev" | "next" => {
+                let col_idx = self.physical_col(inner)?;
+                let offset = match args.get(1) {
+                    Some(arg) => self.parse_offset(arg, &name)?,
+                    None => 1,
+                };
+                let kind = if name == "prev" {
+                    DefineSlotKind::Prev
+                } else {
+                    DefineSlotKind::Next
+                };
+                Ok(DefineSlot {
+                    kind,
+                    vars: vec![],
+                    col_idx,
+                    offset,
+                })
+            }
+            _ => {
+                if args.len() != 1 {
+                    bail_not_implemented!("{}() with an offset in DEFINE", name.to_uppercase());
+                }
+                let (vars, col_idx) = self.var_col(inner)?;
+                let kind = if name == "first" {
+                    DefineSlotKind::RunningFirst
+                } else {
+                    DefineSlotKind::RunningLast
+                };
+                Ok(DefineSlot {
+                    kind,
+                    vars,
+                    col_idx,
+                    offset: 0,
+                })
+            }
+        }
+    }
+
+    /// Resolves a physical-navigation argument (`col` or `var.col`) to its input column index; the
+    /// variable qualifier, if any, does not matter for physical navigation.
+    fn physical_col(&self, expr: &AstExpr) -> RwResult<usize> {
+        let col = match expr {
+            AstExpr::Identifier(c) => c.real_value(),
+            AstExpr::CompoundIdentifier(parts) if parts.len() == 2 => parts[1].real_value(),
+            _ => bail_not_implemented!("PREV/NEXT argument must be a column reference in DEFINE"),
+        };
+        self.col_idx(&col)
+    }
+
+    /// Resolves a logical-navigation argument (`var.col`) to its variable(s) and input column index.
+    fn var_col(&self, expr: &AstExpr) -> RwResult<(Vec<String>, usize)> {
+        let AstExpr::CompoundIdentifier(parts) = expr else {
+            bail_not_implemented!("FIRST/LAST argument must be a pattern-variable column in DEFINE");
+        };
+        if parts.len() != 2 {
+            bail_not_implemented!("FIRST/LAST argument must be a pattern-variable column in DEFINE");
+        }
+        let var = parts[0].real_value();
+        if !self.resolver.alias_names.iter().any(|n| n == &var) {
+            bail_not_implemented!("FIRST/LAST references unknown pattern variable {} in DEFINE", var);
+        }
+        Ok((self.resolver.members_of(&var), self.col_idx(&parts[1].real_value())?))
+    }
+
+    fn col_idx(&self, name: &str) -> RwResult<usize> {
+        match self.input_fields.iter().position(|f| f.name == name) {
+            Some(i) => Ok(i),
+            None => bail_not_implemented!("navigation over unknown column {} in DEFINE", name),
+        }
+    }
+
+    fn parse_offset(&self, arg: &FunctionArg, name: &str) -> RwResult<usize> {
+        if let FunctionArg::Unnamed(FunctionArgExpr::Expr(AstExpr::Value(AstValue::Number(s)))) = arg
+            && let Ok(n) = s.parse::<usize>()
+        {
+            Ok(n)
+        } else {
+            bail_not_implemented!("{}() offset must be a non-negative integer literal", name.to_uppercase());
+        }
+    }
+}
+
+/// Maps each `InputRef` in a bound `DEFINE` predicate to a [`DefineSlot`]: navigation placeholders
+/// (index `>= nav_base`) to their pre-resolved slot; variable-qualified columns to a self slot (the
+/// defined variable, or an unqualified/raw-input reference) or a running slot (another variable).
+struct DefineSlotRewriter<'a> {
+    resolver: &'a VarResolver<'a>,
+    defined_var: &'a str,
+    nav_base: usize,
+    nav_slots: &'a [DefineSlot],
+    slots: Vec<DefineSlot>,
+}
+
+impl ExprRewriter for DefineSlotRewriter<'_> {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        let index = input_ref.index() % self.input_col_num;
-        InputRef::new(index, input_ref.data_type).into()
+        let index = input_ref.index();
+        let data_type = input_ref.data_type;
+        let slot = if index >= self.nav_base {
+            self.nav_slots[index - self.nav_base].clone()
+        } else {
+            let n = self.resolver.input_col_num;
+            let col_idx = index % n;
+            let block = index / n;
+            let self_slot = DefineSlot {
+                kind: DefineSlotKind::SelfCol,
+                vars: vec![],
+                col_idx,
+                offset: 0,
+            };
+            if block == 0 {
+                self_slot
+            } else {
+                let name = &self.resolver.alias_names[block - 1];
+                if name == self.defined_var {
+                    self_slot
+                } else {
+                    DefineSlot {
+                        kind: DefineSlotKind::RunningLast,
+                        vars: self.resolver.members_of(name),
+                        col_idx,
+                        offset: 0,
+                    }
+                }
+            }
+        };
+        let idx = self
+            .slots
+            .iter()
+            .position(|s| *s == slot)
+            .unwrap_or_else(|| {
+                self.slots.push(slot);
+                self.slots.len() - 1
+            });
+        InputRef::new(idx, data_type).into()
     }
 }
 
@@ -552,12 +832,16 @@ impl VarResolver<'_> {
             .alias_names
             .get(block - 1)
             .expect("alias block within range of registered variables/subsets");
-        let vars = self
-            .subset_defs
+        let vars = self.members_of(name);
+        (vars, index % self.input_col_num)
+    }
+
+    /// The variables a name resolves to: a `SUBSET`'s members, or the variable itself.
+    fn members_of(&self, name: &str) -> Vec<String> {
+        self.subset_defs
             .iter()
             .find(|(n, _)| n == name)
-            .map_or_else(|| vec![name.clone()], |(_, members)| members.clone());
-        (vars, index % self.input_col_num)
+            .map_or_else(|| vec![name.to_owned()], |(_, members)| members.clone())
     }
 }
 
@@ -606,17 +890,3 @@ impl ExprRewriter for SlotLoweringRewriter<'_, '_> {
     }
 }
 
-/// Row-pattern navigation operations (`FIRST`/`LAST`/`PREV`/`NEXT`) are not yet supported in
-/// MEASURES/DEFINE. They parse as ordinary function calls, so reject them with a clear message
-/// rather than letting binding fail with a confusing "function does not exist" error.
-fn reject_navigation(expr: &AstExpr) -> RwResult<()> {
-    if let AstExpr::Function(func) = expr
-        && let Some(first) = func.name.0.first()
-    {
-        let name = first.real_value().to_ascii_lowercase();
-        if matches!(name.as_str(), "first" | "last" | "prev" | "next") {
-            bail_not_implemented!("row pattern navigation function {} in MATCH_RECOGNIZE", name);
-        }
-    }
-    Ok(())
-}

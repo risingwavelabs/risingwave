@@ -120,8 +120,8 @@ impl<PlanRef> MatchRecognize<PlanRef> {
         self.order_by
             .iter_mut()
             .for_each(|e| *e = mapping.rewrite_expr(e.clone()));
-        // Measure expressions are over the synthetic per-match row, not the plan input, so the
-        // input-column remapping applies to the slots' input column indices instead.
+        // Measure and DEFINE expressions are over synthetic per-match / per-candidate rows, not the
+        // plan input, so the input-column remapping applies to the slots' input column indices.
         for m in &mut self.measures {
             for slot in &mut m.slots {
                 if !matches!(slot.kind, MeasureSlotKind::Classifier) {
@@ -129,9 +129,11 @@ impl<PlanRef> MatchRecognize<PlanRef> {
                 }
             }
         }
-        self.defines
-            .iter_mut()
-            .for_each(|d| d.definition = mapping.rewrite_expr(d.definition.clone()));
+        for d in &mut self.defines {
+            for slot in &mut d.slots {
+                slot.col_idx = mapping.map(slot.col_idx);
+            }
+        }
     }
 }
 

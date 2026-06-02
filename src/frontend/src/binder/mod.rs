@@ -56,7 +56,7 @@ pub use query::BoundQuery;
 pub use relation::{
     BoundBaseTable, BoundGapFill, BoundJoin, BoundMatchRecognize, BoundMeasure, BoundSource,
     BoundShare, BoundShareInput, BoundSymbolDefinition, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, MeasureSlotKind, Relation, ResolveQualifiedNameError,
+    BoundWindowTableFunction, DefineSlotKind, MeasureSlotKind, Relation, ResolveQualifiedNameError,
     WindowTableFunctionKind,
 };
 // Re-export common types

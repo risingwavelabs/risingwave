@@ -83,8 +83,12 @@ impl LogicalMatchRecognize {
                 }
             }
         }
+        // DEFINE predicates are over synthetic per-candidate rows; the real input columns they read
+        // are recorded in the slots.
         for d in &self.core.defines {
-            required.union_with(&d.definition.collect_input_refs(input_col_num));
+            for slot in &d.slots {
+                required.insert(slot.col_idx);
+            }
         }
         required
     }
