@@ -225,7 +225,7 @@ pub struct IcebergSinkWriterArgs {
     config: IcebergConfig,
     sink_param: SinkParam,
     writer_param: SinkWriterParam,
-    unique_column_ids: Option<Vec<usize>>,
+    upsert_primary_key_column_names: Option<Vec<String>>,
 }
 
 pub struct IcebergSinkWriterInner {
@@ -285,15 +285,32 @@ impl IcebergSinkWriter {
         config: IcebergConfig,
         sink_param: SinkParam,
         writer_param: SinkWriterParam,
-        unique_column_ids: Option<Vec<usize>>,
+        upsert_primary_key_column_names: Option<Vec<String>>,
     ) -> Self {
         Self::Created(IcebergSinkWriterArgs {
             config,
             sink_param,
             writer_param,
-            unique_column_ids,
+            upsert_primary_key_column_names,
         })
     }
+}
+
+pub(super) fn resolve_equality_delete_field_ids(
+    primary_key_column_names: &[String],
+    iceberg_schema: &iceberg::spec::Schema,
+) -> Result<Vec<i32>> {
+    primary_key_column_names
+        .iter()
+        .map(|column_name| {
+            iceberg_schema.field_id_by_name(column_name).ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "Primary key column {} not found in Iceberg schema",
+                    column_name
+                ))
+            })
+        })
+        .collect()
 }
 
 impl IcebergSinkWriterInner {
@@ -403,7 +420,7 @@ impl IcebergSinkWriterInner {
     pub fn build_upsert(
         config: &IcebergConfig,
         table: Table,
-        unique_column_ids: Vec<usize>,
+        primary_key_column_names: Vec<String>,
         writer_param: &SinkWriterParam,
     ) -> Result<Self> {
         let SinkWriterParam {
@@ -418,7 +435,6 @@ impl IcebergSinkWriterInner {
             &sink_id.to_string(),
             sink_name.as_str(),
         ];
-        let unique_column_ids: Vec<_> = unique_column_ids.into_iter().map(|id| id as i32).collect();
 
         // Metrics
         let write_qps = GLOBAL_SINK_METRICS
@@ -438,6 +454,8 @@ impl IcebergSinkWriterInner {
 
         // Determine the schema id and partition spec id
         let schema = table.metadata().current_schema();
+        let unique_column_ids =
+            resolve_equality_delete_field_ids(&primary_key_column_names, schema)?;
         let partition_spec = table.metadata().default_partition_spec();
         let fanout_enabled = !partition_spec.fields().is_empty();
         let use_deletion_vectors = table.metadata().format_version() >= FormatVersion::V3;
@@ -802,11 +820,11 @@ impl SinkWriter for IcebergSinkWriter {
         };
 
         let table = create_and_validate_table_impl(&args.config, &args.sink_param).await?;
-        let inner = match &args.unique_column_ids {
-            Some(unique_column_ids) => IcebergSinkWriterInner::build_upsert(
+        let inner = match &args.upsert_primary_key_column_names {
+            Some(primary_key_column_names) => IcebergSinkWriterInner::build_upsert(
                 &args.config,
                 table,
-                unique_column_ids.clone(),
+                primary_key_column_names.clone(),
                 &args.writer_param,
             )?,
             None => {
