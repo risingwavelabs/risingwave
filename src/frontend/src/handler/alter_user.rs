@@ -374,6 +374,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_createrole_requires_admin_option_to_alter_other_roles() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        frontend
+            .run_sql("CREATE USER manager WITH CREATEROLE")
+            .await
+            .unwrap();
+        frontend.run_sql("CREATE USER target_user").await.unwrap();
+
+        let manager_id = frontend.user_by_name("manager").unwrap().id;
+        let database = DEFAULT_DATABASE_NAME.to_owned();
+        let manager_name = "manager".to_owned();
+
+        let err = frontend
+            .run_user_sql(
+                "ALTER USER target_user WITH PASSWORD 'new_password'",
+                database.clone(),
+                manager_name.clone(),
+                manager_id,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ADMIN OPTION"));
+
+        frontend
+            .run_sql("GRANT target_user TO manager WITH ADMIN OPTION")
+            .await
+            .unwrap();
+        frontend
+            .run_user_sql(
+                "ALTER USER target_user WITH PASSWORD 'new_password'",
+                database,
+                manager_name,
+                manager_id,
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_reserved_default_users_cannot_be_downgraded_or_renamed() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let err = frontend
+            .run_sql("ALTER USER root WITH NOSUPERUSER")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot be downgraded"));
+
+        let err = frontend
+            .run_sql("ALTER USER rwadmin RENAME TO rwadmin_renamed")
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot be renamed"));
+
+        let err = frontend
+            .run_user_sql(
+                "ALTER USER rwadmin WITH NOADMIN NOSUPERUSER",
+                DEFAULT_DATABASE_NAME.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN.to_owned(),
+                DEFAULT_SUPER_USER_FOR_ADMIN_ID,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("cannot be altered"));
+    }
+
+    #[tokio::test]
     async fn test_alter_admin_user() {
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();

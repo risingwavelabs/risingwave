@@ -1,0 +1,61 @@
+# Role-membership INHERIT/SET option coverage.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+DROP TABLE IF EXISTS role_option_privilege_t;
+
+statement ok
+DROP ROLE IF EXISTS role_option_user;
+
+statement ok
+DROP ROLE IF EXISTS role_option_reader;
+
+statement ok
+CREATE TABLE role_option_privilege_t (id int PRIMARY KEY, v int);
+
+statement ok
+INSERT INTO role_option_privilege_t VALUES (1, 10);
+
+statement ok
+CREATE ROLE role_option_reader;
+
+statement ok
+CREATE USER role_option_user WITH PASSWORD 'secret';
+
+statement ok
+GRANT SELECT ON TABLE role_option_privilege_t TO role_option_reader;
+
+statement ok
+GRANT role_option_reader TO role_option_user WITH INHERIT FALSE, SET FALSE;
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_option_user -v ON_ERROR_STOP=1 -c "SELECT * FROM role_option_privilege_t;" 2>&1 | grep -qi "permission denied"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_option_user -v ON_ERROR_STOP=1 -c "SET ROLE role_option_reader;" 2>&1 | grep -q "permission denied to set role"
+
+statement ok
+GRANT role_option_reader TO role_option_user WITH INHERIT TRUE, SET TRUE;
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_option_user -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FROM role_option_privilege_t WHERE id = 1 AND v = 10;" | grep -qx "1"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_option_user -v ON_ERROR_STOP=1 -At -c "SET ROLE role_option_reader; SELECT count(*) FROM role_option_privilege_t WHERE id = 1 AND v = 10;" | grep -qx "1"
+
+statement ok
+REVOKE SET OPTION FOR role_option_reader FROM role_option_user;
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_option_user -v ON_ERROR_STOP=1 -c "SET ROLE role_option_reader;" 2>&1 | grep -q "permission denied to set role"
+
+statement ok
+DROP TABLE role_option_privilege_t;
+
+statement ok
+DROP ROLE role_option_user;
+
+statement ok
+DROP ROLE role_option_reader;

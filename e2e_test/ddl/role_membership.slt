@@ -1,0 +1,110 @@
+# Core RBAC e2e coverage without role membership WITH OPTION syntax.
+# Follow-up PRs cover ADMIN/INHERIT/SET options and GRANTED BY.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+DROP TABLE IF EXISTS role_core_privilege_t;
+
+statement ok
+DROP ROLE IF EXISTS role_core_privilege_user;
+
+statement ok
+DROP ROLE IF EXISTS role_core_privilege_app;
+
+statement ok
+DROP ROLE IF EXISTS role_core_privilege_select;
+
+statement ok
+DROP ROLE IF EXISTS role_core_privilege_update;
+
+statement ok
+CREATE TABLE role_core_privilege_t (id int PRIMARY KEY, v int);
+
+statement ok
+INSERT INTO role_core_privilege_t VALUES (1, 10), (2, 20);
+
+statement ok
+CREATE ROLE role_core_privilege_select;
+
+statement ok
+CREATE ROLE role_core_privilege_update;
+
+statement ok
+CREATE ROLE role_core_privilege_app;
+
+statement ok
+CREATE USER role_core_privilege_user WITH PASSWORD 'secret';
+
+statement ok
+GRANT SELECT ON TABLE role_core_privilege_t TO role_core_privilege_select;
+
+statement ok
+GRANT UPDATE ON TABLE role_core_privilege_t TO role_core_privilege_update;
+
+statement ok
+GRANT role_core_privilege_select TO role_core_privilege_app;
+
+statement ok
+GRANT role_core_privilege_update TO role_core_privilege_app;
+
+statement ok
+GRANT role_core_privilege_app TO role_core_privilege_user;
+
+# SET ROLE should activate the simple role-membership graph.
+statement ok
+SET ROLE role_core_privilege_app;
+
+query II
+SELECT id, v FROM role_core_privilege_t ORDER BY id;
+----
+1 10
+2 20
+
+statement ok
+UPDATE role_core_privilege_t SET v = v + 1 WHERE id = 1;
+
+statement ok
+RESET ROLE;
+
+query II
+SELECT id, v FROM role_core_privilege_t ORDER BY id;
+----
+1 11
+2 20
+
+# A login user should inherit simple role memberships by default.
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_core_privilege_user -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FROM role_core_privilege_t WHERE id = 1 AND v = 11;" | grep -qx "1"
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_core_privilege_user -v ON_ERROR_STOP=1 -c "SET RW_IMPLICIT_FLUSH TO true; UPDATE role_core_privilege_t SET v = v + 1 WHERE id = 2;"
+
+query II
+SELECT id, v FROM role_core_privilege_t ORDER BY id;
+----
+1 11
+2 21
+
+# Simple REVOKE should remove the inherited privilege.
+statement ok
+REVOKE role_core_privilege_app FROM role_core_privilege_user;
+
+system ok
+PGPASSWORD=secret psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U role_core_privilege_user -v ON_ERROR_STOP=1 -c "SELECT id, v FROM role_core_privilege_t ORDER BY id;" 2>&1 | grep -qi "permission denied"
+
+statement ok
+DROP TABLE role_core_privilege_t;
+
+statement ok
+DROP ROLE role_core_privilege_user;
+
+statement ok
+DROP ROLE role_core_privilege_app;
+
+statement ok
+DROP ROLE role_core_privilege_select;
+
+statement ok
+DROP ROLE role_core_privilege_update;

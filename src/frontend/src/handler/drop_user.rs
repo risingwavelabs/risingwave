@@ -113,6 +113,8 @@ pub async fn handle_drop_user(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
+
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
@@ -136,5 +138,59 @@ mod tests {
                 .get_user_by_name("user")
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn test_createrole_requires_admin_option_to_drop_other_roles() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+
+        frontend
+            .run_sql("CREATE USER manager WITH CREATEROLE")
+            .await
+            .unwrap();
+        frontend.run_sql("CREATE USER target_user").await.unwrap();
+
+        let manager_id = frontend.user_by_name("manager").unwrap().id;
+        let err = frontend
+            .run_user_sql(
+                "DROP USER target_user",
+                DEFAULT_DATABASE_NAME.to_owned(),
+                "manager".to_owned(),
+                manager_id,
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("ADMIN OPTION"));
+
+        frontend
+            .run_sql("GRANT target_user TO manager WITH ADMIN OPTION")
+            .await
+            .unwrap();
+        frontend
+            .run_user_sql(
+                "DROP USER target_user",
+                DEFAULT_DATABASE_NAME.to_owned(),
+                "manager".to_owned(),
+                manager_id,
+            )
+            .await
+            .unwrap();
+        assert!(
+            session
+                .env()
+                .user_info_reader()
+                .read_guard()
+                .get_user_by_name("target_user")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_drop_user_rejects_default_admin_user_in_frontend() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let err = frontend.run_sql("DROP USER rwadmin").await.unwrap_err();
+        assert!(err.to_string().contains("drop default super user"));
     }
 }
