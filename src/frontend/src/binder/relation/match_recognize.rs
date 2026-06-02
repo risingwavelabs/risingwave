@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     AfterMatchSkip, Expr as AstExpr, MatchRecognizePattern, MatchRecognizeSymbol, Measure,
     OrderByExpr, RowsPerMatch, SymbolDefinition, TableAlias, TableFactor,
@@ -30,6 +31,10 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 pub struct BoundMeasure {
     pub expr: ExprImpl,
     pub name: String,
+    /// True when this measure is `CLASSIFIER()`: it has no column expression to evaluate; the
+    /// executor fills it with the pattern variable bound to the match's last row. `expr` then holds
+    /// a varchar null placeholder so the output schema and proto encoding stay uniform.
+    pub is_classifier: bool,
 }
 
 /// A bound `DEFINE` item: a pattern variable and the predicate that defines membership.
@@ -133,11 +138,28 @@ impl Binder {
         let measures = measures
             .iter()
             .map(|m| {
+                // CLASSIFIER() reports the pattern variable bound to the row a measure is evaluated
+                // on. Under ONE ROW PER MATCH that is the match's last row (FINAL semantics). It is
+                // resolved at execution time from the match's labels rather than from row columns,
+                // so bind a varchar null placeholder and flag the measure. Only a top-level
+                // CLASSIFIER() is supported in the v1 subset; nested uses (e.g. `lower(CLASSIFIER())`)
+                // fall through to ordinary binding and are rejected as an unknown function.
+                if let Some(arity) = classifier_call_arity(&m.expr) {
+                    if arity != 0 {
+                        bail_not_implemented!("CLASSIFIER() with arguments in MATCH_RECOGNIZE");
+                    }
+                    return Ok(BoundMeasure {
+                        expr: ExprImpl::literal_null(DataType::Varchar),
+                        name: m.alias.real_value(),
+                        is_classifier: true,
+                    });
+                }
                 reject_navigation(&m.expr)?;
                 let expr = self.bind_expr(&m.expr)?;
                 Ok(BoundMeasure {
                     expr: remap.rewrite_expr(expr),
                     name: m.alias.real_value(),
+                    is_classifier: false,
                 })
             })
             .collect::<RwResult<Vec<_>>>()?;
@@ -221,6 +243,18 @@ fn collect_from_pattern(pattern: &MatchRecognizePattern, out: &mut BTreeSet<Stri
         }
         MatchRecognizePattern::Group(inner) => collect_from_pattern(inner, out),
         MatchRecognizePattern::Repetition(inner, _) => collect_from_pattern(inner, out),
+    }
+}
+
+/// Returns the argument count if `expr` is a top-level `CLASSIFIER(...)` call, else `None`.
+fn classifier_call_arity(expr: &AstExpr) -> Option<usize> {
+    if let AstExpr::Function(func) = expr
+        && func.name.0.len() == 1
+        && func.name.0[0].real_value().eq_ignore_ascii_case("classifier")
+    {
+        Some(func.arg_list.args.len())
+    } else {
+        None
     }
 }
 

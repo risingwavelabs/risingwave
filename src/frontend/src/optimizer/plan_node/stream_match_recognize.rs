@@ -142,6 +142,14 @@ impl TryToStreamPb for StreamMatchRecognize {
             .map(|m| m.expr.to_expr_proto_checked_pure(retract, "match_recognize measure"))
             .collect::<crate::error::Result<Vec<_>>>()?;
         let measure_names = self.core.measures.iter().map(|m| m.name.clone()).collect();
+        let classifier_measure_indices = self
+            .core
+            .measures
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.is_classifier)
+            .map(|(i, _)| i as u32)
+            .collect();
 
         let define_symbols = self.core.defines.iter().map(|d| d.symbol.clone()).collect();
         let define_conditions = self
@@ -173,6 +181,7 @@ impl TryToStreamPb for StreamMatchRecognize {
                 _ => "past_last_row",
             }
             .to_owned(),
+            classifier_measure_indices,
         }))
     }
 }
