@@ -563,6 +563,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         }
                         let partition_key = row_ref.project(&partition_key_indices).to_owned_row();
                         let order_key = row_ref.datum_at(time_col).to_owned_datum();
+                        // A row with a NULL order key has no event time: it can never fall under the
+                        // watermark, so it would never be finalized or evicted (it would linger in the
+                        // buffer forever) and cannot be meaningfully ordered against other rows. Drop
+                        // it, as event-time processing does with NULL-rowtime rows.
+                        if order_key.is_none() {
+                            continue;
+                        }
 
                         let state = partitions.entry(partition_key).or_default();
                         let seq = state.next_seq;
