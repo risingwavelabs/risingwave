@@ -88,6 +88,7 @@ pub mod error;
 mod expand;
 mod filter;
 mod gap_fill;
+mod match_recognize;
 pub mod hash_join;
 mod hop_window;
 mod iceberg_with_pk_index;
