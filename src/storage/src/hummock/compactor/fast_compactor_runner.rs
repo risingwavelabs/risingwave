@@ -53,10 +53,22 @@ use crate::hummock::{
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
-struct RawMetaShard {
-    blocks: Vec<(Bytes, BlockMeta)>,
+#[derive(Clone)]
+struct MetaShardCopyCandidate {
+    block_metas: Vec<BlockMeta>,
     filter_data: Vec<u8>,
     largest_key: Vec<u8>,
+    table_id: TableId,
+}
+
+struct RawMetaShard {
+    candidate: MetaShardCopyCandidate,
+    blocks: Vec<(Bytes, BlockMeta)>,
+}
+
+enum MetaShardFastPath {
+    Copied { block_count: u64, block_size: u64 },
+    Skipped,
 }
 
 /// Iterates over the KV-pairs of an SST while downloading it.
@@ -124,7 +136,7 @@ impl BlockStreamIterator {
 
     async fn create_stream(&mut self) -> HummockResult<()> {
         // Fast compaction streams the physical SST blocks directly. Table-id pruning is handled
-        // later by `CompactTaskExecutor` before raw block copy or decoded block compaction.
+        // later by `CompactTaskExecutor` before raw shard copy or decoded block compaction.
         let block_stream = self
             .sstable_store
             .get_stream_for_blocks(
@@ -140,7 +152,7 @@ impl BlockStreamIterator {
     /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
     pub(crate) async fn download_next_block(
         &mut self,
-    ) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
+    ) -> HummockResult<Option<(Bytes, BlockMeta)>> {
         let now = Instant::now();
         let _time_stat = scopeguard::guard(self.stats_ptr.clone(), |stats_ptr: Arc<AtomicU64>| {
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
@@ -157,9 +169,8 @@ impl BlockStreamIterator {
             match ret {
                 Ok(Some((data, _))) => {
                     let meta = self.block_metas[self.next_block_index].clone();
-                    let filter_block = vec![];
                     self.next_block_index += 1;
-                    return Ok(Some((data, filter_block, meta)));
+                    return Ok(Some((data, meta)));
                 }
 
                 Ok(None) => break,
@@ -193,6 +204,51 @@ impl BlockStreamIterator {
         Ok(None)
     }
 
+    async fn download_raw_blocks_for_shard(
+        &mut self,
+        block_metas: &[BlockMeta],
+    ) -> HummockResult<Vec<(Bytes, BlockMeta)>> {
+        let now = Instant::now();
+        let _time_stat = scopeguard::guard(self.stats_ptr.clone(), |stats_ptr: Arc<AtomicU64>| {
+            let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
+            stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
+        });
+        let blocks = loop {
+            match self
+                .sstable_store
+                .read_raw_blocks_by_block_metas(self.sstable_info.object_id, block_metas)
+                .instrument_await("download_raw_meta_shard".verbose())
+                .await
+            {
+                Ok(blocks) => break blocks,
+                Err(e) => {
+                    if !e.is_object_error() || self.io_retry_times >= self.max_io_retry_times {
+                        return Err(e);
+                    }
+                    self.block_stream.take();
+                    self.io_retry_times += 1;
+                    tracing::warn!(
+                        "fast compact retry raw meta shard read for sstable {} times, sstinfo={}",
+                        self.io_retry_times,
+                        format!(
+                            "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
+                            self.sstable_info.object_id,
+                            self.sstable_info.sst_id,
+                            self.sstable_info.meta_offset,
+                            self.sstable_info.table_ids
+                        )
+                    );
+                }
+            }
+        };
+        self.block_stream.take();
+        self.next_block_index += blocks.len();
+        Ok(blocks
+            .into_iter()
+            .zip(block_metas.iter().cloned())
+            .collect())
+    }
+
     pub(crate) fn init_block_iter(
         &mut self,
         buf: Bytes,
@@ -205,29 +261,11 @@ impl BlockStreamIterator {
         Ok(())
     }
 
-    fn next_block_smallest(&self) -> &[u8] {
-        self.block_metas[self.next_block_index]
-            .smallest_key
-            .as_ref()
-    }
-
-    fn next_block_largest(&self) -> &[u8] {
-        if self.next_block_index + 1 < self.block_metas.len() {
-            self.block_metas[self.next_block_index + 1]
-                .smallest_key
-                .as_ref()
-        } else {
-            self.sstable.meta.largest_key.as_ref()
-        }
-    }
-
-    fn current_block_largest(&self) -> Vec<u8> {
-        if self.next_block_index < self.block_metas.len() {
-            let mut largest_key = FullKey::decode(
-                self.block_metas[self.next_block_index]
-                    .smallest_key
-                    .as_ref(),
-            );
+    fn meta_shard_largest(&self, shard: &MetaShard) -> Vec<u8> {
+        let end_block_idx = shard.first_block_idx as usize + shard.block_metas.len();
+        if end_block_idx < self.block_metas.len() {
+            let mut largest_key =
+                FullKey::decode(self.block_metas[end_block_idx].smallest_key.as_ref());
             // do not include this key because it is the smallest key of next block.
             largest_key.epoch_with_gap = EpochWithGap::new_max_epoch();
             largest_key.encode()
@@ -252,52 +290,53 @@ impl BlockStreamIterator {
     }
 
     fn next_partitioned_shard(&self) -> Option<&MetaShard> {
+        let current_key = self.key();
         let shards = self.partitioned_shards.as_ref()?;
-        let shard = shards
-            .iter()
-            .find(|shard| shard.first_block_idx as usize == self.next_block_index)?;
+        let shard = shards.iter().find(|shard| {
+            shard
+                .block_metas
+                .first()
+                .is_some_and(|block_meta| FullKey::decode(&block_meta.smallest_key) == current_key)
+        })?;
         if shard.block_metas.is_empty() {
             None
         } else {
-            Some(shard)
+            // The key check above is the semantic boundary. This index guard only ensures the
+            // physical block stream is positioned at the beginning of the shard whose filter will
+            // be reused.
+            (shard.first_block_idx as usize == self.next_block_index).then_some(shard)
         }
     }
 
-    fn next_partitioned_shard_block_metas(&self) -> Option<&[BlockMeta]> {
-        Some(&self.next_partitioned_shard()?.block_metas)
-    }
-
-    fn next_partitioned_shard_largest(&self) -> Option<Vec<u8>> {
+    fn next_partitioned_shard_copy_candidate(&self) -> Option<MetaShardCopyCandidate> {
         let shard = self.next_partitioned_shard()?;
-        let end_block_idx = shard.first_block_idx as usize + shard.block_metas.len();
-        if end_block_idx < self.block_metas.len() {
-            let mut largest_key =
-                FullKey::decode(self.block_metas[end_block_idx].smallest_key.as_ref());
-            largest_key.epoch_with_gap = EpochWithGap::new_max_epoch();
-            Some(largest_key.encode())
-        } else {
-            Some(self.sstable.meta.largest_key.clone())
-        }
+        let smallest_key = FullKey::decode(shard.block_metas.first()?.smallest_key.as_ref());
+        Some(MetaShardCopyCandidate {
+            block_metas: shard.block_metas.clone(),
+            filter_data: shard.filter.clone(),
+            largest_key: self.meta_shard_largest(shard),
+            table_id: smallest_key.user_key.table_id,
+        })
     }
 
-    async fn download_next_partitioned_shard(&mut self) -> HummockResult<Option<RawMetaShard>> {
-        let Some(shard) = self.next_partitioned_shard().cloned() else {
-            return Ok(None);
-        };
+    async fn download_next_partitioned_shard(
+        &mut self,
+        candidate: MetaShardCopyCandidate,
+    ) -> HummockResult<Option<RawMetaShard>> {
+        let blocks = self
+            .download_raw_blocks_for_shard(&candidate.block_metas)
+            .await?;
 
-        let mut blocks = Vec::with_capacity(shard.block_metas.len());
-        for _ in 0..shard.block_metas.len() {
-            let Some((block, _, meta)) = self.download_next_block().await? else {
-                return Ok(None);
-            };
-            blocks.push((block, meta));
+        Ok(Some(RawMetaShard { candidate, blocks }))
+    }
+
+    fn skip_next_partitioned_shard(&mut self, candidate: &MetaShardCopyCandidate) {
+        self.block_stream.take();
+        self.next_block_index += candidate.block_metas.len();
+        if self.next_block_index >= self.block_metas.len() {
+            self.next_block_index = self.block_metas.len();
+            self.iter.take();
         }
-
-        Ok(Some(RawMetaShard {
-            blocks,
-            filter_data: shard.filter,
-            largest_key: self.current_block_largest(),
-        }))
     }
 
     #[cfg(test)]
@@ -371,7 +410,7 @@ impl ConcatSstableIterator {
             if sstable.iter.is_some() {
                 return Ok(());
             }
-            let (buf, _, meta) = sstable.download_next_block().await?.unwrap();
+            let (buf, meta) = sstable.download_next_block().await?.unwrap();
             sstable.init_block_iter(buf, meta.uncompressed_size as usize)?;
         }
         Ok(())
@@ -598,7 +637,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         }
     }
 
-    async fn try_copy_next_partitioned_shard(
+    async fn try_process_next_partitioned_shard(
         executor: &mut CompactTaskExecutor<
             RemoteBuilderFactory<UnifiedSstableWriterFactory, BlockedXor16FilterBuilder>,
             C,
@@ -606,36 +645,37 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         compression_algorithm: CompressionAlgorithm,
         sstable_iter: &mut BlockStreamIterator,
         right_key: Option<FullKey<Vec<u8>>>,
-    ) -> HummockResult<Option<(u64, u64)>> {
+    ) -> HummockResult<Option<MetaShardFastPath>> {
+        let Some(candidate) = sstable_iter.next_partitioned_shard_copy_candidate() else {
+            return Ok(None);
+        };
+
+        if candidate
+            .block_metas
+            .iter()
+            .any(|block_meta| block_meta.table_id() != candidate.table_id)
+        {
+            return Ok(None);
+        }
+
+        if executor.should_skip_table(candidate.table_id) {
+            sstable_iter.skip_next_partitioned_shard(&candidate);
+            return Ok(Some(MetaShardFastPath::Skipped));
+        }
+
         if executor.builder.need_flush() {
             return Ok(None);
         }
 
-        let Some(block_metas) = sstable_iter
-            .next_partitioned_shard_block_metas()
-            .map(|block_metas| block_metas.to_vec())
-        else {
-            return Ok(None);
-        };
-
-        if !executor.builder.can_add_raw_meta_shard(block_metas.len()) {
-            return Ok(None);
-        }
-        let Some(first_table_id) = block_metas.first().map(BlockMeta::table_id) else {
-            return Ok(None);
-        };
-        if block_metas
-            .iter()
-            .any(|block_meta| block_meta.table_id() != first_table_id)
+        if !executor
+            .builder
+            .can_add_raw_meta_shard(candidate.block_metas.len())
         {
             return Ok(None);
         }
 
         if let Some(right_key) = right_key {
-            let Some(shard_largest) = sstable_iter.next_partitioned_shard_largest() else {
-                return Ok(None);
-            };
-            if FullKey::decode(&shard_largest)
+            if FullKey::decode(&candidate.largest_key)
                 .user_key
                 .ge(&right_key.user_key.as_ref())
             {
@@ -643,11 +683,14 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             }
         }
 
-        if !executor.shall_copy_raw_meta_shard(&block_metas) {
+        if !executor.shall_copy_raw_meta_shard(&candidate) {
             return Ok(None);
         }
 
-        let Some(mut shard) = sstable_iter.download_next_partitioned_shard().await? else {
+        let Some(mut shard) = sstable_iter
+            .download_next_partitioned_shard(candidate)
+            .await?
+        else {
             return Ok(None);
         };
 
@@ -663,14 +706,20 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             key_count += meta.total_key_count;
         }
 
+        let raw_copy_block_count = shard.candidate.block_metas.len() as u64;
+        let filter_data = shard.candidate.filter_data;
+        let largest_key = shard.candidate.largest_key;
         let copied = executor
             .builder
-            .add_raw_meta_shard(shard.blocks, shard.filter_data, shard.largest_key)
+            .add_raw_meta_shard(shard.blocks, filter_data, largest_key)
             .await?;
         assert!(copied, "checked raw meta shard should be copied");
         executor.may_report_process_key(key_count);
         executor.clear();
-        Ok(Some((block_metas.len() as u64, raw_block_size)))
+        Ok(Some(MetaShardFastPath::Copied {
+            block_count: raw_copy_block_count,
+            block_size: raw_block_size,
+        }))
     }
 
     pub async fn run(mut self) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
@@ -696,8 +745,8 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             );
             if first.current_sstable().iter.is_none() {
                 let right_key = second.current_sstable().key().to_vec();
-                while first.current_sstable().is_valid() && !self.executor.builder.need_flush() {
-                    if let Some((block_count, block_size)) = Self::try_copy_next_partitioned_shard(
+                while first.current_sstable().is_valid() {
+                    if let Some(fast_path) = Self::try_process_next_partitioned_shard(
                         &mut self.executor,
                         self.compression_algorithm,
                         first.current_sstable(),
@@ -705,55 +754,21 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                     )
                     .await?
                     {
-                        skip_raw_block_count += block_count;
-                        skip_raw_block_size += block_size;
-                        self.executor
-                            .compaction_statistics
-                            .raw_copy_meta_shard_count += 1;
+                        if let MetaShardFastPath::Copied {
+                            block_count,
+                            block_size,
+                        } = fast_path
+                        {
+                            skip_raw_block_count += block_count;
+                            skip_raw_block_size += block_size;
+                            self.executor
+                                .compaction_statistics
+                                .raw_copy_meta_shard_count += 1;
+                        }
                         continue;
                     }
 
-                    let full_key = FullKey::decode(first.current_sstable().next_block_largest());
-                    // the full key may be either Excluded key or Included key, so we do not allow
-                    // they equals.
-                    if full_key.user_key.ge(&right_key.user_key.as_ref()) {
-                        break;
-                    }
-                    let smallest_key =
-                        FullKey::decode(first.current_sstable().next_block_smallest());
-                    if !self.executor.shall_copy_raw_block(&smallest_key) {
-                        break;
-                    }
-                    let smallest_key = smallest_key.to_vec();
-
-                    let (mut block, filter_data, mut meta) = first
-                        .current_sstable()
-                        .download_next_block()
-                        .await?
-                        .unwrap();
-                    let algorithm = Block::get_algorithm(&block)?;
-                    if algorithm == CompressionAlgorithm::None
-                        && algorithm != self.compression_algorithm
-                    {
-                        block = BlockBuilder::compress_block(block, self.compression_algorithm)?;
-                        meta.len = block.len() as u32;
-                    }
-
-                    let largest_key = first.current_sstable().current_block_largest();
-                    let block_len = block.len() as u64;
-                    let block_key_count = meta.total_key_count;
-
-                    if self
-                        .executor
-                        .builder
-                        .add_raw_block(block, filter_data, smallest_key, largest_key, meta)
-                        .await?
-                    {
-                        skip_raw_block_size += block_len;
-                        skip_raw_block_count += 1;
-                    }
-                    self.executor.may_report_process_key(block_key_count);
-                    self.executor.clear();
+                    break;
                 }
                 if !first.current_sstable().is_valid() {
                     first.next_sstable().await?;
@@ -797,7 +812,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         while rest_data.is_valid() {
             let mut sstable_iter = rest_data.sstable_iter.take().unwrap();
             while sstable_iter.is_valid() {
-                if let Some((block_count, block_size)) = Self::try_copy_next_partitioned_shard(
+                if let Some(fast_path) = Self::try_process_next_partitioned_shard(
                     &mut self.executor,
                     self.compression_algorithm,
                     &mut sstable_iter,
@@ -805,46 +820,27 @@ impl<C: CompactionFilter> CompactorRunner<C> {
                 )
                 .await?
                 {
-                    skip_raw_block_count += block_count;
-                    skip_raw_block_size += block_size;
-                    self.executor
-                        .compaction_statistics
-                        .raw_copy_meta_shard_count += 1;
+                    if let MetaShardFastPath::Copied {
+                        block_count,
+                        block_size,
+                    } = fast_path
+                    {
+                        skip_raw_block_count += block_count;
+                        skip_raw_block_size += block_size;
+                        self.executor
+                            .compaction_statistics
+                            .raw_copy_meta_shard_count += 1;
+                    }
                     continue;
                 }
 
-                let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
-                let (block, filter_data, block_meta) =
-                    sstable_iter.download_next_block().await?.unwrap();
-                // If the last key is tombstone and it was deleted, the first key of this block must be deleted. So we can not move this block directly.
-                let need_deleted = self.executor.last_key.user_key.eq(&smallest_key.user_key)
-                    && self.executor.last_key_is_delete;
-                if self.executor.builder.need_flush()
-                    || need_deleted
-                    || !self.executor.shall_copy_raw_block(&smallest_key.to_ref())
-                {
-                    let largest_key = sstable_iter.sstable.meta.largest_key.clone();
-                    let target_key = FullKey::decode(&largest_key);
-                    sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
-                    let mut iter = sstable_iter.iter.take().unwrap();
-                    self.executor.reset_watermark();
-                    self.executor.run(&mut iter, target_key).await?;
-                } else {
-                    let largest_key = sstable_iter.current_block_largest();
-                    let block_len = block.len() as u64;
-                    let block_key_count = block_meta.total_key_count;
-                    if self
-                        .executor
-                        .builder
-                        .add_raw_block(block, filter_data, smallest_key, largest_key, block_meta)
-                        .await?
-                    {
-                        skip_raw_block_count += 1;
-                        skip_raw_block_size += block_len;
-                    }
-                    self.executor.may_report_process_key(block_key_count);
-                    self.executor.clear();
-                }
+                let (block, block_meta) = sstable_iter.download_next_block().await?.unwrap();
+                let largest_key = sstable_iter.sstable.meta.largest_key.clone();
+                let target_key = FullKey::decode(&largest_key);
+                sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
+                let mut iter = sstable_iter.iter.take().unwrap();
+                self.executor.reset_watermark();
+                self.executor.run(&mut iter, target_key).await?;
             }
             rest_data.next_sstable().await?;
         }
@@ -953,7 +949,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
     }
 
     #[inline(always)]
-    fn should_skip_block(&self, table_id: TableId) -> bool {
+    fn should_skip_table(&self, table_id: TableId) -> bool {
         !self.read_table_ids.contains(&table_id)
     }
 
@@ -973,7 +969,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
     ) -> HummockResult<()> {
-        if self.should_skip_block(iter.table_id()) {
+        if self.should_skip_table(iter.table_id()) {
             iter.finish_block();
             return Ok(());
         }
@@ -1038,56 +1034,42 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         Ok(())
     }
 
-    pub fn shall_copy_raw_block(&mut self, smallest_key: &FullKey<&[u8]>) -> bool {
-        if self.should_skip_block(smallest_key.user_key.table_id) {
-            // If the table id of smallest key is not in read_table_ids, we can not copy the raw block.
+    fn shall_copy_raw_meta_shard(&mut self, candidate: &MetaShardCopyCandidate) -> bool {
+        if candidate.block_metas.is_empty() {
             return false;
         }
 
-        if self.last_key_is_delete && self.last_key.user_key.as_ref().eq(&smallest_key.user_key) {
-            // If the last key is delete tombstone, we can not append the origin block
-            // because it would cause a deleted key could be see by user again.
+        if self.should_skip_table(candidate.table_id) {
             return false;
         }
 
-        if self.watermark_may_delete(smallest_key) {
-            return false;
-        }
+        for (idx, block_meta) in candidate.block_metas.iter().enumerate() {
+            let smallest_key = FullKey::decode(block_meta.smallest_key.as_ref());
+            if self.should_skip_table(smallest_key.user_key.table_id) {
+                return false;
+            }
 
-        // Check compaction filter
-        if self.compaction_filter.should_delete(*smallest_key) {
-            return false;
+            if idx == 0
+                && self.last_key_is_delete
+                && self.last_key.user_key.as_ref() == smallest_key.user_key
+            {
+                return false;
+            }
+
+            if self.watermark_may_delete(&smallest_key) {
+                return false;
+            }
+
+            if self.compaction_filter.should_delete(smallest_key) {
+                return false;
+            }
         }
 
         true
     }
 
-    pub fn shall_copy_raw_meta_shard(&mut self, block_metas: &[BlockMeta]) -> bool {
-        if self.pk_prefix_skip_watermark_state.has_watermark()
-            || self.non_pk_prefix_skip_watermark_state.has_watermark()
-            || self.value_skip_watermark_state.has_watermark()
-        {
-            return false;
-        }
-
-        let Some(first_block_meta) = block_metas.first() else {
-            return false;
-        };
-        let first_smallest_key = FullKey::decode(&first_block_meta.smallest_key);
-        if !self.last_key.is_empty()
-            && self.last_key.user_key.as_ref() == first_smallest_key.user_key
-        {
-            return false;
-        }
-
-        block_metas.iter().all(|block_meta| {
-            let smallest_key = FullKey::decode(&block_meta.smallest_key);
-            self.shall_copy_raw_block(&smallest_key)
-        })
-    }
-
     fn watermark_may_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
-        // Correctness requires the assumption that these PkPrefixSkipWatermarkState and NonPkPrefixSkipWatermarkState never use the `unused_put`.
+        // Correctness requires the assumption that these watermark states never use the dummy value.
         let pk_prefix_has_watermark = self.pk_prefix_skip_watermark_state.has_watermark();
         let non_pk_prefix_has_watermark = self.non_pk_prefix_skip_watermark_state.has_watermark();
         if pk_prefix_has_watermark || non_pk_prefix_has_watermark {
@@ -1145,7 +1127,7 @@ mod tests {
     use crate::compaction_catalog_manager::CompactionCatalogAgent;
     use crate::hummock::compactor::compaction_utils::optimize_by_copy_block;
     use crate::hummock::compactor::task_progress::TaskProgress;
-    use crate::hummock::compactor::{CompactorContext, MultiCompactionFilter};
+    use crate::hummock::compactor::{CompactionFilter, CompactorContext, MultiCompactionFilter};
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
@@ -1159,9 +1141,24 @@ mod tests {
     use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
     fn test_key(table_id: u32, idx: usize) -> FullKey<Vec<u8>> {
+        test_key_with_epoch(table_id, idx, 1)
+    }
+
+    fn test_key_with_epoch(table_id: u32, idx: usize, epoch: u64) -> FullKey<Vec<u8>> {
         let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
         table_key.extend_from_slice(format!("key_test_{idx:05}").as_bytes());
-        FullKey::for_test(TableId::new(table_id), table_key, test_epoch(1))
+        FullKey::for_test(TableId::new(table_id), table_key, test_epoch(epoch))
+    }
+
+    #[derive(Clone)]
+    struct ShouldDeleteTableFilter {
+        table_id: TableId,
+    }
+
+    impl CompactionFilter for ShouldDeleteTableFilter {
+        fn should_delete(&mut self, key: FullKey<&[u8]>) -> bool {
+            self.table_id == key.user_key.table_id
+        }
     }
 
     #[tokio::test]
@@ -1258,7 +1255,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fast_compact_copies_partitioned_meta_whole_shards() {
+    async fn test_fast_compact_copies_only_partitioned_meta_whole_shards() {
         let sstable_store = mock_sstable_store().await;
         let table_id_to_vnode = HashMap::from([(1, VirtualNode::COUNT_FOR_TEST)]);
         let table_id_to_watermark_serde = HashMap::from([(1, None)]);
@@ -1270,7 +1267,7 @@ mod tests {
         let left_sst = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
             opt.clone(),
             11,
-            (0..4).map(|idx| (test_key(1, idx), HummockValue::put(test_value_of(idx)))),
+            (0..3).map(|idx| (test_key(1, idx), HummockValue::put(test_value_of(idx)))),
             sstable_store.clone(),
             CachePolicy::NotFill,
             table_id_to_vnode.clone(),
@@ -1280,7 +1277,7 @@ mod tests {
         let right_sst = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
             opt,
             12,
-            (4..8).map(|idx| (test_key(1, idx), HummockValue::put(test_value_of(idx)))),
+            (3..6).map(|idx| (test_key(1, idx), HummockValue::put(test_value_of(idx)))),
             sstable_store.clone(),
             CachePolicy::NotFill,
             table_id_to_vnode,
@@ -1337,8 +1334,8 @@ mod tests {
         );
 
         let (output_ssts, stats) = runner.run().await.unwrap();
-        assert_eq!(stats.raw_copy_block_count, 8);
-        assert_eq!(stats.raw_copy_meta_shard_count, 4);
+        assert_eq!(stats.raw_copy_block_count, 2);
+        assert_eq!(stats.raw_copy_meta_shard_count, 1);
         assert_eq!(output_ssts.len(), 1);
 
         let output_sst = sstable_store
@@ -1356,11 +1353,12 @@ mod tests {
             .get_partitioned_meta_shards(&output_sst, &mut StoreLocalStatistic::default())
             .await
             .unwrap();
-        assert_eq!(output_shards.len(), 4);
-        assert!(
+        assert_eq!(
             output_shards
                 .iter()
-                .all(|shard| shard.block_metas.len() == 2)
+                .map(|shard| shard.block_metas.len())
+                .sum::<usize>(),
+            output_sst.block_count()
         );
 
         let mut iter = SstableIterator::create(
@@ -1375,6 +1373,202 @@ mod tests {
             key_count += 1;
             iter.next().await.unwrap();
         }
-        assert_eq!(key_count, 8);
+        assert_eq!(key_count, 6);
+    }
+
+    #[tokio::test]
+    async fn test_fast_compact_rejects_partitioned_meta_shard_on_key_overlap() {
+        let sstable_store = mock_sstable_store().await;
+        let table_id_to_vnode = HashMap::from([(1, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from([(1, None)]);
+
+        let mut opt = default_builder_opt_for_test();
+        opt.block_capacity = 1;
+        opt.partitioned_meta_block_count = 2;
+
+        let left_sst = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+            opt.clone(),
+            21,
+            (0..4).map(|idx| (test_key(1, idx), HummockValue::put(test_value_of(idx)))),
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            table_id_to_vnode.clone(),
+            table_id_to_watermark_serde.clone(),
+        )
+        .await;
+        let right_sst = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+            opt,
+            22,
+            (3..6).map(|idx| {
+                (
+                    test_key_with_epoch(1, idx, if idx == 3 { 2 } else { 1 }),
+                    HummockValue::put(test_value_of(idx)),
+                )
+            }),
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        )
+        .await;
+
+        let mut storage_opts = default_opts_for_test();
+        storage_opts.enable_fast_compaction = true;
+        storage_opts.compactor_fast_max_compact_task_size = u64::MAX;
+        storage_opts.compactor_fast_max_compact_delete_ratio = 100;
+        let context = CompactorContext::new_local_compact_context(
+            Arc::new(storage_opts),
+            sstable_store.clone(),
+            Arc::new(CompactorMetrics::unused()),
+            None,
+        );
+
+        let task = CompactTask {
+            input_ssts: vec![
+                InputLevel {
+                    level_idx: 1,
+                    level_type: LevelType::Nonoverlapping,
+                    table_infos: vec![left_sst],
+                },
+                InputLevel {
+                    level_idx: 2,
+                    level_type: LevelType::Nonoverlapping,
+                    table_infos: vec![right_sst],
+                },
+            ],
+            task_id: 44,
+            target_level: 2,
+            existing_table_ids: vec![TableId::new(1)],
+            target_file_size: 1 << 20,
+            task_type: TaskType::Dynamic,
+            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+            ..Default::default()
+        };
+
+        let mut output_opt = default_builder_opt_for_test();
+        output_opt.block_capacity = 1;
+        output_opt.partitioned_meta_block_count = 2;
+        let runner = CompactorRunner::new_for_test(
+            context,
+            task,
+            CompactionCatalogAgent::for_test(vec![1]),
+            SharedComapctorObjectIdManager::for_test(VecDeque::from([101])),
+            Arc::new(TaskProgress::default()),
+            MultiCompactionFilter::default(),
+            output_opt,
+        );
+
+        let (output_ssts, stats) = runner.run().await.unwrap();
+        assert_eq!(stats.raw_copy_block_count, 2);
+        assert_eq!(stats.raw_copy_meta_shard_count, 1);
+        assert_eq!(output_ssts.len(), 1);
+
+        let output_sst = sstable_store
+            .meta_index(
+                &output_ssts[0].sst_info,
+                &mut StoreLocalStatistic::default(),
+            )
+            .await
+            .unwrap();
+        let mut iter = SstableIterator::create(
+            output_sst,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions::default()),
+            &output_ssts[0].sst_info,
+        );
+        iter.rewind().await.unwrap();
+        let mut key_count = 0;
+        while iter.is_valid() {
+            key_count += 1;
+            iter.next().await.unwrap();
+        }
+        assert_eq!(key_count, 6);
+    }
+
+    #[tokio::test]
+    async fn test_fast_compact_rejects_partitioned_meta_shard_when_filter_should_delete() {
+        let sstable_store = mock_sstable_store().await;
+        let table_id_to_vnode = HashMap::from([(1, VirtualNode::COUNT_FOR_TEST)]);
+        let table_id_to_watermark_serde = HashMap::from([(1, None)]);
+
+        let mut opt = default_builder_opt_for_test();
+        opt.block_capacity = 1;
+        opt.partitioned_meta_block_count = 2;
+
+        let left_sst = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+            opt.clone(),
+            31,
+            (0..2).map(|idx| (test_key(1, idx), HummockValue::put(test_value_of(idx)))),
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            table_id_to_vnode.clone(),
+            table_id_to_watermark_serde.clone(),
+        )
+        .await;
+        let right_sst = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+            opt,
+            32,
+            (2..4).map(|idx| (test_key(1, idx), HummockValue::put(test_value_of(idx)))),
+            sstable_store.clone(),
+            CachePolicy::NotFill,
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        )
+        .await;
+
+        let mut storage_opts = default_opts_for_test();
+        storage_opts.enable_fast_compaction = true;
+        storage_opts.compactor_fast_max_compact_task_size = u64::MAX;
+        storage_opts.compactor_fast_max_compact_delete_ratio = 100;
+        let context = CompactorContext::new_local_compact_context(
+            Arc::new(storage_opts),
+            sstable_store.clone(),
+            Arc::new(CompactorMetrics::unused()),
+            None,
+        );
+
+        let task = CompactTask {
+            input_ssts: vec![
+                InputLevel {
+                    level_idx: 1,
+                    level_type: LevelType::Nonoverlapping,
+                    table_infos: vec![left_sst],
+                },
+                InputLevel {
+                    level_idx: 2,
+                    level_type: LevelType::Nonoverlapping,
+                    table_infos: vec![right_sst],
+                },
+            ],
+            task_id: 45,
+            target_level: 2,
+            existing_table_ids: vec![TableId::new(1)],
+            target_file_size: 1 << 20,
+            task_type: TaskType::Dynamic,
+            sstable_filter_kind: PbSstableFilterType::SstableFilterXor16,
+            ..Default::default()
+        };
+
+        let mut output_opt = default_builder_opt_for_test();
+        output_opt.block_capacity = 1;
+        output_opt.partitioned_meta_block_count = 2;
+        let mut filter = MultiCompactionFilter::default();
+        filter.register(Box::new(ShouldDeleteTableFilter {
+            table_id: TableId::new(1),
+        }));
+        let runner = CompactorRunner::new_for_test(
+            context,
+            task,
+            CompactionCatalogAgent::for_test(vec![1]),
+            SharedComapctorObjectIdManager::for_test(VecDeque::from([102])),
+            Arc::new(TaskProgress::default()),
+            filter,
+            output_opt,
+        );
+
+        let (output_ssts, stats) = runner.run().await.unwrap();
+        assert_eq!(stats.raw_copy_block_count, 0);
+        assert_eq!(stats.raw_copy_meta_shard_count, 0);
+        assert_eq!(output_ssts.len(), 0);
     }
 }

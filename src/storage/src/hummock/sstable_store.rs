@@ -605,9 +605,50 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Box<dyn BlockStream>> {
-        let object_id = sst.id;
+        let end_index = std::cmp::min(end_index, sst.meta.block_metas.len());
+        self.prefetch_blocks_by_block_metas(
+            sst.id,
+            sst.meta.estimated_size,
+            block_index,
+            &sst.meta.block_metas[block_index..end_index],
+            policy,
+            stats,
+        )
+        .await
+    }
+
+    pub fn max_prefetch_block_number(&self) -> usize {
+        self.max_prefetch_block_number
+    }
+
+    pub async fn prefetch_blocks_by_block_metas(
+        &self,
+        object_id: HummockSstableObjectId,
+        file_size: u32,
+        block_index: usize,
+        block_metas: &[BlockMeta],
+        policy: CachePolicy,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<Box<dyn BlockStream>> {
+        if block_metas.is_empty() {
+            return Ok(Box::new(PrefetchBlockStream::new(
+                VecDeque::new(),
+                block_index,
+                None,
+            )));
+        }
+
         if self.prefetch_buffer_usage.load(Ordering::Acquire) > self.prefetch_buffer_capacity {
-            let block = self.get(sst, block_index, policy, stats).await?;
+            let block = self
+                .get_by_block_meta(
+                    object_id,
+                    file_size,
+                    block_index,
+                    &block_metas[0],
+                    policy,
+                    stats,
+                )
+                .await?;
             return Ok(Box::new(PrefetchBlockStream::new(
                 VecDeque::from([block]),
                 block_index,
@@ -634,31 +675,31 @@ impl SstableStore {
                 None,
             )));
         }
-        let end_index = std::cmp::min(end_index, block_index + self.max_prefetch_block_number);
-        let mut end_index = std::cmp::min(end_index, sst.meta.block_metas.len());
-        let start_offset = sst.meta.block_metas[block_index].offset as usize;
-        let mut min_hit_index = end_index;
+        let mut prefetch_block_count =
+            std::cmp::min(block_metas.len(), self.max_prefetch_block_number);
+        let start_offset = block_metas[0].offset as usize;
+        let mut min_hit_offset = prefetch_block_count;
         let mut hit_count = 0;
-        for idx in block_index..end_index {
+        for idx in block_index..block_index + prefetch_block_count {
             if self.block_cache.contains(&SstableBlockIndex {
                 sst_id: object_id,
                 block_idx: idx as _,
             }) {
-                if min_hit_index > idx && idx > block_index {
-                    min_hit_index = idx;
+                let hit_offset = idx - block_index;
+                if min_hit_offset > hit_offset && hit_offset > 0 {
+                    min_hit_offset = hit_offset;
                 }
                 hit_count += 1;
             }
         }
 
-        if hit_count * 3 >= (end_index - block_index) || min_hit_index * 2 > block_index + end_index
-        {
-            end_index = min_hit_index;
+        if hit_count * 3 >= prefetch_block_count || min_hit_offset * 2 > prefetch_block_count {
+            prefetch_block_count = min_hit_offset;
         }
         stats.cache_data_prefetch_count += 1;
-        stats.cache_data_prefetch_block_count += (end_index - block_index) as u64;
+        stats.cache_data_prefetch_block_count += prefetch_block_count as u64;
         let end_offset = start_offset
-            + sst.meta.block_metas[block_index..end_index]
+            + block_metas[..prefetch_block_count]
                 .iter()
                 .map(|meta| meta.len as usize)
                 .sum::<usize>();
@@ -681,7 +722,7 @@ impl SstableStore {
                     start_offset,
                     end_offset,
                     object_id,
-                    sst.meta.estimated_size,
+                    file_size,
                 );
                 return Err(e.into());
             }
@@ -693,15 +734,18 @@ impl SstableStore {
         stats.sst_store_data_prefetch_read_bytes += (end_offset - start_offset) as u64;
         let mut offset = 0;
         let mut blocks = VecDeque::default();
-        for idx in block_index..end_index {
-            let end = offset + sst.meta.block_metas[idx].len as usize;
+        for (offset_in_prefetch, block_meta) in
+            block_metas[..prefetch_block_count].iter().enumerate()
+        {
+            let idx = block_index + offset_in_prefetch;
+            let end = offset + block_meta.len as usize;
             if end > buf.len() {
                 return Err(ObjectError::internal("read unexpected EOF").into());
             }
             // copy again to avoid holding a large data in memory.
             let block = Block::decode_with_copy(
                 buf.slice(offset..end),
-                sst.meta.block_metas[idx].uncompressed_size as usize,
+                block_meta.uncompressed_size as usize,
                 true,
             )?;
             let holder = if let CachePolicy::Fill(hint) = policy {
@@ -1425,6 +1469,55 @@ impl SstableStore {
             }
         };
         Ok(BlockDataStream::new(reader, metas.to_vec()))
+    }
+
+    pub async fn read_raw_blocks_by_block_metas(
+        &self,
+        object_id: HummockSstableObjectId,
+        metas: &[BlockMeta],
+    ) -> HummockResult<Vec<Bytes>> {
+        if metas.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let start_pos = metas[0].offset as usize;
+        let mut expected_offset = start_pos;
+        for meta in metas {
+            if meta.offset as usize != expected_offset {
+                return Err(ObjectError::internal(format!(
+                    "non-contiguous raw block range in sst {}: expected offset {}, actual {}",
+                    object_id, expected_offset, meta.offset
+                ))
+                .into());
+            }
+            expected_offset += meta.len as usize;
+        }
+        let data_path = self.get_sst_data_path(object_id);
+        let store = self.store();
+        let range = start_pos..expected_offset;
+        let ret = tokio::spawn(async move { store.read(&data_path, range).await }).await;
+        let buf = match ret {
+            Ok(Ok(buf)) => buf,
+            Ok(Err(e)) => return Err(HummockError::from(e)),
+            Err(e) => {
+                return Err(HummockError::other(format!(
+                    "failed to get result, this read request may be canceled: {}",
+                    e.as_report()
+                )));
+            }
+        };
+
+        let mut offset = 0;
+        let mut blocks = Vec::with_capacity(metas.len());
+        for meta in metas {
+            let end = offset + meta.len as usize;
+            if end > buf.len() {
+                return Err(ObjectError::internal("read unexpected EOF").into());
+            }
+            blocks.push(buf.slice(offset..end));
+            offset = end;
+        }
+        Ok(blocks)
     }
 
     pub fn meta_cache(&self) -> &HybridCache<HummockMetaCacheKey, HummockMetaCacheEntry> {

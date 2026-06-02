@@ -161,28 +161,6 @@ where
         self.add_full_key(full_key, value, is_new_user_key).await
     }
 
-    pub async fn add_raw_block(
-        &mut self,
-        buf: Bytes,
-        filter_data: Vec<u8>,
-        smallest_key: FullKey<Vec<u8>>,
-        largest_key: Vec<u8>,
-        block_meta: BlockMeta,
-    ) -> HummockResult<bool> {
-        if self.current_builder.is_none() {
-            if let Some(progress) = &self.task_progress {
-                progress.inc_num_pending_write_io()
-            }
-            let builder = self.builder_factory.open_builder().await?;
-            self.current_builder = Some(builder);
-        }
-
-        let builder = self.current_builder.as_mut().unwrap();
-        builder
-            .add_raw_block(buf, filter_data, smallest_key, largest_key, block_meta)
-            .await
-    }
-
     pub fn can_add_raw_meta_shard(&self, block_count: usize) -> bool {
         self.current_builder
             .as_ref()

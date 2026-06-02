@@ -41,8 +41,7 @@ use crate::compaction_catalog_manager::{
 use crate::hummock::sstable::{FilterBuilder, utils};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    Block, BlockHolder, BlockIterator, HummockResult, MemoryLimiter, Xor16FilterBuilder,
-    try_shorten_block_smallest_key,
+    HummockResult, MemoryLimiter, Xor16FilterBuilder, try_shorten_block_smallest_key,
 };
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
@@ -306,43 +305,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
     pub fn current_block_size(&self) -> usize {
         self.block_builder.approximate_len()
-    }
-
-    async fn add_decoded_raw_block(
-        &mut self,
-        buf: Bytes,
-        uncompressed_size: u32,
-    ) -> HummockResult<()> {
-        let block = Block::decode(buf, uncompressed_size as usize)?;
-        let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
-        iter.seek_to_first();
-        while iter.is_valid() {
-            let value = HummockValue::from_slice(iter.value()).unwrap_or_else(|_| {
-                panic!(
-                    "decode failed for partitioned-meta fallback sst_id {} block_idx {} last_table_id {:?}",
-                    self.sst_object_id,
-                    self.block_metas.len(),
-                    self.last_table_id
-                )
-            });
-            self.add(iter.key(), value).await?;
-            iter.next();
-        }
-        Ok(())
-    }
-
-    /// Add raw data of block to sstable. return false means fallback
-    pub async fn add_raw_block(
-        &mut self,
-        buf: Bytes,
-        _filter_data: Vec<u8>,
-        _smallest_key: FullKey<Vec<u8>>,
-        _largest_key: Vec<u8>,
-        meta: BlockMeta,
-    ) -> HummockResult<bool> {
-        self.add_decoded_raw_block(buf, meta.uncompressed_size)
-            .await?;
-        Ok(false)
     }
 
     pub fn can_add_raw_meta_shard(&self, block_count: usize) -> bool {

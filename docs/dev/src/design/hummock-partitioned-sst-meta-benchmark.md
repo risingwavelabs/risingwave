@@ -31,13 +31,13 @@ The first prototype can be enabled in a local benchmark or data-correctness run 
 RW_SSTABLE_META_SHARD_BLOCK_COUNT=8
 ```
 
-Use `16` for the second shard-size run. Leaving the variable unset keeps the legacy v2 write path.
+Use `16` for the second shard-size run. Leaving the variable unset uses the prototype default shard size `8`; this benchmark branch writes v3 SSTs only.
 
 For unit tests or dedicated harnesses, the same setting can be applied directly through:
 
 ```rust
 SstableBuilderOptions {
-    partitioned_meta_block_count: Some(8),
+    partitioned_meta_block_count: 8,
     ..Default::default()
 }
 ```
