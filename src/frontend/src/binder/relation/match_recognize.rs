@@ -20,8 +20,8 @@ use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_sqlparser::ast::{
     AfterMatchSkip, Expr as AstExpr, FunctionArg, FunctionArgExpr, MatchRecognizePattern,
-    MatchRecognizeSymbol, Measure, OrderByExpr, RowsPerMatch, SymbolDefinition, TableAlias,
-    TableFactor,
+    MatchRecognizeSymbol, Measure, OrderByExpr, RowsPerMatch, SubsetDefinition, SymbolDefinition,
+    TableAlias, TableFactor,
 };
 
 use super::{Binder, Relation};
@@ -63,14 +63,15 @@ pub enum MeasureSlotKind {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MeasureSlot {
     pub kind: MeasureSlotKind,
-    /// Pattern variable to navigate to. Empty for [`MeasureSlotKind::Classifier`].
-    pub var: String,
+    /// Pattern variables this slot navigates over: one for a plain variable, several for a `SUBSET`
+    /// union variable. A row matches if its label is any of these. Empty for `CLASSIFIER`.
+    pub vars: Vec<String>,
     /// Input column index to read. Ignored for [`MeasureSlotKind::Classifier`].
     pub col_idx: usize,
     /// The slot's output type: the input column type for navigation, varchar for classifier.
     pub data_type: DataType,
-    /// The aggregate to run for [`MeasureSlotKind::Sum`] / [`MeasureSlotKind::Avg`], over a single
-    /// input column (the projected `col_idx`) of the rows labeled `var`. `None` for other kinds.
+    /// The aggregate to run for [`MeasureSlotKind::Sum`], over a single input column (the projected
+    /// `col_idx`) of the rows whose label is in `vars`. `None` for other kinds.
     pub agg: Option<PlanAggCall>,
 }
 
@@ -104,6 +105,7 @@ pub struct BoundMatchRecognize {
 }
 
 impl Binder {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn bind_match_recognize(
         &mut self,
         table: &TableFactor,
@@ -113,6 +115,7 @@ impl Binder {
         rows_per_match: &Option<RowsPerMatch>,
         after_match_skip: &Option<AfterMatchSkip>,
         pattern: &MatchRecognizePattern,
+        subsets: &[SubsetDefinition],
         symbols: &[SymbolDefinition],
         alias: Option<&TableAlias>,
     ) -> RwResult<BoundMatchRecognize> {
@@ -153,6 +156,33 @@ impl Binder {
             self.bind_table_to_context(input_columns.clone(), var.clone(), None, None)?;
         }
 
+        // SUBSET union variables: each must be made of declared pattern variables, and is registered
+        // as a further alias block (after the base variables) so `U.col` type-checks. `alias_names`
+        // records the registration order so a measure InputRef can be decoded back to its variable.
+        let mut alias_names = variables.clone();
+        let mut subset_defs: Vec<(String, Vec<String>)> = Vec::with_capacity(subsets.len());
+        for s in subsets {
+            let name = s.name.real_value();
+            let members: Vec<String> = s.members.iter().map(|m| m.real_value()).collect();
+            for m in &members {
+                if !variables.contains(m) {
+                    bail_not_implemented!(
+                        "SUBSET {} references unknown pattern variable {}",
+                        name,
+                        m
+                    );
+                }
+            }
+            self.bind_table_to_context(input_columns.clone(), name.clone(), None, None)?;
+            alias_names.push(name.clone());
+            subset_defs.push((name, members));
+        }
+        let resolver = VarResolver {
+            input_col_num,
+            alias_names: &alias_names,
+            subset_defs: &subset_defs,
+        };
+
         // AFTER MATCH SKIP TO FIRST/LAST <var> must name a pattern variable.
         if let Some(AfterMatchSkip::ToFirst(sym) | AfterMatchSkip::ToLast(sym)) = after_match_skip
             && !variables.contains(&sym.real_value())
@@ -186,7 +216,7 @@ impl Binder {
         // MEASURES: <expr> AS <alias>.
         let measures = measures
             .iter()
-            .map(|m| self.lower_measure(m, &variables, input_col_num))
+            .map(|m| self.lower_measure(m, &resolver))
             .collect::<RwResult<Vec<_>>>()?;
 
         self.pop_context()?;
@@ -224,12 +254,7 @@ impl Binder {
     /// under ONE ROW PER MATCH); top-level `FIRST(var.col)` / `LAST(var.col)` and `CLASSIFIER()` are
     /// supported. Nesting `FIRST`/`LAST`/`CLASSIFIER` inside a larger expression is not yet
     /// supported (it falls through to ordinary binding and is rejected as an unknown function).
-    fn lower_measure(
-        &mut self,
-        m: &Measure,
-        variables: &[String],
-        input_col_num: usize,
-    ) -> RwResult<BoundMeasure> {
+    fn lower_measure(&mut self, m: &Measure, resolver: &VarResolver<'_>) -> RwResult<BoundMeasure> {
         let name = m.alias.real_value();
 
         // CLASSIFIER(): the pattern variable bound to the match's last row.
@@ -245,7 +270,7 @@ impl Binder {
                 name,
                 slots: vec![MeasureSlot {
                     kind: MeasureSlotKind::Classifier,
-                    var: String::new(),
+                    vars: vec![],
                     col_idx: 0,
                     data_type: DataType::Varchar,
                     agg: None,
@@ -277,7 +302,7 @@ impl Binder {
                     name,
                     slots: vec![MeasureSlot {
                         kind: MeasureSlotKind::CountStar,
-                        var: String::new(),
+                        vars: vec![],
                         col_idx: 0,
                         data_type: DataType::Int64,
                         agg: None,
@@ -291,7 +316,7 @@ impl Binder {
             let ExprImpl::InputRef(r) = self.bind_expr(inner)? else {
                 bail_not_implemented!("{}() argument must be a pattern-variable column", agg.to_uppercase());
             };
-            let (var, col_idx) = decode_var_col(r.index(), input_col_num, variables)?;
+            let (vars, col_idx) = resolver.resolve(r.index())?;
             let col_type = r.data_type.clone();
 
             // COUNT / MIN / MAX fold directly over the matched rows in the executor.
@@ -306,7 +331,7 @@ impl Binder {
                     name,
                     slots: vec![MeasureSlot {
                         kind,
-                        var,
+                        vars,
                         col_idx,
                         data_type,
                         agg: None,
@@ -331,7 +356,7 @@ impl Binder {
             let sum_type = infer(PbAggKind::Sum)?;
             let sum_slot = MeasureSlot {
                 kind: MeasureSlotKind::Sum,
-                var: var.clone(),
+                vars: vars.clone(),
                 col_idx,
                 data_type: sum_type.clone(),
                 agg: Some(PlanAggCall {
@@ -358,7 +383,7 @@ impl Binder {
             let avg_type = infer(PbAggKind::Avg)?;
             let count_slot = MeasureSlot {
                 kind: MeasureSlotKind::Count,
-                var,
+                vars,
                 col_idx,
                 data_type: DataType::Int64,
                 agg: None,
@@ -404,14 +429,14 @@ impl Binder {
             let ExprImpl::InputRef(r) = self.bind_expr(inner)? else {
                 bail_not_implemented!("FIRST/LAST argument must be a pattern-variable column");
             };
-            let (var, col_idx) = decode_var_col(r.index(), input_col_num, variables)?;
+            let (vars, col_idx) = resolver.resolve(r.index())?;
             let data_type = r.data_type.clone();
             return Ok(BoundMeasure {
                 expr: InputRef::new(0, data_type.clone()).into(),
                 name,
                 slots: vec![MeasureSlot {
                     kind,
-                    var,
+                    vars,
                     col_idx,
                     data_type,
                     agg: None,
@@ -424,7 +449,7 @@ impl Binder {
         // LAST(var.col) slot.
         let expr = self.bind_expr(&m.expr)?;
         let mut check = InputRefBlockCheck {
-            input_col_num,
+            input_col_num: resolver.input_col_num,
             unqualified: false,
         };
         check.visit_expr(&expr);
@@ -434,8 +459,7 @@ impl Binder {
             );
         }
         let mut rewriter = SlotLoweringRewriter {
-            input_col_num,
-            variables,
+            resolver,
             slots: Vec::new(),
         };
         let expr = rewriter.rewrite_expr(expr);
@@ -499,25 +523,42 @@ fn collect_from_pattern(pattern: &MatchRecognizePattern, out: &mut BTreeSet<Stri
     }
 }
 
-/// Decodes the pattern variable and input column behind a measure `InputRef`. Each variable was
-/// registered as an alias block of width `input_col_num` after the input columns, so block 0 is the
-/// raw input (an unqualified reference, unsupported here) and block `k + 1` is `variables[k]`.
-fn decode_var_col(
-    index: usize,
+/// Decodes a measure `InputRef` back to the pattern variable(s) and input column it references.
+/// Pattern variables and `SUBSET` names are each registered as an alias block of width
+/// `input_col_num` after the input columns, in `alias_names` order; so block 0 is the raw input (an
+/// unqualified reference, unsupported) and block `k + 1` is `alias_names[k]`. A `SUBSET` name
+/// resolves to its member variables; a plain variable resolves to itself.
+struct VarResolver<'a> {
     input_col_num: usize,
-    variables: &[String],
-) -> RwResult<(String, usize)> {
-    let block = index / input_col_num;
-    if block == 0 {
-        bail_not_implemented!(
-            "unqualified or non-pattern-variable column reference in MATCH_RECOGNIZE MEASURES"
-        );
+    alias_names: &'a [String],
+    subset_defs: &'a [(String, Vec<String>)],
+}
+
+impl VarResolver<'_> {
+    fn resolve(&self, index: usize) -> RwResult<(Vec<String>, usize)> {
+        if index / self.input_col_num == 0 {
+            bail_not_implemented!(
+                "unqualified or non-pattern-variable column reference in MATCH_RECOGNIZE MEASURES"
+            );
+        }
+        Ok(self.resolve_unchecked(index))
     }
-    let var = variables
-        .get(block - 1)
-        .expect("pattern variable block within range of registered variables")
-        .clone();
-    Ok((var, index % input_col_num))
+
+    /// As [`VarResolver::resolve`] but assumes a pattern-variable-qualified reference (block >= 1),
+    /// which [`InputRefBlockCheck`] guarantees before lowering.
+    fn resolve_unchecked(&self, index: usize) -> (Vec<String>, usize) {
+        let block = index / self.input_col_num;
+        let name = self
+            .alias_names
+            .get(block - 1)
+            .expect("alias block within range of registered variables/subsets");
+        let vars = self
+            .subset_defs
+            .iter()
+            .find(|(n, _)| n == name)
+            .map_or_else(|| vec![name.clone()], |(_, members)| members.clone());
+        (vars, index % self.input_col_num)
+    }
 }
 
 /// Checks that every measure `InputRef` is pattern-variable-qualified (alias block >= 1). A
@@ -538,26 +579,23 @@ impl ExprVisitor for InputRefBlockCheck {
 
 /// Rewrites each pattern-variable-qualified `InputRef` in a measure expression to an `InputRef` into
 /// the synthetic per-match row, recording a deduplicated `LAST(var.col)` slot for it.
-struct SlotLoweringRewriter<'a> {
-    input_col_num: usize,
-    variables: &'a [String],
+struct SlotLoweringRewriter<'a, 'b> {
+    resolver: &'a VarResolver<'b>,
     slots: Vec<MeasureSlot>,
 }
 
-impl ExprRewriter for SlotLoweringRewriter<'_> {
+impl ExprRewriter for SlotLoweringRewriter<'_, '_> {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        let block = input_ref.index() / self.input_col_num;
-        let col_idx = input_ref.index() % self.input_col_num;
-        let var = self.variables[block - 1].clone();
+        let (vars, col_idx) = self.resolver.resolve_unchecked(input_ref.index());
         let data_type = input_ref.data_type;
         let slot_idx = self
             .slots
             .iter()
-            .position(|s| s.kind == MeasureSlotKind::Last && s.var == var && s.col_idx == col_idx)
+            .position(|s| s.kind == MeasureSlotKind::Last && s.vars == vars && s.col_idx == col_idx)
             .unwrap_or_else(|| {
                 self.slots.push(MeasureSlot {
                     kind: MeasureSlotKind::Last,
-                    var,
+                    vars,
                     col_idx,
                     data_type: data_type.clone(),
                     agg: None,

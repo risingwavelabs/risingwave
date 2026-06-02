@@ -5749,6 +5749,12 @@ impl Parser<'_> {
         let pattern = self.parse_pattern()?;
         self.expect_token(&Token::RParen)?;
 
+        let subsets = if self.parse_keyword(Keyword::SUBSET) {
+            self.parse_comma_separated(Parser::parse_subset_definition)?
+        } else {
+            vec![]
+        };
+
         self.expect_keyword(Keyword::DEFINE)?;
         let symbols = self.parse_comma_separated(Parser::parse_symbol_definition)?;
 
@@ -5764,9 +5770,20 @@ impl Parser<'_> {
             rows_per_match,
             after_match_skip,
             pattern,
+            subsets,
             symbols,
             alias,
         })
+    }
+
+    /// Parse a `SUBSET` item: `<name> = ( <var>, ... )`.
+    fn parse_subset_definition(&mut self) -> ModalResult<SubsetDefinition> {
+        let name = self.parse_identifier()?;
+        self.expect_token(&Token::Eq)?;
+        self.expect_token(&Token::LParen)?;
+        let members = self.parse_comma_separated(Parser::parse_identifier)?;
+        self.expect_token(&Token::RParen)?;
+        Ok(SubsetDefinition { name, members })
     }
 
     fn parse_after_match_skip(&mut self) -> ModalResult<AfterMatchSkip> {

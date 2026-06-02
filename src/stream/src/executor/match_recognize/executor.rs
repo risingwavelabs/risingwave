@@ -80,8 +80,9 @@ struct AggSlot {
 /// slot from a match's rows and labels, forming the synthetic row the measure is evaluated over.
 struct MeasureSlot {
     kind: MeasureSlotKind,
-    /// Pattern variable to navigate to. Unused for [`MeasureSlotKind::Classifier`].
-    var: String,
+    /// Pattern variables this slot navigates over (several for a `SUBSET`). A row matches if its
+    /// label is any of these. Empty for [`MeasureSlotKind::Classifier`].
+    vars: Vec<String>,
     /// Input column index to read. Unused for [`MeasureSlotKind::Classifier`].
     col_idx: usize,
     /// The aggregate kernel for [`MeasureSlotKind::Sum`] / [`MeasureSlotKind::Avg`].
@@ -132,7 +133,7 @@ impl CompiledMeasure {
                 };
                 Ok(MeasureSlot {
                     kind,
-                    var: s.var.clone(),
+                    vars: s.vars.clone(),
                     col_idx: s.col_idx as usize,
                     agg,
                 })
@@ -153,40 +154,42 @@ impl MeasureSlot {
     ) -> StreamExecutorResult<Datum> {
         // The column value of the row at match-relative index `j`.
         let col_at = |j: usize| rows[start + j].row.datum_at(self.col_idx).to_owned_datum();
+        // Whether a row's label is one this slot navigates over (a plain var, or any SUBSET member).
+        let matches = |l: &String| self.vars.iter().any(|v| v == l);
         Ok(match self.kind {
             MeasureSlotKind::Classifier => {
                 labels.last().map(|s| ScalarImpl::Utf8(s.as_str().into()))
             }
-            MeasureSlotKind::First => labels.iter().position(|l| l == &self.var).and_then(col_at),
-            MeasureSlotKind::Last => labels.iter().rposition(|l| l == &self.var).and_then(col_at),
+            MeasureSlotKind::First => labels.iter().position(&matches).and_then(col_at),
+            MeasureSlotKind::Last => labels.iter().rposition(&matches).and_then(col_at),
             MeasureSlotKind::CountStar => Some(ScalarImpl::Int64(labels.len() as i64)),
             MeasureSlotKind::Count => {
                 let n = labels
                     .iter()
                     .enumerate()
-                    .filter(|(j, l)| *l == &self.var && col_at(*j).is_some())
+                    .filter(|(j, l)| matches(l) && col_at(*j).is_some())
                     .count();
                 Some(ScalarImpl::Int64(n as i64))
             }
             MeasureSlotKind::Min => labels
                 .iter()
                 .enumerate()
-                .filter(|(_, l)| *l == &self.var)
+                .filter(|(_, l)| matches(l))
                 .filter_map(|(j, _)| col_at(j))
                 .min_by(|a, b| a.default_cmp(b)),
             MeasureSlotKind::Max => labels
                 .iter()
                 .enumerate()
-                .filter(|(_, l)| *l == &self.var)
+                .filter(|(_, l)| matches(l))
                 .filter_map(|(j, _)| col_at(j))
                 .max_by(|a, b| a.default_cmp(b)),
             MeasureSlotKind::Sum => {
                 let agg = self.agg.as_ref().expect("sum slot has an aggregate kernel");
-                // Feed the kernel a single-column chunk of the col values over rows labeled `var`.
+                // Feed the kernel a single-column chunk of the col values over the matching rows.
                 let input: Vec<(Op, OwnedRow)> = labels
                     .iter()
                     .enumerate()
-                    .filter(|(_, l)| *l == &self.var)
+                    .filter(|(_, l)| matches(l))
                     .map(|(j, _)| (Op::Insert, OwnedRow::new(vec![col_at(j)])))
                     .collect();
                 if input.is_empty() {
