@@ -200,10 +200,9 @@ impl MeasureSlot {
                 .filter_map(|(j, _)| col_at(j))
                 .max_by(|a, b| a.default_cmp(b)),
             MeasureSlotKind::Sum => {
-                let agg = self
-                    .agg
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("MATCH_RECOGNIZE SUM measure slot has no kernel"))?;
+                let agg = self.agg.as_ref().ok_or_else(|| {
+                    anyhow::anyhow!("MATCH_RECOGNIZE SUM measure slot has no kernel")
+                })?;
                 // Feed the kernel a single-column chunk of the col values over the matching rows.
                 let input: Vec<(Op, OwnedRow)> = labels
                     .iter()
