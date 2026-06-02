@@ -88,7 +88,6 @@ pub mod error;
 mod expand;
 mod filter;
 mod gap_fill;
-mod match_recognize;
 pub mod hash_join;
 mod hop_window;
 mod iceberg_with_pk_index;
@@ -96,6 +95,7 @@ mod join;
 pub mod locality_provider;
 mod lookup;
 mod lookup_union;
+mod match_recognize;
 mod merge;
 mod mview;
 mod nested_loop_temporal_join;
@@ -153,10 +153,6 @@ pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
 pub use filter::{FilterExecutor, UpsertFilterExecutor};
 pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
-pub use match_recognize::{
-    CompiledDefine, CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa,
-    SkipMode, parse_pattern,
-};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use iceberg_with_pk_index::{
@@ -167,6 +163,10 @@ pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
+pub use match_recognize::{
+    CompiledDefine, CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa,
+    SkipMode, parse_pattern,
+};
 pub use merge::MergeExecutor;
 pub(crate) use merge::{MergeExecutorInput, MergeExecutorUpstream};
 pub use mview::{MaterializeExecutor, RefreshableMaterializeArgs};

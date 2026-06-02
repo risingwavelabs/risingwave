@@ -185,12 +185,14 @@ impl SkipMode {
         let target = match self {
             SkipMode::PastLastRow => end,
             SkipMode::ToNextRow => start + 1,
-            SkipMode::ToFirst(var) => {
-                labels.iter().position(|l| l == var).map_or(end, |j| start + j)
-            }
-            SkipMode::ToLast(var) => {
-                labels.iter().rposition(|l| l == var).map_or(end, |j| start + j)
-            }
+            SkipMode::ToFirst(var) => labels
+                .iter()
+                .position(|l| l == var)
+                .map_or(end, |j| start + j),
+            SkipMode::ToLast(var) => labels
+                .iter()
+                .rposition(|l| l == var)
+                .map_or(end, |j| start + j),
         };
         target.max(start + 1)
     }
@@ -262,17 +264,19 @@ impl Nfa {
         if !visited.insert((state, pos)) {
             return None;
         }
-        let mut best: Option<(usize, Vec<String>)> = (state == self.accept).then(|| (pos, Vec::new()));
+        let mut best: Option<(usize, Vec<String>)> =
+            (state == self.accept).then(|| (pos, Vec::new()));
         for t in &self.states[state] {
             let candidate = match t {
                 Transition::Epsilon(next) => self.longest_from(rows, *next, pos, visited),
                 Transition::OnVar { var, target } => {
                     if pos < rows.len() && rows[pos].contains(var) {
-                        self.longest_from(rows, *target, pos + 1, visited)
-                            .map(|(end, mut labels)| {
+                        self.longest_from(rows, *target, pos + 1, visited).map(
+                            |(end, mut labels)| {
                                 labels.insert(0, var.clone());
                                 (end, labels)
-                            })
+                            },
+                        )
                     } else {
                         None
                     }
@@ -338,6 +342,31 @@ impl Nfa {
             }
         }
         Ok(matches)
+    }
+
+    /// Whether the row at `pos` can be the *first* matched row of the pattern: some pattern variable
+    /// reachable from the start state via ε-transitions accepts it under an empty running match.
+    /// Used to evict finalized rows that can no longer begin a match (a match is contiguous from its
+    /// start, so a row that cannot start the pattern and sits before every live match is dead).
+    pub async fn can_begin_at(
+        &self,
+        pos: usize,
+        matcher: &(impl CandidateMatcher + Sync),
+    ) -> StreamExecutorResult<bool> {
+        let mut first_vars: BTreeSet<&str> = BTreeSet::new();
+        for s in self.epsilon_closure([self.start]) {
+            for t in &self.states[s] {
+                if let Transition::OnVar { var, .. } = t {
+                    first_vars.insert(var.as_str());
+                }
+            }
+        }
+        for var in first_vars {
+            if matcher.matches(var, pos, &[]).await? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// Async, path-carrying counterpart of [`Nfa::longest_from`]. `path` is the variables bound to
@@ -472,9 +501,7 @@ impl NfaBuilder {
                 // PERMUTE expands to the alternation of every ordering of the variables.
                 let alts: Vec<Pattern> = permutations(vars)
                     .into_iter()
-                    .map(|order| {
-                        Pattern::Concat(order.into_iter().map(Pattern::Var).collect())
-                    })
+                    .map(|order| Pattern::Concat(order.into_iter().map(Pattern::Var).collect()))
                     .collect();
                 self.build(&Pattern::Alt(alts))
             }
@@ -534,7 +561,13 @@ impl NfaBuilder {
         Fragment { start, accept }
     }
 
-    fn build_range(&mut self, inner: &Pattern, min: u32, max: Option<u32>, reluctant: bool) -> Fragment {
+    fn build_range(
+        &mut self,
+        inner: &Pattern,
+        min: u32,
+        max: Option<u32>,
+        reluctant: bool,
+    ) -> Fragment {
         // Expand to `min` mandatory copies followed by either `*` (unbounded) or `max-min`
         // optional copies.
         let mut parts: Vec<Pattern> = Vec::new();
@@ -644,10 +677,7 @@ mod tests {
     #[test]
     fn alternation() {
         // (A | B) C
-        let p = Pattern::Concat(vec![
-            Pattern::Alt(vec![vars("a"), vars("b")]),
-            vars("c"),
-        ]);
+        let p = Pattern::Concat(vec![Pattern::Alt(vec![vars("a"), vars("b")]), vars("c")]);
         let nfa = Nfa::compile(&p);
         assert_eq!(nfa.longest_match(&rows("ac"), 0), Some(2));
         assert_eq!(nfa.longest_match(&rows("bc"), 0), Some(2));
@@ -763,7 +793,10 @@ mod tests {
             spans(&[(0, 2), (3, 5)])
         );
         // all-non-matching -> no matches, terminates.
-        assert_eq!(nfa.find_matches(&rows("xxx"), &SkipMode::PastLastRow), spans(&[]));
+        assert_eq!(
+            nfa.find_matches(&rows("xxx"), &SkipMode::PastLastRow),
+            spans(&[])
+        );
     }
 
     fn lbl(s: &str) -> Vec<String> {
@@ -775,7 +808,10 @@ mod tests {
         // A B -> rows labelled a, b.
         let p = Pattern::Concat(vec![vars("a"), vars("b")]);
         let nfa = Nfa::compile(&p);
-        assert_eq!(nfa.longest_match_labeled(&rows("ab"), 0), Some((2, lbl("ab"))));
+        assert_eq!(
+            nfa.longest_match_labeled(&rows("ab"), 0),
+            Some((2, lbl("ab")))
+        );
     }
 
     #[test]
@@ -797,7 +833,10 @@ mod tests {
         // (A | B) C on b c -> labels b, c.
         let p = Pattern::Concat(vec![Pattern::Alt(vec![vars("a"), vars("b")]), vars("c")]);
         let nfa = Nfa::compile(&p);
-        assert_eq!(nfa.longest_match_labeled(&rows("bc"), 0), Some((2, lbl("bc"))));
+        assert_eq!(
+            nfa.longest_match_labeled(&rows("bc"), 0),
+            Some((2, lbl("bc")))
+        );
     }
 
     #[test]
@@ -805,7 +844,10 @@ mod tests {
         // PERMUTE(a, b) on b a -> labels b, a.
         let p = Pattern::Permute(vec!["a".to_owned(), "b".to_owned()]);
         let nfa = Nfa::compile(&p);
-        assert_eq!(nfa.longest_match_labeled(&rows("ba"), 0), Some((2, lbl("ba"))));
+        assert_eq!(
+            nfa.longest_match_labeled(&rows("ba"), 0),
+            Some((2, lbl("ba")))
+        );
     }
 
     #[test]
@@ -816,8 +858,16 @@ mod tests {
         assert_eq!(
             nfa.find_matches_labeled(&rows("abab"), &SkipMode::PastLastRow),
             vec![
-                LabeledMatch { start: 0, end: 2, labels: lbl("ab") },
-                LabeledMatch { start: 2, end: 4, labels: lbl("ab") },
+                LabeledMatch {
+                    start: 0,
+                    end: 2,
+                    labels: lbl("ab")
+                },
+                LabeledMatch {
+                    start: 2,
+                    end: 4,
+                    labels: lbl("ab")
+                },
             ]
         );
     }
@@ -882,7 +932,10 @@ mod tests {
             .find_matches_dynamic(r.len(), &m, &SkipMode::PastLastRow)
             .await
             .unwrap();
-        assert_eq!(dynamic, nfa.find_matches_labeled(&r, &SkipMode::PastLastRow));
+        assert_eq!(
+            dynamic,
+            nfa.find_matches_labeled(&r, &SkipMode::PastLastRow)
+        );
     }
 
     /// A path-dependent matcher: `b` only matches once an `a` has been bound earlier in the match.
@@ -919,7 +972,11 @@ mod tests {
                 .find_matches_dynamic(rows.len(), &m, &SkipMode::PastLastRow)
                 .await
                 .unwrap(),
-            vec![LabeledMatch { start: 0, end: 3, labels: lbl("aab") }]
+            vec![LabeledMatch {
+                start: 0,
+                end: 3,
+                labels: lbl("aab")
+            }]
         );
 
         // Reluctant `a+? b`: take the fewest `a` -> [0, 2) (a b), then [2, ...) finds nothing more.
@@ -932,7 +989,11 @@ mod tests {
                 .find_matches_dynamic(rows.len(), &m, &SkipMode::PastLastRow)
                 .await
                 .unwrap(),
-            vec![LabeledMatch { start: 0, end: 2, labels: lbl("ab") }]
+            vec![LabeledMatch {
+                start: 0,
+                end: 2,
+                labels: lbl("ab")
+            }]
         );
     }
 
@@ -945,7 +1006,11 @@ mod tests {
             ab.find_matches_dynamic(2, &m, &SkipMode::PastLastRow)
                 .await
                 .unwrap(),
-            vec![LabeledMatch { start: 0, end: 2, labels: lbl("ab") }]
+            vec![LabeledMatch {
+                start: 0,
+                end: 2,
+                labels: lbl("ab")
+            }]
         );
 
         // (b a): `b` is first, the running labels are empty, so it cannot match -> no match.

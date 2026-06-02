@@ -213,7 +213,9 @@ impl PParser {
                 loop {
                     match self.next() {
                         Some(Tok::Ident(name)) => vars.push(name),
-                        other => return Err(format!("expected pattern variable, found {:?}", other)),
+                        other => {
+                            return Err(format!("expected pattern variable, found {:?}", other));
+                        }
                     }
                     match self.next() {
                         Some(Tok::Comma) => continue,
@@ -271,7 +273,10 @@ pub fn parse_pattern(s: &str) -> Result<Pattern, String> {
     let mut p = PParser { toks, pos: 0 };
     let pat = p.parse_alternation()?;
     if p.pos != p.toks.len() {
-        return Err(format!("trailing tokens after pattern: {:?}", &p.toks[p.pos..]));
+        return Err(format!(
+            "trailing tokens after pattern: {:?}",
+            &p.toks[p.pos..]
+        ));
     }
     Ok(pat)
 }
@@ -325,7 +330,10 @@ mod tests {
             parse_pattern("a{2}").unwrap(),
             Pattern::Quantified(
                 Box::new(var("a")),
-                Quantifier::Range { min: 2, max: Some(2) },
+                Quantifier::Range {
+                    min: 2,
+                    max: Some(2)
+                },
                 false,
             )
         );
@@ -333,7 +341,10 @@ mod tests {
             parse_pattern("a{1,3}").unwrap(),
             Pattern::Quantified(
                 Box::new(var("a")),
-                Quantifier::Range { min: 1, max: Some(3) },
+                Quantifier::Range {
+                    min: 1,
+                    max: Some(3)
+                },
                 false,
             )
         );
@@ -349,7 +360,10 @@ mod tests {
             parse_pattern("a{,4}").unwrap(),
             Pattern::Quantified(
                 Box::new(var("a")),
-                Quantifier::Range { min: 0, max: Some(4) },
+                Quantifier::Range {
+                    min: 0,
+                    max: Some(4)
+                },
                 false,
             )
         );
