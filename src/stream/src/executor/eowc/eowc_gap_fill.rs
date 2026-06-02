@@ -452,17 +452,15 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                         }
                     }
 
-                    let post_commit = this.buffer_table.commit(barrier.epoch).await?;
-                    this.prev_row_table
-                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
-                        .await?;
+                    let buffer_post_commit = this.buffer_table.commit(barrier.epoch).await?;
+                    let prev_row_post_commit = this.prev_row_table.commit(barrier.epoch).await?;
                     vars.committed_prev_rows.clone_from(&vars.staging_prev_rows);
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
                     yield Message::Barrier(barrier);
 
-                    if post_commit
-                        .post_yield_barrier(update_vnode_bitmap)
+                    if buffer_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
                         .await?
                         .is_some()
                     {
@@ -471,6 +469,16 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                         // whenever the vnode bitmap is updated to avoid emitting rows that no
                         // longer belong to this actor.
                         vars.buffer.refill_cache(None, &this.buffer_table).await?;
+                    }
+                    if prev_row_post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?
+                        .is_some()
+                    {
+                        // Vnode ownership changed, so reload per-partition prev rows on demand.
+                        vars.committed_prev_rows.clear();
+                        vars.staging_prev_rows.clear();
+                        vars.dirty_prev_row_partitions.clear();
                     }
                 }
             }
