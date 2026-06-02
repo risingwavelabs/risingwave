@@ -196,7 +196,19 @@ impl ToStream for LogicalMatchRecognize {
         {
             bail!("MATCH_RECOGNIZE currently requires a non-empty PARTITION BY");
         }
+        if self
+            .core
+            .order_key_indices()
+            .expect("checked above")
+            .is_empty()
+        {
+            bail!("MATCH_RECOGNIZE requires an ORDER BY clause");
+        }
 
+        // NOTE (v1): the executor assumes input arrives in ORDER BY order per partition and
+        // finalises a match once a later row arrives. Full event-time correctness — buffering per
+        // partition ordered by the watermark column, processing as the watermark advances, and
+        // evicting stale state — is a dedicated follow-up.
         let stream_input = self.input().to_stream(ctx)?;
         let core = generic::MatchRecognize {
             input: stream_input,
