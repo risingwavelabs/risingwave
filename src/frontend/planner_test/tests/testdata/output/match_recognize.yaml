@@ -16,10 +16,11 @@
     └─LogicalMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["dip"], pattern: a b }
       └─LogicalScan { table: t, columns: [t.id, t.ts, t.v, t._row_id, t._rw_timestamp] }
   stream_plan: |-
-    StreamMaterialize { columns: [partition_0, dip], stream_key: [partition_0, dip], pk_columns: [partition_0, dip], pk_conflict: NoCheck }
-    └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["dip"], pattern: a b }
-      └─StreamExchange { dist: HashShard(t.id) }
-        └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [partition_0, dip, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, dip, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["dip"], pattern: a b }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: MATCH_RECOGNIZE with a CLASSIFIER() measure
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -37,10 +38,11 @@
     └─LogicalMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["cls", "dip"], pattern: a b }
       └─LogicalScan { table: t, columns: [t.id, t.ts, t.v, t._row_id, t._rw_timestamp] }
   stream_plan: |-
-    StreamMaterialize { columns: [partition_0, cls, dip], stream_key: [partition_0, cls, dip], pk_columns: [partition_0, cls, dip], pk_conflict: NoCheck }
-    └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["cls", "dip"], pattern: a b }
-      └─StreamExchange { dist: HashShard(t.id) }
-        └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [partition_0, cls, dip, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, cls, dip, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["cls", "dip"], pattern: a b }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: MATCH_RECOGNIZE with aggregate MEASURES over matched rows
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -58,10 +60,11 @@
     └─LogicalMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["n", "lo", "hi"], pattern: a b }
       └─LogicalScan { table: t, columns: [t.id, t.ts, t.v, t._row_id, t._rw_timestamp] }
   stream_plan: |-
-    StreamMaterialize { columns: [partition_0, n, lo, hi], stream_key: [partition_0, n, lo, hi], pk_columns: [partition_0, n, lo, hi], pk_conflict: NoCheck }
-    └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["n", "lo", "hi"], pattern: a b }
-      └─StreamExchange { dist: HashShard(t.id) }
-        └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [partition_0, n, lo, hi, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, n, lo, hi, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["n", "lo", "hi"], pattern: a b }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: MATCH_RECOGNIZE stream planning requires a watermark on the leading ORDER BY column
   sql: |
     create table t(id int, ts int, v int) append only;

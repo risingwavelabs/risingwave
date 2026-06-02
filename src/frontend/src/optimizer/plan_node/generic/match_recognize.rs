@@ -14,6 +14,7 @@
 
 use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{AfterMatchSkip, MatchRecognizePattern, RowsPerMatch};
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
@@ -43,28 +44,32 @@ pub struct MatchRecognize<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for MatchRecognize<PlanRef> {
     fn schema(&self) -> Schema {
-        let mut fields = Vec::with_capacity(self.partition_by.len() + self.measures.len());
+        let mut fields = Vec::with_capacity(self.partition_by.len() + self.measures.len() + 1);
         for (i, e) in self.partition_by.iter().enumerate() {
             fields.push(Field::with_name(e.return_type(), format!("partition_{i}")));
         }
         for m in &self.measures {
             fields.push(Field::with_name(m.expr.return_type(), m.name.clone()));
         }
+        // Hidden per-match id; the last column. See `stream_key`.
+        fields.push(Field::with_name(DataType::Int64, "_match_id"));
         Schema::new(fields)
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        FunctionalDependencySet::new(self.partition_by.len() + self.measures.len())
+        FunctionalDependencySet::new(self.partition_by.len() + self.measures.len() + 1)
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
         // ONE ROW PER MATCH emits one append-only row per match; a partition can contain many
-        // matches, so the partition columns alone are not a key. v1 keys on all output columns
-        // (partition + measures), which keeps distinct matches distinct. Limitation: two matches
-        // in the same partition with byte-identical output dedupe; a hidden match-id key (carried
-        // through the executor) is the proper fix and a follow-up.
-        let n = self.partition_by.len() + self.measures.len();
-        Some((0..n).collect())
+        // matches whose (partition + measures) output may be byte-identical, so those columns are
+        // not a key. The executor appends a hidden per-match id (the trailing column); the partition
+        // columns plus that id uniquely identify every emitted match. Keeping the partition columns
+        // in the key preserves partition-based sharding (no reshuffle before the downstream MV).
+        let match_id = self.partition_by.len() + self.measures.len();
+        let mut key: Vec<usize> = (0..self.partition_by.len()).collect();
+        key.push(match_id);
+        Some(key)
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -79,7 +84,9 @@ impl<PlanRef: GenericPlanRef> crate::optimizer::plan_node::expr_visitable::ExprV
         self.partition_by.iter().for_each(|e| v.visit_expr(e));
         self.order_by.iter().for_each(|e| v.visit_expr(e));
         self.measures.iter().for_each(|m| v.visit_expr(&m.expr));
-        self.defines.iter().for_each(|d| v.visit_expr(&d.definition));
+        self.defines
+            .iter()
+            .for_each(|d| v.visit_expr(&d.definition));
         if let Some(within) = &self.within {
             v.visit_expr(within);
         }
