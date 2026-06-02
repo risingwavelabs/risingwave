@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
+use risingwave_common::catalog::Field;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -55,20 +55,36 @@ impl StreamMatchRecognize {
         Self { base, core }
     }
 
-    /// Minimal per-partition state table for the NFA. v1 placeholder: output columns keyed by the
-    /// partition columns. The executor's full partial-match state layout will refine this.
+    /// Per-partition buffered-row state table. Layout:
+    ///   [ partition cols.. , seq (i64) , satisfied (varchar) , measure cols.. ]
+    /// keyed by (partition cols, seq). The executor buffers one row per live input row (its
+    /// satisfied pattern variables + pre-evaluated MEASURES) and restores the buffer from here on
+    /// recovery. `seq` is a per-partition monotonic id; consumed rows are deleted after each drain.
     fn infer_state_table(&self) -> TableCatalog {
         let mut tbl_builder = TableCatalogBuilder::default();
-        let out_schema = self.core.schema();
-        for field in out_schema.fields() {
-            tbl_builder.add_column(field);
+        let out_fields = self.core.schema().fields().to_vec();
+        let n_part = self.core.partition_by.len();
+
+        // partition columns
+        for f in &out_fields[0..n_part] {
+            tbl_builder.add_column(f);
         }
-        let mut order_cols = HashSet::new();
-        for i in 0..self.core.partition_by.len() {
-            if order_cols.insert(i) {
-                tbl_builder.add_order_column(i, OrderType::ascending());
-            }
+        // seq
+        tbl_builder.add_column(&Field::with_name(DataType::Int64, "seq"));
+        // satisfied (comma-joined pattern variable names)
+        tbl_builder.add_column(&Field::with_name(DataType::Varchar, "satisfied"));
+        // measure columns
+        for f in &out_fields[n_part..] {
+            tbl_builder.add_column(f);
         }
+
+        // pk: partition columns then seq
+        for i in 0..n_part {
+            tbl_builder.add_order_column(i, OrderType::ascending());
+        }
+        tbl_builder.add_order_column(n_part, OrderType::ascending());
+        // read_prefix_len_hint = 0: recovery does a full (empty-prefix) scan to discover partitions,
+        // so we must not assert a partition-length prefix on iteration.
         tbl_builder.build(vec![], 0)
     }
 }
