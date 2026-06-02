@@ -544,8 +544,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // on the watermark, against the in-progress match.
                     let chunk = chunk.compact_vis();
                     for (op, row_ref) in chunk.rows() {
+                        // The input is required to be append-only (enforced at planning time), so only
+                        // Insert is expected. Fail loud on anything else rather than silently
+                        // producing wrong matches if that contract is ever violated upstream.
                         if !matches!(op, Op::Insert) {
-                            continue;
+                            return Err(anyhow::anyhow!(
+                                "MATCH_RECOGNIZE requires append-only input but received a {:?} record",
+                                op
+                            )
+                            .into());
                         }
                         let partition_key = row_ref.project(&partition_key_indices).to_owned_row();
                         let order_key = row_ref.datum_at(time_col).to_owned_datum();
