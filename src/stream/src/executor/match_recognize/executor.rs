@@ -108,7 +108,9 @@ impl CompiledMeasure {
         error_report: impl EvalErrorReport + 'static,
     ) -> StreamExecutorResult<Self> {
         let expr = build_non_strict_from_prost(
-            pb.expr.as_ref().expect("match_recognize measure expr"),
+            pb.expr
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("MATCH_RECOGNIZE measure missing expression"))?,
             error_report,
         )?;
         let slots = pb
@@ -127,9 +129,12 @@ impl CompiledMeasure {
                 };
                 let agg = match kind {
                     MeasureSlotKind::Sum => {
-                        let call = AggCall::from_protobuf(
-                            s.agg_call.as_ref().expect("sum/avg slot needs agg_call"),
-                        )?;
+                        let call =
+                            AggCall::from_protobuf(s.agg_call.as_ref().ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "MATCH_RECOGNIZE SUM/AVG measure slot missing agg_call"
+                                )
+                            })?)?;
                         let col_type = call.args.arg_types()[0].clone();
                         let func = build_append_only(&call)?;
                         Some(AggSlot { func, col_type })
@@ -248,7 +253,7 @@ impl CompiledDefine {
         let condition = build_non_strict_from_prost(
             pb.condition
                 .as_ref()
-                .expect("match_recognize define condition"),
+                .ok_or_else(|| anyhow::anyhow!("MATCH_RECOGNIZE define missing condition"))?,
             error_report,
         )?;
         let slots = pb
