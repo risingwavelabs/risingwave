@@ -179,8 +179,36 @@ impl ToBatch for LogicalMatchRecognize {
 }
 
 impl ToStream for LogicalMatchRecognize {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<super::StreamPlanRef> {
-        bail!("StreamMatchRecognize is not implemented yet")
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<super::StreamPlanRef> {
+        use super::StreamMatchRecognize;
+
+        // v1 restrictions: PARTITION BY / ORDER BY must be plain columns, PARTITION BY non-empty.
+        if self.core.partition_key_indices().is_none() || self.core.order_key_indices().is_none() {
+            bail!(
+                "MATCH_RECOGNIZE currently supports only plain column references in PARTITION BY and ORDER BY"
+            );
+        }
+        if self
+            .core
+            .partition_key_indices()
+            .expect("checked above")
+            .is_empty()
+        {
+            bail!("MATCH_RECOGNIZE currently requires a non-empty PARTITION BY");
+        }
+
+        let stream_input = self.input().to_stream(ctx)?;
+        let core = generic::MatchRecognize {
+            input: stream_input,
+            partition_by: self.core.partition_by.clone(),
+            order_by: self.core.order_by.clone(),
+            measures: self.core.measures.clone(),
+            rows_per_match: self.core.rows_per_match.clone(),
+            after_match_skip: self.core.after_match_skip.clone(),
+            pattern: self.core.pattern.clone(),
+            defines: self.core.defines.clone(),
+        };
+        Ok(StreamMatchRecognize::new(core).into())
     }
 
     fn logical_rewrite_for_stream(

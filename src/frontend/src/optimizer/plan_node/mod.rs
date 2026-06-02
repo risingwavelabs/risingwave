@@ -1087,6 +1087,7 @@ mod stream_expand;
 mod stream_filter;
 mod stream_fs_fetch;
 mod stream_gap_fill;
+mod stream_match_recognize;
 mod stream_global_approx_percentile;
 mod stream_group_topn;
 mod stream_hash_agg;
@@ -1233,6 +1234,7 @@ pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
 pub use stream_fs_fetch::StreamFsFetch;
 pub use stream_gap_fill::StreamGapFill;
+pub use stream_match_recognize::StreamMatchRecognize;
 pub use stream_global_approx_percentile::StreamGlobalApproxPercentile;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
@@ -1419,6 +1421,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, LocalityProvider }
             , { Stream, EowcGapFill }
             , { Stream, GapFill }
+            , { Stream, MatchRecognize }
             , { Stream, IcebergWithPkIndexWriter }
             , { Stream, IcebergWithPkIndexDvMerger }
             $(,$rest)*

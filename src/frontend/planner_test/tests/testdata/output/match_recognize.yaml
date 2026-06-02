@@ -15,4 +15,7 @@
     LogicalProject { exprs: [partition_0, cnt] }
     └─LogicalMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["cnt"], pattern: a b+ c? }
       └─LogicalScan { table: t, columns: [t.id, t.ts, t.v, t._row_id, t._rw_timestamp] }
-  stream_error: StreamMatchRecognize is not implemented yet
+  stream_plan: |-
+    StreamMaterialize { columns: [partition_0, cnt], stream_key: [partition_0], pk_columns: [partition_0], pk_conflict: NoCheck }
+    └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["cnt"], pattern: a b+ c? }
+      └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

@@ -1132,6 +1132,21 @@ message GapFillNode {
   repeated uint32 pointer_key_indices = 7;
 }
 
+// SQL:2016 MATCH_RECOGNIZE (row pattern recognition). v1: append-only input,
+// ONE ROW PER MATCH. PARTITION BY / ORDER BY are input column indices.
+message MatchRecognizeNode {
+  repeated uint32 partition_by = 1;
+  repeated uint32 order_by = 2;
+  repeated expr.ExprNode measures = 3;
+  repeated string measure_names = 4;
+  repeated string define_symbols = 5;
+  repeated expr.ExprNode define_conditions = 6;
+  // PATTERN encoded as its textual form for v1.
+  string pattern = 7;
+  // Per-partition NFA / partial-match state.
+  catalog.Table state_table = 8;
+}
+
 message StreamNode {
   // This field used to be a `bool append_only`.
   // Enum variants are ordered for backwards compatibility.
@@ -1200,6 +1215,7 @@ message StreamNode {
     VectorIndexLookupJoinNode vector_index_lookup_join = 155;
     IcebergWithPkIndexWriterNode iceberg_with_pk_index_writer = 156;
     IcebergWithPkIndexDvMergerNode iceberg_with_pk_index_dv_merger = 157;
+    MatchRecognizeNode match_recognize = 158;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

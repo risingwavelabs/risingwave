@@ -12,4 +12,4 @@
     );
   expected_outputs:
     - logical_plan
-    - stream_error
+    - stream_plan
