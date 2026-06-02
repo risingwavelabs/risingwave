@@ -1167,7 +1167,8 @@ message MatchRecognizeMeasureSlot {
   // 3 = COUNT(*): number of rows in the match (`var` / `col_idx` unused).
   // 4 = COUNT(var.col): number of rows labeled `var` whose `col` is non-null.
   // 5 = MIN(var.col) / 6 = MAX(var.col): min / max of `col` over rows labeled `var`.
-  // 7 = SUM(var.col) / 8 = AVG(var.col): evaluated by `agg_call` over the rows labeled `var`.
+  // 7 = SUM(var.col): evaluated by `agg_call` over the rows labeled `var`. (AVG is lowered by the
+  //     planner into a SUM slot plus a COUNT slot and a division expression.)
   uint32 kind = 1;
   string var = 2;
   uint32 col_idx = 3;

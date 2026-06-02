@@ -152,7 +152,6 @@ impl TryToStreamPb for StreamMatchRecognize {
                             MeasureSlotKind::Min => 5,
                             MeasureSlotKind::Max => 6,
                             MeasureSlotKind::Sum => 7,
-                            MeasureSlotKind::Avg => 8,
                         },
                         var: s.var.clone(),
                         col_idx: s.col_idx as u32,
