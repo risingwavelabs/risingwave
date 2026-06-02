@@ -25,6 +25,26 @@
 
 use std::collections::{BTreeSet, HashSet};
 
+use async_recursion::async_recursion;
+
+use crate::executor::error::StreamExecutorResult;
+
+/// Decides whether the row at a physical position can be bound to a pattern variable, given the
+/// variables already bound to the earlier rows of the in-progress match. This is how `DEFINE`
+/// predicates are evaluated during matching: a predicate may reference the current row, its physical
+/// neighbours (`PREV`/`NEXT`), and the running values of other pattern variables (e.g. `A.price`),
+/// so membership cannot be precomputed independently of the match path.
+pub trait CandidateMatcher {
+    /// `labels[k]` is the variable bound to the match's `k`-th row; the candidate is the row at
+    /// `pos = match_start + labels.len()`.
+    async fn matches(
+        &self,
+        var: &str,
+        pos: usize,
+        labels: &[String],
+    ) -> StreamExecutorResult<bool>;
+}
+
 /// A quantifier applied to a sub-pattern. Greedy semantics only (v1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Quantifier {
@@ -287,6 +307,94 @@ impl Nfa {
             }
         }
         matches
+    }
+
+    /// Like [`Nfa::find_matches_labeled`], but membership is decided by an async [`CandidateMatcher`]
+    /// instead of precomputed satisfied-sets, so `DEFINE` predicates with row-pattern navigation can
+    /// be evaluated against the running match. `n_rows` is the number of (sorted) rows to scan.
+    pub async fn find_matches_dynamic(
+        &self,
+        n_rows: usize,
+        matcher: &impl CandidateMatcher,
+        skip: &SkipMode,
+    ) -> StreamExecutorResult<Vec<LabeledMatch>> {
+        let mut matches = Vec::new();
+        let mut i = 0;
+        while i < n_rows {
+            let mut path: Vec<String> = Vec::new();
+            let mut visited: HashSet<StateId> = HashSet::new();
+            let found = self
+                .longest_from_dynamic(n_rows, self.start, i, &mut path, matcher, &mut visited)
+                .await?;
+            if let Some((end, labels)) = found
+                && end > i
+            {
+                let start = i;
+                i = skip.next_pos(start, end, &labels);
+                matches.push(LabeledMatch { start, end, labels });
+            } else {
+                i += 1;
+            }
+        }
+        Ok(matches)
+    }
+
+    /// Async, path-carrying counterpart of [`Nfa::longest_from`]. `path` is the variables bound to
+    /// the match's rows so far (threaded *down* so the matcher can see the running match); the
+    /// returned `labels` is the full assignment of the chosen accepting path. `visited` guards
+    /// against ε-cycles *at the current position* — ε-transitions keep `pos`/`path`, so a fresh set
+    /// is used once a row is consumed (which lets distinct variable assignments reach the same state
+    /// at the next position).
+    #[async_recursion(?Send)]
+    async fn longest_from_dynamic(
+        &self,
+        n_rows: usize,
+        state: StateId,
+        pos: usize,
+        path: &mut Vec<String>,
+        matcher: &impl CandidateMatcher,
+        visited: &mut HashSet<StateId>,
+    ) -> StreamExecutorResult<Option<(usize, Vec<String>)>> {
+        if !visited.insert(state) {
+            return Ok(None);
+        }
+        let mut best: Option<(usize, Vec<String>)> =
+            (state == self.accept).then(|| (pos, path.clone()));
+        for t in &self.states[state] {
+            let candidate = match t {
+                Transition::Epsilon(next) => {
+                    self.longest_from_dynamic(n_rows, *next, pos, path, matcher, visited)
+                        .await?
+                }
+                Transition::OnVar { var, target } => {
+                    if pos < n_rows && matcher.matches(var, pos, path).await? {
+                        path.push(var.clone());
+                        let mut next_visited = HashSet::new();
+                        let r = self
+                            .longest_from_dynamic(
+                                n_rows,
+                                *target,
+                                pos + 1,
+                                path,
+                                matcher,
+                                &mut next_visited,
+                            )
+                            .await?;
+                        path.pop();
+                        r
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some((end, labels)) = candidate
+                && best.as_ref().is_none_or(|(b, _)| end > *b)
+            {
+                best = Some((end, labels));
+            }
+        }
+        visited.remove(&state);
+        Ok(best)
     }
 }
 
@@ -720,5 +828,74 @@ mod tests {
             BTreeSet::from(["b".to_owned()]),
         ];
         assert_eq!(nfa.longest_match(&rows, 0), Some(2));
+    }
+
+    /// A [`CandidateMatcher`] backed by precomputed satisfied-sets — the dynamic driver should then
+    /// agree with the static [`Nfa::find_matches_labeled`].
+    struct SetMatcher {
+        rows: Vec<BTreeSet<String>>,
+    }
+    impl CandidateMatcher for SetMatcher {
+        async fn matches(
+            &self,
+            var: &str,
+            pos: usize,
+            _labels: &[String],
+        ) -> StreamExecutorResult<bool> {
+            Ok(self.rows[pos].contains(var))
+        }
+    }
+
+    #[tokio::test]
+    async fn dynamic_matches_static_for_set_predicate() {
+        let p = Pattern::Concat(vec![vars("a"), vars("b")]);
+        let nfa = Nfa::compile(&p);
+        let r = rows("abab");
+        let m = SetMatcher { rows: r.clone() };
+        let dynamic = nfa
+            .find_matches_dynamic(r.len(), &m, &SkipMode::PastLastRow)
+            .await
+            .unwrap();
+        assert_eq!(dynamic, nfa.find_matches_labeled(&r, &SkipMode::PastLastRow));
+    }
+
+    /// A path-dependent matcher: `b` only matches once an `a` has been bound earlier in the match.
+    /// This exercises threading the running labels into the predicate.
+    struct NeedsPrecedingA;
+    impl CandidateMatcher for NeedsPrecedingA {
+        async fn matches(
+            &self,
+            var: &str,
+            _pos: usize,
+            labels: &[String],
+        ) -> StreamExecutorResult<bool> {
+            Ok(match var {
+                "a" => true,
+                "b" => labels.iter().any(|l| l == "a"),
+                _ => false,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn dynamic_threads_running_labels() {
+        // (a b): `b` sees `a` in the running labels -> matches.
+        let ab = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
+        let m = NeedsPrecedingA;
+        assert_eq!(
+            ab.find_matches_dynamic(2, &m, &SkipMode::PastLastRow)
+                .await
+                .unwrap(),
+            vec![LabeledMatch { start: 0, end: 2, labels: lbl("ab") }]
+        );
+
+        // (b a): `b` is first, the running labels are empty, so it cannot match -> no match.
+        let ba = Nfa::compile(&Pattern::Concat(vec![vars("b"), vars("a")]));
+        assert_eq!(
+            ba.find_matches_dynamic(2, &m, &SkipMode::PastLastRow)
+                .await
+                .unwrap(),
+            vec![]
+        );
     }
 }
