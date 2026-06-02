@@ -589,7 +589,12 @@ pub struct SubsetDefinition {
 
 impl fmt::Display for SubsetDefinition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} = ({})", self.name, display_comma_separated(&self.members))
+        write!(
+            f,
+            "{} = ({})",
+            self.name,
+            display_comma_separated(&self.members)
+        )
     }
 }
 
@@ -645,7 +650,13 @@ impl fmt::Display for MatchRecognizePattern {
             Group(pattern) => write!(f, "({})", pattern),
             Alternation(patterns) => write!(f, "{}", display_separated(patterns, " | ")),
             Repetition(pattern, quantifier, reluctant) => {
-                write!(f, "{}{}{}", pattern, quantifier, if *reluctant { "?" } else { "" })
+                write!(
+                    f,
+                    "{}{}{}",
+                    pattern,
+                    quantifier,
+                    if *reluctant { "?" } else { "" }
+                )
             }
         }
     }

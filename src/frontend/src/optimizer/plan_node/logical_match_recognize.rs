@@ -17,13 +17,13 @@ use itertools::Itertools;
 use risingwave_expr::bail;
 use risingwave_sqlparser::ast::{AfterMatchSkip, MatchRecognizePattern, RowsPerMatch};
 
+use super::generic::GenericPlanRef;
+use super::stream::StreamPlanNodeMetadata;
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, ExprVisitable, Logical, LogicalFilter,
     LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     PredicatePushdownContext, ToBatch, ToStream, ToStreamContext, generic,
 };
-use super::generic::GenericPlanRef;
-use super::stream::StreamPlanNodeMetadata;
 use crate::binder::{BoundMeasure, BoundSymbolDefinition, MeasureSlotKind};
 use crate::error::Result;
 use crate::expr::ExprImpl;
@@ -228,8 +228,9 @@ impl ToStream for LogicalMatchRecognize {
         }
         // Shard by the PARTITION BY key so partitions are processed in parallel across actors, each
         // owning its partitions' state (matching is independent per partition).
-        let stream_input = RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
-            .streaming_enforce_if_not_satisfies(stream_input)?;
+        let stream_input =
+            RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
+                .streaming_enforce_if_not_satisfies(stream_input)?;
         let core = generic::MatchRecognize {
             input: stream_input,
             partition_by: self.core.partition_by.clone(),
