@@ -12,21 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Streaming `MATCH_RECOGNIZE` executor (v1, in-memory).
+//! Streaming `MATCH_RECOGNIZE` executor (v1).
 //!
-//! Scope of this first cut (deliberately bounded; see the contribution notes):
-//! - append-only input, `ONE ROW PER MATCH`, `AFTER MATCH SKIP PAST LAST ROW`;
-//! - **assumes input arrives in `ORDER BY` order** per partition (no re-sort yet);
-//! - **scalar** `MEASURES`, evaluated on the match's last row (no aggregates / navigation yet);
-//! - **in-memory** per-partition buffers (no checkpoint/recovery yet — that is the next piece);
-//! - emits a match only once a following row exists, so the greedy match is known to be maximal.
+//! Scope: append-only input, `ONE ROW PER MATCH`, `AFTER MATCH SKIP {PAST LAST ROW | TO NEXT ROW}`,
+//! scalar `MEASURES` evaluated on the match's last row. Assumes input arrives in `ORDER BY` order
+//! per partition (no re-sort yet). A match is emitted once a following row exists, so the greedy
+//! match is known maximal.
+//!
+//! State: the per-partition live row window (each row's satisfied pattern variables + pre-evaluated
+//! MEASURES) is persisted to a state table — written through on arrival, deleted on consumption,
+//! and restored on recovery — so match state survives failover. The cursor is not persisted:
+//! consumed rows are compacted away after each drain, so the persisted window is exactly the live
+//! set and scanning resumes from its start.
 
-use std::collections::BTreeSet;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::ops::Bound;
 
+use futures::{StreamExt, pin_mut};
 use risingwave_common::array::Op;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, ToOwnedDatum};
+use risingwave_common::types::{Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_storage::StateStore;
 
@@ -47,7 +52,6 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub define_exprs: Vec<NonStrictExpression>,
     pub nfa: Nfa,
     pub skip: SkipMode,
-    /// State table for partial-match / buffer persistence. Not yet used (in-memory v1).
     pub state_table: StateTable<S>,
 }
 
@@ -67,17 +71,29 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
 
 /// A buffered input row within one partition.
 struct BufferedRow {
+    /// Per-partition monotonic id; the state-table key suffix.
+    seq: i64,
     /// The pattern variables whose `DEFINE` predicate this row satisfies.
     satisfied: BTreeSet<String>,
     /// Pre-evaluated `MEASURES` values for this row (used when it is a match's last row).
     measures: OwnedRow,
 }
 
-/// Per-partition match state: buffered rows and the next row not yet consumed by a match.
+/// Per-partition match state: the live (un-consumed) buffered rows and the next seq to assign.
 #[derive(Default)]
 struct PartitionState {
     rows: Vec<BufferedRow>,
-    cursor: usize,
+    next_seq: i64,
+}
+
+/// Join a satisfied-variable set into the stored varchar form.
+fn join_satisfied(satisfied: &BTreeSet<String>) -> String {
+    satisfied.iter().cloned().collect::<Vec<_>>().join(",")
+}
+
+/// Split the stored varchar form back into a satisfied-variable set.
+fn split_satisfied(s: &str) -> BTreeSet<String> {
+    s.split(',').filter(|p| !p.is_empty()).map(|p| p.to_owned()).collect()
 }
 
 impl<S: StateStore> MatchRecognizeExecutor<S> {
@@ -95,6 +111,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             skip: args.skip,
             state_table: args.state_table,
         }
+    }
+
+    /// Build a state-table row: `[ partition cols.. , seq , satisfied , measure cols.. ]`.
+    fn state_row(partition_key: &OwnedRow, row: &BufferedRow) -> OwnedRow {
+        let mut datums: Vec<Datum> = partition_key.iter().map(|d| d.to_owned_datum()).collect();
+        datums.push(Some(ScalarImpl::Int64(row.seq)));
+        datums.push(Some(ScalarImpl::Utf8(join_satisfied(&row.satisfied).into())));
+        datums.extend(row.measures.iter().map(|d| d.to_owned_datum()));
+        OwnedRow::new(datums)
     }
 }
 
@@ -121,13 +146,46 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             mut state_table,
         } = *self;
 
+        let n_part = partition_key_indices.len();
+        let n_measure = measures.len();
+
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
         state_table.init_epoch(first_epoch).await?;
 
+        // Recovery: rebuild the per-partition live windows from the state table.
         let mut partitions: HashMap<OwnedRow, PartitionState> = HashMap::new();
+        {
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
+            let iter = state_table
+                .iter_with_prefix(None::<OwnedRow>, sub_range, Default::default())
+                .await?;
+            pin_mut!(iter);
+            while let Some(item) = iter.next().await {
+                let row = item?.into_owned_row();
+                let partition_key =
+                    OwnedRow::new((0..n_part).map(|i| row.datum_at(i).to_owned_datum()).collect());
+                let seq = row.datum_at(n_part).expect("seq not null").into_int64();
+                let satisfied = row
+                    .datum_at(n_part + 1)
+                    .map(|d| split_satisfied(d.into_utf8()))
+                    .unwrap_or_default();
+                let measures_row = OwnedRow::new(
+                    (n_part + 2..n_part + 2 + n_measure)
+                        .map(|i| row.datum_at(i).to_owned_datum())
+                        .collect(),
+                );
+                let state = partitions.entry(partition_key).or_default();
+                state.rows.push(BufferedRow {
+                    seq,
+                    satisfied,
+                    measures: measures_row,
+                });
+                state.next_seq = state.next_seq.max(seq + 1);
+            }
+        }
 
         #[for_await]
         for msg in input {
@@ -154,8 +212,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             continue;
                         }
 
-                        let partition_key =
-                            row_ref.project(&partition_key_indices).to_owned_row();
+                        let partition_key = row_ref.project(&partition_key_indices).to_owned_row();
 
                         let mut satisfied = BTreeSet::new();
                         for (d, sym) in define_symbols.iter().enumerate() {
@@ -163,34 +220,40 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 satisfied.insert(sym.clone());
                             }
                         }
-
                         let measure_datums: Vec<Datum> = measure_cols
                             .iter()
                             .map(|c| c.value_at(idx).to_owned_datum())
                             .collect();
 
                         let state = partitions.entry(partition_key.clone()).or_default();
-                        state.rows.push(BufferedRow {
+                        let seq = state.next_seq;
+                        state.next_seq += 1;
+                        let buffered = BufferedRow {
+                            seq,
                             satisfied,
                             measures: OwnedRow::new(measure_datums),
-                        });
+                        };
+                        state_table.insert(Self::state_row(&partition_key, &buffered));
+                        state.rows.push(buffered);
                         if !touched.contains(&partition_key) {
                             touched.push(partition_key);
                         }
                     }
 
-                    // Drain newly-complete matches from each touched partition.
+                    // Drain newly-complete matches from each touched partition, then compact away
+                    // the consumed prefix (both in memory and in the state table).
                     let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
                     for partition_key in touched {
                         let state = partitions.get_mut(&partition_key).unwrap();
                         let satisfied: Vec<BTreeSet<String>> =
                             state.rows.iter().map(|r| r.satisfied.clone()).collect();
 
+                        let mut cursor = 0usize;
                         for m in nfa.find_matches(&satisfied, skip) {
-                            if m.start < state.cursor {
-                                continue; // already emitted
+                            if m.start < cursor {
+                                continue;
                             }
-                            // Only emit once the greedy match is known maximal: a row exists after it.
+                            // Only emit once the greedy match is known maximal: a following row exists.
                             if m.end >= state.rows.len() {
                                 break;
                             }
@@ -202,13 +265,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             if let Some(c) = builder.append_row(Op::Insert, out) {
                                 yield Message::Chunk(c);
                             }
-                            // Resume per the skip strategy (matches find_matches' own resume):
-                            // PAST LAST ROW is non-overlapping (past the last row); TO NEXT ROW
-                            // allows overlap (one row past the match's first row).
-                            state.cursor = match skip {
+                            cursor = match skip {
                                 SkipMode::PastLastRow => m.end,
                                 SkipMode::ToNextRow => m.start + 1,
                             };
+                        }
+
+                        // Compact: rows before `cursor` are consumed and can no longer start a match.
+                        for consumed in state.rows.drain(0..cursor) {
+                            state_table.delete(Self::state_row(&partition_key, &consumed));
                         }
                     }
                     if let Some(c) = builder.take() {
