@@ -163,7 +163,7 @@ struct EqJoinArgs<'a, S: StateStore, E: AsOfRowEncoding> {
     cnt_rows_received: &'a mut u32,
     join_cache_evict_interval_rows: u32,
     high_join_amplification_threshold: usize,
-    asof_join_equi_matched_keys: &'a LabelGuardedHistogram,
+    asof_join_equi_matched_keys_right: &'a LabelGuardedHistogram,
 }
 
 impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoinExecutor<S, T, E> {
@@ -374,7 +374,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             .join_cached_entry_count
             .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
-        let asof_join_equi_matched_keys = self
+        let asof_join_equi_matched_keys_right = self
             .metrics
             .asof_join_equi_matched_keys
             .with_guarded_label_values(&[
@@ -418,7 +418,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
-                        asof_join_equi_matched_keys: &asof_join_equi_matched_keys,
+                        asof_join_equi_matched_keys_right: &asof_join_equi_matched_keys_right,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -444,7 +444,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
-                        asof_join_equi_matched_keys: &asof_join_equi_matched_keys,
+                        asof_join_equi_matched_keys_right: &asof_join_equi_matched_keys_right,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -572,7 +572,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold: _,
-            asof_join_equi_matched_keys: _,
+            asof_join_equi_matched_keys_right: _,
         } = args;
 
         let (side_update, side_match) = (side_l, side_r);
@@ -745,7 +745,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold,
-            asof_join_equi_matched_keys,
+            asof_join_equi_matched_keys_right,
         } = args;
 
         let (side_update, side_match) = (side_r, side_l);
@@ -970,7 +970,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             }
             join_matched_join_keys.observe(join_matched_rows_cnt as _);
             if let Some(cnt) = asof_equi_matched_rows_cnt {
-                asof_join_equi_matched_keys.observe(cnt as _);
+                asof_join_equi_matched_keys_right.observe(cnt as _);
             }
             if join_matched_rows_cnt > high_join_amplification_threshold {
                 let join_key = row.project(&side_update.join_key_indices);
