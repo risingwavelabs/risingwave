@@ -234,6 +234,11 @@ async fn prepare_hummock_store(table_id: TableId) -> HummockStorage {
         .storage
         .start_epoch(test_epoch(1), HashSet::from_iter([table_id]));
     test_env.commit_epoch(test_epoch(1)).await;
+    for epoch in [test_epoch(2), test_epoch(3), test_epoch(4)] {
+        test_env
+            .storage
+            .start_epoch(epoch, HashSet::from_iter([table_id]));
+    }
     test_env.storage
 }
 
