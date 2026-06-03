@@ -23,6 +23,7 @@ use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
 use risingwave_common::hash::{HashKey, NullBitmap};
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_common::row::RowExt;
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
@@ -246,6 +247,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore, E: JoinEncoding> {
     high_join_amplification_threshold: usize,
     entry_state_max_rows: usize,
     join_cache_evict_interval_rows: u32,
+    join_matched_join_keys: &'a LabelGuardedHistogram,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
@@ -637,6 +639,26 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             .join_cached_entry_count
             .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
+        // Bind at executor scope: a per-chunk guard would be dropped between chunks and reset the series.
+        let left_table_id_str = self.side_l.ht.table_id().to_string();
+        let right_table_id_str = self.side_r.ht.table_id().to_string();
+        let left_join_matched_join_keys = self
+            .metrics
+            .join_matched_join_keys
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                left_table_id_str.as_str(),
+            ]);
+        let right_join_matched_join_keys = self
+            .metrics
+            .join_matched_join_keys
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                right_table_id_str.as_str(),
+            ]);
+
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -674,6 +696,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
                         entry_state_max_rows: self.entry_state_max_rows,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
+                        join_matched_join_keys: &left_join_matched_join_keys,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -701,6 +724,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
                         entry_state_max_rows: self.entry_state_max_rows,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
+                        join_matched_join_keys: &right_join_matched_join_keys,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -937,6 +961,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             high_join_amplification_threshold,
             entry_state_max_rows,
             join_cache_evict_interval_rows,
+            join_matched_join_keys,
             ..
         } = args;
 
@@ -963,15 +988,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 side_update.i2o_mapping.clone(),
                 side_match.i2o_mapping.clone(),
             ));
-
-        let join_matched_join_keys = ctx
-            .streaming_metrics
-            .join_matched_join_keys
-            .with_guarded_label_values(&[
-                &ctx.id.to_string(),
-                &ctx.fragment_id.to_string(),
-                &side_update.ht.table_id().to_string(),
-            ]);
 
         let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
