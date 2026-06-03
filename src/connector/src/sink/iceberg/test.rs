@@ -100,10 +100,10 @@ fn test_compatible_arrow_schema() {
         Field::with_name(DataType::Int32, "b"),
     ]);
     let arrow_schema = ArrowSchema::new(vec![
-        ArrowField::new("a", ArrowDataType::Int32, false),
-        ArrowField::new("b", ArrowDataType::Int32, false),
         ArrowField::new("d", ArrowDataType::Int32, false),
         ArrowField::new("c", ArrowDataType::Int32, false),
+        ArrowField::new("a", ArrowDataType::Int32, false),
+        ArrowField::new("b", ArrowDataType::Int32, false),
     ]);
     try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
 
@@ -228,6 +228,25 @@ fn test_compatible_arrow_schema() {
         ),
     ]);
     try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+}
+
+#[test]
+fn test_arrow_schema_column_order_mismatch() {
+    use super::*;
+    // Same names and types but a different column order must be rejected.
+    let risingwave_schema = Schema::new(vec![
+        Field::with_name(DataType::Int32, "col_a"),
+        Field::with_name(DataType::Int32, "col_b"),
+    ]);
+    let arrow_schema = ArrowSchema::new(vec![
+        ArrowField::new("col_b", ArrowDataType::Int32, false),
+        ArrowField::new("col_a", ArrowDataType::Int32, false),
+    ]);
+    let err = try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap_err();
+    assert!(
+        err.to_string().contains("Column order mismatch"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
