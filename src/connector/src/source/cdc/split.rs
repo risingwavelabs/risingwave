@@ -184,6 +184,18 @@ impl PostgresCdcSplit {
         let lsn = source_offset.get("lsn")?;
         lsn.as_u64()
     }
+
+    /// Extract PostgreSQL `lsn_commit` from the current offset (last commit position).
+    pub fn pg_lsn_commit(&self) -> Option<u64> {
+        let offset_str = self.inner.start_offset.as_ref()?;
+        extract_postgres_lsn_commit_from_offset_str(offset_str)
+    }
+
+    /// Extract PostgreSQL `lsn_proc` from the current offset (last completely processed position).
+    pub fn pg_lsn_proc(&self) -> Option<u64> {
+        let offset_str = self.inner.start_offset.as_ref()?;
+        extract_postgres_lsn_proc_from_offset_str(offset_str)
+    }
 }
 
 impl CdcSplitTrait for PostgresCdcSplit {
@@ -202,7 +214,7 @@ impl CdcSplitTrait for PostgresCdcSplit {
     fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
         let new_snapshot_done = self.extract_snapshot_flag(last_seen_offset.as_str())?;
 
-        // Monotonicity guard for streaming-phase LSN.
+        // Monotonicity guard for streaming-phase Postgres CDC offsets.
         //
         // Debezium's task-level auto-restart (BaseSourceTask) reloads
         // effectiveOffset from ConfigurableOffsetBackingStore, which lags
@@ -211,29 +223,57 @@ impl CdcSplitTrait for PostgresCdcSplit {
         // are smaller than the freshest entry we already persisted.
         // Without this guard those stale LSNs would overwrite the split
         // state, the store would then be pushed backwards via the next
-        // barrier, and a subsequent restart would load the stale value
-        // -- by which time PG's slot.restart_lsn has typically advanced
-        // past it, causing a fatal validateLogPosition failure
-        // ("change stream ... no longer available").
+        // barrier, and a subsequent restart would load the stale value.
+        //
+        // We guard both `lsn_commit` and `lsn_proc` because dbz consumes
+        // them for two different things on resume:
+        //   - `lsn_commit` is what `validateLogPosition` checks against
+        //     PG slot.restart_lsn; regression here causes a fatal
+        //     DebeziumException ("change stream ... no longer available").
+        //   - `lsn_proc` is the start position for `startStreaming` and
+        //     the key `WalPositionLocator` uses to deduplicate replayed
+        //     events on restart; regression here can lead to silent
+        //     data loss / a hung resume if PG has already advanced past
+        //     the rewound value.
+        //
+        // The per-message `lsn` field is intentionally NOT used as a
+        // monotonicity key: under concurrent overlapping transactions
+        // PG streams events in commit order, so the per-event physical
+        // lsn can legitimately move backwards when a long-running
+        // earlier transaction commits later than a shorter newer one.
+        // Only `lsn_commit` and `lsn_proc` are monotonic under correct
+        // dbz behavior.
         //
         // Snapshot-phase offsets carry no comparable LSN, so they always
         // pass through. Heartbeat / non-LSN-bearing offsets also pass
-        // through (extract returns None).
-        if self.inner.snapshot_done
-            && new_snapshot_done
-            && let Some(new_lsn) = extract_postgres_lsn_from_offset_str(&last_seen_offset)
-            && let Some(old_lsn) = self.pg_lsn()
-            && new_lsn < old_lsn
-        {
-            tracing::warn!(
-                split_id = self.inner.split_id,
-                old_lsn,
-                new_lsn,
-                delta_bytes = old_lsn - new_lsn,
-                "Rejecting backward Postgres CDC offset update; \
-                 keeping current LSN to prevent state-table regression."
+        // through (extracts return None on missing fields).
+        if self.inner.snapshot_done && new_snapshot_done {
+            let new_lsn_commit = extract_postgres_lsn_commit_from_offset_str(&last_seen_offset);
+            let new_lsn_proc = extract_postgres_lsn_proc_from_offset_str(&last_seen_offset);
+            let old_lsn_commit = self.pg_lsn_commit();
+            let old_lsn_proc = self.pg_lsn_proc();
+
+            let commit_regressed = matches!(
+                (new_lsn_commit, old_lsn_commit),
+                (Some(new), Some(old)) if new < old
             );
-            return Ok(());
+            let proc_regressed = matches!(
+                (new_lsn_proc, old_lsn_proc),
+                (Some(new), Some(old)) if new < old
+            );
+
+            if commit_regressed || proc_regressed {
+                tracing::warn!(
+                    split_id = self.inner.split_id,
+                    ?old_lsn_commit,
+                    ?new_lsn_commit,
+                    ?old_lsn_proc,
+                    ?new_lsn_proc,
+                    "Rejecting backward Postgres CDC offset update; \
+                     keeping current state to prevent state-table regression."
+                );
+                return Ok(());
+            }
         }
 
         self.inner.snapshot_done = new_snapshot_done;
@@ -509,6 +549,35 @@ pub fn extract_postgres_lsn_from_offset_str(offset_str: &str) -> Option<u64> {
     lsn.as_u64()
 }
 
+/// Extract PostgreSQL `lsn_commit` from a CDC offset JSON string.
+///
+/// `lsn_commit` is the WAL position of the last COMMIT message dbz has
+/// processed. It is the value dbz flushes to PG (`flushLsn`) to advance
+/// `confirmed_flush_lsn`, and the value `validateLogPosition` compares
+/// against `slot.restart_lsn` on restart. Must be monotonic across
+/// restarts -- a regression here can cause a fatal DebeziumException
+/// ("change stream ... no longer available").
+pub fn extract_postgres_lsn_commit_from_offset_str(offset_str: &str) -> Option<u64> {
+    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+    let source_offset = offset.get("sourceOffset")?;
+    let lsn = source_offset.get("lsn_commit")?;
+    lsn.as_u64()
+}
+
+/// Extract PostgreSQL `lsn_proc` from a CDC offset JSON string.
+///
+/// `lsn_proc` is the WAL position of the last message dbz has fully
+/// processed. On restart dbz uses it as the start position passed to
+/// `startStreaming`, and as the dedup key for `WalPositionLocator` to
+/// filter replayed events. A regression can cause silent data loss or
+/// a hung resume if PG has already advanced past the rewound value.
+pub fn extract_postgres_lsn_proc_from_offset_str(offset_str: &str) -> Option<u64> {
+    let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
+    let source_offset = offset.get("sourceOffset")?;
+    let lsn = source_offset.get("lsn_proc")?;
+    lsn.as_u64()
+}
+
 /// Parse SQL Server LSN string (`XXXXXXXX:XXXXXXXX:XXXX`) into a comparable integer.
 pub fn parse_sql_server_lsn_str(lsn: &str) -> Option<u128> {
     let mut parts = lsn.split(':');
@@ -550,13 +619,25 @@ mod tests {
         assert_eq!(parsed, expected);
     }
 
+    /// Build a streaming-phase PG offset JSON. Sets `lsn`, `lsn_proc`,
+    /// and `lsn_commit` all to the same value -- this is the common
+    /// shape for the guard's basic monotonic tests.
     fn pg_streaming_offset_json(lsn: u64) -> String {
+        pg_streaming_offset_json_full(lsn, lsn, lsn)
+    }
+
+    /// Build a streaming-phase PG offset JSON with independent control
+    /// over `lsn`, `lsn_proc`, and `lsn_commit`. Used to exercise
+    /// transaction-interleave and asymmetric-regression scenarios.
+    fn pg_streaming_offset_json_full(lsn: u64, lsn_proc: u64, lsn_commit: u64) -> String {
         format!(
             r#"{{
                 "sourcePartition": {{"server": "RW_CDC_1001"}},
                 "sourceOffset": {{
                     "last_snapshot_record": false,
                     "lsn": {lsn},
+                    "lsn_proc": {lsn_proc},
+                    "lsn_commit": {lsn_commit},
                     "txId": 12345,
                     "ts_usec": 1700000000000000
                 }},
@@ -606,6 +687,70 @@ mod tests {
         // Even with a smaller LSN, snapshot-phase offsets pass through.
         split.update_offset(pg_streaming_offset_json(150)).unwrap();
         assert_eq!(split.pg_lsn(), Some(150));
+    }
+
+    #[test]
+    fn test_postgres_offset_lsn_commit_regression_rejected() {
+        // `lsn_commit` regressing alone must trigger reject -- this is
+        // the field validateLogPosition checks, regression here is the
+        // catastrophic case.
+        let initial = pg_streaming_offset_json_full(200, 200, 200);
+        let mut split = PostgresCdcSplit::new(1, Some(initial), None);
+        split.inner.snapshot_done = true;
+
+        // lsn_commit 200 -> 150, but lsn / lsn_proc stay at 200.
+        let new = pg_streaming_offset_json_full(200, 200, 150);
+        split.update_offset(new).unwrap();
+
+        assert_eq!(
+            split.pg_lsn_commit(),
+            Some(200),
+            "lsn_commit must not regress"
+        );
+    }
+
+    #[test]
+    fn test_postgres_offset_lsn_proc_regression_rejected() {
+        // `lsn_proc` regressing alone must trigger reject -- this is the
+        // field dbz uses as the startStreaming resume position, and
+        // WalPositionLocator's dedup key on restart.
+        let initial = pg_streaming_offset_json_full(200, 200, 200);
+        let mut split = PostgresCdcSplit::new(1, Some(initial), None);
+        split.inner.snapshot_done = true;
+
+        // lsn_proc 200 -> 150, but lsn / lsn_commit stay at 200.
+        let new = pg_streaming_offset_json_full(200, 150, 200);
+        split.update_offset(new).unwrap();
+
+        assert_eq!(split.pg_lsn_proc(), Some(200), "lsn_proc must not regress");
+    }
+
+    #[test]
+    fn test_postgres_offset_interleaved_tx_lsn_proc_drop_rejected() {
+        // Concurrent overlapping transactions under PG logical
+        // replication produce a state-table chunk where the per-event
+        // `lsn` and `lsn_proc` move backwards while `lsn_commit`
+        // strictly advances (because PG streams events in commit
+        // order, and the earlier-begin transaction's INSERT has a
+        // smaller physical LSN even though it commits later).
+        //
+        // We guard *both* lsn_commit and lsn_proc for resume safety,
+        // so this update is rejected and the split state is held at
+        // the previous values. The chunk itself is already emitted
+        // downstream; the only effect is the next actor recovery may
+        // replay a small window of events, which downstream MV upsert
+        // absorbs idempotently.
+        let initial = pg_streaming_offset_json_full(33_967_592, 33_967_592, 33_893_392);
+        let mut split = PostgresCdcSplit::new(1, Some(initial), None);
+        split.inner.snapshot_done = true;
+
+        let new = pg_streaming_offset_json_full(33_918_336, 33_918_336, 33_969_832);
+        split.update_offset(new).unwrap();
+
+        // Update rejected because lsn_proc would regress. State held
+        // at the previous values.
+        assert_eq!(split.pg_lsn_commit(), Some(33_893_392));
+        assert_eq!(split.pg_lsn_proc(), Some(33_967_592));
     }
 
     #[test]
