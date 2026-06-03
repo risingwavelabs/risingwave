@@ -344,11 +344,13 @@ profile:
   ci-session-init:
     config-path: src/config/ci-session-init.toml
     steps:
-      - use: minio
       - use: meta-node
-        meta-backend: env
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+        meta-backend: sqlite
+      - use: sqlite
       - use: compute-node
-        enable-tiered-cache: true
       - use: frontend
 
   ci-iceberg-test:
