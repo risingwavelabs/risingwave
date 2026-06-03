@@ -27,6 +27,7 @@ use either::Either;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::cmp_rows_ascending;
@@ -162,6 +163,7 @@ struct EqJoinArgs<'a, S: StateStore, E: AsOfRowEncoding> {
     cnt_rows_received: &'a mut u32,
     join_cache_evict_interval_rows: u32,
     high_join_amplification_threshold: usize,
+    asof_join_equi_matched_keys: &'a LabelGuardedHistogram,
 }
 
 impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoinExecutor<S, T, E> {
@@ -372,6 +374,15 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             .join_cached_entry_count
             .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
+        let asof_join_equi_matched_keys = self
+            .metrics
+            .asof_join_equi_matched_keys
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                self.side_r.ht.table_id().to_string().as_str(),
+            ]);
+
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -407,6 +418,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        asof_join_equi_matched_keys: &asof_join_equi_matched_keys,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -432,6 +444,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        asof_join_equi_matched_keys: &asof_join_equi_matched_keys,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -559,6 +572,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold: _,
+            asof_join_equi_matched_keys: _,
         } = args;
 
         let (side_update, side_match) = (side_l, side_r);
@@ -731,6 +745,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold,
+            asof_join_equi_matched_keys,
         } = args;
 
         let (side_update, side_match) = (side_r, side_l);
@@ -745,15 +760,6 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
         let join_matched_join_keys = ctx
             .streaming_metrics
             .join_matched_join_keys
-            .with_guarded_label_values(&[
-                &ctx.id.to_string(),
-                &ctx.fragment_id.to_string(),
-                &side_update.ht.table_id().to_string(),
-            ]);
-
-        let asof_join_equi_matched_keys = ctx
-            .streaming_metrics
-            .asof_join_equi_matched_keys
             .with_guarded_label_values(&[
                 &ctx.id.to_string(),
                 &ctx.fragment_id.to_string(),

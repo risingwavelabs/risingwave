@@ -713,7 +713,9 @@ impl<S: StateStore, E: AsOfRowEncoding> AsOfJoinHashMap<S, E> {
         let join_key_owned = join_key.to_owned_row();
         self.ensure_cache_populated(&join_key_owned).await?;
         let cache = self.cache.as_mut().unwrap();
-        Ok(cache.get(&join_key_owned).map(|entry| entry.total_row_count()))
+        Ok(cache
+            .get(&join_key_owned)
+            .map(|entry| entry.total_row_count()))
     }
 
     /// Return true if the inequality key is null.
