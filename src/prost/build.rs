@@ -1207,6 +1207,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.vector_index_lookup_join")
         .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_writer")
         .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_position_delete_merger")
+        .boxed(".stream_plan.StreamNode.node_body.match_recognize")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // prost-build 0.14+ only derives `Eq`/`Hash` for a subset of messages/oneofs.

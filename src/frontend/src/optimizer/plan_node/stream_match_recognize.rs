@@ -212,7 +212,7 @@ impl TryToStreamPb for StreamMatchRecognize {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
-        Ok(NodeBody::MatchRecognize(MatchRecognizeNode {
+        Ok(NodeBody::MatchRecognize(Box::new(MatchRecognizeNode {
             partition_by,
             order_by,
             measures,
@@ -234,7 +234,7 @@ impl TryToStreamPb for StreamMatchRecognize {
                 .as_ref()
                 .map(|w| w.to_expr_proto_checked_pure(retract, "match_recognize within"))
                 .transpose()?,
-        }))
+        })))
     }
 }
 
