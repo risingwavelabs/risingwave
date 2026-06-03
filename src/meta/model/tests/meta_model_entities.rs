@@ -15,6 +15,8 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use thiserror_ext::AsReport;
+
 fn parse_pub_mods_with_syn(lib_rs: &str) -> BTreeSet<String> {
     syn::parse_file(lib_rs)
         .expect("failed to parse lib.rs content")
@@ -41,7 +43,7 @@ macro_rules! collect_modules_in_for_all_meta_model_entities {
 fn parse_table_names_with_syn(source: &str, source_name: &str) -> BTreeSet<String> {
     let mut table_names = BTreeSet::new();
     let parsed = syn::parse_file(source)
-        .unwrap_or_else(|err| panic!("failed to parse {source_name}: {err}"));
+        .unwrap_or_else(|err| panic!("failed to parse {source_name}: {}", err.as_report()));
     for item in parsed.items {
         let syn::Item::Struct(item_struct) = item else {
             continue;
@@ -63,8 +65,9 @@ fn parse_table_names_with_syn(source: &str, source_name: &str) -> BTreeSet<Strin
             })
             .unwrap_or_else(|err| {
                 panic!(
-                    "failed to parse #[sea_orm(...)] attribute on struct `{}` in {source_name}: {err}",
-                    item_struct.ident
+                    "failed to parse #[sea_orm(...)] attribute on struct `{}` in {source_name}: {}",
+                    item_struct.ident,
+                    err.as_report()
                 )
             });
         }
@@ -83,8 +86,13 @@ fn parse_table_names_in_modules(modules: impl IntoIterator<Item = String>) -> BT
         .into_iter()
         .flat_map(|module| {
             let module_path = model_src_dir.join(format!("{module}.rs"));
-            let source = std::fs::read_to_string(&module_path)
-                .unwrap_or_else(|err| panic!("failed to read {}: {err}", module_path.display()));
+            let source = std::fs::read_to_string(&module_path).unwrap_or_else(|err| {
+                panic!(
+                    "failed to read {}: {}",
+                    module_path.display(),
+                    err.as_report()
+                )
+            });
             parse_table_names_with_syn(&source, &module_path.display().to_string())
         })
         .collect()
@@ -96,15 +104,13 @@ fn for_all_meta_model_entities_should_cover_all_entity_table_names() {
 
     let expected = parse_table_names_in_modules(
         parse_pub_mods_with_syn(lib_rs)
-        .into_iter()
-        .filter(|m| m != "prelude")
-        .collect::<BTreeSet<_>>(),
+            .into_iter()
+            .filter(|m| m != "prelude")
+            .collect::<BTreeSet<_>>(),
     );
-    let actual = parse_table_names_in_modules(
-        risingwave_meta_model::for_all_meta_model_entities!(
-            collect_modules_in_for_all_meta_model_entities
-        ),
-    );
+    let actual = parse_table_names_in_modules(risingwave_meta_model::for_all_meta_model_entities!(
+        collect_modules_in_for_all_meta_model_entities
+    ));
 
     let missing: Vec<_> = expected.difference(&actual).cloned().collect();
     let unexpected: Vec<_> = actual.difference(&expected).cloned().collect();

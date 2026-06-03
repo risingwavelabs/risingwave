@@ -12652,6 +12652,7 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 2.0.117",
+ "thiserror-ext",
 ]
 
 [[package]]

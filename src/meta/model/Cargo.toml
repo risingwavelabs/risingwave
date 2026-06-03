@@ -17,3 +17,4 @@ serde_json = "1"
 
 [dev-dependencies]
 syn = { version = "2", features = ["full"] }
+thiserror-ext = { workspace = true }
