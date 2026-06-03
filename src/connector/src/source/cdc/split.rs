@@ -229,7 +229,7 @@ impl CdcSplitTrait for PostgresCdcSplit {
         // them for two different things on resume:
         //   - `lsn_commit` is what `validateLogPosition` checks against
         //     PG slot.restart_lsn; regression here causes a fatal
-        //     DebeziumException ("change stream ... no longer available").
+        //     `DebeziumException` ("change stream ... no longer available").
         //   - `lsn_proc` is the start position for `startStreaming` and
         //     the key `WalPositionLocator` uses to deduplicate replayed
         //     events on restart; regression here can lead to silent
