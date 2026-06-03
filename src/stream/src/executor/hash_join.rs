@@ -998,6 +998,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     CacheResult::NeverMatch
                 }
             };
+            // `total_matches` counts join-key matches for the current probe row. The previous
+            // implementation summed `chunk.cardinality()` of chunks yielded inside the loop, but
+            // `JoinChunkBuilder` only flushes a chunk when it accumulates `chunk_size` rows across
+            // *multiple* probe rows (see `JoinStreamChunkBuilder::append_iter` doc), so the count
+            // was 0 for almost every row and occasionally spiked unrelated to actual amplification.
+            // We now increment from inside `handle_match_rows` per matched build-side row.
             let mut total_matches = 0;
 
             macro_rules! match_rows {
@@ -1013,6 +1019,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         cond,
                         append_only_optimize,
                         entry_state_max_rows,
+                        &mut total_matches,
                     )
                 };
             }
@@ -1022,18 +1029,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 {
                     #[for_await]
                     for chunk in match_rows!(Insert) {
-                        let chunk = chunk?;
-                        total_matches += chunk.cardinality();
-                        yield chunk;
+                        yield chunk?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete =>
                 {
                     #[for_await]
                     for chunk in match_rows!(Delete) {
-                        let chunk = chunk?;
-                        total_matches += chunk.cardinality();
-                        yield chunk;
+                        yield chunk?;
                     }
                 }
             };
@@ -1084,6 +1087,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         cond: &'a mut Option<NonStrictExpression>,
         append_only_optimize: bool,
         entry_state_max_rows: usize,
+        total_matches: &'a mut usize,
     ) {
         let cache_hit = matches!(cached_lookup_result, CacheResult::Hit(_));
         let mut entry_state: JoinEntryState<E> = JoinEntryState::default();
@@ -1141,6 +1145,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     cached_rows.values_mut(&side_match.all_data_types)
                 {
                     let matched_row = matched_row?;
+                    *total_matches += 1;
                     if let Some(chunk) = match_row!(
                         match_order_key_indices,
                         match_degree_state,
@@ -1167,6 +1172,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 #[for_await]
                 for matched_row in matched_rows {
                     let (encoded_pk, matched_row) = matched_row?;
+                    *total_matches += 1;
 
                     let mut matched_row_ref = None;
 
