@@ -972,6 +972,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 &ctx.fragment_id.to_string(),
                 &side_update.ht.table_id().to_string(),
             ]);
+        let join_matched_rows_from_storage = ctx
+            .streaming_metrics
+            .join_matched_rows_from_storage
+            .with_guarded_label_values(&[
+                &ctx.id.to_string(),
+                &ctx.fragment_id.to_string(),
+                &side_update.ht.table_id().to_string(),
+            ]);
 
         let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
@@ -998,12 +1006,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     CacheResult::NeverMatch
                 }
             };
-            // `total_matches` counts join-key matches for the current probe row. The previous
-            // implementation summed `chunk.cardinality()` of chunks yielded inside the loop, but
-            // `JoinChunkBuilder` only flushes a chunk when it accumulates `chunk_size` rows across
-            // *multiple* probe rows (see `JoinStreamChunkBuilder::append_iter` doc), so the count
-            // was 0 for almost every row and occasionally spiked unrelated to actual amplification.
-            // We now increment from inside `handle_match_rows` per matched build-side row.
+            // Join-key matches for this probe row, counted per matched build-side row in
+            // `handle_match_rows`. Don't sum yielded chunk sizes instead: `JoinChunkBuilder`
+            // batches across probe rows, so per-row counts would be wrong.
+            //
+            // A cache lookup is all-or-nothing, so on a `Miss` all matches are read from the state
+            // store and `total_matches` equals the storage-read count.
+            let lookup_was_miss = matches!(cache_lookup_result, CacheResult::Miss);
             let mut total_matches = 0;
 
             macro_rules! match_rows {
@@ -1042,6 +1051,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             };
 
             join_matched_join_keys.observe(total_matches as _);
+            join_matched_rows_from_storage
+                .observe(if lookup_was_miss { total_matches } else { 0 } as _);
             if total_matches > high_join_amplification_threshold {
                 let join_key_data_types = side_update.ht.join_key_data_types();
                 let key = key.deserialize(join_key_data_types)?;

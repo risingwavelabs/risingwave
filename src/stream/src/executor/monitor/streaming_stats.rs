@@ -98,6 +98,7 @@ pub struct StreamingMetrics {
     pub join_match_duration_ns: LabelGuardedIntCounterVec,
     pub join_cached_entry_count: LabelGuardedIntGaugeVec,
     pub join_matched_join_keys: RelabeledGuardedHistogramVec,
+    pub join_matched_rows_from_storage: RelabeledGuardedHistogramVec,
 
     // Streaming Join, Streaming Dynamic Filter and Streaming Union
     pub barrier_align_duration: RelabeledGuardedIntCounterVec,
@@ -582,6 +583,20 @@ impl StreamingMetrics {
 
         let join_matched_join_keys = register_guarded_histogram_vec_with_registry!(
             join_matched_join_keys_opts,
+            &["actor_id", "fragment_id", "table_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1(level);
+
+        let join_matched_rows_from_storage_opts = histogram_opts!(
+            "stream_join_matched_rows_from_storage",
+            "Matched rows on the opposite side read from the state store on a join cache miss",
+            exponential_buckets(16.0, 2.0, 28).unwrap() // max 2^31
+        );
+
+        let join_matched_rows_from_storage = register_guarded_histogram_vec_with_registry!(
+            join_matched_rows_from_storage_opts,
             &["actor_id", "fragment_id", "table_id"],
             registry
         )
@@ -1339,6 +1354,7 @@ impl StreamingMetrics {
             join_match_duration_ns,
             join_cached_entry_count,
             join_matched_join_keys,
+            join_matched_rows_from_storage,
             barrier_align_duration,
             agg_lookup_miss_count,
             agg_total_lookup_count,

@@ -153,7 +153,8 @@ def _(outer_panels: Panels):
                 ),
                 panels.timeseries_count(
                     "Join Executor Matched Rows",
-                    "The number of matched rows on the opposite side",
+                    "The number of matched rows on the opposite side. `(from storage)` series "
+                    "count only rows read from the state store on a join cache miss.",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target_hidden(
@@ -165,6 +166,18 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum by(le, {COMPONENT_LABEL}, fragment_id, table_id) (rate({metric('stream_join_matched_join_keys_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, fragment_id, table_id) (rate({table_metric('stream_join_matched_join_keys_count')}[$__rate_interval])) >= 0",
                             "avg - fragment {{fragment_id}} table_id {{table_id}} - {{%s}}"
+                            % COMPONENT_LABEL,
+                        ),
+                        *quantile(
+                            lambda quantile, legend: panels.target_hidden(
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_join_matched_rows_from_storage_bucket')}[$__rate_interval])) by (le, fragment_id, table_id, {COMPONENT_LABEL}))",
+                                f"p{legend} (from storage) - fragment {{{{fragment_id}}}} table_id {{{{table_id}}}} - {{{{{COMPONENT_LABEL}}}}}",
+                            ),
+                            [90, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, {COMPONENT_LABEL}, fragment_id, table_id) (rate({metric('stream_join_matched_rows_from_storage_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, fragment_id, table_id) (rate({table_metric('stream_join_matched_rows_from_storage_count')}[$__rate_interval])) >= 0",
+                            "avg (from storage) - fragment {{fragment_id}} table_id {{table_id}} - {{%s}}"
                             % COMPONENT_LABEL,
                         ),
                     ],
