@@ -17,20 +17,6 @@ use std::path::PathBuf;
 
 use thiserror_ext::AsReport;
 
-fn parse_pub_mods_with_syn(lib_rs: &str) -> BTreeSet<String> {
-    syn::parse_file(lib_rs)
-        .expect("failed to parse lib.rs content")
-        .items
-        .into_iter()
-        .filter_map(|item| match item {
-            syn::Item::Mod(module) if matches!(module.vis, syn::Visibility::Public(_)) => {
-                Some(module.ident.to_string())
-            }
-            _ => None,
-        })
-        .collect()
-}
-
 macro_rules! collect_modules_in_for_all_meta_model_entities {
     ($($module:ident),* $(,)?) => {{
         [$(stringify!($module)),*]
@@ -98,16 +84,41 @@ fn parse_table_names_in_modules(modules: impl IntoIterator<Item = String>) -> BT
         .collect()
 }
 
+fn parse_table_names_in_src_tree() -> BTreeSet<String> {
+    fn collect_rs_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap_or_else(|err| {
+            panic!("failed to read dir {}: {}", dir.display(), err.as_report())
+        }) {
+            let entry = entry.unwrap_or_else(|err| {
+                panic!("failed to read directory entry in {}: {}", dir.display(), err.as_report())
+            });
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rs_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let src_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut rs_files = Vec::new();
+    collect_rs_files(&src_dir, &mut rs_files);
+    rs_files.sort();
+    rs_files
+        .into_iter()
+        .flat_map(|path| {
+            let source = std::fs::read_to_string(&path).unwrap_or_else(|err| {
+                panic!("failed to read {}: {}", path.display(), err.as_report())
+            });
+            parse_table_names_with_syn(&source, &path.display().to_string())
+        })
+        .collect()
+}
+
 #[test]
 fn for_all_meta_model_entities_should_cover_all_entity_table_names() {
-    let lib_rs = include_str!("../src/lib.rs");
-
-    let expected = parse_table_names_in_modules(
-        parse_pub_mods_with_syn(lib_rs)
-            .into_iter()
-            .filter(|m| m != "prelude")
-            .collect::<BTreeSet<_>>(),
-    );
+    let expected = parse_table_names_in_src_tree();
     let actual = parse_table_names_in_modules(risingwave_meta_model::for_all_meta_model_entities!(
         collect_modules_in_for_all_meta_model_entities
     ));
