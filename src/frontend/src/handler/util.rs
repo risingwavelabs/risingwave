@@ -65,13 +65,13 @@ pub fn ensure_local_fs_connector_allowed(session: &SessionImpl, connector: &str)
     }
 
     Err(RwError::from(ProtocolError(format!(
-        "local filesystem connector '{}' is disabled. Set `frontend.unsafe_enable_local_fs_access = true` in `risingwave.toml` to enable it.",
+        "local filesystem connector '{}' is disabled. Set `frontend.unsafe_enable_local_fs_connector = true` in `risingwave.toml` to enable it.",
         connector
     ))))
 }
 
 fn is_local_fs_connector_enabled(frontend_config: &FrontendConfig, connector: &str) -> bool {
-    !is_local_fs_connector(connector) || frontend_config.unsafe_enable_local_fs_access
+    !is_local_fs_connector(connector) || frontend_config.unsafe_enable_local_fs_connector
 }
 
 fn is_local_fs_connector(connector: &str) -> bool {
@@ -649,7 +649,7 @@ mod tests {
         ));
 
         let enabled_config = FrontendConfig {
-            unsafe_enable_local_fs_access: true,
+            unsafe_enable_local_fs_connector: true,
             ..Default::default()
         };
         assert!(is_local_fs_connector_enabled(

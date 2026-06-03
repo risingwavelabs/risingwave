@@ -1049,7 +1049,7 @@ pub mod tests {
 
         assert!(
             err.to_string()
-                .contains("frontend.unsafe_enable_local_fs_access = true"),
+                .contains("frontend.unsafe_enable_local_fs_connector = true"),
             "{err:?}"
         );
     }

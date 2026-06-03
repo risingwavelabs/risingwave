@@ -41,8 +41,8 @@ pub struct FrontendConfig {
 
     /// Whether to allow local filesystem connectors such as `posix_fs` and `fs`.
     /// Disabled by default because these connectors can access files on the frontend host.
-    #[serde(default = "default::frontend::unsafe_enable_local_fs_access")]
-    pub unsafe_enable_local_fs_access: bool,
+    #[serde(default = "default::frontend::unsafe_enable_local_fs_connector")]
+    pub unsafe_enable_local_fs_connector: bool,
 }
 
 pub mod default {
@@ -64,7 +64,7 @@ pub mod default {
             300_000
         }
 
-        pub fn unsafe_enable_local_fs_access() -> bool {
+        pub fn unsafe_enable_local_fs_connector() -> bool {
             false
         }
     }
