@@ -21,6 +21,46 @@ This document covers the streaming implementation. The supported v1 subset is:
 - `AFTER MATCH SKIP PAST LAST ROW` / `TO NEXT ROW` / `TO FIRST|LAST <var>`.
 - `WITHIN <interval>` (a streaming time bound on the match span).
 
+## Feature support
+
+The clause is modeled on the two reference implementations RisingWave users come from: Apache Flink
+SQL (streaming) and Google BigQuery (batch). The table summarizes RisingWave's v1 support against
+them. Flink and BigQuery columns reflect their public documentation as of June 2026 (see Sources);
+✅ supported, ❌ not supported, ➖ not applicable.
+
+| Feature | Flink SQL | BigQuery | RisingWave v1 |
+| --- | :---: | :---: | :---: |
+| Streaming | ✅ | ❌ | ✅ |
+| Batch | ✅ | ✅ | ❌ |
+| `ONE ROW PER MATCH` | ✅ | ✅ ² | ✅ |
+| `ALL ROWS PER MATCH` | ✅ | ❌ | ❌ |
+| Concatenation, `*` `+` `?` `{n,m}` | ✅ | ✅ | ✅ |
+| Reluctant quantifiers (`*?`) | ✅ ¹ | ✅ | ✅ |
+| Alternation (`A \| B`) | ❌ | ✅ | ✅ |
+| Grouping + quantifier (`(A B)+`) | ❌ | ✅ | ✅ |
+| `PERMUTE` | ❌ | ❌ | ✅ |
+| Anchors (`^` `$`) | ❌ | ✅ | ❌ |
+| Exclusion (`{- … -}`) | ❌ | ❌ | ❌ |
+| Running nav in `DEFINE` (`A.col`, `FIRST`/`LAST`) | ✅ | ✅ | ✅ |
+| Physical `PREV`/`NEXT` | ❌ ³ | ✅ | ✅ |
+| `MEASURES` `FIRST`/`LAST` | ✅ | ✅ | ✅ |
+| Aggregates in `MEASURES` (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`) | ✅ | ✅ | ✅ |
+| `CLASSIFIER()` | ❌ | ✅ | ✅ |
+| `MATCH_NUMBER()` | ❌ | ✅ | ❌ |
+| `SUBSET` | ❌ | ❌ | ✅ |
+| `AFTER MATCH SKIP PAST LAST ROW` / `TO NEXT ROW` | ✅ | ✅ | ✅ |
+| `AFTER MATCH SKIP TO FIRST`/`LAST <var>` | ✅ | ❌ | ✅ |
+| `WITHIN` (time bound) | ✅ | ❌ | ✅ |
+| Checkpoint / recovery / rescaling | ✅ | ➖ | ✅ |
+
+¹ Flink supports reluctant `+?` / `*?` but not the reluctant optional `??`.
+² BigQuery has no `ROWS PER MATCH` keyword; it emits one row per match and requires aggregation in
+`MEASURES` (use `ARRAY_AGG` for all-rows-style output).
+³ Flink expresses physical offsets through `LAST(expr, n)` rather than `PREV`/`NEXT`.
+
+Sources: [Apache Flink — Pattern Recognition](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/match_recognize/),
+[BigQuery — `MATCH_RECOGNIZE` clause](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax#match_recognize_clause).
+
 ## Planning pipeline
 
 The clause flows through the usual layers; each is a thin, conventional addition:
