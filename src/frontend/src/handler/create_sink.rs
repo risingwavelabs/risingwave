@@ -70,8 +70,9 @@ use crate::handler::create_mv::{
 };
 use crate::handler::util::{
     LongRunningNotificationAction, check_connector_match_connection_type,
-    ensure_connection_type_allowed, execute_with_long_running_notification,
-    get_table_catalog_by_table_name, reject_internal_table_dependencies,
+    ensure_connection_type_allowed, ensure_local_fs_connector_allowed,
+    execute_with_long_running_notification, get_table_catalog_by_table_name,
+    reject_internal_table_dependencies,
 };
 use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
@@ -201,6 +202,7 @@ pub async fn gen_sink_plan(
         .get(CONNECTOR_TYPE_KEY)
         .cloned()
         .ok_or_else(|| ErrorCode::BindError(format!("missing field '{CONNECTOR_TYPE_KEY}'")))?;
+    ensure_local_fs_connector_allowed(session, &connector)?;
 
     // Used for debezium's table name
     let sink_from_table_name;
@@ -1020,5 +1022,35 @@ pub mod tests {
             .get_created_sink_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "snk1")
             .unwrap();
         assert_eq!(sink.name, "snk1");
+    }
+
+    #[tokio::test]
+    async fn test_create_fs_sink_requires_frontend_config() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql("CREATE TABLE t(v int);").await.unwrap();
+        frontend
+            .run_sql("CREATE MATERIALIZED VIEW mv AS SELECT * FROM t;")
+            .await
+            .unwrap();
+
+        let err = frontend
+            .run_sql(
+                r#"CREATE SINK local_sink FROM mv
+                    WITH (
+                        connector = 'fs',
+                        fs.path = '/tmp/rw-local-sink',
+                        type = 'append-only',
+                        force_append_only = 'true'
+                    ) FORMAT PLAIN ENCODE JSON (force_append_only = 'true');"#
+                    .to_owned(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("frontend.unsafe_enable_local_fs_access = true"),
+            "{err:?}"
+        );
     }
 }

@@ -98,6 +98,7 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{
     SourceSchemaCompatExt, check_connector_match_connection_type, ensure_connection_type_allowed,
+    ensure_local_fs_connector_allowed,
 };
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
@@ -1150,6 +1151,9 @@ pub async fn handle_create_source(
     let format_encode = stmt.format_encode.into_v2_with_warning();
     let (with_properties, refresh_mode) =
         bind_connector_props(&handler_args, &format_encode, true)?;
+    if let Some(connector) = with_properties.get_connector() {
+        ensure_local_fs_connector_allowed(&session, &connector)?;
+    }
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
@@ -1333,6 +1337,30 @@ pub mod tests {
 
         assert_eq!(source.name, "t_mqtt");
         assert_eq!(source.info.row_encode, EncodeType::Protobuf as i32);
+    }
+
+    #[tokio::test]
+    async fn test_create_posix_fs_source_requires_frontend_config() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let err = frontend
+            .run_sql(
+                r#"CREATE SOURCE local_files (
+                    line VARCHAR
+                ) WITH (
+                    connector = 'posix_fs',
+                    posix_fs.root = '/tmp',
+                    match_pattern = '*.csv'
+                ) FORMAT PLAIN ENCODE CSV (without_header = 'true')"#
+                    .to_owned(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("frontend.unsafe_enable_local_fs_access = true"),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]

@@ -38,6 +38,11 @@ pub struct FrontendConfig {
     /// Maximum allowed clock skew in milliseconds for `WebSocket` ingest init authentication.
     #[serde(default = "default::frontend::webhook_auth_max_clock_skew_ms")]
     pub webhook_auth_max_clock_skew_ms: u64,
+
+    /// Whether to allow local filesystem connectors such as `posix_fs` and `fs`.
+    /// Disabled by default because these connectors can access files on the frontend host.
+    #[serde(default = "default::frontend::unsafe_enable_local_fs_access")]
+    pub unsafe_enable_local_fs_access: bool,
 }
 
 pub mod default {
@@ -57,6 +62,10 @@ pub mod default {
 
         pub fn webhook_auth_max_clock_skew_ms() -> u64 {
             300_000
+        }
+
+        pub fn unsafe_enable_local_fs_access() -> bool {
+            false
         }
     }
 }
