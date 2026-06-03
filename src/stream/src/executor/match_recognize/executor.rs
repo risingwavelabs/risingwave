@@ -96,7 +96,7 @@ struct MeasureSlot {
     vars: Vec<String>,
     /// Input column index to read. Unused for [`MeasureSlotKind::Classifier`].
     col_idx: usize,
-    /// The aggregate kernel for [`MeasureSlotKind::Sum`] / [`MeasureSlotKind::Avg`].
+    /// The aggregate kernel for [`MeasureSlotKind::Sum`] (`AVG` is lowered to `Sum` plus `Count`).
     agg: Option<AggSlot>,
 }
 
