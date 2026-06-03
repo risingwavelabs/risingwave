@@ -549,6 +549,20 @@ pub mod tests {
         assert!(SessionInitConfig::default().entries().is_empty());
     }
 
+    #[test]
+    fn test_session_init_rejects_unrecognized_key() {
+        let err = toml::from_str::<RwConfig>(
+            r#"
+            [session_init]
+            streaming_parallelism = "bounded(8)"
+            not_a_real_param = "oops"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unknown field `not_a_real_param`"));
+    }
+
     #[derive(Debug)]
     struct ConfigItemDoc {
         desc: String,

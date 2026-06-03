@@ -62,14 +62,8 @@ impl SessionParamsController {
         // takes precedence and warn the operator.
         let mut session_init_values: HashMap<String, String> = HashMap::new();
         for (name, value) in session_init.entries() {
-            match init_params.set(name, value.to_owned(), &mut ()) {
-                Ok(normalized) => {
-                    session_init_values.insert(name.to_owned(), normalized);
-                }
-                Err(e) => {
-                    tracing::error!(error = %e.as_report(), parameter = name, "invalid [session_init] value, ignoring");
-                }
-            }
+            let normalized = init_params.set(name, value.to_owned(), &mut ())?;
+            session_init_values.insert(name.to_owned(), normalized);
         }
         if !session_init_values.is_empty() {
             info!(
@@ -382,5 +376,40 @@ mod tests {
                 .unwrap(),
             "bounded(4)"
         );
+    }
+
+    #[tokio::test]
+    async fn test_session_init_invalid_value_fails_without_persisting() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref().clone();
+        // Simulate an empty store: drop the rows seeded while constructing the test env.
+        SessionParameter::delete_many()
+            .exec(&meta_store.conn)
+            .await
+            .unwrap();
+
+        let session_init = SessionInitConfig {
+            streaming_parallelism_for_backfill: Some("bounded(2)".to_owned()),
+            ..Default::default()
+        };
+        let err = match SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            session_init,
+        )
+        .await
+        {
+            Ok(_) => panic!("invalid [session_init] should fail"),
+            Err(err) => err,
+        };
+        assert!(err
+            .to_string()
+            .contains("SessionParams error: Invalid value `bounded(2)` for `streaming_parallelism_for_backfill`"));
+
+        let persisted = SessionParameter::find()
+            .all(&meta_store.conn)
+            .await
+            .unwrap();
+        assert!(persisted.is_empty());
     }
 }

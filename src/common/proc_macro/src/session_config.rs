@@ -286,6 +286,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         /// Editing `[session_init]` after a cluster has been bootstrapped does not change the
         /// effective value of an already-persisted parameter. See the RFC for details.
         #[derive(Clone, Debug, Default, Serialize, Deserialize, ConfigDoc, PartialEq)]
+        #[serde(deny_unknown_fields)]
         pub struct SessionInitConfig {
             #(#session_init_fields)*
         }
