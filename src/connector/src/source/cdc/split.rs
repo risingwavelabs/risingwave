@@ -555,7 +555,7 @@ pub fn extract_postgres_lsn_from_offset_str(offset_str: &str) -> Option<u64> {
 /// processed. It is the value dbz flushes to PG (`flushLsn`) to advance
 /// `confirmed_flush_lsn`, and the value `validateLogPosition` compares
 /// against `slot.restart_lsn` on restart. Must be monotonic across
-/// restarts -- a regression here can cause a fatal DebeziumException
+/// restarts -- a regression here can cause a fatal `DebeziumException`
 /// ("change stream ... no longer available").
 pub fn extract_postgres_lsn_commit_from_offset_str(offset_str: &str) -> Option<u64> {
     let offset = serde_json::from_str::<serde_json::Value>(offset_str).ok()?;
