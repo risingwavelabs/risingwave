@@ -260,7 +260,7 @@ impl ExprVisitable for StreamMatchRecognize {
     }
 }
 
-/// Lower a bound [`MatchRecognizePattern`] (the `sqlparser` AST) into the structured pattern proto
+/// Lower a bound `MatchRecognizePattern` (the `sqlparser` AST) into the structured pattern proto
 /// consumed by the executor. Parenthesized groups are flattened (the executor pattern has no group
 /// node); anchors (`^`, `$`) and exclusions (`{- ... -}`) are rejected here as they are not yet
 /// supported. This replaces the previous text round-trip (`Display` ↔ a hand-rolled parser).
@@ -340,7 +340,7 @@ fn lower_pattern(
     }
 }
 
-/// Map a [`RepetitionQuantifier`] to the proto quantifier. `*`, `+`, `?` map to their dedicated
+/// Map a `RepetitionQuantifier` to the proto quantifier. `*`, `+`, `?` map to their dedicated
 /// kinds; the `{...}` forms all map to `RANGE` with an explicit `min` and an optional `max`.
 fn lower_quantifier(
     quantifier: &risingwave_sqlparser::ast::RepetitionQuantifier,

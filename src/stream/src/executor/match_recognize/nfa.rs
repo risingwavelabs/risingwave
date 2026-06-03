@@ -384,7 +384,7 @@ impl Nfa {
         Ok(false)
     }
 
-    /// Async, path-carrying counterpart of [`Nfa::longest_from`]. `path` is the variables bound to
+    /// Async, path-carrying counterpart of `longest_from`. `path` is the variables bound to
     /// the match's rows so far (threaded *down* so the matcher can see the running match); the
     /// returned `labels` is the full assignment of the chosen accepting path. `visited` guards
     /// against ε-cycles *at the current position* — ε-transitions keep `pos`/`path`, so a fresh set
