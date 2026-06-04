@@ -90,7 +90,11 @@ fn parse_table_names_in_src_tree() -> BTreeSet<String> {
             panic!("failed to read dir {}: {}", dir.display(), err.as_report())
         }) {
             let entry = entry.unwrap_or_else(|err| {
-                panic!("failed to read directory entry in {}: {}", dir.display(), err.as_report())
+                panic!(
+                    "failed to read directory entry in {}: {}",
+                    dir.display(),
+                    err.as_report()
+                )
             });
             let path = entry.path();
             if path.is_dir() {
