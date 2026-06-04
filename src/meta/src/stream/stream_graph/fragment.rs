@@ -490,15 +490,15 @@ fn extend_sink_columns(
 /// Build sink column list after removing and appending columns.
 fn build_new_sink_columns(
     sink: &PbSink,
-    removed_column_names: &HashSet<String>,
+    removed_column_ids: &HashSet<ColumnId>,
     newly_added_columns: &[ColumnCatalog],
 ) -> Vec<PbColumnCatalog> {
     let mut columns: Vec<PbColumnCatalog> = sink
         .columns
         .iter()
         .filter(|col| {
-            let column_name = &col.column_desc.as_ref().unwrap().name;
-            !removed_column_names.contains(column_name)
+            let column_id = ColumnId::new(col.column_desc.as_ref().unwrap().column_id as _);
+            !removed_column_ids.contains(&column_id)
         })
         .cloned()
         .collect();
@@ -759,12 +759,6 @@ pub fn rewrite_refresh_schema_sink_fragment(
         .iter()
         .map(|col| format!("{}_{}", upstream_table.name, col.column_desc.name))
         .collect();
-    let removed_sink_column_names: HashSet<_> = removed_columns
-        .iter()
-        .map(|col| col.column_desc.name.clone())
-        .collect();
-    let new_sink_columns =
-        build_new_sink_columns(sink, &removed_sink_column_names, newly_added_columns);
 
     let mut new_sink_fragment = clone_fragment(original_sink_fragment, id_generator_manager);
     let sink_node = &mut new_sink_fragment.nodes;
@@ -784,6 +778,7 @@ pub fn rewrite_refresh_schema_sink_fragment(
         )
         .into());
     }
+    let new_sink_columns = build_new_sink_columns(sink, &removed_column_ids, newly_added_columns);
 
     // update sink_node
     // following logic in <StreamSink as Explain>::distill

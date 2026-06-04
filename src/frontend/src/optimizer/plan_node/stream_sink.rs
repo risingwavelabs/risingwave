@@ -234,6 +234,46 @@ impl StreamSink {
         &self.sink_desc
     }
 
+    fn inherit_auto_schema_change_column_ids(
+        columns: &mut [ColumnCatalog],
+        upstream_table: &TableCatalog,
+        is_iceberg_connector: bool,
+    ) -> Result<()> {
+        for column in columns {
+            let column_name = column.name();
+            let upstream_column = upstream_table
+                .columns
+                .iter()
+                .find(|upstream_col| upstream_col.name() == column_name)
+                .or_else(|| {
+                    if is_iceberg_connector && column_name == RISINGWAVE_ICEBERG_ROW_ID {
+                        upstream_table
+                            .columns
+                            .iter()
+                            .find(|upstream_col| upstream_col.name() == ROW_ID_COLUMN_NAME)
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    let (_, unqualified_name) = column_name.rsplit_once('.')?;
+                    upstream_table
+                        .columns
+                        .iter()
+                        .find(|upstream_col| upstream_col.name() == unqualified_name)
+                })
+                .ok_or_else(|| {
+                    ErrorCode::InvalidInputSyntax(format!(
+                        "auto schema change sink column {} not found in upstream table {}",
+                        column_name,
+                        upstream_table.name()
+                    ))
+                })?;
+            column.column_desc.column_id = upstream_column.column_id();
+        }
+        Ok(())
+    }
+
     fn derive_iceberg_sink_distribution(
         input: PlanRef,
         partition_info: Option<PartitionComputeInfo>,
@@ -291,7 +331,14 @@ impl StreamSink {
         let (sink_type, ignore_delete) =
             Self::derive_sink_type(input.stream_kind(), &properties, format_desc.as_ref())?;
 
-        let columns = derive_columns(input.schema(), out_names, &user_cols)?;
+        let mut columns = derive_columns(input.schema(), out_names, &user_cols)?;
+        if let Some(upstream_table) = &auto_refresh_schema_from_table {
+            Self::inherit_auto_schema_change_column_ids(
+                &mut columns,
+                upstream_table,
+                properties.is_iceberg_connector(),
+            )?;
+        }
         let (pk, _) = derive_pk(
             input.clone(),
             user_distributed_by.clone(),
