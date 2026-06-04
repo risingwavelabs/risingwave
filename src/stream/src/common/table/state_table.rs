@@ -670,11 +670,6 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAllRow>
         self
     }
 
-    pub fn with_output_column_ids(mut self, output_column_ids: Vec<ColumnId>) -> Self {
-        self.output_column_ids = Some(output_column_ids);
-        self
-    }
-
     pub fn enable_vnode_key_stats(mut self, enable: bool, config: &StreamingConfig) -> Self {
         self.enable_vnode_key_stats = Some(enable);
         self.enable_state_table_vnode_stats_pruning =
@@ -684,6 +679,15 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAllRow>
 
     pub fn with_metrics(mut self, metrics: StateTableMetrics) -> Self {
         self.metrics = Some(metrics);
+        self
+    }
+}
+
+impl<S: StateStore, SD: ValueRowSerde, PreloadAllRow>
+    StateTableBuilder<S, SD, true, PreloadAllRow>
+{
+    pub fn with_output_column_ids(mut self, output_column_ids: Vec<ColumnId>) -> Self {
+        self.output_column_ids = Some(output_column_ids);
         self
     }
 }
@@ -1065,7 +1069,7 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
         table_desc: &StorageTableDesc,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
-        fragment_id: u32,
+        fragment_id: FragmentId,
     ) -> Self {
         let table_id = table_desc.table_id;
         let table_columns: Vec<ColumnDesc> =
@@ -1107,7 +1111,7 @@ impl<S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             prefix_hint_len: table_desc.read_prefix_len_hint as usize,
             retention_seconds: table_desc.retention_seconds,
             versioned: table_desc.versioned,
-            fragment_id: fragment_id.into(),
+            fragment_id,
             clean_watermark_index: None,
             store,
             vnodes,
@@ -1841,7 +1845,13 @@ where
         Ok(self
             .iter_kv_with_pk_range::<()>(pk_range, vnode, prefetch_options)
             .await?
-            .map_ok(|(_, row)| row))
+            .map_ok(|(_, row)| {
+                if IS_REPLICATED {
+                    row.project(&self.output_indices).into_owned_row()
+                } else {
+                    row
+                }
+            }))
     }
 
     pub async fn iter_keyed_row_with_vnode(
@@ -1854,19 +1864,6 @@ where
             .iter_kv_with_pk_range(pk_range, vnode, prefetch_options)
             .await?
             .map_ok(|(key, row)| KeyedRow::new(TableKey(key), row)))
-    }
-
-    pub async fn iter_with_vnode_and_output_indices(
-        &self,
-        vnode: VirtualNode,
-        pk_range: &(Bound<impl Row>, Bound<impl Row>),
-        prefetch_options: PrefetchOptions,
-    ) -> StreamExecutorResult<impl RowStream<'_>> {
-        assert!(IS_REPLICATED);
-        let stream = self
-            .iter_with_vnode(vnode, pk_range, prefetch_options)
-            .await?;
-        Ok(stream.map(|row| row.map(|row| row.project(&self.output_indices).into_owned_row())))
     }
 }
 
@@ -2069,7 +2066,13 @@ where
     ) -> StreamExecutorResult<impl RowStream<'_>> {
         let stream = self.iter_with_prefix_inner::</* REVERSE */ false, ()>(pk_prefix, sub_range, prefetch_options)
             .await?;
-        Ok(stream.map_ok(|(_, row)| row))
+        Ok(stream.map_ok(|(_, row)| {
+            if IS_REPLICATED {
+                row.project(&self.output_indices).into_owned_row()
+            } else {
+                row
+            }
+        }))
     }
 
     /// This function scans rows from the relational table with specific `prefix` and `sub_range` under the same

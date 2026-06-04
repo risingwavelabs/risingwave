@@ -107,7 +107,6 @@ impl JoinEntry {
 struct TemporalSide<K: HashKey, S: StateStore, SD: ValueRowSerde> {
     source: ReplicatedStateTable<S, SD>,
     table_stream_key_indices: Vec<usize>,
-    table_output_indices: Vec<usize>,
     cache: ManagedLruCache<K, JoinEntry>,
     join_key_data_types: Vec<DataType>,
 }
@@ -148,7 +147,7 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
                             row.as_ref()
                                 .project(&self.table_stream_key_indices)
                                 .into_owned_row(),
-                            row.project(&self.table_output_indices).into_owned_row(),
+                            row,
                         );
                     }
                     let key = key.clone();
@@ -623,7 +622,6 @@ impl<
         null_safe: Vec<bool>,
         condition: Option<NonStrictExpression>,
         output_indices: Vec<usize>,
-        table_output_indices: Vec<usize>,
         table_stream_key_indices: Vec<usize>,
         watermark_sequence: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
@@ -646,7 +644,6 @@ impl<
             right_table: TemporalSide {
                 source: table,
                 table_stream_key_indices,
-                table_output_indices,
                 cache,
                 join_key_data_types,
             },
@@ -1016,9 +1013,6 @@ mod tests {
         let (mut right_tx, right_source) = MockSource::channel();
         let right_executor = right_source.into_executor(right_schema.clone(), vec![0, 1]);
 
-        // table_output_indices: indices in right table output rows that form the output.
-        // All 3 columns are selected.
-        let table_output_indices = vec![0usize, 1, 2];
         // table_stream_key_indices: pk of right table within the output row = [0, 1] (key, seq).
         let table_stream_key_indices = vec![0usize, 1];
 
@@ -1056,7 +1050,6 @@ mod tests {
             null_safe,
             None, // no extra non-equi condition
             output_indices,
-            table_output_indices,
             table_stream_key_indices,
             Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),

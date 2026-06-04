@@ -84,7 +84,7 @@ async fn phase1_handle_chunk<S: StateStore, SD: ValueRowSerde, E: phase1::Phase1
             .then(|vnode| async move {
                 Ok::<_, StreamExecutorError>(Box::pin(
                     source
-                        .iter_with_vnode_and_output_indices(
+                        .iter_with_vnode(
                             vnode,
                             &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
                             PrefetchOptions::prefetch_for_large_range_scan(),
