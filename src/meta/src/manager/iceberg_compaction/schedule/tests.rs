@@ -171,9 +171,10 @@ fn test_record_force_compaction_bootstraps_or_preserves_backlog() {
         assert_eq!(track.pending_commit_count, expected_backlog);
         assert!(track.should_trigger(now));
     }
+}
 
-    #[tokio::test]
-    async fn test_commit_update_freezes_gc_watermark_after_task_start() {
+#[tokio::test]
+async fn test_commit_update_freezes_gc_watermark_after_task_start() {
         let manager = build_test_manager().await;
         let sink_id = SinkId::new(404);
         let now = Instant::now();
@@ -260,8 +261,8 @@ fn test_record_force_compaction_bootstraps_or_preserves_backlog() {
         }
     }
 
-    #[tokio::test]
-    async fn test_force_update_records_observed_snapshot_only_for_idle_track() {
+#[tokio::test]
+async fn test_force_update_records_observed_snapshot_only_for_idle_track() {
         let manager = build_test_manager().await;
         let idle_sink_id = SinkId::new(405);
         let processing_sink_id = SinkId::new(406);
@@ -318,8 +319,8 @@ fn test_record_force_compaction_bootstraps_or_preserves_backlog() {
         }
     }
 
-    #[test]
-    fn test_active_task_without_observed_snapshot_has_no_gc_watermark() {
+#[test]
+fn test_active_task_without_observed_snapshot_has_no_gc_watermark() {
         let now = Instant::now();
         let skip_sink_id = SinkId::new(42);
         let mut skip_track = new_track(now, 300, 10, 0);
@@ -337,7 +338,6 @@ fn test_record_force_compaction_bootstraps_or_preserves_backlog() {
                 .processing_gc_watermark_snapshot(),
             Some(None)
         ));
-    }
 }
 
 #[test]
