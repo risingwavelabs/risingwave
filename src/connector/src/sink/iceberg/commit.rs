@@ -40,7 +40,7 @@ use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
 
 use super::{GLOBAL_SINK_METRICS, IcebergConfig, SinkError, commit_branch};
-use crate::connector_common::IcebergSinkCompactionUpdate;
+use crate::connector_common::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
 use crate::sink::catalog::SinkId;
 use crate::sink::{Result, SinglePhaseCommitCoordinator, SinkParam, TwoPhaseCommitCoordinator};
 
@@ -237,6 +237,54 @@ pub struct IcebergSinkCommitter {
 }
 
 impl IcebergSinkCommitter {
+    fn latest_observed_snapshot(&self) -> Option<IcebergCommittedSnapshot> {
+        let branch = commit_branch(self.config.r#type.as_str(), self.config.write_mode);
+        self.table
+            .metadata()
+            .snapshot_for_ref(&branch)
+            .map(|snapshot| IcebergCommittedSnapshot {
+                branch,
+                snapshot_id: snapshot.snapshot_id(),
+                timestamp_ms: snapshot.timestamp_ms(),
+            })
+    }
+
+    fn notify_iceberg_compaction_scheduler(&self, force_compaction: bool) {
+        let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender else {
+            return;
+        };
+
+        let Some(observed_snapshot) = self.latest_observed_snapshot() else {
+            warn!(
+                sink_id = %self.sink_id,
+                "skip iceberg compaction update because no observed snapshot is available"
+            );
+            return;
+        };
+
+        let observed_snapshot_id = observed_snapshot.snapshot_id;
+        let observed_snapshot_timestamp_ms = observed_snapshot.timestamp_ms;
+        let observed_snapshot_branch = observed_snapshot.branch.clone();
+
+        if iceberg_compact_stat_sender
+            .send(IcebergSinkCompactionUpdate {
+                sink_id: self.sink_id,
+                force_compaction,
+                observed_snapshot,
+            })
+            .is_err()
+        {
+            warn!(
+                sink_id = %self.sink_id,
+                force_compaction,
+                observed_snapshot_id,
+                observed_snapshot_timestamp_ms,
+                observed_snapshot_branch = %observed_snapshot_branch,
+                "failed to send iceberg compaction update"
+            );
+        }
+    }
+
     // Reload table and guarantee current schema_id and partition_spec_id matches
     // given `schema_id` and `partition_spec_id`
     async fn reload_table(
@@ -615,16 +663,7 @@ impl IcebergSinkCommitter {
 
         tracing::debug!("Succeeded to commit to iceberg table in epoch {epoch}.");
 
-        if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
-            && iceberg_compact_stat_sender
-                .send(IcebergSinkCompactionUpdate {
-                    sink_id: self.sink_id,
-                    force_compaction: false,
-                })
-                .is_err()
-        {
-            warn!("failed to send iceberg compaction stats");
-        }
+        self.notify_iceberg_compaction_scheduler(false);
 
         Ok(())
     }
@@ -862,21 +901,12 @@ impl IcebergSinkCommitter {
                     max_snapshots
                 );
 
-                if let Some(iceberg_compact_stat_sender) = &self.iceberg_compact_stat_sender
-                    && iceberg_compact_stat_sender
-                        .send(IcebergSinkCompactionUpdate {
-                            sink_id: self.sink_id,
-                            force_compaction: true,
-                        })
-                        .is_err()
-                {
-                    tracing::warn!("failed to send iceberg compaction stats");
-                }
+                self.notify_iceberg_compaction_scheduler(true);
 
                 // Wait for 30 seconds before checking again
                 tokio::time::sleep(Duration::from_secs(30)).await;
 
-                // Reload table to get latest snapshots
+                // Refresh table after the wait so the next check sees latest snapshots.
                 self.table = self.config.load_table().await?;
             }
         }
