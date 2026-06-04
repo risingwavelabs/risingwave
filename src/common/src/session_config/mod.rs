@@ -179,39 +179,40 @@ pub struct SessionConfig {
     /// The execution parallelism for streaming queries, including tables, materialized views,
     /// indexes, and sinks. Defaults to `default`, which preserves the legacy adaptive
     /// scheduling behavior during effective resolution.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism: ConfigParallelism,
 
     /// Specific parallelism for backfill. Only `default` and a fixed positive integer are
     /// supported here. Adaptive backfill strategies are deferred to a later change.
     #[parameter(
         default = ConfigBackfillParallelism::Default,
-        check_hook = check_streaming_parallelism_for_backfill
+        check_hook = check_streaming_parallelism_for_backfill,
+        flags = "SESSION_INIT"
     )]
     streaming_parallelism_for_backfill: ConfigBackfillParallelism,
 
     /// Specific parallelism for table. Defaults to `default`, which preserves the legacy
     /// bounded adaptive behavior only when the global parallelism itself remains `default`.
     /// Otherwise it follows the explicit global parallelism.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_table: ConfigParallelism,
 
     /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_sink: ConfigParallelism,
 
     /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_index: ConfigParallelism,
 
     /// Specific parallelism for source. Defaults to `default`, which preserves the legacy
     /// bounded adaptive behavior only when the global parallelism itself remains `default`.
     /// Otherwise it follows the explicit global parallelism.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_source: ConfigParallelism,
 
     /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
-    #[parameter(default = ConfigParallelism::Default)]
+    #[parameter(default = ConfigParallelism::Default, flags = "SESSION_INIT")]
     streaming_parallelism_for_materialized_view: ConfigParallelism,
 
     /// Enable delta join for streaming queries. Defaults to false.
