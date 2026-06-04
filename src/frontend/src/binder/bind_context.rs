@@ -279,23 +279,39 @@ impl BindContext {
         Ok(())
     }
 
-    pub fn check_cte_name(&self, exposed_relation_name: &str) -> Result<()> {
-        if self
-            .range_of
+    pub fn add_cte_name(&mut self, exposed_relation_name: String) {
+        self.cte_relation_names.insert(exposed_relation_name);
+    }
+
+    fn has_relation_name(&self, relation_name: &str) -> bool {
+        self.range_of
             .keys()
-            .any(|(_, relation_name)| relation_name == exposed_relation_name)
-        {
+            .any(|(_, existing_name)| existing_name == relation_name)
+    }
+
+    pub fn check_relation_name_conflict(&self, relation_name: &str) -> Result<()> {
+        if self.has_relation_name(relation_name) {
             return Err(ErrorCode::DuplicateRelationName(format!(
                 "table name \"{}\" specified more than once",
-                exposed_relation_name
+                relation_name
             ))
             .into());
         }
         Ok(())
     }
 
-    pub fn add_cte_name(&mut self, exposed_relation_name: String) {
-        self.cte_relation_names.insert(exposed_relation_name);
+    fn check_cte_relation_name_conflict(&self, other: &Self) -> Result<()> {
+        // `self` may bind a CTE in a separate context, while `other` already has a catalog
+        // relation with the same exposed name.
+        for cte_relation_name in &self.cte_relation_names {
+            other.check_relation_name_conflict(cte_relation_name)?;
+        }
+        // `other` may bind a CTE in a separate context, while `self` already has a catalog
+        // relation with the same exposed name.
+        for cte_relation_name in &other.cte_relation_names {
+            self.check_relation_name_conflict(cte_relation_name)?;
+        }
+        Ok(())
     }
 
     /// Identifies two columns as being in the same group. Additionally, possibly provides one of
@@ -462,6 +478,8 @@ impl BindContext {
     /// Merges two `BindContext`s which are adjacent. For instance, the `BindContext` of two
     /// adjacent cross-joined tables.
     pub fn merge_context(&mut self, other: Self) -> Result<()> {
+        self.check_cte_relation_name_conflict(&other)?;
+
         let begin = self.columns.len();
         self.columns.extend(other.columns.into_iter().map(|mut c| {
             c.index += begin;

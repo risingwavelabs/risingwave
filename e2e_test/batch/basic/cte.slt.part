@@ -61,6 +61,15 @@ insert into cte_conflict.a values (1, 3);
 statement error table name "a" specified more than once
 with a(id, c) as (select 1, 2) select b, c from cte_conflict.a join a on cte_conflict.a.id = a.id;
 
+statement error table name "a" specified more than once
+with a(id, c) as (select 1, 2) select * from cte_conflict.a, a;
+
+statement error table name "a" specified more than once
+with a(id, c) as (select 1, 2) select * from a join cte_conflict.a using (id);
+
+statement error table name "a" specified more than once
+with a(id, c) as (select 1, 2) select * from a, cte_conflict.a;
+
 query II
 with a(id, c) as (select 1, 2) select t.b, a.c from cte_conflict.a as t join a on t.id = a.id;
 ----

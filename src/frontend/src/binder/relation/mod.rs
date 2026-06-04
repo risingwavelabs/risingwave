@@ -465,7 +465,8 @@ impl Binder {
             }
 
             let exposed_table_name = original_alias.name.real_value();
-            self.context.check_cte_name(&exposed_table_name)?;
+            self.context
+                .check_relation_name_conflict(&exposed_table_name)?;
 
             match cte_state {
                 BindingCteState::Bound { query } => {
