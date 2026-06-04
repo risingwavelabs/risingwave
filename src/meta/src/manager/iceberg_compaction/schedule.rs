@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 
 use itertools::Itertools;
 use parking_lot::RwLock;
-use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
+use risingwave_connector::connector_common::{
+    IcebergCommittedSnapshot, IcebergSinkCompactionUpdate,
+};
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{
@@ -41,6 +43,7 @@ enum CompactionTrackState {
     PendingDispatch {
         next_compaction_time_on_failure: Instant,
         pending_commit_count_at_dispatch: usize,
+        gc_watermark_snapshot: Option<IcebergCommittedSnapshot>,
     },
     /// Compaction task is in-flight. `report_deadline` acts as a lease; if it
     /// expires before a report arrives, the task becomes retryable.
@@ -48,6 +51,7 @@ enum CompactionTrackState {
         task_id: u64,
         pending_commit_count_at_dispatch: usize,
         report_deadline: Instant,
+        gc_watermark_snapshot: Option<IcebergCommittedSnapshot>,
     },
 }
 
@@ -61,6 +65,7 @@ pub(super) struct CompactionTrack {
     report_timeout: Duration,
     last_config_refresh_at: Instant,
     pending_commit_count: usize,
+    latest_observed_snapshot: Option<IcebergCommittedSnapshot>,
     state: CompactionTrackState,
 }
 
@@ -79,6 +84,7 @@ impl CompactionTrack {
             report_timeout,
             last_config_refresh_at: now,
             pending_commit_count: 0,
+            latest_observed_snapshot: None,
             state: CompactionTrackState::Idle {
                 next_compaction_time: now + Duration::from_secs(trigger_interval_sec),
             },
@@ -116,6 +122,10 @@ impl CompactionTrack {
         self.pending_commit_count = self.pending_commit_count.saturating_add(1);
     }
 
+    fn record_observed_snapshot(&mut self, observed_snapshot: IcebergCommittedSnapshot) {
+        self.latest_observed_snapshot = Some(observed_snapshot);
+    }
+
     fn record_force_compaction(&mut self, now: Instant) {
         if let CompactionTrackState::Idle {
             next_compaction_time,
@@ -147,6 +157,7 @@ impl CompactionTrack {
                 self.state = CompactionTrackState::PendingDispatch {
                     next_compaction_time_on_failure: *next_compaction_time,
                     pending_commit_count_at_dispatch: self.pending_commit_count,
+                    gc_watermark_snapshot: self.latest_observed_snapshot.clone(),
                 };
             }
             CompactionTrackState::PendingDispatch { .. }
@@ -157,11 +168,15 @@ impl CompactionTrack {
     }
 
     fn mark_dispatched(&mut self, task_id: u64, now: Instant) {
-        let pending_commit_count_at_dispatch = match &self.state {
+        let (pending_commit_count_at_dispatch, gc_watermark_snapshot) = match &mut self.state {
             CompactionTrackState::PendingDispatch {
                 pending_commit_count_at_dispatch,
+                gc_watermark_snapshot,
                 ..
-            } => *pending_commit_count_at_dispatch,
+            } => (
+                *pending_commit_count_at_dispatch,
+                gc_watermark_snapshot.take(),
+            ),
             CompactionTrackState::Idle { .. } => unreachable!("Cannot mark dispatched when idle"),
             CompactionTrackState::InFlight { .. } => {
                 unreachable!("Cannot mark dispatched when already in flight")
@@ -171,7 +186,24 @@ impl CompactionTrack {
             task_id,
             pending_commit_count_at_dispatch,
             report_deadline: now + self.report_timeout,
+            gc_watermark_snapshot,
         };
+    }
+
+    pub(super) fn processing_gc_watermark_snapshot(
+        &self,
+    ) -> Option<Option<&IcebergCommittedSnapshot>> {
+        match &self.state {
+            CompactionTrackState::PendingDispatch {
+                gc_watermark_snapshot,
+                ..
+            }
+            | CompactionTrackState::InFlight {
+                gc_watermark_snapshot,
+                ..
+            } => Some(gc_watermark_snapshot.as_ref()),
+            CompactionTrackState::Idle { .. } => None,
+        }
     }
 
     fn is_pending_dispatch(&self) -> bool {
@@ -361,17 +393,29 @@ impl Drop for IcebergCompactionHandle {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum SinkUpdateKind {
-    Commit,
-    ForceCompaction,
+    Commit {
+        observed_snapshot: IcebergCommittedSnapshot,
+    },
+    ForceCompaction {
+        observed_snapshot: IcebergCommittedSnapshot,
+    },
 }
 
 impl SinkUpdateKind {
     fn apply_to_track(self, track: &mut CompactionTrack, now: Instant) {
         match self {
-            SinkUpdateKind::Commit => track.record_commit(),
-            SinkUpdateKind::ForceCompaction => track.record_force_compaction(now),
+            SinkUpdateKind::Commit { observed_snapshot } => {
+                track.record_observed_snapshot(observed_snapshot);
+                track.record_commit();
+            }
+            SinkUpdateKind::ForceCompaction { observed_snapshot } => {
+                if matches!(track.state, CompactionTrackState::Idle { .. }) {
+                    track.record_observed_snapshot(observed_snapshot);
+                }
+                track.record_force_compaction(now);
+            }
         }
     }
 }
@@ -435,11 +479,12 @@ impl IcebergCompactionManager {
         let IcebergSinkCompactionUpdate {
             sink_id,
             force_compaction,
+            observed_snapshot,
         } = msg;
         let kind = if force_compaction {
-            SinkUpdateKind::ForceCompaction
+            SinkUpdateKind::ForceCompaction { observed_snapshot }
         } else {
-            SinkUpdateKind::Commit
+            SinkUpdateKind::Commit { observed_snapshot }
         };
         let refresh_interval = self.config_refresh_interval();
         let (allow_track_initialization, should_refresh_config) = {
