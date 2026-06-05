@@ -161,14 +161,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20251111
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8f7c952f66de9b2d65c1d168eccf32a3fe291a55", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f7f3721c9aaecd4d677ff4e6a42c1e6211f7acf5", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8f7c952f66de9b2d65c1d168eccf32a3fe291a55" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "8f7c952f66de9b2d65c1d168eccf32a3fe291a55" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f7f3721c9aaecd4d677ff4e6a42c1e6211f7acf5" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "f7f3721c9aaecd4d677ff4e6a42c1e6211f7acf5" }
 
 adbc_core = { version = "0.23" }
 adbc_snowflake = { version = "0.23", default-features = false }
