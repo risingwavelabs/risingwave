@@ -23,7 +23,9 @@ use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
 use iceberg::{Catalog, TableIdent};
 use itertools::Itertools;
-use risingwave_common::array::arrow::arrow_schema_iceberg::Field as ArrowField;
+use risingwave_common::array::arrow::arrow_schema_iceberg::{
+    DataType as ArrowDataType, Field as ArrowField,
+};
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
 use risingwave_common::catalog::Field;
@@ -225,6 +227,33 @@ impl TryFrom<IcebergCommitResult> for Vec<u8> {
         Ok(serde_json::to_vec(&json_value).context("Can't serialize iceberg sink metadata")?)
     }
 }
+
+fn arrow_data_type_compatible(current: &ArrowDataType, expected: &ArrowDataType) -> bool {
+    use ArrowDataType::*;
+
+    match (current, expected) {
+        (Decimal128(_, _), Decimal128(_, _)) => true,
+        (Binary, LargeBinary) | (LargeBinary, Binary) => true,
+        _ => current == expected,
+    }
+}
+
+fn schema_contains_same_fields(
+    current: &risingwave_common::array::arrow::arrow_schema_iceberg::Fields,
+    expected: &[ArrowField],
+) -> bool {
+    if current.len() != expected.len() {
+        return false;
+    }
+
+    expected.iter().all(|expected_field| {
+        current.iter().any(|current_field| {
+            current_field.name() == expected_field.name()
+                && arrow_data_type_compatible(current_field.data_type(), expected_field.data_type())
+        })
+    })
+}
+
 pub struct IcebergSinkCommitter {
     pub(super) catalog: Arc<dyn Catalog>,
     pub(super) table: Table,
@@ -695,16 +724,7 @@ impl IcebergSinkCommitter {
         let iceberg_arrow_convert = IcebergArrowConvert;
 
         let schema_matches = |expected: &[ArrowField]| {
-            if current_arrow_schema.fields().len() != expected.len() {
-                return false;
-            }
-
-            expected.iter().all(|expected_field| {
-                current_arrow_schema.fields().iter().any(|current_field| {
-                    current_field.name() == expected_field.name()
-                        && current_field.data_type() == expected_field.data_type()
-                })
-            })
+            schema_contains_same_fields(current_arrow_schema.fields(), expected)
         };
 
         let original_arrow_fields: Vec<ArrowField> = schema_change
@@ -965,8 +985,47 @@ mod tests {
         SnapshotReference, SnapshotRetention, SortOrder, Summary, TableMetadataBuilder, Type,
         UnboundPartitionSpec,
     };
+    use risingwave_common::array::arrow::arrow_schema_iceberg::{
+        DataType as ArrowDataType, Field as ArrowField, Schema as ArrowSchema,
+    };
 
     use super::*;
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_binary_large_binary() {
+        let current_schema = ArrowSchema::new(vec![
+            ArrowField::new("k", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::LargeBinary, true),
+        ]);
+        let expected_fields = vec![
+            ArrowField::new("k", ArrowDataType::Int32, true),
+            ArrowField::new("v", ArrowDataType::Binary, true),
+        ];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
+
+    #[test]
+    fn test_schema_contains_same_fields_allows_decimal_precision_scale_delta() {
+        let current_schema = ArrowSchema::new(vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(28, 10),
+            true,
+        )]);
+        let expected_fields = vec![ArrowField::new(
+            "d",
+            ArrowDataType::Decimal128(38, 10),
+            true,
+        )];
+
+        assert!(schema_contains_same_fields(
+            current_schema.fields(),
+            &expected_fields
+        ));
+    }
 
     #[test]
     fn test_count_snapshots_since_rewrite_in_metadata_ignores_other_branches() {
