@@ -39,7 +39,7 @@ use crate::connector_common::{SslMode, create_pg_client};
 use crate::error::ConnectorResult;
 use crate::sink::sqlserver::SqlServerClient;
 use crate::source::cdc::external::mysql::build_mysql_connection_pool;
-use crate::source::cdc::split::parse_sql_server_lsn_str;
+use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
 use crate::source::cdc::{
     CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
     SqlServer, table_schema_exclude_additional_columns,
@@ -474,7 +474,7 @@ impl DebeziumSplitEnumerator<Mysql> {
             Ok(binlog_files) => {
                 if let Some((oldest_file, oldest_size)) = binlog_files.first() {
                     // Extract sequence number from filename (e.g., "binlog.000001" -> 1)
-                    if let Some(seq) = Self::extract_binlog_seq(oldest_file) {
+                    if let Some(seq) = extract_binlog_file_seq(oldest_file) {
                         let labels = vec![hostname.to_owned(), port.to_owned()];
                         get_or_create_guarded_int_gauge(
                             &mut self.mysql_cdc_binlog_file_seq_min,
@@ -495,7 +495,7 @@ impl DebeziumSplitEnumerator<Mysql> {
                 }
                 if let Some((newest_file, newest_size)) = binlog_files.last() {
                     // Extract sequence number from filename
-                    if let Some(seq) = Self::extract_binlog_seq(newest_file) {
+                    if let Some(seq) = extract_binlog_file_seq(newest_file) {
                         let labels = vec![hostname.to_owned(), port.to_owned()];
                         get_or_create_guarded_int_gauge(
                             &mut self.mysql_cdc_binlog_file_seq_max,
@@ -533,12 +533,6 @@ impl DebeziumSplitEnumerator<Mysql> {
             }
         }
         Ok(())
-    }
-
-    /// Extract sequence number from binlog filename
-    /// e.g., "binlog.000001" -> Some(1), "mysql-bin.000123" -> Some(123)
-    fn extract_binlog_seq(filename: &str) -> Option<u64> {
-        filename.rsplit('.').next()?.parse::<u64>().ok()
     }
 
     /// Query binlog files from MySQL, returns Vec<(filename, size)>
