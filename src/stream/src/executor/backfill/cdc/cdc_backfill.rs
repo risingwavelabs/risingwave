@@ -170,9 +170,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             let data_types = chunk.data_types();
             let mut emitted_rows = Vec::new();
             let mut retain_from = None;
-            let mut idx = 0;
-
-            while idx < chunk.capacity() {
+            for idx in 0..chunk.capacity() {
                 let (op, row, visible) = chunk.row_at(idx);
                 debug_assert!(visible, "buffered chunk should have compact visibility");
                 let event_offset = (*offset_parse_func)(
@@ -186,83 +184,26 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     .as_ref()
                     .is_none_or(|binlog_low| *binlog_low <= event_offset);
 
+                let row_pk = row.project(pk_indices);
+                let reached_current_pos =
+                    cmp_datum_iter(row_pk.iter(), current_pos.iter(), pk_order.iter().copied())
+                        .is_le();
+
+                if in_binlog_range && !reached_current_pos {
+                    retain_from = Some(idx);
+                    break;
+                }
+
                 match op {
-                    Op::UpdateDelete => {
-                        let (next_op, next_row, next_visible) = chunk.row_at(idx + 1);
-                        debug_assert!(
-                            next_visible,
-                            "buffered chunk should have compact visibility"
-                        );
-                        debug_assert_eq!(next_op, Op::UpdateInsert);
-
-                        let next_event_offset = (*offset_parse_func)(
-                            next_row
-                                .iter()
-                                .last()
-                                .flatten()
-                                .expect("cdc offset must exist")
-                                .into_utf8(),
-                        )?;
-                        let next_in_binlog_range = last_binlog_offset
-                            .as_ref()
-                            .is_none_or(|binlog_low| *binlog_low <= next_event_offset);
-
-                        let row_pk = row.project(pk_indices);
-                        let next_row_pk = next_row.project(pk_indices);
-                        let row_reached_current_pos = cmp_datum_iter(
-                            row_pk.iter(),
-                            current_pos.iter(),
-                            pk_order.iter().copied(),
-                        )
-                        .is_le();
-                        let next_row_reached_current_pos = cmp_datum_iter(
-                            next_row_pk.iter(),
-                            current_pos.iter(),
-                            pk_order.iter().copied(),
-                        )
-                        .is_le();
-
-                        let should_retain_pair = (in_binlog_range && !row_reached_current_pos)
-                            || (next_in_binlog_range && !next_row_reached_current_pos);
-                        if should_retain_pair {
-                            retain_from = Some(idx);
-                            break;
-                        }
-
-                        if in_binlog_range {
-                            emitted_rows.push((op, row.into_owned_row()));
-                            consumed_binlog_offset = Some(event_offset);
-                        }
-                        if next_in_binlog_range {
-                            emitted_rows.push((next_op, next_row.into_owned_row()));
-                            consumed_binlog_offset = Some(next_event_offset);
-                        }
-                        upstream_processed_row_count += 2;
-                        idx += 2;
-                    }
-                    Op::UpdateInsert => {
-                        unreachable!("UpdateInsert should not be present without UpdateDelete")
-                    }
                     Op::Insert | Op::Delete => {
-                        let row_pk = row.project(pk_indices);
-                        let reached_current_pos = cmp_datum_iter(
-                            row_pk.iter(),
-                            current_pos.iter(),
-                            pk_order.iter().copied(),
-                        )
-                        .is_le();
-
-                        if in_binlog_range && !reached_current_pos {
-                            retain_from = Some(idx);
-                            break;
-                        }
-
                         if in_binlog_range {
                             emitted_rows.push((op, row.into_owned_row()));
                             consumed_binlog_offset = Some(event_offset);
                         }
                         upstream_processed_row_count += 1;
-                        idx += 1;
+                    }
+                    Op::UpdateDelete | Op::UpdateInsert => {
+                        unreachable!("CDC buffered chunks should not contain update pairs")
                     }
                 }
             }
