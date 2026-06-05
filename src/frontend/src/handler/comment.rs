@@ -19,7 +19,6 @@ use risingwave_sqlparser::ast::{CommentObject, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
-use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
 
@@ -92,7 +91,7 @@ pub async fn handle_comment(
                             "materialized view",
                             ObjectType::Mview,
                         ),
-                        CommentObject::Column | CommentObject::View => unreachable!(),
+                        CommentObject::Column => unreachable!(),
                     };
 
                 if table.table_catalog.table_type() != expected_table_type {
@@ -113,40 +112,6 @@ pub async fn handle_comment(
                 PbComment {
                     object_id: table.table_id.as_raw_id(),
                     object_type: comment_object_type as i32,
-                    column_index: None,
-                    description: comment,
-                }
-            }
-            CommentObject::View => {
-                let (schema, view) =
-                    Binder::resolve_schema_qualified_name(&session.database(), &object_name)?;
-                let db_name = session.database();
-                let search_path = session.config().search_path();
-                let user_name = session.user_name();
-                let schema_path = SchemaPath::new(schema.as_deref(), &search_path, &user_name);
-                let reader = session.env().catalog_reader().read_guard();
-                if let Ok((table_catalog, _)) =
-                    reader.get_any_table_by_name(&db_name, schema_path, &view)
-                {
-                    return Err(ErrorCode::WrongObjectType(format!(
-                        "{} is not a view",
-                        table_catalog.name
-                    ))
-                    .into());
-                }
-                let (view_catalog, _) = reader.get_view_by_name(&db_name, schema_path, &view)?;
-
-                if view_catalog.owner != session.user_id() && !session.is_super_user() {
-                    return Err(ErrorCode::PermissionDenied(format!(
-                        "must be owner of relation {}",
-                        view_catalog.name
-                    ))
-                    .into());
-                }
-
-                PbComment {
-                    object_id: view_catalog.id.as_raw_id(),
-                    object_type: ObjectType::View as i32,
                     column_index: None,
                     description: comment,
                 }

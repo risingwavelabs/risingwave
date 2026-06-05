@@ -1125,7 +1125,6 @@ pub enum CommentObject {
     Column,
     Table,
     MaterializedView,
-    View,
 }
 
 impl fmt::Display for CommentObject {
@@ -1134,7 +1133,6 @@ impl fmt::Display for CommentObject {
             CommentObject::Column => f.write_str("COLUMN"),
             CommentObject::Table => f.write_str("TABLE"),
             CommentObject::MaterializedView => f.write_str("MATERIALIZED VIEW"),
-            CommentObject::View => f.write_str("VIEW"),
         }
     }
 }
