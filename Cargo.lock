@@ -8,8 +8,8 @@ version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8dbe031527c9856a1e2df5e82aa8e568ffaab3be897f70d874477fb42a783bb"
 dependencies = [
- "arrow-array 54.3.1",
- "arrow-schema 54.3.1",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
 ]
 
 [[package]]
@@ -20,8 +20,8 @@ checksum = "5beaa87308b040adcf482fb760f64ced1cbcd9469fe86ddd5be221dabbbc544e"
 dependencies = [
  "adbc_core",
  "adbc_ffi",
- "arrow-array 54.3.1",
- "arrow-schema 54.3.1",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
  "libloading 0.8.9",
  "toml 0.9.11+spec-1.1.0",
  "windows-registry 0.6.1",
@@ -35,8 +35,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3600ae9aec2907516d088189e3b863029280f1953dd0eab903c7f4c862a0ce81"
 dependencies = [
  "adbc_core",
- "arrow-array 54.3.1",
- "arrow-schema 54.3.1",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
 ]
 
 [[package]]
@@ -48,8 +48,8 @@ dependencies = [
  "adbc_core",
  "adbc_driver_manager",
  "adbc_ffi",
- "arrow-array 54.3.1",
- "arrow-schema 54.3.1",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
  "url",
 ]
 
@@ -626,9 +626,6 @@ name = "arrow-schema"
 version = "54.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cfaf5e440be44db5413b75b72c2a87c1f8f0627117d110264048f2969b99e9"
-dependencies = [
- "bitflags 2.10.0",
-]
 
 [[package]]
 name = "arrow-schema"
@@ -8501,7 +8498,7 @@ version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77e878c846a8abae00dd069496dbe8751b16ac1c3d6bd2a7283a938e8228f90d"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.4.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -10069,7 +10066,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9120690fafc389a67ba3803df527d0ec9cbbc9cc45e4cc20b332996dfb672425"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
