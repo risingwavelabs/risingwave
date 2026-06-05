@@ -169,6 +169,26 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "AsOf Join Executor Equi-Join Matched Rows",
+                    "Number of rows matched by the initial equi-join in an ASOF join, before the inequality predicate is applied. "
+                    "Emitted only when `streaming_asof_join_use_cache` is enabled. "
+                    "Compare against `Join Executor Matched Rows` to see how many equi-matched rows survive the inequality filter.",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target_hidden(
+                                f"histogram_quantile({quantile}, sum(rate({metric('stream_asof_join_equi_matched_keys_bucket')}[$__rate_interval])) by (le, fragment_id, table_id, {COMPONENT_LABEL}))",
+                                f"p{legend} - fragment {{{{fragment_id}}}} table_id {{{{table_id}}}} - {{{{{COMPONENT_LABEL}}}}}",
+                            ),
+                            [90, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, {COMPONENT_LABEL}, fragment_id, table_id) (rate({metric('stream_asof_join_equi_matched_keys_sum')}[$__rate_interval])) / sum by(le, {COMPONENT_LABEL}, fragment_id, table_id) (rate({table_metric('stream_asof_join_equi_matched_keys_count')}[$__rate_interval])) >= 0",
+                            "avg - fragment {{fragment_id}} table_id {{table_id}} - {{%s}}"
+                            % COMPONENT_LABEL,
+                        ),
+                    ],
+                ),
                 panels.subheader("Aggregation"),
                 panels.timeseries_actor_ops(
                     "Aggregation Executor Cache Statistics For Each StreamChunk",

@@ -27,6 +27,7 @@ use either::Either;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::cmp_rows_ascending;
@@ -162,6 +163,7 @@ struct EqJoinArgs<'a, S: StateStore, E: AsOfRowEncoding> {
     cnt_rows_received: &'a mut u32,
     join_cache_evict_interval_rows: u32,
     high_join_amplification_threshold: usize,
+    asof_join_equi_matched_keys_right: &'a LabelGuardedHistogram,
 }
 
 impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoinExecutor<S, T, E> {
@@ -372,6 +374,15 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             .join_cached_entry_count
             .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
+        let asof_join_equi_matched_keys_right = self
+            .metrics
+            .asof_join_equi_matched_keys
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                self.side_r.ht.table_id().to_string().as_str(),
+            ]);
+
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -407,6 +418,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        asof_join_equi_matched_keys_right: &asof_join_equi_matched_keys_right,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -432,6 +444,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        asof_join_equi_matched_keys_right: &asof_join_equi_matched_keys_right,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -559,6 +572,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold: _,
+            asof_join_equi_matched_keys_right: _,
         } = args;
 
         let (side_update, side_match) = (side_l, side_r);
@@ -731,6 +745,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold,
+            asof_join_equi_matched_keys_right,
         } = args;
 
         let (side_update, side_match) = (side_r, side_l);
@@ -782,8 +797,13 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             let inequal_key = row.project(&inequal_key_idx_update);
 
             let mut join_matched_rows_cnt = 0;
+            let mut asof_equi_matched_rows_cnt: Option<usize> = None;
 
             if !inequal_key_is_null {
+                asof_equi_matched_rows_cnt = side_match
+                    .ht
+                    .cached_equi_match_count_with_jk_prefix(&join_key)
+                    .await?;
                 let (row_to_delete_r, row_to_insert_r) = {
                     let (first_row, second_row) = side_update
                         .ht
@@ -949,6 +969,9 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                 // so we skip storing. No action needed on the right side.
             }
             join_matched_join_keys.observe(join_matched_rows_cnt as _);
+            if let Some(cnt) = asof_equi_matched_rows_cnt {
+                asof_join_equi_matched_keys_right.observe(cnt as _);
+            }
             if join_matched_rows_cnt > high_join_amplification_threshold {
                 let join_key = row.project(&side_update.join_key_indices);
                 tracing::warn!(target: "high_join_amplification",
