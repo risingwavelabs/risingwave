@@ -218,6 +218,15 @@ impl ToStream for LogicalMatchRecognize {
         let partition_key_indices = self.core.partition_key_indices().expect("checked above");
 
         let stream_input = self.input().to_stream(ctx)?;
+        // The executor matches over an append-only sequence and emits insert-only results; it has no
+        // semantics for retracting or revising an already-emitted match, and the stream plan node
+        // declares append-only output. Reject a non-append-only input during planning so the user
+        // gets an error at `CREATE`, rather than the executor crashing on the first update/delete.
+        if !stream_input.append_only() {
+            bail!(
+                "MATCH_RECOGNIZE requires an append-only input; updates and deletes are not supported"
+            );
+        }
         // Event-time contract: the executor buffers rows and finalises matches as the watermark on
         // the leading ORDER BY column advances, so that column must carry a watermark. This mirrors
         // Flink requiring a rowtime attribute on ORDER BY.
