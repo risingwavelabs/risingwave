@@ -1136,7 +1136,9 @@ message GapFillNode {
 // ONE ROW PER MATCH. PARTITION BY / ORDER BY are input column indices.
 message MatchRecognizeNode {
   repeated uint32 partition_by = 1;
-  repeated uint32 order_by = 2;
+  // ORDER BY keys, carried as ColumnOrder like every other ordered streaming node. v1 only supports
+  // the default ascending order (the binder rejects DESC / explicit NULLS); the executor asserts it.
+  repeated common.ColumnOrder order_by = 2;
   repeated MatchRecognizeMeasure measures = 3;
   repeated MatchRecognizeDefine defines = 5;
   // The PATTERN clause as a structured tree (the v1 subset: variables, concatenation, alternation,
