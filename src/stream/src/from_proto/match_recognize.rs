@@ -61,11 +61,19 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             .map_err(|e| anyhow::anyhow!("invalid MATCH_RECOGNIZE pattern: {e}"))?;
         let nfa = Nfa::compile(&pattern);
 
+        // Accept only the encodings the frontend produces; fail fast on anything else rather than
+        // silently defaulting to PAST LAST ROW, which would mask a corrupt plan or a version skew.
         let skip = match node.after_match_skip.as_str() {
+            "past_last_row" => SkipMode::PastLastRow,
             "to_next_row" => SkipMode::ToNextRow,
             s if s.starts_with("to_first:") => SkipMode::ToFirst(s["to_first:".len()..].to_owned()),
             s if s.starts_with("to_last:") => SkipMode::ToLast(s["to_last:".len()..].to_owned()),
-            _ => SkipMode::PastLastRow,
+            other => {
+                return Err(anyhow::anyhow!(
+                    "invalid MATCH_RECOGNIZE after_match_skip encoding: {other:?}"
+                )
+                .into());
+            }
         };
 
         let within = node

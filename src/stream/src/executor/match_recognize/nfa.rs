@@ -23,7 +23,11 @@
 //! Variable→predicate evaluation and the streaming/state layer live elsewhere; this module is pure
 //! and deterministic so it can be unit-tested without a cluster.
 
-use std::collections::{BTreeSet, HashSet};
+// `BTreeSet` is used only by the test-only reference matchers and the unit tests; the streaming
+// matcher walks transitions directly with `HashSet` visited-sets.
+#[cfg(test)]
+use std::collections::BTreeSet;
+use std::collections::HashSet;
 
 use async_recursion::async_recursion;
 
@@ -104,7 +108,10 @@ impl Nfa {
         }
     }
 
-    /// The set of states reachable from `states` via ε-transitions (inclusive).
+    /// The set of states reachable from `states` via ε-transitions (inclusive). Only the test-only
+    /// reference matchers (e.g. [`Nfa::longest_match`]) use the explicit closure; the streaming
+    /// matcher walks transitions directly, so this is gated out of the release binary.
+    #[cfg(test)]
     fn epsilon_closure(&self, states: impl IntoIterator<Item = StateId>) -> BTreeSet<StateId> {
         let mut closure: BTreeSet<StateId> = BTreeSet::new();
         let mut stack: Vec<StateId> = states.into_iter().collect();
@@ -359,28 +366,85 @@ impl Nfa {
         Ok(matches)
     }
 
-    /// Whether the row at `pos` can be the *first* matched row of the pattern: some pattern variable
-    /// reachable from the start state via ε-transitions accepts it under an empty running match.
-    /// Used to evict finalized rows that can no longer begin a match (a match is contiguous from its
-    /// start, so a row that cannot start the pattern and sits before every live match is dead).
-    pub async fn can_begin_at(
+    /// Whether a match starting at `pos` is still *live* at the safe boundary `n_rows`: there exists
+    /// a path that consumes the safe rows `pos..n_rows` and reaches the boundary while still inside
+    /// the automaton (not yet accepted), so a future row could extend it into a complete match. Used
+    /// to evict rows that can no longer be part of any match.
+    ///
+    /// This is strictly stronger than "can `pos` begin the pattern": for `(a b)` over `[a, x]` where
+    /// `x` matches neither, the `a` *can* begin the pattern, but every path dies on `x` before the
+    /// boundary, so the start is dead and must be evictable. A lone `[a]` (boundary right after `a`),
+    /// in contrast, is kept because a future `b` may still complete it.
+    pub async fn reaches_boundary_alive(
         &self,
         pos: usize,
+        n_rows: usize,
         matcher: &(impl CandidateMatcher + Sync),
     ) -> StreamExecutorResult<bool> {
-        let mut first_vars: BTreeSet<&str> = BTreeSet::new();
-        for s in self.epsilon_closure([self.start]) {
-            for t in &self.states[s] {
-                if let Transition::OnVar { var, .. } = t {
-                    first_vars.insert(var.as_str());
-                }
-            }
+        let mut path: Vec<String> = Vec::new();
+        let mut visited: HashSet<StateId> = HashSet::new();
+        self.live_to_boundary(n_rows, self.start, pos, &mut path, matcher, &mut visited)
+            .await
+    }
+
+    /// Path-carrying DFS backing [`Nfa::reaches_boundary_alive`]. Mirrors the traversal of
+    /// [`Nfa::preferred_from_dynamic`] (so `DEFINE` predicates see the running match), but instead of
+    /// looking for an accepting path it asks whether the safe suffix `pos..n_rows` can be consumed
+    /// without dying. Reaching `pos == n_rows` inside the automaton is "alive"; reaching `accept`
+    /// before the boundary is a complete (already-finalized) match, not a live partial one, so it
+    /// does not by itself keep the start alive.
+    #[async_recursion]
+    async fn live_to_boundary(
+        &self,
+        n_rows: usize,
+        state: StateId,
+        pos: usize,
+        path: &mut Vec<String>,
+        matcher: &(impl CandidateMatcher + Sync),
+        visited: &mut HashSet<StateId>,
+    ) -> StreamExecutorResult<bool> {
+        if pos == n_rows {
+            return Ok(true);
         }
-        for var in first_vars {
-            if matcher.matches(var, pos, &[]).await? {
+        if state == self.accept {
+            return Ok(false);
+        }
+        if !visited.insert(state) {
+            return Ok(false);
+        }
+        for t in &self.states[state] {
+            let alive = match t {
+                Transition::Epsilon(next) => {
+                    self.live_to_boundary(n_rows, *next, pos, path, matcher, visited)
+                        .await?
+                }
+                Transition::OnVar { var, target } => {
+                    if pos < n_rows && matcher.matches(var, pos, path).await? {
+                        path.push(var.clone());
+                        let mut next_visited = HashSet::new();
+                        let r = self
+                            .live_to_boundary(
+                                n_rows,
+                                *target,
+                                pos + 1,
+                                path,
+                                matcher,
+                                &mut next_visited,
+                            )
+                            .await?;
+                        path.pop();
+                        r
+                    } else {
+                        false
+                    }
+                }
+            };
+            if alive {
+                visited.remove(&state);
                 return Ok(true);
             }
         }
+        visited.remove(&state);
         Ok(false)
     }
 
@@ -951,6 +1015,36 @@ mod tests {
             dynamic,
             nfa.find_matches_labeled(&r, &SkipMode::PastLastRow)
         );
+    }
+
+    #[tokio::test]
+    async fn reaches_boundary_alive_evicts_dead_prefix() {
+        // PATTERN (a b): a start is live only if a match from it can still reach the safe boundary.
+        let nfa = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
+
+        // `[a]` with the boundary right after it: the `a` is a live partial match — a future `b` may
+        // complete it — so it must be retained.
+        let m = SetMatcher { rows: rows("a") };
+        assert!(nfa.reaches_boundary_alive(0, 1, &m).await.unwrap());
+
+        // `[a, x]` and `[a, x, x]` (x satisfies neither `a` nor `b`): the `a` can still *begin* the
+        // pattern, but the following safe rows already block it from completing, so it is dead and
+        // must be evictable. This is the case the previous `can_begin_at`-based predicate retained
+        // forever.
+        let m = SetMatcher { rows: rows("ax") };
+        assert!(!nfa.reaches_boundary_alive(0, 2, &m).await.unwrap());
+        let m = SetMatcher { rows: rows("axx") };
+        assert!(!nfa.reaches_boundary_alive(0, 3, &m).await.unwrap());
+
+        // A later start can be the live one: in `[x, a]` row 0 is dead but row 1 (the `a`) is live.
+        let m = SetMatcher { rows: rows("xa") };
+        assert!(!nfa.reaches_boundary_alive(0, 2, &m).await.unwrap());
+        assert!(nfa.reaches_boundary_alive(1, 2, &m).await.unwrap());
+
+        // A complete match sitting exactly at the boundary is not yet finalized (it needs a following
+        // safe row to confirm maximality), so its start is still retained.
+        let m = SetMatcher { rows: rows("ab") };
+        assert!(nfa.reaches_boundary_alive(0, 2, &m).await.unwrap());
     }
 
     /// A path-dependent matcher: `b` only matches once an `a` has been bound earlier in the match.
