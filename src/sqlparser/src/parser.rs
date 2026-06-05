@@ -6382,10 +6382,6 @@ impl Parser<'_> {
                 let object_name = self.parse_object_name()?;
                 (CommentObject::Table, object_name)
             }
-            Token::Word(w) if w.keyword == Keyword::VIEW => {
-                let object_name = self.parse_object_name()?;
-                (CommentObject::View, object_name)
-            }
             Token::Word(w) if w.keyword == Keyword::MATERIALIZED => {
                 self.expect_keyword(Keyword::VIEW)?;
                 let object_name = self.parse_object_name()?;
