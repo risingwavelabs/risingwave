@@ -879,6 +879,15 @@ pub mod tests {
     }
 
     #[test]
+    fn test_iceberg_compaction_enable_prefetch_default_is_false() {
+        let config = StorageConfig::default();
+        assert!(
+            !config.iceberg_compaction_enable_prefetch,
+            "enable_prefetch must default to false to avoid unexpected memory usage in existing deployments"
+        );
+    }
+
+    #[test]
     fn test_storage_iceberg_compaction_pull_interval_ms_must_be_positive() {
         let config = toml::from_str::<RwConfig>(
             r#"
