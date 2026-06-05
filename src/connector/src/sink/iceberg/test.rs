@@ -307,6 +307,7 @@ fn test_parse_iceberg_config() {
             primary_key: Some(vec!["v1".to_owned()]),
             partition_by: Some("v1, identity(v1), truncate(4,v2), bucket(5,v1), year(v3), month(v4), day(v5), hour(v6), void(v1)".to_owned()),
             order_key: None,
+            table_location: None,
             java_catalog_props: [("jdbc.user", "admin"), ("jdbc.password", "123456")]
                 .into_iter()
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
@@ -493,6 +494,48 @@ fn test_parse_google_auth_config() {
         config.common.catalog_header.as_deref(),
         Some("x-goog-user-project=my-gcp-project")
     );
+}
+
+/// Test that the `table.location` option is parsed, and is `None` when omitted.
+#[test]
+fn test_parse_iceberg_config_table_location() {
+    let values: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.type", "rest"),
+        ("catalog.uri", "http://localhost:8181"),
+        ("warehouse.path", "my_warehouse"),
+        ("table.location", "s3://my-bucket/my_db/my_table"),
+        ("database.name", "my_db"),
+        ("table.name", "my_table"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+
+    let config = IcebergConfig::from_btreemap(values).unwrap();
+    assert_eq!(
+        config.table_location.as_deref(),
+        Some("s3://my-bucket/my_db/my_table")
+    );
+
+    // When `table.location` is absent, the field stays `None` and parsing is unaffected.
+    let values_without_location: BTreeMap<String, String> = [
+        ("connector", "iceberg"),
+        ("type", "append-only"),
+        ("force_append_only", "true"),
+        ("catalog.type", "rest"),
+        ("catalog.uri", "http://localhost:8181"),
+        ("warehouse.path", "my_warehouse"),
+        ("database.name", "my_db"),
+        ("table.name", "my_table"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+    .collect();
+    let config = IcebergConfig::from_btreemap(values_without_location).unwrap();
+    assert_eq!(config.table_location, None);
 }
 
 /// Test parsing `oauth2` security configuration.

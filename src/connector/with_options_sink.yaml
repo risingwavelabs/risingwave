@@ -648,6 +648,14 @@ IcebergConfig:
     field_type: String
     required: false
     default: Default::default
+  - name: table.location
+    field_type: String
+    comments: |-
+      Explicit Iceberg table location used at table creation. When set, it is
+      used as `TableCreation.location` directly; otherwise the location is
+      derived from `warehouse.path`.
+    required: false
+    default: Default::default
   - name: commit_checkpoint_interval
     field_type: u64
     comments: Commit every n(>0) checkpoints, default is 60.
