@@ -483,8 +483,7 @@ pub enum TableFactor {
     /// dialects, but the information about such nesting is stripped from AST.
     NestedJoin(Box<TableWithJoins>),
     /// `<table> MATCH_RECOGNIZE (...)`: SQL:2016 row pattern recognition applied
-    /// to an input table factor. Parsing only — planning/execution of this clause
-    /// is not yet implemented and is rejected by the binder.
+    /// to an input table factor.
     MatchRecognize {
         /// The input the pattern is matched over.
         table: Box<TableFactor>,
