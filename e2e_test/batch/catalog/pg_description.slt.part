@@ -10,6 +10,9 @@ comment on table mv_t is 'this should fail';
 statement error is not a materialized view
 comment on materialized view t is 'this should fail';
 
+statement error is not a view
+comment on view t is 'this should fail';
+
 statement error Invalid column: missing_col
 comment on column t.missing_col is 'this should fail';
 
