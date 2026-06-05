@@ -152,7 +152,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         output_indices: &[usize],
     ) -> StreamExecutorResult<(Vec<StreamChunk>, u64, Option<CdcOffset>)> {
         let Some(current_pos) = current_pk_pos else {
-            upstream_chunk_buffer.clear();
             return Ok((vec![], 0, None));
         };
 
