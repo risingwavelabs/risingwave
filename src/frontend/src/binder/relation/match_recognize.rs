@@ -169,6 +169,18 @@ impl Binder {
             .iter()
             .map(|e| self.bind_expr(e))
             .collect::<RwResult<Vec<_>>>()?;
+        // v1 supports only the default ordering (ascending, default null placement). The plan, proto
+        // and executor carry only the ORDER BY *expressions* — not direction or null placement — so a
+        // `DESC` or an explicit `NULLS FIRST|LAST` would be silently dropped and the executor would
+        // sort the wrong way. Reject it explicitly rather than compile to incorrect behaviour.
+        for o in order_by {
+            if o.asc == Some(false) || o.nulls_first.is_some() {
+                bail_not_implemented!(
+                    "MATCH_RECOGNIZE ORDER BY currently supports only ascending order with default \
+                     null placement (no DESC or explicit NULLS FIRST/LAST)"
+                );
+            }
+        }
         let order_by = order_by
             .iter()
             .map(|o| self.bind_expr(&o.expr))
@@ -770,11 +782,14 @@ impl NavExtractor<'_> {
         if let FunctionArg::Unnamed(FunctionArgExpr::Expr(AstExpr::Value(AstValue::Number(s)))) =
             arg
             && let Ok(n) = s.parse::<usize>()
+            && n >= 1
         {
             Ok(n)
         } else {
+            // The offset must be a positive literal: `PREV(col, 0)` / `NEXT(col, 0)` would resolve to
+            // the current row, which is surprising for physical navigation and not what these mean.
             bail_not_implemented!(
-                "{}() offset must be a non-negative integer literal",
+                "{}() offset must be a positive integer literal (>= 1)",
                 name.to_uppercase()
             );
         }
