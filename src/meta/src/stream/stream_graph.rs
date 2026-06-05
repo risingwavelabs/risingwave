@@ -17,6 +17,7 @@ mod assignment;
 mod fragment;
 mod id;
 mod schedule;
+mod schema_change;
 pub mod state_match;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
@@ -24,8 +25,11 @@ pub use assignment::*;
 pub use fragment::{
     CompleteStreamFragmentGraph, ExtendedFragmentBackfillOrder, FragmentGraphDownstreamContext,
     FragmentGraphUpstreamContext, StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
-    check_sink_fragments_support_refresh_schema, fill_snapshot_backfill_epoch,
-    rewrite_refresh_schema_sink_fragment,
+    fill_snapshot_backfill_epoch,
 };
 pub(crate) use id::GlobalActorIdGen;
 pub use schedule::Locations;
+pub use schema_change::{
+    TableSchemaChange, check_sink_fragments_support_refresh_schema,
+    rewrite_refresh_schema_sink_fragment,
+};

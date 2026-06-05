@@ -25,7 +25,7 @@ use risingwave_common::id::{JobId, SinkId};
 use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
 use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, streaming_job};
-use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
+use risingwave_pb::catalog::{CreateType, PbSink, Subscription};
 use risingwave_pb::expr::PbExprNode;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbField};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
@@ -215,6 +215,13 @@ impl CreatingStreamingJobInfo {
 type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 
 #[derive(Debug, Clone)]
+pub struct TableMetadataUpdate {
+    pub table_id: TableId,
+    pub columns: Vec<PbColumnCatalog>,
+    pub value_indices: Vec<i32>,
+}
+
+#[derive(Debug, Clone)]
 pub struct AutoRefreshSchemaSinkContext {
     pub tmp_sink_id: SinkId,
     pub original_sink: PbSink,
@@ -223,7 +230,7 @@ pub struct AutoRefreshSchemaSinkContext {
     pub newly_add_fields: Vec<Field>,
     pub removed_column_names: Vec<String>,
     pub new_fragment: Fragment,
-    pub new_log_store_table: Option<Box<PbTable>>,
+    pub updated_tables: Vec<TableMetadataUpdate>,
     /// The sink's own stream context (timezone, `config_override`).
     pub ctx: StreamContext,
 }

@@ -93,8 +93,9 @@ use crate::stream::{
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
     ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
-    StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
-    create_source_worker, rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
+    StreamFragmentGraph, TableSchemaChange, UpstreamSinkInfo,
+    check_sink_fragments_support_refresh_schema, create_source_worker,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -1512,6 +1513,21 @@ impl DdlController {
                     .filter(|col| !new_table_column_ids.contains(&col.column_id()))
                     .cloned()
                     .collect_vec();
+                if !newly_added_columns.is_empty() && !removed_columns.is_empty() {
+                    return Err(anyhow!(
+                        "auto schema change only supports adding or dropping columns in one replacement"
+                    )
+                    .into());
+                }
+                let sink_schema_change = if !removed_columns.is_empty() {
+                    TableSchemaChange::DropColumn {
+                        column_ids: removed_columns.iter().map(|col| col.column_id()).collect(),
+                    }
+                } else {
+                    TableSchemaChange::AddColumn {
+                        columns: newly_added_columns.clone(),
+                    }
+                };
                 let mut sinks = Vec::with_capacity(auto_refresh_schema_sinks.len());
                 for sink in auto_refresh_schema_sinks {
                     let sink_job_fragments = self
@@ -1528,12 +1544,11 @@ impl DdlController {
                     let sink_ctx = sink_job_fragments.ctx;
                     let original_sink_fragment =
                         sink_job_fragments.fragments.into_values().next().unwrap();
-                    let (new_sink_fragment, new_schema, new_log_store_table) =
+                    let (new_sink_fragment, new_schema, updated_tables) =
                         rewrite_refresh_schema_sink_fragment(
                             &original_sink_fragment,
                             &sink,
-                            &newly_added_columns,
-                            &removed_columns,
+                            sink_schema_change.clone(),
                             table,
                             fragment_graph.table_fragment_id(),
                             self.env.id_gen_manager(),
@@ -1565,7 +1580,7 @@ impl DdlController {
                             .map(|col| col.name.clone())
                             .collect(),
                         new_fragment: new_sink_fragment,
-                        new_log_store_table: new_log_store_table.map(Box::new),
+                        updated_tables,
                         ctx: sink_ctx,
                     });
                 }
@@ -1620,7 +1635,7 @@ impl DdlController {
                             tmp_sink_id: sink.tmp_sink_id,
                             original_sink_id: sink.original_sink.id,
                             columns: sink.new_schema.clone(),
-                            new_log_store_table: sink.new_log_store_table.clone(),
+                            updated_tables: sink.updated_tables.clone(),
                         })
                         .collect()
                 });

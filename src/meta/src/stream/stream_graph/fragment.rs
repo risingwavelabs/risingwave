@@ -22,8 +22,9 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    CDC_SOURCE_COLUMN_NUM, ColumnCatalog, ColumnId, Field, FragmentTypeFlag, FragmentTypeMask,
-    TableId, generate_internal_table_name_with_type,
+    CDC_SOURCE_COLUMN_NUM, ColumnCatalog, ColumnDesc, ColumnId, Field, FragmentTypeFlag,
+    FragmentTypeMask, TableId, derive_internal_table_column_name,
+    generate_internal_table_name_with_type,
 };
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::id::JobId;
@@ -37,7 +38,7 @@ use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::expr::{ExprNode as PbExprNode, expr_node};
 use risingwave_pb::id::{RelationId, StreamNodeLocalOperatorId};
-use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
+use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc, PbField};
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
@@ -45,16 +46,20 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 use risingwave_pb::stream_plan::{
     BackfillOrder, DispatchOutputMapping, DispatchStrategy, DispatcherType, PbStreamNode,
-    PbStreamScanType, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamScanNode,
-    StreamScanType,
+    PbStreamScanType, ProjectNode, SinkNode, StreamFragmentGraph as StreamFragmentGraphProto,
+    StreamNode, StreamScanNode, StreamScanType,
 };
 
 use crate::barrier::SnapshotBackfillInfo;
-use crate::controller::id::IdGeneratorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob, StreamingJobType};
 use crate::model::{Fragment, FragmentDownstreamRelation, FragmentId};
+use crate::stream::TableMetadataUpdate;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
+use crate::stream::stream_graph::schema_change::{
+    AddColumn, DropColumn, NodeSchemaRewrite, PropagatedSchemaChange, TableSchemaChange,
+    validate_log_store_schema_prefix,
+};
 use crate::{MetaError, MetaResult};
 
 /// The fragment in the building phase, including the [`StreamFragment`] from the frontend and
@@ -377,121 +382,31 @@ impl StreamFragmentEdge {
     }
 }
 
-fn clone_fragment(fragment: &Fragment, id_generator_manager: &IdGeneratorManager) -> Fragment {
-    let fragment_id = GlobalFragmentIdGen::new(id_generator_manager, 1)
-        .to_global_id(0)
-        .as_global_id();
-    Fragment {
-        fragment_id,
-        fragment_type_mask: fragment.fragment_type_mask,
-        distribution_type: fragment.distribution_type,
-        state_table_ids: fragment.state_table_ids.clone(),
-        maybe_vnode_count: fragment.maybe_vnode_count,
-        nodes: fragment.nodes.clone(),
-    }
-}
-
-pub fn check_sink_fragments_support_refresh_schema(
-    fragments: &BTreeMap<FragmentId, Fragment>,
-) -> MetaResult<()> {
-    if fragments.len() != 1 {
-        return Err(anyhow!(
-            "sink with auto schema change should have only 1 fragment, but got {:?}",
-            fragments.len()
-        )
-        .into());
-    }
-    let (_, fragment) = fragments.first_key_value().expect("non-empty");
-    let sink_node = &fragment.nodes;
-    let PbNodeBody::Sink(_) = sink_node.node_body.as_ref().unwrap() else {
-        return Err(anyhow!("expect PbNodeBody::Sink but got: {:?}", sink_node.node_body).into());
-    };
-    let [stream_input_node] = sink_node.input.as_slice() else {
-        panic!("Sink has more than 1 input: {:?}", sink_node.input);
-    };
-    let stream_scan_node = match stream_input_node.node_body.as_ref().unwrap() {
-        PbNodeBody::StreamScan(_) => stream_input_node,
-        PbNodeBody::Project(_) => {
-            let [stream_scan_node] = stream_input_node.input.as_slice() else {
-                return Err(anyhow!(
-                    "Project node must have exactly 1 input for auto schema change, but got {:?}",
-                    stream_input_node.input.len()
-                )
-                .into());
-            };
-            stream_scan_node
-        }
-        _ => {
-            return Err(anyhow!(
-                "expect PbNodeBody::StreamScan or PbNodeBody::Project but got: {:?}",
-                stream_input_node.node_body
-            )
-            .into());
-        }
-    };
-    let PbNodeBody::StreamScan(scan) = stream_scan_node.node_body.as_ref().unwrap() else {
-        return Err(anyhow!(
-            "expect PbNodeBody::StreamScan but got: {:?}",
-            stream_scan_node.node_body
-        )
-        .into());
-    };
-    let stream_scan_type = PbStreamScanType::try_from(scan.stream_scan_type).unwrap();
-    if stream_scan_type != PbStreamScanType::ArrangementBackfill {
-        return Err(anyhow!(
-            "unsupported stream_scan_type for auto refresh schema: {:?}",
-            stream_scan_type
-        )
-        .into());
-    }
-    let [merge_node, _batch_plan_node] = stream_scan_node.input.as_slice() else {
-        panic!(
-            "the number of StreamScan inputs is not 2: {:?}",
-            stream_scan_node.input
-        );
-    };
-    let NodeBody::Merge(_) = merge_node.node_body.as_ref().unwrap() else {
-        return Err(anyhow!(
-            "expect PbNodeBody::Merge but got: {:?}",
-            merge_node.node_body
-        )
-        .into());
-    };
-    Ok(())
-}
-
-/// Output mapping info after rewriting a `StreamScan` node.
-struct ScanRewriteResult {
-    old_output_index_to_new_output_index: HashMap<u32, u32>,
-    new_output_index_by_column_id: HashMap<ColumnId, u32>,
-    output_fields: Vec<risingwave_pb::plan_common::Field>,
-}
-
 /// Append new columns to a sink/log-store column list with updated names/ids.
-fn extend_sink_columns(
+fn extend_columns_from_fields(
     sink_columns: &mut Vec<PbColumnCatalog>,
-    new_columns: &[ColumnCatalog],
-    get_column_name: impl Fn(&String) -> String,
+    new_fields: &[PbField],
+    mut get_column_name: impl FnMut(&Field) -> String,
 ) {
     let next_column_id = sink_columns
         .iter()
         .map(|col| col.column_desc.as_ref().unwrap().column_id + 1)
         .max()
         .unwrap_or(1);
-    sink_columns.extend(new_columns.iter().enumerate().map(|(i, col)| {
-        let mut col = col.to_protobuf();
-        let column_desc = col.column_desc.as_mut().unwrap();
-        column_desc.column_id = next_column_id + (i as i32);
-        column_desc.name = get_column_name(&column_desc.name);
-        col
+    sink_columns.extend(new_fields.iter().enumerate().map(|(i, field)| {
+        let field = Field::from(field);
+        let mut column_desc =
+            ColumnDesc::from_field_with_column_id(&field, next_column_id + (i as i32));
+        column_desc.name = get_column_name(&field);
+        ColumnCatalog::visible(column_desc).to_protobuf()
     }));
 }
 
 /// Build sink column list after removing and appending columns.
-fn build_new_sink_columns(
+pub(super) fn build_new_sink_columns(
     sink: &PbSink,
     removed_column_names: &HashSet<String>,
-    newly_added_columns: &[ColumnCatalog],
+    newly_added_fields: &[PbField],
 ) -> Vec<PbColumnCatalog> {
     let mut columns: Vec<PbColumnCatalog> = sink
         .columns
@@ -502,34 +417,55 @@ fn build_new_sink_columns(
         })
         .cloned()
         .collect();
-    extend_sink_columns(&mut columns, newly_added_columns, |name| name.clone());
+    extend_columns_from_fields(&mut columns, newly_added_fields, |field| field.name.clone());
     columns
 }
 
 /// Rewrite log store table columns for schema change.
-fn rewrite_log_store_table(
+pub(super) fn rewrite_log_store_table(
     log_store_table: &mut PbTable,
     removed_log_store_column_names: &HashSet<String>,
-    newly_added_columns: &[ColumnCatalog],
-    upstream_table_name: &str,
-) {
+    newly_added_fields: &[PbField],
+) -> TableMetadataUpdate {
     log_store_table.columns.retain(|col| {
         !removed_log_store_column_names.contains(&col.column_desc.as_ref().unwrap().name)
     });
-    extend_sink_columns(&mut log_store_table.columns, newly_added_columns, |name| {
-        format!("{}_{}", upstream_table_name, name)
+    extend_columns_from_fields(&mut log_store_table.columns, newly_added_fields, |field| {
+        derive_internal_table_column_name(&field.name)
     });
     log_store_table.value_indices = (0..log_store_table.columns.len() as i32).collect();
+    TableMetadataUpdate {
+        table_id: log_store_table.id,
+        columns: log_store_table.columns.clone(),
+        value_indices: log_store_table.value_indices.clone(),
+    }
+}
+
+fn propagate_schema_change(
+    newly_added_fields: Vec<PbField>,
+    removed_indices: Vec<usize>,
+) -> Option<PropagatedSchemaChange> {
+    assert!(newly_added_fields.is_empty() || removed_indices.is_empty());
+    if !newly_added_fields.is_empty() {
+        Some(PropagatedSchemaChange::AddColumn(AddColumn {
+            added_fields: newly_added_fields,
+        }))
+    } else if !removed_indices.is_empty() {
+        Some(PropagatedSchemaChange::DropColumn(DropColumn {
+            removed_indices,
+        }))
+    } else {
+        None
+    }
 }
 
 /// Rewrite `StreamScan` + Merge to match the new upstream schema.
-fn rewrite_stream_scan_and_merge(
+pub(super) fn rewrite_stream_scan_and_merge(
     stream_scan_node: &mut StreamNode,
-    removed_column_ids: &HashSet<ColumnId>,
-    newly_added_columns: &[ColumnCatalog],
+    upstream_table_change: &TableSchemaChange,
     upstream_table: &PbTable,
-    upstream_table_fragment_id: FragmentId,
-) -> MetaResult<ScanRewriteResult> {
+    new_upstream_fragment_id: FragmentId,
+) -> MetaResult<Option<PropagatedSchemaChange>> {
     let PbNodeBody::StreamScan(scan) = stream_scan_node.node_body.as_mut().unwrap() else {
         return Err(anyhow!(
             "expect PbNodeBody::StreamScan but got: {:?}",
@@ -550,7 +486,6 @@ fn rewrite_stream_scan_and_merge(
         )
         .into());
     };
-
     let stream_scan_type = PbStreamScanType::try_from(scan.stream_scan_type).unwrap();
     if stream_scan_type != PbStreamScanType::ArrangementBackfill {
         return Err(anyhow!(
@@ -558,6 +493,13 @@ fn rewrite_stream_scan_and_merge(
             stream_scan_type
         )
         .into());
+    }
+    if scan.table_id != upstream_table.id {
+        bail!(
+            "StreamScan table id {} does not match upstream table id {}",
+            scan.table_id,
+            upstream_table.id
+        );
     }
 
     let upstream_columns_by_id: HashMap<i32, PbColumnDesc> = upstream_table
@@ -571,6 +513,19 @@ fn rewrite_stream_scan_and_merge(
 
     let old_upstream_column_ids = scan.upstream_column_ids.clone();
     let old_output_indices = scan.output_indices.clone();
+    let (removed_column_ids, newly_added_columns): (&[ColumnId], &[_]) = match upstream_table_change
+    {
+        TableSchemaChange::AddColumn { columns } => (&[], columns.as_slice()),
+        TableSchemaChange::DropColumn { column_ids } => (column_ids.as_slice(), &[] as &[_]),
+    };
+    let newly_added_fields = newly_added_columns
+        .iter()
+        .map(|col| PbField {
+            name: col.column_desc.name.clone(),
+            data_type: Some(col.data_type().to_protobuf()),
+        })
+        .collect();
+
     let mut old_upstream_index_to_new_upstream_index = HashMap::new();
     let mut new_upstream_column_ids = Vec::new();
     for (old_idx, &column_id) in old_upstream_column_ids.iter().enumerate() {
@@ -596,15 +551,11 @@ fn rewrite_stream_scan_and_merge(
         .iter()
         .map(|&idx| new_upstream_column_ids[idx as usize])
         .collect();
-    let mut new_output_index_by_column_id = HashMap::new();
-    for (pos, &column_id) in new_output_column_ids.iter().enumerate() {
-        new_output_index_by_column_id.insert(ColumnId::new(column_id as _), pos as u32);
-    }
-    let mut old_output_index_to_new_output_index = HashMap::new();
+    let mut removed_indices = Vec::new();
     for (old_pos, old_output_index) in old_output_indices.iter().enumerate() {
         let column_id = old_upstream_column_ids[*old_output_index as usize];
-        if let Some(new_pos) = new_output_index_by_column_id.get(&ColumnId::new(column_id as _)) {
-            old_output_index_to_new_output_index.insert(old_pos as u32, *new_pos);
+        if !new_output_column_ids.contains(&column_id) {
+            removed_indices.push(old_pos);
         }
     }
 
@@ -661,133 +612,120 @@ fn rewrite_stream_scan_and_merge(
             .to_prost()
         })
         .collect();
-    merge.upstream_fragment_id = upstream_table_fragment_id;
+    merge.upstream_fragment_id = new_upstream_fragment_id;
 
-    Ok(ScanRewriteResult {
-        old_output_index_to_new_output_index,
-        new_output_index_by_column_id,
-        output_fields: stream_scan_node.fields.clone(),
-    })
+    let change = propagate_schema_change(newly_added_fields, removed_indices);
+    Ok(change)
 }
 
 /// Rewrite Project node input refs and extend with newly added columns.
-fn rewrite_project_node(
-    project_node: &mut StreamNode,
-    scan_rewrite: &ScanRewriteResult,
-    newly_added_columns: &[ColumnCatalog],
-    removed_column_ids: &HashSet<ColumnId>,
-    upstream_table_name: &str,
-) -> MetaResult<()> {
-    let PbNodeBody::Project(project_node_body) = project_node.node_body.as_mut().unwrap() else {
-        return Err(anyhow!(
-            "expect PbNodeBody::Project but got: {:?}",
-            project_node.node_body
-        )
-        .into());
-    };
+pub(super) fn rewrite_project_node(
+    mut project_node_body: ProjectNode,
+    fields: Vec<PbField>,
+    input_change: PropagatedSchemaChange,
+    input_fields: Vec<PbField>,
+) -> MetaResult<NodeSchemaRewrite> {
     let has_non_input_ref = project_node_body
         .select_list
         .iter()
         .any(|expr| !matches!(expr.rex_node, Some(expr_node::RexNode::InputRef(_))));
-    if has_non_input_ref && !removed_column_ids.is_empty() {
-        return Err(anyhow!(
-            "auto schema change with drop column only supports Project with InputRef"
-        )
-        .into());
+    if has_non_input_ref && input_change.is_drop_column() {
+        bail!("auto schema change with drop column only supports Project with InputRef");
     }
 
+    let newly_added_fields = input_change.newly_added_fields();
+    let old_output_index_to_new_output_index: HashMap<u32, u32> = match &input_change {
+        PropagatedSchemaChange::AddColumn(_) => {
+            let old_input_len = input_fields.len() - newly_added_fields.len();
+            (0..old_input_len)
+                .map(|idx| (idx as u32, idx as u32))
+                .collect()
+        }
+        PropagatedSchemaChange::DropColumn(drop_column) => {
+            let old_input_len = input_fields.len() + drop_column.removed_indices.len();
+            (0..old_input_len)
+                .filter_map(|old_index| {
+                    remap_index_after_drop(old_index, &drop_column.removed_indices)
+                        .map(|new_index| (old_index as u32, new_index as u32))
+                })
+                .collect()
+        }
+    };
+
     let mut new_select_list = Vec::with_capacity(project_node_body.select_list.len());
-    let mut new_project_fields = Vec::with_capacity(project_node.fields.len());
+    let mut new_project_fields = Vec::with_capacity(fields.len());
+    let mut removed_indices = Vec::new();
     for (index, expr) in project_node_body.select_list.iter().enumerate() {
         let mut new_expr = expr.clone();
         if let Some(expr_node::RexNode::InputRef(old_index)) = new_expr.rex_node {
-            let Some(&new_index) = scan_rewrite
-                .old_output_index_to_new_output_index
-                .get(&old_index)
-            else {
+            let Some(&new_index) = old_output_index_to_new_output_index.get(&old_index) else {
+                removed_indices.push(index);
                 continue;
             };
             new_expr.rex_node = Some(expr_node::RexNode::InputRef(new_index));
-        } else if !removed_column_ids.is_empty() {
-            return Err(anyhow!(
-                "auto schema change with drop column only supports Project with InputRef"
-            )
-            .into());
+        } else if input_change.is_drop_column() {
+            bail!("auto schema change with drop column only supports Project with InputRef");
         }
         new_select_list.push(new_expr);
-        new_project_fields.push(project_node.fields[index].clone());
+        new_project_fields.push(fields[index].clone());
     }
 
-    for col in newly_added_columns {
-        let Some(&new_index) = scan_rewrite
-            .new_output_index_by_column_id
-            .get(&col.column_id())
-        else {
-            return Err(anyhow!("new column id not found in scan output").into());
-        };
+    let start_input_index = input_fields.len() - newly_added_fields.len();
+    for (offset, field) in newly_added_fields.iter().enumerate() {
+        let new_index = (start_input_index + offset) as u32;
+        // This mirrors frontend Project construction for pass-through
+        // `InputRef` expressions: output field names/types are taken from the
+        // input schema.
         new_select_list.push(PbExprNode {
             function_type: expr_node::Type::Unspecified as i32,
-            return_type: Some(col.data_type().to_protobuf()),
+            return_type: field.data_type.clone(),
             rex_node: Some(expr_node::RexNode::InputRef(new_index)),
         });
-        new_project_fields.push(
-            Field::new(
-                format!("{}.{}", upstream_table_name, col.column_desc.name),
-                col.data_type().clone(),
-            )
-            .to_prost(),
-        );
+        new_project_fields.push(input_fields[new_index as usize].clone());
     }
-
     project_node_body.select_list = new_select_list;
-    project_node.fields = new_project_fields;
-    Ok(())
+    let change = propagate_schema_change(newly_added_fields.to_vec(), removed_indices);
+
+    Ok(NodeSchemaRewrite {
+        body: NodeBody::Project(Box::new(project_node_body)),
+        fields: new_project_fields,
+        identity: None,
+        change,
+    })
 }
 
-pub fn rewrite_refresh_schema_sink_fragment(
-    original_sink_fragment: &Fragment,
+/// Rewrite Sink node columns, identity, and optional log-store table.
+pub(super) fn rewrite_sink_node(
+    mut sink_node_body: SinkNode,
+    input_change: PropagatedSchemaChange,
+    input_fields: Vec<PbField>,
     sink: &PbSink,
-    newly_added_columns: &[ColumnCatalog],
-    removed_columns: &[ColumnCatalog],
-    upstream_table: &PbTable,
-    upstream_table_fragment_id: FragmentId,
-    id_generator_manager: &IdGeneratorManager,
-) -> MetaResult<(Fragment, Vec<PbColumnCatalog>, Option<PbTable>)> {
-    let removed_column_ids: HashSet<_> =
-        removed_columns.iter().map(|col| col.column_id()).collect();
-    let removed_log_store_column_names: HashSet<_> = removed_columns
-        .iter()
-        .map(|col| format!("{}_{}", upstream_table.name, col.column_desc.name))
-        .collect();
-    let removed_sink_column_names: HashSet<_> = removed_columns
-        .iter()
-        .map(|col| col.column_desc.name.clone())
-        .collect();
+) -> MetaResult<(
+    NodeSchemaRewrite,
+    Vec<PbColumnCatalog>,
+    Option<TableMetadataUpdate>,
+)> {
+    let mut removed_column_names = HashSet::new();
+    let newly_added_sink_fields = match &input_change {
+        PropagatedSchemaChange::AddColumn(add_column) => add_column.added_fields.as_slice(),
+        PropagatedSchemaChange::DropColumn(drop_column) => {
+            for &idx in &drop_column.removed_indices {
+                let Some(column) = sink.columns.get(idx) else {
+                    bail!(
+                        "removed sink column index {} is out of range for sink columns {}",
+                        idx,
+                        sink.columns.len()
+                    );
+                };
+                removed_column_names.insert(column.column_desc.as_ref().unwrap().name.clone());
+            }
+            &[]
+        }
+    };
     let new_sink_columns =
-        build_new_sink_columns(sink, &removed_sink_column_names, newly_added_columns);
-
-    let mut new_sink_fragment = clone_fragment(original_sink_fragment, id_generator_manager);
-    let sink_node = &mut new_sink_fragment.nodes;
-    let PbNodeBody::Sink(sink_node_body) = sink_node.node_body.as_mut().unwrap() else {
-        return Err(anyhow!("expect PbNodeBody::Sink but got: {:?}", sink_node.node_body).into());
-    };
-    let [stream_input_node] = sink_node.input.as_mut_slice() else {
-        panic!("Sink has more than 1 input: {:?}", sink_node.input);
-    };
-    let stream_input_body = stream_input_node.node_body.as_ref().unwrap();
-    let stream_input_is_project = matches!(stream_input_body, PbNodeBody::Project(_));
-    let stream_input_is_scan = matches!(stream_input_body, PbNodeBody::StreamScan(_));
-    if !stream_input_is_project && !stream_input_is_scan {
-        return Err(anyhow!(
-            "expect PbNodeBody::StreamScan or PbNodeBody::Project but got: {:?}",
-            stream_input_body
-        )
-        .into());
-    }
-
-    // update sink_node
+        build_new_sink_columns(sink, &removed_column_names, newly_added_sink_fields);
     // following logic in <StreamSink as Explain>::distill
-    sink_node.identity = {
+    let identity = {
         let sink_type = SinkType::from_proto(sink.sink_type());
         let sink_type_str = sink_type.type_str();
         let column_names = new_sink_columns
@@ -810,55 +748,73 @@ pub fn rewrite_refresh_schema_sink_fragment(
         };
         format!("StreamSink {{ type: {sink_type_str}, columns: [{column_names}]{downstream_pk} }}")
     };
-    let new_log_store_table = if let Some(log_store_table) = &mut sink_node_body.table {
-        rewrite_log_store_table(
+
+    let updated_table = if let Some(log_store_table) = &mut sink_node_body.table {
+        let log_store_payload_offset = validate_log_store_schema_prefix(log_store_table)?;
+        let removed_log_store_column_names: HashSet<_>;
+        let newly_added_fields;
+        match &input_change {
+            PropagatedSchemaChange::AddColumn(add_column) => {
+                removed_log_store_column_names = HashSet::new();
+                newly_added_fields =
+                    &input_fields[input_fields.len() - add_column.added_fields.len()..];
+            }
+            PropagatedSchemaChange::DropColumn(drop_column) => {
+                let payload_columns_len = log_store_table.columns.len() - log_store_payload_offset;
+                removed_log_store_column_names = drop_column
+                    .removed_indices
+                    .iter()
+                    .map(|&idx| -> MetaResult<_> {
+                        let Some(column) = log_store_table.columns.get(log_store_payload_offset + idx) else {
+                            bail!(
+                                "removed sink column index {} is out of range for log store payload columns {}",
+                                idx,
+                                payload_columns_len
+                            );
+                        };
+                        Ok(column
+                            .column_desc
+                            .as_ref()
+                            .unwrap()
+                            .name
+                            .clone())
+                    })
+                    .collect::<MetaResult<_>>()?;
+                newly_added_fields = &[];
+            }
+        }
+        let updated_table = rewrite_log_store_table(
             log_store_table,
             &removed_log_store_column_names,
-            newly_added_columns,
-            &upstream_table.name,
+            newly_added_fields,
         );
-        Some(log_store_table.clone())
+        Some(updated_table)
     } else {
         None
     };
     sink_node_body.sink_desc.as_mut().unwrap().column_catalogs = new_sink_columns.clone();
 
-    let stream_scan_node = if stream_input_is_project {
-        let [stream_scan_node] = stream_input_node.input.as_mut_slice() else {
-            return Err(anyhow!(
-                "Project node must have exactly 1 input for auto schema change, but got {:?}",
-                stream_input_node.input.len()
-            )
-            .into());
-        };
-        stream_scan_node
-    } else {
-        stream_input_node
-    };
-    let scan_rewrite = rewrite_stream_scan_and_merge(
-        stream_scan_node,
-        &removed_column_ids,
-        newly_added_columns,
-        upstream_table,
-        upstream_table_fragment_id,
-    )?;
+    Ok((
+        NodeSchemaRewrite {
+            body: NodeBody::Sink(Box::new(sink_node_body)),
+            fields: input_fields,
+            identity: Some(identity),
+            change: Some(input_change),
+        },
+        new_sink_columns,
+        updated_table,
+    ))
+}
 
-    if stream_input_is_project {
-        let [project_node] = sink_node.input.as_mut_slice() else {
-            panic!("Sink has more than 1 input: {:?}", sink_node.input);
-        };
-        rewrite_project_node(
-            project_node,
-            &scan_rewrite,
-            newly_added_columns,
-            &removed_column_ids,
-            &upstream_table.name,
-        )?;
-        sink_node.fields = project_node.fields.clone();
-    } else {
-        sink_node.fields = scan_rewrite.output_fields;
+fn remap_index_after_drop(old_index: usize, removed_indices: &[usize]) -> Option<usize> {
+    if removed_indices.contains(&old_index) {
+        return None;
     }
-    Ok((new_sink_fragment, new_sink_columns, new_log_store_table))
+    let removed_before = removed_indices
+        .iter()
+        .filter(|&&removed_index| removed_index < old_index)
+        .count();
+    Some(old_index - removed_before)
 }
 
 /// Adjacency list (G) of backfill orders.
@@ -2263,23 +2219,30 @@ impl CompleteStreamFragmentGraph {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{
+        ColumnCatalog, ColumnDesc, ColumnId, Field, FragmentTypeMask,
+    };
+    use risingwave_common::constants::log_store::v2 as log_store_v2;
     use risingwave_common::types::DataType;
-    use risingwave_pb::catalog::SinkType as PbSinkType;
+    use risingwave_pb::catalog::{PbSink, PbTable, SinkType as PbSinkType};
+    use risingwave_pb::expr::{ExprNode as PbExprNode, expr_node};
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
-    use risingwave_pb::plan_common::StorageTableDesc;
+    use risingwave_pb::plan_common::{PbField, StorageTableDesc};
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
     use risingwave_pb::stream_plan::{
         BatchPlanNode, MergeNode, ProjectNode, SinkDesc, SinkLogStoreType, SinkNode, StreamNode,
         StreamScanNode, StreamScanType,
     };
 
     use super::*;
+    use crate::manager::MetaSrvEnv;
+    use crate::stream::stream_graph::{TableSchemaChange, rewrite_refresh_schema_sink_fragment};
 
     fn make_column(name: &str, id: i32, data_type: DataType) -> ColumnCatalog {
         ColumnCatalog::visible(ColumnDesc::named(name, ColumnId::new(id), data_type))
     }
 
-    fn make_field(table_name: &str, column: &ColumnCatalog) -> risingwave_pb::plan_common::Field {
+    fn make_field(table_name: &str, column: &ColumnCatalog) -> PbField {
         Field::new(
             format!("{}.{}", table_name, column.column_desc.name),
             column.data_type().clone(),
@@ -2292,6 +2255,57 @@ mod tests {
             function_type: expr_node::Type::Unspecified as i32,
             return_type: Some(data_type.to_protobuf()),
             rex_node: Some(expr_node::RexNode::InputRef(index)),
+        }
+    }
+
+    fn make_upstream_table(table_name: &str, columns: &[ColumnCatalog]) -> PbTable {
+        PbTable {
+            id: 1.into(),
+            name: table_name.to_owned(),
+            columns: columns.iter().map(|col| col.to_protobuf()).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn make_sink_and_desc(columns: &[ColumnCatalog]) -> (PbSink, SinkDesc) {
+        let sink = PbSink {
+            columns: columns.iter().map(|col| col.to_protobuf()).collect(),
+            sink_type: PbSinkType::AppendOnly as i32,
+            ..Default::default()
+        };
+        let sink_desc = SinkDesc {
+            sink_type: PbSinkType::AppendOnly as i32,
+            column_catalogs: sink.columns.clone(),
+            ..Default::default()
+        };
+        (sink, sink_desc)
+    }
+
+    fn make_log_store_table(table_name: &str, columns: &[ColumnCatalog]) -> PbTable {
+        let mut table_columns = vec![];
+        for (name, data_type) in log_store_v2::KV_LOG_STORE_PREDEFINED_COLUMNS {
+            let column_id = table_columns.len() as i32;
+            table_columns.push(
+                ColumnCatalog::visible(ColumnDesc::named(
+                    name,
+                    ColumnId::new(column_id),
+                    data_type,
+                ))
+                .to_protobuf(),
+            );
+        }
+        let payload_column_id_offset = table_columns.len() as i32;
+        table_columns.extend(columns.iter().cloned().enumerate().map(|(idx, mut col)| {
+            col.column_desc.column_id = ColumnId::new(payload_column_id_offset + idx as i32);
+            col.column_desc.name = format!("{}_{}", table_name, col.column_desc.name);
+            col.to_protobuf()
+        }));
+        PbTable {
+            columns: table_columns,
+            value_indices: (0..columns.len() + log_store_v2::KV_LOG_STORE_PREDEFINED_COLUMNS.len())
+                .map(|i| i as i32)
+                .collect(),
+            ..Default::default()
         }
     }
 
@@ -2369,59 +2383,16 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_rewrite_refresh_schema_sink_fragment_with_project() {
-        let env = MetaSrvEnv::for_test().await;
-        let id_gen_manager = env.id_gen_manager().as_ref();
-
-        let table_name = "t";
-        let columns = vec![
-            make_column("a", 1, DataType::Int64),
-            make_column("b", 2, DataType::Int64),
-        ];
-        let new_column = make_column("c", 3, DataType::Varchar);
-
-        let mut upstream_columns = columns.clone();
-        upstream_columns.push(new_column.clone());
-        let upstream_table = PbTable {
-            name: table_name.to_owned(),
-            columns: upstream_columns
-                .iter()
-                .map(|col| col.to_protobuf())
-                .collect(),
-            ..Default::default()
-        };
-
-        let sink = PbSink {
-            columns: columns.iter().map(|col| col.to_protobuf()).collect(),
-            sink_type: PbSinkType::AppendOnly as i32,
-            ..Default::default()
-        };
-
-        let sink_desc = SinkDesc {
-            sink_type: PbSinkType::AppendOnly as i32,
-            column_catalogs: sink.columns.clone(),
-            ..Default::default()
-        };
-
-        let stream_scan_node = make_stream_scan_node(table_name, 1, &columns);
-        let project_node = make_project_node(table_name, &columns, stream_scan_node);
-
-        let log_store_table = PbTable {
-            columns: columns
-                .iter()
-                .cloned()
-                .map(|mut col| {
-                    col.column_desc.name = format!("{}_{}", table_name, col.column_desc.name);
-                    col.to_protobuf()
-                })
-                .collect(),
-            value_indices: (0..columns.len()).map(|i| i as i32).collect(),
-            ..Default::default()
-        };
-
-        let original_fragment = Fragment {
-            fragment_id: 1.into(),
+    fn make_sink_fragment(
+        fragment_id: FragmentId,
+        table_name: &str,
+        columns: &[ColumnCatalog],
+        sink_desc: SinkDesc,
+        input: StreamNode,
+        log_store_table: Option<PbTable>,
+    ) -> Fragment {
+        Fragment {
+            fragment_id,
             fragment_type_mask: FragmentTypeMask::default(),
             distribution_type: PbFragmentDistributionType::Single,
             state_table_ids: vec![],
@@ -2429,23 +2400,52 @@ mod tests {
             nodes: StreamNode {
                 node_body: Some(NodeBody::Sink(Box::new(SinkNode {
                     sink_desc: Some(sink_desc),
-                    table: Some(log_store_table),
+                    table: log_store_table,
+                    log_store_type: SinkLogStoreType::KvLogStore as i32,
                     ..Default::default()
                 }))),
                 fields: columns
                     .iter()
                     .map(|col| make_field(table_name, col))
                     .collect(),
-                input: vec![project_node],
+                input: vec![input],
                 ..Default::default()
             },
-        };
+        }
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_refresh_schema_sink_fragment_with_project() {
+        let env = MetaSrvEnv::for_test().await;
+        let id_gen_manager = env.id_gen_manager().as_ref();
+        let table_name = "t";
+        let columns = vec![
+            make_column("a", 1, DataType::Int64),
+            make_column("b", 2, DataType::Int64),
+        ];
+        let new_column = make_column("c", 3, DataType::Varchar);
+        let upstream_table = make_upstream_table(
+            table_name,
+            &[columns[0].clone(), columns[1].clone(), new_column.clone()],
+        );
+        let (sink, sink_desc) = make_sink_and_desc(&columns);
+        let stream_scan_node = make_stream_scan_node(table_name, 1, &columns);
+        let project_node = make_project_node(table_name, &columns, stream_scan_node);
+        let original_fragment = make_sink_fragment(
+            1.into(),
+            table_name,
+            &columns,
+            sink_desc,
+            project_node,
+            Some(make_log_store_table(table_name, &columns)),
+        );
 
         let (new_fragment, _, _) = rewrite_refresh_schema_sink_fragment(
             &original_fragment,
             &sink,
-            std::slice::from_ref(&new_column),
-            &[],
+            TableSchemaChange::AddColumn {
+                columns: vec![new_column.clone()],
+            },
             &upstream_table,
             7.into(),
             id_gen_manager,
@@ -2496,80 +2496,49 @@ mod tests {
     async fn test_rewrite_refresh_schema_sink_fragment_drop_column_with_project() {
         let env = MetaSrvEnv::for_test().await;
         let id_gen_manager = env.id_gen_manager().as_ref();
-
         let table_name = "t";
         let columns = vec![
             make_column("a", 1, DataType::Int64),
             make_column("b", 2, DataType::Int64),
             make_column("tmp", 3, DataType::Varchar),
         ];
+        let row_id_column = ColumnCatalog::row_id_column();
         let removed_column = columns.last().unwrap().clone();
-        let upstream_columns = columns[..2].to_vec();
-
-        let upstream_table = PbTable {
-            name: table_name.to_owned(),
-            columns: upstream_columns
-                .iter()
-                .map(|col| col.to_protobuf())
-                .collect(),
-            ..Default::default()
-        };
-
-        let sink = PbSink {
-            columns: columns.iter().map(|col| col.to_protobuf()).collect(),
-            sink_type: PbSinkType::AppendOnly as i32,
-            ..Default::default()
-        };
-
-        let sink_desc = SinkDesc {
-            sink_type: PbSinkType::AppendOnly as i32,
-            column_catalogs: sink.columns.clone(),
-            ..Default::default()
-        };
-
-        let stream_scan_node = make_stream_scan_node(table_name, 1, &columns);
+        let upstream_table = make_upstream_table(
+            table_name,
+            &[
+                columns[0].clone(),
+                columns[1].clone(),
+                row_id_column.clone(),
+            ],
+        );
+        let (sink, sink_desc) = make_sink_and_desc(&columns);
+        let stream_scan_node = make_stream_scan_node(
+            table_name,
+            1,
+            &[
+                columns[0].clone(),
+                columns[1].clone(),
+                columns[2].clone(),
+                row_id_column,
+            ],
+        );
         let project_node = make_project_node(table_name, &columns, stream_scan_node);
+        let original_fragment = make_sink_fragment(
+            1.into(),
+            table_name,
+            &columns,
+            sink_desc,
+            project_node,
+            Some(make_log_store_table(table_name, &columns)),
+        );
 
-        let log_store_table = PbTable {
-            columns: columns
-                .iter()
-                .cloned()
-                .map(|mut col| {
-                    col.column_desc.name = format!("{}_{}", table_name, col.column_desc.name);
-                    col.to_protobuf()
-                })
-                .collect(),
-            value_indices: (0..columns.len()).map(|i| i as i32).collect(),
-            ..Default::default()
-        };
-
-        let original_fragment = Fragment {
-            fragment_id: 1.into(),
-            fragment_type_mask: FragmentTypeMask::default(),
-            distribution_type: PbFragmentDistributionType::Single,
-            state_table_ids: vec![],
-            maybe_vnode_count: None,
-            nodes: StreamNode {
-                node_body: Some(NodeBody::Sink(Box::new(SinkNode {
-                    sink_desc: Some(sink_desc),
-                    table: Some(log_store_table),
-                    log_store_type: SinkLogStoreType::KvLogStore as i32,
-                    ..Default::default()
-                }))),
-                fields: columns
-                    .iter()
-                    .map(|col| make_field(table_name, col))
-                    .collect(),
-                input: vec![project_node],
-                ..Default::default()
-            },
-        };
-
-        let (new_fragment, new_schema, new_log_store_table) = rewrite_refresh_schema_sink_fragment(
+        let (new_fragment, new_schema, updated_tables) = rewrite_refresh_schema_sink_fragment(
             &original_fragment,
             &sink,
-            &[],
-            std::slice::from_ref(&removed_column),
+            TableSchemaChange::DropColumn {
+                column_ids: vec![removed_column.column_id()],
+            },
             &upstream_table,
             7.into(),
             id_gen_manager,
@@ -2618,7 +2587,9 @@ mod tests {
                 .all(|f| !f.name.contains("tmp"))
         );
 
-        let new_log_store_table = new_log_store_table.expect("log store table should be updated");
+        let new_log_store_table = updated_tables
+            .first()
+            .expect("log store table should be updated");
         assert!(
             new_log_store_table.columns.iter().all(|col| !col
                 .column_desc
@@ -2631,5 +2602,198 @@ mod tests {
             new_log_store_table.value_indices,
             (0..new_log_store_table.columns.len() as i32).collect::<Vec<_>>()
         );
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_refresh_schema_sink_fragment_with_scan() {
+        let env = MetaSrvEnv::for_test().await;
+        let id_gen_manager = env.id_gen_manager().as_ref();
+        let table_name = "t";
+        let columns = vec![
+            make_column("a", 1, DataType::Int64),
+            make_column("b", 2, DataType::Int64),
+        ];
+        let new_column = make_column("c", 3, DataType::Varchar);
+        let upstream_table = make_upstream_table(
+            table_name,
+            &[columns[0].clone(), columns[1].clone(), new_column.clone()],
+        );
+        let (sink, sink_desc) = make_sink_and_desc(&columns);
+        let original_fragment = make_sink_fragment(
+            1.into(),
+            table_name,
+            &columns,
+            sink_desc,
+            make_stream_scan_node(table_name, 1, &columns),
+            Some(make_log_store_table(table_name, &columns)),
+        );
+
+        let (new_fragment, new_schema, updated_tables) = rewrite_refresh_schema_sink_fragment(
+            &original_fragment,
+            &sink,
+            TableSchemaChange::AddColumn {
+                columns: vec![new_column.clone()],
+            },
+            &upstream_table,
+            7.into(),
+            id_gen_manager,
+        )
+        .unwrap();
+
+        assert_eq!(new_schema.len(), columns.len() + 1);
+        assert_eq!(new_fragment.nodes.fields.len(), columns.len() + 1);
+        let [stream_scan_node] = new_fragment.nodes.input.as_slice() else {
+            panic!("Sink has more than 1 input: {:?}", new_fragment.nodes.input);
+        };
+        let PbNodeBody::StreamScan(scan) = stream_scan_node.node_body.as_ref().unwrap() else {
+            panic!(
+                "expect PbNodeBody::StreamScan but got: {:?}",
+                stream_scan_node.node_body
+            );
+        };
+        assert_eq!(
+            scan.upstream_column_ids.last().copied(),
+            Some(new_column.column_id().get_id())
+        );
+        assert_eq!(
+            scan.output_indices.last().copied(),
+            Some(columns.len() as u32)
+        );
+        let [merge_node, batch_plan_node] = stream_scan_node.input.as_slice() else {
+            panic!("StreamScan should have Merge and BatchPlan inputs");
+        };
+        let PbNodeBody::Merge(merge) = merge_node.node_body.as_ref().unwrap() else {
+            panic!("expect Merge");
+        };
+        assert_eq!(merge.upstream_fragment_id, FragmentId::from(7));
+        assert!(matches!(
+            batch_plan_node.node_body.as_ref(),
+            Some(PbNodeBody::BatchPlan(_))
+        ));
+        assert!(batch_plan_node.fields.is_empty());
+
+        assert_eq!(updated_tables.len(), 1);
+        let new_log_store_table = updated_tables
+            .first()
+            .expect("log store table should be updated");
+        assert_eq!(
+            new_log_store_table.columns.len(),
+            log_store_v2::KV_LOG_STORE_PREDEFINED_COLUMNS.len() + columns.len() + 1
+        );
+        assert_eq!(
+            new_log_store_table
+                .columns
+                .last()
+                .unwrap()
+                .column_desc
+                .as_ref()
+                .unwrap()
+                .name,
+            format!("{}_{}", table_name, new_column.column_desc.name)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_refresh_schema_sink_fragment_rejects_unsupported_node() {
+        let env = MetaSrvEnv::for_test().await;
+        let id_gen_manager = env.id_gen_manager().as_ref();
+        let table_name = "t";
+        let columns = [make_column("a", 1, DataType::Int64)];
+        let new_column = make_column("b", 2, DataType::Int64);
+        let upstream_table =
+            make_upstream_table(table_name, &[columns[0].clone(), new_column.clone()]);
+        let (sink, sink_desc) = make_sink_and_desc(&columns);
+        let filter_node = StreamNode {
+            node_body: Some(NodeBody::Filter(Box::default())),
+            fields: columns
+                .iter()
+                .map(|col| make_field(table_name, col))
+                .collect(),
+            input: vec![make_stream_scan_node(table_name, 1, &columns)],
+            ..Default::default()
+        };
+        let original_fragment =
+            make_sink_fragment(1.into(), table_name, &columns, sink_desc, filter_node, None);
+
+        let err = rewrite_refresh_schema_sink_fragment(
+            &original_fragment,
+            &sink,
+            TableSchemaChange::AddColumn {
+                columns: vec![new_column],
+            },
+            &upstream_table,
+            7.into(),
+            id_gen_manager,
+        )
+        .unwrap_err();
+        let err = format!("{err:#}");
+        assert!(err.contains("Filter"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn test_rewrite_refresh_schema_sink_fragment_rejects_multiple_changed_inputs() {
+        let env = MetaSrvEnv::for_test().await;
+        let id_gen_manager = env.id_gen_manager().as_ref();
+        let table_name = "t";
+        let columns = [make_column("a", 1, DataType::Int64)];
+        let new_column = make_column("b", 2, DataType::Int64);
+        let upstream_table =
+            make_upstream_table(table_name, &[columns[0].clone(), new_column.clone()]);
+        let (sink, sink_desc) = make_sink_and_desc(&columns);
+        let project_node = StreamNode {
+            node_body: Some(NodeBody::Project(Box::new(ProjectNode {
+                select_list: vec![make_input_ref(0, columns[0].data_type())],
+                ..Default::default()
+            }))),
+            fields: columns
+                .iter()
+                .map(|col| make_field(table_name, col))
+                .collect(),
+            input: vec![
+                make_stream_scan_node(table_name, 1, &columns),
+                make_stream_scan_node(table_name, 1, &columns),
+            ],
+            ..Default::default()
+        };
+        let original_fragment = make_sink_fragment(
+            1.into(),
+            table_name,
+            &columns,
+            sink_desc,
+            project_node,
+            None,
+        );
+
+        let err = rewrite_refresh_schema_sink_fragment(
+            &original_fragment,
+            &sink,
+            TableSchemaChange::AddColumn {
+                columns: vec![new_column],
+            },
+            &upstream_table,
+            7.into(),
+            id_gen_manager,
+        )
+        .unwrap_err();
+        let err = format!("{err:#}");
+        assert!(
+            err.contains("Project node should have exactly one input"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_remap_index_after_drop() {
+        assert_eq!(remap_index_after_drop(0, &[1, 3]), Some(0));
+        assert_eq!(remap_index_after_drop(1, &[1, 3]), None);
+        assert_eq!(remap_index_after_drop(2, &[1, 3]), Some(1));
+        assert_eq!(remap_index_after_drop(3, &[1, 3]), None);
+        assert_eq!(remap_index_after_drop(4, &[1, 3]), Some(2));
+
+        assert_eq!(remap_index_after_drop(0, &[3, 1]), Some(0));
+        assert_eq!(remap_index_after_drop(1, &[3, 1]), None);
+        assert_eq!(remap_index_after_drop(2, &[3, 1]), Some(1));
+        assert_eq!(remap_index_after_drop(3, &[3, 1]), None);
+        assert_eq!(remap_index_after_drop(4, &[3, 1]), Some(2));
     }
 }

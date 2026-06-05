@@ -97,7 +97,7 @@ use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate,
 };
-use crate::stream::SplitAssignment;
+use crate::stream::{SplitAssignment, TableMetadataUpdate};
 use crate::{MetaError, MetaResult};
 
 /// A planned fragment update for dependent sources when a connection's properties change.
@@ -1893,27 +1893,26 @@ impl CatalogController {
                         ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job.clone()).into(),
                     )),
                 });
-                if let Some(new_log_store_table) = finish_sink_context.new_log_store_table {
-                    let log_store_table_id = new_log_store_table.id;
-                    let new_log_store_table_columns: ColumnCatalogArray =
-                        new_log_store_table.columns.clone().into();
-                    let new_log_store_table_value_indices =
-                        new_log_store_table.value_indices.clone();
-                    let (mut table, table_obj) = Table::find_by_id(log_store_table_id)
+                for updated_table in finish_sink_context.updated_tables {
+                    let table_id = updated_table.table_id;
+                    let updated_table_columns: ColumnCatalogArray =
+                        updated_table.columns.clone().into();
+                    let updated_table_value_indices = updated_table.value_indices.clone();
+                    let (mut table, table_obj) = Table::find_by_id(table_id)
                         .find_also_related(Object)
                         .one(txn)
                         .await?
                         .ok_or_else(|| MetaError::catalog_id_not_found("table", original_job_id))?;
                     Table::update(table::ActiveModel {
-                        table_id: Set(log_store_table_id),
-                        columns: Set(new_log_store_table_columns.clone()),
-                        value_indices: Set(new_log_store_table_value_indices.clone().into()),
+                        table_id: Set(table_id),
+                        columns: Set(updated_table_columns.clone()),
+                        value_indices: Set(updated_table_value_indices.clone().into()),
                         ..Default::default()
                     })
                     .exec(txn)
                     .await?;
-                    table.columns = new_log_store_table_columns;
-                    table.value_indices = new_log_store_table_value_indices.into();
+                    table.columns = updated_table_columns;
+                    table.value_indices = updated_table_value_indices.into();
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
                             ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
@@ -3501,7 +3500,7 @@ pub struct FinishAutoRefreshSchemaSinkContext {
     pub tmp_sink_id: SinkId,
     pub original_sink_id: SinkId,
     pub columns: Vec<PbColumnCatalog>,
-    pub new_log_store_table: Option<Box<PbTable>>,
+    pub updated_tables: Vec<TableMetadataUpdate>,
 }
 
 async fn update_connector_props_fragments<F>(
