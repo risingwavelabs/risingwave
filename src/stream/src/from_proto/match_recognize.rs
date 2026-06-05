@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::MatchRecognizeNode;
 use risingwave_storage::StateStore;
@@ -40,7 +41,24 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let partition_key_indices = node.partition_by.iter().map(|&i| i as usize).collect();
-        let order_key_indices = node.order_by.iter().map(|&i| i as usize).collect();
+        // ORDER BY is carried as `ColumnOrder`. v1 only supports the default ascending order (the
+        // binder rejects anything else); assert it here too so a non-ascending plan fails fast
+        // rather than being silently sorted ascending by the executor.
+        let order_key_indices = node
+            .order_by
+            .iter()
+            .map(|c| {
+                let co = ColumnOrder::from_protobuf(c);
+                if co.order_type != OrderType::ascending() {
+                    return Err(anyhow::anyhow!(
+                        "MATCH_RECOGNIZE only supports the default ascending ORDER BY, got {:?}",
+                        co.order_type
+                    )
+                    .into());
+                }
+                Ok(co.column_index)
+            })
+            .collect::<StreamResult<Vec<usize>>>()?;
 
         let defines = node
             .defines

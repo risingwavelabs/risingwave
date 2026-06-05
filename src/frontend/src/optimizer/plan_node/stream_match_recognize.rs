@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::stream::prelude::*;
@@ -131,12 +131,15 @@ impl TryToStreamPb for StreamMatchRecognize {
             .into_iter()
             .map(|i| i as u32)
             .collect();
+        // ORDER BY is carried as `ColumnOrder` (like every other ordered streaming node). v1 only
+        // supports the default ascending order — non-ascending is rejected in the binder — so each
+        // key is emitted ascending; the executor (and `from_proto`) assert that on the way back.
         let order_by = self
             .core
             .order_key_indices()
             .expect("order keys validated to be columns")
             .into_iter()
-            .map(|i| i as u32)
+            .map(|i| ColumnOrder::new(i, OrderType::ascending()).to_protobuf())
             .collect();
 
         let measures = self
