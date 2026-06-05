@@ -54,7 +54,7 @@ pub async fn handle_comment(
                     TableType::Table => ObjectType::Table,
                     TableType::MaterializedView => ObjectType::Mview,
                     _ => {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                        return Err(ErrorCode::WrongObjectType(format!(
                             "{} is not a table or materialized view",
                             table.table_catalog.name
                         ))
@@ -96,7 +96,7 @@ pub async fn handle_comment(
                     };
 
                 if table.table_catalog.table_type() != expected_table_type {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                    return Err(ErrorCode::WrongObjectType(format!(
                         "{} is not a {}",
                         table.table_catalog.name, expected_object_name
                     ))
@@ -128,7 +128,7 @@ pub async fn handle_comment(
                 if let Ok((table_catalog, _)) =
                     reader.get_any_table_by_name(&db_name, schema_path, &view)
                 {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                    return Err(ErrorCode::WrongObjectType(format!(
                         "{} is not a view",
                         table_catalog.name
                     ))
