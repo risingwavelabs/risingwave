@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod alter_op;
+mod comment;
 mod create_op;
 mod drop_op;
 mod get_op;
@@ -40,12 +41,11 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::{
-    ColumnCatalogArray, ConnectionId, CreateType, DatabaseId, FragmentId, I32Array, IndexId,
-    JobStatus, ObjectId, Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId,
-    StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, TableIdArray,
-    UserId, ViewId, connection, database, fragment, function, index, object, object_dependency,
-    pending_sink_state, schema, secret, sink, source, streaming_job, subscription, table,
-    user_privilege, view,
+    ConnectionId, CreateType, DatabaseId, FragmentId, I32Array, IndexId, JobStatus, ObjectId,
+    Property, SchemaId, SecretId, SinkFormatDesc, SinkId, SourceId, StreamNode, StreamSourceInfo,
+    StreamingParallelism, SubscriptionId, TableId, TableIdArray, UserId, ViewId, connection,
+    database, fragment, function, index, object, object_dependency, pending_sink_state, schema,
+    secret, sink, source, streaming_job, subscription, table, user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;
@@ -664,16 +664,29 @@ impl CatalogController {
     }
 
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
+        let object_type = PbObjectType::try_from(comment.object_type)
+            .map_err(|_| MetaError::invalid_parameter("comment object type"))?;
+
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let object_id = ObjectId::new(comment.object_id);
-        let table_id = TableId::new(comment.object_id);
-        let object_type = PbObjectType::try_from(comment.object_type)
-            .map_err(|_| MetaError::invalid_parameter("comment object type"))?;
-        let expected_table_type = match object_type {
-            PbObjectType::Table => TableType::Table,
-            PbObjectType::Mview => TableType::MaterializedView,
+        let object = Object::find_by_id(object_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+        if object.obj_type != ObjectType::from(object_type) {
+            return Err(MetaError::invalid_parameter(format!(
+                "{} is not a {}",
+                object_id,
+                object_type.as_str_name().to_ascii_lowercase()
+            )));
+        }
+
+        let object_info = match object_type {
+            PbObjectType::Table | PbObjectType::Mview => {
+                Self::comment_on_table(&txn, object, object_type, comment).await?
+            }
             unsupported => {
                 return Err(MetaError::invalid_parameter(format!(
                     "comment on {} is not supported yet",
@@ -682,81 +695,10 @@ impl CatalogController {
             }
         };
 
-        let (table_obj, streaming_job) = Object::find_by_id(object_id)
-            .find_also_related(StreamingJob)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
-        if table_obj.obj_type != ObjectType::Table {
-            return Err(MetaError::invalid_parameter(format!(
-                "{} is not a table or materialized view",
-                object_id
-            )));
-        }
-
-        let table_type: TableType = Table::find_by_id(table_id)
-            .select_only()
-            .column(table::Column::TableType)
-            .into_tuple()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
-        if table_type != expected_table_type {
-            return Err(MetaError::invalid_parameter(format!(
-                "{} is not a {}",
-                object_id,
-                match expected_table_type {
-                    TableType::Table => "table",
-                    TableType::MaterializedView => "materialized view",
-                    _ => unreachable!(),
-                }
-            )));
-        }
-
-        let table = if let Some(col_idx) = comment.column_index {
-            let columns: ColumnCatalogArray = Table::find_by_id(table_id)
-                .select_only()
-                .column(table::Column::Columns)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
-            let mut pb_columns = columns.to_protobuf();
-
-            let column = pb_columns
-                .get_mut(col_idx as usize)
-                .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
-            let column_desc = column.column_desc.as_mut().ok_or_else(|| {
-                anyhow!(
-                    "column desc at index {} for table id {} not found",
-                    col_idx,
-                    table_id
-                )
-            })?;
-            column_desc.description = comment.description;
-            table::ActiveModel {
-                table_id: Set(table_id),
-                columns: Set(pb_columns.into()),
-                ..Default::default()
-            }
-            .update(&txn)
-            .await?
-        } else {
-            table::ActiveModel {
-                table_id: Set(table_id),
-                description: Set(comment.description),
-                ..Default::default()
-            }
-            .update(&txn)
-            .await?
-        };
         txn.commit().await?;
 
         let version = self
-            .notify_frontend_relation_info(
-                NotificationOperation::Update,
-                PbObjectInfo::Table(ObjectModel(table, table_obj, streaming_job).into()),
-            )
+            .notify_frontend_relation_info(NotificationOperation::Update, object_info)
             .await;
 
         Ok(version)
