@@ -8,8 +8,8 @@ version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8dbe031527c9856a1e2df5e82aa8e568ffaab3be897f70d874477fb42a783bb"
 dependencies = [
- "arrow-array 56.2.0",
- "arrow-schema 56.2.0",
+ "arrow-array 54.3.1",
+ "arrow-schema 54.3.1",
 ]
 
 [[package]]
@@ -20,8 +20,8 @@ checksum = "5beaa87308b040adcf482fb760f64ced1cbcd9469fe86ddd5be221dabbbc544e"
 dependencies = [
  "adbc_core",
  "adbc_ffi",
- "arrow-array 56.2.0",
- "arrow-schema 56.2.0",
+ "arrow-array 54.3.1",
+ "arrow-schema 54.3.1",
  "libloading 0.8.9",
  "toml 0.9.11+spec-1.1.0",
  "windows-registry 0.6.1",
@@ -35,8 +35,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3600ae9aec2907516d088189e3b863029280f1953dd0eab903c7f4c862a0ce81"
 dependencies = [
  "adbc_core",
- "arrow-array 56.2.0",
- "arrow-schema 56.2.0",
+ "arrow-array 54.3.1",
+ "arrow-schema 54.3.1",
 ]
 
 [[package]]
@@ -48,8 +48,8 @@ dependencies = [
  "adbc_core",
  "adbc_driver_manager",
  "adbc_ffi",
- "arrow-array 56.2.0",
- "arrow-schema 56.2.0",
+ "arrow-array 54.3.1",
+ "arrow-schema 54.3.1",
  "url",
 ]
 
@@ -626,6 +626,9 @@ name = "arrow-schema"
 version = "54.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cfaf5e440be44db5413b75b72c2a87c1f8f0627117d110264048f2969b99e9"
+dependencies = [
+ "bitflags 2.10.0",
+]
 
 [[package]]
 name = "arrow-schema"
@@ -6558,7 +6561,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c68b693e6f3f223eb05ae5090e24a39e8b89cea8#c68b693e6f3f223eb05ae5090e24a39e8b89cea8"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=73acde690f87221906730f1e31ae7b17f7a9ab83#73acde690f87221906730f1e31ae7b17f7a9ab83"
 dependencies = [
  "anyhow",
  "apache-avro 0.20.0",
@@ -6617,7 +6620,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c68b693e6f3f223eb05ae5090e24a39e8b89cea8#c68b693e6f3f223eb05ae5090e24a39e8b89cea8"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=73acde690f87221906730f1e31ae7b17f7a9ab83#73acde690f87221906730f1e31ae7b17f7a9ab83"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6632,7 +6635,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c68b693e6f3f223eb05ae5090e24a39e8b89cea8#c68b693e6f3f223eb05ae5090e24a39e8b89cea8"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=73acde690f87221906730f1e31ae7b17f7a9ab83#73acde690f87221906730f1e31ae7b17f7a9ab83"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6654,7 +6657,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=b625b4146e03486de3943ac618915d08910897f1#b625b4146e03486de3943ac618915d08910897f1"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=5cc3ce55f7487cea64fef283e9de96b8126ad204#5cc3ce55f7487cea64fef283e9de96b8126ad204"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6684,7 +6687,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=c68b693e6f3f223eb05ae5090e24a39e8b89cea8#c68b693e6f3f223eb05ae5090e24a39e8b89cea8"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=73acde690f87221906730f1e31ae7b17f7a9ab83#73acde690f87221906730f1e31ae7b17f7a9ab83"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8498,7 +8501,7 @@ version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77e878c846a8abae00dd069496dbe8751b16ac1c3d6bd2a7283a938e8228f90d"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
@@ -10066,7 +10069,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9120690fafc389a67ba3803df527d0ec9cbbc9cc45e4cc20b332996dfb672425"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.111",
