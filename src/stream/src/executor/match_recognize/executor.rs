@@ -46,6 +46,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
+use risingwave_common::util::row_id::RowIdGenerator;
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
 use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
 use risingwave_pb::stream_plan::{
@@ -124,6 +125,7 @@ impl CompiledMeasure {
             .iter()
             .map(|s| {
                 let kind = match s.kind {
+                    0 => MeasureSlotKind::Last,
                     1 => MeasureSlotKind::First,
                     2 => MeasureSlotKind::Classifier,
                     3 => MeasureSlotKind::CountStar,
@@ -131,7 +133,14 @@ impl CompiledMeasure {
                     5 => MeasureSlotKind::Min,
                     6 => MeasureSlotKind::Max,
                     7 => MeasureSlotKind::Sum,
-                    _ => MeasureSlotKind::Last,
+                    // Fail fast on an unknown kind rather than silently treating it as LAST, which
+                    // would change measure semantics under a corrupt plan or version skew.
+                    other => {
+                        return Err(anyhow::anyhow!(
+                            "invalid MATCH_RECOGNIZE measure slot kind: {other}"
+                        )
+                        .into());
+                    }
                 };
                 let agg = match kind {
                     MeasureSlotKind::Sum => {
@@ -267,19 +276,30 @@ impl CompiledDefine {
         let slots = pb
             .slots
             .iter()
-            .map(|s| DefineSlot {
-                kind: match s.kind {
+            .map(|s| {
+                let kind = match s.kind {
+                    0 => DefineSlotKind::SelfCol,
                     1 => DefineSlotKind::Prev,
                     2 => DefineSlotKind::Next,
                     3 => DefineSlotKind::RunningFirst,
                     4 => DefineSlotKind::RunningLast,
-                    _ => DefineSlotKind::SelfCol,
-                },
-                vars: s.vars.clone(),
-                col_idx: s.col_idx as usize,
-                offset: s.offset as usize,
+                    // Fail fast on an unknown kind rather than silently treating it as a self-column
+                    // reference, which would change the DEFINE predicate's meaning under a corrupt
+                    // plan or version skew.
+                    other => {
+                        return Err(StreamExecutorError::from(anyhow::anyhow!(
+                            "invalid MATCH_RECOGNIZE define slot kind: {other}"
+                        )));
+                    }
+                };
+                Ok(DefineSlot {
+                    kind,
+                    vars: s.vars.clone(),
+                    col_idx: s.col_idx as usize,
+                    offset: s.offset as usize,
+                })
             })
-            .collect();
+            .collect::<StreamExecutorResult<Vec<_>>>()?;
         Ok(CompiledDefine {
             symbol: pb.symbol.clone(),
             condition,
@@ -546,11 +566,16 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         yield Message::Barrier(barrier);
         state_table.init_epoch(first_epoch).await?;
 
-        // Monotonic per-match id, the hidden unique stream key. Seeded from the (meta-guaranteed
-        // monotonic) epoch and re-seeded up to each barrier's epoch, so ids strictly increase within
-        // a run and across restarts (a recovered run starts from an epoch greater than any before
-        // it). Combined with the partition columns this uniquely identifies every emitted match.
-        let mut next_match_id: i64 = first_epoch.curr as i64;
+        // Generator for the hidden `_match_id` column, the per-partition unique suffix of the stream
+        // key. A snowflake-style id (timestamp + owned vnode + sequence) is unique across this
+        // actor's lifetime and across rescaling, and — because recovery rolls back the whole epoch
+        // atomically — re-emitting a match after recovery is not a downstream duplicate, so the id
+        // need not be deterministic across recovery, only never reused within the committed stream.
+        // Scoped to the vnodes this actor currently owns; rebuilt on a vnode-bitmap change below.
+        let mut row_id_gen = RowIdGenerator::new(
+            state_table.vnodes().iter_vnodes(),
+            state_table.vnodes().len(),
+        );
 
         // Recovery: rebuild the per-partition buffers from the state table.
         let mut partitions =
@@ -673,8 +698,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     let value = measure.expr.eval_row_infallible(&synthetic).await;
                                     measure_datums.push(value);
                                 }
-                                let match_id = next_match_id;
-                                next_match_id += 1;
+                                let match_id = row_id_gen.next();
                                 out_rows.push(
                                     partition_key
                                         .clone()
@@ -687,16 +711,19 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 cursor = skip.next_pos(m.start, m.end, &m.labels);
                             }
 
-                            // Evict finalized rows that can no longer be part of any match: everything
-                            // before the earliest safe row that could still *begin* a match. Rows the
-                            // scan consumed sit before `cursor`; rows after it that cannot start the
-                            // pattern are dead (a match is contiguous from its start), so they are
-                            // dropped instead of lingering and being re-scanned every watermark. A live
-                            // partial match (a row that begins the pattern but needs future rows) is
-                            // retained.
+                            // Evict finalized rows that can no longer be part of any match. A match is
+                            // contiguous from its start, so a row is dead once no match starting at it
+                            // is still possible. It is *not* enough to ask whether a row can merely
+                            // *begin* the pattern: for `(a b)`, a buffer `[a, x, x, ...]` whose `a` is
+                            // followed only by non-matching safe rows can never complete, yet the `a`
+                            // can still begin the pattern — keeping it would pin the dead prefix in the
+                            // buffer and state table forever. Retain from the earliest row whose match
+                            // is still live at the safe boundary (can consume the safe suffix without
+                            // dying), so a genuine partial match awaiting future rows is kept while a
+                            // start already blocked by safe rows is dropped.
                             let mut retain_from = safe_len;
                             for p in cursor..safe_len {
-                                if nfa.can_begin_at(p, &matcher).await? {
+                                if nfa.reaches_boundary_alive(p, safe_len, &matcher).await? {
                                     retain_from = p;
                                     break;
                                 }
@@ -725,8 +752,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     }
                 }
                 Message::Barrier(barrier) => {
-                    // Keep match ids ahead of the epoch clock so they stay unique across restarts.
-                    next_match_id = next_match_id.max(barrier.epoch.curr as i64);
                     let post_commit = state_table.commit(barrier.epoch).await?;
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
                     yield Message::Barrier(barrier);
@@ -745,6 +770,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             &partition_key_indices,
                         )
                         .await?;
+                        // The owned vnodes changed; rebuild the id generator so it only mints ids
+                        // within this actor's new vnode set (mirrors `RowIdGenExecutor`).
+                        row_id_gen = RowIdGenerator::new(
+                            state_table.vnodes().iter_vnodes(),
+                            state_table.vnodes().len(),
+                        );
                     }
                 }
             }
