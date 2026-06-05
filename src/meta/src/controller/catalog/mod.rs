@@ -54,6 +54,7 @@ use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSecret, PbSink, PbSource,
     PbSubscription, PbTable, PbView,
 };
+use risingwave_pb::common::ObjectType as PbObjectType;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbCreatingJobInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -665,22 +666,61 @@ impl CatalogController {
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        ensure_object_id(ObjectType::Database, comment.database_id, &txn).await?;
-        ensure_object_id(ObjectType::Schema, comment.schema_id, &txn).await?;
-        let (table_obj, streaming_job) = Object::find_by_id(comment.table_id)
+
+        let object_id = ObjectId::new(comment.object_id);
+        let table_id = TableId::new(comment.object_id);
+        let object_type = PbObjectType::try_from(comment.object_type)
+            .map_err(|_| MetaError::invalid_parameter("comment object type"))?;
+        let expected_table_type = match object_type {
+            PbObjectType::Table => TableType::Table,
+            PbObjectType::Mview => TableType::MaterializedView,
+            unsupported => {
+                return Err(MetaError::invalid_parameter(format!(
+                    "comment on {} is not supported yet",
+                    unsupported.as_str_name().to_ascii_lowercase()
+                )));
+            }
+        };
+
+        let (table_obj, streaming_job) = Object::find_by_id(object_id)
             .find_also_related(StreamingJob)
             .one(&txn)
             .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("object", comment.table_id))?;
+            .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+        if table_obj.obj_type != ObjectType::Table {
+            return Err(MetaError::invalid_parameter(format!(
+                "{} is not a table or materialized view",
+                object_id
+            )));
+        }
+
+        let table_type: TableType = Table::find_by_id(table_id)
+            .select_only()
+            .column(table::Column::TableType)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+        if table_type != expected_table_type {
+            return Err(MetaError::invalid_parameter(format!(
+                "{} is not a {}",
+                object_id,
+                match expected_table_type {
+                    TableType::Table => "table",
+                    TableType::MaterializedView => "materialized view",
+                    _ => unreachable!(),
+                }
+            )));
+        }
 
         let table = if let Some(col_idx) = comment.column_index {
-            let columns: ColumnCatalogArray = Table::find_by_id(comment.table_id)
+            let columns: ColumnCatalogArray = Table::find_by_id(table_id)
                 .select_only()
                 .column(table::Column::Columns)
                 .into_tuple()
                 .one(&txn)
                 .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
             let mut pb_columns = columns.to_protobuf();
 
             let column = pb_columns
@@ -690,12 +730,12 @@ impl CatalogController {
                 anyhow!(
                     "column desc at index {} for table id {} not found",
                     col_idx,
-                    comment.table_id
+                    table_id
                 )
             })?;
             column_desc.description = comment.description;
             table::ActiveModel {
-                table_id: Set(comment.table_id),
+                table_id: Set(table_id),
                 columns: Set(pb_columns.into()),
                 ..Default::default()
             }
@@ -703,7 +743,7 @@ impl CatalogController {
             .await?
         } else {
             table::ActiveModel {
-                table_id: Set(comment.table_id),
+                table_id: Set(table_id),
                 description: Set(comment.description),
                 ..Default::default()
             }
