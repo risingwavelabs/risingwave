@@ -20,10 +20,11 @@ use either::Either;
 use futures::stream;
 use futures::stream::select_with_strategy;
 use itertools::Itertools;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::row::RowExt;
+use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
 use risingwave_connector::parser::{
     BigintUnsignedHandlingMode, ByteStreamSourceParser, DebeziumParser, DebeziumProps,
     EncodingProperties, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
@@ -141,7 +142,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .inc_by(upstream_processed_row_count);
     }
 
-    fn drain_upstream_chunk_buffer(
+    fn consume_upstream_chunk_buffer(
         offset_parse_func: &risingwave_connector::source::cdc::external::CdcOffsetParseFunc,
         upstream_chunk_buffer: &mut Vec<StreamChunk>,
         current_pk_pos: Option<&OwnedRow>,
@@ -158,22 +159,133 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut emitted_chunks = Vec::with_capacity(upstream_chunk_buffer.len());
         let mut upstream_processed_row_count = 0;
         let mut consumed_binlog_offset = None;
+        let mut retained_chunks = Vec::new();
+        let mut should_retain_remaining_chunks = false;
 
         for chunk in upstream_chunk_buffer.drain(..) {
-            upstream_processed_row_count += chunk.cardinality() as u64;
-            consumed_binlog_offset = get_cdc_chunk_last_offset(offset_parse_func, &chunk)?;
-            emitted_chunks.push(mapping_chunk(
-                mark_cdc_chunk(
-                    offset_parse_func,
-                    chunk,
-                    current_pos,
-                    pk_indices,
-                    pk_order,
-                    last_binlog_offset.clone(),
-                )?,
-                output_indices,
-            ));
+            if should_retain_remaining_chunks {
+                retained_chunks.push(chunk);
+                continue;
+            }
+
+            let data_types = chunk.data_types();
+            let mut emitted_rows = Vec::new();
+            let mut retain_from = None;
+            let mut idx = 0;
+
+            while idx < chunk.capacity() {
+                let (op, row, visible) = chunk.row_at(idx);
+                debug_assert!(visible, "buffered chunk should have compact visibility");
+                let event_offset = (*offset_parse_func)(
+                    row.iter()
+                        .last()
+                        .flatten()
+                        .expect("cdc offset must exist")
+                        .into_utf8(),
+                )?;
+                let in_binlog_range = last_binlog_offset
+                    .as_ref()
+                    .is_none_or(|binlog_low| *binlog_low <= event_offset);
+
+                match op {
+                    Op::UpdateDelete => {
+                        let (next_op, next_row, next_visible) = chunk.row_at(idx + 1);
+                        debug_assert!(
+                            next_visible,
+                            "buffered chunk should have compact visibility"
+                        );
+                        debug_assert_eq!(next_op, Op::UpdateInsert);
+
+                        let next_event_offset = (*offset_parse_func)(
+                            next_row
+                                .iter()
+                                .last()
+                                .flatten()
+                                .expect("cdc offset must exist")
+                                .into_utf8(),
+                        )?;
+                        let next_in_binlog_range = last_binlog_offset
+                            .as_ref()
+                            .is_none_or(|binlog_low| *binlog_low <= next_event_offset);
+
+                        let row_pk = row.project(pk_indices);
+                        let next_row_pk = next_row.project(pk_indices);
+                        let row_reached_current_pos = cmp_datum_iter(
+                            row_pk.iter(),
+                            current_pos.iter(),
+                            pk_order.iter().copied(),
+                        )
+                        .is_le();
+                        let next_row_reached_current_pos = cmp_datum_iter(
+                            next_row_pk.iter(),
+                            current_pos.iter(),
+                            pk_order.iter().copied(),
+                        )
+                        .is_le();
+
+                        let should_retain_pair = (in_binlog_range && !row_reached_current_pos)
+                            || (next_in_binlog_range && !next_row_reached_current_pos);
+                        if should_retain_pair {
+                            retain_from = Some(idx);
+                            break;
+                        }
+
+                        if in_binlog_range {
+                            emitted_rows.push((op, row.into_owned_row()));
+                            consumed_binlog_offset = Some(event_offset);
+                        }
+                        if next_in_binlog_range {
+                            emitted_rows.push((next_op, next_row.into_owned_row()));
+                            consumed_binlog_offset = Some(next_event_offset);
+                        }
+                        upstream_processed_row_count += 2;
+                        idx += 2;
+                    }
+                    Op::UpdateInsert => {
+                        unreachable!("UpdateInsert should not be present without UpdateDelete")
+                    }
+                    Op::Insert | Op::Delete => {
+                        let row_pk = row.project(pk_indices);
+                        let reached_current_pos = cmp_datum_iter(
+                            row_pk.iter(),
+                            current_pos.iter(),
+                            pk_order.iter().copied(),
+                        )
+                        .is_le();
+
+                        if in_binlog_range && !reached_current_pos {
+                            retain_from = Some(idx);
+                            break;
+                        }
+
+                        if in_binlog_range {
+                            emitted_rows.push((op, row.into_owned_row()));
+                            consumed_binlog_offset = Some(event_offset);
+                        }
+                        upstream_processed_row_count += 1;
+                        idx += 1;
+                    }
+                }
+            }
+
+            if !emitted_rows.is_empty() {
+                emitted_chunks.push(mapping_chunk(
+                    StreamChunk::from_rows(&emitted_rows, &data_types),
+                    output_indices,
+                ));
+            }
+
+            if let Some(retain_from) = retain_from {
+                let retained_rows = chunk
+                    .rows_in(retain_from..chunk.capacity())
+                    .map(|(op, row)| (op, row.into_owned_row()))
+                    .collect_vec();
+                retained_chunks.push(StreamChunk::from_rows(&retained_rows, &data_types));
+                should_retain_remaining_chunks = true;
+            }
         }
+
+        *upstream_chunk_buffer = retained_chunks;
 
         Ok((
             emitted_chunks,
@@ -371,7 +483,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // When a new barrier comes from upstream:
         //  - read the current binlog offset as `binlog_high`
         //  - for each row of the upstream change log, forward it to downstream if it in the range
-        //    of [binlog_low, binlog_high] and its pk <= `current_pos`, otherwise ignore it
+        //    of [binlog_low, binlog_high] and its pk <= `current_pos`, otherwise keep buffering it
+        //    until `current_pos` catches up
         //  - reconstruct the whole backfill stream with upstream changelog and a new table snapshot
         //
         // When a chunk comes from snapshot, we forward it to the downstream and raise
@@ -549,7 +662,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             emitted_upstream_chunks,
                                             drained_upstream_row_count,
                                             drained_binlog_offset,
-                                        ) = Self::drain_upstream_chunk_buffer(
+                                        ) = Self::consume_upstream_chunk_buffer(
                                             &offset_parse_func,
                                             &mut upstream_chunk_buffer,
                                             current_pk_pos.as_ref(),
@@ -1016,11 +1129,13 @@ mod tests {
     use futures::{StreamExt, pin_mut};
     use risingwave_common::array::{Array, DataChunk, Op, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::types::{DataType, Datum, JsonbVal};
+    use risingwave_common::row::{OwnedRow, Row};
+    use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_connector::source::cdc::CdcScanOptions;
+    use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
     use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
     use risingwave_connector::source::cdc::external::{
         CdcOffset, ExternalCdcTableType, ExternalTableConfig, SchemaTableName,
@@ -1235,6 +1350,83 @@ mod tests {
             None,
         )
         .await
+    }
+
+    #[test]
+    fn test_consume_upstream_chunk_buffer_retains_future_rows() {
+        let mut upstream_chunk_buffer = vec![StreamChunk::from_rows(
+            &[
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int64(1)),
+                        Some(ScalarImpl::Int64(100)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Int64(6)),
+                        Some(ScalarImpl::Int64(600)),
+                        Some(ScalarImpl::Utf8(
+                            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
+                                .into(),
+                        )),
+                    ]),
+                ),
+            ],
+            &[DataType::Int64, DataType::Int64, DataType::Varchar],
+        )];
+
+        let (emitted_chunks, drained_row_count, drained_offset) =
+            CdcBackfillExecutor::<MemoryStateStore>::consume_upstream_chunk_buffer(
+                &MockExternalTableReader::get_cdc_offset_parser(),
+                &mut upstream_chunk_buffer,
+                Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
+                &[0],
+                &[OrderType::ascending()],
+                &Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
+                &[0, 1],
+            )
+            .unwrap();
+
+        assert_eq!(drained_row_count, 1);
+        assert_eq!(
+            drained_offset,
+            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 3)))
+        );
+        assert_eq!(emitted_chunks.len(), 1);
+        assert_eq!(emitted_chunks[0].rows().count(), 1);
+        assert_eq!(
+            emitted_chunks[0].rows().next().unwrap().1.to_owned_row(),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(1)),
+                Some(ScalarImpl::Int64(100))
+            ])
+        );
+
+        assert_eq!(upstream_chunk_buffer.len(), 1);
+        assert_eq!(upstream_chunk_buffer[0].rows().count(), 1);
+        assert_eq!(
+            upstream_chunk_buffer[0]
+                .rows()
+                .next()
+                .unwrap()
+                .1
+                .to_owned_row(),
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(6)),
+                Some(ScalarImpl::Int64(600)),
+                Some(ScalarImpl::Utf8(
+                    r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#
+                        .into(),
+                )),
+            ])
+        );
     }
 
     #[tokio::test]
