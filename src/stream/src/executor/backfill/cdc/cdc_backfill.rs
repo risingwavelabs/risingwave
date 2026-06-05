@@ -23,6 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::parser::{
     BigintUnsignedHandlingMode, ByteStreamSourceParser, DebeziumParser, DebeziumProps,
     EncodingProperties, JsonProperties, ProtocolProperties, SourceStreamChunkBuilder,
@@ -138,6 +139,47 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         metrics
             .cdc_backfill_upstream_output_row_count
             .inc_by(upstream_processed_row_count);
+    }
+
+    fn drain_upstream_chunk_buffer(
+        offset_parse_func: &risingwave_connector::source::cdc::external::CdcOffsetParseFunc,
+        upstream_chunk_buffer: &mut Vec<StreamChunk>,
+        current_pk_pos: Option<&OwnedRow>,
+        pk_indices: &[usize],
+        pk_order: &[OrderType],
+        last_binlog_offset: &Option<CdcOffset>,
+        output_indices: &[usize],
+    ) -> StreamExecutorResult<(Vec<StreamChunk>, u64, Option<CdcOffset>)> {
+        let Some(current_pos) = current_pk_pos else {
+            upstream_chunk_buffer.clear();
+            return Ok((vec![], 0, None));
+        };
+
+        let mut emitted_chunks = Vec::with_capacity(upstream_chunk_buffer.len());
+        let mut upstream_processed_row_count = 0;
+        let mut consumed_binlog_offset = None;
+
+        for chunk in upstream_chunk_buffer.drain(..) {
+            upstream_processed_row_count += chunk.cardinality() as u64;
+            consumed_binlog_offset = get_cdc_chunk_last_offset(offset_parse_func, &chunk)?;
+            emitted_chunks.push(mapping_chunk(
+                mark_cdc_chunk(
+                    offset_parse_func,
+                    chunk,
+                    current_pos,
+                    pk_indices,
+                    pk_order,
+                    last_binlog_offset.clone(),
+                )?,
+                output_indices,
+            ));
+        }
+
+        Ok((
+            emitted_chunks,
+            upstream_processed_row_count,
+            consumed_binlog_offset,
+        ))
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -437,6 +479,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     barrier_count += 1;
                                     let can_start_new_snapshot =
                                         barrier_count == self.options.snapshot_barrier_interval;
+                                    let mut needs_rebuild_snapshot = false;
 
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
@@ -460,20 +503,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                     rate_limit_to_zero = self
                                                         .rate_limit_rps
                                                         .is_some_and(|val| val == 0);
-                                                    // update and persist current backfill progress without draining the buffered upstream chunks
-                                                    state_impl
-                                                        .mutate_state(
-                                                            current_pk_pos.clone(),
-                                                            last_binlog_offset.clone(),
-                                                            total_snapshot_row_count,
-                                                            false,
-                                                        )
-                                                        .await?;
-                                                    state_impl.commit_state(barrier.epoch).await?;
-                                                    yield Message::Barrier(barrier);
-
-                                                    // rebuild the snapshot stream with new rate limit
-                                                    continue 'backfill_loop;
+                                                    needs_rebuild_snapshot = true;
                                                 }
                                             }
                                             Mutation::Update(UpdateMutation {
@@ -515,6 +545,34 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         // Break the loop for consuming snapshot and prepare to start a new snapshot
                                         break;
                                     } else {
+                                        let (
+                                            emitted_upstream_chunks,
+                                            drained_upstream_row_count,
+                                            drained_binlog_offset,
+                                        ) = Self::drain_upstream_chunk_buffer(
+                                            &offset_parse_func,
+                                            &mut upstream_chunk_buffer,
+                                            current_pk_pos.as_ref(),
+                                            &pk_indices,
+                                            &pk_order,
+                                            &last_binlog_offset,
+                                            &self.output_indices,
+                                        )?;
+                                        cur_barrier_upstream_processed_rows +=
+                                            drained_upstream_row_count;
+                                        if let Some(drained_binlog_offset) = drained_binlog_offset {
+                                            last_binlog_offset = Some(drained_binlog_offset);
+                                        }
+                                        for chunk in emitted_upstream_chunks {
+                                            yield Message::Chunk(chunk);
+                                        }
+
+                                        Self::report_metrics(
+                                            &self.metrics,
+                                            cur_barrier_snapshot_processed_rows,
+                                            cur_barrier_upstream_processed_rows,
+                                        );
+
                                         // update and persist current backfill progress
                                         state_impl
                                             .mutate_state(
@@ -529,6 +587,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                         // emit barrier and continue consume the backfill stream
                                         yield Message::Barrier(barrier);
+
+                                        if needs_rebuild_snapshot {
+                                            continue 'backfill_loop;
+                                        }
                                     }
                                 }
                                 Message::Chunk(chunk) => {
@@ -953,14 +1015,21 @@ mod tests {
 
     use futures::{StreamExt, pin_mut};
     use risingwave_common::array::{Array, DataChunk, Op, StreamChunk};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::types::{DataType, Datum, JsonbVal};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::iter_util::ZipEqFast;
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_connector::source::cdc::CdcScanOptions;
+    use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
+    use risingwave_connector::source::cdc::external::{
+        CdcOffset, ExternalCdcTableType, ExternalTableConfig, SchemaTableName,
+    };
     use risingwave_storage::memory::MemoryStateStore;
 
+    use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
+    use crate::executor::backfill::cdc::state::CdcBackfillState;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::prelude::StateTable;
     use crate::executor::source::default_source_internal_table;
@@ -1113,6 +1182,166 @@ mod tests {
         assert_eq!(
             chunk.columns()[2].as_int64().iter().collect::<Vec<_>>(),
             vec![Some(100)]
+        );
+    }
+
+    fn create_raw_cdc_chunk(rows: &[(&str, &str)]) -> StreamChunk {
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Jsonb),
+            Field::unnamed(DataType::Varchar),
+        ]);
+        let mut builders = schema.create_array_builders(rows.len());
+        for (payload, offset) in rows {
+            let payload_datum: Datum = Some(JsonbVal::from_str(payload).unwrap().into());
+            let offset_datum: Datum = Some((*offset).into());
+            builders[0].append(payload_datum);
+            builders[1].append(offset_datum);
+        }
+        let columns = builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
+        StreamChunk::from_parts(
+            vec![Op::Insert; rows.len()],
+            DataChunk::new(columns, rows.len()),
+        )
+    }
+
+    async fn create_cdc_state_table(store: MemoryStateStore) -> StateTable<MemoryStateStore> {
+        let state_schema = Schema::new(vec![
+            Field::with_name(DataType::Varchar, "split_id"),
+            Field::with_name(DataType::Int64, "id"),
+            Field::with_name(DataType::Boolean, "backfill_finished"),
+            Field::with_name(DataType::Int64, "row_count"),
+            Field::with_name(DataType::Jsonb, "cdc_offset"),
+        ]);
+        let column_descs = vec![
+            ColumnDesc::unnamed(ColumnId::from(0), state_schema[0].data_type.clone()),
+            ColumnDesc::unnamed(ColumnId::from(1), state_schema[1].data_type.clone()),
+            ColumnDesc::unnamed(ColumnId::from(2), state_schema[2].data_type.clone()),
+            ColumnDesc::unnamed(ColumnId::from(3), state_schema[3].data_type.clone()),
+            ColumnDesc::unnamed(ColumnId::from(4), state_schema[4].data_type.clone()),
+        ];
+
+        StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::from(0x42),
+                column_descs,
+                vec![OrderType::ascending()],
+                vec![0],
+                0,
+            ),
+            store,
+            None,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn test_cdc_backfill_persists_buffered_offset_on_checkpoint() {
+        let memory_state_store = MemoryStateStore::new();
+        let state_table = create_cdc_state_table(memory_state_store.clone()).await;
+
+        let (mut tx, source) = MockSource::channel();
+        let source = source.into_executor(
+            Schema::new(vec![
+                Field::unnamed(DataType::Jsonb),
+                Field::unnamed(DataType::Varchar),
+            ]),
+            vec![0],
+        );
+
+        let external_table = ExternalStorageTable::new(
+            TableId::new(1234),
+            SchemaTableName {
+                schema_name: "public".to_owned(),
+                table_name: "mock_table".to_owned(),
+            },
+            "mydb".to_owned(),
+            ExternalTableConfig::default(),
+            ExternalCdcTableType::Mock,
+            Schema::new(vec![
+                Field::with_name(DataType::Int64, "id"),
+                Field::with_name(DataType::Float64, "price"),
+            ]),
+            vec![OrderType::ascending()],
+            vec![0],
+        );
+        let output_columns = vec![
+            ColumnDesc::named("id", ColumnId::new(1), DataType::Int64),
+            ColumnDesc::named("price", ColumnId::new(2), DataType::Float64),
+        ];
+
+        let executor = CdcBackfillExecutor::new(
+            ActorContext::for_test(0x1a),
+            external_table,
+            source,
+            vec![0, 1],
+            output_columns,
+            None,
+            StreamingMetrics::unused().into(),
+            state_table,
+            None,
+            CdcScanOptions {
+                snapshot_barrier_interval: 10,
+                ..Default::default()
+            },
+            BTreeMap::default(),
+        )
+        .execute_inner();
+        pin_mut!(executor);
+
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(1)));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(2)));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Chunk(_)
+        ));
+
+        tx.push_chunk(create_raw_cdc_chunk(&[
+            (
+                r#"{ "payload": { "before": null, "after": { "id": 1, "price": 10.01 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002" }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+                r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#,
+            ),
+            (
+                r#"{ "payload": { "before": null, "after": { "id": 6, "price": 66.06 }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002" }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#,
+                r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#,
+            ),
+        ]));
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(3)));
+
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Chunk(_)
+        ));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+
+        let mut restored_state = CdcBackfillState::new(
+            TableId::new(1234),
+            create_cdc_state_table(memory_state_store).await,
+            5,
+        );
+        restored_state
+            .init_epoch(Barrier::new_test_barrier(test_epoch(3)).epoch)
+            .await
+            .unwrap();
+        let state = restored_state.restore_state().await.unwrap();
+        assert_eq!(
+            state.last_cdc_offset,
+            Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 4)))
         );
     }
 }
