@@ -42,6 +42,7 @@ pub struct IcebergScanExecutor {
     metrics: Option<BatchMetrics>,
     need_seq_num: bool,
     need_file_path_and_pos: bool,
+    limit: Option<u64>,
 }
 
 impl Executor for IcebergScanExecutor {
@@ -68,6 +69,7 @@ impl IcebergScanExecutor {
         metrics: Option<BatchMetrics>,
         need_seq_num: bool,
         need_file_path_and_pos: bool,
+        limit: Option<u64>,
     ) -> Self {
         Self {
             iceberg_config,
@@ -78,6 +80,7 @@ impl IcebergScanExecutor {
             metrics,
             need_seq_num,
             need_file_path_and_pos,
+            limit,
         }
     }
 
@@ -98,8 +101,15 @@ impl IcebergScanExecutor {
                 bail!("file_scan_tasks must be Some")
             }
         };
+        let mut remaining_limit = self
+            .limit
+            .map(|limit| usize::try_from(limit).unwrap_or(usize::MAX));
 
         for data_file_scan_task in data_file_scan_tasks {
+            if matches!(remaining_limit, Some(0)) {
+                return Ok(());
+            }
+
             #[for_await]
             for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
@@ -115,7 +125,21 @@ impl IcebergScanExecutor {
             ) {
                 let chunk = chunk?;
                 assert_eq!(chunk.data_types(), data_types);
-                yield chunk;
+                if let Some(remaining) = &mut remaining_limit {
+                    if chunk.cardinality() > *remaining {
+                        yield take_first_visible_rows(chunk, *remaining);
+                        return Ok(());
+                    }
+
+                    *remaining -= chunk.cardinality();
+                    yield chunk;
+
+                    if *remaining == 0 {
+                        return Ok(());
+                    }
+                } else {
+                    yield chunk;
+                }
             }
         }
     }
@@ -188,9 +212,44 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 metrics,
                 need_seq_num,
                 need_file_path_and_pos,
+                split.limit,
             )))
         } else {
             unreachable!()
         }
+    }
+}
+
+fn take_first_visible_rows(chunk: DataChunk, limit: usize) -> DataChunk {
+    if limit >= chunk.cardinality() {
+        return chunk;
+    }
+
+    let indexes = chunk.visibility().iter_ones().take(limit).collect_vec();
+    chunk.reorder_rows(&indexes)
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::test_prelude::DataChunkTestExt;
+
+    use super::*;
+
+    #[test]
+    fn test_take_first_visible_rows_keeps_visible_prefix() {
+        let chunk = DataChunk::from_pretty(
+            "i
+             1
+             2 D
+             3
+             4",
+        );
+        let expected = DataChunk::from_pretty(
+            "i
+             1
+             3",
+        );
+
+        assert_eq!(take_first_visible_rows(chunk, 2), expected);
     }
 }
