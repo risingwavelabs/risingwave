@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use itertools::Itertools;
@@ -30,7 +31,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::error::BatchError;
-use crate::executor::Executor;
+use crate::executor::{Executor, PushContext, PushSink, PushStatus, execute_pull_stream_as_push};
 use crate::monitor::BatchMetrics;
 
 pub struct IcebergScanExecutor {
@@ -55,6 +56,14 @@ impl Executor for IcebergScanExecutor {
 
     fn execute(self: Box<Self>) -> super::BoxedDataChunkStream {
         self.do_execute().boxed()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, crate::error::Result<PushStatus>> {
+        execute_pull_stream_as_push(self.do_execute().boxed(), context, sink).boxed()
     }
 }
 

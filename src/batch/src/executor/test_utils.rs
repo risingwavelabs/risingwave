@@ -15,13 +15,14 @@
 use std::collections::VecDeque;
 
 use futures::StreamExt;
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 
 use super::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    register_executor,
+    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, register_executor,
 };
 use crate::error::{BatchError, Result};
 use crate::exchange_source::ExchangeSource;
@@ -97,6 +98,22 @@ impl Executor for MockExecutor {
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
     }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        _context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            for data_chunk in self.chunks {
+                if sink.push(data_chunk).await?.is_finished() {
+                    break;
+                }
+            }
+            sink.finish().await
+        }
+        .boxed()
+    }
 }
 
 impl MockExecutor {
@@ -121,6 +138,14 @@ impl Executor for BlockExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute().boxed()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        execute_pull_stream_as_push(self.execute(), context, sink).boxed()
     }
 }
 
@@ -155,6 +180,14 @@ impl Executor for BusyLoopExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute().boxed()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        execute_pull_stream_as_push(self.execute(), context, sink).boxed()
     }
 }
 

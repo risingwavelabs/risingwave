@@ -22,12 +22,12 @@ use std::time::Duration;
 use StageEvent::Failed;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
+use futures::future::{BoxFuture, FutureExt};
 use futures::stream::Fuse;
 use futures::{StreamExt, TryStreamExt, stream};
-use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::{ExecutorBuilder, PushContext, execute_push_as_pull};
+use risingwave_batch::executor::{ExecutorBuilder, PushContext, PushSink, PushStatus};
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
@@ -93,6 +93,28 @@ pub enum StageEvent {
     },
     /// All tasks in stage finished.
     Completed(#[expect(dead_code)] StageId),
+}
+
+struct RootStagePushSink {
+    sender: Sender<SchedulerResult<DataChunk>>,
+}
+
+impl PushSink for RootStagePushSink {
+    fn push<'a>(
+        &'a mut self,
+        chunk: DataChunk,
+    ) -> BoxFuture<'a, risingwave_batch::error::Result<PushStatus>> {
+        async move {
+            if self.sender.send(Ok(chunk)).await.is_err() {
+                warn!(
+                    "Root executor has been dropped before receive any events so the send is failed"
+                );
+                return Ok(PushStatus::Finished);
+            }
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
 }
 
 #[derive(Clone)]
@@ -620,7 +642,7 @@ impl StageRunner {
 
     async fn schedule_tasks_for_root(
         &mut self,
-        mut shutdown_rx: ShutdownToken,
+        shutdown_rx: ShutdownToken,
         expr_context: ExprContext,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage_id;
@@ -657,36 +679,20 @@ impl StageRunner {
 
         let result = expr_context_scope(expr_context, async {
             let executor = executor.build().await?;
-            let chunk_stream = execute_push_as_pull(
-                executor,
-                PushContext::new(shutdown_rx.clone()),
-                PushContext::DEFAULT_MORSEL_QUEUE_CAPACITY,
-            );
-            let cancelled = pin!(shutdown_rx.cancelled());
-            #[for_await]
-            for chunk in chunk_stream.take_until(cancelled) {
-                if let Err(ref e) = chunk {
-                    if shutdown_rx0.is_cancelled() {
-                        break;
-                    }
-                    let err_str = e.to_report_string();
-                    // This is possible if The Query Runner drop early before schedule the root
-                    // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
-                    // The error format is just channel closed so no care.
-                    if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
-                        warn!("Root executor has been dropped before receive any events so the send is failed");
-                    }
-                    // Different from below, return this function and report error.
-                    return Err(TaskExecutionError(err_str));
-                } else {
-                    // Same for below.
-                    if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
-                        warn!("Root executor has been dropped before receive any events so the send is failed");
-                    }
+            let mut sink = RootStagePushSink {
+                sender: result_tx.clone(),
+            };
+            if let Err(e) = executor
+                .execute_push(PushContext::new(shutdown_rx.clone()), &mut sink)
+                .await
+            {
+                if !shutdown_rx0.is_cancelled() {
+                    return Err(TaskExecutionError(e.to_report_string()));
                 }
             }
             Ok(())
-        }).await;
+        })
+        .await;
 
         if let Err(err) = &result {
             // If we encountered error when executing root stage locally, we have to notify the result fetcher, which is

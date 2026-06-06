@@ -15,6 +15,7 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
+use futures::future::{BoxFuture, FutureExt};
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
 use futures_util::pin_mut;
@@ -38,6 +39,7 @@ use super::{
 };
 use crate::build_scan_range_from_pb;
 use crate::error::{BatchError, Result};
+use crate::executor::{PushContext, PushSink, PushStatus, execute_pull_stream_as_push};
 use crate::monitor::BatchMetrics;
 
 pub struct LogRowSeqScanExecutor<S: StateStore> {
@@ -176,6 +178,14 @@ impl<S: StateStore> Executor for LogRowSeqScanExecutor<S> {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute().boxed()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        execute_pull_stream_as_push(self.do_execute().boxed(), context, sink).boxed()
     }
 }
 

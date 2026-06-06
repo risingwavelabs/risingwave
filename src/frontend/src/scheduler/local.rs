@@ -19,20 +19,18 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::stream::BoxStream;
-use futures::{FutureExt, StreamExt};
-use futures_async_stream::try_stream;
+use futures::future::{BoxFuture, FutureExt};
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::{ExecutorBuilder, PushContext, execute_push_as_pull};
+use risingwave_batch::executor::{ExecutorBuilder, PushContext, PushSink, PushStatus};
 use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::tracing::{InstrumentStream, TracingContext};
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
@@ -44,11 +42,10 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::debug;
+use tracing::{Instrument, debug};
 
 use super::plan_fragmenter::{PartitionInfo, QueryStage};
 use crate::catalog::{FragmentId, TableId};
-use crate::error::RwError;
 use crate::optimizer::plan_node::BatchPlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -57,6 +54,27 @@ use crate::session::{FrontendEnv, SessionImpl};
 
 // TODO(error-handling): use a concrete error type.
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
+
+struct LocalQueryPushSink {
+    sender: mpsc::Sender<Result<DataChunk, BoxedError>>,
+}
+
+impl PushSink for LocalQueryPushSink {
+    fn push<'a>(
+        &'a mut self,
+        chunk: DataChunk,
+    ) -> BoxFuture<'a, risingwave_batch::error::Result<PushStatus>> {
+        async move {
+            if self.sender.send(Ok(chunk)).await.is_err() {
+                tracing::info!("Receiver closed.");
+                return Ok(PushStatus::Finished);
+            }
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+}
+
 pub struct LocalQueryExecution {
     query: Query,
     front_env: FrontendEnv,
@@ -89,50 +107,11 @@ impl LocalQueryExecution {
         self.session.reset_cancel_query_flag()
     }
 
-    #[try_stream(ok = DataChunk, error = RwError)]
-    pub async fn run_inner(self) {
-        debug!(
-            query_id = %self.query.query_id,
-            "Starting to run query"
-        );
-        let context = FrontendBatchTaskContext::create(self.session.clone());
-        let task_id = TaskId {
-            query_id: self.query.query_id.id.clone(),
-            stage_id: 0,
-            task_id: 0,
-        };
-
-        let plan_fragment = self.create_plan_fragment()?;
-        let plan_node = plan_fragment.root.unwrap();
-
-        let shutdown_rx = self.shutdown_rx();
-        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, shutdown_rx.clone());
-        let executor = executor.build().await?;
-        // The following loop can be slow.
-        // Release potential large object in Query and PlanNode early.
-        drop(plan_node);
-        drop(self);
-
-        let chunk_stream = execute_push_as_pull(
-            executor,
-            PushContext::new(shutdown_rx),
-            PushContext::DEFAULT_MORSEL_QUEUE_CAPACITY,
-        );
-        #[for_await]
-        for chunk in chunk_stream {
-            yield chunk?;
-        }
-    }
-
-    fn run(self) -> BoxStream<'static, Result<DataChunk, RwError>> {
-        let span = tracing::info_span!("local_execute", query_id = self.query.query_id.id,);
-        Box::pin(self.run_inner().instrument(span))
-    }
-
     pub fn stream_rows(self) -> LocalQueryStream {
         let compute_runtime = self.front_env.compute_runtime();
         let (sender, receiver) = mpsc::channel(10);
         let shutdown_rx = self.shutdown_rx();
+        let span = tracing::info_span!("local_execute", query_id = self.query.query_id.id);
 
         let catalog_reader = self.front_env.catalog_reader().clone();
         let user_info_reader = self.front_env.user_info_reader().clone();
@@ -146,17 +125,56 @@ impl LocalQueryExecution {
 
         let sender1 = sender.clone();
         let exec = async move {
-            let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
-            while let Some(mut r) = data_stream.next().await {
-                // append a query cancelled error if the query is cancelled.
-                if r.is_err() && shutdown_rx.is_cancelled() {
-                    r = Err(Box::new(SchedulerError::QueryCancelled(
+            let query_id = self.query.query_id.id.clone();
+            let exec_shutdown_rx = shutdown_rx.clone();
+            let result_sender = sender1.clone();
+            let result = async move {
+                debug!(
+                    query_id = %query_id,
+                    "Starting to run query"
+                );
+                let context = FrontendBatchTaskContext::create(self.session.clone());
+                let task_id = TaskId {
+                    query_id: query_id.clone(),
+                    stage_id: 0,
+                    task_id: 0,
+                };
+
+                let plan_fragment = self
+                    .create_plan_fragment()
+                    .map_err(|e| Box::new(e) as BoxedError)?;
+                let plan_node = plan_fragment.root.unwrap();
+                let executor =
+                    ExecutorBuilder::new(&plan_node, &task_id, context, exec_shutdown_rx.clone());
+                let executor = executor
+                    .build()
+                    .await
+                    .map_err(|e| Box::new(e) as BoxedError)?;
+                // The following execution can be slow.
+                // Release potential large object in Query and PlanNode early.
+                drop(plan_node);
+                drop(self);
+
+                let mut sink = LocalQueryPushSink {
+                    sender: result_sender,
+                };
+                executor
+                    .execute_push(PushContext::new(exec_shutdown_rx.clone()), &mut sink)
+                    .await
+                    .map_err(|e| Box::new(e) as BoxedError)
+            }
+            .await;
+
+            if let Err(e) = result {
+                let err = if shutdown_rx.is_cancelled() {
+                    Box::new(SchedulerError::QueryCancelled(
                         "Cancelled by user".to_owned(),
-                    )) as BoxedError);
-                }
-                if sender1.send(r).await.is_err() {
+                    )) as BoxedError
+                } else {
+                    e
+                };
+                if sender1.send(Err(err)).await.is_err() {
                     tracing::info!("Receiver closed.");
-                    return;
                 }
             }
         };
@@ -176,6 +194,7 @@ impl LocalQueryExecution {
         let exec = async move { TIME_ZONE::scope(time_zone, exec).await }.boxed();
         let exec = async move { STRICT_MODE::scope(strict_mode, exec).await }.boxed();
         let exec = async move { META_CLIENT::scope(meta_client, exec).await }.boxed();
+        let exec = exec.instrument(span);
 
         if let Some(timeout) = timeout {
             let exec = async move {

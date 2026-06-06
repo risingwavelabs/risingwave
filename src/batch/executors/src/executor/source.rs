@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
@@ -33,7 +34,10 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::Executor;
 use crate::error::{BatchError, Result};
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
+use crate::executor::{
+    BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder, PushContext, PushSink, PushStatus,
+    execute_pull_stream_as_push,
+};
 
 pub struct SourceExecutor {
     source: SourceReader,
@@ -138,6 +142,14 @@ impl Executor for SourceExecutor {
 
     fn execute(self: Box<Self>) -> super::BoxedDataChunkStream {
         self.do_execute().boxed()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        execute_pull_stream_as_push(self.do_execute().boxed(), context, sink).boxed()
     }
 }
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
@@ -23,7 +24,10 @@ use risingwave_pb::batch_plan::file_scan_node;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor::{
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, PushContext, PushSink,
+    PushStatus, execute_pull_stream_as_push,
+};
 
 #[derive(PartialEq, Debug)]
 pub enum FileFormat {
@@ -53,6 +57,14 @@ impl Executor for AzblobFileScanExecutor {
 
     fn execute(self: Box<Self>) -> super::BoxedDataChunkStream {
         self.do_execute().boxed()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, crate::error::Result<PushStatus>> {
+        execute_pull_stream_as_push(self.do_execute().boxed(), context, sink).boxed()
     }
 }
 

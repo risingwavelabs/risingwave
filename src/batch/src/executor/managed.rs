@@ -14,15 +14,15 @@
 
 use std::pin::pin;
 
-use futures::future::{Either, select};
+use futures::future::{BoxFuture, Either, FutureExt, select};
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use tracing::Instrument;
 
-use crate::error::BatchError;
-use crate::executor::{BoxedExecutor, Executor};
+use crate::error::{BatchError, Result};
+use crate::executor::{BoxedExecutor, Executor, PushContext, PushSink, PushStatus};
 use crate::task::{ShutdownMsg, ShutdownToken};
 
 /// `ManagedExecutor` build on top of the underlying executor. For now, it does two things:
@@ -79,5 +79,28 @@ impl Executor for ManagedExecutor {
             }
             ShutdownMsg::Init => {}
         }
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let input_desc = self.child.identity().to_owned();
+            let span = tracing::info_span!("batch_executor", "otel.name" = input_desc);
+            let mut shutdown_rx = self.shutdown_rx.clone();
+            let child = self.child;
+            let execute = child.execute_push(context, sink).instrument(span);
+            tokio::select! {
+                _ = shutdown_rx.cancelled() => match shutdown_rx.message() {
+                    ShutdownMsg::Abort(reason) => Err(BatchError::aborted(reason)),
+                    ShutdownMsg::Cancel => Err(BatchError::aborted("cancelled")),
+                    ShutdownMsg::Init => Ok(PushStatus::NeedMoreInput),
+                },
+                result = execute => result,
+            }
+        }
+        .boxed()
     }
 }
