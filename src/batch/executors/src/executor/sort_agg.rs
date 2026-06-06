@@ -14,6 +14,7 @@
 
 use std::ops::Range;
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilderImpl, ArrayImpl, DataChunk, StreamChunk};
@@ -27,6 +28,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
 };
 use crate::task::ShutdownToken;
 
@@ -101,6 +103,36 @@ impl Executor for SortAggExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let SortAggExecutor {
+                aggs,
+                group_key,
+                child,
+                schema,
+                identity,
+                output_size_limit,
+                shutdown_rx,
+            } = *self;
+            let executor = Box::new(SortAggExecutor {
+                aggs,
+                group_key,
+                child: wrap_push_executor(child, context.clone()),
+                schema,
+                identity,
+                output_size_limit,
+                shutdown_rx,
+            });
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

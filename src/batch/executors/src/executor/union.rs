@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use futures::StreamExt;
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
@@ -23,6 +24,7 @@ use rw_futures_util::select_all;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
 };
 
 pub struct UnionExecutor {
@@ -41,6 +43,24 @@ impl Executor for UnionExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let UnionExecutor { inputs, identity } = *self;
+            let inputs = inputs
+                .into_iter()
+                .map(|input| wrap_push_executor(input, context.clone()))
+                .collect_vec();
+            let executor = Box::new(UnionExecutor { inputs, identity });
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

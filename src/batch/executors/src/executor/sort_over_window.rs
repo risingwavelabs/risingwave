@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -25,7 +26,10 @@ use risingwave_expr::window_function::{
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use super::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+};
 use crate::error::{BatchError, Result};
 use crate::task::ShutdownToken;
 
@@ -110,6 +114,32 @@ impl Executor for SortOverWindowExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let SortOverWindowExecutor {
+                child,
+                schema,
+                identity,
+                shutdown_rx,
+                inner,
+            } = *self;
+            let executor = Box::new(SortOverWindowExecutor {
+                child: wrap_push_executor(child, context.clone()),
+                schema,
+                identity,
+                shutdown_rx,
+                inner,
+            });
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
@@ -32,6 +33,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::join::{JoinType, concatenate, convert_row_to_chunk};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
 };
 use crate::task::ShutdownToken;
 
@@ -80,6 +82,44 @@ impl Executor for NestedLoopJoinExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let NestedLoopJoinExecutor {
+                join_expr,
+                join_type,
+                original_schema,
+                schema,
+                output_indices,
+                left_child,
+                right_child,
+                identity,
+                chunk_size,
+                mem_context,
+                shutdown_rx,
+            } = *self;
+            let executor = Box::new(NestedLoopJoinExecutor {
+                join_expr,
+                join_type,
+                original_schema,
+                schema,
+                output_indices,
+                left_child: wrap_push_executor(left_child, context.clone()),
+                right_child: wrap_push_executor(right_child, context.clone()),
+                identity,
+                chunk_size,
+                mem_context,
+                shutdown_rx,
+            });
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

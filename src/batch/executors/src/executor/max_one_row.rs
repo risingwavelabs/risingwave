@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::{BatchError, Result};
-use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::executor::{
+    BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder, PushContext, PushSink,
+    PushStatus, execute_pull_stream_as_push, wrap_push_executor,
+};
 
 pub struct MaxOneRowExecutor {
     child: BoxedExecutor,
@@ -81,6 +85,23 @@ impl Executor for MaxOneRowExecutor {
         if let Some(result) = result {
             yield result;
         }
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let MaxOneRowExecutor { child, identity } = *self;
+            let executor = Box::new(MaxOneRowExecutor {
+                child: wrap_push_executor(child, context.clone()),
+                identity,
+            });
+
+            execute_pull_stream_as_push(executor.execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

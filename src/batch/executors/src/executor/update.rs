@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
@@ -29,6 +30,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
 };
 
 /// [`UpdateExecutor`] implements table update with values from its child executor and given
@@ -109,6 +111,50 @@ impl Executor for UpdateExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let UpdateExecutor {
+                table_id,
+                table_version_id,
+                dml_manager,
+                child,
+                old_exprs,
+                new_exprs,
+                chunk_size,
+                schema,
+                identity,
+                returning,
+                txn_id,
+                session_id,
+                upsert,
+                wait_for_persistence,
+            } = *self;
+            let executor = Box::new(UpdateExecutor {
+                table_id,
+                table_version_id,
+                dml_manager,
+                child: wrap_push_executor(child, context.clone()),
+                old_exprs,
+                new_exprs,
+                chunk_size,
+                schema,
+                identity,
+                returning,
+                txn_id,
+                session_id,
+                upsert,
+                wait_for_persistence,
+            });
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

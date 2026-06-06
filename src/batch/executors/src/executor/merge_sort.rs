@@ -15,6 +15,7 @@
 use std::mem;
 use std::sync::Arc;
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use futures_util::StreamExt;
 use itertools::Itertools;
@@ -25,7 +26,10 @@ use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_common_estimate_size::EstimateSize;
 
-use super::{BoxedDataChunkStream, BoxedExecutor, Executor};
+use super::{
+    BoxedDataChunkStream, BoxedExecutor, Executor, PushContext, PushSink, PushStatus,
+    execute_pull_stream_as_push, wrap_push_executor,
+};
 use crate::error::{BatchError, Result};
 
 pub struct MergeSortExecutor {
@@ -50,6 +54,40 @@ impl Executor for MergeSortExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let MergeSortExecutor {
+                inputs,
+                column_orders,
+                identity,
+                schema,
+                chunk_size,
+                mem_context,
+                min_heap: _,
+                current_chunks: _,
+            } = *self;
+            let inputs = inputs
+                .into_iter()
+                .map(|input| wrap_push_executor(input, context.clone()))
+                .collect_vec();
+            let executor = Box::new(MergeSortExecutor::new(
+                inputs,
+                column_orders,
+                schema,
+                identity,
+                chunk_size,
+                mem_context,
+            ));
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 

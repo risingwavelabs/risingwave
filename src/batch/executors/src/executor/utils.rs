@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use futures::StreamExt;
+use futures::future::{BoxFuture, FutureExt};
 use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
@@ -22,7 +23,10 @@ use risingwave_pb::plan_common::StorageTableDesc;
 pub use risingwave_storage::table::batch_table::PkScanRange as ScanRange;
 
 use crate::error::{BatchError, Result};
-use crate::executor::{BoxedDataChunkStream, Executor};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, Executor, PushContext, PushSink, PushStatus,
+    execute_pull_stream_as_push, execute_push_as_pull,
+};
 
 pub type BoxedDataChunkListStream = BoxStream<'static, Result<Vec<DataChunk>>>;
 
@@ -65,6 +69,22 @@ impl Executor for BufferChunkExecutor {
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
     }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        _context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            for chunk in self.chunk_list {
+                if sink.push(chunk).await?.is_finished() {
+                    break;
+                }
+            }
+            sink.finish().await
+        }
+        .boxed()
+    }
 }
 
 impl BufferChunkExecutor {
@@ -96,6 +116,14 @@ impl Executor for DummyExecutor {
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         DummyExecutor::do_nothing()
     }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        _context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move { sink.finish().await }.boxed()
+    }
 }
 
 impl DummyExecutor {
@@ -126,6 +154,20 @@ impl Executor for WrapStreamExecutor {
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.stream
     }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        execute_pull_stream_as_push(self.stream, context, sink).boxed()
+    }
+}
+
+pub fn wrap_push_executor(executor: BoxedExecutor, context: PushContext) -> BoxedExecutor {
+    let schema = executor.schema().clone();
+    let stream = execute_push_as_pull(executor, context.clone(), context.morsel_budget());
+    Box::new(WrapStreamExecutor::new(schema, stream))
 }
 
 pub fn build_scan_ranges_from_pb(

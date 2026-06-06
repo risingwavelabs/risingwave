@@ -16,6 +16,7 @@ use std::marker::PhantomData;
 use std::mem::swap;
 use std::sync::Arc;
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -35,6 +36,7 @@ use super::top_n::{HeapElem, TopNHeap};
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus, execute_pull_stream_as_push, wrap_push_executor,
 };
 
 /// Group Top-N Executor
@@ -177,6 +179,44 @@ impl<K: HashKey> Executor for GroupTopNExecutor<K> {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let GroupTopNExecutor {
+                child,
+                column_orders,
+                offset,
+                limit,
+                group_key,
+                with_ties,
+                schema,
+                identity,
+                chunk_size,
+                mem_ctx,
+                _phantom: _,
+            } = *self;
+            let executor = Box::new(GroupTopNExecutor::<K> {
+                child: wrap_push_executor(child, context.clone()),
+                column_orders,
+                offset,
+                limit,
+                group_key,
+                with_ties,
+                schema,
+                identity,
+                chunk_size,
+                mem_ctx,
+                _phantom: PhantomData,
+            });
+
+            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+        }
+        .boxed()
     }
 }
 
