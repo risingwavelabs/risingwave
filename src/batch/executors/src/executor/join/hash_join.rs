@@ -42,7 +42,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
     PushContext, PushSink, PushStatus, WrapStreamExecutor, execute_pull_stream_as_push,
-    execute_push_as_pull,
+    wrap_push_executor,
 };
 use crate::monitor::BatchSpillMetrics;
 use crate::risingwave_common::hash::NullBitmap;
@@ -140,17 +140,11 @@ impl<K: HashKey> Executor for HashJoinExecutor<K> {
                 mem_ctx,
                 _phantom: _,
             } = *self;
-            let probe_schema = probe_side_source.schema().clone();
-            let build_schema = build_side_source.schema().clone();
-            let probe_stream =
-                execute_push_as_pull(probe_side_source, context.clone(), context.morsel_budget());
-            let build_stream =
-                execute_push_as_pull(build_side_source, context.clone(), context.morsel_budget());
             let executor = Box::new(HashJoinExecutor::<K>::new_inner(
                 join_type,
                 output_indices,
-                Box::new(WrapStreamExecutor::new(probe_schema, probe_stream)),
-                Box::new(WrapStreamExecutor::new(build_schema, build_stream)),
+                wrap_push_executor(probe_side_source, context.clone()),
+                wrap_push_executor(build_side_source, context.clone()),
                 probe_key_idxs,
                 build_key_idxs,
                 null_matched,
@@ -2584,7 +2578,9 @@ mod tests {
     };
     use crate::error::Result;
     use crate::executor::test_utils::MockExecutor;
-    use crate::executor::{BoxedExecutor, Executor};
+    use crate::executor::{
+        BoxedExecutor, Executor, PushContext, WrapStreamExecutor, execute_push_as_pull,
+    };
     use crate::monitor::BatchSpillMetrics;
     use crate::spill::spill_op::SpillBackend;
     use crate::task::ShutdownToken;
@@ -2933,6 +2929,45 @@ mod tests {
             assert_eq!(0, parent_mem_context.get_bytes_used());
         }
 
+        async fn do_push_test(
+            &self,
+            expected: DataChunk,
+            has_non_equi_cond: bool,
+            null_safe: bool,
+        ) {
+            let parent_mem_context =
+                MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), u64::MAX);
+            let join_executor = self.create_join_executor_with_chunk_size_and_executors(
+                has_non_equi_cond,
+                null_safe,
+                self::CHUNK_SIZE,
+                self.create_left_executor(),
+                self.create_right_executor(),
+                ShutdownToken::empty(),
+                Some(parent_mem_context.clone()),
+                false,
+            );
+            let schema = join_executor.schema().clone();
+            let push_stream = execute_push_as_pull(
+                join_executor,
+                PushContext::new(ShutdownToken::empty()),
+                self::CHUNK_SIZE,
+            );
+            let push_output = Box::new(WrapStreamExecutor::new(schema, push_stream));
+            let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
+            let mut stream = push_output.execute();
+
+            while let Some(data_chunk) = stream.next().await {
+                let data_chunk = data_chunk.unwrap();
+                let data_chunk = data_chunk.compact_vis();
+                data_chunk_merger.append(&data_chunk).unwrap();
+            }
+
+            let result_chunk = data_chunk_merger.finish().unwrap();
+            assert!(compare_data_chunk_with_rowsort(&expected, &result_chunk));
+            assert_eq!(0, parent_mem_context.get_bytes_used());
+        }
+
         async fn do_test_shutdown(&self, has_non_equi_cond: bool) {
             // Test `ShutdownMsg::Cancel`
             let left_executor = self.create_left_executor();
@@ -2997,6 +3032,25 @@ mod tests {
         );
 
         test_fixture.do_test(expected_chunk, false, false).await;
+    }
+
+    #[tokio::test]
+    async fn test_inner_join_push() {
+        let test_fixture = TestFixture::with_join_type(JoinType::Inner);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             2   .   2   .
+             3   3.9 3   3.7
+             3   3.9 3   .
+             4   6.6 4   7.5
+             3   .   3   3.7
+             3   .   3   .",
+        );
+
+        test_fixture
+            .do_push_test(expected_chunk, false, false)
+            .await;
     }
 
     /// Sql:
@@ -3218,6 +3272,45 @@ mod tests {
         );
 
         test_fixture.do_test(expected_chunk, false, false).await;
+    }
+
+    #[tokio::test]
+    async fn test_full_outer_join_push() {
+        let test_fixture = TestFixture::with_join_type(JoinType::FullOuter);
+
+        let expected_chunk = DataChunk::from_pretty(
+            "i   f   i   F
+             1   6.1 .   .
+             2   .   2   .
+             .   8.4 .   .
+             3   3.9 3   3.7
+             3   3.9 3   .
+             .   .   .   .
+             4   6.6 4   7.5
+             3   .   3   3.7
+             3   .   3   .
+             .   0.7 .   .
+             5   .   .   .
+             .   5.5 .   .
+             .   .   8   6.1
+             .   .   .   8.9
+             .   .   .   3.5
+             .   .   6   .
+             .   .   6   .
+             .   .   .   8
+             .   .   7   .
+             .   .   .   9.1
+             .   .   9   .
+             .   .   9   .
+             .   .   .   9.6
+             .   .   100 .
+             .   .   .   8.18
+             .   .   200 .",
+        );
+
+        test_fixture
+            .do_push_test(expected_chunk, false, false)
+            .await;
     }
 
     /// ```sql
