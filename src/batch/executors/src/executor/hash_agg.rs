@@ -25,7 +25,7 @@ use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::bitmap::{Bitmap, FilterByBitmap};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
-use risingwave_common::memory::MemoryContext;
+use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -41,8 +41,7 @@ use crate::error::{BatchError, Result};
 use crate::executor::aggregation::build as build_agg;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, WrapStreamExecutor, execute_pull_stream_as_push,
-    execute_push_as_pull,
+    PushContext, PushSink, PushStatus, WrapStreamExecutor,
 };
 use crate::monitor::BatchSpillMetrics;
 use crate::spill::spill_op::SpillBackend::Disk;
@@ -312,22 +311,12 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
                 _phantom: _,
             } = *self;
             let child_schema = child.schema().clone();
-            let child_stream =
-                execute_push_as_pull(child, context.clone(), context.morsel_budget());
-            let child = Box::new(WrapStreamExecutor::new(child_schema, child_stream));
-            let init_agg_state_executor = init_agg_state_executor.map(|executor| {
-                let schema = executor.schema().clone();
-                let stream =
-                    execute_push_as_pull(executor, context.clone(), context.morsel_budget());
-                Box::new(WrapStreamExecutor::new(schema, stream)) as BoxedExecutor
-            });
-            let executor = Box::new(HashAggExecutor::<K>::new_inner(
+            let mut state = HashAggPushState::<K>::new(
                 aggs,
                 group_key_columns,
                 group_key_types,
                 schema,
-                child,
-                init_agg_state_executor,
+                child_schema,
                 identity,
                 chunk_size,
                 mem_context,
@@ -335,9 +324,19 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
                 spill_metrics,
                 memory_upper_bound,
                 shutdown_rx,
-            ));
+            );
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            if let Some(init_agg_state_executor) = init_agg_state_executor {
+                let mut init_sink = HashAggInitStateSink { state: &mut state };
+                init_agg_state_executor
+                    .execute_push(context.clone(), &mut init_sink)
+                    .await?;
+            }
+
+            let mut child_sink = HashAggChildSink { state: &mut state };
+            child.execute_push(context.clone(), &mut child_sink).await?;
+
+            state.finish(context, sink).await
         }
         .boxed()
     }
@@ -540,6 +539,355 @@ impl AggSpillManager {
         let input_partition_file_name = format!("input-chunks-p{}", partition);
         self.op.delete(&input_partition_file_name).await?;
         Ok(())
+    }
+}
+
+struct ForwardPushNoFinishSink<'a> {
+    sink: &'a mut dyn PushSink,
+    finished: bool,
+}
+
+impl PushSink for ForwardPushNoFinishSink<'_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let status = self.sink.push(chunk).await?;
+            self.finished |= status.is_finished();
+            Ok(status)
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if self.finished {
+                Ok(PushStatus::Finished)
+            } else {
+                Ok(PushStatus::NeedMoreInput)
+            }
+        }
+        .boxed()
+    }
+}
+
+struct HashAggPushState<K: HashKey> {
+    aggs: Arc<Vec<BoxedAggregateFunction>>,
+    group_key_columns: Vec<usize>,
+    group_key_types: Vec<DataType>,
+    schema: Schema,
+    child_schema: Schema,
+    identity: String,
+    chunk_size: usize,
+    mem_context: MemoryContext,
+    spill_backend: Option<SpillBackend>,
+    spill_metrics: Arc<BatchSpillMetrics>,
+    check_memory: bool,
+    shutdown_rx: ShutdownToken,
+    groups: AggHashMap<K, MonitoredGlobalAlloc>,
+    agg_spill_manager: Option<AggSpillManager>,
+}
+
+impl<K: HashKey + Send + Sync> HashAggPushState<K> {
+    #[expect(clippy::too_many_arguments)]
+    fn new(
+        aggs: Arc<Vec<BoxedAggregateFunction>>,
+        group_key_columns: Vec<usize>,
+        group_key_types: Vec<DataType>,
+        schema: Schema,
+        child_schema: Schema,
+        identity: String,
+        chunk_size: usize,
+        mem_context: MemoryContext,
+        spill_backend: Option<SpillBackend>,
+        spill_metrics: Arc<BatchSpillMetrics>,
+        memory_upper_bound: Option<u64>,
+        shutdown_rx: ShutdownToken,
+    ) -> Self {
+        let check_memory = match memory_upper_bound {
+            Some(upper_bound) => upper_bound > SPILL_AT_LEAST_MEMORY,
+            None => true,
+        };
+        let groups = AggHashMap::<K, _>::with_hasher_in(
+            PrecomputedBuildHasher,
+            mem_context.global_allocator(),
+        );
+        Self {
+            aggs,
+            group_key_columns,
+            group_key_types,
+            schema,
+            child_schema,
+            identity,
+            chunk_size,
+            mem_context,
+            spill_backend,
+            spill_metrics,
+            check_memory,
+            shutdown_rx,
+            groups,
+            agg_spill_manager: None,
+        }
+    }
+
+    fn consume_init_state_chunk(&mut self, chunk: DataChunk) -> Result<()> {
+        let group_key_indices = (0..self.group_key_columns.len()).collect_vec();
+        let keys = K::build_many(&group_key_indices, &chunk);
+        let mut memory_usage_diff = 0;
+        for (row_id, key) in keys.into_iter().enumerate() {
+            let mut agg_states = vec![];
+            for i in 0..self.aggs.len() {
+                let agg = &self.aggs[i];
+                let datum = chunk
+                    .row_at(row_id)
+                    .0
+                    .datum_at(self.group_key_columns.len() + i)
+                    .to_owned_datum();
+                let agg_state = agg.decode_state(datum)?;
+                memory_usage_diff += agg_state.estimated_size() as i64;
+                agg_states.push(agg_state);
+            }
+            self.groups.try_insert(key, agg_states).unwrap();
+        }
+
+        if !self.mem_context.add(memory_usage_diff) && self.check_memory {
+            warn!(
+                "not enough memory to load one partition agg state after spill which is not a normal case, so keep going"
+            );
+        }
+        Ok(())
+    }
+
+    async fn consume_input_chunk(&mut self, chunk: DataChunk) -> Result<()> {
+        if let Some(agg_spill_manager) = &mut self.agg_spill_manager {
+            let hash_codes = chunk.get_hash_values(
+                self.group_key_columns.as_slice(),
+                agg_spill_manager.spill_build_hasher,
+            );
+            agg_spill_manager
+                .write_input_chunk(
+                    chunk,
+                    hash_codes
+                        .into_iter()
+                        .map(|hash_code| hash_code.value())
+                        .collect(),
+                )
+                .await?;
+            return Ok(());
+        }
+
+        let chunk = StreamChunk::from(chunk);
+        let keys = K::build_many(self.group_key_columns.as_slice(), &chunk);
+        let mut memory_usage_diff = 0;
+        for (row_id, key) in keys
+            .into_iter()
+            .enumerate()
+            .filter_by_bitmap(chunk.visibility())
+        {
+            let mut new_group = false;
+            let states = match self.groups.entry(key) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    new_group = true;
+                    let states = self
+                        .aggs
+                        .iter()
+                        .map(|agg| agg.create_state())
+                        .try_collect()?;
+                    entry.insert(states)
+                }
+            };
+
+            for (agg, state) in self.aggs.iter().zip_eq_fast(states) {
+                if !new_group {
+                    memory_usage_diff -= state.estimated_size() as i64;
+                }
+                agg.update_range(state, &chunk, row_id..row_id + 1).await?;
+                memory_usage_diff += state.estimated_size() as i64;
+            }
+        }
+
+        if !self.mem_context.add(memory_usage_diff) && self.check_memory {
+            if self.spill_backend.is_some() {
+                self.start_spill().await?;
+            } else {
+                Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn start_spill(&mut self) -> Result<()> {
+        if self.agg_spill_manager.is_some() {
+            return Ok(());
+        }
+        info!(
+            "batch hash agg executor {} starts to spill out",
+            &self.identity
+        );
+        let mut agg_spill_manager = AggSpillManager::new(
+            self.spill_backend.clone().unwrap(),
+            &self.identity,
+            DEFAULT_SPILL_PARTITION_NUM,
+            self.group_key_types.clone(),
+            self.aggs.iter().map(|agg| agg.return_type()).collect(),
+            self.child_schema.data_types(),
+            self.chunk_size,
+            self.spill_metrics.clone(),
+        )?;
+        agg_spill_manager.init_writers().await?;
+
+        let mut old_groups = AggHashMap::<K, _>::with_hasher_in(
+            PrecomputedBuildHasher,
+            self.mem_context.global_allocator(),
+        );
+        std::mem::swap(&mut self.groups, &mut old_groups);
+
+        let mut memory_usage_diff = 0;
+        for (key, states) in old_groups {
+            let key_row = key.deserialize(&self.group_key_types)?;
+            let mut agg_datums = vec![];
+            for (agg, state) in self.aggs.iter().zip_eq_fast(states) {
+                let encode_state = agg.encode_state(&state)?;
+                memory_usage_diff -= state.estimated_size() as i64;
+                agg_datums.push(encode_state);
+            }
+            let agg_state_row = OwnedRow::from_iter(agg_datums.into_iter());
+            let hash_code = agg_spill_manager.spill_build_hasher.hash_one(key);
+            agg_spill_manager
+                .write_agg_state_row(key_row.chain(agg_state_row), hash_code)
+                .await?;
+        }
+        self.mem_context.add(memory_usage_diff);
+        self.agg_spill_manager = Some(agg_spill_manager);
+        Ok(())
+    }
+
+    async fn finish(mut self, context: PushContext, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        if let Some(mut agg_spill_manager) = self.agg_spill_manager.take() {
+            agg_spill_manager.close_writers().await?;
+            for i in 0..agg_spill_manager.partition_num {
+                let partition_size = agg_spill_manager.estimate_partition_size(i).await?;
+
+                let agg_state_stream = agg_spill_manager.read_agg_state_partition(i).await?;
+                let input_stream = agg_spill_manager.read_input_partition(i).await?;
+
+                let sub_hash_agg_executor: HashAggExecutor<K> = HashAggExecutor::new_inner(
+                    self.aggs.clone(),
+                    self.group_key_columns.clone(),
+                    self.group_key_types.clone(),
+                    self.schema.clone(),
+                    Box::new(WrapStreamExecutor::new(
+                        self.child_schema.clone(),
+                        input_stream,
+                    )),
+                    Some(Box::new(WrapStreamExecutor::new(
+                        self.schema.clone(),
+                        agg_state_stream,
+                    ))),
+                    format!("{}-sub{}", self.identity.clone(), i),
+                    self.chunk_size,
+                    self.mem_context.clone(),
+                    self.spill_backend.clone(),
+                    self.spill_metrics.clone(),
+                    Some(partition_size),
+                    self.shutdown_rx.clone(),
+                );
+
+                debug!(
+                    "create sub_hash_agg {} for hash_agg {} to spill",
+                    sub_hash_agg_executor.identity, self.identity
+                );
+
+                let mut forward_sink = ForwardPushNoFinishSink {
+                    sink,
+                    finished: false,
+                };
+                let status = Box::new(sub_hash_agg_executor)
+                    .execute_push(context.clone(), &mut forward_sink)
+                    .await?;
+
+                agg_spill_manager.clear_partition(i).await?;
+
+                if status.is_finished() {
+                    return sink.finish().await;
+                }
+            }
+            return sink.finish().await;
+        }
+
+        let mut result = self.groups.iter_mut();
+        let cardinality = self.chunk_size;
+        loop {
+            let mut group_builders: Vec<_> = self
+                .group_key_types
+                .iter()
+                .map(|datatype| datatype.create_array_builder(cardinality))
+                .collect();
+
+            let mut agg_builders: Vec<_> = self
+                .aggs
+                .iter()
+                .map(|agg| agg.return_type().create_array_builder(cardinality))
+                .collect();
+
+            let mut has_next = false;
+            let mut array_len = 0;
+            for (key, states) in result.by_ref().take(cardinality) {
+                self.shutdown_rx.check()?;
+                has_next = true;
+                array_len += 1;
+                key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
+                for ((agg, state), builder) in (self.aggs.iter())
+                    .zip_eq_fast(states)
+                    .zip_eq_fast(&mut agg_builders)
+                {
+                    let result = agg.get_result(state).await?;
+                    builder.append(result);
+                }
+            }
+            if !has_next {
+                break;
+            }
+
+            let columns = group_builders
+                .into_iter()
+                .chain(agg_builders)
+                .map(|b| b.finish().into())
+                .collect::<Vec<_>>();
+
+            let output = DataChunk::new(columns, array_len);
+            if sink.push(output).await?.is_finished() {
+                return sink.finish().await;
+            }
+        }
+        sink.finish().await
+    }
+}
+
+struct HashAggInitStateSink<'a, K: HashKey> {
+    state: &'a mut HashAggPushState<K>,
+}
+
+impl<K: HashKey + Send + Sync> PushSink for HashAggInitStateSink<'_, K> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            self.state.consume_init_state_chunk(chunk)?;
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+}
+
+struct HashAggChildSink<'a, K: HashKey> {
+    state: &'a mut HashAggPushState<K>,
+}
+
+impl<K: HashKey + Send + Sync> PushSink for HashAggChildSink<'_, K> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            self.state.consume_input_chunk(chunk).await?;
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
     }
 }
 
