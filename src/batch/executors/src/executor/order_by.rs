@@ -20,10 +20,11 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::memory::MemoryContext;
+use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_common::util::memcmp_encoding::encode_chunk;
+use risingwave_common::util::memcmp_encoding::{MemcmpEncoded, encode_chunk};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::Message;
@@ -32,8 +33,7 @@ use risingwave_pb::data::DataChunk as PbDataChunk;
 
 use super::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, WrapStreamExecutor, execute_pull_stream_as_push,
-    execute_push_as_pull,
+    PushContext, PushSink, PushStatus, WrapStreamExecutor,
 };
 use crate::error::{BatchError, Result};
 use crate::executor::merge_sort::MergeSortExecutor;
@@ -94,20 +94,21 @@ impl Executor for SortExecutor {
                 memory_upper_bound,
             } = *self;
             let child_schema = child.schema().clone();
-            let child_stream =
-                execute_push_as_pull(child, context.clone(), context.morsel_budget());
-            let executor = Box::new(SortExecutor::new_inner(
-                Box::new(WrapStreamExecutor::new(child_schema, child_stream)),
+            let mut state = SortPushState::new(
                 column_orders,
                 identity,
+                child_schema,
                 chunk_size,
                 mem_context,
                 spill_backend,
                 spill_metrics,
                 memory_upper_bound,
-            ));
+            );
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            let mut child_sink = SortChildSink { state: &mut state };
+            child.execute_push(context.clone(), &mut child_sink).await?;
+
+            state.finish(context, sink).await
         }
         .boxed()
     }
@@ -147,6 +148,29 @@ impl BoxedExecutorBuilder for SortExecutor {
 }
 
 impl SortExecutor {
+    async fn execute_sorted_rows(
+        encoded_rows: Vec<(OwnedRow, MemcmpEncoded)>,
+        schema: &Schema,
+        chunk_size: usize,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
+        let mut chunk_builder = DataChunkBuilder::new(schema.data_types(), chunk_size);
+        for (row, _) in encoded_rows {
+            if let Some(spilled) = chunk_builder.append_one_row(row) {
+                if sink.push(spilled).await?.is_finished() {
+                    return sink.finish().await;
+                }
+            }
+        }
+
+        if let Some(spilled) = chunk_builder.consume_all()
+            && sink.push(spilled).await?.is_finished()
+        {
+            return sink.finish().await;
+        }
+        sink.finish().await
+    }
+
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let child_schema = self.child.schema().clone();
@@ -289,6 +313,206 @@ impl SortExecutor {
                 yield spilled
             }
         }
+    }
+}
+
+struct SortPushState {
+    column_orders: Arc<Vec<ColumnOrder>>,
+    identity: String,
+    schema: Schema,
+    child_schema: Schema,
+    chunk_size: usize,
+    mem_context: MemoryContext,
+    spill_backend: Option<SpillBackend>,
+    spill_metrics: Arc<BatchSpillMetrics>,
+    check_memory: bool,
+    chunks: Vec<DataChunk, MonitoredGlobalAlloc>,
+    sort_spill_manager: Option<SortSpillManager>,
+}
+
+impl SortPushState {
+    fn new(
+        column_orders: Arc<Vec<ColumnOrder>>,
+        identity: String,
+        child_schema: Schema,
+        chunk_size: usize,
+        mem_context: MemoryContext,
+        spill_backend: Option<SpillBackend>,
+        spill_metrics: Arc<BatchSpillMetrics>,
+        memory_upper_bound: Option<u64>,
+    ) -> Self {
+        let check_memory = match memory_upper_bound {
+            Some(upper_bound) => upper_bound > SPILL_AT_LEAST_MEMORY,
+            None => true,
+        };
+        let chunks = Vec::new_in(mem_context.global_allocator());
+        Self {
+            column_orders,
+            identity,
+            schema: child_schema.clone(),
+            child_schema,
+            chunk_size,
+            mem_context,
+            spill_backend,
+            spill_metrics,
+            check_memory,
+            chunks,
+            sort_spill_manager: None,
+        }
+    }
+
+    async fn consume_input_chunk(&mut self, chunk: DataChunk) -> Result<()> {
+        if let Some(sort_spill_manager) = &mut self.sort_spill_manager {
+            sort_spill_manager.write_input_chunk(chunk).await?;
+            return Ok(());
+        }
+
+        let chunk = chunk.compact_vis();
+        let chunk_estimated_heap_size = chunk.estimated_heap_size();
+        self.chunks.push(chunk);
+        if !self.mem_context.add(chunk_estimated_heap_size as i64) && self.check_memory {
+            if self.spill_backend.is_some() {
+                self.start_spill().await?;
+            } else {
+                Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn start_spill(&mut self) -> Result<()> {
+        if self.sort_spill_manager.is_some() {
+            return Ok(());
+        }
+
+        info!("batch sort executor {} starts to spill out", &self.identity);
+        let mut sort_spill_manager = SortSpillManager::new(
+            self.spill_backend.clone().unwrap(),
+            &self.identity,
+            DEFAULT_SPILL_PARTITION_NUM,
+            self.child_schema.data_types(),
+            self.chunk_size,
+            self.spill_metrics.clone(),
+        )?;
+        sort_spill_manager.init_writers().await?;
+
+        for chunk in std::mem::replace(
+            &mut self.chunks,
+            Vec::new_in(self.mem_context.global_allocator()),
+        ) {
+            sort_spill_manager.write_input_chunk(chunk).await?;
+        }
+        self.sort_spill_manager = Some(sort_spill_manager);
+        Ok(())
+    }
+
+    async fn finish(mut self, context: PushContext, sink: &mut dyn PushSink) -> Result<PushStatus> {
+        if self.sort_spill_manager.is_some() {
+            return self.finish_spilled(context, sink).await;
+        }
+
+        let mut encoded_rows: Vec<(OwnedRow, MemcmpEncoded), MonitoredGlobalAlloc> =
+            Vec::with_capacity_in(self.chunks.len(), self.mem_context.global_allocator());
+
+        for chunk in &self.chunks {
+            let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
+            let chunk_estimated_heap_size = encoded_chunk
+                .iter()
+                .map(|x| x.estimated_heap_size())
+                .sum::<usize>();
+            encoded_rows.extend(
+                encoded_chunk.into_iter().enumerate().map(|(row_id, row)| {
+                    (chunk.row_at_unchecked_vis(row_id).into_owned_row(), row)
+                }),
+            );
+            if !self.mem_context.add(chunk_estimated_heap_size as i64) && self.check_memory {
+                if self.spill_backend.is_some() {
+                    drop(encoded_rows);
+                    self.start_spill().await?;
+                    return self.finish_spilled(context, sink).await;
+                } else {
+                    Err(BatchError::OutOfMemory(self.mem_context.mem_limit()))?;
+                }
+            }
+        }
+
+        encoded_rows.sort_unstable_by(|(_, a), (_, b)| a.cmp(b));
+        SortExecutor::execute_sorted_rows(
+            encoded_rows.into_iter().collect::<Vec<_>>(),
+            &self.schema,
+            self.chunk_size,
+            sink,
+        )
+        .await
+    }
+
+    async fn finish_spilled(
+        mut self,
+        context: PushContext,
+        sink: &mut dyn PushSink,
+    ) -> Result<PushStatus> {
+        let mut sort_spill_manager = self.sort_spill_manager.take().unwrap();
+        sort_spill_manager.close_writers().await?;
+
+        let partition_num = sort_spill_manager.partition_num;
+        let mut sorted_inputs: Vec<BoxedExecutor> = Vec::with_capacity(partition_num);
+        for i in 0..partition_num {
+            let partition_size = sort_spill_manager.estimate_partition_size(i).await?;
+
+            let input_stream = sort_spill_manager.read_input_partition(i).await?;
+
+            let sub_sort_executor: SortExecutor = SortExecutor::new_inner(
+                Box::new(WrapStreamExecutor::new(
+                    self.child_schema.clone(),
+                    input_stream,
+                )),
+                self.column_orders.clone(),
+                format!("{}-sub{}", self.identity.clone(), i),
+                self.chunk_size,
+                self.mem_context.clone(),
+                self.spill_backend.clone(),
+                self.spill_metrics.clone(),
+                Some(partition_size),
+            );
+
+            debug!(
+                "create sub_sort {} for sort {} to spill",
+                sub_sort_executor.identity, self.identity
+            );
+
+            sorted_inputs.push(Box::new(sub_sort_executor));
+        }
+
+        let merge_sort = MergeSortExecutor::new(
+            sorted_inputs,
+            self.column_orders.clone(),
+            self.schema.clone(),
+            format!("{}-merge-sort", self.identity.clone()),
+            self.chunk_size,
+            self.mem_context.clone(),
+        );
+
+        let status = Box::new(merge_sort).execute_push(context, sink).await;
+
+        for i in 0..partition_num {
+            sort_spill_manager.clear_partition(i).await?;
+        }
+
+        status
+    }
+}
+
+struct SortChildSink<'a> {
+    state: &'a mut SortPushState,
+}
+
+impl PushSink for SortChildSink<'_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            self.state.consume_input_chunk(chunk).await?;
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
     }
 }
 
@@ -455,6 +679,12 @@ impl SortSpillManager {
             .await?
             .content_length();
         Ok(input_size)
+    }
+
+    async fn clear_partition(&mut self, partition: usize) -> Result<()> {
+        let input_partition_file_name = format!("input-chunks-p{}", partition);
+        self.op.delete(&input_partition_file_name).await?;
+        Ok(())
     }
 }
 

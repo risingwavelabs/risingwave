@@ -30,8 +30,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    PushContext, PushSink, PushStatus, WrapStreamExecutor, execute_pull_stream_as_push,
-    execute_push_as_pull,
+    PushContext, PushSink, PushStatus,
 };
 
 /// Top-N Executor
@@ -131,26 +130,60 @@ impl Executor for TopNExecutor {
                 offset,
                 limit,
                 with_ties,
-                schema: _,
-                identity,
+                schema,
+                identity: _,
                 chunk_size,
                 mem_ctx,
             } = *self;
-            let child_schema = child.schema().clone();
-            let child_stream =
-                execute_push_as_pull(child, context.clone(), context.morsel_budget());
-            let executor = Box::new(TopNExecutor::new(
-                Box::new(WrapStreamExecutor::new(child_schema, child_stream)),
-                column_orders,
-                offset,
-                limit,
-                with_ties,
-                identity,
-                chunk_size,
-                mem_ctx,
-            ));
+            if limit == 0 {
+                return sink.finish().await;
+            }
 
-            execute_pull_stream_as_push(executor.do_execute(), context, sink).await
+            let mut heap = TopNHeap::new(limit, offset, with_ties, mem_ctx);
+            let mut child_sink = TopNChildSink {
+                heap: &mut heap,
+                column_orders: &column_orders,
+            };
+            child.execute_push(context, &mut child_sink).await?;
+
+            let mut chunk_builder = DataChunkBuilder::new(schema.data_types(), chunk_size);
+            for HeapElem { row, .. } in heap.dump() {
+                if let Some(spilled) = chunk_builder.append_one_row(row)
+                    && sink.push(spilled).await?.is_finished()
+                {
+                    return sink.finish().await;
+                }
+            }
+            if let Some(spilled) = chunk_builder.consume_all()
+                && sink.push(spilled).await?.is_finished()
+            {
+                return sink.finish().await;
+            }
+            sink.finish().await
+        }
+        .boxed()
+    }
+}
+
+struct TopNChildSink<'a> {
+    heap: &'a mut TopNHeap,
+    column_orders: &'a [ColumnOrder],
+}
+
+impl PushSink for TopNChildSink<'_> {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let chunk = Arc::new(chunk.compact_vis());
+            for (row_id, encoded_row) in encode_chunk(&chunk, self.column_orders)?
+                .into_iter()
+                .enumerate()
+            {
+                self.heap.push(HeapElem {
+                    encoded_row,
+                    row: chunk.row_at(row_id).0.to_owned_row(),
+                });
+            }
+            Ok(PushStatus::NeedMoreInput)
         }
         .boxed()
     }
