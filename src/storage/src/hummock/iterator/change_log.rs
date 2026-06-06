@@ -345,7 +345,11 @@ impl<NI: HummockIterator<Direction = Forward>, OI: HummockIterator<Direction = F
     }
 }
 
-impl Drop for ChangeLogIterator {
+impl<NI, OI> Drop for BaseChangeLogIterator<NI, OI>
+where
+    NI: HummockIterator<Direction = Forward>,
+    OI: HummockIterator<Direction = Forward>,
+{
     fn drop(&mut self) {
         self.inner
             .new_value_iter
@@ -356,18 +360,29 @@ impl Drop for ChangeLogIterator {
     }
 }
 
-pub struct ChangeLogIterator {
-    inner: ChangeLogIteratorInner<MergeIterator<SstableIterator>, MergeIterator<SstableIterator>>,
+pub struct BaseChangeLogIterator<NI, OI>
+where
+    NI: HummockIterator<Direction = Forward>,
+    OI: HummockIterator<Direction = Forward>,
+{
+    inner: ChangeLogIteratorInner<NI, OI>,
     initial_read: bool,
     stats_guard: IterLocalMetricsGuard,
 }
 
-impl ChangeLogIterator {
+pub type ChangeLogIterator =
+    BaseChangeLogIterator<MergeIterator<SstableIterator>, MergeIterator<SstableIterator>>;
+
+impl<NI, OI> BaseChangeLogIterator<NI, OI>
+where
+    NI: HummockIterator<Direction = Forward>,
+    OI: HummockIterator<Direction = Forward>,
+{
     pub async fn new(
         epoch_range: (u64, u64),
         table_key_range: TableKeyRange,
-        new_value_iter: MergeIterator<SstableIterator>,
-        old_value_iter: MergeIterator<SstableIterator>,
+        new_value_iter: NI,
+        old_value_iter: OI,
         table_id: TableId,
         stats_guard: IterLocalMetricsGuard,
     ) -> HummockResult<Self> {
@@ -391,7 +406,11 @@ impl ChangeLogIterator {
     }
 }
 
-impl StateStoreIter<StateStoreReadLogItem> for ChangeLogIterator {
+impl<NI, OI> StateStoreIter<StateStoreReadLogItem> for BaseChangeLogIterator<NI, OI>
+where
+    NI: HummockIterator<Direction = Forward>,
+    OI: HummockIterator<Direction = Forward>,
+{
     async fn try_next(&mut self) -> StorageResult<Option<StateStoreReadLogItemRef<'_>>> {
         if !self.initial_read {
             self.initial_read = true;

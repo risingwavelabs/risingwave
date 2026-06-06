@@ -1,0 +1,52 @@
+statement ok
+set enable_locality_backfill=true;
+
+statement ok
+set enable_locality_sort_buffer=true;
+
+statement ok
+create table t (
+    id int primary key,
+    join_key int,
+    group_key int,
+    large_value varchar
+);
+
+statement ok
+insert into t
+select i, 1, i % 1000000, 'xxxxxxxxxxxxxxxxxxxxxxxx'
+from generate_series(1, 10000000, 1) i;
+
+statement ok
+create table dim (join_key int, change int);
+
+statement ok
+insert into dim values (1, 1);
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv_sort_buffer as
+select
+    group_key,
+    sum(change) as change_sum,
+    min(large_value) as min_large_value
+from t join dim using (join_key)
+group by group_key;
+
+# Trigger join amplification: the single dim update fans out to every row in t.
+statement ok
+update dim set change = change + 1;
+
+statement ok
+flush;
+
+statement ok
+drop materialized view mv_sort_buffer;
+
+statement ok
+drop table t;
+
+statement ok
+drop table dim;

@@ -1111,6 +1111,37 @@ impl<R: RangeKv> LocalStateStore for RangeKvLocalStateStore<R> {
     }
 }
 
+impl<R: RangeKv> LocalStateStoreReadLog for RangeKvLocalStateStore<R> {
+    type ChangeLogIter = LocalRangeKvStateStoreChangeLogIter<R>;
+
+    async fn iter_uncommitted_log(&self) -> StorageResult<Self::ChangeLogIter> {
+        assert!(
+            !self.mem_table.is_dirty(),
+            "iter_uncommitted_log requires all writes to be flushed before reading the local changelog"
+        );
+        let epoch = self.epoch();
+        let mut vnode_iters = VecDeque::new();
+        for vnode in self.vnodes.iter_vnodes() {
+            let key_range = prefixed_range_with_vnode(
+                (Bound::<Bytes>::Unbounded, Bound::<Bytes>::Unbounded),
+                vnode,
+            );
+            let iter = self
+                .inner
+                .iter_log(
+                    (epoch, epoch),
+                    key_range,
+                    ReadLogOptions {
+                        table_id: self.table_id,
+                    },
+                )
+                .await?;
+            vnode_iters.push_back(iter);
+        }
+        Ok(LocalRangeKvStateStoreChangeLogIter::new(vnode_iters))
+    }
+}
+
 impl<R: RangeKv> StateStoreWriteEpochControl for RangeKvLocalStateStore<R> {
     async fn flush(&mut self) -> StorageResult<usize> {
         let buffer = self.mem_table.drain().into_parts();
@@ -1512,6 +1543,45 @@ impl<R: RangeKv> StateStoreIter<StateStoreReadLogItem> for RangeKvStateStoreChan
     }
 }
 
+/// Chains per-vnode `RangeKvStateStoreChangeLogIter`s into a single iterator
+/// over the local store's owned vnodes — analogous to
+/// `LocalHummockStorageChangeLogIterator` in the hummock backend.
+pub struct LocalRangeKvStateStoreChangeLogIter<R: RangeKv> {
+    vnode_iters: VecDeque<RangeKvStateStoreChangeLogIter<R>>,
+    current_item: Option<StateStoreReadLogItem>,
+}
+
+impl<R: RangeKv> LocalRangeKvStateStoreChangeLogIter<R> {
+    fn new(vnode_iters: VecDeque<RangeKvStateStoreChangeLogIter<R>>) -> Self {
+        Self {
+            vnode_iters,
+            current_item: None,
+        }
+    }
+}
+
+impl<R: RangeKv> StateStoreIter<StateStoreReadLogItem> for LocalRangeKvStateStoreChangeLogIter<R> {
+    async fn try_next(&mut self) -> StorageResult<Option<StateStoreReadLogItemRef<'_>>> {
+        loop {
+            let Some(iter) = self.vnode_iters.front_mut() else {
+                self.current_item = None;
+                return Ok(None);
+            };
+            if let Some((key, value)) = iter.try_next().await? {
+                let owned_value = value
+                    .try_map(|v| Ok::<_, crate::error::StorageError>(Bytes::copy_from_slice(v)))?;
+                self.current_item = Some((TableKey(Bytes::copy_from_slice(key.0)), owned_value));
+                let (key, value) = self
+                    .current_item
+                    .as_ref()
+                    .expect("current changelog item has just been set");
+                return Ok(Some((key.to_ref(), value.to_ref())));
+            }
+            self.vnode_iters.pop_front();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::util::epoch::test_epoch;
@@ -1835,5 +1905,114 @@ mod tests {
             }
             assert!(iter.try_next().await.unwrap().is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn test_iter_uncommitted_log_local_memory() {
+        let state_store = MemoryStateStore::new();
+        let table_id = TableId::new(233);
+        let mut local = state_store
+            .new_local(NewLocalOptions {
+                table_id,
+                fragment_id: FragmentId::default(),
+                op_consistency_level: OpConsistencyLevel::Inconsistent,
+                table_option: Default::default(),
+                is_replicated: false,
+                vnodes: Arc::new(Bitmap::from_bool_slice(&[true])),
+                upload_on_flush: true,
+            })
+            .await;
+        let epoch = EpochPair::new_test_epoch(test_epoch(1));
+        local.init(InitOptions::new(epoch)).await.unwrap();
+
+        let make_key = |i| TableKey(Bytes::from(iterator_test_table_key_of(i)));
+        let make_value = |i| Bytes::from(iterator_test_value_of(i));
+
+        LocalStateStore::insert(&mut local, make_key(1), make_value(1), None).unwrap();
+        LocalStateStore::insert(&mut local, make_key(2), make_value(2), None).unwrap();
+        local.flush().await.unwrap();
+
+        LocalStateStore::insert(&mut local, make_key(1), make_value(12), Some(make_value(1)))
+            .unwrap();
+        local.delete(make_key(2), make_value(2)).unwrap();
+        local.flush().await.unwrap();
+
+        let mut iter = local.iter_uncommitted_log().await.unwrap();
+        let (key, change) = iter.try_next().await.unwrap().unwrap();
+        assert_eq!(key, make_key(1).to_ref());
+        assert_eq!(change, ChangeLogValue::Insert(make_value(12).as_ref()));
+        assert!(iter.try_next().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_iter_uncommitted_log_local_memory_vnode_boundary() {
+        // Verifies that iter_uncommitted_log returns rows only from the local
+        // instance's owned vnodes, even when other writers have pushed data
+        // for unowned vnodes through the same backing inner store.
+        use risingwave_hummock_sdk::key::prefix_slice_with_vnode;
+
+        let state_store = MemoryStateStore::new();
+        let table_id = TableId::new(234);
+
+        let owned_vnode = VirtualNode::from_index(0);
+        let unowned_vnode = VirtualNode::from_index(1);
+
+        let single_vnode_bitmap = |vnode: VirtualNode| {
+            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+            builder.set(vnode.to_index(), true);
+            Arc::new(builder.finish())
+        };
+
+        let new_local = async |vnodes: Arc<Bitmap>| {
+            state_store
+                .new_local(NewLocalOptions {
+                    table_id,
+                    fragment_id: FragmentId::default(),
+                    op_consistency_level: OpConsistencyLevel::Inconsistent,
+                    table_option: Default::default(),
+                    is_replicated: false,
+                    vnodes,
+                    upload_on_flush: true,
+                })
+                .await
+        };
+        let mut owned = new_local(single_vnode_bitmap(owned_vnode)).await;
+        let mut unowned = new_local(single_vnode_bitmap(unowned_vnode)).await;
+        let epoch = EpochPair::new_test_epoch(test_epoch(1));
+        owned.init(InitOptions::new(epoch)).await.unwrap();
+        unowned.init(InitOptions::new(epoch)).await.unwrap();
+
+        let key_for = |vnode: VirtualNode, i: usize| {
+            TableKey(prefix_slice_with_vnode(
+                vnode,
+                format!("key_{:05}", i).as_bytes(),
+            ))
+        };
+        let make_value = |i| Bytes::from(iterator_test_value_of(i));
+
+        // Owned writer puts owned-vnode keys.
+        let owned_keys = [key_for(owned_vnode, 1), key_for(owned_vnode, 2)];
+        for (i, key) in owned_keys.iter().enumerate() {
+            LocalStateStore::insert(&mut owned, key.clone(), make_value(i + 1), None).unwrap();
+        }
+        owned.flush().await.unwrap();
+
+        // Sibling writer puts unowned-vnode keys through the same inner store.
+        LocalStateStore::insert(
+            &mut unowned,
+            key_for(unowned_vnode, 1),
+            make_value(101),
+            None,
+        )
+        .unwrap();
+        unowned.flush().await.unwrap();
+
+        let mut iter = owned.iter_uncommitted_log().await.unwrap();
+        for (i, expected_key) in owned_keys.iter().enumerate() {
+            let (key, change) = iter.try_next().await.unwrap().expect("missing row");
+            assert_eq!(key, expected_key.to_ref());
+            assert_eq!(change, ChangeLogValue::Insert(make_value(i + 1).as_ref()));
+        }
+        assert!(iter.try_next().await.unwrap().is_none());
     }
 }

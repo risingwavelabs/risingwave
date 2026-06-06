@@ -366,10 +366,23 @@ pub trait StateStore: StateStoreReadLog + StaticSendSync + Clone {
     ) -> impl Future<Output = Self::VectorWriter> + Send + '_;
 }
 
+/// Reads the net changelog of the current unsealed epoch from a local state store instance.
+///
+/// Unlike [`StateStoreReadLog`], this trait is intended for executor-private local state and does
+/// not expose committed-epoch or key-range semantics or any implementation detail such as imm/sst
+/// layout.
+pub trait LocalStateStoreReadLog: StaticSendSync {
+    type ChangeLogIter: StateStoreReadChangeLogIter;
+
+    fn iter_uncommitted_log(&self) -> impl StorageFuture<'_, Self::ChangeLogIter>;
+}
+
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StateStoreGet + StateStoreWriteEpochControl + StaticSendSync {
+pub trait LocalStateStore:
+    LocalStateStoreReadLog + StateStoreGet + StateStoreWriteEpochControl + StaticSendSync
+{
     type FlushedSnapshotReader: StateStoreRead;
     type Iter<'a>: StateStoreIter + 'a;
     type RevIter<'a>: StateStoreIter + 'a;

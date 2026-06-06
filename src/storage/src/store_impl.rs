@@ -461,6 +461,23 @@ pub mod verify {
         }
     }
 
+    impl<A: LocalStateStoreReadLog, E: LocalStateStoreReadLog> LocalStateStoreReadLog
+        for VerifyStateStore<A, E>
+    {
+        type ChangeLogIter = impl StateStoreReadChangeLogIter;
+
+        async fn iter_uncommitted_log(&self) -> StorageResult<Self::ChangeLogIter> {
+            let actual = self.actual.iter_uncommitted_log().await?;
+            let expected = if let Some(expected) = &self.expected {
+                Some(expected.iter_uncommitted_log().await?)
+            } else {
+                None
+            };
+
+            Ok(verify_iter::<StateStoreReadLogItem>(actual, expected))
+        }
+    }
+
     impl<A: StateStoreIter<T>, E: StateStoreIter<T>, T: IterItem> StateStoreIter<T>
         for VerifyStateStore<A, E, T>
     where
@@ -1016,6 +1033,11 @@ mod dyn_state_store {
         ) -> StorageResult<BoxStateStoreReadChangeLogIter>;
     }
 
+    #[async_trait::async_trait]
+    pub trait DynLocalStateStoreReadLog: StaticSendSync {
+        async fn iter_uncommitted_log(&self) -> StorageResult<BoxLocalStateStoreReadChangeLogIter>;
+    }
+
     pub type StateStoreReadDynRef = StateStorePointer<Arc<dyn DynStateStoreRead>>;
 
     #[async_trait::async_trait]
@@ -1073,9 +1095,15 @@ mod dyn_state_store {
 
     // For LocalStateStore
     pub type BoxLocalStateStoreIterStream<'a> = BoxStateStoreIter<'a, StateStoreKeyedRow>;
+    pub type BoxLocalStateStoreReadChangeLogIter =
+        BoxStateStoreIter<'static, StateStoreReadLogItem>;
+
     #[async_trait::async_trait]
     pub trait DynLocalStateStore:
-        DynStateStoreGet + DynStateStoreWriteEpochControl + StaticSendSync
+        DynStateStoreGet
+        + DynStateStoreWriteEpochControl
+        + DynLocalStateStoreReadLog
+        + StaticSendSync
     {
         async fn iter(
             &self,
@@ -1161,6 +1189,13 @@ mod dyn_state_store {
     }
 
     #[async_trait::async_trait]
+    impl<S: LocalStateStoreReadLog> DynLocalStateStoreReadLog for S {
+        async fn iter_uncommitted_log(&self) -> StorageResult<BoxLocalStateStoreReadChangeLogIter> {
+            Ok(Box::new(self.iter_uncommitted_log().await?))
+        }
+    }
+
+    #[async_trait::async_trait]
     impl<S: StateStoreWriteEpochControl> DynStateStoreWriteEpochControl for S {
         async fn flush(&mut self) -> StorageResult<usize> {
             self.flush().await
@@ -1225,6 +1260,16 @@ mod dyn_state_store {
 
         async fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) -> StorageResult<Arc<Bitmap>> {
             (*self.0).update_vnode_bitmap(vnodes).await
+        }
+    }
+
+    impl LocalStateStoreReadLog for BoxDynLocalStateStore {
+        type ChangeLogIter = BoxLocalStateStoreReadChangeLogIter;
+
+        fn iter_uncommitted_log(
+            &self,
+        ) -> impl Future<Output = StorageResult<Self::ChangeLogIter>> + Send + '_ {
+            (*self.0).iter_uncommitted_log()
         }
     }
 
@@ -1405,6 +1450,7 @@ mod dyn_state_store {
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreRead);
     state_store_pointer_dyn_as_ref!(Arc<dyn DynStateStoreRead>, DynStateStoreGet);
     state_store_pointer_dyn_as_ref!(Box<dyn DynLocalStateStore>, DynStateStoreGet);
+    state_store_pointer_dyn_as_ref!(Box<dyn DynLocalStateStore>, DynLocalStateStoreReadLog);
 
     macro_rules! state_store_pointer_dyn_as_mut {
         ($pointer:ident < dyn $source_dyn_trait:ident > , $target_dyn_trait:ident) => {
