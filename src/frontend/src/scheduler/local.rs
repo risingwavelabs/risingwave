@@ -25,7 +25,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::ExecutorBuilder;
+use risingwave_batch::executor::{ExecutorBuilder, PushContext, execute_push_as_pull};
 use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
@@ -105,15 +105,21 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.shutdown_rx());
+        let shutdown_rx = self.shutdown_rx();
+        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, shutdown_rx.clone());
         let executor = executor.build().await?;
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.
         drop(plan_node);
         drop(self);
 
+        let chunk_stream = execute_push_as_pull(
+            executor,
+            PushContext::new(shutdown_rx),
+            PushContext::DEFAULT_MORSEL_QUEUE_CAPACITY,
+        );
         #[for_await]
-        for chunk in executor.execute() {
+        for chunk in chunk_stream {
             yield chunk?;
         }
     }

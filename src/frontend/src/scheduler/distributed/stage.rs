@@ -27,7 +27,7 @@ use futures::{StreamExt, TryStreamExt, stream};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::ExecutorBuilder;
+use risingwave_batch::executor::{ExecutorBuilder, PushContext, execute_push_as_pull};
 use risingwave_batch::task::{ShutdownMsg, ShutdownSender, ShutdownToken, TaskId as TaskIdBatch};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
@@ -657,7 +657,11 @@ impl StageRunner {
 
         let result = expr_context_scope(expr_context, async {
             let executor = executor.build().await?;
-            let chunk_stream = executor.execute();
+            let chunk_stream = execute_push_as_pull(
+                executor,
+                PushContext::new(shutdown_rx.clone()),
+                PushContext::DEFAULT_MORSEL_QUEUE_CAPACITY,
+            );
             let cancelled = pin!(shutdown_rx.cancelled());
             #[for_await]
             for chunk in chunk_stream.take_until(cancelled) {
