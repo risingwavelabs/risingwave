@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
+use tokio::sync::{Mutex, mpsc};
 
 use super::{BoxedDataChunkStream, BoxedExecutor};
 use crate::error::{BatchError, Result};
@@ -44,15 +46,21 @@ impl PushStatus {
 pub struct PushContext {
     shutdown_rx: ShutdownToken,
     morsel_budget: usize,
+    morsel_queue_capacity: usize,
+    morsel_parallelism: usize,
 }
 
 impl PushContext {
     pub const DEFAULT_MORSEL_BUDGET: usize = 64;
+    pub const DEFAULT_MORSEL_PARALLELISM: usize = 1;
+    pub const DEFAULT_MORSEL_QUEUE_CAPACITY: usize = 64;
 
     pub fn new(shutdown_rx: ShutdownToken) -> Self {
         Self {
             shutdown_rx,
             morsel_budget: Self::DEFAULT_MORSEL_BUDGET,
+            morsel_queue_capacity: Self::DEFAULT_MORSEL_QUEUE_CAPACITY,
+            morsel_parallelism: Self::DEFAULT_MORSEL_PARALLELISM,
         }
     }
 
@@ -61,8 +69,26 @@ impl PushContext {
         self
     }
 
+    pub fn with_morsel_queue_capacity(mut self, capacity: usize) -> Self {
+        self.morsel_queue_capacity = capacity.max(1);
+        self
+    }
+
+    pub fn with_morsel_parallelism(mut self, parallelism: usize) -> Self {
+        self.morsel_parallelism = parallelism.max(1);
+        self
+    }
+
     pub fn morsel_budget(&self) -> usize {
         self.morsel_budget
+    }
+
+    pub fn morsel_queue_capacity(&self) -> usize {
+        self.morsel_queue_capacity
+    }
+
+    pub fn morsel_parallelism(&self) -> usize {
+        self.morsel_parallelism
     }
 
     pub fn check_shutdown(&self) -> Result<()> {
@@ -135,12 +161,61 @@ impl MorselQueue {
         Some(sequence)
     }
 
+    pub fn push_morsel(&mut self, morsel: Morsel) -> bool {
+        if !self.has_capacity() {
+            return false;
+        }
+        self.queue.push_back(morsel);
+        true
+    }
+
     pub fn pop(&mut self) -> Option<Morsel> {
         self.queue.pop_front()
     }
 
     pub fn len(&self) -> usize {
         self.queue.len()
+    }
+}
+
+struct MorselScheduler<'a, S> {
+    source: &'a mut S,
+    context: PushContext,
+    queue: MorselQueue,
+    source_exhausted: bool,
+}
+
+impl<'a, S> MorselScheduler<'a, S>
+where
+    S: MorselSource,
+{
+    fn new(source: &'a mut S, context: PushContext) -> Self {
+        let queue_capacity = context.morsel_queue_capacity();
+        Self {
+            source,
+            context,
+            queue: MorselQueue::new(queue_capacity),
+            source_exhausted: false,
+        }
+    }
+
+    async fn next_morsel(&mut self) -> Result<Option<Morsel>> {
+        if let Some(morsel) = self.queue.pop() {
+            return Ok(Some(morsel));
+        }
+
+        while !self.source_exhausted && self.queue.has_capacity() {
+            match self.source.next_morsel(&self.context).await? {
+                Some(morsel) => {
+                    assert!(self.queue.push_morsel(morsel));
+                }
+                None => {
+                    self.source_exhausted = true;
+                }
+            }
+        }
+
+        Ok(self.queue.pop())
     }
 }
 
@@ -201,7 +276,8 @@ where
 
     pub async fn execute(&mut self, sink: &mut dyn PushSink) -> Result<PushStatus> {
         let mut processed = 0;
-        while let Some(morsel) = self.source.next_morsel(&self.context).await? {
+        let mut scheduler = MorselScheduler::new(&mut self.source, self.context.clone());
+        while let Some(morsel) = scheduler.next_morsel().await? {
             self.context.check_shutdown()?;
             let status = sink.push(morsel.into_chunk()).await?;
             if status.is_finished() {
@@ -223,8 +299,82 @@ pub async fn execute_pull_stream_as_push(
     context: PushContext,
     sink: &mut dyn PushSink,
 ) -> Result<PushStatus> {
+    if context.morsel_parallelism() > 1 {
+        return execute_pull_stream_as_push_parallel(stream, context, sink).await;
+    }
+
     let source = StreamMorselSource::new(stream);
     PipelineExecutor::new(source, context).execute(sink).await
+}
+
+async fn execute_pull_stream_as_push_parallel(
+    mut stream: BoxedDataChunkStream,
+    context: PushContext,
+    sink: &mut dyn PushSink,
+) -> Result<PushStatus> {
+    let (morsel_tx, morsel_rx) = mpsc::channel(context.morsel_queue_capacity());
+    let (output_tx, mut output_rx) = mpsc::channel(context.morsel_queue_capacity());
+    let shared_rx = Arc::new(Mutex::new(morsel_rx));
+
+    let producer_context = context.clone();
+    let producer_output_tx = output_tx.clone();
+    let producer = tokio::spawn(async move {
+        let mut sequence = 0;
+        while let Some(chunk) = stream.next().await {
+            let chunk = match producer_context.check_shutdown().and(chunk) {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    let _ = producer_output_tx.send(Err(error)).await;
+                    break;
+                }
+            };
+
+            if morsel_tx.send(Morsel::new(sequence, chunk)).await.is_err() {
+                break;
+            }
+            sequence += 1;
+        }
+    });
+
+    let mut tasks = vec![producer];
+    for _ in 0..context.morsel_parallelism() {
+        let rx = shared_rx.clone();
+        let tx = output_tx.clone();
+        tasks.push(tokio::spawn(async move {
+            loop {
+                let next = {
+                    let mut rx = rx.lock().await;
+                    rx.recv().await
+                };
+                let Some(morsel) = next else {
+                    break;
+                };
+                if tx.send(Ok(morsel)).await.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(output_tx);
+
+    let mut next_sequence = 0;
+    let mut pending = BTreeMap::new();
+    while let Some(morsel) = output_rx.recv().await {
+        let morsel = morsel?;
+        pending.insert(morsel.sequence(), morsel.into_chunk());
+        while let Some(chunk) = pending.remove(&next_sequence) {
+            let status = sink.push(chunk).await?;
+            next_sequence += 1;
+            if status.is_finished() {
+                for task in tasks {
+                    task.abort();
+                }
+                return sink.finish().await;
+            }
+        }
+    }
+
+    sink.finish().await
 }
 
 struct ChannelPushSink {
@@ -321,6 +471,52 @@ mod tests {
 
         assert_eq!(status, PushStatus::NeedMoreInput);
         assert_eq!(sink.cardinalities, vec![2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_morsel_scheduler_drives_bounded_queue() {
+        let stream = stream::iter(vec![
+            Ok(DataChunk::new_dummy(2)),
+            Ok(DataChunk::new_dummy(3)),
+            Ok(DataChunk::new_dummy(4)),
+        ])
+        .boxed();
+        let context = PushContext::new(ShutdownToken::empty()).with_morsel_queue_capacity(2);
+        let mut source = StreamMorselSource::new(stream);
+        let mut scheduler = MorselScheduler::new(&mut source, context);
+
+        let first = scheduler.next_morsel().await.unwrap().unwrap();
+        let second = scheduler.next_morsel().await.unwrap().unwrap();
+        let third = scheduler.next_morsel().await.unwrap().unwrap();
+
+        assert_eq!(first.sequence(), 0);
+        assert_eq!(second.sequence(), 1);
+        assert_eq!(third.sequence(), 2);
+        assert!(scheduler.next_morsel().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_parallel_pull_stream_as_push_preserves_sequence() {
+        let stream = stream::iter(vec![
+            Ok(DataChunk::new_dummy(1)),
+            Ok(DataChunk::new_dummy(2)),
+            Ok(DataChunk::new_dummy(3)),
+            Ok(DataChunk::new_dummy(4)),
+        ])
+        .boxed();
+        let context = PushContext::new(ShutdownToken::empty())
+            .with_morsel_queue_capacity(2)
+            .with_morsel_parallelism(3);
+        let mut sink = CollectSink {
+            cardinalities: vec![],
+        };
+
+        let status = execute_pull_stream_as_push(stream, context, &mut sink)
+            .await
+            .unwrap();
+
+        assert_eq!(status, PushStatus::NeedMoreInput);
+        assert_eq!(sink.cardinalities, vec![1, 2, 3, 4]);
     }
 
     struct PushOnlyExecutor {
