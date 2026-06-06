@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use either::Either;
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk};
@@ -29,6 +30,7 @@ use risingwave_pb::expr::project_set_select_item::PbSelectItem;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus,
 };
 
 pub struct ProjectSetExecutor {
@@ -50,6 +52,120 @@ impl Executor for ProjectSetExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        downstream: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let Self {
+                select_list,
+                child,
+                chunk_size,
+                ..
+            } = *self;
+            assert!(!select_list.is_empty());
+            let mut sink = ProjectSetPushSink {
+                data_chunk_builder: DataChunkBuilder::new(
+                    std::iter::once(DataType::Int64)
+                        .chain(select_list.iter().map(|i| i.return_type()))
+                        .collect(),
+                    chunk_size,
+                ),
+                select_list,
+                downstream,
+            };
+            child.execute_push(context, &mut sink).await
+        }
+        .boxed()
+    }
+}
+
+struct ProjectSetPushSink<'a> {
+    select_list: Vec<ProjectSetSelectItem>,
+    downstream: &'a mut dyn PushSink,
+    data_chunk_builder: DataChunkBuilder,
+}
+
+impl PushSink for ProjectSetPushSink<'_> {
+    fn push<'a>(&'a mut self, input: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let mut row = vec![None as DatumRef<'_>; self.data_chunk_builder.num_columns()];
+            let mut results = Vec::with_capacity(self.select_list.len());
+            for select_item in &self.select_list {
+                let result = select_item.eval(&input).await?;
+                results.push(result);
+            }
+
+            // for each input row
+            for row_idx in 0..input.capacity() {
+                // for each output row
+                for projected_row_id in 0i64.. {
+                    // SAFETY:
+                    // We use `row` as a buffer and don't read elements from the previous loop.
+                    // The `transmute` is used for bypassing the borrow checker.
+                    let row: &mut [DatumRef<'_>] =
+                        unsafe { std::mem::transmute(row.as_mut_slice()) };
+                    row[0] = Some(projected_row_id.into());
+                    // if any of the set columns has a value
+                    let mut valid = false;
+                    // for each column
+                    for (item, value) in results.iter_mut().zip_eq_fast(&mut row[1..]) {
+                        *value = match item {
+                            Either::Left(state) => {
+                                if let Some((i, value)) = state.peek()
+                                    && i == row_idx
+                                {
+                                    valid = true;
+                                    value?
+                                } else {
+                                    None
+                                }
+                            }
+                            Either::Right(array) => array.value_at(row_idx),
+                        };
+                    }
+                    if !valid {
+                        // no more output rows for the input row
+                        break;
+                    }
+                    if let Some(chunk) = self.data_chunk_builder.append_one_row(&*row)
+                        && self.downstream.push(chunk).await?.is_finished()
+                    {
+                        return Ok(PushStatus::Finished);
+                    }
+                    // move to the next row
+                    for item in &mut results {
+                        if let Either::Left(state) = item
+                            && matches!(state.peek(), Some((i, _)) if i == row_idx)
+                        {
+                            state.next().await?;
+                        }
+                    }
+                }
+            }
+            if let Some(chunk) = self.data_chunk_builder.consume_all()
+                && self.downstream.push(chunk).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if let Some(chunk) = self.data_chunk_builder.consume_all()
+                && self.downstream.push(chunk).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+            self.downstream.finish().await
+        }
+        .boxed()
     }
 }
 

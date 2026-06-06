@@ -14,6 +14,7 @@
 
 use std::cmp::min;
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
@@ -24,6 +25,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus,
 };
 
 /// Limit executor.
@@ -128,6 +130,102 @@ impl Executor for LimitExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        downstream: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let Self {
+                child,
+                limit,
+                offset,
+                ..
+            } = *self;
+            if limit == 0 {
+                return downstream.finish().await;
+            }
+
+            let mut sink = LimitPushSink {
+                downstream,
+                limit,
+                offset,
+                skipped: 0,
+                returned: 0,
+            };
+            child.execute_push(context, &mut sink).await
+        }
+        .boxed()
+    }
+}
+
+struct LimitPushSink<'a> {
+    downstream: &'a mut dyn PushSink,
+    limit: usize,
+    offset: usize,
+    skipped: usize,
+    returned: usize,
+}
+
+impl PushSink for LimitPushSink<'_> {
+    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if self.returned == self.limit {
+                return Ok(PushStatus::Finished);
+            }
+
+            let cardinality = data_chunk.cardinality();
+            if cardinality + self.skipped <= self.offset {
+                self.skipped += cardinality;
+                return Ok(PushStatus::NeedMoreInput);
+            }
+
+            let output = if self.skipped == self.offset && cardinality + self.returned <= self.limit
+            {
+                self.returned += cardinality;
+                data_chunk
+            } else {
+                let mut new_vis;
+                if !data_chunk.is_vis_compacted() {
+                    new_vis = data_chunk.visibility().iter().collect_vec();
+                    for vis in new_vis.iter_mut().filter(|x| **x) {
+                        if self.skipped < self.offset {
+                            self.skipped += 1;
+                            *vis = false;
+                        } else if self.returned < self.limit {
+                            self.returned += 1;
+                        } else {
+                            *vis = false;
+                        }
+                    }
+                } else {
+                    let chunk_size = data_chunk.capacity();
+                    new_vis = vec![false; chunk_size];
+                    let l = self.offset - self.skipped;
+                    let r = min(l + self.limit - self.returned, chunk_size);
+                    new_vis[l..r].fill(true);
+                    self.returned += r - l;
+                    self.skipped += l;
+                }
+                data_chunk
+                    .with_visibility(new_vis.into_iter().collect::<Bitmap>())
+                    .compact_vis()
+            };
+
+            let downstream_status = self.downstream.push(output).await?;
+            if self.returned == self.limit || downstream_status.is_finished() {
+                Ok(PushStatus::Finished)
+            } else {
+                Ok(PushStatus::NeedMoreInput)
+            }
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        self.downstream.finish()
     }
 }
 

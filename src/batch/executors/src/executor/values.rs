@@ -14,6 +14,7 @@
 
 use std::vec;
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
@@ -25,6 +26,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus,
 };
 
 /// [`ValuesExecutor`] implements Values executor.
@@ -63,6 +65,47 @@ impl Executor for ValuesExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        mut self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if !self.rows.is_empty() {
+                let cardinality = self.rows.len();
+                ensure!(cardinality > 0);
+
+                while !self.rows.is_empty() {
+                    context.check_shutdown()?;
+                    // We need a one row chunk rather than an empty chunk because constant
+                    // expression's eval result is same size as input chunk cardinality.
+                    let one_row_chunk = DataChunk::new_dummy(1);
+
+                    let chunk_size = self.chunk_size.min(self.rows.len());
+                    let mut array_builders = self.schema.create_array_builders(chunk_size);
+                    for row in self.rows.by_ref().take(chunk_size) {
+                        for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
+                            let out = expr.eval(&one_row_chunk).await?;
+                            builder.append_array(&out);
+                        }
+                    }
+
+                    let columns: Vec<_> = array_builders
+                        .into_iter()
+                        .map(|b| b.finish().into())
+                        .collect();
+
+                    let chunk = DataChunk::new(columns, chunk_size);
+                    if sink.push(chunk).await?.is_finished() {
+                        return sink.finish().await;
+                    }
+                }
+            }
+            sink.finish().await
+        }
+        .boxed()
     }
 }
 

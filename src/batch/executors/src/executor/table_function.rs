@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures_async_stream::try_stream;
+use futures::future::{BoxFuture, FutureExt};
+use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -21,7 +22,9 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::error::{BatchError, Result};
-use crate::executor::{BoxedDataChunkStream, Executor, ExecutorBuilder};
+use crate::executor::{
+    BoxedDataChunkStream, Executor, ExecutorBuilder, PushContext, PushSink, PushStatus,
+};
 
 pub struct TableFunctionExecutor {
     schema: Schema,
@@ -42,6 +45,33 @@ impl Executor for TableFunctionExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let dummy_chunk = DataChunk::new_dummy(1);
+
+            #[for_await]
+            for chunk in self.table_function.eval(&dummy_chunk).await {
+                context.check_shutdown()?;
+                let chunk = chunk?;
+                check_error(&chunk)?;
+                // remove the first column and expand the second column if its data type is struct
+                let chunk = match chunk.column_at(1).as_ref() {
+                    ArrayImpl::Struct(struct_array) => struct_array.into(),
+                    _ => chunk.split_column_at(1).1,
+                };
+                if sink.push(chunk).await?.is_finished() {
+                    return sink.finish().await;
+                }
+            }
+            sink.finish().await
+        }
+        .boxed()
     }
 }
 

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, I64Array};
@@ -20,7 +21,10 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use super::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus,
+};
 use crate::error::{BatchError, Result};
 
 pub struct ExpandExecutor {
@@ -42,6 +46,70 @@ impl Executor for ExpandExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        downstream: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let Self {
+                column_subsets,
+                child,
+                schema,
+                chunk_size,
+                ..
+            } = *self;
+            let mut sink = ExpandPushSink {
+                column_subsets,
+                downstream,
+                data_chunk_builder: DataChunkBuilder::new(schema.data_types(), chunk_size),
+            };
+            child.execute_push(context, &mut sink).await
+        }
+        .boxed()
+    }
+}
+
+struct ExpandPushSink<'a> {
+    column_subsets: Vec<Vec<usize>>,
+    downstream: &'a mut dyn PushSink,
+    data_chunk_builder: DataChunkBuilder,
+}
+
+impl PushSink for ExpandPushSink<'_> {
+    fn push<'a>(&'a mut self, input: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            for (i, subsets) in self.column_subsets.iter().enumerate() {
+                let flags =
+                    I64Array::from_iter(std::iter::repeat_n(i as i64, input.capacity())).into_ref();
+                let (mut columns, vis) = input.clone().keep_columns(subsets).into_parts();
+                columns.extend(input.columns().iter().cloned());
+                columns.push(flags);
+                let chunk = DataChunk::new(columns, vis);
+
+                for data_chunk in self.data_chunk_builder.append_chunk(chunk) {
+                    if self.downstream.push(data_chunk).await?.is_finished() {
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+            }
+            Ok(PushStatus::NeedMoreInput)
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if let Some(data_chunk) = self.data_chunk_builder.consume_all()
+                && self.downstream.push(data_chunk).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+            self.downstream.finish().await
+        }
+        .boxed()
     }
 }
 

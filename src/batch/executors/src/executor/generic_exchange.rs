@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -35,7 +36,10 @@ use crate::executor::ExecutorBuilder;
 use crate::task::{BatchTaskContext, TaskId};
 
 pub type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
-use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
+use crate::executor::{
+    BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, PushContext, PushSink,
+    PushStatus,
+};
 use crate::monitor::BatchMetrics;
 
 pub struct GenericExchangeExecutor<CS> {
@@ -192,6 +196,49 @@ impl<CS: 'static + Send + CreateSource> Executor for GenericExchangeExecutor<CS>
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let streams = self
+                .proto_sources
+                .into_iter()
+                .zip_eq_fast(self.source_creators)
+                .map(|(prost_source, source_creator)| {
+                    Self::data_chunk_stream(
+                        prost_source,
+                        source_creator,
+                        &*self.context,
+                        self.metrics.clone(),
+                    )
+                });
+
+            if self.sequential {
+                for mut stream in streams {
+                    while let Some(data_chunk) = stream.next().await {
+                        context.check_shutdown()?;
+                        if sink.push(data_chunk?).await?.is_finished() {
+                            return sink.finish().await;
+                        }
+                    }
+                }
+            } else {
+                let mut stream = select_all(streams).boxed();
+                while let Some(data_chunk) = stream.next().await {
+                    context.check_shutdown()?;
+                    if sink.push(data_chunk?).await?.is_finished() {
+                        return sink.finish().await;
+                    }
+                }
+            }
+
+            sink.finish().await
+        }
+        .boxed()
     }
 }
 

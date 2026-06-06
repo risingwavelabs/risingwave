@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use futures::future::{BoxFuture, FutureExt};
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
@@ -24,6 +25,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus,
 };
 
 pub struct ProjectExecutor {
@@ -44,6 +46,46 @@ impl Executor for ProjectExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         (*self).do_execute().boxed()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        downstream: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let Self { expr, child, .. } = *self;
+            let expr: Arc<[Box<dyn Expression>]> = expr.into();
+            let mut sink = ProjectPushSink { expr, downstream };
+            child.execute_push(context, &mut sink).await
+        }
+        .boxed()
+    }
+}
+
+struct ProjectPushSink<'a> {
+    expr: Arc<[Box<dyn Expression>]>,
+    downstream: &'a mut dyn PushSink,
+}
+
+impl PushSink for ProjectPushSink<'_> {
+    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let arrays = {
+                let expr_futs = self.expr.iter().map(|expr| expr.eval(&data_chunk));
+                futures::future::join_all(expr_futs)
+                    .await
+                    .into_iter()
+                    .try_collect()?
+            };
+            let (_, vis) = data_chunk.into_parts();
+            self.downstream.push(DataChunk::new(arrays, vis)).await
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        self.downstream.finish()
     }
 }
 
@@ -106,17 +148,33 @@ impl BoxedExecutorBuilder for ProjectExecutor {
 
 #[cfg(test)]
 mod tests {
+    use futures::future::{BoxFuture, FutureExt};
     use risingwave_common::array::{Array, I32Array};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
 
     use super::*;
-    use crate::executor::ValuesExecutor;
     use crate::executor::test_utils::MockExecutor;
+    use crate::executor::{PushContext, PushSink, PushStatus, ValuesExecutor};
+    use crate::task::ShutdownToken;
     use crate::*;
 
     const CHUNK_SIZE: usize = 1024;
+
+    struct CollectSink {
+        chunks: Vec<DataChunk>,
+    }
+
+    impl PushSink for CollectSink {
+        fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+            async move {
+                self.chunks.push(chunk);
+                Ok(PushStatus::NeedMoreInput)
+            }
+            .boxed()
+        }
+    }
 
     #[tokio::test]
     async fn test_project_executor() -> Result<()> {
@@ -155,6 +213,57 @@ mod tests {
 
         let mut stream = proj_executor.execute();
         let result_chunk = stream.next().await.unwrap().unwrap();
+        assert_eq!(result_chunk.dimension(), 1);
+        assert_eq!(
+            result_chunk
+                .column_at(0)
+                .as_int32()
+                .iter()
+                .collect::<Vec<_>>(),
+            vec![Some(1), Some(2), Some(33333), Some(4), Some(5)]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_project_push_executor() -> Result<()> {
+        let chunk = DataChunk::from_pretty(
+            "
+            i     i
+            1     7
+            2     8
+            33333 66666
+            4     4
+            5     3
+        ",
+        );
+
+        let expr1 = InputRefExpression::new(DataType::Int32, 0);
+        let expr_vec = vec![Box::new(expr1) as BoxedExpression];
+
+        let schema = schema_unnamed! { DataType::Int32, DataType::Int32 };
+        let mut mock_executor = MockExecutor::new(schema);
+        mock_executor.add(chunk);
+
+        let fields = expr_vec
+            .iter()
+            .map(|expr| Field::unnamed(expr.return_type()))
+            .collect::<Vec<Field>>();
+
+        let proj_executor = Box::new(ProjectExecutor {
+            expr: expr_vec,
+            child: Box::new(mock_executor),
+            schema: Schema { fields },
+            identity: "ProjectExecutor".to_owned(),
+        });
+        let mut sink = CollectSink { chunks: vec![] };
+
+        proj_executor
+            .execute_push(PushContext::new(ShutdownToken::empty()), &mut sink)
+            .await?;
+
+        assert_eq!(sink.chunks.len(), 1);
+        let result_chunk = &sink.chunks[0];
         assert_eq!(result_chunk.dimension(), 1);
         assert_eq!(
             result_chunk

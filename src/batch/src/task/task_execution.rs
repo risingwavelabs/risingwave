@@ -17,7 +17,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 
 use anyhow::Context;
-use futures::StreamExt;
+use futures::future::{BoxFuture, FutureExt};
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
@@ -36,7 +36,7 @@ use tracing::Instrument;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result, SharedResult};
-use crate::executor::{BoxedExecutor, ExecutorBuilder};
+use crate::executor::{BoxedExecutor, ExecutorBuilder, PushContext, PushSink, PushStatus};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::BatchTaskContext;
@@ -44,6 +44,61 @@ use crate::task::channel::{ChanReceiverImpl, ChanSenderImpl, create_output_chann
 
 // Now we will only at most have 2 status for each status channel. Running -> Failed or Finished.
 pub const TASK_STATUS_BUFFER_SIZE: usize = 2;
+
+struct TaskOutputPushSink {
+    sender: ChanSenderImpl,
+    shutdown_rx: ShutdownToken,
+    receiver_closed: bool,
+}
+
+impl TaskOutputPushSink {
+    fn new(sender: ChanSenderImpl, shutdown_rx: ShutdownToken) -> Self {
+        Self {
+            sender,
+            shutdown_rx,
+            receiver_closed: false,
+        }
+    }
+
+    async fn close(self, error: Option<Arc<BatchError>>) -> Result<()> {
+        self.sender.close(error).await
+    }
+}
+
+impl PushSink for TaskOutputPushSink {
+    fn push<'a>(&'a mut self, chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if self.receiver_closed {
+                return Ok(PushStatus::Finished);
+            }
+
+            select! {
+                biased;
+                _ = self.shutdown_rx.cancelled() => {
+                    match self.shutdown_rx.message() {
+                        ShutdownMsg::Abort(e) => Err(BatchError::Aborted(e)),
+                        ShutdownMsg::Cancel => Err(BatchError::Aborted("cancelled".to_owned())),
+                        ShutdownMsg::Init => unreachable!("Init message should not be received here!"),
+                    }
+                }
+                result = self.sender.send(chunk) => {
+                    match result {
+                        Ok(()) => Ok(PushStatus::NeedMoreInput),
+                        Err(SenderError) => {
+                            // This is possible since when we have limit executor in parent stage,
+                            // it may early stop receiving data from downstream.
+                            warn!("Task receiver closed!");
+                            self.receiver_closed = true;
+                            Ok(PushStatus::Finished)
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+            }
+        }
+        .boxed()
+    }
+}
 
 /// Send batch task status (local/distributed) to frontend.
 ///
@@ -499,93 +554,45 @@ impl BatchTaskExecution {
     async fn run(
         &self,
         root: BoxedExecutor,
-        mut sender: ChanSenderImpl,
+        sender: ChanSenderImpl,
         state_tx: Option<&mut StateReporter>,
     ) {
         self.context
             .batch_metrics()
             .as_ref()
             .inspect(|m| m.batch_manager_metrics().task_num.inc());
-        let mut data_chunk_stream = root.execute();
         let mut state;
         let mut error = None;
 
-        let mut shutdown_rx = self.shutdown_rx.clone();
-        loop {
-            select! {
-                biased;
-                // `shutdown_rx` can't be removed here to avoid `sender.send(data_chunk)` blocked whole execution.
-                _ = shutdown_rx.cancelled() => {
-                    match self.shutdown_rx.message() {
-                        ShutdownMsg::Abort(e) => {
-                            error = Some(BatchError::Aborted(e));
-                            state = TaskStatus::Aborted;
-                            break;
-                        }
-                        ShutdownMsg::Cancel => {
-                            state = TaskStatus::Cancelled;
-                            break;
-                        }
-                        ShutdownMsg::Init => {
-                            unreachable!("Init message should not be received here!")
-                        }
-                    }
-                }
-                data_chunk = data_chunk_stream.next()=> {
-                    match data_chunk {
-                        Some(Ok(data_chunk)) => {
-                            if let Err(e) = sender.send(data_chunk).await {
-                                match e {
-                                    BatchError::SenderError => {
-                                        // This is possible since when we have limit executor in parent
-                                        // stage, it may early stop receiving data from downstream, which
-                                        // leads to close of channel.
-                                        warn!("Task receiver closed!");
-                                        state = TaskStatus::Finished;
-                                        break;
-                                    }
-                                    x => {
-                                        error!("Failed to send data!");
-                                        error = Some(x);
-                                        state = TaskStatus::Failed;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        Some(Err(e)) => match self.shutdown_rx.message() {
-                            ShutdownMsg::Init => {
-                                // There is no message received from shutdown channel, which means it caused
-                                // task failed.
-                                error!(error = %e.as_report(), "Batch task failed");
-                                error = Some(e);
-                                state = TaskStatus::Failed;
-                                break;
-                            }
-                            ShutdownMsg::Abort(_) => {
-                                error = Some(e);
-                                state = TaskStatus::Aborted;
-                                break;
-                            }
-                            ShutdownMsg::Cancel => {
-                                state = TaskStatus::Cancelled;
-                                break;
-                            }
-                        },
-                        None => {
-                            debug!("Batch task {:?} finished successfully.", self.task_id);
-                            state = TaskStatus::Finished;
-                            break;
-                        }
-                    }
-                }
+        let mut sink = TaskOutputPushSink::new(sender, self.shutdown_rx.clone());
+        let push_context = PushContext::new(self.shutdown_rx.clone());
+        match root.execute_push(push_context, &mut sink).await {
+            Ok(_) => {
+                debug!("Batch task {:?} finished successfully.", self.task_id);
+                state = TaskStatus::Finished;
             }
+            Err(e) => match self.shutdown_rx.message() {
+                ShutdownMsg::Init => {
+                    // There is no message received from shutdown channel, which means it caused
+                    // task failed.
+                    error!(error = %e.as_report(), "Batch task failed");
+                    error = Some(e);
+                    state = TaskStatus::Failed;
+                }
+                ShutdownMsg::Abort(_) => {
+                    error = Some(e);
+                    state = TaskStatus::Aborted;
+                }
+                ShutdownMsg::Cancel => {
+                    state = TaskStatus::Cancelled;
+                }
+            },
         }
 
         let error = error.map(Arc::new);
         self.failure.lock().clone_from(&error);
         let err_str = error.as_ref().map(|e| e.to_report_string());
-        if let Err(e) = sender.close(error).await {
+        if let Err(e) = sink.close(error).await {
             match e {
                 SenderError => {
                     // This is possible since when we have limit executor in parent

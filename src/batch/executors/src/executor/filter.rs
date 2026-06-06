@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::{BoxFuture, FutureExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
@@ -23,6 +24,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
+    PushContext, PushSink, PushStatus,
 };
 
 pub struct FilterExecutor {
@@ -43,6 +45,70 @@ impl Executor for FilterExecutor {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        downstream: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let Self {
+                expr,
+                child,
+                chunk_size,
+                ..
+            } = *self;
+            let mut sink = FilterPushSink {
+                expr,
+                downstream,
+                data_chunk_builder: DataChunkBuilder::new(child.schema().data_types(), chunk_size),
+            };
+            child.execute_push(context, &mut sink).await
+        }
+        .boxed()
+    }
+}
+
+struct FilterPushSink<'a> {
+    expr: BoxedExpression,
+    downstream: &'a mut dyn PushSink,
+    data_chunk_builder: DataChunkBuilder,
+}
+
+impl PushSink for FilterPushSink<'_> {
+    fn push<'a>(&'a mut self, data_chunk: DataChunk) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let data_chunk = data_chunk.compact_vis();
+            let vis_array = self.expr.eval(&data_chunk).await?;
+
+            if let Bool(vis) = vis_array.as_ref() {
+                for data_chunk in self
+                    .data_chunk_builder
+                    .append_chunk(data_chunk.with_visibility(vis.to_bitmap()))
+                {
+                    if self.downstream.push(data_chunk).await?.is_finished() {
+                        return Ok(PushStatus::Finished);
+                    }
+                }
+                Ok(PushStatus::NeedMoreInput)
+            } else {
+                bail!("Filter can only receive bool array");
+            }
+        }
+        .boxed()
+    }
+
+    fn finish<'a>(&'a mut self) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            if let Some(data_chunk) = self.data_chunk_builder.consume_all()
+                && self.downstream.push(data_chunk).await?.is_finished()
+            {
+                return Ok(PushStatus::Finished);
+            }
+            self.downstream.finish().await
+        }
+        .boxed()
     }
 }
 

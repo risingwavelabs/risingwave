@@ -14,6 +14,7 @@
 
 mod fast_insert;
 mod managed;
+mod push;
 pub mod test_utils;
 
 use std::future::Future;
@@ -22,9 +23,10 @@ use std::sync::Arc;
 use anyhow::Context;
 use async_recursion::async_recursion;
 pub use fast_insert::*;
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, FutureExt};
 use futures::stream::BoxStream;
 pub use managed::*;
+pub use push::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::batch_plan::PlanNode;
@@ -56,6 +58,18 @@ pub trait Executor: Send + 'static {
     ///
     /// The implementation should guaranteed that each `DataChunk`'s cardinality is not zero.
     fn execute(self: Box<Self>) -> BoxedDataChunkStream;
+
+    /// Executes this executor using push-style flow control.
+    ///
+    /// The default adapter keeps all existing pull executors working while individual operators
+    /// are migrated to override this method and push directly into downstream sinks.
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        execute_pull_stream_as_push(self.execute(), context, sink).boxed()
+    }
 }
 
 impl std::fmt::Debug for BoxedExecutor {

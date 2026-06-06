@@ -16,8 +16,9 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::future::{BoxFuture, FutureExt};
 use futures::{StreamExt, pin_mut};
-use futures_async_stream::try_stream;
+use futures_async_stream::{for_await, try_stream};
 use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::Bitmap;
@@ -36,7 +37,7 @@ use super::ScanRange;
 use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
-    build_scan_ranges_from_pb,
+    PushContext, PushSink, PushStatus, build_scan_ranges_from_pb,
 };
 use crate::monitor::BatchMetrics;
 
@@ -152,6 +153,112 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
         self.do_execute().boxed()
+    }
+
+    fn execute_push<'a>(
+        self: Box<Self>,
+        context: PushContext,
+        sink: &'a mut dyn PushSink,
+    ) -> BoxFuture<'a, Result<PushStatus>> {
+        async move {
+            let Self {
+                chunk_size,
+                metrics,
+                table,
+                scan_ranges,
+                ordered,
+                query_epoch,
+                limit,
+                ..
+            } = *self;
+            let table = Arc::new(table);
+
+            let histogram = metrics
+                .as_ref()
+                .map(|metrics| &metrics.executor_metrics().row_seq_scan_next_duration);
+
+            if ordered {
+                // Currently we execute range-scans concurrently so the order is not guaranteed if
+                // there're multiple ranges.
+                // TODO: reserve the order for multiple ranges.
+                assert_eq!(scan_ranges.len(), 1);
+            }
+
+            let (point_gets, range_scans): (Vec<ScanRange>, Vec<ScanRange>) = scan_ranges
+                .into_iter()
+                .partition(|x| x.pk_prefix.len() == table.pk_indices().len());
+
+            let mut returned = 0;
+            if let Some(limit) = &limit
+                && returned >= *limit
+            {
+                return sink.finish().await;
+            }
+
+            let mut data_chunk_builder =
+                DataChunkBuilder::new(table.schema().data_types(), chunk_size);
+            for point_get in point_gets {
+                context.check_shutdown()?;
+                let table = table.clone();
+                if let Some(row) =
+                    Self::execute_point_get(table, point_get, query_epoch, histogram).await?
+                    && let Some(chunk) = data_chunk_builder.append_one_row(row)
+                {
+                    returned += chunk.cardinality() as u64;
+                    if sink.push(chunk).await?.is_finished() {
+                        return sink.finish().await;
+                    }
+                    if let Some(limit) = &limit
+                        && returned >= *limit
+                    {
+                        return sink.finish().await;
+                    }
+                }
+            }
+            if let Some(chunk) = data_chunk_builder.consume_all() {
+                returned += chunk.cardinality() as u64;
+                if sink.push(chunk).await?.is_finished() {
+                    return sink.finish().await;
+                }
+                if let Some(limit) = &limit
+                    && returned >= *limit
+                {
+                    return sink.finish().await;
+                }
+            }
+
+            // Range Scan
+            // WARN: DO NOT use `select` to execute range scans concurrently
+            //       it can consume too much memory if there're too many ranges.
+            for range in range_scans {
+                context.check_shutdown()?;
+                let stream = Self::execute_range(
+                    table.clone(),
+                    range,
+                    ordered,
+                    query_epoch,
+                    chunk_size,
+                    limit,
+                    histogram,
+                );
+                #[for_await]
+                for chunk in stream {
+                    context.check_shutdown()?;
+                    let chunk = chunk?;
+                    returned += chunk.cardinality() as u64;
+                    if sink.push(chunk).await?.is_finished() {
+                        return sink.finish().await;
+                    }
+                    if let Some(limit) = &limit
+                        && returned >= *limit
+                    {
+                        return sink.finish().await;
+                    }
+                }
+            }
+            sink.finish().await
+        }
+        .boxed()
     }
 }
 
